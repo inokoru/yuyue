@@ -1,0 +1,383 @@
+import SwiftUI
+import YuyueCore
+
+/// 播客's own pieces, the same on the Mac and the phone.
+
+/// 播客's pill button, the same as `YYButtonStyle`: one warm white pill with a hairline; `main`,
+/// the screen's one action, has its words in the theme colour; the one
+/// playing is in the theme's colour, the one writing grey with a spinner.
+struct PodcastGlassButton: View {
+    enum Kind { case plain, main, playing, writing }
+    let title: String
+    var symbol: String?
+    var kind = Kind.plain
+    /// Kept for callers; every button is the same pill now.
+    var flat = false
+    /// The key that presses it, written small after the title (建好了 ⌘↩).
+    var key: String?
+    let action: () -> Void
+    @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
+    private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                switch kind {
+                case .playing: EqualizerBars().frame(width: 10, height: 10)
+                case .writing: ProgressView().controlSize(.mini).scaleEffect(0.8).frame(width: 10, height: 10)
+                case .plain, .main: if let symbol { Image(systemName: symbol).font(.system(size: 9, weight: .semibold)) }
+                }
+                Text(title).font(.yy(size: 12, weight: kind == .main ? .semibold : .regular)).monospacedDigit().lineLimit(1)
+                if let key { Text(key).font(.yy(size: 10)).foregroundStyle(YYColor.t3).padding(.leading, -2) }
+            }
+            .foregroundStyle(kind == .playing || kind == .main ? tint.accent : kind == .writing ? YYColor.t2 : YYColor.t1)
+            .padding(.leading, symbol == nil || kind == .writing ? 14 : 11).padding(.trailing, 14)
+            .frame(height: 28)
+        }
+        .buttonStyle(YYPillChrome(role: kind == .main ? .primary : .secondary))
+    }
+}
+
+/// 播客列表一行右边那一颗: a line of words over one
+/// short mark a 条. Heard 条 in ink, the one being told in the theme's colour and breathing, the
+/// rest faint. Writing uses the same marks — one lights as each 条 is written — and a failure
+/// stops on a red one. No frame; a faint wash under the pointer.
+struct EpisodeTicksButton: View {
+    enum State: Equatable {
+        /// Not started: the whole length and how many 条.
+        case fresh(minutes: Int)
+        /// Listened into and left.
+        case partway(minutesLeft: Int)
+        case playing(minutesLeft: Int)
+        case heard
+        case writing(String)
+        case failed
+    }
+    let state: State
+    /// How many 条, and how many are done (heard, or written).
+    let count: Int
+    let done: Int
+    let action: () -> Void
+    @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
+    private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .trailing, spacing: 5) {
+                HStack(spacing: 5) {
+                    glyph
+                    Text(words).lineLimit(1)
+                }
+                .font(.yy(size: 11.5, weight: weight))
+                .monospacedDigit()
+                .foregroundStyle(ink)
+                if count > 0 { ticks }
+            }
+            .frame(minWidth: 96, alignment: .trailing)
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .background(YYColor.t1.opacity(hovering ? 0.04 : 0), in: .rect(cornerRadius: 9))
+            .padding(.horizontal, -8).padding(.vertical, -6)
+            .contentShape(.rect)
+            .animation(.easeOut(duration: 0.15), value: hovering)
+        }
+        .buttonStyle(.plain)
+        #if os(macOS)
+        .onHover { hovering = $0 }
+        #endif
+        .accessibilityLabel(Text(words))
+    }
+
+    private var words: String {
+        switch state {
+        case .fresh(let m): count > 0 ? String(localized: "\(m) 分钟 · \(count) 条") : String(localized: "\(m) 分钟")
+        case .partway(let m): String(localized: "还剩 \(m) 分")
+        case .playing(let m): count > 0 ? String(localized: "第 \(min(done + 1, count)) 条 · 还剩 \(m) 分") : String(localized: "还剩 \(m) 分")
+        case .heard: String(localized: "听完了")
+        case .writing(let line): line
+        case .failed: String(localized: "再试一次")
+        }
+    }
+
+    @ViewBuilder private var glyph: some View {
+        switch state {
+        case .fresh, .partway: Image(systemName: "play.fill").font(.system(size: 8, weight: .bold))
+        case .playing: EqualizerBars().frame(width: 10, height: 10)
+        case .heard: Image(systemName: "checkmark").font(.system(size: 8.5, weight: .bold))
+        case .writing: EmptyView()
+        case .failed: Image(systemName: "arrow.clockwise").font(.system(size: 9, weight: .bold))
+        }
+    }
+
+    private var weight: SwiftUI.Font.Weight {
+        switch state {
+        case .heard, .writing: .medium
+        default: .semibold
+        }
+    }
+
+    private var ink: Color {
+        switch state {
+        case .playing: tint.accent
+        case .heard: YYColor.t3
+        case .writing: YYColor.t2
+        case .failed: YYColor.danger
+        default: YYColor.t1
+        }
+    }
+
+    /// One mark a 条; narrower when there are many, so the row keeps its width.
+    private var ticks: some View {
+        let width = max(4, min(10, (110 - 3 * CGFloat(count - 1)) / CGFloat(count)))
+        return HStack(spacing: 3) {
+            ForEach(0 ..< count, id: \.self) { i in
+                Tick(color: color(i), breathing: breathing(i)).frame(width: width, height: 3)
+            }
+        }
+    }
+
+    private func color(_ i: Int) -> Color {
+        switch state {
+        case .heard: return YYColor.t1.opacity(0.62)
+        case .failed where i == done: return YYColor.danger
+        case .playing where i == done, .writing where i == done: return tint.accent
+        default: return i < done ? YYColor.t1.opacity(0.62) : YYColor.t1.opacity(0.13)
+        }
+    }
+
+    private func breathing(_ i: Int) -> Bool {
+        switch state {
+        case .playing, .writing: i == done
+        default: false
+        }
+    }
+
+    private struct Tick: View {
+        let color: Color
+        let breathing: Bool
+        @State private var dim = false
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        var body: some View {
+            RoundedRectangle(cornerRadius: 1.5).fill(color)
+                .opacity(breathing && dim ? 0.35 : 1)
+                .onAppear { start() }
+                .onChange(of: breathing) { start() }
+        }
+
+        private func start() {
+            guard breathing, !reduceMotion else { dim = false; return }
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { dim = true }
+        }
+    }
+}
+
+/// `.pb.t`: only words (取消) — a faint grey pad under the pointer.
+struct PodcastTextButton: View {
+    let title: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title).font(.yy(size: 11.5, weight: .medium)).foregroundStyle(hovering ? YYColor.t1 : YYColor.t2)
+                .padding(.horizontal, 8).frame(height: 28)
+                .background(hovering ? YYColor.t1.opacity(0.05) : .clear, in: .capsule)
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        #if os(macOS)
+        .onHover { hovering = $0 }
+        #endif
+    }
+}
+
+/// Where an episode's articles came from: a small square each, one per site, as 配一档节目
+/// marks its sources (Y for Hacker News). Hover lists the articles.
+struct SourceMarks: View {
+    let articles: [ScriptArticle]
+
+    var body: some View {
+        var seen: [String] = []
+        for a in articles where !seen.contains(a.source) { seen.append(a.source) }
+        let shown = Array(seen.prefix(4))
+        return HStack(spacing: 3) {
+            ForEach(shown, id: \.self) { s in Self.mark(s) }
+            if seen.count > shown.count {
+                Text("+\(seen.count - shown.count)").font(.yy(size: 10)).foregroundStyle(YYColor.t3)
+            }
+        }
+        .help(articles.map { $0.source.isEmpty ? $0.title : "\($0.source) · \($0.title)" }.joined(separator: "\n"))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(String(localized: "来源：\(seen.joined(separator: String(localized: "、")))")))
+    }
+
+    static func mark(_ source: String) -> some View {
+        let hn = source.localizedCaseInsensitiveContains("hacker news")
+        let letter = hn ? "Y" : String(source.prefix(1)).uppercased()
+        let color = hn ? Color(red: 0.95, green: 0.4, blue: 0.13) : Color(white: 0.2)
+        return Text(letter).font(.system(size: 8, weight: .bold)).foregroundStyle(.white)
+            .frame(width: 15, height: 15).background(color, in: .rect(cornerRadius: 4))
+    }
+}
+
+/// Three bars that move while something plays.
+struct EqualizerBars: View {
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.12, paused: YYMotion.reduce)) { t in
+            let s = t.date.timeIntervalSinceReferenceDate
+            HStack(alignment: .bottom, spacing: 1.5) {
+                ForEach(0 ..< 3) { i in
+                    Capsule().frame(width: 2, height: 3 + 7 * abs(sin(s * 4 + Double(i) * 1.3)))
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .bottom)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// 连着听 among the shows' covers: the same shape and layout, on the page's own white.
+struct RadioCover: View {
+    let running: Bool
+    let size: CGFloat
+    @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
+    private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: size * 0.17)
+        shape
+            .fill(YYColor.card)
+            .overlay(shape.strokeBorder(YYColor.line, lineWidth: 0.5))
+            .frame(width: size, height: size)
+            .overlay(alignment: .topLeading) {
+                Text("连着听").font(.custom("Songti SC", size: size * 0.14).weight(.semibold)).tracking(size * 0.01)
+                    .foregroundStyle(YYColor.t1.opacity(0.92)).lineLimit(1)
+                    .padding(.top, size * 0.1).padding(.leading, size * 0.11)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                Group {
+                    if running {
+                        EqualizerBars().frame(width: size * 0.15, height: size * 0.15).foregroundStyle(tint.accent)
+                    } else {
+                        Image(systemName: "play.fill").font(.system(size: size * 0.15)).foregroundStyle(YYColor.t1)
+                    }
+                }
+                .padding(size * 0.12)
+            }
+            .accessibilityHidden(true)
+    }
+}
+
+/// 节目封面: made from the show's name, square, the radio mark in the corner.
+struct ShowCover: View {
+    let name: String
+    var size: CGFloat = 52
+
+    var body: some View {
+        let c = Self.colour(name)
+        RoundedRectangle(cornerRadius: size * 0.17)
+            .fill(c.fill)
+            .frame(width: size, height: size)
+            .overlay(alignment: .topLeading) {
+                // Only where it can be read: a small cover in a list sits beside the show's name
+                // anyway, and 6-point 宋体 was a smudge.
+                if size >= 64 {
+                Text(name).font(.custom("Songti SC", size: max(6.5, size * 0.14)).weight(.semibold)).tracking(size * 0.007)
+                    .foregroundStyle(c.ink.opacity(0.92)).lineLimit(2)
+                    .padding(.top, size * 0.1).padding(.leading, size * 0.11).padding(.trailing, size * 0.1)
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if size >= 40 {
+                    Image("radio").resizable().renderingMode(.template).scaledToFit()
+                        .frame(width: size * 0.24, height: size * 0.24).foregroundStyle(c.ink.opacity(0.6))
+                        .padding(size * 0.09)
+                }
+            }
+            .accessibilityHidden(true)
+    }
+
+    /// The five: 墨蓝、砖红、苔绿、米、紫.
+    private static let palette: [(Color, Color)] = [
+        (Color(red: 0x2F / 255, green: 0x45 / 255, blue: 0x60 / 255), .white),
+        (Color(red: 0x8C / 255, green: 0x4A / 255, blue: 0x33 / 255), .white),
+        (Color(red: 0x5B / 255, green: 0x6E / 255, blue: 0x4E / 255), .white),
+        (Color(red: 0xE6 / 255, green: 0xDC / 255, blue: 0xCB / 255), Color(red: 30 / 255, green: 28 / 255, blue: 24 / 255)),
+        (Color(red: 0x6B / 255, green: 0x5A / 255, blue: 0x82 / 255), .white),
+    ]
+
+    static func colour(_ name: String) -> (fill: Color, ink: Color) {
+        let n = name.unicodeScalars.reduce(UInt32(5381)) { ($0 &* 33) &+ $1.value }
+        let p = palette[Int(n % UInt32(palette.count))]
+        return (p.0, p.1)
+    }
+}
+
+extension Show {
+    var draft: ShowDraft {
+        ShowDraft(name: name, sources: sources, schedule: schedule, minutes: minutes, form: form, hosts: hosts,
+                  language: language, brief: brief, avoid: avoid, device: device)
+    }
+
+    /// "工作日早上 7:00", "每天 7:00", "点了才写".
+    var scheduleLine: String { schedule.line }
+}
+
+extension ShowSchedule {
+    var line: String {
+        let time = String(format: "%d:%02d", minute / 60, minute % 60)
+        let d = Set(days)
+        if d.isEmpty { return String(localized: "点了才写") }
+        if d == [1, 2, 3, 4, 5] { return String(localized: "工作日 \(time)") }
+        if d.count == 7 { return String(localized: "每天 \(time)") }
+        let names = PodcastSchedule.weekdayNames
+        return String(localized: "每周\(days.sorted().map { names[Int($0) - 1] }.joined(separator: String(localized: "、"))) \(time)")
+    }
+}
+
+extension Episode {
+    /// "今天", "昨天", "10 月 27 日".
+    var day: String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        guard let d = f.date(from: date) else { return date }
+        let cal = Calendar.current
+        if cal.isDateInToday(d) { return String(localized: "今天") }
+        if cal.isDateInYesterday(d) { return String(localized: "昨天") }
+        return d.formatted(.dateTime.month().day())
+    }
+}
+
+extension Podcasts.Progress {
+    /// "正在写第 4 / 7 条", "正在取新内容".
+    var line: String {
+        switch step {
+        case .fetch: String(localized: "正在取新内容 \(done) / \(max(total, 1))")
+        case .read, .pick: String(localized: "收到 \(found) 篇，正在挑")
+        case .summarize: String(localized: "正在读第 \(min(done + 1, total)) / \(total) 篇")
+        case .write: String(localized: "正在写稿")
+        case .save: String(localized: "快好了")
+        }
+    }
+
+    /// "正在写 4 / 7" for the small button.
+    var short: String {
+        switch step {
+        case .summarize: String(localized: "正在写 \(min(done + 1, total)) / \(total)")
+        case .write, .save: String(localized: "正在写稿")
+        default: String(localized: "正在准备")
+        }
+    }
+}
+
+/// Monday-first weekday names for podcast schedules: 一…日 in Chinese, the system's short
+/// names (Mon…Sun) elsewhere. Not the 一/二 numeral strings, whose English is One/Two.
+enum PodcastSchedule {
+    static var weekdayNames: [String] {
+        if Locale.preferredLanguages.first?.hasPrefix("zh") ?? false { return ["一", "二", "三", "四", "五", "六", "日"] }
+        let s = Calendar.current.shortWeekdaySymbols // Sunday first
+        return Array(s[1...]) + [s[0]]
+    }
+}

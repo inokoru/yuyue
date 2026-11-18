@@ -1,0 +1,133 @@
+import org.gradle.process.ExecOperations
+import java.util.Properties
+
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.plugin.compose")
+}
+
+android {
+    namespace = "app.yuyue"
+    compileSdk = 37
+    buildToolsVersion = "36.1.0"
+
+    defaultConfig {
+        applicationId = "app.yuyue"
+        // Android 8: docs/plan/tech.md §十二.
+        minSdk = 26
+        targetSdk = 36
+        versionCode = 1
+        versionName = "0.1.0"
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+        // 反馈. android/feedback.properties is not committed (topic + public key).
+        val feedbackFile = rootProject.file("feedback.properties")
+        val feedback = Properties()
+        if (feedbackFile.exists()) feedbackFile.inputStream().use { feedback.load(it) }
+        fun cfg(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+        buildConfigField("String", "FEEDBACK_TOPIC", cfg(feedback.getProperty("topic", "")))
+        buildConfigField("String", "FEEDBACK_PUBLIC_KEY", cfg(feedback.getProperty("publicKey", "")))
+        // 检查更新: the APK from GitHub updates itself; Google Play's (`-Pplay`) leaves it to the store.
+        buildConfigField("boolean", "SELF_UPDATE", (!project.hasProperty("play")).toString())
+    }
+
+    signingConfigs {
+        // The store key lives outside the repo: android/keystore.properties (storeFile, storePassword,
+        // keyAlias, keyPassword). Without it a release build is signed with the debug key, to try on a phone.
+        val props = rootProject.file("keystore.properties")
+        if (props.exists()) {
+            val p = Properties().apply { props.inputStream().use { load(it) } }
+            create("store") {
+                storeFile = rootProject.file(p.getProperty("storeFile"))
+                storePassword = p.getProperty("storePassword")
+                keyAlias = p.getProperty("keyAlias")
+                keyPassword = p.getProperty("keyPassword")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.findByName("store") ?: signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
+
+    // The reader bundle (`cd reader && pnpm build`) is served to the WebView as /app/….
+    sourceSets["main"].assets.directories.add("../../reader/dist")
+    // Wi‑Fi 传书's page for the computer, shared with Apple.
+    sourceSets["main"].assets.directories.add("../../shared")
+    // 点词's dictionary (scripts/ecdict-android.py).
+    sourceSets["main"].assets.directories.add("src/main/assets-dict")
+
+    // Google Play's build (`-Pplay`): no permission to install apps.
+    if (project.hasProperty("play")) sourceSets["release"].manifest.srcFile("src/play/AndroidManifest.xml")
+
+    packaging { jniLibs { useLegacyPackaging = false } }
+}
+
+kotlin { jvmToolchain(21) }
+
+/** English for the interface, from the catalog the Apple app uses (scripts/l10n-android.py). */
+abstract class L10nTask : DefaultTask() {
+    @get:InputFile abstract val catalog: RegularFileProperty
+    @get:InputFile abstract val extra: RegularFileProperty
+    @get:InputFile abstract val script: RegularFileProperty
+    @get:OutputDirectory abstract val outputDir: DirectoryProperty
+    @get:javax.inject.Inject abstract val exec: ExecOperations
+
+    @TaskAction
+    fun run() {
+        exec.exec { commandLine("python3", script.get().asFile.path, outputDir.get().file("l10n/en.json").asFile.path) }
+    }
+}
+
+val l10n = tasks.register<L10nTask>("l10n") {
+    catalog.set(file("../../apple/Yuyue/Localizable.xcstrings"))
+    extra.set(file("src/main/l10n/extra-en.json"))
+    script.set(file("../../scripts/l10n-android.py"))
+    outputDir.set(layout.buildDirectory.dir("generated/l10n"))
+}
+
+androidComponents {
+    onVariants { variant -> variant.sources.assets?.addGeneratedSourceDirectory(l10n, L10nTask::outputDir) }
+}
+
+dependencies {
+    val bom = platform("androidx.compose:compose-bom:2026.09.00")
+    implementation(bom)
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    // 底栏 blurs the page under it (Android 12+; below that, a translucent paper colour).
+    implementation("dev.chrisbanes.haze:haze:2.0.1")
+    implementation("dev.chrisbanes.haze:haze-blur:2.0.1")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    debugImplementation("androidx.compose.ui:ui-tooling")
+    implementation("androidx.activity:activity-compose:1.11.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")
+    implementation("androidx.navigation:navigation-compose:2.9.5")
+    implementation("androidx.webkit:webkit:1.14.0")
+    implementation("androidx.media3:media3-session:1.8.0")
+    implementation("androidx.media3:media3-exoplayer:1.8.0")
+    // 强制对齐: Meta's MMS alignment model, run on the device (the model itself is downloaded).
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.30.0")
+    implementation("androidx.documentfile:documentfile:1.1.0")
+    implementation("androidx.exifinterface:exifinterface:1.4.1")
+    implementation("androidx.security:security-crypto:1.1.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // WebDAV needs PROPFIND and MKCOL, which the platform client refuses.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // 同步 · Google Drive: the phone's Google account allows the app's hidden folder.
+    implementation("com.google.android.gms:play-services-auth:21.3.0")
+    // UniFFI's Kotlin bindings call the core through JNA.
+    implementation("net.java.dev.jna:jna:5.18.1@aar")
+    testImplementation("junit:junit:4.13.2")
+}

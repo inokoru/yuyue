@@ -1,0 +1,15 @@
+你在为一部小说整理“说过话的人物表”，结果用来给每个人物配声音。
+
+要求：
+- 只列在书里说过话（有台词）的人物。
+- names：这个人在书里的所有叫法（全名、短名、字、外号）。kind 填 full / short / courtesy / nickname / title。“母亲”“老爷”“姐姐”这类因人而异的称呼不要放进 names，放进 called_by：写明是谁（编号）这样叫他。
+- gender：m / f / unknown。age：child / teen / young / middle / old / unknown。
+- traits：一句话，身份、性格、说话的样子。
+- evidence：至少一句能证明这个人存在、并且说过话的原文，quote 必须从原文逐字抄，写明在第几章（[[章号]]）。
+- merges：你认为是同一个人的两个条目。每条都要有一句原文证据，证据里要同时出现两边的名字。不确定就不要合并：把两个人合成一个，比把一个人分成两行糟糕得多。
+- 身份后来才揭开的（化名、易容），不要合并，在 same_as 填另一个条目的 key，在 revealed 填从第几章起读者才知道。
+- groups：一群人的叫法（众人、丫头们）。
+- narrator：第一人称写的填 person = "first"，并在 who 填叙述者的 key（没有名字就 null）；否则 "third"。
+- readings：人名、地名、专有名词里容易念错的字的读音（拼音带声调），每条带原文证据。
+
+只回答 JSON，符合给出的 schema。

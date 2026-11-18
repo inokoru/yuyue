@@ -1,0 +1,54 @@
+# 复制到私有仓库（inokoru/yuyue-feedback）的 .github/workflows/relay.yml。
+# 公开的语阅仓库不放这份工作流，也不放密钥。
+#
+# 每小时把 ntfy 上的反馈搬进语阅仓库（公开）的 Issue，打「反馈」标签。不解密任何东西：
+# 私钥只在开发者的 Mac 上。公开的附件推到 inokoru/yuyue-feedback-assets（公开），
+# 密封的附件原样提交到本仓库 feedback-files/，邮箱的密文留在 Issue 的注释里。
+# ntfy.sh 消息留 12 小时、附件留 3 小时，所以每小时一次。一次不到一分钟。
+#
+# secrets：
+#   NTFY_TOPIC        话题名
+#   ISSUE_TOKEN       fine-grained token，只给 inokoru/yuyue 的 Issues 读写
+#   SHOTS_DEPLOY_KEY  inokoru/yuyue-feedback-assets 的部署密钥（私钥那一半，允许写），只能动那个仓库
+name: 转发反馈
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write   # 密封附件提交到本仓库 feedback-files/
+
+concurrency:
+  group: feedback-relay
+  cancel-in-progress: false
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      SHOTS_REPO: inokoru/yuyue-feedback-assets
+      GIT_SSH_COMMAND: ssh -i ${{ github.workspace }}/../shots-key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new
+    steps:
+      - uses: actions/checkout@v4
+      - name: 取公开附件仓库
+        env:
+          KEY: ${{ secrets.SHOTS_DEPLOY_KEY }}
+        run: |
+          printf '%s\n' "$KEY" > "$GITHUB_WORKSPACE/../shots-key"
+          chmod 600 "$GITHUB_WORKSPACE/../shots-key"
+          git clone -q --depth 1 "git@github.com:$SHOTS_REPO.git" "$RUNNER_TEMP/shots"
+      - name: 拉取 ntfy 并开 Issue
+        run: python3 feedback/relay/relay.py
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          ISSUE_REPO: inokoru/yuyue
+          ISSUE_TOKEN: ${{ secrets.ISSUE_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHOTS_DIR: ${{ runner.temp }}/shots
+      - name: 删掉密钥文件
+        if: always()
+        run: rm -f "$GITHUB_WORKSPACE/../shots-key"

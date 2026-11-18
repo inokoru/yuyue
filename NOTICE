@@ -1,0 +1,73 @@
+语阅 Yuyue
+Copyright (C) 2026 Yuyue contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License, version 3, as published by the
+Free Software Foundation. See LICENSE.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.
+
+Third-party components keep their own licences:
+
+  UniFFI                                      MPL-2.0
+  rusqlite                                    MIT
+  SQLite                                      Public Domain
+  serde, serde_json, regex, encoding_rs,
+  chardetng, zip, html5ever, roxmltree,
+  ICU4X, blake3, percent-encoding, thiserror,
+  aho-corasick, base64, crypto_box, flate2,
+  getrandom, lewton, markup5ever_rcdom,
+  ripemd                                      MIT / Apache-2.0
+  rars, rust-lzo1x                            MIT
+  foliate-js mobi.js (ported in mobi.rs,
+    Copyright (c) 2022 John Factotum)         MIT
+  zhconv (with OpenCC dictionaries)           GPL-2.0-or-later (OpenCC data Apache-2.0)
+  ECDICT                                      MIT
+  OkHttp, JNA                                 Apache-2.0
+  AndroidX, Jetpack Compose, Media3,
+  kotlinx.coroutines, Haze                    Apache-2.0
+  Sparkle                                     MIT
+  pinyin, pypinyin word lists                 MIT
+  ONNX Runtime                                MIT
+  mlx-audio-swift, mlx-swift                  MIT
+  Simple Icons (Notion, Obsidian logos)       CC0 1.0
+
+The Meta MMS alignment model is not part of this repository or covered by the
+GPL. The apps download it separately when it is first needed. It is licensed
+under CC-BY-NC 4.0, which does not allow commercial use.
+
+The ZipVoice-Distill speech synthesis model (k2-fsa/ZipVoice) and Vocos 24 kHz
+vocoder (charactr/vocos-mel-24khz) are likewise downloaded separately for on-device
+reading and zero-shot voice cloning. ZipVoice's code is Apache-2.0 and its
+pre-trained weights (trained on the Emilia corpus) are licensed under CC-BY-NC 4.0
+(non-commercial use only); Vocos is licensed under MIT.
+
+The built-in voice card pack (voices-1) is generated entirely from text descriptions
+using Qwen3-TTS VoiceDesign with no human voice recordings, and is dedicated to the
+public domain under CC0 1.0.
+
+The sound library (sounds-1) is generated with MOSS-SoundEffect v2.0 (Apache-2.0)
+from text descriptions and is dedicated to the public domain under CC0 1.0.
+
+On macOS, the optional studio speech models (Qwen3-TTS-12Hz-1.7B Base and VoiceDesign,
+quantized via MLX) are downloaded separately when requested by the user and are
+licensed under Apache-2.0.
+
+The 3D-Speaker CAM++ speaker-embedding model (iic/speech_campplus_sv_zh-cn_16k-common)
+is likewise downloaded separately, for telling voices apart in radio plays. It is
+licensed under Apache-2.0. scripts/align-bench/export_speaker.py converts it; the model
+definition in that script is ported from 3D-Speaker (speakerlab/models/campplus,
+Copyright 3D-Speaker, Apache-2.0).
+
+On Android, the SenseVoice-Small speech recognition model (FunAudioLLM, as exported
+by sherpa-onnx) is downloaded separately to transcribe recordings and check radio
+play clips. It is licensed under the FunASR Model License Agreement
+(https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE), which asks that its
+source, authors and model name be credited.
+
+Product names and logos in shared/provider-icons and the app's assets (the AI
+providers, Azure, Notion, Obsidian, flomo and Seniverse/xinzhi among them) belong to
+their owners. They only identify the services the app connects to and are not
+covered by the GPL.
