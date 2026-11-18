@@ -1,0 +1,53 @@
+.DS_Store
+
+# Rust
+core/target
+
+# Node
+node_modules/
+reader/dist/
+reader/test-results/
+reader/playwright-report/
+
+# Apple
+apple/build/
+apple/*.xcodeproj/
+apple/YuyueCore/YuyueCoreFFI.xcframework/
+apple/YuyueCore/Sources/YuyueCore/yuyue_core.swift
+apple/YuyueCore/Sources/YuyueCoreFFI/
+apple/OnnxRuntime/.build/
+apple/OnnxRuntime/.swiftpm/
+apple/OnnxRuntime/onnxruntime.xcframework/
+DerivedData/
+xcuserdata/
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/feedback.properties
+apple/Config/Feedback.local.xcconfig
+__pycache__/
+android/app/src/main/jniLibs/
+android/app/src/main/java/uniffi/
+android/.kotlin/
+android/app/build
+android/keystore.properties
+*.jks
+*.keystore
+.alma-snapshots
+/build/window-catalog/
+
+# Release files
+/dist/
+
+# Local work: models, voice auditions, design drafts and plans
+/models/
+/voice-audition/
+/yuyue-design
+
+# Not for the public repository
+.agents/
+.claude/
+skills-lock.json

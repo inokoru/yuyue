@@ -1,0 +1,99 @@
+name: 出了问题 / Bug
+description: 崩溃、丢数据、哪里不对。App 里“我的 › 反馈”会自动带上版本和日志，更省事。
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        谢谢来报。App 里 **我的 › 反馈**（Mac：帮助 › 反馈）能自动带上版本、系统和日志摘要，用它发最省事。
+        Thanks! **Me › Feedback** in the app (Mac: Help › Feedback) attaches version, system and a log summary for you.
+
+        请不要上传有版权的书文件。需要样本时，用公版书或自己做一个小文件。
+        Please don't attach copyrighted books. A public-domain book or a small file you made is fine.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 设备 / Platform
+      multiple: true
+      options: [Mac, iPhone, iPad, Android, 墨水屏 Android / E-ink Android]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 语阅版本 / App version
+      description: 我的 › 关于（Mac：语阅 › 关于语阅）
+      placeholder: 0.1.0 (1)
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: 系统和机型 / OS and device
+      placeholder: macOS 26.1 · MacBook Air M2 ／ Android 15 · Pixel 8
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 哪一块 / Area
+      options:
+        - 书架和导入 / Library & import
+        - 读书和排版 / Reading & layout
+        - PDF
+        - 朗读和声音 / Read aloud & voices
+        - 分角色和广播剧 / Cast & drama
+        - 有声书和对齐 / Audiobooks & alignment
+        - 播客 / Podcasts
+        - 划线、笔记和导出 / Highlights, notes & export
+        - 外文：查词、翻译、生词 / Foreign books
+        - 书伴 / Companion
+        - 同步和快照 / Sync & snapshots
+        - 记书和统计 / Book tracking & stats
+        - 软件更新 / Updates
+        - 其他 / Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么 / What happened
+      description: 看到了什么、本来应该怎样。截图或录屏直接拖进来。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 怎么重现 / Steps to reproduce
+      placeholder: |
+        1. 导入一本 EPUB
+        2. 打开第三章，点“听”
+        3. ……
+    validations:
+      required: true
+  - type: dropdown
+    id: always
+    attributes:
+      label: 每次都这样吗 / Does it happen every time
+      options: [每次 / Every time, 有时 / Sometimes, 只出现过一次 / Once]
+  - type: input
+    id: book
+    attributes:
+      label: 和哪种书有关 / Book involved
+      description: 格式、语言、从哪来（不用给书名）。和书无关就留空。
+      placeholder: EPUB · 中文 · Calibre 转出来的
+  - type: textarea
+    id: log
+    attributes:
+      label: 日志 / Log
+      description: 崩溃报告或日志，贴原文。
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认 / Checks
+      options:
+        - label: 我搜过已有的 issue，没有同样的 / I searched existing issues
+          required: true
+        - label: 我用的是最新版，或写明了为什么不能更新 / I'm on the latest version (or said why not)
+          required: false
