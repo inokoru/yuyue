@@ -342,14 +342,16 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         if (spot.section == section && sentence != spot.sentence) sentence = spot.sentence
         showUnread()
         // A chapter the recording only follows as a whole: no ink line; the page keeps up.
+        val follow = following && player?.pinnedSpot != spot
         if (player?.narrator != null && player.guide?.chapterOnly(spot.section) == true) {
             pager.clearInk()
-            if (following && !isOnScreen(spot)) pager.show(spot.section, Target.Sentence(spot.sentence, "third"))
+            if (follow && !isOnScreen(spot)) pager.show(spot.section, Target.Sentence(spot.sentence, "third"))
             return
         }
         pager.setInk(spot.section, spot.sentence, durationMs, elapsedMs, playing, wordTimes(spot))
         // Into the next chapter with the voice; within a section the reader says when the ink reaches another page.
-        if (following && spot.section != pager.current?.section) pager.show(spot.section, Target.Sentence(spot.sentence, "third"))
+        // A voice change restarts this sentence in place: the page stays where it is.
+        if (follow && spot.section != pager.current?.section) pager.show(spot.section, Target.Sentence(spot.sentence, "third"))
     }
 
     val paper: Paper get() = settings.paper
@@ -1111,7 +1113,7 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
     }
 
     override fun inkReached(page: Int) {
-        if (following && isPlaying) pager.showPage(page, animated = true)
+        if (following && isPlaying && player?.pinnedSpot != player?.spot) pager.showPage(page, animated = true)
     }
 
     override fun selected(m: ReaderMessage) {

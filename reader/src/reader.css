@@ -781,9 +781,14 @@ html[data-yy-bubbles] #yy-content .yy-bn { text-indent: 0 !important; }
 #yy-content .yy-bq-ch {
   position: relative;
   display: inline-block;
+  margin: 0;
+  border: 0;
+  font: inherit;
+  font-weight: 600;
+  appearance: none;
+  -webkit-appearance: none;
   padding: 0 .6em;
   border-radius: .7em;
-  font-weight: 600;
   line-height: 1.55;
   cursor: pointer;
   color: color-mix(in srgb, var(--yy-c, #888) 80%, var(--yy-p-ink));

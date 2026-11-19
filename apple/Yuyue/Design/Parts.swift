@@ -592,7 +592,7 @@ struct YYSegments<T: Hashable>: View {
                 Button { selection = value } label: {
                     HStack(spacing: YYUI.s(4)) {
                         // A longer English label scales down smoothly instead of overflowing the track.
-                        Text(title).lineLimit(1).minimumScaleFactor(0.78)
+                        Text(title).lineLimit(1).minimumScaleFactor(small ? 0.5 : 0.75)
                         if let n = counts[value] {
                             Text("\(n)").font(YYUI.font(10).monospacedDigit()).foregroundStyle(YYColor.t3)
                         }

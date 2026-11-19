@@ -173,8 +173,12 @@ impl DramaCharacter {
         }
     }
 
-    /// The name to show when the user hasn't picked one.
+    /// The name to show when the user hasn't picked one. The short form of a full name (宝玉 for
+    /// 贾宝玉), except a 家的 name, which keeps the surname: 周瑞家的, not 瑞家的.
     pub fn short_name(&self) -> &str {
+        if let Some(n) = self.names.iter().filter(|n| n.ends_with("家的")).max_by_key(|n| (n.chars().count(), n.as_str())) {
+            return n;
+        }
         let chars = |n: &&String| n.chars().count();
         self.names.iter().filter(|n| chars(n) >= 2).min_by_key(|n| (chars(n), n.as_str())).or(self.names.first()).map(String::as_str).unwrap_or("")
     }
@@ -538,6 +542,17 @@ mod tests {
 
     fn names(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn jia_de_is_shown_with_its_surname() {
+        let t = from_rules(&names(&["周瑞家的", "瑞家的", "贾宝玉", "宝玉"]));
+        let zhou = t.chars.iter().find(|c| c.names.iter().any(|n| n == "周瑞家的")).unwrap();
+        assert!(zhou.names.iter().any(|n| n == "瑞家的"));
+        assert_eq!(zhou.short_name(), "周瑞家的");
+        assert_eq!(t.resolve("瑞家的"), Some(zhou.id));
+        let bao = t.chars.iter().find(|c| c.names.iter().any(|n| n == "贾宝玉")).unwrap();
+        assert_eq!(bao.short_name(), "宝玉");
     }
 
     #[test]

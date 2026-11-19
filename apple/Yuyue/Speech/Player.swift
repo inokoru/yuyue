@@ -728,7 +728,9 @@ final class Player {
         let newSection = spot?.section != line.spot.section
         if extraPlaying != line.extra { extraPlaying = line.extra }
         if line.extra == nil, skippedHead != nil, spot != nil, spot != line.spot { skippedHead = nil }
+        let advancing = line.spot != spot
         spot = line.spot
+        if advancing { pinnedSpot = nil }
         if newSection {
             if let held = holdSystemVoiceSection, held != line.spot.section, LiveVoiceModel.isInstalled {
                 holdSystemVoiceSection = nil
@@ -790,11 +792,16 @@ final class Player {
         script.roles?.reload()
     }
 
+    /// The sentence a voice change restarted. While playback is still on it, the page stays
+    /// where the reader left it.
+    private(set) var pinnedSpot: Spot?
+
     /// 分角色: someone's voice, pace or pitch changed; read on from this sentence with it.
     func rolesChanged() {
         script.roles?.reload()
         sectionLayers.removeAll()
         LiveCastCache.shared.invalidate(book: detail.summary.id)
+        pinnedSpot = state == .stopped ? nil : spot
         restartHere()
     }
 

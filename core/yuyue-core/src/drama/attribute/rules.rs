@@ -36,6 +36,11 @@ fn first_person_after(after: &str) -> bool {
 /// Who says each line, as far as the rules are sure.
 pub fn attribute(rule_cast: &RuleCast, cast: &mut CastTable, sentences: &[String], segs: &[RawSeg]) -> Vec<RuleAnswer> {
     let found: Vec<Line> = lines(rule_cast, sentences);
+    // 无引号体: 老周： at the start of a sentence names who, which the quote rules never see.
+    let named_unquoted: std::collections::HashMap<(u32, u32), String> = crate::drama::spans::unquoted_lines(sentences)
+        .into_iter()
+        .filter_map(|(s, start, name)| name.map(|n| ((s, start), n)))
+        .collect();
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for (k, seg) in segs.iter().enumerate() {
@@ -59,7 +64,11 @@ pub fn attribute(rule_cast: &RuleCast, cast: &mut CastTable, sentences: &[String
         let body_start = seg.start + 1;
         let line = found.iter().find(|l| l.first == seg.sentence && (l.start == body_start || l.start == seg.start));
         let Some(line) = line else {
-            out.push(unsure(u));
+            if let Some(who) = named_unquoted.get(&(seg.sentence, seg.start)) {
+                out.push(named_new(cast, u, who));
+            } else {
+                out.push(unsure(u));
+            }
             continue;
         };
         let Some(who) = line.who.as_deref() else {
@@ -142,6 +151,19 @@ const TO: &[char] = &['向', '對', '对', '與', '与', '和', '跟', '同', '�
 /// Whether `who`, where it last comes before the line, is the one spoken to.
 fn spoken_to(before: &str, who: &str) -> bool {
     before.rfind(who).is_some_and(|i| before[..i].chars().last().is_some_and(|c| TO.contains(&c)))
+}
+
+/// A name written at the start of an unquoted line (老周：). New to the cast when nobody has it.
+fn named_new(cast: &mut CastTable, utterance: u32, who: &str) -> RuleAnswer {
+    if SOMEONE.contains(&who) || GENERIC.contains(&who) {
+        return unsure(utterance);
+    }
+    let id = match cast.resolve(who) {
+        Some(id) => id,
+        None if !cast.ambiguous.iter().any(|a| a == who) => cast.add_name(who, false),
+        None => return unsure(utterance),
+    };
+    RuleAnswer { utterance, speaker: DramaSpeaker::Char { id }, basis: LineBasis::Explicit, decided_by: DecidedBy::Rule, tag: None }
 }
 
 fn unsure(u: u32) -> RuleAnswer {

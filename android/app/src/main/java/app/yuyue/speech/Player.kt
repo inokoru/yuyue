@@ -607,7 +607,9 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         val newSection = spot?.section != l.spot.section
         if (extraPlaying != l.extra) extraPlaying = l.extra
         if (l.extra == null && skippedHead != null && spot != null && spot != l.spot) skippedHead = null
+        val advancing = l.spot != spot
         spot = l.spot
+        if (advancing) pinnedSpot = null
         state = State.Playing
         report()
         if (newSection) Session.update() else Session.updateLine()
@@ -857,9 +859,14 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         roles?.reload()
     }
 
+    /** The sentence a voice change restarted. While playback is still on it, the page stays put. */
+    var pinnedSpot: Spot? = null
+        private set
+
     /** 分角色: someone's voice, pace or pitch changed; read on from this sentence with it. */
     fun rolesChanged() {
         roles?.reload()
+        pinnedSpot = if (state == State.Stopped) null else spot
         restartHere()
     }
 

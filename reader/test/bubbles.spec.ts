@@ -32,6 +32,9 @@ test('setBubbles keeps every sentence and puts them back', async ({ page }) => {
   await page.evaluate((ls) => (window as any).yy.setBubbles(ls), lines);
   const bubbles = await page.locator('.yy-bq').count();
   expect(bubbles).toBeGreaterThan(10);
+  const more = page.locator('.yy-bq-ch-more').first();
+  await expect(more).toHaveCount(1);
+  expect(await more.evaluate((el) => el.tagName)).toBe('BUTTON');
   expect(await page.evaluate(texts)).toEqual(before);
   expect((await checkPaginated(page)).problems).toEqual([]);
   const align = await page.evaluate(() => {

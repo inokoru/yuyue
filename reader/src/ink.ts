@@ -255,7 +255,7 @@ export function setActive(s: number | null, opts?: ActiveOptions | null): void {
 
 let lastWords: number[] | null = null;
 
-function build(s: number, dur: number, e: number, play: boolean, list: number[] | null | undefined = lastWords): void {
+function build(s: number, dur: number, e: number, play: boolean, list: number[] | null | undefined = lastWords, announce = true): void {
   lastWords = list ?? null;
   teardown();
   const frags = fragmentsOf(s);
@@ -322,7 +322,11 @@ function build(s: number, dur: number, e: number, play: boolean, list: number[] 
   for (const g of bars) sync(g, base);
   schedule();
   startWords(frags, list);
-  emit(pageAt(base));
+  // A redraw (气泡, a new voice) keeps the geometry. Announcing the page pulls the reader
+  // back to the sentence; remember it instead, and only a later crossing is announced.
+  const page = pageAt(base);
+  if (announce) emit(page);
+  else if (page >= 0) postedPage = page;
 }
 
 export function setPlaying(p: boolean): void {
@@ -341,12 +345,12 @@ export function setPlaying(p: boolean): void {
 
 /** Builds the line again on the sentence's new fragments, after the content was rebuilt (气泡). */
 export function rebuild(): void {
-  if (active != null) build(active, total, elapsed(), playing);
+  if (active != null) build(active, total, elapsed(), playing, lastWords, false);
 }
 
 /** After a relayout or a paper/motion change: same sentence and timing, new geometry. */
 export function refresh(): void {
-  if (active != null) build(active, total, elapsed(), playing);
+  if (active != null) build(active, total, elapsed(), playing, lastWords, false);
 }
 
 if (reducedMotion && reducedMotion.addEventListener) {
