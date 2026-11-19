@@ -213,6 +213,26 @@ impl Store {
         Ok(out)
     }
 
+    /// The names of the entities under `prefix` that aren't deleted and have every field of
+    /// `required` with a value passing its SQL test (on `value`), without reading them out.
+    pub fn live_entities(&self, prefix: &str, required: &[(&str, &str)]) -> Result<Vec<String>> {
+        let upper = format!("{prefix}\u{FFFF}");
+        let tests = required
+            .iter()
+            .enumerate()
+            .map(|(i, (_, test))| format!("(field = ?{} AND {test})", i + 3))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let mut stmt = self.conn.prepare_cached(&format!(
+            "SELECT entity FROM registers WHERE entity >= ?1 AND entity < ?2 GROUP BY entity \
+             HAVING SUM({tests}) = {} AND SUM(field = 'deleted' AND value = 'true') = 0",
+            required.len()
+        ))?;
+        let params: Vec<&str> = [prefix, upper.as_str()].into_iter().chain(required.iter().map(|(f, _)| *f)).collect();
+        let rows = stmt.query_map(rusqlite::params_from_iter(params), |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
     /// All entities whose name starts with `prefix` ("book/"), with their fields.
     pub fn entities(&self, prefix: &str) -> Result<BTreeMap<String, BTreeMap<String, Value>>> {
         // Names are ASCII paths; everything starting with the prefix sorts below prefix + U+FFFF.

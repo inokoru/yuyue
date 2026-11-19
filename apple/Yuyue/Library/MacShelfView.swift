@@ -619,7 +619,8 @@ struct MacShelfView: View {
     @State private var wordCount = 0
 
     private func countNotes() {
-        noteCount = library.books.filter(\.available).reduce(0) { $0 + ((try? library.core.marks(book: $1.id).count) ?? 0) }
+        let counts = (try? library.core.markCounts()) ?? [:]
+        noteCount = library.books.filter(\.available).reduce(0) { $0 + Int(counts[$1.id] ?? 0) }
         wordCount = (try? library.core.words().count) ?? 0
     }
 

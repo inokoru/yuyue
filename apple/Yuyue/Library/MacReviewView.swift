@@ -374,9 +374,8 @@ struct MacReviewSheet: View {
     }
 
     private var booksWithNotes: [BookSummary] {
-        library.books.filter(\.available).filter { book in
-            !((try? library.core.marks(book: book.id)) ?? []).isEmpty
-        }
+        let counts = (try? library.core.markCounts()) ?? [:]
+        return library.books.filter { $0.available && counts[$0.id] != nil }
     }
 
     // MARK: Buttons

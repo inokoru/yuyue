@@ -287,7 +287,7 @@ private fun Summary(review: Review, library: Library, only: (BookSummary) -> Uni
                 Icon(Icons.chevronRight, null, tint = YY.c.t3, modifier = Modifier.size(12.dp))
             }
             DropdownMenu(picking, { picking = false }, containerColor = YY.c.card) {
-                val books = remember { library.books.filter { b -> b.available && runCatching { library.core.marks(b.id) }.getOrDefault(emptyList()).isNotEmpty() } }
+                val books = remember { runCatching { library.core.markCounts() }.getOrDefault(emptyMap()).let { counts -> library.books.filter { b -> b.available && b.id in counts } } }
                 for (b in books) Item(b.title, Icons.book) { picking = false; only(b) }
             }
         }

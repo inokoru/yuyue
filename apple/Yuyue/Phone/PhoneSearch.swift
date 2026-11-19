@@ -88,6 +88,7 @@ struct PhoneSearch: View {
             let s = QuickSearch(library: library, many: true)
             s.query = query
             search = s
+            Task { await s.prepare() }
         }
         .onChange(of: query) {
             search?.query = query

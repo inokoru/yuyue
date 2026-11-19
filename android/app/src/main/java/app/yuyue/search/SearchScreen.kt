@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +63,7 @@ import app.yuyue.reader.ReaderModel
 import app.yuyue.shelf.BookCover
 import app.yuyue.t
 import kotlinx.coroutines.Dispatchers
+import uniffi.yuyue_core.BookDetail
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import uniffi.yuyue_core.BookFormat
@@ -90,9 +92,20 @@ fun SearchScreen(library: Library) {
     fun dismissKeyboard() { focus.clearFocus(); keyboard?.hide() }
     val q = query.trim()
     val books = remember(library.books) { library.books.filter { it.available } }
-    val details = remember(books) { books.associate { it.id to runCatching { library.core.book(it.id) }.getOrNull() } }
-    val marks = remember(books, library.notesVersion) { books.associate { it.id to runCatching { library.core.marks(it.id) }.getOrDefault(emptyList()) } }
-    val vocab = remember(library.notesVersion) { runCatching { library.core.words() }.getOrDefault(emptyList()) }
+    // Read off the main thread: over a big library they hold up the screen's first frame.
+    // Null until read: no “没有结果” before there was anything to look through.
+    val readDetails by produceState<Map<String, BookDetail?>?>(null, books) {
+        value = withContext(Dispatchers.IO) { books.associate { it.id to runCatching { library.core.book(it.id) }.getOrNull() } }
+    }
+    val readMarks by produceState<Map<String, List<Mark>>?>(null, books, library.notesVersion) {
+        value = withContext(Dispatchers.IO) { books.associate { it.id to runCatching { library.core.marks(it.id) }.getOrDefault(emptyList()) } }
+    }
+    val readVocab by produceState<List<VocabWord>?>(null, library.notesVersion) {
+        value = withContext(Dispatchers.IO) { runCatching { library.core.words() }.getOrDefault(emptyList()) }
+    }
+    val details = readDetails.orEmpty()
+    val marks = readMarks.orEmpty()
+    val vocab = readVocab.orEmpty()
     fun chapter(id: String, section: UInt) = details[id]?.let { ReaderModel.chapterTitle(it, section.toInt()) }
 
     val titles = if (q.isEmpty()) {
@@ -111,6 +124,8 @@ fun SearchScreen(library: Library) {
     var lines by remember { mutableStateOf<List<LineHit>>(emptyList()) }
     var lineCount by remember { mutableIntStateOf(0) }
     var lineBooks by remember { mutableIntStateOf(0) }
+    /// The query the full text was last searched for.
+    var searched by remember { mutableStateOf("") }
     LaunchedEffect(q) {
         if (q.isEmpty()) { lines = emptyList(); lineCount = 0; lineBooks = 0; scope = Scope.All; return@LaunchedEffect }
         delay(140)
@@ -125,6 +140,7 @@ fun SearchScreen(library: Library) {
             round++
         }
         lines = picked
+        searched = q
     }
 
     Column(Modifier.fillMaxSize().background(YY.c.bg).windowInsetsPadding(WindowInsets.statusBars)) {
@@ -225,7 +241,8 @@ fun SearchScreen(library: Library) {
                         }
                     }
                 }
-                val nothing = when (scope) {
+                val ready = readDetails != null && readMarks != null && readVocab != null && searched == q
+                val nothing = if (!ready) null else when (scope) {
                     Scope.All -> if (titles.isEmpty() && lines.isEmpty() && notes.isEmpty() && words.isEmpty()) t("书名、原文、笔记里都没有“%@”。可以问问书伴", q) else null
                     Scope.Books -> if (titles.isEmpty()) t("没有书名里带“%@”的书", q) else null
                     Scope.Lines -> if (lines.isEmpty()) t("书里的原文没有“%@”", q) else null

@@ -346,7 +346,7 @@ private fun sums(library: Library, days: List<LocalDate>): List<DaySums> {
 @Composable
 private fun WeekCard(library: Library) {
     val days = remember(library.notesVersion) { sums(library, weekDays()) }
-    val marks = remember(library.notesVersion, library.books) { library.books.filter { it.available }.sumOf { runCatching { library.core.marks(it.id).size }.getOrDefault(0) } }
+    val marks = remember(library.notesVersion, library.books) { runCatching { library.core.markCounts() }.getOrDefault(emptyMap()).let { counts -> library.books.filter { it.available }.sumOf { (counts[it.id] ?: 0u).toInt() } } }
     val words = remember(library.notesVersion) { runCatching { library.core.words().count { !it.known } }.getOrDefault(0) }
     val year = LocalDate.now().year
     val finished = library.books.count { b ->

@@ -64,20 +64,45 @@ final class QuickSearch {
     @ObservationIgnored private var details: [String: BookDetail] = [:]
     @ObservationIgnored private var marks: [String: [Mark]] = [:]
     @ObservationIgnored private var finding: Task<Void, Never>?
+    @ObservationIgnored private let many: Bool
+    @ObservationIgnored private var loaded = false
+    @ObservationIgnored private var noteTotal: Int?
 
+    /// Cheap: the ⌘K panel makes one each time the view holding it is drawn again, and keeps
+    /// only the first. Contents, notes and words come with `prepare()`.
     init(library: Library, many: Bool = false) {
         self.library = library
+        self.many = many
         limit = many ? (40, 60, 60) : (4, 4, 3)
-        if many { vocab = (try? library.core.words()) ?? [] }
         books = library.books.filter(\.available)
-        for book in books {
-            details[book.id] = try? library.core.book(id: book.id)
-            marks[book.id] = (try? library.core.marks(book: book.id)) ?? []
-        }
         find()
     }
 
-    var allNotes: Int { marks.values.reduce(0) { $0 + $1.count } }
+    /// Reads contents, notes and words off the main thread, then searches again with them.
+    func prepare() async {
+        guard !loaded else { return }
+        loaded = true
+        (details, marks, vocab) = await Self.read(core: library.core, books: books.map(\.id), words: many)
+        if !query.trimmingCharacters(in: .whitespaces).isEmpty { find() }
+    }
+
+    @concurrent private static func read(core: YuyueCore, books: [String], words: Bool) async -> ([String: BookDetail], [String: [Mark]], [VocabWord]) {
+        var details: [String: BookDetail] = [:]
+        var marks: [String: [Mark]] = [:]
+        for id in books {
+            details[id] = try? core.book(id: id)
+            marks[id] = (try? core.marks(book: id)) ?? []
+        }
+        return (details, marks, words ? ((try? core.words()) ?? []) : [])
+    }
+
+    var allNotes: Int {
+        if let noteTotal { return noteTotal }
+        let counts = (try? library.core.markCounts()) ?? [:]
+        let n = books.reduce(0) { $0 + Int(counts[$1.id] ?? 0) }
+        noteTotal = n
+        return n
+    }
     var bookCount: Int { books.count }
 
     var rows: [Row] {
@@ -192,6 +217,7 @@ struct QuickSearchPanel: View {
                 .onTapGesture(perform: close)
             panel.padding(.top, 50)
         }
+        .task { await search.prepare() }
         .task {
             // In a reading window the page (a web view) holds the keyboard; asking once as the
             // panel appears can lose to it, so ask again when it has settled.

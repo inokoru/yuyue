@@ -193,6 +193,23 @@ impl YuyueCore {
         Ok(out)
     }
 
+    /// How many highlights each book has, books without any left out: one pass over the
+    /// store, for counts that would otherwise fetch every book's marks.
+    pub fn mark_counts(&self) -> Result<std::collections::HashMap<String, u32>> {
+        let mut out = std::collections::HashMap::new();
+        // What `mark_from` can't do without: a section and two points, as whole numbers ≥ 0.
+        const WHOLE: &str = "json_type(value) = 'integer' AND json_extract(value, '$') >= 0";
+        const POINT: &str = "json_type(value, '$.s') = 'integer' AND json_extract(value, '$.s') >= 0 \
+             AND json_type(value, '$.o') = 'integer' AND json_extract(value, '$.o') >= 0";
+        let required = [("section", WHOLE), ("start", POINT), ("end", POINT)];
+        for entity in lock(&self.store).live_entities("mark/", &required)? {
+            if let Some((book, _)) = entity["mark/".len()..].split_once('/') {
+                *out.entry(book.to_string()).or_insert(0) += 1;
+            }
+        }
+        Ok(out)
+    }
+
     /// Marks `text` from `start` to `end` of a section.
     pub fn add_mark(
         &self,
@@ -551,8 +568,18 @@ mod tests {
         core.delete_mark(b.id.clone(), heard.id).unwrap();
         core.delete_mark(b.id.clone(), early.id.clone()).unwrap();
         assert_eq!(core.marks(b.id.clone()).unwrap().len(), 1);
+        assert_eq!(core.mark_counts().unwrap().get(&b.id), Some(&1));
         core.restore_mark(b.id.clone(), early.id.clone()).unwrap();
         assert_eq!(core.marks(b.id.clone()).unwrap().len(), 2);
+        assert_eq!(core.mark_counts().unwrap(), [(b.id.clone(), 2)].into());
+        // A mark `marks()` can't read (say, a point gone null in sync) isn't counted either.
+        let entity = format!("mark/{}/{}", b.id, early.id);
+        let start = lock(&core.store).get(&entity, "start").unwrap().unwrap();
+        lock(&core.store).set(&entity, "start", Value::Null).unwrap();
+        assert_eq!(core.marks(b.id.clone()).unwrap().len(), 1);
+        assert_eq!(core.mark_counts().unwrap(), [(b.id.clone(), 1)].into());
+        lock(&core.store).set(&entity, "start", start).unwrap();
+        assert_eq!(core.mark_counts().unwrap(), [(b.id.clone(), 2)].into());
 
         let deck = core.review_today(None, 0, 5).unwrap();
         assert_eq!((deck.items.len(), deck.done_today), (2, 0));
