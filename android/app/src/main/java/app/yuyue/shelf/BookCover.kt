@@ -88,28 +88,46 @@ fun BookCover(book: BookSummary, modifier: Modifier = Modifier) {
 
 @Composable
 private fun Placeholder(book: BookSummary) {
+    CoverFace(book.title, book.authors.firstOrNull(), book.format == uniffi.yuyue_core.BookFormat.PDF)
+}
+
+/** The title page a cover shows when the book has no image. The shelf snapshot uses the same face. */
+@Composable
+internal fun CoverFace(title: String, author: String?, pdf: Boolean, modifier: Modifier = Modifier) {
     // Sized to the cover, so it reads the same on a small card and in the grid.
     // Warm stone, a shade deeper than the page and the white card, so it doesn't read as empty.
-    BoxWithConstraints(Modifier.fillMaxSize().background(if (YY.dark) Color(0xFF2C2824) else Color(0xFFEBE6DD))) {
+    BoxWithConstraints(modifier.fillMaxSize().background(if (YY.dark) Color(0xFF2C2824) else Color(0xFFEBE6DD))) {
         val unit = maxWidth.value / 100
         Column(Modifier.padding((11 * unit).dp)) {
             Text(
-                book.title, maxLines = 4, overflow = TextOverflow.Ellipsis,
+                title, maxLines = 4, overflow = TextOverflow.Ellipsis,
                 fontFamily = YY.serif, fontWeight = FontWeight.SemiBold, fontSize = (14 * unit).sp, lineHeight = (18 * unit).sp,
                 color = YY.c.t1,
             )
-            book.authors.firstOrNull()?.let {
+            author?.let {
                 Text(it, maxLines = 1, fontFamily = YY.serif, fontSize = (9.5 * unit).sp, color = YY.c.t2, modifier = Modifier.padding(top = (5 * unit).dp))
             }
         }
-        // A PDF with no cover of its own says what it is, small, at the bottom.
-        if (book.format == uniffi.yuyue_core.BookFormat.PDF) {
+        if (pdf) {
             Text(
                 "PDF", fontSize = (8.5 * unit).sp, fontWeight = FontWeight.Medium, letterSpacing = (0.6 * unit).sp, color = YY.c.t2,
                 modifier = Modifier.align(Alignment.BottomStart).padding((11 * unit).dp),
             )
         }
     }
+}
+
+/** A cover with no file yet: the same plate [BookCover] draws around [CoverFace]. */
+@Composable
+internal fun CoverPlate(title: String, author: String?, pdf: Boolean, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(4.dp)
+    Box(
+        modifier
+            .aspectRatio(2f / 3f)
+            .shadow(3.dp, shape, ambientColor = Color.Black.copy(alpha = 0.08f), spotColor = Color.Black.copy(alpha = 0.12f))
+            .clip(shape)
+            .border(0.5.dp, YY.c.line, shape),
+    ) { CoverFace(title, author, pdf) }
 }
 
 /** A recording's cover, square; the headphones on grey when it has none. */

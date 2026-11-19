@@ -32,6 +32,68 @@ open -n <调试版 .app 路径> --args -debugLibrary <一个空文件夹>
 
 空文件夹就是新装的样子。Android 用模拟器或测试机，文件用 `adb push <文件> /sdcard/Download/` 推进去再从 App 里导入。
 
+## 界面快照
+
+书架、阅读条、设置、App 自己画的弹层，用快照库对着 PNG 看，不必把整个 App 拉起来。这一轮只覆盖这些代表画面，不是每个窗口。
+
+两条路，不要混：
+
+| | 界面快照 | 全窗口图册 |
+|---|---|---|
+| 看什么 | App 里用 SwiftUI / Compose 画的屏幕和弹层 | 系统权限框、Sparkle 安装窗、网页书页（WebView 里的正文） |
+| 怎么画 | 夹具数据，单独把那个视图画出来 | `scripts/window-catalog.sh` 启动完整的 Mac App，用调试参数一扇窗一扇窗截 |
+| 库 | Apple：`pointfreeco/swift-snapshot-testing`。Android：Compose Preview Screenshot Testing（`com.android.compose.screenshot`） | `scripts/window-catalog.sh`、`scripts/window-gallery.py`、`DebugShots.swift` |
+
+`apple/Yuyue/App/Snapshots.swift`、`apple/Yuyue/Phone/PhoneSnapshot.swift`、`core/yuyue-core/src/snapshot.rs` 是**数据**快照（导出书和划线），不是这套图。
+
+正文是网页控件排的，快照库画不出那一页。阅读条的图底下垫了一段《故乡》的夹具文字，只为了看玻璃条；真书页仍用全窗口图册。
+
+图放在仓库里，用系统的看图或下面的网页对着看：
+
+- Apple：`apple/YuyueSnapshotTests/__Snapshots__/ScreenCatalogTests/`
+- Android：`android/app/src/screenshotTestDebug/reference/`（文件名是预览函数的全名加参数摘要）
+
+```sh
+python3 scripts/snapshot-gallery.py
+# 打开 build/snapshot-catalog/index.html
+```
+
+全窗口图册的网页还是 `python3 scripts/window-gallery.py`。
+
+### Apple
+
+在 Mac 上，先按 README 编过核心和书页，再生成工程。模拟器和 macOS 各跑各的，图不要混用：换了一台 Mac、换了一个模拟器，像素会对不上，在那台机器上重录。
+
+```sh
+cd apple && xcodegen
+# 缺图就记下，这一趟会失败；再跑一次才拿新图比对。
+xcodebuild test -project Yuyue.xcodeproj -scheme Yuyue \
+  -destination 'platform=macOS' \
+  -only-testing:YuyueSnapshotTests \
+  CODE_SIGNING_ALLOWED=NO
+# 模拟器名字以本机为准：xcrun simctl list devices available
+xcodebuild test -project Yuyue.xcodeproj -scheme Yuyue \
+  -destination 'platform=iOS Simulator,name=iPhone 16' \
+  -only-testing:YuyueSnapshotTests \
+  CODE_SIGNING_ALLOWED=NO
+```
+
+整套重录（界面故意改了）：同一条命令前面加 `YY_SNAPSHOT_RECORD=all`。只补缺的图不用设这个变量，库会把还没有的 PNG 写下来，然后这次测试失败，再跑一次就对着新图比。
+
+### Android
+
+主机上用 layoutlib 画 `@Preview`，不需要模拟器。先编核心和书页（和打 debug 包一样）。参考图是在哪台系统上录的，比对也在那台系统上：Mac 和 Linux 的中文字形会差一截，换了系统就重录，不要拿两边的 PNG 互相指。
+
+```sh
+cd android
+./gradlew :app:updateDebugScreenshotTest    # 写出 / 更新 reference PNG
+./gradlew :app:validateDebugScreenshotTest  # 再画一遍，和 reference 比
+```
+
+对不上时，HTML 报告在 `android/app/build/reports/screenshotTest/preview/debug/index.html`（Reference / Actual / Diff）。
+
+Android Studio 里，`@PreviewTest` 旁边的运行按钮也能录、也能比。
+
 ## 一、读书（Mac / Android / iPhone 都要）
 
 | # | 做什么 | 应该 |
@@ -54,7 +116,7 @@ open -n <调试版 .app 路径> --args -debugLibrary <一个空文件夹>
 
 平台特有的：
 
-- **Mac**：⌘W 关掉所有窗口后点程序坞图标，书架回来；从访达双击 EPUB 能打开；菜单栏图标能点开。改了设置页的，跑 `scripts/window-catalog.sh` 给每个窗口截图，逐张看。
+- **Mac**：⌘W 关掉所有窗口后点程序坞图标，书架回来；从访达双击 EPUB 能打开；菜单栏图标能点开。改了书架、阅读条、设置或 App 自己画的弹层，按下面「界面快照」重录 PNG 对着看。系统权限框、Sparkle 安装窗、网页书页仍跑 `scripts/window-catalog.sh`。
 - **Android**：双击屏幕左右边缘进出沉浸阅读；音量键翻页；预测式返回和系统返回手势回到上一层，不直接退出；横竖屏和分屏版面不乱。
 - **iPhone**：装好后先彻底退出再开一次。
 

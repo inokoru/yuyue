@@ -251,7 +251,7 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
 /** A paper-tinted glass shape over the page, opaque on e-ink. */
 @Composable
 private fun Modifier.glass(paper: YYPaper, @Suppress("UNUSED_PARAMETER") haze: HazeState, shape: androidx.compose.ui.graphics.Shape = CircleShape): Modifier {
-    val eink = paper === YYPapers.Eink || Prefs.bool("eink.on", false)
+    val eink = paper === YYPapers.Eink || (Prefs.isReady && Prefs.bool("eink.on", false))
     if (eink) {
         return this.clip(shape).background(paper.bg).border(0.75.dp, paper.line, shape)
     }
@@ -372,19 +372,16 @@ private fun Chrome(model: ReaderModel, paper: YYPaper, haze: HazeState, popupOpe
 @Composable
 private fun TopBar(model: ReaderModel, paper: YYPaper, haze: HazeState, close: () -> Unit) {
     var more by remember { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(Modifier.size(40.dp).glass(paper, haze).pressable(label = t("返回书架"), scale = 0.92f, onClick = close), contentAlignment = Alignment.Center) {
-            Icon(Icons.back, t("返回书架"), tint = paper.ink, modifier = Modifier.size(20.dp))
-        }
-        Column(Modifier.weight(1f).height(40.dp).glass(paper, haze).padding(horizontal = 12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Text(model.detail?.summary?.title ?: "", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = paper.ink, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-            val line = listOfNotNull(model.chapterTitle?.takeIf { it != model.detail?.summary?.title }, model.bookPage?.let { t("第 %lld 页", it) }).joinToString(" · ")
-            if (line.isNotEmpty()) Text(line, fontSize = 11.sp, color = paper.ink2, style = YY.tnum, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-        }
-        Row(Modifier.height(40.dp).glass(paper, haze).padding(horizontal = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-            Glyph(Icons.search, t("搜索这本书"), paper.ink) { model.chromeShown = false; model.searchShown = true }
-            val here = model.bookmarkHere
-            Glyph(if (here == null) Icons.bookmarkOutline else Icons.bookmark, if (here == null) t("加书签") else t("拿掉书签"), if (here == null) paper.ink else YY.tint.accent) { model.toggleBookmark() }
+    val line = listOfNotNull(model.chapterTitle?.takeIf { it != model.detail?.summary?.title }, model.bookPage?.let { t("第 %lld 页", it) }).joinToString(" · ")
+    ReaderTopBar(
+        paper, haze,
+        title = model.detail?.summary?.title ?: "",
+        subtitle = line,
+        bookmarked = model.bookmarkHere != null,
+        onClose = close,
+        onSearch = { model.chromeShown = false; model.searchShown = true },
+        onBookmark = { model.toggleBookmark() },
+        more = {
             Box {
                 Glyph(Icons.more, t("更多"), paper.ink) { more = true }
                 DropdownMenu(more, { more = false }, containerColor = YY.c.card) {
@@ -395,6 +392,36 @@ private fun TopBar(model: ReaderModel, paper: YYPaper, haze: HazeState, close: (
                     if (model.detail?.summary?.format == uniffi.yuyue_core.BookFormat.TXT) app.yuyue.shelf.Item(t("编码和目录"), Icons.textSize) { more = false; model.txtShown = true }
                 }
             }
+        },
+    )
+}
+
+/** The glass row over a page: 返回, the book's name, 搜索 · 书签 · 更多. The snapshot uses this
+ *  with fixture words; the WebView under it is not part of the picture. */
+@Composable
+internal fun ReaderTopBar(
+    paper: YYPaper,
+    haze: HazeState,
+    title: String,
+    subtitle: String,
+    bookmarked: Boolean,
+    onClose: () -> Unit,
+    onSearch: () -> Unit,
+    onBookmark: () -> Unit,
+    more: @Composable () -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.size(40.dp).glass(paper, haze).pressable(label = t("返回书架"), scale = 0.92f, onClick = onClose), contentAlignment = Alignment.Center) {
+            Icon(Icons.back, t("返回书架"), tint = paper.ink, modifier = Modifier.size(20.dp))
+        }
+        Column(Modifier.weight(1f).height(40.dp).glass(paper, haze).padding(horizontal = 12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = paper.ink, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            if (subtitle.isNotEmpty()) Text(subtitle, fontSize = 11.sp, color = paper.ink2, style = YY.tnum, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        }
+        Row(Modifier.height(40.dp).glass(paper, haze).padding(horizontal = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+            Glyph(Icons.search, t("搜索这本书"), paper.ink, onSearch)
+            Glyph(if (bookmarked) Icons.bookmark else Icons.bookmarkOutline, if (bookmarked) t("拿掉书签") else t("加书签"), if (bookmarked) YY.tint.accent else paper.ink, onBookmark)
+            more()
         }
     }
 }
@@ -411,36 +438,71 @@ private fun Glyph(icon: ImageVector, label: String, tint: Color, onClick: () -> 
 /** 平时只有一条胶囊: 目录, where the reader is, ‹ 朗读 ›, Aa, and how far into the chapter. */
 @Composable
 private fun Capsule(model: ReaderModel, paper: YYPaper, haze: HazeState) {
+    val alert = model.capsuleAlert
+    val reading = model.player?.spot != null
+    val n = model.sentenceCount
+    ReaderCapsuleBar(
+        paper, haze,
+        title = alert?.title ?: if (reading && n > 0) t("第 %lld / %lld 句", minOf(model.sentence + 1, n), n) else model.chapterTitle ?: model.detail?.summary?.title ?: "",
+        note = if (alert != null) alert.note else model.capsuleNote,
+        noteAccent = alert != null,
+        playing = model.isPlaying,
+        progress = if (n > 0) minOf(1f, (model.sentence + 1f) / n).coerceIn(0f, 1f) else 0f,
+        playEnabled = model.player != null,
+        sentenceStep = reading,
+        onToc = { model.tocShown = true },
+        onCenter = { if (alert != null) alert.action() else model.listenShown = true },
+        onPrevious = { model.step(false) },
+        onPlay = { model.togglePlay() },
+        onNext = { model.step(true) },
+        onTypeset = { model.settingsShown = true },
+    )
+}
+
+/** The capsule under the page. [Capsule] fills it from the reader; the snapshot fills it from a fixture. */
+@Composable
+internal fun ReaderCapsuleBar(
+    paper: YYPaper,
+    haze: HazeState,
+    title: String,
+    note: String,
+    noteAccent: Boolean,
+    playing: Boolean,
+    progress: Float,
+    playEnabled: Boolean,
+    sentenceStep: Boolean,
+    onToc: () -> Unit,
+    onCenter: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onPlay: () -> Unit,
+    onTypeset: () -> Unit,
+) {
     Box(Modifier.fillMaxWidth().height(50.dp).glass(paper, haze)) {
         Row(Modifier.fillMaxSize().padding(horizontal = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            Glyph(Icons.list, t("目录、书签和笔记"), paper.ink) { model.tocShown = true }
-            val alert = model.capsuleAlert
-            val reading = model.player?.spot != null
-            Column(Modifier.weight(1f).padding(start = 2.dp).clickable(enabled = model.player != null) { if (alert != null) alert.action() else model.listenShown = true }) {
-                val n = model.sentenceCount
+            Glyph(Icons.list, t("目录、书签和笔记"), paper.ink, onToc)
+            Column(Modifier.weight(1f).padding(start = 2.dp).clickable(enabled = playEnabled, onClick = onCenter)) {
+                Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = paper.ink, style = YY.tnum, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 Text(
-                    alert?.title ?: if (reading && n > 0) t("第 %lld / %lld 句", minOf(model.sentence + 1, n), n) else model.chapterTitle ?: model.detail?.summary?.title ?: "",
-                    fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = paper.ink, style = YY.tnum, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    note,
+                    fontSize = 12.sp, fontWeight = if (noteAccent) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (noteAccent) YY.tint.accent else paper.ink2, style = YY.tnum, maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
-                if (alert != null) Text(alert.note, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = YY.tint.accent, style = YY.tnum, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                else Text(model.capsuleNote, fontSize = 12.sp, color = paper.ink2, style = YY.tnum, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
-            Glyph(Icons.chevronLeft, if (reading) t("上一句") else t("上一页"), paper.ink) { model.step(false) }
-            val playing = model.isPlaying
+            Glyph(Icons.chevronLeft, if (sentenceStep) t("上一句") else t("上一页"), paper.ink, onPrevious)
             // The play button takes the theme colour on every paper but e-ink (YYTint.play).
-            Box(Modifier.size(40.dp).clip(CircleShape).background(LocalTint.current.play(paper)).pressable(label = if (playing) t("暂停") else t("朗读"), enabled = model.player != null, scale = 0.92f) { model.togglePlay() }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(40.dp).clip(CircleShape).background(LocalTint.current.play(paper)).pressable(label = if (playing) t("暂停") else t("朗读"), enabled = playEnabled, scale = 0.92f, onClick = onPlay), contentAlignment = Alignment.Center) {
                 androidx.compose.animation.Crossfade(playing, animationSpec = YYMotion.quick(), label = "play") { on -> Icon(if (on) Icons.pause else Icons.play, if (on) t("暂停") else t("朗读"), tint = paper.onMain, modifier = Modifier.size(20.dp)) }
             }
-            Glyph(Icons.chevronRight, if (reading) t("下一句") else t("下一页"), paper.ink) { model.step(true) }
-            Box(Modifier.size(38.dp).clip(CircleShape).pressable(label = t("排版"), scale = 0.9f) { model.settingsShown = true }, contentAlignment = Alignment.Center) {
+            Glyph(Icons.chevronRight, if (sentenceStep) t("下一句") else t("下一页"), paper.ink, onNext)
+            Box(Modifier.size(38.dp).clip(CircleShape).pressable(label = t("排版"), scale = 0.9f, onClick = onTypeset), contentAlignment = Alignment.Center) {
                 Text("Aa", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = paper.ink)
             }
         }
-        // How far into this chapter.
-        val n = model.sentenceCount
-        val share = if (n > 0) minOf(1f, (model.sentence + 1f) / n).coerceIn(0f, 1f) else 0f
         val trackColor = paper.line
         val fillColor = YY.tint.accent
+        val share = progress.coerceIn(0f, 1f)
         Box(Modifier.align(Alignment.BottomCenter).padding(horizontal = 24.dp).fillMaxWidth().height(2.dp).drawBehind {
             val r = CornerRadius(size.height / 2f)
             drawRoundRect(trackColor, cornerRadius = r)

@@ -355,7 +355,7 @@ private enum class PanelFrom { Title, Chip }
 
 /** 全部, how many, and their order. */
 @Composable
-private fun AllRow(count: Int, sort: ShelfSort, onSort: (ShelfSort) -> Unit) {
+internal fun AllRow(count: Int, sort: ShelfSort, onSort: (ShelfSort) -> Unit) {
     var sorting by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(t("全部"), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1)
@@ -414,7 +414,7 @@ private fun ReadingRow(library: Library, reading: List<BookSummary>, open: (Book
 
 /** What this is, then the three ways to put books in. */
 @Composable
-private fun Welcome(onFiles: () -> Unit, onWifi: () -> Unit, onRemote: () -> Unit) {
+internal fun Welcome(onFiles: () -> Unit, onWifi: () -> Unit, onRemote: () -> Unit) {
     Column(Modifier.padding(top = YY.s(14))) {
         Text(t("把书放进来，\n读或者听都行。"), fontFamily = YY.serif, fontWeight = FontWeight.Bold, fontSize = YY.sp(21f), lineHeight = YY.sp(31f), color = YY.c.t1)
         Text(t("不用注册。书、进度和笔记都存在你自己的设备里。"), style = YY.font(11f), color = YY.c.t2, modifier = Modifier.padding(top = YY.s(6)))
@@ -636,15 +636,22 @@ private fun BarButton(title: String, icon: ImageVector, enabled: Boolean, modifi
 @Composable
 fun ImportSheet(watching: String?, dismiss: () -> Unit, files: () -> Unit, wifi: () -> Unit, remote: () -> Unit, watch: () -> Unit) {
     ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
-        Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
-            Text(t("导入"), style = YY.font(14f, FontWeight.Bold), color = YY.c.t1, modifier = Modifier.padding(start = 4.dp, bottom = 12.dp))
-            app.yuyue.design.YYGroup {
-                row { app.yuyue.design.YYRow(t("从文件导入"), Icons.folder, t("本机或云盘里的"), chevron = true, onClick = files) }
-                row { app.yuyue.design.YYRow(t("Wi‑Fi 传书"), Icons.wifi, t("用电脑浏览器传"), chevron = true, onClick = wifi) }
-                row { app.yuyue.design.YYRow(t("远程书库"), Icons.server, "OPDS · WebDAV", chevron = true, onClick = remote) }
-                row { app.yuyue.design.YYRow(t("监听一个文件夹"), Icons.folder, watching ?: t("还没选"), chevron = true, onClick = watch) }
-            }
-            app.yuyue.design.YYNote(t("同一个文件只导入一次：按内容认，改过名字也认得出来"))
+        ImportChoices(watching, files, wifi, remote, watch)
+    }
+}
+
+/** The rows inside [ImportSheet]. The snapshot draws these on a sheet-shaped plate; the system
+ *  sheet chrome (the drag handle) is not part of it. */
+@Composable
+internal fun ImportChoices(watching: String?, files: () -> Unit, wifi: () -> Unit, remote: () -> Unit, watch: () -> Unit) {
+    Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
+        Text(t("导入"), style = YY.font(14f, FontWeight.Bold), color = YY.c.t1, modifier = Modifier.padding(start = 4.dp, bottom = 12.dp))
+        app.yuyue.design.YYGroup {
+            row { app.yuyue.design.YYRow(t("从文件导入"), Icons.folder, t("本机或云盘里的"), chevron = true, onClick = files) }
+            row { app.yuyue.design.YYRow(t("Wi‑Fi 传书"), Icons.wifi, t("用电脑浏览器传"), chevron = true, onClick = wifi) }
+            row { app.yuyue.design.YYRow(t("远程书库"), Icons.server, "OPDS · WebDAV", chevron = true, onClick = remote) }
+            row { app.yuyue.design.YYRow(t("监听一个文件夹"), Icons.folder, watching ?: t("还没选"), chevron = true, onClick = watch) }
         }
+        app.yuyue.design.YYNote(t("同一个文件只导入一次：按内容认，改过名字也认得出来"))
     }
 }

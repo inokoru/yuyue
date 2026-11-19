@@ -263,59 +263,38 @@ struct PhoneReaderChrome: View {
     // MARK: Top
 
     private var top: some View {
-        HStack(spacing: 8) {
-            Button(action: close) {
-                Image(systemName: "chevron.left").font(.yy(size: 15, weight: .semibold))
-                    .frame(width: 40, height: 40)
-                    .glass(paper, in: Circle())
-            }
-            .accessibilityLabel("返回书架")
-            VStack(spacing: 1) {
-                Text(model.detail?.summary.title ?? "").font(.yy(size: 13, weight: .semibold)).lineLimit(1)
-                Text(whereLine).font(.yy(size: 11)).foregroundStyle(paper.ink2).lineLimit(1).monospacedDigit()
-            }
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity)
-            .frame(height: 40)
-            .glass(paper, in: Capsule())
-            HStack(spacing: 0) {
-                Button { startSearch() } label: { icon("magnifyingglass") }
-                    .accessibilityLabel("搜索这本书")
-                Button { model.toggleBookmark() } label: {
-                    icon(model.bookmarkHere == nil ? "bookmark" : "bookmark.fill")
-                        .foregroundStyle(model.bookmarkHere == nil ? paper.ink : YYTint.standard.accent)
-                        .contentTransition(.symbolEffect(.replace))
-                        .animation(YYMotion.quick, value: model.bookmarkHere == nil)
+        PhoneReaderTopBar(
+            paper: paper,
+            title: model.detail?.summary.title ?? "",
+            subtitle: whereLine,
+            bookmarked: model.bookmarkHere != nil,
+            onClose: close,
+            onSearch: { startSearch() },
+            onBookmark: { model.toggleBookmark() }
+        ) {
+            Menu {
+                Button("沉浸阅读", systemImage: "viewfinder") { immersiveShown = true }
+                Button("书的信息", systemImage: "info.circle") { infoShown = true }
+                if model.detail?.summary.format != .pdf {
+                    Button("替换规则", systemImage: "arrow.left.arrow.right") { model.rulesShown = true }
                 }
-                .accessibilityLabel(model.bookmarkHere == nil ? String(localized: "加书签") : String(localized: "拿掉书签"))
-                Menu {
-                    Button("沉浸阅读", systemImage: "viewfinder") { immersiveShown = true }
-                    Button("书的信息", systemImage: "info.circle") { infoShown = true }
-                    if model.detail?.summary.format != .pdf {
-                        Button("替换规则", systemImage: "arrow.left.arrow.right") { model.rulesShown = true }
-                    }
-                    if model.detail?.summary.format == .txt {
-                        Button("编码和目录", systemImage: "doc.text.magnifyingglass") { model.txtShown = true }
-                    }
-                    Menu("导出笔记", systemImage: "square.and.arrow.up") {
-                        Button("Markdown", systemImage: "doc.plaintext") { exportNotes() }
-                        Divider()
-                        NoteSendItems(sender: model.noteSender, books: {
-                            guard let library = model.library else { return [] }
-                            return NotedBook.load(library, only: [model.bookID]).map(\.export)
-                        }, book: model.detail?.summary)
-                    }
-                } label: {
-                    icon("ellipsis")
-                        .background(paper.ink.opacity(0.09), in: .circle)
+                if model.detail?.summary.format == .txt {
+                    Button("编码和目录", systemImage: "doc.text.magnifyingglass") { model.txtShown = true }
                 }
-                .accessibilityLabel("更多")
+                Menu("导出笔记", systemImage: "square.and.arrow.up") {
+                    Button("Markdown", systemImage: "doc.plaintext") { exportNotes() }
+                    Divider()
+                    NoteSendItems(sender: model.noteSender, books: {
+                        guard let library = model.library else { return [] }
+                        return NotedBook.load(library, only: [model.bookID]).map(\.export)
+                    }, book: model.detail?.summary)
+                }
+            } label: {
+                readerIcon("ellipsis")
+                    .background(paper.ink.opacity(0.09), in: .circle)
             }
-            .padding(.horizontal, 3)
-            .frame(height: 40)
-            .glass(paper, in: Capsule())
+            .accessibilityLabel("更多")
         }
-        .padding(.top, 4)
     }
 
     private var whereLine: String {
@@ -325,74 +304,27 @@ struct PhoneReaderChrome: View {
                 model.bookPage.map { String(localized: "第 \(spread ? $0 * 2 - 1 : $0) 页") }].compactMap { $0 }.joined(separator: " · ")
     }
 
-    private func icon(_ name: String) -> some View {
-        Image(systemName: name).font(.yy(size: 15, weight: .medium)).frame(width: 34, height: 34)
-    }
-
     // MARK: The capsule
 
     private var capsule: some View {
-        HStack(spacing: 2) {
-            Button { model.tocShown = true } label: { capButton("list.bullet") }
-                .accessibilityLabel("目录、书签和笔记")
-            Button { if let alert = model.capsuleAlert { alert.action() } else { listenShown = true } } label: {
-                let reading = model.player?.spot != nil
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(model.capsuleAlert?.title ?? (reading && model.sentenceCount > 0 ? String(localized: "第 \(min(model.sentence + 1, model.sentenceCount)) / \(model.sentenceCount) 句") : (model.chapterTitle ?? model.detail?.summary.title ?? "")))
-                        .font(.yy(size: 12, weight: .semibold))
-                    if let alert = model.capsuleAlert {
-                        Text(alert.note)
-                            .font(.yy(size: 10.5, weight: .semibold))
-                            .foregroundStyle(YYTint.standard.accent)
-                    } else {
-                        Text(model.capsuleNote)
-                            .font(.yy(size: 10.5))
-                            .foregroundStyle(paper.ink2)
-                    }
-                }
-                .monospacedDigit()
-                .lineLimit(1)
-                .padding(.leading, 2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: 40)
-                .contentShape(.rect)
-            }
-            .accessibilityHint("听书：声音、速度、睡眠定时")
-            Button { step(forward: false) } label: { capButton("chevron.left") }
-                .accessibilityLabel(model.player?.spot != nil ? String(localized: "上一句") : String(localized: "上一页"))
-            Button { model.togglePlay() } label: {
-                Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
-                    // ▶ and ❚❚ turn into each other.
-                    .contentTransition(.symbolEffect(.replace))
-                    .animation(YYMotion.quick, value: model.isPlaying)
-                    .font(.yy(size: 14, weight: .semibold))
-                    .foregroundStyle(paper.onMain)
-                    .frame(width: 40, height: 40)
-                    // The theme colour on every paper but e-ink, as the other play buttons.
-                    .background(YYTint.standard.play(on: paper), in: .circle)
-            }
-            .accessibilityLabel(model.isPlaying ? String(localized: "暂停") : String(localized: "朗读"))
-            .disabled(model.player == nil)
-            Button { step(forward: true) } label: { capButton("chevron.right") }
-                .accessibilityLabel(model.player?.spot != nil ? String(localized: "下一句") : String(localized: "下一页"))
-            Button { model.settingsShown = true } label: {
-                Text("Aa").font(.yy(size: 14, weight: .semibold)).frame(width: 36, height: 36).contentShape(.rect)
-            }
-            .accessibilityLabel("排版")
-        }
-        .padding(.horizontal, 5)
-        .frame(height: 50)
-        .glass(paper, in: Capsule())
-        .overlay(alignment: .bottom) {
-            // How far into this chapter.
-            GeometryReader { g in
-                Capsule().fill(paper.line)
-                Capsule().fill(YYTint.standard.accent).frame(width: g.size.width * chapterProgress)
-            }
-            .animation(YYMotion.standard, value: chapterProgress)
-            .frame(height: 2)
-            .padding(.horizontal, 24)
-        }
+        let reading = model.player?.spot != nil
+        let n = model.sentenceCount
+        return PhoneReaderCapsule(
+            paper: paper,
+            title: model.capsuleAlert?.title ?? (reading && n > 0 ? String(localized: "第 \(min(model.sentence + 1, n)) / \(n) 句") : (model.chapterTitle ?? model.detail?.summary.title ?? "")),
+            note: model.capsuleAlert?.note ?? model.capsuleNote,
+            noteAccent: model.capsuleAlert != nil,
+            playing: model.isPlaying,
+            progress: chapterProgress,
+            playEnabled: model.player != nil,
+            sentenceStep: reading,
+            onToc: { model.tocShown = true },
+            onCenter: { if let alert = model.capsuleAlert { alert.action() } else { listenShown = true } },
+            onPrevious: { step(forward: false) },
+            onPlay: { model.togglePlay() },
+            onNext: { step(forward: true) },
+            onTypeset: { model.settingsShown = true }
+        )
     }
 
     private func capButton(_ name: String) -> some View {
@@ -641,6 +573,176 @@ struct ActivitySheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+/// The glass row over a page: 返回, the book's name, 搜索 · 书签 · 更多. The words are the caller's;
+/// the WebView under the real page is not part of this view.
+struct PhoneReaderTopBar<More: View>: View {
+    var paper: YYPaper
+    var title: String
+    var subtitle: String
+    var bookmarked: Bool
+    var onClose: () -> Void
+    var onSearch: () -> Void
+    var onBookmark: () -> Void
+    @ViewBuilder var more: () -> More
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onClose) {
+                Image(systemName: "chevron.left").font(.yy(size: 15, weight: .semibold))
+                    .frame(width: 40, height: 40)
+                    .glass(paper, in: Circle())
+            }
+            .accessibilityLabel("返回书架")
+            VStack(spacing: 1) {
+                Text(title).font(.yy(size: 13, weight: .semibold)).lineLimit(1)
+                Text(subtitle).font(.yy(size: 11)).foregroundStyle(paper.ink2).lineLimit(1).monospacedDigit()
+            }
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity)
+            .frame(height: 40)
+            .glass(paper, in: Capsule())
+            HStack(spacing: 0) {
+                Button(action: onSearch) { readerIcon("magnifyingglass") }
+                    .accessibilityLabel("搜索这本书")
+                Button(action: onBookmark) {
+                    readerIcon(bookmarked ? "bookmark.fill" : "bookmark")
+                        .foregroundStyle(bookmarked ? YYTint.standard.accent : paper.ink)
+                        .contentTransition(.symbolEffect(.replace))
+                        .animation(YYMotion.quick, value: bookmarked)
+                }
+                .accessibilityLabel(bookmarked ? String(localized: "拿掉书签") : String(localized: "加书签"))
+                more()
+            }
+            .padding(.horizontal, 3)
+            .frame(height: 40)
+            .glass(paper, in: Capsule())
+        }
+        .padding(.top, 4)
+    }
+}
+
+/// The capsule under the page: 目录, where the reader is, ‹ 朗读 ›, Aa, and how far into the chapter.
+struct PhoneReaderCapsule: View {
+    var paper: YYPaper
+    var title: String
+    var note: String
+    var noteAccent: Bool
+    var playing: Bool
+    var progress: Double
+    var playEnabled: Bool
+    var sentenceStep: Bool
+    var onToc: () -> Void
+    var onCenter: () -> Void
+    var onPrevious: () -> Void
+    var onPlay: () -> Void
+    var onNext: () -> Void
+    var onTypeset: () -> Void
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Button(action: onToc) { capButton("list.bullet") }
+                .accessibilityLabel("目录、书签和笔记")
+            Button(action: onCenter) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(.yy(size: 12, weight: .semibold))
+                    Text(note)
+                        .font(.yy(size: 10.5, weight: noteAccent ? .semibold : .regular))
+                        .foregroundStyle(noteAccent ? YYTint.standard.accent : paper.ink2)
+                }
+                .monospacedDigit()
+                .lineLimit(1)
+                .padding(.leading, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: 40)
+                .contentShape(.rect)
+            }
+            .accessibilityHint("听书：声音、速度、睡眠定时")
+            Button(action: onPrevious) { capButton("chevron.left") }
+                .accessibilityLabel(sentenceStep ? String(localized: "上一句") : String(localized: "上一页"))
+            Button(action: onPlay) {
+                Image(systemName: playing ? "pause.fill" : "play.fill")
+                    // ▶ and ❚❚ turn into each other.
+                    .contentTransition(.symbolEffect(.replace))
+                    .animation(YYMotion.quick, value: playing)
+                    .font(.yy(size: 14, weight: .semibold))
+                    .foregroundStyle(paper.onMain)
+                    .frame(width: 40, height: 40)
+                    // The theme colour on every paper but e-ink, as the other play buttons.
+                    .background(YYTint.standard.play(on: paper), in: .circle)
+            }
+            .accessibilityLabel(playing ? String(localized: "暂停") : String(localized: "朗读"))
+            .disabled(!playEnabled)
+            Button(action: onNext) { capButton("chevron.right") }
+                .accessibilityLabel(sentenceStep ? String(localized: "下一句") : String(localized: "下一页"))
+            Button(action: onTypeset) {
+                Text("Aa").font(.yy(size: 14, weight: .semibold)).frame(width: 36, height: 36).contentShape(.rect)
+            }
+            .accessibilityLabel("排版")
+        }
+        .padding(.horizontal, 5)
+        .frame(height: 50)
+        .glass(paper, in: Capsule())
+        .overlay(alignment: .bottom) {
+            GeometryReader { g in
+                Capsule().fill(paper.line)
+                Capsule().fill(YYTint.standard.accent).frame(width: g.size.width * progress)
+            }
+            .animation(YYMotion.standard, value: progress)
+            .frame(height: 2)
+            .padding(.horizontal, 24)
+        }
+    }
+
+    private func capButton(_ name: String) -> some View {
+        Image(systemName: name).font(.yy(size: 14, weight: .semibold)).frame(width: 34, height: 40).contentShape(.rect)
+    }
+}
+
+/// The chrome over a page of 《故乡》. The sentence is a fixture; the bars are the ones the reader uses.
+/// The WebView that sets the real page is not in this picture.
+struct PhoneReaderChromeFixture: View {
+    var body: some View {
+        let paper = YYPaper.kami
+        ZStack(alignment: .top) {
+            paper.bg
+            VStack(alignment: .leading, spacing: 0) {
+                Text("故乡")
+                    .font(YYUI.serif(22, .bold))
+                    .foregroundStyle(paper.ink)
+                Text("我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。")
+                    .font(YYUI.serif(17))
+                    .foregroundStyle(paper.ink)
+                    .lineSpacing(10)
+                    .padding(.top, 18)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 28)
+            .padding(.top, 96)
+            VStack {
+                PhoneReaderTopBar(
+                    paper: paper, title: "故乡", subtitle: String(localized: "第 1 页"), bookmarked: true,
+                    onClose: {}, onSearch: {}, onBookmark: {}
+                ) {
+                    readerIcon("ellipsis").background(paper.ink.opacity(0.09), in: .circle)
+                }
+                Spacer()
+                PhoneReaderCapsule(
+                    paper: paper, title: "故乡", note: String(localized: "第 1 页"), noteAccent: false,
+                    playing: false, progress: 0.08, playEnabled: true, sentenceStep: false,
+                    onToc: {}, onCenter: {}, onPrevious: {}, onPlay: {}, onNext: {}, onTypeset: {}
+                )
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
+        }
+    }
+}
+
+fileprivate func readerIcon(_ name: String) -> some View {
+    Image(systemName: name).font(.yy(size: 15, weight: .medium)).frame(width: 34, height: 34)
 }
 
 private extension View {
