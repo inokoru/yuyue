@@ -41,6 +41,10 @@ function marks(page: Page, compress: boolean): Promise<Mark[]> {
   }, compress);
 }
 
+/** The expected decisions are measured in Apple's Songti SC and PingFang SC; elsewhere (Linux CI)
+ *  other fonts stand in and decide otherwise. */
+const APPLE_FONTS = process.platform === 'darwin';
+
 const key = (m: Mark): string => m.kind + m.ch + (m.next || '');
 const near = (a: number, b: number, tol = 0.06): boolean => Math.abs(a - b) < tol;
 
@@ -71,6 +75,7 @@ function check(on: Mark[], off: Mark[], want: Record<string, boolean>, what: str
 }
 
 test('compress on beiying: the font decides, not core markup alone', async ({ page }) => {
+  test.skip(!APPLE_FONTS, 'the decisions are for Songti SC and PingFang SC');
   await open(page, 'beiying/s/0.html', { font: 'serif', justify: 0 });
   const off = await marks(page, false);
   const on = await marks(page, true);
@@ -83,6 +88,7 @@ test('compress on beiying: the font decides, not core markup alone', async ({ pa
 });
 
 test('compress with a sans font: the same section, other decisions', async ({ page }) => {
+  test.skip(!APPLE_FONTS, 'the decisions are for Songti SC and PingFang SC');
   await open(page, 'beiying/s/0.html', { font: 'sans', justify: 0 });
   const off = await marks(page, false);
   const on = await marks(page, true);
@@ -90,6 +96,7 @@ test('compress with a sans font: the same section, other decisions', async ({ pa
 });
 
 test('compress around brackets and in runs of punctuation', async ({ page }) => {
+  test.skip(!APPLE_FONTS, 'the decisions are for Songti SC and PingFang SC');
   await open(page, 'edge/s/0.html', { font: 'serif', justify: 0 });
   const off = await marks(page, false);
   const on = await marks(page, true);
