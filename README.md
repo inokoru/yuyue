@@ -71,7 +71,7 @@ android/build-core.sh
 cd android && ./gradlew assembleDebug
 ```
 
-测试：`cargo test`（在 `core/` 下）、`pnpm test`（在 `reader/` 下）。
+测试：`cargo test`（在 `core/` 下）、`pnpm test`（在 `reader/` 下）。界面快照怎么录、怎么看，见 [docs/dev/testing.md](docs/dev/testing.md)「界面快照」。
 
 打包三端的发布文件到 `dist/`：`scripts/package-release.sh`，也可以只打一部分，比如 `scripts/package-release.sh mac android`。Android 正式版的签名配置放在 `android/keystore.properties`（不进仓库）。
 

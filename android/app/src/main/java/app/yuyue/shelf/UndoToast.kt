@@ -66,17 +66,39 @@ fun UndoToast(toast: Library.Toast, undo: () -> Unit, modifier: Modifier = Modif
         shown.animateTo(0f, YYMotion.exit())
     }
     val b = button.value.coerceIn(0f, 1f)
+    UndoToastPlate(
+        title = toast.title,
+        danger = toast.danger,
+        error = toast.icon == Library.Toast.Icon.Error,
+        button = b,
+        undoShown = !done && b > 0f,
+        undo = undo,
+        modifier = modifier.graphicsLayer {
+            val v = shown.value
+            alpha = v.coerceIn(0f, 1f)
+            translationY = (1 - v) * -10.dp.toPx()
+            scaleX = 0.97f + 0.03f * v
+            scaleY = 0.97f + 0.03f * v
+            transformOrigin = TransformOrigin(0.5f, 0f)
+        },
+    )
+}
+
+/** The capsule itself, settled. [UndoToast] animates into this; the snapshot records this, not the motion. */
+@Composable
+internal fun UndoToastPlate(
+    title: String,
+    danger: Boolean,
+    error: Boolean,
+    button: Float,
+    undoShown: Boolean,
+    undo: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val b = button.coerceIn(0f, 1f)
     Row(
         modifier
             .widthIn(max = 420.dp)
-            .graphicsLayer {
-                val v = shown.value
-                alpha = v.coerceIn(0f, 1f)
-                translationY = (1 - v) * -10.dp.toPx()
-                scaleX = 0.97f + 0.03f * v
-                scaleY = 0.97f + 0.03f * v
-                transformOrigin = TransformOrigin(0.5f, 0f)
-            }
             .shadow(11.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.04f), spotColor = Color.Black.copy(alpha = if (YY.dark) 0.4f else 0.08f))
             .background(if (YY.dark) Color(0xFF2A2A2C) else Color(0xFFFCFCFC), CircleShape)
             .border(0.5.dp, if (YY.dark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.14f), CircleShape)
@@ -84,19 +106,18 @@ fun UndoToast(toast: Library.Toast, undo: () -> Unit, modifier: Modifier = Modif
             .padding(start = YY.s(14), end = YY.s(18f - 10f * b))
             .semantics(mergeDescendants = true) {
                 liveRegion = LiveRegionMode.Polite
-                if (!done) customActions = listOf(CustomAccessibilityAction(t("撤销")) { undo(); true })
+                if (undoShown) customActions = listOf(CustomAccessibilityAction(t("撤销")) { undo(); true })
             },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val error = toast.icon == Library.Toast.Icon.Error
         Box(
-            Modifier.size(YY.s(17)).background(if (toast.danger || error) YY.c.danger else Done, CircleShape),
+            Modifier.size(YY.s(17)).background(if (danger || error) YY.c.danger else Done, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             Icon(if (error) Icons.bang else Icons.check, null, tint = Color.White, modifier = Modifier.size(YY.s(12)))
         }
         Text(
-            toast.title, style = YY.font(13f, FontWeight.Medium), color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            title, style = YY.font(13f, FontWeight.Medium), color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(start = YY.s(10)).weight(1f, fill = false),
         )
         if (b > 0f) {
@@ -105,7 +126,7 @@ fun UndoToast(toast: Library.Toast, undo: () -> Unit, modifier: Modifier = Modif
                     .graphicsLayer { alpha = b }
                     .clip(CircleShape)
                     .background(if (YY.dark) Color(0xFF3A3A3C) else Color(0xFFEBEBEB))
-                    .clickable(enabled = !done, onClickLabel = t("撤销"), onClick = undo),
+                    .clickable(enabled = undoShown, onClickLabel = t("撤销"), onClick = undo),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.undo, t("撤销"), tint = YY.c.t1, modifier = Modifier.size(YY.s(14f * b)))

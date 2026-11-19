@@ -1,6 +1,9 @@
 #!/bin/bash
 # 全窗口图册:把 app 的每个窗口和弹窗各截一张。用法: scripts/window-catalog.sh [输出目录]
 #
+# 系统权限框、Sparkle 安装窗、网页书页（WebView 正文）仍走这里。书架、阅读条、设置、
+# App 自己画的弹层用界面快照，见 docs/dev/testing.md「界面快照」。两条都留着。
+#
 # 原理:app 的 debug 启动参数(-debug*)一次开一个弹窗,app 自己截图(-debugShots,截自己的
 # 窗口不需要屏幕录制权限),存完退出。真 app 有 App Sandbox,容器外写不了,所以拷一份构建
 # 出来重签成不带沙箱的副本(只给图册跑),输出、临时书库都直接放仓库的输出目录。

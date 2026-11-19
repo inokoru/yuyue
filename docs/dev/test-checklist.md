@@ -2,6 +2,7 @@
 
 > 2026-11-18 ｜ 做了、但还没亲眼确认过的东西。每项写：测什么、怎么测、过线、现在跑没跑过。测过一条就改状态。
 > 怎么测的通用步骤见 [testing.md](testing.md)。命令行工具：`yuyue audiobook-eval`、`audiobook-letters`、`drama-eval`、`drama-llm`、`drama-sounds`、`speaker-features`；App 的调试开关见各项。
+> 界面长什么样：书架、阅读条、设置、App 自己画的弹层看界面快照（testing.md「界面快照」）。系统权限框、Sparkle 安装窗、网页书页仍用 `scripts/window-catalog.sh`。
 
 ## 一、有声书
 

@@ -433,7 +433,7 @@ private fun Bars(days: List<DaySums>, modifier: Modifier) {
 // MARK: 外观
 
 @Composable
-private fun AppearancePage() {
+internal fun AppearancePage() {
     var mode by rememberPref(Appearance.KEY, Appearance.SYSTEM)
     var tintID by rememberPref("appearance.tint", YYTints.Default.id)
     var coverSize by rememberPref(Shelf.COVER_SIZE, 100f)

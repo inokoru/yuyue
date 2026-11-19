@@ -84,6 +84,10 @@ fun YuyueTheme(content: @Composable () -> Unit) {
 object Prefs {
     private lateinit var prefs: SharedPreferences
 
+    /** False until [init]. The reader chrome asks about 墨水屏 before drawing; a preview that has
+     *  not opened the app's preferences yet is not in that mode. */
+    internal val isReady: Boolean get() = ::prefs.isInitialized
+
     fun init(context: Context) {
         prefs = context.getSharedPreferences("yuyue", Context.MODE_PRIVATE)
     }
