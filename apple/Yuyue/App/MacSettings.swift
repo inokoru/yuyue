@@ -266,7 +266,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
 
 #if os(macOS)
 /// The page's name and what it's for, fixed over the page as it scrolls.
-private struct SettingsPageHeader: View {
+struct SettingsPageHeader: View {
     let page: SettingsPage
 
     var body: some View {
@@ -692,7 +692,7 @@ private struct GeneralSettings: View {
 
 // MARK: - 外观
 
-private struct AppearanceSettings: View {
+struct AppearanceSettings: View {
     @AppStorage(AppAppearance.key) private var mode = AppAppearance.system
     @AppStorage("shelf.coverSize") private var coverSize = 100.0
     @AppStorage("shelf.showProgress") private var showProgress = true

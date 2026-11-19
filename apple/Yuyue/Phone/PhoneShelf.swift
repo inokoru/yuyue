@@ -406,22 +406,8 @@ struct PhoneShelf: View {
     private var placeHeader: some View {
         let now = info(place)
         return Button { openPanel(.title) } label: {
-            HStack(spacing: 11) {
-                PlaceMark(symbol: now.symbol, size: 40, bare: true)
-                HStack(spacing: 6) {
-                    Text(now.name)
-                        .font(YYUI.serif(30, .medium))
-                        .tracking(now.name.contains { $0.isASCII } ? 0 : 1)
-                        .foregroundStyle(YYColor.t1)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(YYColor.t3)
-                        .padding(.top, 3)
-                }
-            }
-            .frame(height: 40)
-            .contentShape(.rect)
+            ShelfPlaceTitle(symbol: now.symbol, name: now.name)
+                .contentShape(.rect)
         }
         .buttonStyle(YYPressStyle(scale: 0.98))
         .opacity(panelFrom == .title ? 0 : 1)
@@ -450,12 +436,7 @@ struct PhoneShelf: View {
     }
 
     private func sortLabel(_ name: String) -> some View {
-        HStack(spacing: 4) {
-            Text(name)
-            Image(systemName: "chevron.up.chevron.down").font(.yy(size: 10, weight: .semibold))
-        }
-        .font(.footnote)
-        .foregroundStyle(YYColor.t2)
+        ShelfSortLabel(name: name)
     }
 
     /// The chip (scrolled down, on the shelf itself) and the panel, over the whole stack.
@@ -615,40 +596,7 @@ struct PhoneShelf: View {
     /// three ways to put books in. Narrower than 420 pt (iPhone Duo closed, beside its side bar)
     /// the three tiles would cut their names short, so they stack as rows instead.
     private var welcome: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            welcomeTitle(size: YYUI.s(21))
-            welcomeLine
-                .font(YYUI.font(11)).lineSpacing(YYUI.s(11) * 0.7)
-                .padding(.top, YYUI.s(6))
-            if width < 520 {
-                VStack(spacing: 10) { ways(row: 64) }
-                    .padding(.top, YYUI.s(16))
-            } else {
-                HStack(alignment: .top, spacing: YYUI.s(8)) { ways(row: nil) }
-                    .padding(.top, YYUI.s(16))
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, YYUI.s(14))
-    }
-
-    private func welcomeTitle(size: CGFloat) -> some View {
-        Text("把书放进来，\n读或者听都行。")
-            .font(YYUI.serif(size, .bold))
-            .tracking(size * 0.02)
-            .lineSpacing(size * 0.5)
-            .foregroundStyle(YYColor.t1)
-    }
-
-    private var welcomeLine: some View {
-        Text("不用注册。书、进度和笔记都存在你自己的设备里。").foregroundStyle(YYColor.t2)
-    }
-
-    /// The three ways in: tiles (`row` nil), or full-width rows of that height.
-    @ViewBuilder private func ways(row: CGFloat?) -> some View {
-        way("folder", String(localized: "从文件导入"), String(localized: "本机或云盘里的"), row: row) { importerShown = true }
-        way("wifi", String(localized: "Wi‑Fi 传书"), String(localized: "用电脑浏览器传"), row: row) { wifiShown = true }
-        way("server.rack", String(localized: "远程书库"), String(localized: "Calibre、NAS"), row: row) { remoteShown = true }
+        PhoneShelfWelcome(narrow: width < 520, files: $importerShown, wifi: $wifiShown, remote: $remoteShown)
     }
 
     /// Regular width with no books: what this is on the left (40%), the three ways in as rows on
@@ -674,8 +622,8 @@ struct PhoneShelf: View {
 
     private var welcomeIntro: some View {
         VStack(alignment: .leading, spacing: 12) {
-            welcomeTitle(size: 34)
-            welcomeLine.font(.yy(size: 15))
+            PhoneShelfWelcomeTitle(size: 34)
+            PhoneShelfWelcomeLine().font(.yy(size: 15))
         }
         .frame(maxWidth: 360, alignment: .leading)
         .padding(.horizontal, 32)
@@ -683,67 +631,10 @@ struct PhoneShelf: View {
     }
 
     private var welcomeWays: some View {
-        VStack(spacing: 10) { ways(row: 72) }
+        PhoneShelfWays(row: 72, files: $importerShown, wifi: $wifiShown, remote: $remoteShown)
             .frame(maxWidth: 440)
             .padding(.horizontal, 32)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    /// `row` nil: the tile. Otherwise a full-width row that tall: the icon in a circle, the name
-    /// and the grey line on one line each, a chevron.
-    @ViewBuilder private func way(_ symbol: String, _ title: String, _ detail: String, row: CGFloat? = nil, _ action: @escaping () -> Void) -> some View {
-        if let row {
-            Button(action: action) {
-                HStack(spacing: 12) {
-                    Image(systemName: symbol)
-                        .font(.yy(size: 20, weight: .medium))
-                        .foregroundStyle(YYColor.t1)
-                        .frame(width: 36, height: 36)
-                        .background(YYColor.inset, in: .circle)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title).font(.yy(size: 15, weight: .semibold)).foregroundStyle(YYColor.t1).lineLimit(1)
-                        Text(detail).font(.yy(size: 13)).foregroundStyle(YYColor.t2).lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.right")
-                        .font(.yy(size: 13, weight: .semibold))
-                        .foregroundStyle(YYColor.t3)
-                }
-                .padding(.leading, 14)
-                .padding(.trailing, 16)
-                .frame(maxWidth: .infinity, minHeight: row, alignment: .leading)
-                .background(YYColor.card, in: .rect(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(YYColor.line, lineWidth: 0.5))
-                .contentShape(.rect(cornerRadius: 16))
-            }
-            .buttonStyle(YYPressStyle())
-        } else {
-            tile(symbol, title, detail, action)
-        }
-    }
-
-    /// A tile, then the name and a grey line.
-    private func tile(_ symbol: String, _ title: String, _ detail: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: YYUI.s(10)) {
-                Image(systemName: symbol)
-                    .font(YYUI.font(12, .medium))
-                    .foregroundStyle(YYColor.t1)
-                    .frame(width: YYUI.s(28), height: YYUI.s(28))
-                    .background(YYColor.inset, in: .rect(cornerRadius: YYUI.s(8)))
-                VStack(alignment: .leading, spacing: YYUI.s(2)) {
-                    Text(title).font(YYUI.font(11.5, .semibold)).foregroundStyle(YYColor.t1).lineLimit(1).minimumScaleFactor(0.8)
-                    Text(detail).font(YYUI.font(10)).foregroundStyle(YYColor.t3).lineLimit(2)
-                }
-            }
-            .padding(.horizontal, YYUI.s(10))
-            .padding(.top, YYUI.s(12))
-            .padding(.bottom, YYUI.s(11))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .yyCard()
-            .contentShape(.rect)
-        }
-        .buttonStyle(YYPressStyle(scale: 0.98))
     }
 
     @ViewBuilder private var empty: some View {
@@ -972,6 +863,157 @@ struct PhoneShelf: View {
         withAnimation(YYMotion.layout) {
             selecting = false
             selected = []
+        }
+    }
+}
+
+/// The closed sort menu's label: the name and the up-down chevron.
+struct ShelfSortLabel: View {
+    var name: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(name)
+            Image(systemName: "chevron.up.chevron.down").font(.yy(size: 10, weight: .semibold))
+        }
+        .font(.footnote)
+        .foregroundStyle(YYColor.t2)
+    }
+}
+
+/// What this is, then the three ways to put books in. Narrow stacks the ways as rows.
+struct PhoneShelfWelcome: View {
+    var narrow: Bool
+    @Binding var files: Bool
+    @Binding var wifi: Bool
+    @Binding var remote: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PhoneShelfWelcomeTitle(size: YYUI.s(21))
+            PhoneShelfWelcomeLine()
+                .font(YYUI.font(11)).lineSpacing(YYUI.s(11) * 0.7)
+                .padding(.top, YYUI.s(6))
+            PhoneShelfWays(row: narrow ? 64 : nil, files: $files, wifi: $wifi, remote: $remote)
+                .padding(.top, YYUI.s(16))
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, YYUI.s(14))
+    }
+}
+
+struct PhoneShelfWelcomeTitle: View {
+    var size: CGFloat
+
+    var body: some View {
+        Text("把书放进来，\n读或者听都行。")
+            .font(YYUI.serif(size, .bold))
+            .tracking(size * 0.02)
+            .lineSpacing(size * 0.5)
+            .foregroundStyle(YYColor.t1)
+    }
+}
+
+struct PhoneShelfWelcomeLine: View {
+    var body: some View {
+        Text("不用注册。书、进度和笔记都存在你自己的设备里。").foregroundStyle(YYColor.t2)
+    }
+}
+
+/// The three ways in: tiles (`row` nil), or full-width rows of that height.
+struct PhoneShelfWays: View {
+    var row: CGFloat?
+    @Binding var files: Bool
+    @Binding var wifi: Bool
+    @Binding var remote: Bool
+
+    var body: some View {
+        if let row {
+            VStack(spacing: 10) {
+                way("folder", String(localized: "从文件导入"), String(localized: "本机或云盘里的"), row: row) { files = true }
+                way("wifi", String(localized: "Wi‑Fi 传书"), String(localized: "用电脑浏览器传"), row: row) { wifi = true }
+                way("server.rack", String(localized: "远程书库"), String(localized: "Calibre、NAS"), row: row) { remote = true }
+            }
+        } else {
+            HStack(alignment: .top, spacing: YYUI.s(8)) {
+                tile("folder", String(localized: "从文件导入"), String(localized: "本机或云盘里的")) { files = true }
+                tile("wifi", String(localized: "Wi‑Fi 传书"), String(localized: "用电脑浏览器传")) { wifi = true }
+                tile("server.rack", String(localized: "远程书库"), String(localized: "Calibre、NAS")) { remote = true }
+            }
+        }
+    }
+
+    private func way(_ symbol: String, _ title: String, _ detail: String, row: CGFloat, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: symbol)
+                    .font(.yy(size: 20, weight: .medium))
+                    .foregroundStyle(YYColor.t1)
+                    .frame(width: 36, height: 36)
+                    .background(YYColor.inset, in: .circle)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.yy(size: 15, weight: .semibold)).foregroundStyle(YYColor.t1).lineLimit(1)
+                    Text(detail).font(.yy(size: 13)).foregroundStyle(YYColor.t2).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.yy(size: 13, weight: .semibold))
+                    .foregroundStyle(YYColor.t3)
+            }
+            .padding(.leading, 14)
+            .padding(.trailing, 16)
+            .frame(maxWidth: .infinity, minHeight: row, alignment: .leading)
+            .background(YYColor.card, in: .rect(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(YYColor.line, lineWidth: 0.5))
+            .contentShape(.rect(cornerRadius: 16))
+        }
+        .buttonStyle(YYPressStyle())
+    }
+
+    private func tile(_ symbol: String, _ title: String, _ detail: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: YYUI.s(10)) {
+                Image(systemName: symbol)
+                    .font(YYUI.font(12, .medium))
+                    .foregroundStyle(YYColor.t1)
+                    .frame(width: YYUI.s(28), height: YYUI.s(28))
+                    .background(YYColor.inset, in: .rect(cornerRadius: YYUI.s(8)))
+                VStack(alignment: .leading, spacing: YYUI.s(2)) {
+                    Text(title).font(YYUI.font(11.5, .semibold)).foregroundStyle(YYColor.t1).lineLimit(1).minimumScaleFactor(0.8)
+                    Text(detail).font(YYUI.font(10)).foregroundStyle(YYColor.t3).lineLimit(2)
+                }
+            }
+            .padding(.horizontal, YYUI.s(10))
+            .padding(.top, YYUI.s(12))
+            .padding(.bottom, YYUI.s(11))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .yyCard()
+            .contentShape(.rect)
+        }
+        .buttonStyle(YYPressStyle(scale: 0.98))
+    }
+}
+
+/// One book on the shelf when it has no cover file yet: the plate, the name, the line under it.
+struct PhoneShelfBookCell: View {
+    var title: String
+    var author: String?
+    var note: String
+    var pdf = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CoverPlate(title: title, author: author, pdf: pdf)
+                .padding(.bottom, 8)
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(YYColor.t1)
+                .lineLimit(1)
+                .padding(.bottom, 2)
+            Text(note)
+                .font(.caption2)
+                .foregroundStyle(YYColor.t3)
+                .lineLimit(1)
         }
     }
 }

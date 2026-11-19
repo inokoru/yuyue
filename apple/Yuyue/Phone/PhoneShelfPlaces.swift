@@ -44,6 +44,30 @@ struct TopButton: View {
     }
 }
 
+/// The shelf's title: the place's mark, its name in 宋体, and ⌄. The page that owns it adds the tap.
+struct ShelfPlaceTitle: View {
+    var symbol: String
+    var name: String
+
+    var body: some View {
+        HStack(spacing: 11) {
+            PlaceMark(symbol: symbol, size: 40, bare: true)
+            HStack(spacing: 6) {
+                Text(name)
+                    .font(YYUI.serif(30, .medium))
+                    .tracking(name.contains { $0.isASCII } ? 0 : 1)
+                    .foregroundStyle(YYColor.t1)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(YYColor.t3)
+                    .padding(.top, 3)
+            }
+        }
+        .frame(height: 40)
+    }
+}
+
 /// A tab's own title, as the shelf has it: the mark and the name in 宋体 (笔记, 我的).
 struct PageTitle: View {
     let symbol: String

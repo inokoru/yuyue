@@ -38,6 +38,7 @@ android/keystore.properties
 *.keystore
 .alma-snapshots
 /build/window-catalog/
+/build/snapshot-catalog/
 
 # Release files
 /dist/

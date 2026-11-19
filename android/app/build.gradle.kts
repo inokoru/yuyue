@@ -4,6 +4,7 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.android.compose.screenshot")
 }
 
 android {
@@ -58,6 +59,9 @@ android {
         compose = true
         buildConfig = true
     }
+
+    // 界面快照 source set (src/screenshotTest). The flag in gradle.properties turns the feature on.
+    experimentalProperties["android.experimental.enableScreenshotTest"] = true
 
     // The reader bundle (`cd reader && pnpm build`) is served to the WebView as /app/….
     sourceSets["main"].assets.directories.add("../../reader/dist")
@@ -130,4 +134,10 @@ dependencies {
     // UniFFI's Kotlin bindings call the core through JNA.
     implementation("net.java.dev.jna:jna:5.18.1@aar")
     testImplementation("junit:junit:4.13.2")
+    // @PreviewTest renders on the host JVM (layoutlib), not on a device. Previews live in
+    // src/screenshotTest and call the app's composables with fixture data.
+    screenshotTestImplementation(bom)
+    screenshotTestImplementation("androidx.compose.ui:ui-tooling")
+    screenshotTestImplementation("androidx.compose.ui:ui-tooling-preview")
+    screenshotTestImplementation("com.android.tools.screenshot:screenshot-validation-api:0.0.1-alpha16")
 }

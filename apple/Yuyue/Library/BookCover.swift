@@ -63,9 +63,19 @@ struct BookCover: View {
             }
     }
 
+    private var placeholder: some View {
+        CoverFace(title: book.title, author: book.authors.first, pdf: book.format == .pdf)
+    }
+}
+
+/// The title page a cover shows when the book has no image. The shelf snapshot uses the same face.
+struct CoverFace: View {
+    var title: String
+    var author: String?
+    var pdf: Bool
     private static let stone = Color.yyDynamic(light: YYRGBA(235, 230, 221), dark: YYRGBA(44, 40, 36))
 
-    private var placeholder: some View {
+    var body: some View {
         // Sized to the cover, so it reads the same on a small card and in the grid.
         GeometryReader { g in
             let unit = g.size.width / 100
@@ -73,11 +83,11 @@ struct BookCover: View {
                 // Warm stone, a shade deeper than the page and the white card, so it doesn't read as empty.
                 Self.stone
                 VStack(alignment: .leading, spacing: 5 * unit) {
-                    Text(book.title)
+                    Text(title)
                         .font(YYFontFamily.serif.font(size: 14 * unit, weight: .semibold))
                         .foregroundStyle(YYColor.t1)
                         .lineLimit(4)
-                    if let author = book.authors.first {
+                    if let author {
                         Text(author)
                             .font(YYFontFamily.serif.font(size: 9.5 * unit))
                             .foregroundStyle(YYColor.t2)
@@ -85,8 +95,7 @@ struct BookCover: View {
                     }
                 }
                 .padding(11 * unit)
-                // A PDF with no cover of its own says what it is, small, at the bottom.
-                if book.format == .pdf {
+                if pdf {
                     Text(verbatim: "PDF")
                         .font(.system(size: 8.5 * unit, weight: .medium))
                         .tracking(0.6 * unit)
@@ -98,6 +107,21 @@ struct BookCover: View {
         }
         // The title and author are read out below the cover already.
         .accessibilityHidden(true)
+    }
+}
+
+/// A cover with no file yet: the same plate [BookCover] draws around [CoverFace].
+struct CoverPlate: View {
+    var title: String
+    var author: String?
+    var pdf: Bool
+
+    var body: some View {
+        CoverFace(title: title, author: author, pdf: pdf)
+            .aspectRatio(2 / 3, contentMode: .fit)
+            .clipShape(.rect(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(YYColor.line, lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
     }
 }
 

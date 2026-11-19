@@ -931,11 +931,7 @@ struct MacShelfView: View {
         } else {
             ("book.closed", String(localized: "这里还没有书"))
         }
-        VStack(spacing: 10) {
-            Image(systemName: symbol).font(.yy(size: 28, weight: .light)).foregroundStyle(YYColor.t3)
-            Text(text).font(.yy(size: 12.5)).foregroundStyle(YYColor.t2)
-        }
-        .frame(maxWidth: .infinity, minHeight: 260)
+        MacShelfEmpty(symbol: symbol, text: text)
     }
 
     private func cell(_ book: BookSummary) -> some View {
@@ -1374,6 +1370,21 @@ struct EditInfoSheet: View {
         panel.prompt = String(localized: "用作封面")
         guard panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) else { return }
         library.setCover(current, image: data)
+    }
+}
+
+/// The shelf with nothing to show. The window catalog still shoots the whole window; this is the
+/// empty state on its own, for the snapshot tests.
+struct MacShelfEmpty: View {
+    var symbol: String
+    var text: String
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: symbol).font(.yy(size: 28, weight: .light)).foregroundStyle(YYColor.t3)
+            Text(text).font(.yy(size: 12.5)).foregroundStyle(YYColor.t2)
+        }
+        .frame(maxWidth: .infinity, minHeight: 260)
     }
 }
 #endif

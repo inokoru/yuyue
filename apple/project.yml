@@ -23,6 +23,10 @@ packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     exactVersion: 2.10.1
+  # 界面快照. Test target only — not linked into the app.
+  SnapshotTesting:
+    url: https://github.com/pointfreeco/swift-snapshot-testing
+    exactVersion: 1.19.7
 
 settings:
   base:
@@ -161,6 +165,9 @@ targets:
       Debug: Config/Feedback.xcconfig
       Release: Config/Feedback.xcconfig
     settings:
+      configs:
+        Debug:
+          ENABLE_TESTABILITY: YES
       base:
         PRODUCT_NAME: Yuyue
         # Placeholder until the App Store identity is settled.
@@ -181,3 +188,26 @@ targets:
         "ENABLE_HARDENED_RUNTIME[sdk=macosx*]": YES
         # The Mac app keeps its frameworks (Sparkle) in Contents/Frameworks, not beside the binary.
         "LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]": "$(inherited) @executable_path/../Frameworks"
+    scheme:
+      testTargets:
+        - YuyueSnapshotTests
+  # 界面快照: isolated SwiftUI, recorded as PNGs next to these tests.
+  # System permission dialogs, Sparkle and the WebView reader stay on scripts/window-catalog.sh.
+  YuyueSnapshotTests:
+    type: bundle.unit-test
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: YuyueSnapshotTests
+    dependencies:
+      - target: Yuyue
+      - package: SnapshotTesting
+        product: SnapshotTesting
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.yuyue.YuyueSnapshotTests
+        GENERATE_INFOPLIST_FILE: YES
+        # XCTest's entry points are nonisolated. The app target defaults the actor to MainActor;
+        # these tests opt out and mark the UI cases @MainActor themselves.
+        SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
+        "CODE_SIGN_IDENTITY[sdk=macosx*]": "-"
+        CODE_SIGN_STYLE: Automatic
