@@ -750,14 +750,12 @@ struct RoleNamesSection: View {
             }
         }
         .task { await load() }
-        .alert(String(localized: "书里还怎么叫\(name)"), isPresented: $adding) {
-            TextField(String(localized: "名字"), text: $newName)
-            Button(String(localized: "加上")) {
-                let n = newName.trimmingCharacters(in: .whitespaces)
-                newName = ""
-                if !n.isEmpty { edit(.addName(to: name, name: n)) }
-            }
-            Button(String(localized: "取消"), role: .cancel) { newName = "" }
+        .yyPrompt(String(localized: "书里还怎么叫\(name)"), text: $newName, prompt: String(localized: "名字"),
+                  isPresented: $adding, confirm: String(localized: "加上")) {
+            let n = newName.trimmingCharacters(in: .whitespaces)
+            newName = ""
+            adding = false
+            if !n.isEmpty { edit(.addName(to: name, name: n)) }
         }
     }
 

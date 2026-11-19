@@ -27,7 +27,7 @@ final class MacMenuBar: NSObject, NSMenuDelegate {
     private func follow() {
         // Also while an episode is in the 播放条, or while Mac is preparing drama chapters for a phone.
         let on = withObservationTracking {
-            podcasts.scheduledHere || library.nowPlaying != nil || StudioWorkshop.shared.active != nil
+            podcasts.scheduledHere || library.nowPlaying != nil || StudioWorkshop.shared.active != nil || StudioWorkshop.shared.paused != nil
         } onChange: { [weak self] in
             Task { @MainActor in self?.follow() }
         }
@@ -83,16 +83,23 @@ final class MacMenuBar: NSObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        if let job = StudioWorkshop.shared.active {
+        let workshop = StudioWorkshop.shared
+        if let job = workshop.active ?? workshop.paused {
             menu.addItem(.sectionHeader(title: String(localized: "声音工坊")))
-            menu.addItem(NSMenuItem(
-                title: String(localized: "正在给手机做《\(job.bookTitle)》第 \(job.currentSection + 1) 章"),
-                action: nil,
-                keyEquivalent: ""
-            ))
-            menu.addItem(action(String(localized: "停")) {
-                StudioWorkshop.shared.stop()
+            let running = workshop.active != nil
+            let row = NSMenuItem()
+            let view = NSHostingView(rootView: WorkshopMenuRow(
+                title: running
+                    ? String(localized: "正在给手机做《\(job.bookTitle)》第 \(job.currentSection + 1) 章")
+                    : String(localized: "已暂停给手机做《\(job.bookTitle)》"),
+                button: running ? String(localized: "停") : String(localized: "继续")
+            ) { [weak menu] in
+                if running { workshop.pause() } else { workshop.resume() }
+                menu?.cancelTracking()
             })
+            view.frame.size = view.fittingSize
+            row.view = view
+            menu.addItem(row)
             menu.addItem(.separator())
         }
         // 正在放: the 播放条's episode, playable from here with every window closed.
@@ -248,6 +255,37 @@ enum LoginItem {
     @MainActor static var launchedAtLogin: Bool {
         let event = NSAppleEventManager.shared().currentAppleEvent
         return event?.eventID == kAEOpenApplication && event?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
+    }
+}
+/// 正在给手机做《红楼梦》第 9 章 · [停]: a menu line with its pill on the right.
+private struct WorkshopMenuRow: View {
+    let title: String
+    let button: String
+    let run: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(.system(size: 13))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Button(action: run) {
+                Text(button)
+                    .font(.system(size: 11))
+                    .foregroundStyle(hover ? YYColor.danger : .primary)
+                    .padding(.horizontal, 8)
+                    .frame(height: 18)
+                    .background(hover ? YYColor.danger.opacity(0.15) : Color.primary.opacity(0.07), in: .capsule)
+                    .contentShape(.capsule)
+            }
+            .buttonStyle(.plain)
+            .onHover { hover = $0 }
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 10)
+        .frame(minWidth: 260, minHeight: 24)
     }
 }
 #endif

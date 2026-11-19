@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The foot of 关于: the pencil signature from the corner of a drawing — a curve running into the
-/// long stroke under it, then two T's. It writes itself out when the page opens; touched, again.
+/// long stroke under it, then two T's. Not there when the page opens; clicked, it writes itself out.
 struct PencilSignature: View {
     /// Its three strokes, in the order they were written, on a 60 × 56 sheet.
     private static let strokes: [Path] = [
@@ -51,6 +51,8 @@ struct PencilSignature: View {
     }()
 
     var size: CGFloat = 84
+    /// Raised by whoever holds the lines under it, so a click there writes it out too.
+    var run = 0
     @State private var drawn: [CGFloat] = [0, 0, 0]
     @State private var writing: Task<Void, Never>?
 
@@ -82,7 +84,7 @@ struct PencilSignature: View {
         }
         .contentShape(.rect)
         .onTapGesture { write() }
-        .onAppear { write() }
+        .onChange(of: run) { write() }
         .onDisappear { writing?.cancel() }
         .accessibilityLabel(Text(verbatim: "CTT"))
     }
@@ -98,7 +100,7 @@ struct PencilSignature: View {
         }
         withTransaction(none) { drawn = [0, 0, 0] }
         writing = Task {
-            try? await Task.sleep(for: .milliseconds(400))
+            try? await Task.sleep(for: .milliseconds(100))
             let durations: [Double] = [0.62, 0.5, 0.56]
             for i in 0..<3 {
                 guard !Task.isCancelled else { return }

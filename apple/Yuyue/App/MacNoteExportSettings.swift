@@ -220,7 +220,7 @@ struct NotesInspector: View {
 /// A connected target: where it writes, when it last got something, and 断开 on its own.
 private struct ConnectedPanel: View {
     let target: NoteExport.Target
-    @State private var leaving = false
+    @State private var confirming: YYConfirm?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -263,15 +263,15 @@ private struct ConnectedPanel: View {
                 PanelCard { openRow }
             }
             #endif
-            PanelDestructive(String(localized: "断开 \(target.title)")) { leaving = true }
-            .confirmationDialog(String(localized: "断开 \(target.title)？"), isPresented: $leaving) {
-                Button("断开", role: .destructive) {
+            PanelDestructive(String(localized: "断开 \(target.title)")) {
+                confirming = YYConfirm(title: String(localized: "断开 \(target.title)？"),
+                                       message: target == .obsidian ? String(localized: "已经写进去的笔记留着不动。") : String(localized: "令牌也一起删掉；已经发过去的留着不动。"),
+                                       button: String(localized: "断开")) {
                     NoteExport.disconnect(target)
                     NotesFocus.shared.tick &+= 1
                 }
-            } message: {
-                Text(target == .obsidian ? String(localized: "已经写进去的笔记留着不动。") : String(localized: "令牌也一起删掉；已经发过去的留着不动。"))
             }
+            .yyConfirm($confirming)
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 14)

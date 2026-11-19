@@ -164,6 +164,8 @@ nonisolated enum LiveVoiceModel {
 
 /// 自带声音包（48 张 CC0 声音卡，七档语气）。
 nonisolated enum VoicePack {
+    /// Cards in the pack, every language: what 推荐 promises before it is downloaded.
+    static let totalCards = 48
     static func folder(_ dataDir: URL) -> URL { LiveVoiceModel.packFolder(dataDir) }
     static func installed(_ dataDir: URL) -> Bool { LiveVoiceModel.packInstalled(dataDir) }
 
@@ -243,6 +245,18 @@ final class LiveVoiceDownload {
         monitor.start(queue: .global(qos: .utility))
         refresh()
     }
+
+    #if DEBUG
+    /// `-debugLivePhase idle|downloading|failed`：图册里摆出 §7.6-2 的三种样子。
+    func debugShow(_ name: String) {
+        switch name {
+        case "downloading": phase = .downloading(0.43)
+        case "failed": phase = .failed
+        case "idle": phase = .idle
+        default: break
+        }
+    }
+    #endif
 
     func refresh() {
         if LiveVoiceModel.deviceUnsupported {

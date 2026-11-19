@@ -152,7 +152,7 @@ struct ServicePanel: View {
     var removed: (() -> Void)?
     @State private var checking = false
     @State private var result: Result<TimeInterval, Error>?
-    @State private var removing = false
+    @State private var confirming: YYConfirm?
     private var focus: CompanionFocus { .shared }
 
     var body: some View {
@@ -235,17 +235,17 @@ struct ServicePanel: View {
                 }
                 #endif
                 if !apple {
-                    PanelDestructive(String(localized: "移除 \(provider.title)")) { removing = true }
-                    .confirmationDialog(String(localized: "移除 \(provider.title)？"), isPresented: $removing) {
-                        Button("移除", role: .destructive) {
+                    PanelDestructive(String(localized: "移除 \(provider.title)")) {
+                        confirming = YYConfirm(title: String(localized: "移除 \(provider.title)？"),
+                                               message: String(localized: "它的 Key 也一起删掉。"),
+                                               button: String(localized: "移除")) {
                             CompanionConfig.remove(provider)
                             focus.page = nil
                             focus.reload()
                             removed?()
                         }
-                    } message: {
-                        Text("它的 Key 也一起删掉。")
                     }
+                    .yyConfirm($confirming)
                 }
             }
         }

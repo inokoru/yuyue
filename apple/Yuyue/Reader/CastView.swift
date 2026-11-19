@@ -32,52 +32,89 @@ struct CastSheet: View {
     @State private var suggestions: [SameSuggestion] = []
     @State private var mergingFrom: String?
 
+    private var rootRoute: Route? { start.first }
+    private var activeRoute: Route? { path.last ?? rootRoute }
+
     var body: some View {
         NavigationStack(path: $path) {
-            list
+            rootContent
                 .navigationDestination(for: Route.self) { route in
-                    switch route {
-                    case .role(let name): RoleView(context: context, name: name, path: $path)
-                    case .voice(let name): VoiceChoiceView(context: context, name: name, path: $path)
-                    case .clone(let name): CloneVoiceView(context: context, forName: name, path: $path)
-                    case let .rerecord(id, initialName):
-                        CloneVoiceView(
-                            core: core,
-                            dataDir: LiveVoiceModel.context?.dataDir ?? ClonedVoices.dir.deletingLastPathComponent(),
-                            language: language,
-                            existingID: id,
-                            initialName: initialName,
-                            previewSentence: CloneVoiceView.nextBookSentence(core: core, bookID: bookID, section: section, player: player, language: language),
-                            onSaved: { _ in if !path.isEmpty { path.removeLast() } },
-                            onClose: { if !path.isEmpty { path.removeLast() } }
-                        )
-                    case .cloneDetail(let id):
-                        ClonedCardDetailView(
-                            entryID: id,
-                            core: core,
-                            dataDir: LiveVoiceModel.context?.dataDir ?? ClonedVoices.dir.deletingLastPathComponent(),
-                            language: language
-                        )
-                    case .unsure:
-                        ScrollView { UnsureView(core: core, bookID: bookID, section: section, compact: true).padding(16) }
-                            .background(YYColor.bg)
-                            .navigationTitle(String(localized: "待确认的台词"))
-                    }
+                    destinationView(route, isRoot: false)
                 }
         }
-        .task { path = start; await load() }
+        .task {
+            if start.count > 1 { path = Array(start.dropFirst()) }
+            #if DEBUG
+            // `-debugCastRoute narrator`: straight to 旁白的声音.
+            if UserDefaults.standard.string(forKey: "debugCastRoute") == "narrator" { path = [.voice(nil)] }
+            #endif
+            await load()
+        }
         .onReceive(NotificationCenter.default.publisher(for: CastContext.changed)) { _ in Task { await load() } }
         #if os(macOS)
-        .frame(width: 420, height: 600)
+        .frame(width: macSize.width, height: macSize.height)
+        .fixedSize(horizontal: false, vertical: macSize.height == nil)
         #endif
     }
+
+    @ViewBuilder private var rootContent: some View {
+        if let rootRoute {
+            destinationView(rootRoute, isRoot: true)
+        } else {
+            list
+        }
+    }
+
+    @ViewBuilder private func destinationView(_ route: Route, isRoot: Bool) -> some View {
+        switch route {
+        case .role(let name): RoleView(context: context, name: name, path: $path, isRoot: isRoot, close: close)
+        case .voice(let name): VoiceChoiceView(context: context, name: name, path: $path, isRoot: isRoot, close: close)
+        case .clone(let name): CloneVoiceView(context: context, forName: name, path: $path)
+        case let .rerecord(id, initialName):
+            CloneVoiceView(
+                core: core,
+                dataDir: LiveVoiceModel.context?.dataDir ?? ClonedVoices.dir.deletingLastPathComponent(),
+                language: language,
+                existingID: id,
+                initialName: initialName,
+                previewSentence: CloneVoiceView.nextBookSentence(core: core, bookID: bookID, section: section, player: player, language: language),
+                onSaved: { _ in if !path.isEmpty { path.removeLast() } },
+                onClose: { if !path.isEmpty { path.removeLast() } }
+            )
+        case .cloneDetail(let id):
+            ClonedCardDetailView(
+                entryID: id,
+                core: core,
+                dataDir: LiveVoiceModel.context?.dataDir ?? ClonedVoices.dir.deletingLastPathComponent(),
+                language: language
+            )
+        case .unsure:
+            ScrollView { UnsureView(core: core, bookID: bookID, section: section, compact: true).padding(16) }
+                .background(YYColor.bg)
+                .yySheetPage(String(localized: "待确认的台词"), back: isRoot ? nil : { if !path.isEmpty { path.removeLast() } }, close: close)
+        }
+    }
+
+    #if os(macOS)
+    /// The cast list is 420 × 600; choosing a voice is the 486 × 476 panel; a clone page is a card
+    /// as tall as what it holds.
+    private var macSize: (width: CGFloat, height: CGFloat?) {
+        switch activeRoute {
+        case .voice?: (486, 476)
+        case .clone?, .rerecord?, .cloneDetail?: (CloneCardPage<EmptyView>.macWidth, nil)
+        // The cast list is as tall as it is, up to a scroll.
+        case nil: (420, nil)
+        default: (420, 600)
+        }
+    }
+    #endif
 
     private var context: CastContext {
         CastContext(core: core, bookID: bookID, section: section, player: player, language: language, cast: cast, roles: roles)
     }
 
     private var list: some View {
-        YYPage {
+        CastListPage {
             DramaStatusBlock(core: core, bookID: bookID, section: section) { path.append(.unsure) }
                 .padding(.top, YYUI.s(12))
             if !suggestions.isEmpty {
@@ -115,7 +152,7 @@ struct CastSheet: View {
                 YYNote(String(localized: "点一个人：声音、快慢高低、气泡放左边还是右边。改了从下一段起生效，跟着同步到你的其他设备。"))
             }
         }
-        .navigationTitle(String(localized: "人物"))
+        .yySheetPage(String(localized: "人物"), close: close)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -126,11 +163,13 @@ struct CastSheet: View {
             }, close: { mergingFrom = nil })
             .presentationBackground(YYColor.bg)
         }
+        #if os(iOS)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button(String(localized: "完成"), action: close)
             }
         }
+        #endif
     }
 
     private func row(_ m: CastMember) -> some View {
@@ -260,6 +299,8 @@ private struct RoleView: View {
     let context: CastContext
     let name: String
     @Binding var path: [CastSheet.Route]
+    var isRoot: Bool = false
+    let close: () -> Void
     @State private var voice = RoleVoice(voice: nil, rate: 1, pitch: 0, right: false)
 
     var body: some View {
@@ -319,7 +360,7 @@ private struct RoleView: View {
                 .padding(.top, YYUI.s(12))
             }
         }
-        .navigationTitle(name)
+        .yySheetPage(name, back: isRoot ? nil : { if !path.isEmpty { path.removeLast() } }, close: close)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -365,9 +406,60 @@ private struct VoiceChoiceView: View {
     let context: CastContext
     let name: String?
     @Binding var path: [CastSheet.Route]
+    var isRoot: Bool = false
+    let close: () -> Void
     @State private var chosen: String?
 
     var body: some View {
+        #if os(macOS)
+        let narratorVoice = context.player?.currentVoice(for: context.language)
+        MacVoicePickerPanel(
+            language: context.language,
+            bookID: context.bookID,
+            selectedID: chosen,
+            sampleSource: (try? context.core.book(id: context.bookID))?.summary.title,
+            onPreview: { preview($0) },
+            onSelect: { voice in pick(id: voice.id, voice: voice) },
+            onOpenClone: { existingID, initName in
+                if let existingID {
+                    path.append(.rerecord(id: existingID, name: initName))
+                } else {
+                    path.append(.clone(name))
+                }
+            },
+            onOpenCloneDetail: { path.append(.cloneDetail($0)) },
+            onClose: close,
+            title: name.map { String(localized: "\($0)的声音") } ?? String(localized: "旁白的声音"),
+            onBack: isRoot ? nil : { if !path.isEmpty { path.removeLast() } },
+            usedByLabel: { usedBy($0) },
+            follow: name.map { n in
+                MacVoicePickerPanel.Follow(
+                    narrator: narratorVoice,
+                    detail: String(localized: "现在旁白是\(narratorVoice?.name ?? "")，旁白换了\(n)也跟着换"),
+                    selected: chosen == nil,
+                    pick: { pick(id: nil, voice: narratorVoice) }
+                )
+            }
+        )
+        .toolbar(.hidden)
+        .navigationBarBackButtonHidden(true)
+        .onAppear {
+            chosen = name.map { context.role($0)?.voice } ?? context.player?.currentVoice(for: context.language)?.id
+        }
+        #else
+        phoneBody
+        #endif
+    }
+
+    private func preview(_ voice: any Voice) {
+        if let player = context.player {
+            player.preview(voice, text: context.sample(name))
+        } else {
+            Voices.preview(voice, text: context.sample(name))
+        }
+    }
+
+    private var phoneBody: some View {
         YYPage {
             if let name {
                 YYGroup {
@@ -854,5 +946,25 @@ nonisolated enum CastCore {
 
     @concurrent static func editCast(_ core: YuyueCore, bookID: String, edit: CastEdit) async {
         _ = try? core.dramaEditCast(bookId: bookID, edit: edit)
+    }
+}
+
+/// 人物's list: on the Mac as tall as what it holds (up to 560, then it scrolls), so a short
+/// cast leaves no empty paper below; on a phone a page.
+private struct CastListPage<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        #if os(macOS)
+        YYFitScroll(maxHeight: 560) {
+            VStack(alignment: .leading, spacing: 0) { content }
+                .padding(.horizontal, YYUI.s(16))
+                .padding(.bottom, YYUI.s(18))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(YYColor.bg)
+        #else
+        YYPage { content }
+        #endif
     }
 }

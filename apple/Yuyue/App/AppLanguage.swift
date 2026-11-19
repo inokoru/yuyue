@@ -107,6 +107,8 @@ import AppKit
 extension Notification.Name {
     /// 现在重开 under 语言.
     static let relaunchForLanguage = Notification.Name("yuyue.relaunchForLanguage")
+    /// Ask the user to confirm restarting 语阅 in a new language.
+    static let confirmLanguageRelaunch = Notification.Name("yuyue.confirmLanguageRelaunch")
 }
 
 extension AppLanguage {
@@ -114,12 +116,10 @@ extension AppLanguage {
     private static let pendingKey = "language.sweepSettings"
     private static let frameKey = "language.sweepFrame"
     private static let forwardKey = "language.sweepForward"
-    /// The new 语阅 tells the old one its settings window is up and covered, so the old one can go.
-    private static let readyNote = Notification.Name("app.yuyue.languageReady")
-
-    /// Changes the language without the window going anywhere: a picture of the settings window is
-    /// kept, a new 语阅 opens behind it and puts its own settings window in the same place under that
-    /// picture, and only then does this one quit. The ink line then sweeps the picture away.
+    /// Changes the language the usual way, quit and open again, without the window going anywhere:
+    /// a picture of the settings window and its place are kept, this 语阅 quits, and the one opened
+    /// after it puts its settings window back in the same place under that picture. The ink line then
+    /// sweeps the picture away.
     @MainActor static func handOver(_ window: NSWindow, to language: AppLanguage) {
         if let view = window.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
             view.cacheDisplay(in: view.bounds, to: rep)
@@ -130,32 +130,21 @@ extension AppLanguage {
         d.set(NSStringFromRect(window.frame), forKey: frameKey)
         // Into English it reads left to right; back into 中文 the line comes the other way.
         d.set(language == .en, forKey: forwardKey)
-        let center = DistributedNotificationCenter.default()
-        var token: NSObjectProtocol?
-        token = center.addObserver(forName: readyNote, object: nil, queue: .main) { _ in
-            token.map(center.removeObserver)
-            MainActor.assumeIsolated {
-                // The front is handed to the new one; macOS won't let it take it on its own.
-                if let next {
-                    NSApp.yieldActivation(to: next)
-                    next.activate(from: .current)
-                }
-                // A moment for the front to move over, so nothing else comes up in between.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { NSApp.terminate(nil) }
-            }
+        d.synchronize()
+        // Opened again only once this one is gone, so there's never a second 语阅 in the Dock.
+        let reopen = Process()
+        reopen.executableURL = URL(filePath: "/bin/sh")
+        reopen.arguments = ["-c", "while /bin/kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do /bin/sleep 0.1; done; /usr/bin/open \"$0\"", Bundle.main.bundlePath]
+        do {
+            try reopen.run()
+        } catch {
+            // Can't open it again: the new language comes with the next launch.
+            for key in [pendingKey, frameKey, forwardKey] { d.removeObject(forKey: key) }
+            try? FileManager.default.removeItem(at: snapshotURL)
+            return
         }
-        let config = NSWorkspace.OpenConfiguration()
-        config.createsNewApplicationInstance = true
-        config.activates = false
-        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config) { app, _ in
-            DispatchQueue.main.async { next = app }
-        }
-        // If the new one never says so, go anyway.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { NSApp.terminate(nil) }
+        NSApp.terminate(nil)
     }
-
-    /// The new 语阅, once it is running.
-    @MainActor private static var next: NSRunningApplication?
 
     /// Opened again after a language change: the picture to sweep from, read once.
     @MainActor static let pendingSweep: (picture: NSImage, forward: Bool)? = {
@@ -164,21 +153,44 @@ extension AppLanguage {
         return (picture, UserDefaults.standard.bool(forKey: forwardKey))
     }()
 
-    /// The new settings window is where the old one was, under its picture: the old 语阅 may quit.
+    /// The new settings window is where the old one was, under its picture.
     @MainActor static func takeOver(_ window: NSWindow) {
         let d = UserDefaults.standard
         if let s = d.string(forKey: frameKey) { window.setFrame(NSRectFromString(s), display: true) }
         for key in [pendingKey, frameKey, forwardKey] { d.removeObject(forKey: key) }
-        window.orderFrontRegardless()
-        DistributedNotificationCenter.default().postNotificationName(readyNote, object: nil, deliverImmediately: true)
-        // Taken up once the old one has yielded the front.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            NSApp.activate()
-            window.makeKeyAndOrderFront(nil)
-        }
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
     }
 
     @MainActor static var settingsPending: Bool { UserDefaults.standard.bool(forKey: pendingKey) }
+
+    /// Waits until any attached sheet (such as the native confirmation `.alert`) finishes dismissing
+    /// and the window chrome settles before snapshotting and handing over to the relaunched process.
+    @MainActor static func handOverWhenClear(_ window: NSWindow, to language: AppLanguage, attemptsRemaining: Int = 20) {
+        let target = window.sheetParent ?? window
+        if target.attachedSheet != nil, attemptsRemaining > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                handOverWhenClear(target, to: language, attemptsRemaining: attemptsRemaining - 1)
+            }
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            handOver(target, to: language)
+        }
+    }
+
+    /// Title shown in the native macOS restart confirmation alert.
+    @MainActor static func restartPromptTitle(for target: AppLanguage) -> String {
+        let label: String = switch target {
+        case .system:
+            String(localized: "跟随系统（\(MacLanguageCard.systemDisplayName)）")
+        case .zh:
+            "中文"
+        case .en:
+            "English"
+        }
+        return String(localized: "切换为 \(label)？")
+    }
 }
 
 /// Hands the settings window to `AppLanguage.takeOver` once it is on screen.
@@ -194,19 +206,18 @@ struct LanguageTakeOver: NSViewRepresentable {
     func updateNSView(_ nsView: Host, context: Context) {}
 }
 
-/// 设置 › 通用 › 语言: three small paper slips on the right, each in its own typeface, with a short
-/// underline rule under the one chosen (the same mark as the 阅 icon). Picking one that differs from
-/// what's showing changes it at once: 语阅 opens again behind the window, and an ink line sweeps
-/// the words into the new language. Only while something is being read aloud or made is it left for next time.
+/// 设置 › 通用 › 语言: 高定纸墨下拉 merged into the first row of the main 通用 card.
+/// Picking a language with a different effective locale opens a system-style confirmation modal
+/// before restarting 语阅 and sweeping the words into the new language.
 struct MacLanguageCard: View {
-    @State private var choice = AppLanguage.chosen
-    @State private var later = false
-    /// Handed over to a new 语阅; nothing more to pick here.
-    @State private var going = false
-    /// Whether it may change now; not while something is being read aloud or made.
-    let canRelaunch: () -> Bool
+    @Binding var choice: AppLanguage
+    @Binding var later: Bool
+    @Binding var menuOpen: Bool
+    var onTriggerBottomChange: (CGFloat) -> Void = { _ in }
+    @State private var triggerHover = false
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
@@ -219,17 +230,83 @@ struct MacLanguageCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 12)
-            HStack(spacing: 7) {
-                ForEach(AppLanguage.allCases) { l in
-                    LanguageSlip(language: l, selected: choice == l, tint: tint) { pick(l) }
+            Button {
+                withAnimation(YYMotion.quick) {
+                    menuOpen.toggle()
                 }
+            } label: {
+                HStack(spacing: 8) {
+                    LanguageSealBadge(language: choice, onTrigger: true)
+                    Text(Self.name(choice))
+                        .font(.yy(size: 12.5, weight: .medium))
+                        .foregroundStyle(YYColor.t1)
+                        .lineLimit(1)
+                    if choice == .system {
+                        Text(Self.systemDisplayName)
+                            .font(.yy(size: 10.5, weight: .medium))
+                            .foregroundStyle(YYColor.t2)
+                            .lineLimit(1)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1.5)
+                            .background(systemTagFill, in: .capsule)
+                    }
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.yy(size: 9.5, weight: .semibold))
+                        .foregroundStyle(YYColor.t3)
+                }
+                .padding(.leading, 6)
+                .padding(.trailing, 10)
+                .frame(width: 180, height: 32)
+                .background(triggerFill, in: .rect(cornerRadius: 9, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(triggerBorder, lineWidth: menuOpen ? 1 : 0.5)
+                }
+                .shadow(color: .black.opacity(scheme == .dark ? 0.22 : 0.03), radius: 1.5, y: 1)
+                .contentShape(.rect(cornerRadius: 9, style: .continuous))
             }
+            .buttonStyle(YYPressStyle(scale: 0.98))
+            .onHover { triggerHover = $0 }
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.frame(in: .named("generalSettings")).maxY
+            } action: { bottom in
+                onTriggerBottomChange(bottom)
+            }
+            .animation(YYMotion.quick, value: triggerHover)
+            .animation(YYMotion.quick, value: menuOpen)
         }
-        .padding(.leading, 16)
-        .padding(.trailing, 14)
-        .padding(.vertical, 12)
-        .animation(YYMotion.standard, value: choice)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(minHeight: 46)
         .animation(YYMotion.standard, value: later)
+    }
+
+    private var triggerFill: Color {
+        if scheme == .dark {
+            if menuOpen || triggerHover {
+                return Color(yy: YYRGBA(48, 50, 55))
+            }
+            return YYColor.inset
+        }
+        if menuOpen {
+            return YYColor.card
+        }
+        if triggerHover {
+            return Color(yy: YYRGBA(241, 237, 229))
+        }
+        return YYColor.bg
+    }
+
+    private var triggerBorder: Color {
+        if menuOpen {
+            return tint.edge
+        }
+        return scheme == .dark ? Color.white.opacity(0.10) : Color(yy: YYRGBA(80, 65, 45, 0.14))
+    }
+
+    private var systemTagFill: Color {
+        scheme == .dark ? Color.white.opacity(0.09) : Color(yy: YYRGBA(42, 43, 46, 0.06))
     }
 
     private var subtitle: String {
@@ -238,30 +315,17 @@ struct MacLanguageCard: View {
         }
         if choice == .system {
             return AppLanguage.systemLanguage == .en
-                ? String(localized: "当前：English · 切换后自动重开，并回到当前页")
-                : String(localized: "当前：中文 · 切换后自动重开，并回到当前页")
+                ? String(localized: "当前：English · 切换需确认重开，并回到当前页")
+                : String(localized: "当前：中文 · 切换需确认重开，并回到当前页")
         }
-        return String(localized: "切换后自动重开，并回到当前页")
+        return String(localized: "切换需确认重开语阅，并回到当前页")
     }
 
-    private func pick(_ l: AppLanguage) {
-        guard choice != l, !going else { return }
-        let from = name(choice)
-        choice = l
-        AppLanguage.choose(l)
-        SettingsLog.shared.flash = .init(date: .now, title: String(localized: "语言"), to: name(l), from: from)
-        guard l.effective != AppLanguage.running else { later = false; return }
-        later = !canRelaunch()
-        if !later {
-            going = true
-            // A beat for the slip to take the choice, then the picture is taken.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                NotificationCenter.default.post(name: .relaunchForLanguage, object: l.effective)
-            }
-        }
+    static var systemDisplayName: String {
+        AppLanguage.systemLanguage == .en ? "English" : "中文"
     }
 
-    private func name(_ l: AppLanguage) -> String {
+    static func name(_ l: AppLanguage) -> String {
         switch l {
         case .system: String(localized: "跟随系统")
         case .zh: "中文"
@@ -270,80 +334,199 @@ struct MacLanguageCard: View {
     }
 }
 
-private struct LanguageSlip: View {
+/// The floating warm-paper dropdown menu without a bulky NSPopover arrow.
+struct LanguagePaperDropdownMenu: View {
+    let selected: AppLanguage
+    let pick: (AppLanguage) -> Void
+    @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
+    private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            LanguagePaperDropdownRow(
+                language: .zh,
+                title: "中文",
+                detail: String(localized: "简体中文界面"),
+                isSelected: selected == .zh,
+                tint: tint
+            ) {
+                pick(.zh)
+            }
+            LanguagePaperDropdownRow(
+                language: .en,
+                title: "English",
+                detail: "English interface",
+                isSelected: selected == .en,
+                tint: tint
+            ) {
+                pick(.en)
+            }
+            Rectangle()
+                .fill(YYColor.line)
+                .frame(height: 0.5)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+            LanguagePaperDropdownRow(
+                language: .system,
+                title: String(localized: "跟随系统"),
+                detail: AppLanguage.systemLanguage == .en
+                    ? String(localized: "当前：English")
+                    : String(localized: "当前：中文"),
+                isSelected: selected == .system,
+                tint: tint
+            ) {
+                pick(.system)
+            }
+        }
+        .padding(5)
+        .frame(width: 218, alignment: .leading)
+        // Solid paper. The prototype lists backdrop-filter, but --menu-bg is opaque, so nothing behind shows through.
+        .background(scheme == .dark ? Color(yy: YYRGBA(38, 39, 43)) : Color(yy: YYRGBA(252, 251, 248)), in: .rect(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .inset(by: -0.25)
+                .stroke(scheme == .dark ? Color.white.opacity(0.12) : Color(yy: YYRGBA(51, 46, 41, 0.12)), lineWidth: 0.5)
+                .allowsHitTesting(false)
+        }
+        .spreadShadow(
+            scheme == .dark ? Color(yy: YYRGBA(0, 0, 0, 0.65)) : Color(yy: YYRGBA(38, 30, 20, 0.20)),
+            y: scheme == .dark ? 18 : 14,
+            blur: scheme == .dark ? 40 : 36,
+            spread: 6,
+            radius: 12
+        )
+        .spreadShadow(
+            scheme == .dark ? .clear : Color(yy: YYRGBA(38, 30, 20, 0.06)),
+            y: 2,
+            blur: 6,
+            spread: 0,
+            radius: 12
+        )
+    }
+}
+
+private struct LanguagePaperDropdownRow: View {
     let language: AppLanguage
-    let selected: Bool
+    let title: String
+    let detail: String
+    let isSelected: Bool
     let tint: YYTint
     let action: () -> Void
-    @Environment(\.colorScheme) private var scheme
     @State private var hover = false
+    @Environment(\.colorScheme) private var scheme
+
+    private var rowFill: Color {
+        if isSelected {
+            return scheme == .dark ? tint.accent.opacity(0.18) : tint.soft
+        }
+        if hover {
+            return scheme == .dark ? Color.white.opacity(0.08) : Color(yy: YYRGBA(246, 243, 236))
+        }
+        return .clear
+    }
 
     var body: some View {
         Button(action: action) {
-            ZStack {
-                word
-                    .offset(y: -2)
-                    .padding(.horizontal, 6)
+            HStack(spacing: 9) {
+                LanguageSealBadge(language: language, highlighted: isSelected, tint: tint)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.yy(size: 12.5, weight: isSelected ? .semibold : .medium))
+                        .foregroundStyle(isSelected ? tint.accent : YYColor.t1)
+                    Text(detail)
+                        .font(.yy(size: 10.5))
+                        .foregroundStyle(isSelected ? tint.accent.opacity(0.78) : YYColor.t3)
+                }
+                Spacer(minLength: 0)
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.yy(size: 10.5, weight: .bold))
+                        .foregroundStyle(tint.accent)
+                }
             }
-            .frame(width: 94, height: 48)
-            .background(fill, in: .rect(cornerRadius: 10))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(selected ? tint.edge : (hover ? YYColor.tint : YYColor.line),
-                                  lineWidth: selected ? 1 : 0.5)
-            }
-            .overlay(alignment: .bottom) {
-                Capsule()
-                    .fill(tint.accent)
-                    .frame(width: 16, height: 2)
-                    .padding(.bottom, 7.5)
-                    .scaleEffect(x: selected ? 1 : 0.4, y: 1)
-                    .opacity(selected ? 1 : 0)
-            }
-            .shadow(color: selected
-                        ? (scheme == .dark ? .black.opacity(0.28) : Color(yy: YYRGBA(40, 32, 22, 0.09)))
-                        : .clear,
-                    radius: 3.5, y: 2)
-            .contentShape(.rect(cornerRadius: 10))
+            .padding(.horizontal, 9)
+            .frame(height: 40)
+            .background(rowFill, in: .rect(cornerRadius: 8, style: .continuous))
+            .contentShape(.rect(cornerRadius: 8, style: .continuous))
         }
-        .buttonStyle(YYPressStyle(scale: 0.97))
+        .buttonStyle(.plain)
         .onHover { hover = $0 }
         .animation(YYMotion.quick, value: hover)
-        .accessibilityLabel(Text(accessibilityName))
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
+}
+
+/// The 20 × 20 warm-paper seal emblem holding 文, Aa, or the macOS display glyph.
+struct LanguageSealBadge: View {
+    let language: AppLanguage
+    var highlighted = false
+    var onTrigger = false
+    var tint: YYTint = .byDefault
+    @Environment(\.colorScheme) private var scheme
 
     private var fill: Color {
-        if selected || hover { return YYColor.card }
-        return scheme == .dark ? Color(yy: YYRGBA(38, 39, 43)) : Color(yy: YYRGBA(249, 247, 243))
+        if highlighted {
+            return scheme == .dark ? tint.accent.opacity(0.20) : YYColor.card
+        }
+        if onTrigger {
+            return scheme == .dark ? Color.white.opacity(0.08) : YYColor.card
+        }
+        return scheme == .dark ? Color.white.opacity(0.07) : YYColor.bg
     }
 
-    @ViewBuilder private var word: some View {
-        switch language {
-        case .system:
-            Text("跟随系统")
-                .font(.yy(size: 12.5, weight: selected ? .semibold : .medium))
-                .foregroundStyle(selected ? YYColor.t1 : YYColor.t2)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-        case .zh:
-            Text(verbatim: "中文")
-                .font(YYUI.serif(16.5, .semibold))
-                .tracking(0.8)
-                .foregroundStyle(selected ? YYColor.t1 : YYColor.t2)
-        case .en:
-            Text(verbatim: "English")
-                .font(.system(size: 16.5, weight: .medium, design: .serif).italic())
-                .foregroundStyle(selected ? YYColor.t1 : YYColor.t2)
+    private var border: Color {
+        if highlighted {
+            return tint.edge
         }
+        if onTrigger {
+            return scheme == .dark ? Color.white.opacity(0.11) : YYColor.line
+        }
+        return scheme == .dark ? Color.white.opacity(0.10) : YYColor.line
     }
 
-    private var accessibilityName: String {
-        switch language {
-        case .system: String(localized: "跟随系统")
-        case .zh: "中文"
-        case .en: "English"
+    private var glyphColor: Color {
+        if highlighted {
+            return tint.accent
         }
+        return scheme == .dark ? YYColor.t1.opacity(0.82) : YYColor.t2
+    }
+
+    var body: some View {
+        ZStack {
+            switch language {
+            case .zh:
+                Text(verbatim: "文")
+                    .font(YYUI.serif(11.5, .semibold))
+            case .en:
+                Text(verbatim: "Aa")
+                    .font(.system(size: 11, weight: .semibold, design: .serif).italic())
+            case .system:
+                MacDisplayMark()
+                    .stroke(style: StrokeStyle(lineWidth: 1.35, lineCap: .round, lineJoin: .round))
+                    .frame(width: 12, height: 12)
+            }
+        }
+        .foregroundStyle(glyphColor)
+        .frame(width: 20, height: 20)
+        .background(fill, in: .rect(cornerRadius: 5.5, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                .strokeBorder(border, lineWidth: 0.5)
+        }
+    }
+}
+
+private struct MacDisplayMark: Shape {
+    nonisolated func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.addRoundedRect(in: CGRect(x: 6, y: 7, width: 22, height: 15), cornerSize: CGSize(width: 2.5, height: 2.5))
+        p.move(to: CGPoint(x: 17, y: 22))
+        p.addLine(to: CGPoint(x: 17, y: 26.5))
+        p.move(to: CGPoint(x: 12.5, y: 26.5))
+        p.addLine(to: CGPoint(x: 21.5, y: 26.5))
+        let k = min(rect.width, rect.height) / 34
+        return p.applying(CGAffineTransform(translationX: rect.minX + (rect.width - 34 * k) / 2, y: rect.minY + (rect.height - 34 * k) / 2).scaledBy(x: k, y: k))
     }
 }
 #endif

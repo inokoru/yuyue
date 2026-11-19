@@ -878,6 +878,9 @@ final class StudioWorkshop {
     }
 
     private(set) var active: Job?
+    /// Stopped from the menu bar: the job, to pick up again with 继续.
+    private(set) var paused: Job?
+    @ObservationIgnored private var lastWant: (core: YuyueCore, dataDir: URL)?
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var targetBook: String?
     @ObservationIgnored private var wantSection: UInt32 = 0
@@ -920,6 +923,8 @@ final class StudioWorkshop {
             return
         }
         wantSection = section
+        lastWant = (core, dataDir)
+        paused = nil
         if targetBook == bookID, task != nil {
             return
         }
@@ -995,6 +1000,26 @@ final class StudioWorkshop {
             }
             await MainActor.run { self?.finish(core: core) }
         }
+    }
+
+    #if DEBUG
+    /// `-debugWorkshopJob 书名`: the menu bar's 正在给手机做 line without a phone.
+    func debugShow(_ title: String) {
+        active = Job(bookID: "debug", bookTitle: title, currentSection: 8)
+    }
+    #endif
+
+    /// 停 in the menu bar: stops, and keeps where it was so 继续 can go on.
+    func pause() {
+        paused = active
+        stop()
+    }
+
+    /// 继续: the paused job again, from the chapter it was on.
+    func resume() {
+        guard let job = paused, let want = lastWant else { return }
+        paused = nil
+        handleWant(core: want.core, dataDir: want.dataDir, bookID: job.bookID, section: job.currentSection)
     }
 
     func stop() {

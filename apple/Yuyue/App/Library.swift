@@ -166,6 +166,22 @@ final class Library {
         podcasts = Podcasts(core: core, dataDir: dir)
         #if os(macOS)
         podcasts.startSchedule()
+        #if DEBUG
+        if let t = UserDefaults.standard.string(forKey: "debugWorkshopJob") { StudioWorkshop.shared.debugShow(t) }
+        // `-debugSynth 1`: say one line with the default narrator card and log what came back.
+        if UserDefaults.standard.bool(forKey: "debugSynth") {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                guard let v = VoicePack.defaultNarrator(for: "zh") else { return NSLog("debugSynth: 没有默认旁白") }
+                do {
+                    let sp = try await v.render("我买几个橘子去。你就在此地，不要走动。", language: "zh")
+                    NSLog("debugSynth: \(v.name) → \(sp == nil ? "nil" : "ok")")
+                } catch {
+                    NSLog("debugSynth: \(v.name) 出错 \(String(reflecting: error))")
+                }
+            }
+        }
+        #endif
         menuBar = MacMenuBar(library: self)
         #endif
         // Deleted books can be put back for 30 days; after that their files go.

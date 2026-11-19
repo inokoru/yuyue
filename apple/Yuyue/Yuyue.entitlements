@@ -20,6 +20,9 @@
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
 	<!-- 检查更新: Sparkle's installer and its status, services of their own outside the sandbox. -->
+	<!-- 包是 ad-hoc 签名、开了 hardened runtime：没有 Team ID，不放开库校验就加载不了 Sparkle.framework。 -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
 	<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
 	<array>
 		<string>$(PRODUCT_BUNDLE_IDENTIFIER)-spks</string>

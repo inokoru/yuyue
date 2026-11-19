@@ -330,7 +330,7 @@ struct CloudVoicePanel: View {
     @State private var region = CloudVoice.Provider.region
     @State private var connect = AutoConnect()
     @State private var check = AutoConnect()
-    @State private var removing = false
+    @State private var confirming: YYConfirm?
     private var focus: ListeningFocus { .shared }
 
     var body: some View {
@@ -369,18 +369,18 @@ struct CloudVoicePanel: View {
             PanelCard {
                 PanelButton(tint: YYColor.danger, destructive: true) {
                     Text("断开 \(provider.title)")
-                } action: { removing = true }
-            }
-            .confirmationDialog(String(localized: "断开 \(provider.title)？"), isPresented: $removing) {
-                Button("断开", role: .destructive) {
-                    provider.remove()
-                    focus.page = nil
-                    if focus.source == .cloud(provider) { focus.close() }
-                    focus.reload()
+                } action: {
+                    confirming = YYConfirm(title: String(localized: "断开 \(provider.title)？"),
+                                           message: String(localized: "将同时移除 API Key；使用该服务音色的书籍将切回本地音色。"),
+                                           button: String(localized: "断开")) {
+                        provider.remove()
+                        focus.page = nil
+                        if focus.source == .cloud(provider) { focus.close() }
+                        focus.reload()
+                    }
                 }
-            } message: {
-                Text("将同时移除 API Key；使用该服务音色的书籍将切回本地音色。")
             }
+            .yyConfirm($confirming)
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 14)

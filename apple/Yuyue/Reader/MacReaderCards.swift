@@ -638,9 +638,6 @@ struct ListenCard: View {
             #endif
             if let player {
                 if player.recording != nil { narrator(player) }
-                if !player.narrated {
-                    LiveVoicePrepBanner(language: player.language)
-                }
                 if let hotNotice = player.thermalNotice {
                     HStack(spacing: 8) {
                         Image(systemName: "thermometer.medium")
@@ -659,6 +656,9 @@ struct ListenCard: View {
                     hostVoices(player, show)
                 } else {
                     voice(player)
+                }
+                if !player.narrated {
+                    LiveVoicePrepBanner(language: player.language)
                 }
                 speed(player)
                 sleep(player)
@@ -704,6 +704,11 @@ struct ListenCard: View {
         .task {
             // `-debugCast 1`: the cast page straight away (with `-debugListen 1`).
             if UserDefaults.standard.bool(forKey: "debugCast") { try? await Task.sleep(for: .seconds(0.8)); castShown = true }
+            #if DEBUG
+            // `-debugLivePhase …`: the 准备更好的声音 row; `-debugVoicePicker 1`: the 换声音 sheet.
+            if let p = UserDefaults.standard.string(forKey: "debugLivePhase") { LiveVoiceDownload.shared.debugShow(p) }
+            if UserDefaults.standard.bool(forKey: "debugVoicePicker") { try? await Task.sleep(for: .seconds(0.8)); voicePickerShown = true }
+            #endif
         }
         .sheet(isPresented: $castShown) {
             if let castBook {
@@ -715,14 +720,17 @@ struct ListenCard: View {
         .sheet(isPresented: $voicePickerShown) {
             if let player {
                 let lang = player.language
+                let bookLine = castBook.map { CloneVoiceView.nextBookSentence(core: $0.core, bookID: $0.bookID, section: $0.section, player: player, language: lang) }
                 VoicePickerSheet(
-                    title: String(localized: "选择声音"),
+                    title: String(localized: "声音"),
                     language: lang,
                     bookID: castBook?.bookID,
                     selectedID: player.currentVoice(for: lang)?.id,
                     sampleText: sample(lang),
-                    previewSentence: castBook.map { CloneVoiceView.nextBookSentence(core: $0.core, bookID: $0.bookID, section: $0.section, player: player, language: lang) },
-                    onPreview: { v in player.preview(v, text: sample(lang)) },
+                    previewSentence: bookLine,
+                    sampleSource: castBook == nil ? nil : player.bookTitle,
+                    // 指着试听: the sentence the book stopped on, in the voice pointed at.
+                    onPreview: { v in player.preview(v, text: bookLine.flatMap { $0.isEmpty ? nil : $0 } ?? sample(lang)) },
                     onSelect: { v in player.choose(v, for: lang) },
                     onClose: { voicePickerShown = false }
                 )
@@ -817,17 +825,25 @@ struct ListenCard: View {
         let language = player.language
         let current = player.currentVoice(for: language)
         return HStack(spacing: 10) {
-            Image(systemName: "waveform")
-                .font(.yy(size: 14, weight: .medium))
-                .foregroundStyle(YYColor.t1)
-                .frame(width: 32, height: 32)
-                .background(YYColor.card, in: .rect(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(YYColor.line, lineWidth: 0.5))
+            // The prototype's bars: they move while the voice reads.
+            SpeakingBars(paused: player.state != .playing)
+            .frame(width: 32, height: 32)
+            .background(YYColor.card, in: .rect(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(YYColor.line, lineWidth: 0.5))
             VStack(alignment: .leading, spacing: 2) {
-                Text(current.map(Voices.title) ?? String(localized: "没有能读的声音"))
-                    .font(.yy(size: 12.5, weight: .semibold))
-                    .foregroundStyle(YYColor.t1)
-                Text([languageName(language), current?.isOffline == false ? String(localized: "云端（已读内容本地缓存）") : String(localized: "本地离线")].joined(separator: " · "))
+                HStack(spacing: 5) {
+                    Text(current.map(Voices.title) ?? String(localized: "没有能读的声音"))
+                        .font(.yy(size: 12.5, weight: .semibold))
+                        .foregroundStyle(YYColor.t1)
+                    if current is SystemVoice {
+                        Text("系统自带")
+                            .font(.yy(size: 9.5, weight: .medium))
+                            .foregroundStyle(YYColor.t2)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(YYColor.t1.opacity(0.06), in: .rect(cornerRadius: 4))
+                    }
+                }
+                Text(voiceLine(player, current))
                     .font(.yy(size: 10.5))
                     .foregroundStyle(YYColor.t2)
             }
@@ -849,9 +865,7 @@ struct ListenCard: View {
                 }
                 .buttonStyle(.plain)
             }
-            Button {
-                voicePickerShown = true
-            } label: {
+            Button { voicePickerShown = true } label: {
                 HStack(spacing: 1) {
                     Text("换声音")
                     Image(systemName: "chevron.right").font(.yy(size: 9, weight: .semibold))
@@ -866,6 +880,18 @@ struct ListenCard: View {
         }
         .padding(.leading, 9).padding(.trailing, 8).padding(.vertical, 9)
         .background(YYColor.inset, in: .rect(cornerRadius: 14))
+    }
+
+    /// Under the voice's name: while the better voice downloads and a system voice stands in,
+    /// what happens next; otherwise 正在朗读 and where it reads from.
+    private func voiceLine(_ player: Player, _ current: (any Voice)?) -> String {
+        if current is SystemVoice, case .downloading = LiveVoiceDownload.shared.phase, CardVoice.supportsLanguage(player.language) {
+            return String(localized: "先替你念完这一\(unit)，下好后下一\(unit)换默认旁白")
+        }
+        let parts = [player.state == .playing ? String(localized: "正在朗读") : nil,
+                     languageName(player.language),
+                     current?.isOffline == false ? String(localized: "云端（已读内容本地缓存）") : String(localized: "本地离线")]
+        return parts.compactMap { $0 }.joined(separator: " · ")
     }
 
     /// 原声: a recording is laid against this book; off reads it in the voice below instead.

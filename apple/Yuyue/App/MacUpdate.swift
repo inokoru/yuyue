@@ -124,11 +124,18 @@ struct MacUpdateSettings: View {
         var id: String { rawValue }
     }
 
+    var windowHeight: CGFloat = 640
+
     private var center: UpdateCenter { UpdateCenter.shared }
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
     @State private var activeSheet: SheetKind?
     @State private var hoverAuthor = false
+    @State private var hoverSig = false
+    @State private var hoverSkip = false
+    @State private var rightHeight: CGFloat = 0
+    /// A click on the signature or the line under it writes the signature out.
+    @State private var signRun = 0
     @State private var releases: [Release] = Self.loadBundledReleases()
 
     private static let author = URL(string: "https://github.com/nowtin")!
@@ -136,23 +143,26 @@ struct MacUpdateSettings: View {
     private static let issues = URL(string: "https://github.com/inokoru/yuyue/issues")!
     private static let releasesURL = URL(string: "https://github.com/inokoru/yuyue/releases")!
     private static let noticeURL = URL(string: "https://github.com/inokoru/yuyue/blob/main/NOTICE")!
+    private static let hair = Color.yyDynamic(light: YYRGBA(223, 219, 211), dark: YYRGBA(53, 50, 46))
 
     private var buildNumber: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
     }
 
     var body: some View {
+        let minTrackHeight = max(400, windowHeight - 110)
+        let trackHeight = max(minTrackHeight, rightHeight)
         HStack(alignment: .top, spacing: 38) {
             leftFolio
-                .frame(width: 214, alignment: .topLeading)
+                .frame(width: 214, height: trackHeight, alignment: .topLeading)
             rightFolio
-                .frame(maxWidth: 468, alignment: .topLeading)
-            Spacer(minLength: 0)
+                .frame(width: 468, alignment: .topLeading)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rightHeight = $0 }
         }
         .padding(.leading, 18)
         .padding(.top, 28)
         .padding(.bottom, 8)
-        .frame(maxWidth: .infinity, minHeight: 520, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .onAppear { center.boot() }
         .sheet(item: $activeSheet) { kind in
             sheetView(for: kind)
@@ -164,7 +174,7 @@ struct MacUpdateSettings: View {
     private var leftFolio: some View {
         let isEn = AppLanguage.running == .en
         return VStack(alignment: .leading, spacing: 0) {
-            YuyueMark(px: 48)
+            YuyueMark(px: 54 / YYUI.k)
             if isEn {
                 Text("语阅")
                     .font(.system(size: 28, weight: .semibold, design: .serif))
@@ -173,33 +183,38 @@ struct MacUpdateSettings: View {
                     .padding(.top, 18)
                 Text(verbatim: "语阅 · for macOS")
                     .font(.system(size: 13, design: .serif).italic())
+                    .tracking(0.26)
                     .foregroundStyle(YYColor.t3)
                     .padding(.top, 5)
             } else {
                 Text("语阅")
                     .font(YYUI.serif(28, .semibold))
-                    .tracking(3.6)
+                    .tracking(3.92)
                     .foregroundStyle(YYColor.t1)
-                    .padding(.top, 18)
+                    .padding(.top, 16)
                 Text(verbatim: "Yuyue for macOS")
                     .font(.system(size: 13, design: .serif).italic())
+                    .tracking(0.26)
                     .foregroundStyle(YYColor.t3)
                     .padding(.top, 5)
             }
             Rectangle()
-                .fill(YYColor.line)
+                .fill(Self.hair)
                 .frame(width: 24, height: 1.5)
                 .padding(.top, 18)
                 .padding(.bottom, 16)
             Text("读着听，听着读，进度接得上。\n没有服务器，不收集数据，\n书与笔记都留在你手里。")
                 .font(isEn ? .system(size: 13, design: .serif) : YYUI.serif(13.5))
-                .lineSpacing(isEn ? 5 : 7.5)
+                .lineSpacing(isEn ? 5.5 : 7.5)
                 .foregroundStyle(YYColor.t2)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Spacer(minLength: 28)
+            Spacer(minLength: 20)
 
-            PencilSignature(size: 58)
+            PencilSignature(size: 58, run: signRun)
+                .opacity(hoverSig ? 1 : 0.86)
+                .onHover { hoverSig = $0 }
+                .animation(YYMotion.quick, value: hoverSig)
             HStack(spacing: 4) {
                 Text(verbatim: "by")
                     .foregroundStyle(YYColor.t3)
@@ -207,55 +222,58 @@ struct MacUpdateSettings: View {
                     NSWorkspace.shared.open(Self.author)
                 } label: {
                     Text(verbatim: "nowtin")
+                        .font(.yy(size: 11, weight: .medium))
                         .underline(hoverAuthor, color: YYColor.t3)
-                        .foregroundStyle(hoverAuthor ? YYColor.t1 : YYColor.t2)
+                        .foregroundStyle(YYColor.t1)
                 }
                 .buttonStyle(.plain)
                 .onHover { hoverAuthor = $0 }
                 Text(verbatim: "· GPL-3.0")
                     .foregroundStyle(YYColor.t3)
             }
-            .font(.yy(size: 11.5))
+            .font(.yy(size: 11))
+            .tracking(0.22)
             .padding(.top, 4)
+            .contentShape(.rect)
+            .onTapGesture { signRun += 1 }
         }
+        .padding(.top, 6)
         .frame(maxHeight: .infinity, alignment: .topLeading)
     }
 
     // MARK: Right Folio (牌记与操作)
 
     private var rightFolio: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Group {
-                if let offer = center.offer, center.phase == .release {
-                    offerCard(offer)
-                } else if center.phase == .skipped {
-                    SettingsCard {
-                        SettingsRow(String(localized: "已跳过 \(center.offer?.display ?? "")"),
-                                    detail: String(localized: "有新版本时仍会提醒")) {
-                            Button("查看此版本") { center.lookAnyway() }
-                        }
+        VStack(alignment: .leading, spacing: 12) {
+            if let offer = center.offer, center.phase == .release {
+                offerCard(offer)
+            } else if center.phase == .skipped {
+                AboutCard {
+                    AboutRow(String(localized: "已跳过 \(center.offer?.display ?? "")"),
+                             detail: String(localized: "有新版本时仍会提醒")) {
+                        Button("查看此版本") { center.lookAnyway() }
                     }
-                } else if center.phase == .later {
-                    SettingsCard {
-                        SettingsRow(String(localized: "\(center.offer?.display ?? "") · 稍后提醒"),
-                                    detail: String(localized: "\(center.remindUntil.map(UpdateWhen.monthDay) ?? "") 之前不显示红点")) {
-                            Button("现在查看") { center.lookAnyway() }
-                        }
+                }
+            } else if center.phase == .later {
+                AboutCard {
+                    AboutRow(String(localized: "\(center.offer?.display ?? "") · 稍后提醒"),
+                             detail: String(localized: "\(center.remindUntil.map(UpdateWhen.monthDay) ?? "") 之前不显示红点")) {
+                        Button("现在查看") { center.lookAnyway() }
                     }
                 }
             }
-            .animation(YYMotion.standard, value: center.phase)
 
-            SettingsCard {
+            AboutCard {
                 versionHeaderRow
                 AboutNavRow(title: String(localized: "更新日志"), value: changelogSummary) {
                     activeSheet = .changelog
                 }
-                SettingsRow(String(localized: "自动检查更新"),
-                            detail: String(localized: "每天启动时检查一次，仅读取版本号，不上传任何本地数据；已跳过或延后的版本不显示红点")) {
+                AboutRow(String(localized: "自动检查更新"),
+                         detail: String(localized: "每天启动时检查一次，仅读取版本号，不上传本地数据")) {
                     SettingsSwitch(isOn: Binding(get: { center.autoOn }, set: { center.autoOn = $0 }))
                 }
-                SettingsRow(String(localized: "更新渠道"), detail: UpdateChannel.detail) {
+                AboutRow(String(localized: "更新渠道"),
+                         detail: String(localized: "测试版先拿到新功能；换回正式版后随下个正式版恢复")) {
                     Menu {
                         ForEach(UpdateChannel.allCases) { c in
                             Button { center.channel = c } label: {
@@ -273,19 +291,19 @@ struct MacUpdateSettings: View {
                     .menuIndicator(.hidden)
                     .fixedSize()
                 }
+                .help(UpdateChannel.detail)
             }
 
-            SettingsCard {
-                SettingsRow(String(localized: "问题与建议"),
-                            detail: String(localized: "可附截图或日志直达开发者，无需注册账号")) {
-                    HStack(spacing: 12) {
-                        AboutLinkButton(title: "GitHub") {
+            AboutCard {
+                AboutRow(String(localized: "问题与建议"),
+                         detail: String(localized: "可附截图或日志直达开发者，无需注册账号")) {
+                    HStack(spacing: 10) {
+                        AboutLinkButton(title: "GitHub", prominent: false) {
                             NSWorkspace.shared.open(Self.issues)
                         }
-                        Button(String(localized: "写反馈…")) {
+                        AboutPillButton(title: String(localized: "写反馈…"), small: true) {
                             activeSheet = .feedback
                         }
-                        .buttonStyle(YYButtonStyle(kind: .raised, size: .small))
                     }
                 }
                 AboutNavRow(title: String(localized: "隐私说明"),
@@ -301,71 +319,68 @@ struct MacUpdateSettings: View {
                         .font(.yy(size: 12.5, weight: .medium))
                         .foregroundStyle(YYColor.t1)
                     Spacer(minLength: 12)
-                    AboutLinkButton(title: "github.com/inokoru/yuyue") {
+                    AboutLinkButton(title: "github.com/inokoru/yuyue", prominent: true) {
                         NSWorkspace.shared.open(Self.source)
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 9)
-                .frame(minHeight: 40)
+                .padding(.vertical, 7)
+                .frame(minHeight: 39)
             }
         }
+        .animation(YYMotion.standard, value: center.phase)
     }
 
     private var versionHeaderRow: some View {
         let isEn = AppLanguage.running == .en
-        return HStack(alignment: .center, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
+        return HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("第 \(UpdateCenter.current) 版")
                         .font(isEn ? .system(size: 17, weight: .semibold, design: .serif) : YYUI.serif(17, .semibold))
                         .monospacedDigit()
                         .foregroundStyle(YYColor.t1)
                     Text(verbatim: "build \(buildNumber)")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 11.5, design: .monospaced))
                         .foregroundStyle(YYColor.t3)
                 }
-                versionStatusLine
+                if center.phase != .release {
+                    versionStatusLine
+                }
             }
             Spacer(minLength: 10)
             if center.phase != .release {
-                Button(checkButtonTitle) {
+                AboutPillButton(title: checkButtonTitle) {
                     Task { await center.check(manual: true) }
                 }
-                .buttonStyle(YYButtonStyle(kind: .raised, size: .small))
                 .disabled(center.phase == .checking)
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 13)
+        .padding(.vertical, 14)
         .animation(YYMotion.standard, value: center.phase)
     }
 
     @ViewBuilder private var versionStatusLine: some View {
         if center.phase == .checking {
             Text("正在检查更新…")
-                .font(.yy(size: 11))
+                .font(.yy(size: 12))
                 .foregroundStyle(YYColor.t2)
         } else if center.phase == .checkFailed {
             Text("无法检查更新，请检查网络连接后重试。")
-                .font(.yy(size: 11))
+                .font(.yy(size: 12))
                 .foregroundStyle(YYColor.danger)
         } else if center.lastWasCurrent, center.lastSuccess != nil {
-            HStack(spacing: 5) {
-                Circle()
-                    .fill(YYColor.ok)
-                    .frame(width: 5.5, height: 5.5)
-                Text(center.checkedLine())
-                    .font(.yy(size: 11, weight: .medium))
-                    .foregroundStyle(YYColor.ok)
-            }
+            Text(center.checkedLine())
+                .font(.yy(size: 12, weight: .medium))
+                .foregroundStyle(YYColor.ok)
         } else if center.lastSuccess != nil {
             Text(center.checkedLine())
-                .font(.yy(size: 11))
+                .font(.yy(size: 12))
                 .foregroundStyle(YYColor.t3)
         } else {
-            Text("尚未检查")
-                .font(.yy(size: 11))
+            Text("尚未检查更新")
+                .font(.yy(size: 12))
                 .foregroundStyle(YYColor.t3)
         }
     }
@@ -381,40 +396,91 @@ struct MacUpdateSettings: View {
     private var changelogSummary: String {
         guard let latest = releases.first else { return UpdateCenter.current }
         let items = Self.notes(for: latest)
-        if let day = UpdateRules.monthDay(latest.date), !items.isEmpty {
+        if !latest.date.isEmpty, !items.isEmpty {
+            let day = latest.date.replacingOccurrences(of: "-", with: ".")
             return "\(day) · " + String(localized: "\(items.count) 项")
         }
         return latest.version
     }
 
     private func offerCard(_ offer: UpdateOffer) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let items = offer.notes.sections.flatMap(\.items)
+        let meta = [UpdateRules.monthDay(offer.publishedAt), offer.assetSize > 0 ? UpdateRules.megabytes(offer.assetSize) : nil]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(offer.display)
-                    .font(YYUI.serif(22, .semibold))
+                    .font(YYUI.serif(18, .semibold))
                     .monospacedDigit()
+                    .foregroundStyle(UpdatePaper.ink)
                 Text("可以安装")
-                    .font(.yy(size: 10, weight: .semibold))
+                    .font(.yy(size: 11, weight: .semibold))
                     .foregroundStyle(tint.accent)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 1.5)
                     .background(tint.black, in: Capsule())
                     .overlay(Capsule().strokeBorder(tint.edge, lineWidth: 0.5))
-                Spacer()
-                if let day = UpdateRules.monthDay(offer.publishedAt) {
-                    Text(day).font(.yy(size: 11.5)).monospacedDigit().foregroundStyle(YYColor.t3)
+                Spacer(minLength: 8)
+                if !meta.isEmpty {
+                    Text(meta)
+                        .font(.yy(size: 12))
+                        .monospacedDigit()
+                        .foregroundStyle(UpdatePaper.ink2)
                 }
             }
-            UpdateNotesCard(offer: offer)
+            VStack(alignment: .leading, spacing: 5) {
+                if !offer.notes.lede.isEmpty {
+                    Text(offer.notes.lede)
+                        .font(.yy(size: 12.5))
+                        .lineSpacing(3)
+                        .foregroundStyle(UpdatePaper.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Circle()
+                            .fill(tint.accent)
+                            .frame(width: 4, height: 4)
+                            .alignmentGuide(.firstTextBaseline) { $0.height }
+                        Text(item)
+                            .font(.yy(size: 12.5))
+                            .lineSpacing(3)
+                            .foregroundStyle(UpdatePaper.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.leading, 2)
+                }
+                if offer.notes.lede.isEmpty, items.isEmpty {
+                    Text("这一版的说明写在发布页上。")
+                        .font(.yy(size: 12.5))
+                        .foregroundStyle(UpdatePaper.ink)
+                }
+            }
+            .padding(.top, 7)
+            .padding(.bottom, 10)
             HStack(spacing: 8) {
-                UpdateButton(title: String(localized: "下载并安装"), kind: .main) { center.install() }
-                UpdateButton(title: String(localized: "稍后提醒")) { center.remindLater() }
-                UpdateButton(title: String(localized: "跳过此版本")) { center.skip() }
+                AboutPillButton(title: String(localized: "下载并安装"), primary: true) {
+                    center.install()
+                }
+                AboutPillButton(title: String(localized: "稍后提醒")) {
+                    center.remindLater()
+                }
+                Button(String(localized: "跳过此版本")) {
+                    center.skip()
+                }
+                .buttonStyle(.plain)
+                .font(.yy(size: 12))
+                .foregroundStyle(hoverSkip ? YYColor.t1 : YYColor.t3)
+                .onHover { hoverSkip = $0 }
+                .animation(YYMotion.quick, value: hoverSkip)
+                .padding(.leading, 4)
             }
         }
-        .padding(14)
-        .background(YYColor.card, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(YYColor.line, lineWidth: 0.5))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .background(UpdatePaper.bg, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(UpdatePaper.line, lineWidth: 0.5))
     }
 
     // MARK: Sheets
@@ -466,6 +532,78 @@ struct MacUpdateSettings: View {
 
 // MARK: - About Row Pieces & Sheets
 
+private struct AboutCard<Content: View>: View {
+    @ViewBuilder let content: Content
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Group(subviews: content) { rows in
+                ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
+                    if i > 0 { Rectangle().fill(YYColor.line).frame(height: 0.5).padding(.horizontal, 16) }
+                    row
+                }
+            }
+        }
+        .background(YYColor.card, in: .rect(cornerRadius: 13))
+        .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(scheme == .dark ? Color(yy: YYRGBA(255, 255, 255, 0.06)) : YYColor.line, lineWidth: 0.5))
+        .shadow(color: scheme == .dark ? .clear : Color(yy: YYRGBA(51, 46, 41, 0.04)), radius: 1, y: 1)
+    }
+}
+
+private struct AboutRow<Trailing: View>: View {
+    let title: String
+    var detail: String?
+    @ViewBuilder let trailing: Trailing
+
+    init(_ title: String, detail: String? = nil, @ViewBuilder trailing: () -> Trailing) {
+        self.title = title
+        self.detail = detail
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.yy(size: 12.5, weight: .medium))
+                    .foregroundStyle(YYColor.t1)
+                if let detail {
+                    Text(detail)
+                        .font(.yy(size: 11))
+                        .lineSpacing(2.5)
+                        .foregroundStyle(YYColor.t3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 8)
+            trailing
+                .environment(\.settingsRowTitle, title)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .frame(minHeight: 46)
+    }
+}
+
+private struct AboutPillButton: View {
+    let title: String
+    var primary = false
+    var small = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.yy(size: 12, weight: primary ? .semibold : .medium))
+                .foregroundStyle(primary ? YYTint.standard.accent : YYColor.t1)
+                .padding(.horizontal, small ? 11 : 14)
+                .frame(height: small ? 25 : 28)
+        }
+        .buttonStyle(YYPillChrome(role: primary ? .primary : .secondary))
+    }
+}
+
 private struct AboutNavRow: View {
     let title: String
     var value: String?
@@ -479,21 +617,23 @@ private struct AboutNavRow: View {
                     .font(.yy(size: 12.5, weight: .medium))
                     .foregroundStyle(YYColor.t1)
                 Spacer(minLength: 12)
-                if let value {
-                    Text(value)
-                        .font(.yy(size: 11.5))
-                        .monospacedDigit()
-                        .foregroundStyle(YYColor.t3)
+                HStack(spacing: 3) {
+                    if let value {
+                        Text(value)
+                            .font(.yy(size: 12))
+                            .monospacedDigit()
+                            .foregroundStyle(hover ? YYColor.t1 : YYColor.t3)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(hover ? YYColor.t1 : YYColor.t3)
+                        .offset(x: hover && !YYMotion.reduce ? 1.5 : 0)
                 }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(hover ? YYColor.t2 : YYColor.t3)
-                    .offset(x: hover && !YYMotion.reduce ? 1.5 : 0)
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 9)
-            .frame(minHeight: 40)
-            .background(YYColor.inset.opacity(hover ? 0.5 : 0))
+            .padding(.vertical, 7)
+            .frame(minHeight: 39)
+            .background(YYColor.t1.opacity(hover ? 0.028 : 0))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -504,6 +644,7 @@ private struct AboutNavRow: View {
 
 private struct AboutLinkButton: View {
     let title: String
+    var prominent = false
     let action: () -> Void
     @State private var hover = false
 
@@ -515,8 +656,8 @@ private struct AboutLinkButton: View {
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 9.5, weight: .semibold))
             }
-            .font(.yy(size: 11.5))
-            .foregroundStyle(hover ? YYColor.t1 : YYColor.t2)
+            .font(.yy(size: 12, weight: prominent ? .medium : .regular))
+            .foregroundStyle(prominent ? YYColor.t1 : (hover ? YYColor.t1 : YYColor.t3))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

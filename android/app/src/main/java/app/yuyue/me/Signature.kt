@@ -6,8 +6,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -18,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
@@ -78,7 +78,7 @@ private val grain by lazy {
 
 /**
  * The foot of 关于: the pencil signature from the corner of a drawing — a curve running into the
- * long stroke under it, then two T's. It writes itself out when the page opens; touched, again.
+ * long stroke under it, then two T's. Not there when the page opens; tapped, it writes itself out.
  */
 @Composable
 fun PencilSignature(modifier: Modifier = Modifier) {
@@ -88,7 +88,8 @@ fun PencilSignature(modifier: Modifier = Modifier) {
     val lead = if (YY.dark) Color(0xFFD9D5CD) else Color(0xFF2F2E2D)
     LaunchedEffect(run) {
         drawn.forEach { it.snapTo(0f) }
-        delay(400)
+        if (run == 0) return@LaunchedEffect
+        delay(100)
         val ease = CubicBezierEasing(0.45f, 0.05f, 0.3f, 1f)
         listOf(620, 500, 560).forEachIndexed { i, d ->
             launch { drawn[i].animateTo(1f, tween(d, easing = ease)) }
@@ -99,7 +100,7 @@ fun PencilSignature(modifier: Modifier = Modifier) {
         modifier.size(84.dp, 78.4.dp)
             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
             .then(if (Build.VERSION.SDK_INT >= 31) Modifier.blur(0.45.dp) else Modifier)
-            .clickable(remember { MutableInteractionSource() }, indication = null) { run++ }
+            .pointerInput(Unit) { detectTapGestures(onTap = { run++ }) }
             .semantics { contentDescription = "CTT" },
     ) {
         val k = size.width / 60f

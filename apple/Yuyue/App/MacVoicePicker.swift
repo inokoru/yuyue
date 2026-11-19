@@ -9,7 +9,7 @@ import AVFoundation
 struct ListeningPage: View {
     @AppStorage("player.rate") private var rate = 1.0
     @AppStorage(StudioWorkshop.forPhoneKey) private var workshopForPhone = true
-    @State private var confirmingRemoveStudio = false
+    @State private var confirming: YYConfirm?
     private var focus: ListeningFocus { .shared }
     private var studio: StudioVoiceCenter { .shared }
 
@@ -42,7 +42,7 @@ struct ListeningPage: View {
 
     private var sources: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SettingsHeading(String(localized: "声音来源"))
+            SettingsHeading(String(localized: "声音来源"), note: String(localized: "点一个，进去听它的声音"))
                 .padding(.bottom, -2)
             FlatCard {
                 ForEach(Array(VoiceSource.all.enumerated()), id: \.element) { i, s in
@@ -51,26 +51,12 @@ struct ListeningPage: View {
                 }
             }
             SettingsNote(String(localized: "云端语音使用你自己的 API Key，费用由服务商直接结算；已合成的句子缓存在本机，重听不重复计费。"))
-            SettingsHeading(String(localized: "语速"))
-            FlatCard {
-                HStack(spacing: 8) {
-                    Text("慢").font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
-                    Slider(value: Binding(get: { rate == 0 ? 1 : rate }, set: { rate = ($0 * 10).rounded() / 10 }), in: 0.8 ... 2.0)
-                        .frame(width: 150)
-                        .tint(YYColor.t1)
-                    Text("快").font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
-                    rateMenu
-                    Spacer(minLength: 8)
-                    Text("与阅读页听书面板同步").font(.yy(size: 10.5)).foregroundStyle(YYColor.t3).lineLimit(1)
-                }
-                .padding(.horizontal, 9)
-                .frame(height: 40)
-            }
-            SettingsHeading(String(localized: "广播剧工坊"))
+            SettingsHeading(String(localized: "广播剧工坊"), note: String(localized: "只在这台 Mac 上跑，不传云端"))
             FlatCard {
                 studioVoiceRow
                 Rectangle().fill(YYColor.line).frame(height: 0.5).padding(.horizontal, 9)
                 HStack(spacing: 12) {
+                    ServiceTile(mark: .phone, size: 32)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("给我的手机提前做好").font(.yy(size: 12.5, weight: .medium)).foregroundStyle(YYColor.t1)
                         Text("接着电源时，附近手机正在听的书自动往后精做 10 章")
@@ -83,65 +69,78 @@ struct ListeningPage: View {
                 .padding(.horizontal, 10)
                 .frame(minHeight: 50)
             }
-            .confirmationDialog(String(localized: "删除“精做的声音”？"), isPresented: $confirmingRemoveStudio) {
-                Button("删除", role: .destructive) { studio.remove() }
-            } message: {
-                Text("模型文件会从这台 Mac 上删掉，已经做好并存下的广播剧章节不受影响。")
+            .yyConfirm($confirming)
+            SettingsHeading(String(localized: "语速"), note: String(localized: "读书窗口里调的也是这一个"))
+            FlatCard {
+                HStack(spacing: 8) {
+                    Text("慢").font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
+                    Slider(value: Binding(get: { rate == 0 ? 1 : rate }, set: { rate = ($0 * 10).rounded() / 10 }), in: 0.8 ... 2.0)
+                        .frame(width: 150)
+                        .tint(YYColor.t1)
+                    Text("快").font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
+                    rateMenu
+                    Spacer(minLength: 8)
+                }
+                .padding(.horizontal, 9)
+                .frame(height: 40)
             }
             Spacer(minLength: 0)
         }
     }
 
+    /// ✦ 精做的声音 [已装好] — what it is, how big, and 删除; or 下载, or how far it has come.
     private var studioVoiceRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text("精做的声音").font(.yy(size: 12.5, weight: .medium)).foregroundStyle(YYColor.t1)
-                        if case .ready = studio.phase {
-                            SettingsPill(String(localized: "已装好"), tone: .ok)
-                        }
+        let total = StudioVoiceModel.formatBytes(StudioVoiceModel.estimatedBytes)
+        return HStack(spacing: 12) {
+            Image(systemName: "sparkle")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(YYColor.t1)
+                .frame(width: 32, height: 32)
+                .background(YYColor.card, in: .rect(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(YYColor.line, lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.05), radius: 1, y: 1)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text("精做的声音").font(.yy(size: 12.5, weight: .medium)).foregroundStyle(YYColor.t1)
+                    if case .ready = studio.phase {
+                        SettingsPill(String(localized: "已装好"), tone: .ok)
                     }
-                    Group {
-                        switch studio.phase {
-                        case .idle:
-                            Text("更会演戏的角色声音，并为缺声音的主角现场造嗓子 · 约 3.2 GB")
-                        case .downloading(let frac):
-                            Text("正在下载 \(Int((frac * 100).rounded()))% · 约 3.2 GB").monospacedDigit()
-                        case .ready(let bytes):
-                            Text("在这台 Mac 上精做广播剧 · 占 \(StudioVoiceModel.formatBytes(bytes))").monospacedDigit()
-                        case .failed(let why):
-                            Text("没下下来：\(why)").foregroundStyle(YYColor.danger)
-                        }
+                }
+                Group {
+                    switch studio.phase {
+                    case .idle:
+                        Text("约 \(total) · 装好后可在 Mac 上提前细做广播剧语气、为人物造专属声音")
+                    case .downloading(let frac):
+                        Text("正在下载 \(StudioVoiceModel.formatBytes(Int64(Double(StudioVoiceModel.estimatedBytes) * frac))) / \(total)（\(Int((frac * 100).rounded()))%）· 未下完前广播剧照常用即时层")
+                            .monospacedDigit()
+                    case .ready(let bytes):
+                        Text("Qwen3-TTS 1.7B 本机模型 · 占用 \(StudioVoiceModel.formatBytes(bytes)) · 用于整本细做与生成新角色声音")
+                            .monospacedDigit()
+                    case .failed(let why):
+                        Text("没下下来：\(why)").foregroundStyle(YYColor.danger)
                     }
-                    .font(.yy(size: 11)).foregroundStyle(YYColor.t3).lineLimit(1)
                 }
-                Spacer(minLength: 8)
-                switch studio.phase {
-                case .idle:
-                    Button("下载") { studio.download() }
-                        .buttonStyle(YYButtonStyle(kind: .plain, size: .small))
-                case .failed:
-                    Button("再试") { studio.download() }
-                        .buttonStyle(YYButtonStyle(kind: .plain, size: .small))
-                case .downloading:
-                    Button("取消") { studio.cancel() }
-                        .buttonStyle(YYButtonStyle(kind: .plain, size: .small))
-                case .ready:
-                    Button("删除") { confirmingRemoveStudio = true }
-                        .buttonStyle(YYButtonStyle(kind: .plain, size: .small))
-                }
+                .font(.yy(size: 11)).foregroundStyle(YYColor.t3).lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
             }
-            if case .downloading(let frac) = studio.phase {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(YYColor.line)
-                        Capsule()
-                            .fill(YYTint.standard.fill)
-                            .frame(width: max(6, geo.size.width * CGFloat(min(1, max(0, frac)))))
-                    }
+            Spacer(minLength: 8)
+            switch studio.phase {
+            case .idle:
+                Button("下载") { studio.download() }
+                    .buttonStyle(YYButtonStyle(kind: .soft, size: .small))
+            case .failed:
+                Button("再试") { studio.download() }
+                    .buttonStyle(YYButtonStyle(kind: .plain, size: .small))
+            case .downloading:
+                Button("取消") { studio.cancel() }
+                    .buttonStyle(YYButtonStyle(kind: .plain, size: .small))
+            case .ready:
+                Button("删除") {
+                    confirming = YYConfirm(title: String(localized: "删除“精做的声音”？"),
+                                           message: String(localized: "模型文件会从这台 Mac 上删掉，已经做好并存下的广播剧章节不受影响。"),
+                                           button: String(localized: "删除")) { studio.remove() }
                 }
-                .frame(height: 4)
+                    .buttonStyle(YYButtonStyle(kind: .plain, size: .small))
             }
         }
         .padding(.horizontal, 10)
@@ -459,7 +458,7 @@ private struct SourceRow: View {
                     Text(source.title).font(.yy(size: 13, weight: .medium)).foregroundStyle(YYColor.t1)
                     Group {
                         switch source {
-                        case .mac: Text("\(source.voiceCount) 个音色 · 本地免费，无需联网")
+                        case .mac: Text("推荐 \(VoicePack.totalCards) 个自带声音 · 我的克隆 \(ClonedVoices.entries().count) 个 · 系统自带")
                         case .cloud(let p): Text(on ? String(localized: "\(source.voiceCount) 个音色 · 已连接") : p.blurb)
                         }
                     }
@@ -676,9 +675,10 @@ struct VoiceSourcePage: View {
                         onClose: { showingCloneSheet = false }
                     )
                 }
-                .presentationBackground(YYColor.bg)
+                .presentationBackground(YYColor.card)
                 #if os(macOS)
-                .frame(width: 400, height: 520)
+                .frame(width: CloneCardPage<EmptyView>.macWidth)
+                .fixedSize(horizontal: false, vertical: true)
                 #endif
             }
         }
@@ -692,15 +692,11 @@ struct VoiceSourcePage: View {
                         language: book.rawValue,
                         onDeleted: { cloneDetailID = nil }
                     )
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button(String(localized: "完成")) { cloneDetailID = nil }
-                        }
-                    }
                 }
-                .presentationBackground(YYColor.bg)
+                .presentationBackground(YYColor.card)
                 #if os(macOS)
-                .frame(width: 400, height: 520)
+                .frame(width: CloneCardPage<EmptyView>.macWidth)
+                .fixedSize(horizontal: false, vertical: true)
                 #endif
             }
         }
@@ -1475,6 +1471,17 @@ struct ListeningVoiceCard: View {
             } else {
                 PanelHint(String(localized: "这台 Mac 上没有这种语言的声音"))
             }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("两层合成").font(.yy(size: 13, weight: .semibold)).foregroundStyle(YYColor.t1)
+                Text("平时点朗读或广播剧，**即时层**（\(LiveVoiceModel.totalMegabytes) MB）马上出声。")
+                Text("装上**精做的声音**后，“整本提前做好”和手机在读的书会用大模型细做语气，并为缺声音的角色造专属声音卡，整章就绪后无感切换。")
+            }
+            .font(.yy(size: 11.5))
+            .foregroundStyle(YYColor.t2)
+            .lineSpacing(4)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 4)
+            .padding(.top, 14)
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 14)

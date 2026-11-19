@@ -68,6 +68,7 @@ extension Font {
 
 /// A page of these pieces on its grey ground.
 struct YYPage<Content: View>: View {
+    var background: Color = YYColor.bg
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -78,7 +79,7 @@ struct YYPage<Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollBounceBehavior(.basedOnSize)
-        .background(YYColor.bg)
+        .background(background)
     }
 }
 
@@ -771,7 +772,8 @@ struct YYSheetHeader: View {
     let title: String
     var subtitle: String?
     var back: (() -> Void)? = nil
-    let close: () -> Void
+    /// nil: a page pushed inside a sheet, left with ‹ only.
+    let close: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .center, spacing: YYUI.s(8)) {
@@ -792,17 +794,45 @@ struct YYSheetHeader: View {
                     Text(subtitle).font(YYUI.font(12)).foregroundStyle(YYColor.t3).lineLimit(1)
                 }
             }
-            Button(action: close) {
-                Image(systemName: "xmark").font(YYUI.font(10, .bold)).foregroundStyle(YYColor.t2)
-                    .frame(width: YYUI.s(28), height: YYUI.s(28))
-                    .background(YYColor.inset, in: .circle)
-                    .contentShape(Circle().inset(by: -6))
+            if let close {
+                Button(action: close) {
+                    Image(systemName: "xmark").font(YYUI.font(10, .bold)).foregroundStyle(YYColor.t2)
+                        .frame(width: YYUI.s(28), height: YYUI.s(28))
+                        .background(YYColor.inset, in: .circle)
+                        .contentShape(Circle().inset(by: -6))
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .accessibilityLabel("关上")
+            } else if let back {
+                Button("", action: back).keyboardShortcut(.cancelAction).opacity(0).frame(width: 0, height: 0)
             }
-            .buttonStyle(.plain)
-            .keyboardShortcut(.cancelAction)
-            .accessibilityLabel("关上")
         }
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+extension View {
+    /// A page in a sheet. On the Mac it heads itself — its title, ‹ when pushed, × to close —
+    /// instead of the window's grey title strip and a 完成 bar along the bottom. On a phone it
+    /// keeps the navigation bar's title.
+    @ViewBuilder
+    func yySheetPage(_ title: String, back: (() -> Void)? = nil, close: (() -> Void)? = nil) -> some View {
+        #if os(macOS)
+        self
+            .safeAreaInset(edge: .top, spacing: 0) {
+                YYSheetHeader(title: title, back: back, close: close)
+                    .padding(.leading, YYUI.s(back == nil ? 20 : 12))
+                    .padding(.trailing, YYUI.s(16))
+                    .padding(.top, YYUI.s(14))
+                    .padding(.bottom, YYUI.s(6))
+                    .background(YYColor.bg)
+            }
+            .toolbar(.hidden)
+            .navigationBarBackButtonHidden(true)
+        #else
+        self.navigationTitle(title)
+        #endif
     }
 }
 

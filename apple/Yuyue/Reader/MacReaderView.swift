@@ -200,10 +200,15 @@ struct MacReaderView: View {
             // `-debugThought 1`: the thought sheet for the first note (use with -debugSeed).
             if d.bool(forKey: "debugThought") { Task { try? await Task.sleep(for: .seconds(2)); thought = model.marks.first } }
             // `-debugSpeechFail 1`: 朗读停下了, the paper card with 关上 / 换成系统声音.
-            if d.bool(forKey: "debugSpeechFail") {
+            if d.bool(forKey: "debugSpeechFail") || d.string(forKey: "debugSpeechFail") == "close" {
                 Task {
                     try? await Task.sleep(for: .seconds(1.5))
                     model.player?.failure = String(localized: "云端声音没连上，检查一下网络；也可以先换成系统声音接着听。")
+                    // `-debugSpeechFail close`: and then 关上, as a click would.
+                    if d.string(forKey: "debugSpeechFail") == "close" {
+                        try? await Task.sleep(for: .seconds(1.5))
+                        model.player?.failure = nil
+                    }
                 }
             }
             // `-debugAlign 1`: the feedback card pops up, and then alignment check opens too.

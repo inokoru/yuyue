@@ -185,8 +185,13 @@ enum Voices {
                     return
                 }
                 Previewer.shared.play(speech, id: voice.id)
+            } catch is CancellationError {
+                // Pointed at another row, or stopped: not a failure.
+                PreviewState.shared.ended(voice.id)
             } catch {
                 PreviewState.shared.ended(voice.id)
+                guard !Task.isCancelled else { return }
+                PreviewState.shared.failed(voice.id)
                 failed(error.localizedDescription)
             }
         }
@@ -213,8 +218,11 @@ final class PreviewState {
     private(set) var started: Date?
     /// How long the sentence takes; nil until it's known (a system voice says it as it goes).
     private(set) var seconds: Double?
+    /// The last 试听 that didn't come out: said quietly where it was tried, never as a dialog.
+    private(set) var failedID: String?
 
     func began(_ id: String, seconds: Double?) {
+        failedID = nil
         voiceID = id
         started = seconds == nil ? nil : .now
         self.seconds = seconds
@@ -226,6 +234,8 @@ final class PreviewState {
         started = .now
         self.seconds = seconds
     }
+
+    func failed(_ id: String) { failedID = id }
 
     /// nil: whatever is playing; otherwise only if it's still that one.
     func ended(_ id: String?) {

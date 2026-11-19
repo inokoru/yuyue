@@ -166,3 +166,20 @@ private nonisolated final class Collector: @unchecked Sendable {
         continuation?.resume(returning: Speech.make(from: buffers))
     }
 }
+
+extension SystemVoice {
+    /// 系统自带 · 中文 / 粤语 / 英语: the line under its name in the voice lists.
+    var listLine: String {
+        let t = language.lowercased()
+        let lang: String = if t.hasPrefix("zh-hk") || t.hasPrefix("yue") {
+            String(localized: "粤语")
+        } else if t.hasPrefix("zh-tw") {
+            String(localized: "繁体中文")
+        } else if t.hasPrefix("zh") {
+            String(localized: "中文")
+        } else {
+            Locale.current.localizedString(forIdentifier: language) ?? language
+        }
+        return String(localized: "系统自带 · \(lang)")
+    }
+}

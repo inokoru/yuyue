@@ -12,7 +12,7 @@ enum DebugShots {
     static func run() {
         let d = UserDefaults.standard
         // 换语言的整套动效：打开设置 › 通用，两秒后换成另一种语言（会真的重开）。
-        // The new 语阅 is opened with the same arguments; it only takes over, it doesn't swap again.
+        // The 语阅 opened again after it only takes over, it doesn't swap again.
         if d.bool(forKey: "debugLanguageSwap"), AppLanguage.pendingSweep == nil {
             d.set(SettingsPage.general.rawValue, forKey: "settings.page")
             // `-debugSettings general` alongside opens 设置.

@@ -123,6 +123,8 @@ final class Player {
     @ObservationIgnored var onMarkHeard: ((Spot) -> Void)?
 
     @ObservationIgnored private let detail: BookDetail
+    /// 《书名》, for the 换声音 panel's 试听 line.
+    var bookTitle: String { detail.summary.title }
     @ObservationIgnored private let script: Script
     @ObservationIgnored private let engine = AVAudioEngine()
     @ObservationIgnored private let node = AVAudioPlayerNode()
@@ -537,6 +539,8 @@ final class Player {
                     do {
                         speech = try await voice.render(self.text(at: spot), language: language)
                     } catch {
+                        // Another voice chosen, or a jump: this sentence was called off, nothing failed.
+                        if error is CancellationError || Task.isCancelled || self.generation != generation { return }
                         self.failed(String(localized: "朗读出错了（\(error.localizedDescription)）"))
                         return
                     }
@@ -882,7 +886,9 @@ final class Player {
     /// 试听: a few words in `voice`, without moving the book.
     func preview(_ voice: any Voice, text: String) {
         if state == .playing || state == .loading { pause() }
-        Voices.preview(voice, text: text) { [weak self] in self?.failure = $0 }
+        // A 试听 that doesn't come out isn't reading stopping: the picker says so in its own
+        // footer (PreviewState.failedID), not the window's 朗读停下了 card.
+        Voices.preview(voice, text: text)
     }
 
     private func voice(for language: String, section: UInt32? = nil) -> (any Voice)? {

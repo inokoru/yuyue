@@ -3,6 +3,12 @@ import YuyueCore
 
 #if os(macOS)
 
+/// Keeps a weak reference to the settings `NSWindow` so confirmation alerts don't lose the parent window.
+@MainActor
+private final class SettingsWindowBox {
+    weak var window: NSWindow?
+}
+
 /// 设置 (⌘,): the pages down a sidebar on the left, the page in the middle, and on the right what
 /// was last changed, each change undoable, with a sample of the page where there's something to
 /// see. Changes take at once; there is no 应用 button.
@@ -11,6 +17,8 @@ struct MacSettings: View {
     @AppStorage("settings.page") private var page = SettingsPage.general
     /// Opened again for a new language: the old window's picture, swept away once this one is in its place.
     @State private var sweep = AppLanguage.pendingSweep
+    @State private var pendingLanguage: AppLanguage?
+    @State private var windowBox = SettingsWindowBox()
 
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
@@ -33,10 +41,23 @@ struct MacSettings: View {
                         .padding(.top, 24)
                         .padding(.bottom, 12)
                         .ignoresSafeArea(.container, edges: .top)
-                } else {
-                    if page != .update {
-                        SettingsPageHeader(page: page)
+                } else if page == .update {
+                    ScrollView {
+                        MacUpdateSettings(windowHeight: height)
+                            .padding(.leading, 24)
+                            .padding(.trailing, 26)
+                            .padding(.top, 10)
+                            .padding(.bottom, 24)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .buttonStyle(SettingsActionStyle())
                     }
+                    .scrollBounceBehavior(.basedOnSize)
+                    .padding(.trailing, 6)
+                    .ignoresSafeArea(.container, edges: .top)
+                    .id(page)
+                    .transition(YYMotion.swap)
+                } else {
+                    SettingsPageHeader(page: page)
                     ScrollView {
                         content(page)
                     }
@@ -77,7 +98,7 @@ struct MacSettings: View {
         .frame(width: 980, height: height)
         .tint(tint.accent)
         .navigationTitle(page.title)
-        .background(SettingsTitlebar())
+        .background(SettingsTitlebar { windowBox.window = $0 })
         // At the top of the sidebar, as in the shelf window.
         .trafficLights(CGPoint(x: 22, y: 20))
         .onAppear {
@@ -95,17 +116,48 @@ struct MacSettings: View {
             }
         }
         .yyToastMotion(value: library.toast?.id)
+        .alert(
+            pendingLanguage.map(AppLanguage.restartPromptTitle(for:)) ?? "",
+            isPresented: Binding(
+                get: { pendingLanguage != nil },
+                set: { if !$0 { pendingLanguage = nil } }
+            ),
+            presenting: pendingLanguage
+        ) { pending in
+            Button("立即重开", role: .destructive) {
+                let from = MacLanguageCard.name(AppLanguage.chosen)
+                AppLanguage.choose(pending)
+                SettingsLog.shared.flash = .init(
+                    date: .now,
+                    title: String(localized: "语言"),
+                    to: MacLanguageCard.name(pending),
+                    from: from
+                )
+                pendingLanguage = nil
+                NotificationCenter.default.post(name: .relaunchForLanguage, object: pending.effective)
+            }
+            Button("取消", role: .cancel) {
+                pendingLanguage = nil
+            }
+        } message: { _ in
+            Text("切换界面语言会重新启动语阅，并自动回到当前设置页。")
+        }
         .overlay {
             if let sweep {
-                InkSweep(old: Image(nsImage: sweep.picture), forward: sweep.forward, delay: 0.35) { self.sweep = nil }
+                InkSweep(old: Image(nsImage: sweep.picture), forward: sweep.forward, delay: 0.05) { self.sweep = nil }
                     .ignoresSafeArea()
                     .background(LanguageTakeOver())
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .confirmLanguageRelaunch)) { note in
+            guard let to = note.object as? AppLanguage else { return }
+            pendingLanguage = to
+        }
         // A new language: a new 语阅 takes this window's place, and the words are swept into it.
         .onReceive(NotificationCenter.default.publisher(for: .relaunchForLanguage)) { note in
-            guard let window = NSApp.keyWindow, let to = note.object as? AppLanguage else { return }
-            AppLanguage.handOver(window, to: to)
+            guard let to = note.object as? AppLanguage,
+                  let window = windowBox.window ?? NSApp.keyWindow ?? NSApp.mainWindow else { return }
+            AppLanguage.handOverWhenClear(window, to: to)
         }
     }
 
@@ -122,7 +174,7 @@ struct MacSettings: View {
             case .sync: SyncSettings(library: library)
             case .storage: StorageSettings(library: library)
             case .data: DataSettings(library: library)
-            case .update: MacUpdateSettings()
+            case .update: MacUpdateSettings(windowHeight: height)
             }
         }
         .padding(.leading, 24)
@@ -291,13 +343,17 @@ private struct SettingsUndoKey: NSViewRepresentable {
 /// whenever it likes, and a toolbar is taller than the title bar, so every window update takes
 /// them off again.
 private struct SettingsTitlebar: NSViewRepresentable {
+    var onWindow: ((NSWindow) -> Void)?
+
     final class Host: NSView {
+        var onWindow: ((NSWindow) -> Void)?
         nonisolated(unsafe) private var observer: NSObjectProtocol?
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             observer.map(NotificationCenter.default.removeObserver)
             guard let window else { return }
+            onWindow?(window)
             tidy(window)
             observer = NotificationCenter.default.addObserver(forName: NSWindow.didUpdateNotification, object: window, queue: .main) { [weak self] note in
                 guard let window = note.object as? NSWindow else { return }
@@ -317,10 +373,18 @@ private struct SettingsTitlebar: NSViewRepresentable {
         }
     }
 
-    func makeNSView(context: Context) -> Host { Host() }
+    func makeNSView(context: Context) -> Host {
+        let host = Host()
+        host.onWindow = onWindow
+        return host
+    }
 
     func updateNSView(_ host: Host, context: Context) {
-        host.window.map(host.tidy)
+        host.onWindow = onWindow
+        if let window = host.window {
+            onWindow?(window)
+            host.tidy(window)
+        }
     }
 }
 
@@ -506,15 +570,27 @@ struct SettingsSwitch: View {
 /// The small grey heading over a card.
 struct SettingsHeading: View {
     let text: String
-    init(_ text: String) { self.text = text }
+    /// A quiet line at the right end, as 点一个，进去听它的声音.
+    var note: String? = nil
+    init(_ text: String, note: String? = nil) { self.text = text; self.note = note }
 
     var body: some View {
-        Text(text)
-            .font(.yy(size: 11.5, weight: .semibold))
-            .foregroundStyle(YYColor.t2)
-            .padding(.leading, 16)
-            .padding(.top, 6)
-            .padding(.bottom, -6)
+        HStack(alignment: .firstTextBaseline) {
+            Text(text)
+                .font(.yy(size: 11.5, weight: .semibold))
+                .foregroundStyle(YYColor.t2)
+            if let note {
+                Spacer(minLength: 8)
+                Text(note)
+                    .font(.yy(size: 10.5))
+                    .foregroundStyle(YYColor.t3)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.leading, 16)
+        .padding(.trailing, note == nil ? 0 : 12)
+        .padding(.top, 6)
+        .padding(.bottom, -6)
     }
 }
 
@@ -523,17 +599,27 @@ struct SettingsHeading: View {
 private struct GeneralSettings: View {
     @AppStorage("general.reopenLast") private var reopenLast = false
     @AppStorage("general.keepAwake") private var keepAwake = true
+    @State private var langChoice = AppLanguage.chosen
+    @State private var langLater = false
+    @State private var langMenuOpen = false
+    @State private var langTriggerBottom: CGFloat = 44
+
+    private var canRelaunch: Bool {
+        let library = SettingsLog.shared.library
+        return library?.nowPlaying?.isPlaying != true && library?.audiobooks.job == nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             SettingsCard {
-                MacLanguageCard {
-                    // Not while a book is being read aloud or a recording made: it waits for next time.
-                    let library = SettingsLog.shared.library
-                    return library?.nowPlaying?.isPlaying != true && library?.audiobooks.job == nil
-                }
-            }
-            SettingsCard {
+                MacLanguageCard(
+                    choice: $langChoice,
+                    later: $langLater,
+                    menuOpen: $langMenuOpen,
+                    onTriggerBottomChange: { bottom in
+                        langTriggerBottom = bottom
+                    }
+                )
                 SettingsRow(String(localized: "启动时继续上次阅读"), detail: String(localized: "关闭则进入书架")) {
                     SettingsSwitch(isOn: $reopenLast)
                 }
@@ -550,6 +636,57 @@ private struct GeneralSettings: View {
             }
             Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, minHeight: 520, alignment: .top)
+        .coordinateSpace(name: "generalSettings")
+        .overlay(alignment: .topTrailing) {
+            if langMenuOpen {
+                ZStack(alignment: .topTrailing) {
+                    Color.black.opacity(0.001)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(.rect)
+                        .onTapGesture {
+                            withAnimation(YYMotion.quick) { langMenuOpen = false }
+                        }
+                    Button("") {
+                        withAnimation(YYMotion.quick) { langMenuOpen = false }
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
+                    .keyboardShortcut(.cancelAction)
+
+                    LanguagePaperDropdownMenu(selected: langChoice) { picked in
+                        withAnimation(YYMotion.quick) { langMenuOpen = false }
+                        pickLanguage(picked)
+                    }
+                    .padding(.top, langTriggerBottom + 6)
+                    .padding(.trailing, 16)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
+                }
+            }
+        }
+        .onDisappear { langMenuOpen = false }
+    }
+
+    private func pickLanguage(_ l: AppLanguage) {
+        guard langChoice != l else { return }
+        let prev = langChoice
+        guard l.effective != AppLanguage.running else {
+            langLater = false
+            langChoice = l
+            AppLanguage.choose(l)
+            SettingsLog.shared.flash = .init(date: .now, title: String(localized: "语言"), to: MacLanguageCard.name(l), from: MacLanguageCard.name(prev))
+            return
+        }
+        if canRelaunch {
+            // Keep langChoice unchanged until confirmation so cancelling never flickers and InkSweep snapshots cleanly.
+            NotificationCenter.default.post(name: .confirmLanguageRelaunch, object: l)
+        } else {
+            langLater = true
+            langChoice = l
+            AppLanguage.choose(l)
+            SettingsLog.shared.flash = .init(date: .now, title: String(localized: "语言"), to: MacLanguageCard.name(l), from: MacLanguageCard.name(prev))
+        }
     }
 }
 
@@ -563,19 +700,21 @@ private struct AppearanceSettings: View {
 
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
+    @State private var hoverMode: AppAppearance?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             SettingsCard {
                 // What 界面 covers is the page header's line; the card only chooses.
-                HStack(alignment: .top) {
+                HStack(alignment: .center) {
                     Text("界面").font(.yy(size: 12.5, weight: .medium)).foregroundStyle(YYColor.t1)
                     Spacer()
                     HStack(spacing: 10) {
                         ForEach(AppAppearance.allCases) { m in modeChoice(m) }
                     }
                 }
-                .padding(16)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
             }
             SettingsCard {
                 HStack(alignment: .center) {
@@ -616,21 +755,28 @@ private struct AppearanceSettings: View {
 
     private func modeChoice(_ m: AppAppearance) -> some View {
         let on = mode == m
+        let hovered = !on && hoverMode == m
+        let strokeColor: Color = on ? tint.accent : (hovered ? YYColor.line : .clear)
+        let strokeWidth: CGFloat = on ? 1.75 : 1
         return Button { mode = m } label: {
-            VStack(spacing: 7) {
-                ModeThumbnail(mode: m)
-                    .frame(width: 76, height: 50)
-                    .padding(3)
-                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(on ? tint.accent : .clear, lineWidth: 2))
+            VStack(spacing: 6) {
+                ModeThumbnail(mode: m, accent: tint.accent)
+                    .frame(width: 84, height: 54)
+                    .padding(2.5)
+                    .overlay(RoundedRectangle(cornerRadius: 9.5, style: .continuous).strokeBorder(strokeColor, lineWidth: strokeWidth))
                     .animation(YYMotion.quick, value: on)
+                    .animation(YYMotion.quick, value: hovered)
                 Text(m.title)
                     .font(.yy(size: 11.5, weight: on ? .semibold : .regular))
-                    .foregroundStyle(on ? YYColor.t1 : YYColor.t2)
+                    .foregroundStyle(on || hovered ? YYColor.t1 : YYColor.t2)
                     // 跟随系统 on one line, not broken in two under its picture.
                     .fixedSize()
             }
+            .offset(y: hovered ? -1.5 : 0)
+            .animation(YYMotion.quick, value: hovered)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(YYPressStyle(scale: 0.97))
+        .onHover { hoverMode = $0 ? m : (hoverMode == m ? nil : hoverMode) }
     }
 
     private func tintChoice(_ t: YYTint) -> some View {
@@ -656,48 +802,92 @@ private extension EnvironmentValues {
     }
 }
 
-/// A tiny window: a sidebar and three covers, light, dark, or half and half.
+/// 三帧缩略书页: miniature warm/night book leaves for 浅色, 深色, and a diagonal split for 跟随系统.
 private struct ModeThumbnail: View {
     let mode: AppAppearance
+    let accent: Color
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         ZStack {
-            window(dark: mode == .dark)
-            if mode == .system {
-                window(dark: true)
-                    .mask(GeometryReader { g in
-                        Path { p in
-                            p.move(to: CGPoint(x: g.size.width * 0.62, y: 0))
-                            p.addLine(to: CGPoint(x: g.size.width, y: 0))
-                            p.addLine(to: CGPoint(x: g.size.width, y: g.size.height))
-                            p.addLine(to: CGPoint(x: g.size.width * 0.38, y: g.size.height))
-                        }
-                    })
+            switch mode {
+            case .light:
+                fullLeaf(dark: false)
+            case .dark:
+                fullLeaf(dark: true)
+            case .system:
+                splitLeaf
             }
         }
-        .clipShape(.rect(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.black.opacity(0.08)))
+        .clipShape(.rect(cornerRadius: 7, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .strokeBorder(scheme == .dark || mode == .dark ? Color.white.opacity(0.12) : Color(yy: YYRGBA(42, 43, 46, 0.11)), lineWidth: 0.5)
+        )
     }
 
-    private func window(dark: Bool) -> some View {
-        HStack(spacing: 0) {
-            RoundedRectangle(cornerRadius: 3)
-                .fill(dark ? Color(white: 0.2) : .white)
-                .frame(width: 18)
-                .padding(4)
-            VStack(alignment: .leading, spacing: 5) {
-                Capsule().fill(dark ? Color(white: 0.85) : Color(white: 0.2)).frame(width: 22, height: 3)
-                HStack(spacing: 3) {
-                    Rectangle().fill(Color(red: 0.2, green: 0.25, blue: 0.21)).frame(width: 9, height: 14)
-                    Rectangle().fill(Color(red: 0.55, green: 0.17, blue: 0.14)).frame(width: 9, height: 14)
-                    Rectangle().fill(Color(red: 0.84, green: 0.64, blue: 0.33)).frame(width: 9, height: 14)
+    private func fullLeaf(dark: Bool) -> some View {
+        let bg = dark ? Color(yy: YYRGBA(29, 30, 33)) : Color(yy: YYRGBA(246, 243, 235))
+        let titleInk = dark ? Color(yy: YYRGBA(237, 237, 238, 0.84)) : Color(yy: YYRGBA(42, 43, 46, 0.76))
+        let rule = dark ? Color(yy: YYRGBA(154, 152, 149, 0.44)) : Color(yy: YYRGBA(138, 134, 130, 0.38))
+
+        return ZStack(alignment: .topLeading) {
+            bg
+            LinearGradient(
+                colors: [.black.opacity(dark ? 0.30 : 0.05), .clear],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: 4.5)
+            .frame(maxHeight: .infinity)
+
+            VStack(alignment: .leading, spacing: 5.5) {
+                Capsule().fill(titleInk).frame(width: 24, height: 3)
+                VStack(alignment: .leading, spacing: 3.5) {
+                    Capsule().fill(rule).frame(width: 50, height: 2)
+                    Capsule().fill(rule).frame(width: 46, height: 2)
+                    Capsule().fill(rule).frame(width: 34, height: 2)
                 }
             }
-            .padding(.leading, 6)
-            Spacer(minLength: 0)
+            .padding(.leading, 12)
+            .padding(.top, 12)
+
+            Capsule()
+                .fill(rule.opacity(0.7))
+                .frame(width: 10, height: 1.5)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .padding(.leading, 12)
+                .padding(.bottom, 8)
+
+            UnevenRoundedRectangle(bottomLeadingRadius: 1.2, bottomTrailingRadius: 1.2)
+                .fill(accent.opacity(dark ? 0.88 : 0.78))
+                .frame(width: 3.5, height: 8.5)
+                .frame(maxWidth: .infinity, alignment: .topTrailing)
+                .padding(.trailing, 8)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(dark ? Color(white: 0.1) : Color(white: 0.96))
+    }
+
+    private var splitLeaf: some View {
+        ZStack {
+            fullLeaf(dark: false)
+            fullLeaf(dark: true)
+                .mask(GeometryReader { g in
+                    Path { p in
+                        p.move(to: CGPoint(x: g.size.width * 0.60, y: 0))
+                        p.addLine(to: CGPoint(x: g.size.width, y: 0))
+                        p.addLine(to: CGPoint(x: g.size.width, y: g.size.height))
+                        p.addLine(to: CGPoint(x: g.size.width * 0.40, y: g.size.height))
+                        p.closeSubpath()
+                    }
+                })
+            GeometryReader { g in
+                Path { p in
+                    p.move(to: CGPoint(x: g.size.width * 0.60, y: 0))
+                    p.addLine(to: CGPoint(x: g.size.width * 0.40, y: g.size.height))
+                }
+                .stroke(Color.white.opacity(0.14), lineWidth: 0.5)
+            }
+        }
     }
 }
 
