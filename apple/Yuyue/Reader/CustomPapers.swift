@@ -413,6 +413,7 @@ struct PaperTile: View {
                     .font(.yy(size: 10.5, weight: selected ? .semibold : .regular))
                     .foregroundStyle(selected ? YYColor.t1 : YYColor.t2)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.5)
                     .frame(maxWidth: 50)
             }
             .contentShape(.rect)

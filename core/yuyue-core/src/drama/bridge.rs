@@ -124,12 +124,19 @@ impl YuyueCore {
                 None => ("?".into(), "#888888".into(), false),
             };
             let same = f.sentence == l.sentence;
+            let sentences = b.sentences.get(section as usize).map(Vec::as_slice).unwrap_or(&[]);
+            let at = |s: u32, i: u32| sentences.get(s as usize).and_then(|t| t.chars().nth(i as usize));
+            // Quoted lines sit inside the marks. A dash or 名字： line has none, so the range is
+            // the words themselves — stripping a character there ate the first and last of the line
+            // and the page drew no bubble.
+            let open = at(f.sentence, f.start).is_some_and(|c| "“\"「『".contains(c));
+            let close = same && l.end > 0 && at(l.sentence, l.end - 1).is_some_and(|c| "”\"」』".contains(c));
+            let start = f.start + u32::from(open);
             out.push(BubbleLine {
                 first: f.sentence,
                 last: l.sentence,
-                // Inside the quote marks.
-                start: f.start + 1,
-                end: if same { l.end.saturating_sub(1).max(f.start + 1) } else { f.end },
+                start,
+                end: if close { l.end.saturating_sub(1).max(start) } else if same { l.end } else { f.end },
                 who,
                 avatar: avatar_s,
                 color: color_s,
@@ -304,6 +311,33 @@ mod tests {
         let cast = core.book_cast(book.clone(), s).unwrap();
         assert!(!cast.iter().any(|m| m.name == "鶯儿"));
         assert!(!core.section_bubbles(book.clone(), s).unwrap().iter().any(|b| b.who.as_deref() == Some("鶯儿")));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn dash_dialogue_becomes_bubbles_with_names() {
+        let dir = std::env::temp_dir().join(format!("yuyue-dash-{}", getrandom::u64().unwrap()));
+        let core = YuyueCore::open(dir.to_string_lossy().into_owned(), "test".into(), "test".into()).unwrap();
+        let root = env!("CARGO_MANIFEST_DIR");
+        let book = core.import_book(format!("{root}/../../fixtures/books/dash-dialogue.txt")).unwrap();
+        let n = core.manifest(&book.id).unwrap().sections.len() as u32;
+        let mut bubbles = Vec::new();
+        for s in 0..n {
+            let lines = core.sentences(book.id.clone(), s).unwrap();
+            for b in core.section_bubbles(book.id.clone(), s).unwrap() {
+                let text: String = lines[b.first as usize].chars().skip(b.start as usize).take((b.end - b.start) as usize).collect();
+                bubbles.push((b.who.clone(), b.avatar.clone(), text));
+            }
+        }
+        let said: Vec<&str> = bubbles.iter().map(|(_, _, t)| t.as_str()).collect();
+        assert!(said.iter().any(|t| t.contains("你又来晚了")), "dash line missing: {said:?}");
+        assert!(said.iter().any(|t| t.contains("路上积水")), "{said:?}");
+        assert!(said.iter().any(|t| t.contains("还有位子")), "{said:?}");
+        assert!(said.iter().any(|t| t.contains("上来吧")), "{said:?}");
+        assert!(bubbles.iter().any(|(w, a, t)| w.as_deref() == Some("老周") && a != "?" && t.contains("明天的船")), "{bubbles:?}");
+        assert!(bubbles.iter().any(|(w, a, _)| w.as_deref() == Some("阿青") && a != "?"), "{bubbles:?}");
+        assert!(bubbles.iter().all(|(_, a, _)| !a.is_empty()));
+        assert!(said.iter().all(|t| !t.contains("雨下了一整夜") && !t.contains("窗外的雨声") && !t.contains("少年道了谢")), "narration became a bubble: {said:?}");
         std::fs::remove_dir_all(dir).ok();
     }
 }

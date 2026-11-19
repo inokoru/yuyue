@@ -143,16 +143,18 @@ const uiEn = (): boolean => document.documentElement.getAttribute('data-yy-ui') 
 function choices(l: BubbleLine, nm: HTMLElement): void {
   const list = l.choices || [];
   if (l.who || !list.length) return;
-  for (const name of list) {
-    const c = el('span', 'yy-bq-ch');
-    c.setAttribute('data-yy-who', name);
-    c.textContent = name;
-    nm.appendChild(c);
-  }
-  const more = el('span', 'yy-bq-ch yy-bq-ch-more');
-  more.setAttribute('data-yy-who', '');
-  more.textContent = uiEn() ? 'Others…' : '别人…';
-  nm.appendChild(more);
+  for (const name of list) nm.appendChild(choice(name, false));
+  nm.appendChild(choice('', true));
+}
+
+/** A tappable name. A button, not a span: VoiceOver otherwise reports it as not interactive. */
+function choice(name: string, more: boolean): HTMLButtonElement {
+  const c = document.createElement('button');
+  c.type = 'button';
+  c.className = 'yy-bq-ch' + (more ? ' yy-bq-ch-more' : '');
+  c.setAttribute('data-yy-who', name);
+  c.textContent = more ? (uiEn() ? 'Others…' : '别人…') : name;
+  return c;
 }
 
 function bubble(l: BubbleLine, index: number, quote: DocumentFragment, tag: DocumentFragment | null, cont: boolean): HTMLElement {

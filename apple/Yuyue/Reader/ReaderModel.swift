@@ -648,17 +648,19 @@ final class ReaderModel {
         showUnread()
         // A chapter the recording is only followed through as a whole: no ink line; the page
         // still keeps up with the sentence it's about at.
+        let follow = following && player?.pinnedSpot != spot
         if let player, player.narrated, player.guide?.chapterOnly(spot.section) == true {
             pager.clearInk()
-            if following, !isOnScreen(spot) {
+            if follow, !isOnScreen(spot) {
                 pager.show(section: spot.section, target: .sentence(spot.sentence, align: .third), animated: !pager.reduceMotion)
             }
             return
         }
         pager.setInk(section: spot.section, sentence: spot.sentence, durationMs: durationMs, elapsedMs: elapsedMs, playing: playing, words: wordTimes(spot))
         // Into the next chapter with the voice. Within a section the reader says when the ink
-        // reaches another page (`inkReachedPage`).
-        if following, spot.section != pager.current?.section {
+        // reaches another page (`inkReachedPage`). A voice change restarts this sentence in
+        // place: the page stays where it is.
+        if follow, spot.section != pager.current?.section {
             pager.show(section: spot.section, target: .sentence(spot.sentence, align: .third), animated: !pager.reduceMotion)
         }
     }
@@ -1009,7 +1011,7 @@ extension ReaderModel: ReaderPagerDelegate {
     }
 
     func pager(_ pager: ReaderPager, inkReachedPage page: Int) {
-        guard following, settings.mode == .paginated, page != pager.current?.page else { return }
+        guard following, player?.pinnedSpot != player?.spot, settings.mode == .paginated, page != pager.current?.page else { return }
         pager.turn(to: page, animated: !pager.reduceMotion)
     }
 }

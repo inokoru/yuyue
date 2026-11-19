@@ -78,7 +78,9 @@ impl Cast {
     /// The names that come before a speech verb at least three times in the book's sentences.
     pub fn read(sections: &[Vec<String>]) -> Cast {
         let verbs = VERBS.join("|");
-        let pat = Regex::new(&format!(r#"(?:^|[，。；：！？．、\s“”])([一-鿿]{{2,3}}?)(?:笑|冷笑|忙|便|因|又|也|方|只|才|乃|遂|先|含笑|点头|點頭)*(?:{verbs})[：:]?[“"「『]"#)).unwrap();
+        // 2–3 characters, or a 家的 name with its surname (周瑞家的, 王善保家的). The 家的
+        // alternative is tried first so 周 isn't left off the front.
+        let pat = Regex::new(&format!(r#"(?:^|[，。；：！？．、\s“”])([一-鿿]{{1,4}}家的|[一-鿿]{{2,3}}?)(?:笑|冷笑|忙|便|因|又|也|方|只|才|乃|遂|先|含笑|点头|點頭)*(?:{verbs})[：:]?[“"「『]"#)).unwrap();
         let mut count: HashMap<String, u32> = HashMap::new();
         for s in sections.iter().flatten() {
             for c in pat.captures_iter(s) {
@@ -93,7 +95,7 @@ impl Cast {
                     && !NOT_NAMES.contains(&n.as_str())
                     && !GROUPS.contains(&n.as_str())
                     && !n.chars().next().is_some_and(|c| lead.contains(c))
-                    && !n.chars().last().is_some_and(|c| "都也又便了的著着說说道".contains(c))
+                    && !n.chars().last().is_some_and(|c| "都也又便了的著着說说道".contains(c) && !n.ends_with("家的"))
                     && !is_doing(n)
             })
             .map(|(n, _)| n)
@@ -350,7 +352,9 @@ fn speaker(cast: &Cast, sentences: &[String], at: usize, before: &str, prev: Opt
     // the cast hasn't got it.
     if cs.len() == 1 && before.len() == last.len() {
         let n = head.chars().count();
-        if (2..=3).contains(&n) && !is_doing(head) && head.chars().all(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)) && !NOT_NAMES.contains(&head) && !head.starts_with(|c: char| "便又因忙也方只才乃遂先一這这那".contains(c)) {
+        // 周瑞家的 is four characters; a 2–3 window kept only 瑞家的.
+        let jia = head.ends_with("家的") && (3..=6).contains(&n);
+        if ((2..=3).contains(&n) || jia) && !is_doing(head) && head.chars().all(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)) && !NOT_NAMES.contains(&head) && !head.starts_with(|c: char| "便又因忙也方只才乃遂先一這这那".contains(c)) {
             return (Some(head.to_string()), How::Named);
         }
     }
@@ -496,6 +500,21 @@ mod tests {
         std::fs::remove_dir_all(dir).ok();
         println!("第八回：认对 {right}，认错 {}，没把握 {grey}", wrong.len());
         assert!(wrong.is_empty(), "认错了：\n{}", wrong.join("\n"));
+    }
+
+    #[test]
+    fn zhou_rui_keeps_her_full_name() {
+        let line = "周瑞家的道：“进来。”".to_string();
+        let short = "瑞家的道：“是。”".to_string();
+        let section = vec![line.clone(), line.clone(), line, short];
+        let cast = Cast::read(&[section.clone(), section.clone(), section.clone()]);
+        assert!(cast.names().iter().any(|n| n == "周瑞家的"), "{:?}", cast.names());
+        let got = lines(&cast, &section);
+        assert_eq!(got[0].who.as_deref(), Some("周瑞家的"));
+        assert_ne!(got[0].who.as_deref(), Some("瑞家的"));
+        // No cast yet: the words in front of 道 are still the full name, not the last three.
+        let bare = lines(&Cast::with_names(vec![]), &["周瑞家的笑道：“坐。”".into()]);
+        assert_eq!(bare[0].who.as_deref(), Some("周瑞家的"));
     }
 
     #[test]

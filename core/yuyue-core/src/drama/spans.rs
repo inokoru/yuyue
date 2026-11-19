@@ -237,8 +237,15 @@ pub fn unquoted(sentences: &[String]) -> bool {
         return false;
     }
     let quoted: usize = split(sentences).iter().filter(|r| r.kind != SegKind::Narration).map(|r| (r.end - r.start) as usize).sum();
-    let marks = sentences.iter().filter(|s| s.starts_with("——") || s.contains("道：") || s.contains("说：") || s.contains("說：")).count();
-    quoted * 50 < total && marks >= 5
+    if quoted * 50 >= total {
+        return false;
+    }
+    // Sure lines: ——, 名字： (老周：), and 道：/说：. A long chapter needs five so a couple of
+    // dashes don't flip a novel; a short one (dash-dialogue.txt, two chapters) is enough when
+    // those lines are a real share of it.
+    let verb = sentences.iter().filter(|s| s.starts_with("——") || s.contains("道：") || s.contains("说：") || s.contains("說：")).count();
+    let marks = verb.max(unquoted_lines(sentences).len());
+    marks >= 5 || (marks >= 2 && marks * 5 >= sentences.len())
 }
 
 /// A section's segments: by its quotes, or — a book without quote marks — by the model's lines

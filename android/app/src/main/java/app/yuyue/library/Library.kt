@@ -505,6 +505,7 @@ class Library(private val context: Context) {
             is CoreException.Unsupported -> t("不支持这种文件，目前能打开 EPUB、PDF、MOBI、AZW3 和 TXT")
             is CoreException.Protected -> t("这本书有版权保护（DRM），打不开")
             is CoreException.BadBook -> when {
+                e.detail == "empty" -> t("这个文件是空的，里面没有内容")
                 e.detail.contains("password", ignoreCase = true) -> t("这个压缩包设了密码，打不开")
                 e.detail.contains("too large") -> t("这本书太大了，读不进来")
                 else -> t("这本书读不出来，文件可能坏了，或者不是它看起来的格式")

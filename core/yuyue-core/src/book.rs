@@ -143,13 +143,20 @@ pub fn book_id(bytes: &[u8]) -> String {
 /// existing book.
 pub fn import(books_dir: &Path, source: &Path) -> Result<Manifest> {
     let bytes = fs::read(source)?;
+    if bytes.is_empty() {
+        return Err(CoreError::bad_book("empty"));
+    }
     let id = book_id(&bytes);
     let dir = books_dir.join(&id);
     if let Ok(existing) = load(&dir)
         && existing.version == FORMAT_VERSION {
             return Ok(existing);
         }
-    let format = detect(&bytes)?;
+    let format = match detect(&bytes) {
+        // Named like a book (broken.epub) but not one we can read: damaged, not "unsupported type".
+        Err(CoreError::Unsupported) if book_extension(source) => return Err(CoreError::bad_book("unreadable")),
+        other => other?,
+    };
     let fallback_title = source.file_stem().and_then(|s| s.to_str()).unwrap_or("").trim().to_string();
     build_into(books_dir, &id, |tmp| {
         let original = tmp.join(format!("original.{}", format.extension()));
@@ -234,6 +241,13 @@ pub fn resource_path(dir: &Path, path: &str) -> Option<PathBuf> {
         out.push(segment);
     }
     out.is_file().then_some(out)
+}
+
+fn book_extension(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(),
+        Some("epub" | "mobi" | "azw" | "azw3" | "azw4" | "pdf" | "txt" | "text")
+    )
 }
 
 fn detect(bytes: &[u8]) -> Result<Format> {
@@ -604,6 +618,17 @@ mod tests {
         assert!(matches!(import(&books, &zip), Err(CoreError::BadBook { .. })));
         let names: Vec<_> = fs::read_dir(&books).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name()).collect();
         assert_eq!(names.len(), 2, "no temporary folders left: {names:?}");
+        fs::remove_dir_all(&books).unwrap();
+    }
+
+    #[test]
+    fn empty_and_broken_say_what_is_wrong() {
+        let books = temp_dir("empty-broken");
+        let empty = import(&books, &fixture("empty.txt"));
+        assert!(matches!(empty, Err(CoreError::BadBook { ref detail }) if detail == "empty"), "{empty:?}");
+        let broken = import(&books, &fixture("broken.epub"));
+        assert!(matches!(broken, Err(CoreError::BadBook { .. })), "a damaged epub is not an unsupported type: {broken:?}");
+        assert!(!matches!(broken, Err(CoreError::Unsupported)));
         fs::remove_dir_all(&books).unwrap();
     }
 }

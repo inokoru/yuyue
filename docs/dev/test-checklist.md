@@ -62,7 +62,7 @@
 | 考卷扩到 ≥ 6000 句 | `scripts/drama-gold`：出草稿 → 找分歧 → 人工校 | — | 草稿有一部分；**没校对** |
 | 校准系数 `data/drama-calibration.json` | 用考卷调试集拟合 | 过线句子错率上界 ≤ 0.1% | **没做** |
 | 复核换一家模型 | `drama-llm` 第 7 个参数 | — | **没跑** |
-| 无引号体（规则 / 接模型） | 导入用“——”写对话的书，开气泡；再点“用大模型认全书” | 台词成气泡，旁白没被拆进去 | 单元测试过；**Mac 实测未过**：`dash-dialogue.txt` 开 `-debugBubbles 1` 仍为普通段落、未出人物图标；接大模型待测 |
+| 无引号体（规则 / 接模型） | 导入用“——”写对话的书，开气泡；再点“用大模型认全书” | 台词成气泡，旁白没被拆进去 | 规则路已修：短章里“——”和“某某：”也算无引号体，气泡不再按引号裁掉首尾字。`dash_dialogue_becomes_bubbles_with_names` 用 `dash-dialogue.txt` 走 App 的 `section_bubbles`，台词出气泡和人物图标、旁白不进气泡。**没在 Mac 上再开 App 看**；接大模型待测 |
 | 专名读音 `{词|读音}` | 看人物表读音；Azure 声音念人名 | 系统声音不把拼音念出来 | 核心测过；**没在 App 里听** |
 
 ### 2. 合成、混音、播放
@@ -121,8 +121,8 @@
 | 翻页手感、墨水屏、耳机按键、通知栏 | 只在模拟器上试过 |
 | 双击左右边缘进出沉浸阅读（Android） | 模拟器发不出够快的双击 |
 | PDF 朗读在 Android 15 以下 | 没试 |
-| iPhone 大字体 | 模拟器 `accessibility-extra-extra-extra-large` 实测人物页与阅读排版面板：主布局无重叠，紧凑胶囊有轻微截断（`Single...`、`Two c...`、`LXG...`、`Pape...`） |
-| 读屏（VoiceOver / TalkBack） | iPhone 模拟器 `describe-ui` 核对书架/远程书库/阅读/排版/人物/选声均有标签（气泡 `Others…` 节点标了 `interactive:false`）；**真机开 VoiceOver / TalkBack 走读没跑** |
+| iPhone 大字体 | 模拟器 `accessibility-extra-extra-extra-large` 曾见紧凑胶囊截断（`Single...`、`Two c...`、`LXG...`、`Pape...`）。胶囊标签改为缩小以放进格子（字体名不再跟系统字号再放大一截）。**没在模拟器上重看** |
+| 读屏（VoiceOver / TalkBack） | 气泡上的 `Others…` / `别人…` 改成按钮，点得中的也报得出来。**真机开 VoiceOver / TalkBack 走读没跑** |
 | 存储空间不够、下载断网的提示 | 只编译过 |
 
 ### Mac
@@ -141,14 +141,16 @@
 
 | 项 | 平台 |
 |---|---|
-| “这本书打不开”（真的坏文件、DRM 书） | Mac 跑过（`broken.epub` 提示不支持类型、`empty.txt` 提示空文件）；Android 跑过（均弹窗拦截不崩，但两项都落到“不支持类型”而非损坏/空文件文案）；iPhone、DRM 书没跑 |
+| “这本书打不开”（真的坏文件、DRM 书） | 空文件是“这个文件是空的”，坏掉的 EPUB（`broken.epub`）是“读不出来”，不再两端都说不支持类型。核心 `empty_and_broken_say_what_is_wrong` 过了；Android 文案按同一条错误来。**没在 Mac / Android 上再导入看弹窗**；iPhone、DRM 书没跑 |
 | 底栏模糊、第一次进书页的翻页提示 | Android 模拟器跑过（底栏正常无遮挡；三分区翻页提示首次进书展示且写入 `reader.tapHintShown`） |
 | Wi‑Fi 传书“电脑打不开这个地址？”卡片、PDF 新样子、播客页 | iPhone 模拟器跑过 Wi‑Fi 传书“打不开地址”卡片（含 Open Settings）；PDF 新样子、播客页没跑 |
 | 新撤销条（阅读页、PDF 页、笔记页） | iPhone、Android |
 | 人物页、给人物选声音、人物浮栏、排版卡片“正文 / 气泡” | Mac 跑过红楼梦气泡与人物浮栏；iPhone 模拟器全过（正文/气泡切换、人物浮栏点 `Others…` 指定 `Mrs. Bennet`、人物页计数刷新、旁白选声列表与预览） |
 | “有声书录音”同步开关；剧集在别的设备上导入成播客 | iPhone 模拟器看过“有声书录音”同步开关（含说明与开关状态）；Mac、Android 及跨设备播客导入没跑 |
 
-### 已知毛病（没修）
+### 上一轮的毛病
 
-- 听书时改某个人的声音，书页会跳回正在读的那句。
-- 认人：“周瑞家的”被认成“瑞家的”（剧本规则）。
+这两条已经改了，还没在真机上再看：
+
+- 听书时改某个人的声音：这一句用新声音重念，书页留在正在看的地方，等下一句才跟着走。播放器和阅读页的逻辑；**没再听一遍**。
+- 认人：“周瑞家的”按全名收，不再显示成“瑞家的”。`zhou_rui_keeps_her_full_name`、`jia_de_is_shown_with_its_surname` 过了。

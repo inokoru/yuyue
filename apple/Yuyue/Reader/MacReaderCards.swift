@@ -70,7 +70,9 @@ struct TypesetCard: View {
                 model.update { FontShelf.shared.apply(id, to: &$0) }
                 FontShelf.shared.ensure(id)
             })) { id, title in
-                Text(title).font(FontShelf.shared.font(id, size: 12.5)).lineLimit(1).minimumScaleFactor(0.8)
+                // fixedSize: Font.custom(size:) follows the full Dynamic Type and overflows the
+                // chip at accessibility sizes. Scale with the rest of the UI, then shrink to fit.
+                Text(title).font(face(id, 12.5)).lineLimit(1).minimumScaleFactor(0.5)
             }
             FontStatus(id: FontShelf.id(of: model.settings))
             HStack(spacing: 12) {
@@ -109,7 +111,10 @@ struct TypesetCard: View {
                     twoColumns = $0
                     model.pager.prefersTwoColumns = $0
                 }), small: true) { two, title in
-                    Label(title, systemImage: two ? "book.pages" : "doc.plaintext").labelStyle(TightLabel())
+                    HStack(spacing: 3) {
+                        Image(systemName: two ? "book.pages" : "doc.plaintext")
+                        Text(title).lineLimit(1).minimumScaleFactor(0.5)
+                    }
                 }
                 .disabled(model.settings.mode == .scrolled)
             }
@@ -241,6 +246,15 @@ struct TypesetCard: View {
             Spacer()
             content()
         }
+    }
+
+    /// The face at the UI's text scale, not the system's full Dynamic Type.
+    private func face(_ id: String, _ size: CGFloat) -> Font {
+        let size = size * TextScale.shared.factor
+        if let name = FontShelf.shared.family(id) {
+            return .custom(name, fixedSize: size)
+        }
+        return .yy(size: size)
     }
 
     /// 系统、宋体、楷体、霞鹜文楷, and the book's own face when it is another.
@@ -553,8 +567,10 @@ struct Segments<T: Hashable, Label: View>: View {
                     label(value, title)
                         .font(.yy(size: size, weight: on ? .semibold : .regular))
                         .foregroundStyle(ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(small ? 0.5 : 0.75)
                         .frame(maxWidth: .infinity)
-                        .frame(height: height)
+                        .frame(minHeight: height)
                         .background(chip, in: .rect(cornerRadius: corner))
                         .shadow(color: .black.opacity(shade), radius: 1.5, y: 0.5)
                         .animation(YYMotion.quick, value: on)
