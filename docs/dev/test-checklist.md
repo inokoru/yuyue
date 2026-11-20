@@ -152,3 +152,17 @@
 
 - 听书时改某个人的声音，书页会跳回正在读的那句。
 - 认人：“周瑞家的”被认成“瑞家的”（剧本规则）。
+
+## 第二轮自动化补测（2026-11-20，最新代码 `cd32314`）
+
+| 范围 | 执行结果 |
+|---|---|
+| `reader/` TypeScript 类型检查、构建及 Playwright | 类型检查与构建通过；安装 Playwright 浏览器后 WebKit + Chromium 共 **134/134 通过**。这是 reader WebView 层自动化，不代表原生 App 模拟器走查已完成 |
+| Android Gradle 单测 | **未能执行到测试**：直接运行缺 UniFFI 生成绑定；按 `android/build-core.sh` 生成后续准备时，Android Builder 缺 `cargo`（`cargo: command not found`），因此 Kotlin 编译失败；当前无 APK 可安装实测 |
+| Rust core (`cargo test --workspace`) | **通过**：macOS Builder 临时安装 Rust 后实跑；`yuyue-core` 300 passed / 0 failed / 5 ignored，`yuyue-mix` 5 passed / 0 failed；doc tests 均通过 |
+| Feedback relay Python tests | **通过**：临时 venv 安装声明依赖 PyNaCl 后运行 `python -m unittest -v test_relay`，6/6 通过 |
+| iOS 原生模拟器构建与启动 | **已通过**：最新代码生成 iOS Simulator app，安装到 iPhone 18 Pro 后首次启动显示空书架（0 books）；Files 导入入口可打开系统文件选择器。未导入书籍，阅读器相关流程不可达；返回系统文件选择器后预览设备短暂无法切回 App，终止后重启可恢复 |
+| iOS 原生 snapshot tests | **已在 iPhone 18 Pro simulator 执行，但测试失败于基线缺失**：6 个 `ScreenCatalogTests` 找不到磁盘上的 reference snapshot，自动记录新快照后仍判失败；这是测试基线配置缺口，非产品回归结论。测试日志另见 Builder run `8023264c-b7e9-444e-b31f-79c0e6030619` |
+| 本轮新增原生 UI 流程（撤销条、iPhone PDF / 播客页、Android 逐词跟读 / 长按对准） | **仍未验证**：iOS 空书架与 Files picker 已实测，但本轮没有将电子书/录音 fixtures 注入 iOS Simulator，Reader/PDF/播客子流程无法进入；Android Builder 缺 Rust 工具链，尚无 APK。macOS 仅完成构建，未交互检查 |
+
+本轮未修改应用源代码。以下需要另外安排：真机与跨设备同步/硬件控制、真实服务或密钥（云端语音、模型服务、Google Drive、远程书库服务器、外部导出）、真人听音或人工标注；按各条原状态保留，不将它们视作已测。
