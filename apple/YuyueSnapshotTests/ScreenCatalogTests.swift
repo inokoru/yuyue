@@ -1,6 +1,9 @@
 import SnapshotTesting
 import SwiftUI
 import XCTest
+#if canImport(AppKit)
+import AppKit
+#endif
 @testable import Yuyue
 
 /// 界面快照. These render SwiftUI on its own, with fixture words, and compare PNGs under
@@ -28,11 +31,23 @@ final class ScreenCatalogTests: XCTestCase {
             .frame(width: width, height: height)
             .environment(\.colorScheme, .light)
             .transaction { $0.disablesAnimations = true }
+        // Swift 6 forbids `#if` inside a call's argument list, so the platform
+        // branch wraps each whole `assertSnapshot` call.
+        #if os(macOS)
+        let hosting = NSHostingView(rootView: framed)
+        hosting.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        assertSnapshot(
+            of: hosting,
+            as: .image,
+            file: file, testName: testName, line: line
+        )
+        #else
         assertSnapshot(
             of: framed,
             as: .image(layout: .fixed(width: width, height: height)),
             file: file, testName: testName, line: line
         )
+        #endif
     }
 
     private struct ShelfBook {

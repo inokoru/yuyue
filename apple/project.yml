@@ -211,3 +211,6 @@ targets:
         SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
         "CODE_SIGN_IDENTITY[sdk=macosx*]": "-"
         CODE_SIGN_STYLE: Automatic
+        # On macOS the app binary lives at Contents/MacOS/Yuyue, not beside Yuyue.app.
+        "TEST_HOST[sdk=macosx*]": "$(BUILT_PRODUCTS_DIR)/Yuyue.app/Contents/MacOS/Yuyue"
+        "BUNDLE_LOADER[sdk=macosx*]": "$(TEST_HOST)"
