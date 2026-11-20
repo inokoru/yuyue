@@ -78,7 +78,13 @@ xcodebuild test -project Yuyue.xcodeproj -scheme Yuyue \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-整套重录（界面故意改了）：同一条命令前面加 `YY_SNAPSHOT_RECORD=all`。只补缺的图不用设这个变量，库会把还没有的 PNG 写下来，然后这次测试失败，再跑一次就对着新图比。
+YY_SNAPSHOT_RECORD=all xcodebuild test -project Yuyue.xcodeproj -scheme Yuyue \
+  -destination 'platform=iOS Simulator,name=iPhone 16' \
+  -only-testing:YuyueSnapshotTests \
+  CODE_SIGNING_ALLOWED=NO
+```
+
+整套重录（界面故意改了）：在 `xcodebuild` 前设置 `YY_SNAPSHOT_RECORD=all`，让 XCTest 进程能读到变量。只补缺的图不用设这个变量，库会把还没有的 PNG 写下来，然后这次测试失败，再跑一次就对着新图比。
 
 ### Android
 
