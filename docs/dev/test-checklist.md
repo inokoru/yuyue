@@ -169,3 +169,7 @@
 | macOS app 启动检查（GUI） | **已实测通过（11-21，Pluso）**：云端 Mac 上从构建产物直接启动 `Yuyue.app`，进程存活、无报错日志；窗口渲染正常——侧栏（Search·Ask、Library 的 Books/Progress/Podcasts/Audio、Notes/Word List/Collections）、书架空态「0 books」、拖入 EPUB/TXT 的引导文案、右上 + Import、左下 Sync is off 都在。启动时系统弹出「允许语阅查找本地网络上的设备」询问（传书/远程书库发现用的本地网络权限，系统行为，选 Allow 后才可传书）。截图在频道消息里。|
 
 本轮未修改应用源代码。以下需要另外安排：真机与跨设备同步/硬件控制、真实服务或密钥（云端语音、模型服务、Google Drive、远程书库服务器、外部导出）、真人听音或人工标注；按各条原状态保留，不将它们视作已测。
+| 逐词跟读（Android） | **已实测通过（11-21）**：macOS `say` 中文系统声音生成《背影》m4a 录音（audiogen 配额耗尽后的替代方案）→ Android 端导入录音 → 转写完成（页内进度条，完成后书架多出配对电子书）→ 播放条第 4 块「这本录音」出现 → 设置里打开「逐词跟读」开关 → 打开配对电子书播放：当前句词级下划线随朗读逐词前进（Sentence 4→6 of 43，7%→12%），未读句标题带虚线并显示「Not read in the recording」标签。|
+| Android 对准（长按对准） | **已实测通过（11-21）**：播放中长按正文任意句子 → 划词菜单（Thoughts/Read from…/Loop to here/**Align**/Ask/Translate/Copy/Share + 高亮颜色）→ 点 Align：阅读页跳到被按句子，播放从该句继续（Sentence 14 of 43 · 30%），跟读下划线随即从新位置跟随。|
+| iOS 文件注入途径（onOpenURL file://） | **已实测打通（11-21）**：云端 iOS 模拟器无 UI 自动化，用 `xcrun simctl openurl booted "file://<app容器>/Inbox/书.epub"` 直接触发导入：弹出「Imported 背影」toast、书架出现书卡（封面/朱自清/想读）。EPUB/PDF/音频均可走此途径注入。限制：注入后进入深层界面（阅读页/播放页）仍需点按，Builder 无法模拟；阅读器子流程以 Android 端结果为准（同一 reader 前端）。|
+| Android 阅读页空白（排查记录，非应用 bug） | 本轮模拟器上阅读页一度全空白（文本版/转写书都白）。诊断日志定位：WebView 请求被正确拦截、HTML 正常返回，但 `/app/reader.js` 404——自建 APK 缺了 CI 里的「书页」步骤（`reader/` 目录 `pnpm install && pnpm build` 生成 `reader/dist/`，经 `app/build.gradle.kts` 的 assets 目录进包）。补上该步骤重出包后阅读页完整渲染。**给 @developer：任何离线/自建 Android 包都必须先跑 reader 构建**，官方 CI（.github/workflows/ci.yml android job 的「书页」步）已包含。|
