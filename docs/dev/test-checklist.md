@@ -158,11 +158,11 @@
 | 范围 | 执行结果 |
 |---|---|
 | `reader/` TypeScript 类型检查、构建及 Playwright | 类型检查与构建通过；安装 Playwright 浏览器后 WebKit + Chromium 共 **134/134 通过**。这是 reader WebView 层自动化，不代表原生 App 模拟器走查已完成 |
-| Android Gradle 单测 | **未能执行到测试**：直接运行缺 UniFFI 生成绑定；按 `android/build-core.sh` 生成后续准备时，Android Builder 缺 `cargo`（`cargo: command not found`），因此 Kotlin 编译失败；当前无 APK 可安装实测 |
+| Android Gradle 单测与模拟器启动 | **已补测通过**：此前 Android Builder 临时安装 Rust/cargo-ndk；`android/build-core.sh` 成功编译 ARM64/ARMv7 Rust core 并生成 UniFFI 绑定，`./gradlew testDebugUnitTest` 成功。初次 ARM-only APK 在 x86_64 Pixel 9 上因缺 `libyuyue_core.so` 崩溃，属 ABI 不匹配；未改仓库 ABI 配置。**最新轮**：在 Linux Builder 副本内切到 x86_64（`build-core.sh` 的 `ABIS`、绑定源库路径与 `abiFilters` 均只改副本）重建 APK 成功，Pixel 9 重开机后安装启动正常，空书架首屏正常；期间模拟器系统 UI 无响应属模拟器故障，冷启动后恢复。 |
 | Rust core (`cargo test --workspace`) | **通过**：macOS Builder 临时安装 Rust 后实跑；`yuyue-core` 300 passed / 0 failed / 5 ignored，`yuyue-mix` 5 passed / 0 failed；doc tests 均通过 |
 | Feedback relay Python tests | **通过**：临时 venv 安装声明依赖 PyNaCl 后运行 `python -m unittest -v test_relay`，6/6 通过 |
 | iOS 原生模拟器构建与启动 | **已通过**：最新代码生成 iOS Simulator app，安装到 iPhone 18 Pro 后首次启动显示空书架（0 books）；Files 导入入口可打开系统文件选择器。未导入书籍，阅读器相关流程不可达；返回系统文件选择器后预览设备短暂无法切回 App，终止后重启可恢复 |
-| iOS 原生 snapshot tests | **通过**：iPhone 18 Pro Simulator 上 6 个 `ScreenCatalogTests` reference PNG 已加入仓库，关闭录制模式重跑 6/6 通过。基线与录制流程说明提交于 `9455c6d` |
-| 本轮新增原生 UI 流程（撤销条、iPhone PDF / 播客页、Android 逐词跟读 / 长按对准） | **仍未验证**：iOS 空书架与 Files picker 已实测，但本轮没有将电子书/录音 fixtures 注入 iOS Simulator，Reader/PDF/播客子流程无法进入；Android Builder 缺 Rust 工具链，尚无 APK。macOS 仅完成构建，未交互检查 |
+| iOS 原生 snapshot tests | **上一轮通过**：iPhone 18 Pro Simulator 上 6 个 `ScreenCatalogTests` reference PNG 已加入仓库，关闭录制模式重跑 6/6 通过，基线与录制流程说明提交于 `9455c6d`。**本轮重跑未能开始测试**：macOS Builder 已安装 XcodeGen、Rust 并生成工程/编译依赖，但 `xcodebuild test` 与 `build-for-testing` 都报 `Could not find test host for YuyueSnapshotTests`，其 `TEST_HOST` 指向不存在的 `Yuyue.app/Yuyue`；未得出新的测试断言结果。
+| 本轮新增原生 UI 流程（撤销条、iPhone PDF / 播客页、Android 逐词跟读 / 长按对准） | **部分覆盖**：Android 端 Files 导入 EPUB 全链路已实测通过——把 `beiying.epub` 分块写入 `/sdcard/Download/` 后，从书架“Import from Files”经系统选择器选中，书架出现《背影》（朱自清）；打开后 Reader 正文完整渲染（含 Read/Listen 时长与播放条），左滑翻页进度 0%→17% 正常。逐词跟读与长按对准仍未测。iOS 侧空书架与 Files picker 旧结果仍有效，fixtures 注入 iOS Simulator 未做，Reader/PDF/播客子流程未进入。macOS app 编译成功（`BUILD SUCCEEDED`）且包已取回，无 GUI 环境未交互启动；macOS 测试宿主配置问题已定位：生成的 `TEST_HOST` 用 iOS 结构 `Yuyue.app/Yuyue`，macOS 应为 `Contents/MacOS/Yuyue`（仅 Builder 副本验证修复，仓库未改）。
 
 本轮未修改应用源代码。以下需要另外安排：真机与跨设备同步/硬件控制、真实服务或密钥（云端语音、模型服务、Google Drive、远程书库服务器、外部导出）、真人听音或人工标注；按各条原状态保留，不将它们视作已测。
