@@ -22,7 +22,6 @@ struct BookRecordPage: View {
     @AppStorage("book.contentsAsGrid") private var asGrid = false
     @State private var comment = ""
     @State private var newTag = ""
-    @State private var noting = false
     @State private var deleting: BookSummary?
     @State private var about: String?
     /// The Mac's status menu: the app's own white card, under the button.
@@ -52,7 +51,6 @@ struct BookRecordPage: View {
                             standing(book).padding(.top, 16)
                             next(book).padding(.top, 12)
                         }
-                        if book.record { progressBlock(book).padding(.top, 22) }
                         tabs(book).padding(.top, wide ? 30 : 20)
                         Group {
                             switch tab {
@@ -377,7 +375,11 @@ struct BookRecordPage: View {
                     Text(book.authors.joined(separator: " · ").isEmpty ? author : book.authors.joined(separator: " · "))
                         .font(.yy(size: 13)).foregroundStyle(YYColor.t2).padding(.top, 4)
                 }
-                Text(meta(book)).font(.yy(size: 11.5)).foregroundStyle(YYColor.t3).padding(.top, 3)
+                if book.record {
+                    PaperBookTag().padding(.top, 6)
+                } else {
+                    Text(meta(book)).font(.yy(size: 11.5)).foregroundStyle(YYColor.t3).padding(.top, 3)
+                }
                 HStack(spacing: 10) {
                     Text("你的评分").font(.yy(size: 11)).foregroundStyle(YYColor.t3)
                     StarRow(rating: book.rating, size: wide ? 16 : 17) { library.setRating(book, $0) }
@@ -396,13 +398,9 @@ struct BookRecordPage: View {
         }
     }
 
-    /// EPUB · 34 章 · 约 9 小时 — 纸书 · 320 页
+    /// EPUB · 34 章 · 约 9 小时 — 纸书
     private func meta(_ book: BookSummary) -> String {
-        if book.record {
-            var parts = [String(localized: "纸书")]
-            if let m = book.manual, m.unit == .page, m.total > 0 { parts.append(String(localized: "\(m.total) 页")) }
-            return parts.joined(separator: " · ")
-        }
+        if book.record { return String(localized: "纸书") }
         var parts = [book.format.label]
         if !rows.isEmpty { parts.append(String(localized: "\(rows.count) 章")) }
         if book.readMinutes > 0 { parts.append(String(localized: "约 \(BookSummary.hours(book.readMinutes))")) }
@@ -466,26 +464,19 @@ struct BookRecordPage: View {
         #endif
     }
 
-    /// The one thing to do next: 接着读 · 第 15 章, 开始读, 重读, +20 页.
+    /// The one thing to do next: 接着读 · 第 15 章, 开始读, 重读 (ebooks), or status transition (paper books).
     @ViewBuilder private func next(_ book: BookSummary) -> some View {
         if book.record {
-            HStack(spacing: 8) {
-                if !wide {
-                    Button { noting.toggle() } label: { Image(systemName: "pencil") }
-                        .buttonStyle(RecordButton(main: false, big: true))
-                        .accessibilityLabel(String(localized: "记到第几页"))
-                }
-                if let step = book.stepTitle, let m = book.manual {
-                    Button { library.stepManualProgress(book) } label: {
-                        Text("+\(step) · 读到 \(min(m.total == 0 ? .max : m.total, m.value + max(1, m.step)))")
-                            .frame(maxWidth: wide ? nil : .infinity)
-                    }
-                    .buttonStyle(RecordButton(main: true, big: !wide))
-                } else {
-                    Button { noting = true } label: { Text("记读到哪").frame(maxWidth: wide ? nil : .infinity) }
-                        .buttonStyle(RecordButton(main: true, big: !wide))
-                }
+            let (title, target): (String, ReadingStatus) = switch book.status {
+            case .want: (String(localized: "开始读"), .reading)
+            case .reading: (String(localized: "记为读过"), .finished)
+            case .finished: (String(localized: "重读"), .reading)
+            case .paused, .dropped: (String(localized: "接着读"), .reading)
             }
+            Button { library.setStatus(book, target) } label: {
+                Text(title).frame(maxWidth: wide ? nil : .infinity)
+            }
+            .buttonStyle(RecordButton(main: true, big: !wide))
         } else {
             Button { open(book, nil) } label: {
                 Text(nextTitle(book)).frame(maxWidth: wide ? nil : .infinity)
@@ -510,83 +501,6 @@ struct BookRecordPage: View {
         if minutes < 60 { return String(localized: "\(max(1, minutes)) 分钟") }
         let h = minutes / 60, m = minutes % 60
         return m == 0 || h >= 10 ? String(localized: "\(h) 小时") : String(localized: "\(h) 小时 \(m) 分")
-    }
-
-    // MARK: 纸书: how far, by hand
-
-    @State private var valueText = ""
-    @State private var totalText = ""
-    @State private var unit = ProgressUnit.page
-
-    private func progressBlock(_ book: BookSummary) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("读到").font(.yy(size: 13, weight: .semibold)).foregroundStyle(YYColor.t1)
-                Spacer()
-                if let at = book.manual?.at {
-                    Text(Date(timeIntervalSince1970: Double(at) / 1000).formatted(.relative(presentation: .named)))
-                        .font(.yy(size: 12)).foregroundStyle(YYColor.t3)
-                }
-            }
-            if let m = book.manual, !noting {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("\(m.value)").font(.yy(size: 26, weight: .bold).monospacedDigit()).foregroundStyle(YYColor.t1)
-                        .contentTransition(.numericText())
-                        .animation(YYMotion.standard, value: m.value)
-                    Text(totalLabel(m)).font(.yy(size: 14)).foregroundStyle(YYColor.t3)
-                    Spacer()
-                    if wide {
-                        Button { noting = true } label: { Image(systemName: "pencil") }
-                            .buttonStyle(RecordButton(main: false))
-                            .accessibilityLabel(String(localized: "记到第几页"))
-                    }
-                }
-                if m.total > 0 { RecordProgressLine(value: book.progress, height: 5) }
-            } else {
-                editor(book)
-            }
-        }
-        .onAppear { fillEditor(book) }
-        .onChange(of: noting) { if noting { fillEditor(book) } }
-    }
-
-    private func totalLabel(_ m: ManualProgress) -> String {
-        switch m.unit {
-        case .page: m.total > 0 ? String(localized: "/ \(m.total) 页") : String(localized: "页")
-        case .percent: "%"
-        case .chapter: m.total > 0 ? String(localized: "/ \(m.total) 章") : String(localized: "章")
-        }
-    }
-
-    private func fillEditor(_ book: BookSummary) {
-        unit = book.manual?.unit ?? .page
-        valueText = book.manual.map { "\($0.value)" } ?? ""
-        totalText = book.manual.flatMap { $0.total > 0 && $0.unit != .percent ? "\($0.total)" : nil } ?? ""
-    }
-
-    private func editor(_ book: BookSummary) -> some View {
-        HStack(spacing: 8) {
-            TextField(unit == .percent ? "0–100" : String(localized: "读到"), text: $valueText)
-                .numberField()
-                .frame(width: 70)
-            if unit != .percent {
-                Text("/").foregroundStyle(YYColor.t3)
-                TextField(String(localized: "共"), text: $totalText)
-                    .numberField()
-                    .frame(width: 70)
-            }
-            YYSegments(items: [(ProgressUnit.page, String(localized: "页")), (.percent, "%"), (.chapter, String(localized: "章"))], selection: $unit, small: true)
-                .frame(width: 120)
-            Spacer(minLength: 0)
-            Button(String(localized: "记下")) {
-                let value = UInt32(valueText.filter(\.isNumber)) ?? 0
-                let total = UInt32(totalText.filter(\.isNumber)) ?? 0
-                library.setManualProgress(book, unit, value: value, total: total)
-                noting = false
-            }
-            .buttonStyle(RecordButton(main: true))
-        }
-        .font(.yy(size: 14).monospacedDigit())
     }
 
     // MARK: 目录 · 笔记
@@ -693,8 +607,7 @@ struct BookRecordPage: View {
     private func log(_ book: BookSummary) -> [LogLine] {
         var out: [LogLine] = [LogLine(id: "added", at: book.addedAt, text: String(localized: "加进来"))]
         if let s = book.startedAt { out.append(LogLine(id: "started", at: s, text: String(localized: "开始读"))) }
-        if let m = book.manual { out.append(LogLine(id: "manual", at: m.at, text: String(localized: "记到 "), bold: book.recordLine.replacingOccurrences(of: String(localized: "读到 "), with: ""))) }
-        if let p = (try? library.core.latestProgress(bookId: book.id)) ?? nil, let current {
+        if !book.record, let p = (try? library.core.latestProgress(bookId: book.id)) ?? nil, let current {
             out.append(LogLine(id: "at", at: p.at, text: String(localized: "读到 "), bold: String(localized: "第 \(current.number) 章 · \(current.title)")))
         }
         let byDay = Dictionary(grouping: marks) { Calendar.current.startOfDay(for: Date(timeIntervalSince1970: Double($0.at) / 1000)) }
@@ -835,15 +748,5 @@ private extension BookFormat {
         case .audio: String(localized: "有声书")
         case .podcast: String(localized: "播客")
         }
-    }
-}
-
-extension View {
-    func numberField() -> some View {
-        #if os(iOS)
-        self.keyboardType(.numberPad).textFieldStyle(.roundedBorder)
-        #else
-        self.textFieldStyle(.roundedBorder)
-        #endif
     }
 }

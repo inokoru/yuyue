@@ -65,6 +65,7 @@ extension BookSummary {
 
     /// 还剩 4 小时 20 分 · 还没读 · 读完了
     var remaining: String {
+        if !available { return String(localized: "在别的设备上") }
         let audio = format == .audio
         switch status {
         case .finished: return audio ? String(localized: "听完了") : String(localized: "读完了")

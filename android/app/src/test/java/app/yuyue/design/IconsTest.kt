@@ -38,5 +38,9 @@ class IconsTest {
             val v = CollectionIcon.vector(symbol)
             assertTrue("Collection symbol $symbol has empty vector", v.root.size > 0)
         }
+
+        assertEquals(7f, TabIcons.switchChevron.viewportWidth)
+        assertEquals(24f, TabIcons.switchChevron.viewportHeight)
+        assertTrue("TabIcons.switchChevron has no path nodes", TabIcons.switchChevron.root.size > 0)
     }
 }

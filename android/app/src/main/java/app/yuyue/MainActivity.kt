@@ -410,14 +410,14 @@ private fun RowScope.TabItem(icon: ImageVector, iconOn: ImageVector, title: Stri
         // 2px wanted; Android's line box for the word already adds about 1.6 of it.
         verticalArrangement = Arrangement.spacedBy(YY.s(0.4f), Alignment.CenterVertically),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.pressScale(press, 0.9f)) {
             // As much nothing on the left as the ⌃⌄ on the right keeps the icon over its name.
-            if (switch) androidx.compose.foundation.layout.Spacer(Modifier.width(YY.s(7)))
+            if (switch) androidx.compose.foundation.layout.Spacer(Modifier.width(7.dp))
             Box {
-                Icon(if (on) iconOn else icon, null, tint = color, modifier = Modifier.pressScale(press, 0.9f).size(YY.s(24)))
-                if (badge) Box(Modifier.align(Alignment.TopEnd).size(7.dp).offset(3.dp, (-2).dp).clip(CircleShape).background(YY.c.danger))
+                Icon(if (on) iconOn else icon, null, tint = color, modifier = Modifier.size(24.dp))
+                if (badge) Box(Modifier.align(Alignment.TopEnd).size(7.dp).offset(2.dp, (-2).dp).clip(CircleShape).background(YY.c.danger))
             }
-            if (switch) Icon(app.yuyue.shelf.PlaceIcons.switch, null, tint = color.copy(alpha = if (on) 1f else 0f), modifier = Modifier.size(YY.s(7)).padding(start = 0.dp))
+            if (switch) Icon(TabIcons.switchChevron, null, tint = color.copy(alpha = if (on) 1f else 0f), modifier = Modifier.size(width = 7.dp, height = 24.dp))
         }
         Text(title, style = YY.font(10f, if (on) FontWeight.SemiBold else FontWeight.Medium).copy(lineHeight = YY.sp(12f)), color = color)
     }

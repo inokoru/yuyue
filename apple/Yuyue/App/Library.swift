@@ -379,11 +379,6 @@ final class Library {
         run { _ = try core.setManualProgress(book: book.id, unit: unit, value: value, total: total) }
     }
 
-    /// “+20 页”.
-    func stepManualProgress(_ book: BookSummary) {
-        run { _ = try core.stepManualProgress(book: book.id) }
-    }
-
     /// 只删文件，留下记录.
     func keepRecordOnly(_ book: BookSummary) {
         closeOpenBook(book.id)
@@ -507,15 +502,16 @@ final class Library {
 
     /// How long a plain note stays.
     static let toastSeconds = 3.0
+    /// How long a two-line note with guidance stays so it can be read.
+    static let toastDetailSeconds = 4.2
     /// The seconds a deletion can be undone, counted down on its banner.
     static let undoSeconds = 5.0
-    /// Until a note goes: a banner counts its seconds, shows the red tick a moment, then rises away.
-    static func lifetime(of toast: Toast) -> Double { toast.undo == nil ? toastSeconds : undoSeconds + 1.2 }
 
     /// Waits for `toast` to finish showing, pausing an undoable banner while hovered on Mac.
     static func waitToast(_ toast: Toast) async {
         if toast.undo == nil {
-            try? await Task.sleep(for: .seconds(toastSeconds))
+            let seconds = toast.detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? toastSeconds : toastDetailSeconds
+            try? await Task.sleep(for: .seconds(seconds))
             return
         }
         var remaining = undoSeconds

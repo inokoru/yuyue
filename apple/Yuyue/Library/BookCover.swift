@@ -71,7 +71,7 @@ struct BookCover: View {
     }
 
     private var placeholder: some View {
-        CoverFace(title: book.title, author: book.authors.first, pdf: book.format == .pdf)
+        CoverFace(title: book.title, author: book.authors.first, pdf: book.format == .pdf, paper: book.record)
     }
 }
 
@@ -80,15 +80,40 @@ struct CoverFace: View {
     var title: String
     var author: String?
     var pdf: Bool
+    var paper = false
     private static let stone = Color.yyDynamic(light: YYRGBA(235, 230, 221), dark: YYRGBA(44, 40, 36))
+    /// Restrained literary cloth-bound cover tones for paper books without custom cover art.
+    private static let clothTones: [Color] = [
+        Color.yyDynamic(light: YYRGBA(233, 227, 215), dark: YYRGBA(50, 45, 39)), // warm linen
+        Color.yyDynamic(light: YYRGBA(221, 229, 225), dark: YYRGBA(39, 48, 45)), // muted sage
+        Color.yyDynamic(light: YYRGBA(222, 227, 236), dark: YYRGBA(40, 45, 54)), // slate mist
+        Color.yyDynamic(light: YYRGBA(235, 224, 218), dark: YYRGBA(54, 43, 39)), // dusty terracotta
+        Color.yyDynamic(light: YYRGBA(229, 225, 235), dark: YYRGBA(47, 43, 53)), // soft wisteria
+        Color.yyDynamic(light: YYRGBA(235, 230, 214), dark: YYRGBA(52, 48, 37)), // pale ochre
+    ]
+
+    private var surfaceColor: Color {
+        guard paper else { return Self.stone }
+        var hash: UInt64 = 5381
+        for byte in title.utf8 { hash = ((hash &<< 5) &+ hash) &+ UInt64(byte) }
+        return Self.clothTones[Int(hash % UInt64(Self.clothTones.count))]
+    }
 
     var body: some View {
         // Sized to the cover, so it reads the same on a small card and in the grid.
         GeometryReader { g in
             let unit = g.size.width / 100
             ZStack(alignment: .topLeading) {
-                // Warm stone, a shade deeper than the page and the white card, so it doesn't read as empty.
-                Self.stone
+                surfaceColor
+                if paper {
+                    // Subtle physical book-spine crease along the left edge.
+                    LinearGradient(
+                        colors: [.black.opacity(0.08), .white.opacity(0.22), .black.opacity(0.05), .clear],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: max(3, 8 * unit))
+                }
                 VStack(alignment: .leading, spacing: 5 * unit) {
                     Text(title)
                         .font(YYFontFamily.serif.font(size: 14 * unit, weight: .semibold))
@@ -101,7 +126,9 @@ struct CoverFace: View {
                             .lineLimit(1)
                     }
                 }
-                .padding(11 * unit)
+                .padding(.leading, paper ? 14 * unit : 11 * unit)
+                .padding(.trailing, 10 * unit)
+                .padding(.vertical, 11 * unit)
                 if pdf {
                     Text(verbatim: "PDF")
                         .font(.system(size: 8.5 * unit, weight: .medium))

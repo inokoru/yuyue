@@ -10,11 +10,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -89,17 +91,62 @@ fun BookCover(book: BookSummary, modifier: Modifier = Modifier) {
 
 @Composable
 private fun Placeholder(book: BookSummary) {
-    CoverFace(book.title, book.authors.firstOrNull(), book.format == uniffi.yuyue_core.BookFormat.PDF)
+    CoverFace(book.title, book.authors.firstOrNull(), book.format == uniffi.yuyue_core.BookFormat.PDF, paper = book.record)
+}
+
+private val clothLight = listOf(
+    Color(0xFFE9E3D7), // warm linen
+    Color(0xFFDDE5E1), // muted sage
+    Color(0xFFDEE3EC), // slate mist
+    Color(0xFFEBE0DA), // dusty terracotta
+    Color(0xFFE5E1EB), // soft wisteria
+    Color(0xFFEBE6D6), // pale ochre
+)
+private val clothDark = listOf(
+    Color(0xFF322D27),
+    Color(0xFF27302D),
+    Color(0xFF282D36),
+    Color(0xFF362B27),
+    Color(0xFF2F2B35),
+    Color(0xFF343025),
+)
+
+private fun clothToneIndex(title: String): Int {
+    var hash = 5381UL
+    for (byte in title.toByteArray(Charsets.UTF_8)) {
+        hash = ((hash shl 5) + hash) + byte.toUByte().toULong()
+    }
+    return (hash % clothLight.size.toULong()).toInt()
 }
 
 /** The title page a cover shows when the book has no image. The shelf snapshot uses the same face. */
 @Composable
-internal fun CoverFace(title: String, author: String?, pdf: Boolean, modifier: Modifier = Modifier) {
+internal fun CoverFace(title: String, author: String?, pdf: Boolean, modifier: Modifier = Modifier, paper: Boolean = false) {
+    val bg = when {
+        paper -> (if (YY.dark) clothDark else clothLight)[clothToneIndex(title)]
+        else -> if (YY.dark) Color(0xFF2C2824) else Color(0xFFEBE6DD)
+    }
     // Sized to the cover, so it reads the same on a small card and in the grid.
-    // Warm stone, a shade deeper than the page and the white card, so it doesn't read as empty.
-    BoxWithConstraints(modifier.fillMaxSize().background(if (YY.dark) Color(0xFF2C2824) else Color(0xFFEBE6DD))) {
+    BoxWithConstraints(modifier.fillMaxSize().background(bg)) {
         val unit = maxWidth.value / 100
-        Column(Modifier.padding((11 * unit).dp)) {
+        if (paper) {
+            Box(
+                Modifier
+                    .fillMaxHeight()
+                    .width(maxOf(3f, 8 * unit).dp)
+                    .background(
+                        androidx.compose.ui.graphics.Brush.horizontalGradient(
+                            listOf(
+                                Color.Black.copy(alpha = 0.08f),
+                                Color.White.copy(alpha = 0.22f),
+                                Color.Black.copy(alpha = 0.05f),
+                                Color.Transparent,
+                            )
+                        )
+                    )
+            )
+        }
+        Column(Modifier.padding(start = (if (paper) 14 * unit else 11 * unit).dp, end = (10 * unit).dp, top = (11 * unit).dp, bottom = (11 * unit).dp)) {
             Text(
                 title, maxLines = 4, overflow = TextOverflow.Ellipsis,
                 fontFamily = YY.serif, fontWeight = FontWeight.SemiBold, fontSize = (14 * unit).sp, lineHeight = (18 * unit).sp,

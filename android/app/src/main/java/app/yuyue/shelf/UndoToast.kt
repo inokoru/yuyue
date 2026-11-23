@@ -5,13 +5,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -73,7 +76,8 @@ fun UndoToast(toast: Library.Toast, undo: () -> Unit, modifier: Modifier = Modif
             delay(Library.UNDO_SETTLE_MS)
         } else {
             // Goes as it came, just before Library takes it off, rather than vanishing mid-frame.
-            delay(Library.TOAST_MS - app.yuyue.design.YYDuration.Standard - app.yuyue.design.YYDuration.Exit - 60)
+            val hold = if (toast.detail.isNotBlank()) Library.TOAST_DETAIL_MS else Library.TOAST_MS
+            delay(hold - app.yuyue.design.YYDuration.Standard - app.yuyue.design.YYDuration.Exit - 60)
         }
         shown.animateTo(0f, YYMotion.exit())
     }
@@ -85,6 +89,8 @@ fun UndoToast(toast: Library.Toast, undo: () -> Unit, modifier: Modifier = Modif
         button = b,
         undoShown = !done && b > 0f,
         undo = undo,
+        detail = toast.detail,
+        icon = toast.icon,
         modifier = modifier
             .pointerInput(toast.id) {
                 val velocityTracker = VelocityTracker()
@@ -140,15 +146,21 @@ internal fun UndoToastPlate(
     undoShown: Boolean,
     undo: () -> Unit,
     modifier: Modifier = Modifier,
+    detail: String = "",
+    icon: Library.Toast.Icon = if (error) Library.Toast.Icon.Error else Library.Toast.Icon.Check,
 ) {
     val eink = if (app.yuyue.design.Prefs.isReady) app.yuyue.design.rememberPref("eink.on", false).value else false
     val b = button.coerceIn(0f, 1f)
+    val hasDetail = detail.isNotBlank()
+    val shape = if (hasDetail) RoundedCornerShape(YY.s(20)) else CircleShape
+    val isError = error || icon == Library.Toast.Icon.Error
+    val isDownload = !danger && !isError && icon == Library.Toast.Icon.Download
     Row(
         modifier
             .widthIn(max = 420.dp)
-            .shadow(if (eink) 0.dp else 11.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.04f), spotColor = Color.Black.copy(alpha = if (YY.dark) 0.4f else 0.08f))
-            .background(if (YY.dark) Color(0xFF2A2A2C) else Color(0xFFFCFCFC), CircleShape)
-            .border(0.5.dp, if (YY.dark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.14f), CircleShape)
+            .shadow(if (eink) 0.dp else 11.dp, shape, ambientColor = Color.Black.copy(alpha = 0.04f), spotColor = Color.Black.copy(alpha = if (YY.dark) 0.4f else 0.08f))
+            .background(if (YY.dark) Color(0xFF2A2A2C) else Color(0xFFFCFCFC), shape)
+            .border(0.5.dp, if (YY.dark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.14f), shape)
             .heightIn(min = YY.s(40))
             .padding(start = YY.s(14), end = YY.s(18f - 16.5f * b))
             .semantics(mergeDescendants = true) {
@@ -157,16 +169,36 @@ internal fun UndoToastPlate(
             },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier.size(YY.s(17)).background(if (danger || error) YY.c.danger else Done, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(if (error) Icons.bang else Icons.check, null, tint = Color.White, modifier = Modifier.size(YY.s(12)))
+        if (isDownload) {
+            Box(
+                Modifier.size(YY.s(22)).background(YY.c.inset, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.cloudDownload, null, tint = YY.c.t2, modifier = Modifier.size(YY.s(13.5f)))
+            }
+        } else {
+            Box(
+                Modifier.size(YY.s(17)).background(if (danger || isError) YY.c.danger else Done, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(if (isError) Icons.bang else Icons.check, null, tint = Color.White, modifier = Modifier.size(YY.s(12)))
+            }
         }
-        Text(
-            title, style = YY.font(13f, FontWeight.Medium), color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = YY.s(10), top = 4.dp, bottom = 4.dp).weight(1f, fill = false),
-        )
+        Column(
+            modifier = Modifier
+                .padding(
+                    start = YY.s(10),
+                    top = if (hasDetail) YY.s(8) else 4.dp,
+                    bottom = if (hasDetail) YY.s(8) else 4.dp,
+                )
+                .weight(1f, fill = false),
+            verticalArrangement = Arrangement.spacedBy(YY.s(1.5f)),
+        ) {
+            Text(title, style = YY.font(13f, FontWeight.Medium), color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (hasDetail) {
+                Text(detail, style = YY.font(11.5f), color = YY.c.t2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
         if (b > 0f) {
             Box(
                 Modifier

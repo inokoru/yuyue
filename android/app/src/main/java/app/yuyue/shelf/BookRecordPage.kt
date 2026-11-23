@@ -62,14 +62,12 @@ import app.yuyue.library.dayText
 import app.yuyue.library.hoursText
 import app.yuyue.library.recordLine
 import app.yuyue.library.remaining
-import app.yuyue.library.stepTitle
 import app.yuyue.library.title
 import app.yuyue.t
 import uniffi.yuyue_core.BookFormat
 import uniffi.yuyue_core.BookSummary
 import uniffi.yuyue_core.Mark
 import uniffi.yuyue_core.Position
-import uniffi.yuyue_core.ProgressUnit
 import uniffi.yuyue_core.ReadingStatus
 
 private enum class RecordTab { Contents, About, Notes, Podcast, Log }
@@ -108,7 +106,11 @@ private fun Record(library: Library, book: BookSummary, pick: () -> Unit, delete
             Column(Modifier.weight(1f)) {
                 Text(book.title, fontFamily = YY.serif, fontWeight = FontWeight.Bold, fontSize = 20.sp, lineHeight = 27.sp, color = YY.c.t1, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 if (book.authors.isNotEmpty()) Text(book.authors.joinToString(" · "), fontSize = 13.sp, color = YY.c.t2, modifier = Modifier.padding(top = 4.dp))
-                Text(meta(book, rows), fontSize = 11.5.sp, color = YY.c.t3, style = YY.tnum, modifier = Modifier.padding(top = 3.dp))
+                if (book.record) {
+                    PaperBookTag(Modifier.padding(top = 6.dp))
+                } else {
+                    Text(meta(book, rows), fontSize = 11.5.sp, color = YY.c.t3, style = YY.tnum, modifier = Modifier.padding(top = 3.dp))
+                }
                 Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(t("你的评分"), fontSize = 11.sp, color = YY.c.t3)
                     StarRow(book.rating?.toInt(), 17f) { library.setRating(book, it) }
@@ -124,17 +126,16 @@ private fun Record(library: Library, book: BookSummary, pick: () -> Unit, delete
                 StatusMenu(menu, { menu = false }, book, library, pick, delete)
             }
         }
-        // The one thing to do next: 接着读 · 第 15 章, 开始读, 重读, +20 页.
-        var noting by remember(book.id) { mutableStateOf(false) }
+        // The one thing to do next: 接着读 · 第 15 章, 开始读, 重读 (ebooks), or status transition (paper books).
         Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (book.record) {
-                RecordButton("", false, big = true, icon = Icons.edit) { noting = !noting }
-                val m = book.manual
-                val step = book.stepTitle
-                if (step != null && m != null) {
-                    val to = minOf(if (m.total == 0u) Int.MAX_VALUE else m.total.toInt(), m.value.toInt() + maxOf(1, m.step.toInt()))
-                    RecordButton(t("+%@ · 读到 %lld", step, to), true, big = true, modifier = Modifier.weight(1f)) { library.stepManualProgress(book) }
-                } else RecordButton(t("记读到哪"), true, big = true, modifier = Modifier.weight(1f)) { noting = true }
+                val (label, target) = when (book.status) {
+                    ReadingStatus.WANT -> t("开始读") to ReadingStatus.READING
+                    ReadingStatus.READING -> t("记为读过") to ReadingStatus.FINISHED
+                    ReadingStatus.FINISHED -> t("重读") to ReadingStatus.READING
+                    ReadingStatus.PAUSED, ReadingStatus.DROPPED -> t("接着读") to ReadingStatus.READING
+                }
+                RecordButton(label, true, big = true, modifier = Modifier.weight(1f)) { library.setStatus(book, target) }
             } else {
                 val next = when {
                     book.status == ReadingStatus.FINISHED -> t("重读")
@@ -145,7 +146,6 @@ private fun Record(library: Library, book: BookSummary, pick: () -> Unit, delete
                 RecordButton(next, true, big = true, modifier = Modifier.weight(1f)) { open(null) }
             }
         }
-        if (book.record) PaperProgress(library, book, noting) { noting = it }
         // 目录 · 简介 · 笔记 · 电台 · 记录
         var brewingStudio by remember { mutableStateOf(false) }
         val mentions = remember(book.id, book.title, brewingStudio) {
@@ -237,12 +237,9 @@ private fun Record(library: Library, book: BookSummary, pick: () -> Unit, delete
     }
 }
 
-/** EPUB · 34 章 · 约 9 小时 — 纸书 · 320 页 */
+/** EPUB · 34 章 · 约 9 小时 — 纸书 */
 private fun meta(book: BookSummary, rows: List<ChapterRow>): String {
-    if (book.record) {
-        val m = book.manual
-        return listOfNotNull(t("纸书"), if (m != null && m.unit == ProgressUnit.PAGE && m.total > 0u) t("%lld 页", m.total.toInt()) else null).joinToString(" · ")
-    }
+    if (book.record) return t("纸书")
     val label = when (book.format) {
         BookFormat.EPUB -> "EPUB"; BookFormat.TXT -> "TXT"; BookFormat.PDF -> "PDF"; BookFormat.MOBI -> "Kindle"
         BookFormat.AUDIO -> t("有声书"); BookFormat.PODCAST -> t("播客")
@@ -282,61 +279,6 @@ private fun TabChip(icon: ImageVector, title: String, count: Int?, on: Boolean, 
         Icon(icon, null, tint = if (on) YY.c.t1 else YY.c.t2, modifier = Modifier.size(15.dp))
         Text(title, fontSize = 12.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, color = YY.c.t1)
         if (count != null) Text("$count", fontSize = 10.5.sp, color = YY.c.t3, style = YY.tnum)
-    }
-}
-
-/** 纸书: how far, by hand. */
-@Composable
-private fun PaperProgress(library: Library, book: BookSummary, noting: Boolean, setNoting: (Boolean) -> Unit) {
-    Column(Modifier.padding(top = 22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(t("读到"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1, modifier = Modifier.weight(1f))
-            book.manual?.let { Text(agoText(it.at), fontSize = 12.sp, color = YY.c.t3, style = YY.tnum) }
-        }
-        val m = book.manual
-        if (m != null && !noting) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("${m.value}", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = YY.c.t1, style = YY.tnum, modifier = Modifier.alignByBaseline())
-                Text(when (m.unit) {
-                    ProgressUnit.PAGE -> if (m.total > 0u) t("/ %lld 页", m.total.toInt()) else t("页")
-                    ProgressUnit.PERCENT -> "%"
-                    ProgressUnit.CHAPTER -> if (m.total > 0u) t("/ %lld 章", m.total.toInt()) else t("章")
-                }, fontSize = 14.sp, color = YY.c.t3, style = YY.tnum, modifier = Modifier.alignByBaseline())
-            }
-            if (m.total > 0u) ChapterBar(emptyList(), book.progress)
-        } else {
-            var unit by remember(book.id) { mutableStateOf(m?.unit ?: ProgressUnit.PAGE) }
-            var value by remember(book.id) { mutableStateOf(m?.value?.toString() ?: "") }
-            var total by remember(book.id) { mutableStateOf(m?.takeIf { it.total > 0u && it.unit != ProgressUnit.PERCENT }?.total?.toString() ?: "") }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                NumberField(value, if (unit == ProgressUnit.PERCENT) "0–100" else t("读到")) { value = it }
-                if (unit != ProgressUnit.PERCENT) {
-                    Text("/", color = YY.c.t3)
-                    NumberField(total, t("共")) { total = it }
-                }
-                Row(Modifier.clip(RoundedCornerShape(8.dp)).background(YY.c.inset).padding(2.dp)) {
-                    for ((u, name) in listOf(ProgressUnit.PAGE to t("页"), ProgressUnit.PERCENT to "%", ProgressUnit.CHAPTER to t("章"))) {
-                        Box(Modifier.clip(RoundedCornerShape(6.dp)).background(if (u == unit) YY.c.card else Color.Transparent).clickable { unit = u }.padding(horizontal = 10.dp, vertical = 5.dp)) {
-                            Text(name, fontSize = 12.sp, color = YY.c.t1)
-                        }
-                    }
-                }
-                Spacer(Modifier.weight(1f))
-                RecordButton(t("记下"), true) {
-                    library.setManualProgress(book, unit, value.filter(Char::isDigit).toIntOrNull() ?: 0, total.filter(Char::isDigit).toIntOrNull() ?: 0)
-                    setNoting(false)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun NumberField(text: String, hint: String, change: (String) -> Unit) {
-    Box(Modifier.width(64.dp).height(32.dp).clip(RoundedCornerShape(8.dp)).background(YY.c.card).border(0.5.dp, YY.c.line, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp), contentAlignment = Alignment.CenterStart) {
-        if (text.isEmpty()) Text(hint, fontSize = 14.sp, color = YY.c.t3)
-        BasicTextField(text, change, singleLine = true, textStyle = TextStyle(fontSize = 14.sp, color = YY.c.t1), cursorBrush = SolidColor(YY.c.t1),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
     }
 }
 
@@ -469,12 +411,11 @@ private fun Notes(library: Library, book: BookSummary, marks: List<Mark>, open: 
 private fun log(library: Library, book: BookSummary, marks: List<Mark>, current: ChapterRow?): List<Triple<Long, String, String>> {
     val out = mutableListOf(Triple(book.addedAt, t("加进来"), ""))
     book.startedAt?.let { out += Triple(it, t("开始读"), "") }
-    book.manual?.let { out += Triple(it.at, t("记到 "), book.recordLine.replace(t("读到 "), "")) }
-    val p = runCatching { library.core.latestProgress(book.id) }.getOrNull()
+    val p = if (book.record) null else runCatching { library.core.latestProgress(book.id) }.getOrNull()
     if (p != null && current != null) out += Triple(p.at, t("读到 "), t("第 %lld 章", current.number) + " · " + current.title)
     marks.groupBy { java.util.Calendar.getInstance().apply { timeInMillis = it.at; set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0) }.timeInMillis }
         .forEach { (day, list) -> out += Triple(day + 1, t("划了 %lld 句", list.size), "") }
     book.finishedAt?.let { out += Triple(it, t("读完"), book.rating?.let { r -> "★".repeat(r.toInt()) } ?: "") }
-    if (book.status == ReadingStatus.PAUSED || book.status == ReadingStatus.DROPPED) (book.openedAt ?: book.manual?.at)?.let { out += Triple(it + 1, book.status.title, "") }
+    if (book.status == ReadingStatus.PAUSED || book.status == ReadingStatus.DROPPED) (book.openedAt ?: book.startedAt ?: book.addedAt).let { out += Triple(it + 1, book.status.title, "") }
     return out.sortedByDescending { it.first }
 }

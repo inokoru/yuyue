@@ -45,21 +45,46 @@ struct UndoToast: View {
     @AppStorage(EInk.key) private var eink = false
 
     private var canUndo: Bool { toast.undo != nil && !done }
+    private var isError: Bool { toast.icon.hasPrefix("exclamationmark") || toast.icon == "thermometer.high" }
+    private var isCloud: Bool { !toast.danger && !isError && toast.icon == "icloud.and.arrow.down" }
+    private var hasDetail: Bool { !toast.detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 20 * k)
         HStack(spacing: 0) {
-            ZStack {
-                Circle().fill(toast.danger ? YYColor.danger : UndoToast.done)
-                Image(systemName: "checkmark")
-                    .font(.yy(size: 8 * k, weight: .bold))
-                    .foregroundStyle(.white)
+            if isCloud {
+                ZStack {
+                    Circle().fill(YYColor.inset)
+                    Image(systemName: "icloud.and.arrow.down")
+                        .font(.yy(size: 10.5 * k, weight: .semibold))
+                        .foregroundStyle(YYColor.t2)
+                }
+                .frame(width: 22 * k, height: 22 * k)
+                .padding(.trailing, 10 * k)
+            } else {
+                ZStack {
+                    Circle().fill((toast.danger || isError) ? YYColor.danger : UndoToast.done)
+                    Image(systemName: isError ? "exclamationmark" : "checkmark")
+                        .font(.yy(size: 8 * k, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 17 * k, height: 17 * k)
+                .padding(.trailing, 10 * k)
             }
-            .frame(width: 17 * k, height: 17 * k)
-            .padding(.trailing, 10 * k)
-            Text(toast.title)
-                .font(.yy(size: 13 * k, weight: .medium))
-                .foregroundStyle(YYColor.t1)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 1.5 * k) {
+                Text(toast.title)
+                    .font(.yy(size: 13 * k, weight: .medium))
+                    .foregroundStyle(YYColor.t1)
+                    .lineLimit(1)
+                if hasDetail {
+                    Text(toast.detail)
+                        .font(.yy(size: 11.5 * k))
+                        .foregroundStyle(YYColor.t2)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.vertical, hasDetail ? 8 * k : 4 * k)
             if canUndo {
                 Button(action: undo) {
                     Image(systemName: "arrow.uturn.backward")
@@ -86,9 +111,9 @@ struct UndoToast: View {
         }
         .padding(.leading, 14 * k)
         .padding(.trailing, (canUndo ? 8 : 18) * k)
-        .frame(height: 40 * k)
-        .background(UndoToast.fill, in: .capsule)
-        .overlay(Capsule().strokeBorder(UndoToast.edge, lineWidth: 0.5))
+        .frame(minHeight: 40 * k)
+        .background(UndoToast.fill, in: shape)
+        .overlay(shape.strokeBorder(UndoToast.edge, lineWidth: 0.5))
         .shadow(color: .black.opacity(eink ? 0 : 0.03), radius: 1, y: 1)
         .shadow(color: .black.opacity(eink ? 0 : 0.07), radius: 11, y: 6)
         .frame(maxWidth: 420)

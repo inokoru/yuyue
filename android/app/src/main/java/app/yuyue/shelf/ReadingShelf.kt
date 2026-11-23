@@ -111,7 +111,12 @@ fun ReadingShelf(library: Library, books: List<BookSummary>, open: (BookSummary,
             StripRow(books, current.id) { b -> if (b.id == current.id) open(b, null) else picked = b.id }
             AnimatedContent(current, transitionSpec = { fadeIn(YYMotion.standard()) togetherWith fadeOut(YYMotion.exit()) }, contentKey = { it.id }, label = "reading") { b ->
                 ReadingLine(
-                    if (playing(b)) Icons.waveform else LineIcons.headset, b.title, meta(b), b.progress,
+                    when {
+                        !b.available -> Icons.cloudDownload
+                        playing(b) -> Icons.waveform
+                        else -> LineIcons.headset
+                    },
+                    b.title, meta(b), b.progress,
                     percent = b.percent, listen = { listen(b) }, read = { read(b) },
                 )
             }
@@ -175,13 +180,16 @@ private fun Strip(book: BookSummary, on: Boolean, index: Int, onIndex: Int, open
         CoverStrip(
             book, book.percent, StripW, RowH,
             Modifier.wrapContentWidth(Alignment.Start, unbounded = true).width(StripW).fillMaxHeight()
-                .graphicsLayer { alpha = 1f - open.value }.align(Alignment.TopStart),
+                .graphicsLayer { alpha = (1f - open.value) * if (book.available) 1f else 0.55f }.align(Alignment.TopStart),
         )
         if (on || showCover) {
             Box(
                 Modifier.wrapContentWidth(Alignment.Start, unbounded = true).width(CoverW).fillMaxHeight()
                     .graphicsLayer { alpha = open.value }.align(Alignment.TopStart),
-            ) { CoverFill(book) }
+            ) {
+                Box(Modifier.fillMaxSize().alpha(if (book.available) 1f else 0.45f)) { CoverFill(book) }
+                if (!book.available) UnavailableBadge(Modifier.align(Alignment.BottomEnd))
+            }
         }
     }
 }
@@ -275,14 +283,24 @@ private fun One(book: BookSummary, playing: Boolean, read: () -> Unit, listen: (
     Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
         val shape = RoundedCornerShape(9.dp)
         val borderColor = if (YY.dark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f)
-        Box(Modifier.size(CoverW, RowH).clip(shape).border(0.5.dp, borderColor, shape).clickable(onClick = read)) { CoverFill(book) }
+        Box(Modifier.size(CoverW, RowH).clip(shape).border(0.5.dp, borderColor, shape).clickable(onClick = read)) {
+            Box(Modifier.fillMaxSize().alpha(if (book.available) 1f else 0.45f)) { CoverFill(book) }
+            if (!book.available) UnavailableBadge(Modifier.align(Alignment.BottomEnd))
+        }
         Column(Modifier.weight(1f).height(RowH).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = read).padding(top = 4.dp)) {
             Text(book.title, fontFamily = YY.serif, fontWeight = FontWeight.Medium, fontSize = 21.sp, lineHeight = 27.sp, letterSpacing = 0.5.sp, color = YY.c.t1, maxLines = 3, overflow = TextOverflow.Ellipsis)
             book.author?.let { Text(it, fontSize = 13.sp, color = YY.c.t3, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 5.dp)) }
             Spacer(Modifier.weight(1f))
             Text(meta(book), fontSize = 12.5.sp, color = YY.c.t3, style = YY.tnum, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(bottom = 14.dp))
             Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Mark(if (playing) Icons.waveform else LineIcons.headset, listen)
+                Mark(
+                    when {
+                        !book.available -> Icons.cloudDownload
+                        playing -> Icons.waveform
+                        else -> LineIcons.headset
+                    },
+                    listen,
+                )
                 Spacer(Modifier.weight(1f))
                 Text(book.percent, fontSize = 12.5.sp, color = YY.c.t3, style = YY.tnum)
             }
@@ -312,10 +330,28 @@ private fun ReadingLine(
 /** The thin drawing at the head of the line; with an action, 听. */
 @Composable
 private fun Mark(icon: androidx.compose.ui.graphics.vector.ImageVector, action: (() -> Unit)?) {
+    val label = when {
+        icon === Icons.cloudDownload -> t("在别的设备上")
+        icon === Icons.waveform -> t("正在听")
+        else -> t("听")
+    }
     Box(
-        Modifier.size(34.dp).clip(CircleShape).then(if (action != null) Modifier.clickable(onClickLabel = t("听"), onClick = action) else Modifier),
+        Modifier.size(34.dp).clip(CircleShape).then(if (action != null) Modifier.clickable(onClickLabel = label, onClick = action) else Modifier),
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, null, tint = YY.c.t1, modifier = Modifier.size(if (icon === LineIcons.headset || icon === LineIcons.book) 34.dp else 22.dp)) }
+    ) {
+        Icon(
+            icon, null,
+            tint = if (icon === Icons.cloudDownload) YY.c.t2 else YY.c.t1,
+            modifier = Modifier.size(if (icon === LineIcons.headset || icon === LineIcons.book) 34.dp else 22.dp),
+        )
+    }
+}
+
+@Composable
+private fun UnavailableBadge(modifier: Modifier = Modifier) {
+    Box(modifier.padding(6.dp).size(24.dp).clip(CircleShape).background(YY.c.card), contentAlignment = Alignment.Center) {
+        Icon(Icons.cloudDownload, null, tint = YY.c.t2, modifier = Modifier.size(13.dp))
+    }
 }
 
 /** A hairline the width of the row; the part read drawn over it in ink, never shorter than the mark. */

@@ -496,7 +496,7 @@ struct MacShelfView: View {
 
     /// 刚刚同步, 5 分钟前同步, 今天 9:40 同步.
     private func syncedAgo(_ date: Date?) -> String {
-        let ago = date.map(SyncSettings.ago) ?? String(localized: "刚刚")
+        let ago = date.map(Sync.ago) ?? String(localized: "刚刚")
         return ago + (ago.last?.isNumber == true ? String(localized: " 同步") : String(localized: "同步"))
     }
 
@@ -818,88 +818,111 @@ struct MacShelfView: View {
 
     private var main: some View {
         ScrollViewReader { scroll in
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                mainHeader
+        Group {
+            if shown.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    mainHeader
 
-                if !library.imports.isEmpty {
-                    MacImportCard(library: library, tint: tint) { id in reveal(id) }
-                        .padding(.leading, 22)
-                        .padding(.trailing, 28)
-                        .padding(.bottom, 18)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    if !library.imports.isEmpty {
+                        MacImportCard(library: library, tint: tint) { id in reveal(id) }
+                            .padding(.leading, 22)
+                            .padding(.trailing, 28)
+                            .padding(.bottom, 18)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+
+                    empty
+                        .padding(.horizontal, 28)
+                        .padding(.bottom, 56)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-
-                if !reading.isEmpty {
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        readingHeader(count: allReading.count)
-                        Group {
-                            if reading.count == 1, let book = reading.first {
-                                readingTile(book, tinted: true)
-                                    .frame(maxWidth: 316, alignment: .leading)
-                            } else {
-                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 266), spacing: 12)], spacing: 12) {
-                                    ForEach(reading) { book in
-                                        readingTile(book, tinted: true)
+                        mainHeader
+
+                        if !library.imports.isEmpty {
+                            MacImportCard(library: library, tint: tint) { id in reveal(id) }
+                                .padding(.leading, 22)
+                                .padding(.trailing, 28)
+                                .padding(.bottom, 18)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+
+                        if !reading.isEmpty {
+                            VStack(alignment: .leading, spacing: 0) {
+                                readingHeader(count: allReading.count)
+                                Group {
+                                    if reading.count == 1, let book = reading.first {
+                                        // 暂时关闭封面取色染色，恢复浅色卡片；需要时改回 tinted: true
+                                        // readingTile(book, tinted: true)
+                                        readingTile(book, tinted: false)
+                                            .frame(maxWidth: 316, alignment: .leading)
+                                    } else {
+                                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 266), spacing: 12)], spacing: 12) {
+                                            ForEach(reading) { book in
+                                                // readingTile(book, tinted: true)
+                                                readingTile(book, tinted: false)
+                                            }
+                                        }
                                     }
                                 }
+                                // A book moving into or out of the cards moves, not jumps.
+                                .animation(YYMotion.layout, value: reading.map(\.id))
+                                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { readingWidth = $0 }
                             }
+                            .padding(.leading, 22)
+                            .padding(.trailing, 28)
+                            .padding(.top, 14)
+                            .padding(.bottom, 20)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(readingBand)
+                            .padding(.bottom, 20)
                         }
-                        // A book moving into or out of the cards moves, not jumps.
-                        .animation(YYMotion.layout, value: reading.map(\.id))
-                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { readingWidth = $0 }
-                    }
-                    .padding(.leading, 22)
-                    .padding(.trailing, 28)
-                    .padding(.top, 14)
-                    .padding(.bottom, 20)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(readingBand)
-                    .padding(.bottom, 20)
-                }
 
-                // The books in the 在读 cards above aren't shown again below them.
-                let carded = Set(reading.map(\.id))
-                let books = shown.filter { !carded.contains($0.id) }
-                if !books.isEmpty || carded.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack {
-                        Text(carded.isEmpty
-                             ? String(localized: "\(books.count) 本")
-                             : String(localized: "其余 \(books.count) 本"))
-                            .font(.yy(size: 12.5, weight: .semibold))
-                            .foregroundStyle(YYColor.t1)
-                        Spacer()
-                        sortMenu
-                    }
-                    .padding(.horizontal, 2)
-                    .padding(.bottom, 14)
+                        // The books in the 在读 cards above aren't shown again below them.
+                        let carded = Set(reading.map(\.id))
+                        let books = shown.filter { !carded.contains($0.id) }
+                        if !books.isEmpty {
+                            VStack(alignment: .leading, spacing: 0) {
+                                HStack {
+                                    Text(carded.isEmpty
+                                         ? String(localized: "\(books.count) 本")
+                                         : String(localized: "其余 \(books.count) 本"))
+                                        .font(.yy(size: 12.5, weight: .semibold))
+                                        .foregroundStyle(YYColor.t1)
+                                    Spacer()
+                                    sortMenu
+                                }
+                                .padding(.horizontal, 2)
+                                .padding(.bottom, 14)
 
-                    if books.isEmpty {
-                        empty
-                    } else if case .status(let s) = filter ?? .all {
-                        statusShelves(s, books)
-                    } else {
-                        LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
-                            ForEach(books) { book in
-                                cell(book).id(book.id)
-                                    .transition(.scale(scale: 0.9).combined(with: .opacity))
+                                if case .status(let s) = filter ?? .all {
+                                    statusShelves(s, books)
+                                } else {
+                                    LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
+                                        ForEach(books) { book in
+                                            cell(book).id(book.id)
+                                                .transition(.scale(scale: 0.9).combined(with: .opacity))
+                                        }
+                                    }
+                                    // Sorted another way, a book brought in or taken out, each moves to its place.
+                                    .animation(YYMotion.layout, value: books.map(\.id))
+                                }
                             }
+                            .padding(.leading, 22)
+                            .padding(.trailing, 28)
                         }
-                        // Sorted another way, a book brought in or taken out, each moves to its place.
-                        .animation(YYMotion.layout, value: books.map(\.id))
                     }
+                    .padding(.bottom, 80)
                 }
-                .padding(.leading, 22)
-                .padding(.trailing, 28)
-                }
+                .scrollDisabled(menu != nil)
             }
-            .padding(.bottom, 80)
         }
         // The title sits level with the window's buttons, as in the shelf's design.
         .ignoresSafeArea(.container, edges: .top)
         .blur(radius: dropCount != nil ? 5 : 0)
-        .scrollDisabled(menu != nil)
         .background(YYColor.bg)
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { mainFrame = $0 }
         .overlay { menuLayer.animation(YYMotion.quick, value: menu?.book) }
@@ -1067,54 +1090,32 @@ struct MacShelfView: View {
 
     @ViewBuilder private var empty: some View {
         if filter == .audio {
-            VStack(spacing: 12) {
-                PodcastStationeryCard(cornerRadius: 16) {
-                    VStack(spacing: 0) {
-                        VStack(spacing: 11) {
-                            PodcastGlyphView(glyph: .waveform, size: 20, lineWidth: 1.55)
-                                .foregroundStyle(tint.accent)
-                                .frame(width: 44, height: 44)
-                                .background(PodcastStyle.rowTintWash(tint, scheme), in: Circle())
-                                .overlay(Circle().strokeBorder(PodcastStyle.accentRing(tint, scheme), lineWidth: 0.5))
-
-                            VStack(spacing: 4) {
-                                Text("还没有有声书")
-                                    .font(PodcastStyle.songti(17))
-                                    .foregroundStyle(YYColor.t1)
-                                Text("把 M4B、MP3、M4A 拖进窗口，或导入音频与书架上的电子书合成听读同步。")
-                                    .font(.yy(size: 12))
-                                    .foregroundStyle(YYColor.t3)
-                                    .multilineTextAlignment(.center)
-                                    .lineSpacing(4)
-                            }
-                        }
-                        .padding(.horizontal, 24)
-                        .padding(.top, 24)
-                        .padding(.bottom, 18)
-
-                        Rectangle().fill(YYColor.line).frame(height: 0.5)
-
-                        HStack(spacing: 10) {
-                            PodcastPaperPill(
-                                title: String(localized: "导入有声书"),
-                                glyph: .plus,
-                                accent: true,
-                                height: 28,
-                                horizontalPadding: 13
-                            ) {
-                                importerShown = true
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(PodcastStyle.leafSurface(scheme))
+            VStack(spacing: 10) {
+                Image(systemName: "waveform")
+                    .font(.yy(size: 28, weight: .light))
+                    .foregroundStyle(YYColor.t3)
+                Text("还没有有声书")
+                    .font(.yy(size: 13, weight: .semibold))
+                    .foregroundStyle(YYColor.t1)
+                Text("把 M4B、MP3、M4A 拖进窗口，或导入音频与书架上的电子书合成听读同步。")
+                    .font(.yy(size: 12))
+                    .foregroundStyle(YYColor.t2)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+                    .frame(maxWidth: 340)
+                Button { importerShown = true } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "plus").font(.yy(size: 11, weight: .semibold))
+                        Text("导入有声书")
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .font(.yy(size: 12))
+                    .foregroundStyle(YYColor.t1)
+                    .padding(.horizontal, 13)
+                    .frame(height: 28)
                 }
-                .frame(maxWidth: 380)
+                .buttonStyle(YYPillChrome())
+                .padding(.top, 6)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.bottom, 40)
         } else {
             let (symbol, text): (String, String) = if library.books.isEmpty {
                 ("books.vertical", String(localized: "书架是空的，把 EPUB、PDF、MOBI、TXT 拖进窗口就能开始读"))

@@ -159,13 +159,22 @@ struct BookMenuCard: View {
                         .lineLimit(1)
                 }
             }
-            HStack(spacing: 8) {
-                // Not started: no line, only 还没读.
-                if book.progress > 0 { ProgressLine(value: book.progress, height: 2.5) }
-                Text(book.remaining)
-                    .font(.yy(size: 10.5))
-                    .foregroundStyle(YYColor.t2)
-                    .fixedSize()
+            if book.record {
+                HStack(spacing: 6) {
+                    PaperBookTag()
+                    Text(book.status.name)
+                        .font(.yy(size: 10.5))
+                        .foregroundStyle(YYColor.t2)
+                }
+            } else {
+                HStack(spacing: 8) {
+                    // Not started: no line, only 还没读.
+                    if book.progress > 0 { ProgressLine(value: book.progress, height: 2.5) }
+                    Text(book.remaining)
+                        .font(.yy(size: 10.5))
+                        .foregroundStyle(YYColor.t2)
+                        .fixedSize()
+                }
             }
         }
         .padding(.horizontal, 14)

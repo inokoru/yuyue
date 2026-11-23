@@ -18,6 +18,11 @@ object TabIcons {
     val shelf = icon("shelf") { line(SHELF) }
     val shelfOn = icon("shelf.on") { line(SHELF, filled = true) }
 
+    /** The small ⌃⌄ beside the chosen 书架 tab icon, matching Apple's tab-shelf-switch.svg (7×24). */
+    val switchChevron = ImageVector.Builder("shelf.switch", 7.dp, 24.dp, 7f, 24f).apply {
+        line("M1.6 9.6L3.6 7.6L5.6 9.6M1.6 14.4L3.6 16.4L5.6 14.4", width = 1.5f)
+    }.build()
+
     val notes = icon("notes") {
         line("M7.35 3.75h9.3a2.6 2.6 0 0 1 2.6 2.6v11.3a2.6 2.6 0 0 1-2.6 2.6h-9.3a2.6 2.6 0 0 1-2.6-2.6V6.35a2.6 2.6 0 0 1 2.6-2.6zM8.5 8.75h7M8.5 12.25h7M8.5 15.75h4.5")
     }

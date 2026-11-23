@@ -555,7 +555,7 @@ private fun Cell(
             ),
         ) {
             Box(Modifier.padding(bottom = 8.dp)) {
-                BookCover(book, Modifier.fillMaxWidth().then(if (book.available) Modifier else Modifier.background(Color.Transparent)))
+                BookCover(book, Modifier.fillMaxWidth().alpha(if (book.available) 1f else 0.45f))
                 when {
                     selecting -> Box(Modifier.align(Alignment.BottomEnd).padding(6.dp)) {
                         Icon(

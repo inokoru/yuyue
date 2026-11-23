@@ -10,6 +10,13 @@ enum RecordInk {
     static let star = Color.yyDynamic(light: YYRGBA(216, 212, 206), dark: YYRGBA(78, 76, 73))
     static let faint = Color.yyDynamic(light: YYRGBA(179, 175, 169), dark: YYRGBA(110, 108, 104))
     static let leader = Color.yyDynamic(light: YYRGBA(214, 210, 204), dark: YYRGBA(70, 68, 65))
+    /// Luminous warm cream-parchment card tint: cleanly distinct from both #FFFFFF ebook cards and #F8F5F0 canvas.
+    static let paperCard = Color.yyDynamic(light: YYRGBA(252, 246, 233, 1), dark: YYRGBA(36, 32, 27, 1))
+    static let paperBorder = Color.yyDynamic(light: YYRGBA(176, 148, 102, 0.24), dark: YYRGBA(218, 196, 162, 0.16))
+    static let paperTagBg = Color.yyDynamic(light: YYRGBA(146, 118, 76, 0.11), dark: YYRGBA(218, 196, 162, 0.14))
+    static let paperTagInk = Color.yyDynamic(light: YYRGBA(122, 96, 58, 1), dark: YYRGBA(218, 198, 166, 1))
+    static let paperPillBg = Color.yyDynamic(light: YYRGBA(146, 118, 76, 0.09), dark: YYRGBA(218, 196, 162, 0.12))
+    static let paperPillHover = Color.yyDynamic(light: YYRGBA(146, 118, 76, 0.16), dark: YYRGBA(218, 196, 162, 0.20))
 }
 
 extension ReadingStatus: @retroactive Identifiable {
@@ -17,19 +24,12 @@ extension ReadingStatus: @retroactive Identifiable {
 }
 
 extension BookSummary {
-    /// 读到 148 页 · 共 320 页 · 读到第 3 章 · 读到 43% · 还剩 5 小时
+    /// 读到 43% · 还剩 5 小时 — 11月3日开始
     var recordLine: String {
-        if let m = manual {
-            switch m.unit {
-            case .page:
-                return m.total > 0 ? String(localized: "读到 \(m.value) 页 · 共 \(m.total) 页") : String(localized: "读到 \(m.value) 页")
-            case .percent:
-                return String(localized: "读到 \(m.value)%")
-            case .chapter:
-                return m.total > 0 ? String(localized: "读到第 \(m.value) 章 · 共 \(m.total) 章") : String(localized: "读到第 \(m.value) 章")
-            }
+        if record {
+            if let s = startedAt, status == .reading { return String(localized: "\(Self.day(s))开始") }
+            return status.name
         }
-        if record { return status == .want ? String(localized: "纸书") : String(localized: "还没记读到哪") }
         if progress <= 0 { return readMinutes > 0 ? String(localized: "约 \(Self.hours(readMinutes))") : String(localized: "还没读") }
         return "\(String(localized: "读到 \(percent)")) · \(remaining)"
     }
@@ -40,17 +40,6 @@ extension BookSummary {
         if m < 60 { return String(localized: "\(max(1, m)) 分钟") }
         let h = Int((Double(m) / 60).rounded())
         return String(localized: "\(h) 小时")
-    }
-
-    /// “+20 页”: what one step of hand-noted progress adds.
-    var stepTitle: String? {
-        guard let m = manual else { return nil }
-        let step = max(1, m.step)
-        return switch m.unit {
-        case .page: String(localized: "\(step) 页")
-        case .percent: "\(step)%"
-        case .chapter: String(localized: "\(step) 章")
-        }
     }
 
     /// 刚刚 · 14 小时前 · 3 天前
@@ -71,10 +60,10 @@ extension BookSummary {
         case .finished:
             return finishedAt.map { String(localized: "\(Self.day($0))读完") } ?? String(localized: "读过")
         case .paused, .dropped:
-            let at = openedAt ?? manual?.at
-            let when = at.map { Date(timeIntervalSince1970: Double($0) / 1000).formatted(.relative(presentation: .named)) }
-            let place = manual != nil ? recordLine : (progress > 0 ? String(localized: "停在 \(percent)") : "")
-            return [place, when ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
+            let at = record ? (startedAt ?? addedAt) : (openedAt ?? addedAt)
+            let when = Date(timeIntervalSince1970: Double(at) / 1000).formatted(.relative(presentation: .named))
+            let place = !record && progress > 0 ? String(localized: "停在 \(percent)") : ""
+            return [place, when].filter { !$0.isEmpty }.joined(separator: " · ")
         default:
             return recordLine
         }
@@ -346,8 +335,8 @@ extension View {
 
 // MARK: One book, one card
 
-/// A book on 进度: compact horizontal card with inset cover, title in 宋体, progress + chapter
-/// bar, top-right status switcher (📖⌄), and compact 目录 / 接着读 actions on the bottom-right.
+/// A book on 进度: digital books sit on crisp white cards with chapter progress + 目录 / 接着读;
+/// paper books sit on warm stationery cards with a 纸书 badge and status-only tracking (在读 · 想读 · 读过 · 搁置 · 弃读).
 struct BookRecordCard: View {
     let book: BookSummary
     let library: Library
@@ -371,24 +360,19 @@ struct BookRecordCard: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            // Left & center body: clicking anywhere on the cover, title, author, or progress bar opens the book's record page.
+            // Left & center body: clicking anywhere on the cover, title, author, or status line opens the book's record page.
             Button(action: show) {
                 HStack(alignment: .center, spacing: 12) {
                     BookCover(book: book)
                         .frame(width: 48, height: 68)
 
                     VStack(alignment: .leading, spacing: 0) {
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 3) {
                             Text(book.title)
                                 .font(YYUI.serif(compact ? 14 : 15, .bold))
                                 .foregroundStyle(YYColor.t1)
                                 .lineLimit(1)
-                            if !byline.isEmpty {
-                                Text(byline)
-                                    .font(.yy(size: 11.5))
-                                    .foregroundStyle(YYColor.t2)
-                                    .lineLimit(1)
-                            }
+                            bylineRow
                         }
                         Spacer(minLength: 6)
                         standing
@@ -402,7 +386,9 @@ struct BookRecordCard: View {
             .accessibilityLabel("《\(book.title)》\(byline.isEmpty ? "" : "，\(byline)")")
 
             VStack(alignment: .trailing, spacing: 0) {
-                statusButton
+                if !book.record {
+                    statusButton
+                }
                 Spacer(minLength: 8)
                 quickActions
             }
@@ -412,15 +398,12 @@ struct BookRecordCard: View {
         .padding(.trailing, 10)
         .padding(.vertical, 11)
         .frame(maxWidth: .infinity, minHeight: 94, alignment: .leading)
-        .background(YYColor.card, in: .rect(cornerRadius: YYRadius.block))
+        .background(cardBackground, in: .rect(cornerRadius: YYRadius.block))
         .contentShape(.rect(cornerRadius: YYRadius.block))
         .onTapGesture(perform: show)
         .overlay(
             RoundedRectangle(cornerRadius: YYRadius.block)
-                .strokeBorder(
-                    scheme == .dark ? Color.white.opacity(0.06) : Color(yy: YYRGBA(42, 43, 46, 0.06)),
-                    lineWidth: 0.5
-                )
+                .strokeBorder(cardBorderColor, lineWidth: book.record ? 0.75 : 0.5)
         )
         .shadow(
             color: cardShadowColor,
@@ -444,23 +427,47 @@ struct BookRecordCard: View {
         #endif
     }
 
+    private var cardBackground: Color {
+        if eink { return YYColor.card }
+        return book.record ? RecordInk.paperCard : YYColor.card
+    }
+
+    private var cardBorderColor: Color {
+        if book.record { return RecordInk.paperBorder }
+        return scheme == .dark ? Color.white.opacity(0.06) : Color(yy: YYRGBA(42, 43, 46, 0.06))
+    }
+
     private var cardShadowColor: Color {
         if eink { return .clear }
         if scheme == .dark { return .black.opacity(cardHover ? 0.44 : 0.32) }
         return Color(yy: YYRGBA(42, 43, 46, cardHover ? 0.10 : 0.065))
     }
 
+    @ViewBuilder private var bylineRow: some View {
+        HStack(spacing: 6) {
+            if !byline.isEmpty {
+                Text(byline)
+                    .font(.yy(size: 11.5))
+                    .foregroundStyle(YYColor.t2)
+                    .lineLimit(1)
+            }
+            if book.record {
+                PaperBookTag()
+            }
+        }
+    }
+
     @ViewBuilder private var statusButton: some View {
         Group {
             if let menuAt {
-                StatusMark(status: book.status)
+                StatusMark(status: book.status, showLabel: book.record)
                     .onTapGesture(coordinateSpace: .global) { menuAt($0) }
                     .accessibilityAddTraits(.isButton)
             } else {
                 Menu {
                     StatusMenuItems(book: book, library: library, pickCollection: pickCollection, delete: delete)
                 } label: {
-                    StatusMark(status: book.status)
+                    StatusMark(status: book.status, showLabel: book.record)
                 }
                 .menuStyle(.button)
                 .buttonStyle(.plain)
@@ -471,18 +478,16 @@ struct BookRecordCard: View {
         .accessibilityLabel(String(localized: "改状态"))
     }
 
-    /// Jane Austen · 14 小时前 — 史铁生 · 纸书
+    /// Jane Austen · 14 小时前 — 史铁生
     private var byline: String {
         var parts = [book.authors.first ?? ""]
-        if book.record {
-            parts.append(String(localized: "纸书"))
-        } else if let at = book.openedAt, book.status == .reading || book.status == .paused {
+        if !book.record, let at = book.openedAt, book.status == .reading || book.status == .paused {
             parts.append(BookSummary.ago(at))
         }
         return parts.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
-    // MARK: Where it's got to
+    // MARK: Where it's got to (ebooks track chapters & progress; paper books track status only)
 
     @ViewBuilder private var standing: some View {
         switch book.status {
@@ -511,16 +516,13 @@ struct BookRecordCard: View {
                 .foregroundStyle(YYColor.t3)
                 .lineLimit(1)
         default:
-            if book.record && book.manual == nil {
-                Text("还没记读到哪")
-                    .font(.yy(size: 11))
-                    .foregroundStyle(YYColor.t3)
-                    .lineLimit(1)
+            if book.record {
+                paperStatusLine
             } else {
                 VStack(alignment: .leading, spacing: 5) {
                     progressMetaLine
                     ChapterBar(
-                        rows: book.record ? [] : rows,
+                        rows: rows,
                         progress: book.progress,
                         height: 3.5,
                         muted: book.status == .paused || book.status == .dropped
@@ -531,23 +533,39 @@ struct BookRecordCard: View {
         }
     }
 
+    @ViewBuilder private var paperStatusLine: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(paperTimeText)
+                .font(.yy(size: 11).monospacedDigit())
+                .foregroundStyle(YYColor.t3)
+                .lineLimit(1)
+            if let c = book.comment, !c.isEmpty {
+                Text(c)
+                    .font(YYUI.serif(11))
+                    .foregroundStyle(YYColor.t2)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var paperTimeText: String {
+        if book.status == .reading, let s = book.startedAt {
+            return String(localized: "\(BookSummary.day(s))开始")
+        }
+        return BookSummary.ago(book.addedAt) + String(localized: "加的")
+    }
+
     @ViewBuilder private var progressMetaLine: some View {
+        let lead = book.status == .reading
+            ? String(localized: "读到 \(compactWhereLine)")
+            : String(localized: "停在 \(book.percent)")
         Group {
-            if book.record {
-                Text(whereLine).foregroundStyle(YYColor.t3)
-                    + Text(" · ").foregroundStyle(YYColor.t3.opacity(0.55))
-                    + Text(book.percent).foregroundStyle(tint.accent).fontWeight(.semibold)
+            if leftLine.isEmpty {
+                Text(lead).foregroundStyle(tint.accent).fontWeight(.semibold)
             } else {
-                let lead = book.status == .reading
-                    ? String(localized: "读到 \(compactWhereLine)")
-                    : String(localized: "停在 \(book.percent)")
-                if leftLine.isEmpty {
-                    Text(lead).foregroundStyle(tint.accent).fontWeight(.semibold)
-                } else {
-                    Text(lead).foregroundStyle(tint.accent).fontWeight(.semibold)
-                        + Text(" · ").foregroundStyle(YYColor.t3.opacity(0.55))
-                        + Text(leftLine).foregroundStyle(YYColor.t3)
-                }
+                Text(lead).foregroundStyle(tint.accent).fontWeight(.semibold)
+                    + Text(" · ").foregroundStyle(YYColor.t3.opacity(0.55))
+                    + Text(leftLine).foregroundStyle(YYColor.t3)
             }
         }
         .font(.yy(size: 11).monospacedDigit())
@@ -560,25 +578,10 @@ struct BookRecordCard: View {
         return ChapterTitle(current.title).number ?? String(localized: "第 \(current.number) 章")
     }
 
-    /// 148 / 320 页 — 第 8 章 · Chapter 8 — 13%
-    private var whereLine: String {
-        if let m = book.manual {
-            return switch m.unit {
-            case .page: m.total > 0 ? String(localized: "\(m.value) / \(m.total) 页") : String(localized: "第 \(m.value) 页")
-            case .percent: "\(m.value)%"
-            case .chapter: m.total > 0 ? String(localized: "第 \(m.value) / \(m.total) 章") : String(localized: "第 \(m.value) 章")
-            }
-        }
-        guard let current else { return book.percent }
-        let number = String(localized: "第 \(current.number) 章")
-        return current.title.isEmpty ? number : "\(number) · \(current.title)"
-    }
-
-    /// 共 3 章 · 约 7 小时 — 共 168 页
+    /// 共 3 章 · 约 7 小时 — 昨天加的
     private var wantLine: String {
         if book.record {
-            if let m = book.manual, m.unit == .page, m.total > 0 { return String(localized: "共 \(m.total) 页") }
-            return String(localized: "纸书")
+            return BookSummary.ago(book.addedAt) + String(localized: "加的")
         }
         var parts: [String] = []
         if !rows.isEmpty { parts.append(String(localized: "共 \(rows.count) 章")) }
@@ -586,32 +589,28 @@ struct BookRecordCard: View {
         return parts.isEmpty ? String(localized: "还没读") : parts.joined(separator: " · ")
     }
 
-    // MARK: Compact bottom-right quick actions: 目录 icon + 接着读 / 开始读 / +步进
+    // MARK: Compact bottom-right quick actions: ebooks get 目录 + 接着读; paper books get the 5-status switcher pill
 
     @ViewBuilder private var quickActions: some View {
         HStack(spacing: 4) {
-            switch book.status {
-            case .finished:
-                if book.rating == nil {
+            if book.record {
+                if book.status == .finished, book.rating == nil {
                     Button(String(localized: "打分"), action: show)
                         .buttonStyle(CompactCardButton(main: false))
                 }
-            case .want:
-                if !book.record { contentsIconButton }
-                Button(String(localized: "开始读")) {
-                    if book.record { library.setStatus(book, .reading) } else { read() }
-                }
-                .buttonStyle(CompactCardButton(main: true))
-            default:
-                if book.record {
-                    if let step = book.stepTitle {
-                        Button("+\(step)") { library.stepManualProgress(book) }
-                            .buttonStyle(CompactCardButton(main: true))
-                    } else {
-                        Button(String(localized: "记到…"), action: show)
+                statusButton
+            } else {
+                switch book.status {
+                case .finished:
+                    if book.rating == nil {
+                        Button(String(localized: "打分"), action: show)
                             .buttonStyle(CompactCardButton(main: false))
                     }
-                } else {
+                case .want:
+                    contentsIconButton
+                    Button(String(localized: "开始读"), action: read)
+                        .buttonStyle(CompactCardButton(main: true))
+                default:
                     contentsIconButton
                     Button(String(localized: "接着读"), action: read)
                         .buttonStyle(CompactCardButton(main: true))
@@ -651,7 +650,7 @@ struct BookRecordCard: View {
     }
 }
 
-/// Compact 24pt action button inside BookRecordCard (接着读 / 开始读 / +20 页 / 打分).
+/// Compact 24pt action button inside BookRecordCard (接着读 / 开始读 / 记进度 / 打分).
 private struct CompactCardButton: ButtonStyle {
     var main: Bool
     @State private var hover = false
@@ -703,22 +702,56 @@ private struct CompactTocButton: View {
 }
 
 /// The card's corner: what the book is now (在读's book, 想读's bookmark…) and a small ⌄, a pad
-/// under it on hover; it opens the menu to change it.
+/// under it on hover; paper books show the status name directly so switching 在读/读过/搁置/弃读/想读
+/// is front and center.
 private struct StatusMark: View {
     let status: ReadingStatus
+    var showLabel = false
     @State private var hover = false
 
     var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: status.symbol).font(.yy(size: 11.5, weight: .medium))
+        HStack(spacing: showLabel ? 4 : 3) {
+            if !showLabel {
+                Image(systemName: status.symbol).font(.yy(size: 11.5, weight: .medium))
+            }
+            if showLabel {
+                Text(status.name).font(.yy(size: 11, weight: .medium))
+            }
             Image(systemName: "chevron.down").font(.yy(size: 7.5, weight: .bold))
         }
-        .foregroundStyle(hover ? YYColor.t1 : YYColor.t3)
-        .frame(width: 34, height: 24)
-        .background(hover ? YYColor.inset : .clear, in: .rect(cornerRadius: 7))
+        .foregroundStyle(hover ? YYColor.t1 : (showLabel ? RecordInk.paperTagInk : YYColor.t3))
+        .padding(.horizontal, showLabel ? 9 : 0)
+        .frame(minWidth: showLabel ? nil : 34, minHeight: 24, maxHeight: 24)
+        .background(
+            showLabel ? (hover ? RecordInk.paperPillHover : RecordInk.paperPillBg) : (hover ? YYColor.inset : .clear),
+            in: .rect(cornerRadius: 7)
+        )
+        .overlay {
+            if showLabel {
+                RoundedRectangle(cornerRadius: 7)
+                    .strokeBorder(RecordInk.paperBorder, lineWidth: 0.5)
+            }
+        }
         .contentShape(.rect)
         .onHover { hover = $0 }
         .help(status.name)
+    }
+}
+
+/// Warm pill badge marking paper / external books so they stand apart from readable ebooks at a glance.
+struct PaperBookTag: View {
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "book.closed")
+                .font(.yy(size: 8.5, weight: .semibold))
+            Text("纸书")
+                .font(.yy(size: 10, weight: .medium))
+        }
+        .foregroundStyle(RecordInk.paperTagInk)
+        .padding(.horizontal, 5.5)
+        .frame(height: 17)
+        .background(RecordInk.paperTagBg, in: .rect(cornerRadius: 4.5))
+        .fixedSize()
     }
 }
 

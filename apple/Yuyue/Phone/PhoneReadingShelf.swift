@@ -85,8 +85,12 @@ struct PhoneReadingShelf<Menu: View>: View {
             ZStack(alignment: .topLeading) {
                 FinishedStrip(book: book, size: Self.strip, note: book.percent)
                     .frame(width: Self.cover.width, alignment: .leading)
-                    .opacity(on ? 0 : 1)
+                    .opacity(on ? 0 : (book.available ? 1 : 0.55))
                 BookCover(book: book, bleed: true)
+                    .opacity(book.available ? 1 : 0.45)
+                    .overlay(alignment: .bottomTrailing) {
+                        if !book.available { unavailableBadge }
+                    }
                     .frame(width: Self.cover.width, height: Self.cover.height)
                     .opacity(on ? 1 : 0)
             }
@@ -136,6 +140,10 @@ struct PhoneReadingShelf<Menu: View>: View {
         HStack(alignment: .top, spacing: 18) {
             Button { read(book) } label: {
                 BookCover(book: book, bleed: true)
+                    .opacity(book.available ? 1 : 0.45)
+                    .overlay(alignment: .bottomTrailing) {
+                        if !book.available { unavailableBadge }
+                    }
                     .frame(width: Self.cover.width, height: Self.cover.height)
                     .clipShape(.rect(cornerRadius: 9))
                     .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.black.opacity(0.06), lineWidth: 0.5))
@@ -172,7 +180,19 @@ struct PhoneReadingShelf<Menu: View>: View {
         library.listening == book.id || library.nowPlaying?.bookID == book.id
     }
 
-    private func mark(_ book: BookSummary) -> String { playing(book) ? "waveform" : "headphones" }
+    private func mark(_ book: BookSummary) -> String {
+        if !book.available { return "icloud.and.arrow.down" }
+        return playing(book) ? "waveform" : "headphones"
+    }
+
+    private var unavailableBadge: some View {
+        Image(systemName: "icloud.and.arrow.down")
+            .font(.yy(size: 11, weight: .semibold))
+            .foregroundStyle(YYColor.t2)
+            .padding(6)
+            .background(YYColor.card, in: .circle)
+            .padding(6)
+    }
 
     /// The line: an 有声书's tap listens; while it plays, back to it.
     private func read(_ book: BookSummary) {
@@ -247,15 +267,20 @@ private struct ReadingMark: View {
             default:
                 Image(systemName: symbol)
                     .font(.system(size: 19, weight: .light))
-                    .foregroundStyle(PlaceMark.ink)
+                    .foregroundStyle(symbol == "icloud.and.arrow.down" ? YYColor.t2 : PlaceMark.ink)
                     .symbolEffect(.variableColor.iterative, options: .repeating, isActive: symbol == "waveform")
             }
         }
         .frame(width: 34, height: 34)
         if let action {
+            let label = switch symbol {
+            case "icloud.and.arrow.down": String(localized: "在别的设备上")
+            case "waveform": String(localized: "正在听")
+            default: String(localized: "听")
+            }
             Button(action: action) { mark.contentShape(.rect) }
                 .buttonStyle(YYPressStyle(scale: 0.92))
-                .accessibilityLabel(symbol == "waveform" ? String(localized: "正在听") : String(localized: "听"))
+                .accessibilityLabel(label)
         } else {
             mark.accessibilityHidden(true)
         }

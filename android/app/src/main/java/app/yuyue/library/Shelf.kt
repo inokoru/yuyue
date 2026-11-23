@@ -53,6 +53,7 @@ val BookSummary.shelfNote: String
 /** 还剩 4 小时 20 分 · 还没读 · 读完了 */
 val BookSummary.remaining: String
     get() {
+        if (!available) return t("在别的设备上")
         val audio = format == uniffi.yuyue_core.BookFormat.AUDIO
         return when {
             status == ReadingStatus.FINISHED -> if (audio) t("听完了") else t("读完了")

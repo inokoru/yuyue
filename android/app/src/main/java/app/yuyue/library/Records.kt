@@ -30,32 +30,15 @@ fun dayText(ms: Long): String {
     return java.text.SimpleDateFormat(pattern, locale).format(java.util.Date(ms))
 }
 
-/** 读到 148 页 · 共 320 页 · 读到第 3 章 · 读到 43% · 还剩 5 小时 */
+/** 读到 43% · 还剩 5 小时 — 11月3日开始 */
 val BookSummary.recordLine: String
     get() {
-        manual?.let { m ->
-            val v = m.value.toInt(); val n = m.total.toInt()
-            return when (m.unit) {
-                ProgressUnit.PAGE -> if (n > 0) t("读到 %lld 页 · 共 %lld 页", v, n) else t("读到 %lld 页", v)
-                ProgressUnit.PERCENT -> t("读到 %lld%%", v)
-                ProgressUnit.CHAPTER -> if (n > 0) t("读到第 %lld 章 · 共 %lld 章", v, n) else t("读到第 %lld 章", v)
-            }
+        if (record) {
+            if (status == ReadingStatus.READING) startedAt?.let { return t("%@开始", dayText(it)) }
+            return status.title
         }
-        if (record) return if (status == ReadingStatus.WANT) t("纸书") else t("还没记读到哪")
         if (progress <= 0) return if (readMinutes > 0u) t("约 %@", hoursText(readMinutes.toInt())) else t("还没读")
         return t("读到 %@", percent) + " · " + remaining
-    }
-
-/** “+20 页”: what one step of hand-noted progress adds. */
-val BookSummary.stepTitle: String?
-    get() {
-        val m = manual ?: return null
-        val step = maxOf(1, m.step.toInt())
-        return when (m.unit) {
-            ProgressUnit.PAGE -> t("%lld 页", step)
-            ProgressUnit.PERCENT -> "$step%"
-            ProgressUnit.CHAPTER -> t("%lld 章", step)
-        }
     }
 
 /** The line under a book's title when it isn't being read: when, and how it went. */
@@ -63,9 +46,9 @@ val BookSummary.restLine: String
     get() = when (status) {
         ReadingStatus.FINISHED -> finishedAt?.let { t("%@读完", dayText(it)) } ?: t("读过")
         ReadingStatus.PAUSED, ReadingStatus.DROPPED -> {
-            val at = openedAt ?: manual?.at
-            val place = if (manual != null) recordLine else if (progress > 0) t("停在 %@", percent) else ""
-            listOf(place, at?.let(::agoText) ?: "").filter { it.isNotEmpty() }.joinToString(" · ")
+            val at = if (record) (startedAt ?: addedAt) else (openedAt ?: addedAt)
+            val place = if (!record && progress > 0) t("停在 %@", percent) else ""
+            listOf(place, agoText(at)).filter { it.isNotEmpty() }.joinToString(" · ")
         }
         else -> recordLine
     }

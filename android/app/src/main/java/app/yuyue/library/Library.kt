@@ -149,8 +149,6 @@ class Library(private val context: Context) {
     /** 加一本书: only the title is needed. */
     fun addRecordBook(title: String, status: uniffi.yuyue_core.ReadingStatus) = run { core.addRecordBook(title, emptyList(), status) }
     fun setManualProgress(book: BookSummary, unit: uniffi.yuyue_core.ProgressUnit, value: Int, total: Int) = run { core.setManualProgress(book.id, unit, value.toUInt(), total.toUInt()) }
-    /** “+20 页”. */
-    fun stepManualProgress(book: BookSummary) = run { core.stepManualProgress(book.id) }
     /** 只删文件，留下记录. */
     fun keepRecordOnly(book: BookSummary) = run { core.keepRecordOnly(book.id) }
 
@@ -282,7 +280,12 @@ class Library(private val context: Context) {
         enum class Icon { Delete, Highlight, Add, Folder, Download, Check, Share, Error }
 
         /** Until it goes: a banner counts its seconds, shows the tick, then rises away. */
-        val lifetime: Long get() = if (undo != null) UNDO_MS + UNDO_SETTLE_MS + 400 else TOAST_MS
+        val lifetime: Long
+            get() = when {
+                undo != null -> UNDO_MS + UNDO_SETTLE_MS + 400
+                detail.isNotBlank() -> TOAST_DETAIL_MS
+                else -> TOAST_MS
+            }
     }
 
     fun note(icon: Toast.Icon, title: String, detail: String) = show(Toast(icon, title, detail))
@@ -543,9 +546,10 @@ class Library(private val context: Context) {
         File(dataDir, "books/${book.id}").listFiles()?.firstOrNull { it.name.startsWith("original.") }
 
     companion object {
-        /** How long a note stays. */
         /** How long a plain note stays. */
         const val TOAST_MS = 3000L
+        /** How long a two-line note with guidance stays so it can be read. */
+        const val TOAST_DETAIL_MS = 4200L
         /** The seconds a deletion can be undone, counted down on its banner. */
         const val UNDO_MS = 5000L
         /** How long the red tick shows after the count before the banner rises away. */

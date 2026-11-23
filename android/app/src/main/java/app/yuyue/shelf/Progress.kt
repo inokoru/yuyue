@@ -80,11 +80,9 @@ import app.yuyue.library.recordLine
 import app.yuyue.library.remaining
 import app.yuyue.library.restLine
 import app.yuyue.library.shelfOrder
-import app.yuyue.library.stepTitle
 import app.yuyue.library.title
 import app.yuyue.t
 import uniffi.yuyue_core.BookSummary
-import uniffi.yuyue_core.ProgressUnit
 import uniffi.yuyue_core.ReadingStatus
 import java.util.Calendar
 
@@ -98,9 +96,30 @@ val ReadingStatus.icon: ImageVector
         ReadingStatus.DROPPED -> Icons.xmarkCircle
     }
 
-/** The faint ink under the thing chosen; the stars not given. */
+/** The faint ink under the thing chosen; the stars not given; paper-book warm parchment palette. */
 private val chosenInk @Composable get() = if (YY.dark) Color.White.copy(alpha = 0.08f) else Color(0x122A2B2E)
 internal val starOff @Composable get() = if (YY.dark) Color(0xFF4E4C49) else Color(0xFFD8D4CE)
+private val paperCardColor @Composable get() = if (YY.dark) Color(0xFF24201B) else Color(0xFFFCF6E9)
+private val paperBorderColor @Composable get() = if (YY.dark) Color(0x29DAC4A2) else Color(0x3DB09466)
+internal val paperTagBg @Composable get() = if (YY.dark) Color(0x24DAC4A2) else Color(0x1C92764C)
+internal val paperTagInk @Composable get() = if (YY.dark) Color(0xFFDAC6A6) else Color(0xFF7A603A)
+private val paperPillBg @Composable get() = if (YY.dark) Color(0x1FDAC4A2) else Color(0x1792764C)
+
+@Composable
+internal fun PaperBookTag(modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .height(18.dp)
+            .clip(RoundedCornerShape(4.5.dp))
+            .background(paperTagBg)
+            .padding(horizontal = 5.5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Icon(Icons.book, null, tint = paperTagInk, modifier = Modifier.size(9.dp))
+        Text(t("纸书"), fontSize = 10.sp, fontWeight = FontWeight.Medium, color = paperTagInk)
+    }
+}
 
 /**
  * 进度: 在读 · 想读 · 读过 · 搁置 · 弃读, then a card for each book — the files on this phone and
@@ -192,8 +211,8 @@ internal fun SortMenu(name: String, options: List<Pair<String, Boolean>>, pick: 
     }
 }
 
-/** A book on 进度: its cover down the left; the title in 宋体, who and when; where it's got to, a
- *  chapter at a time; and at the bottom how long is left, 目录 and the one thing to do next. */
+/** A book on 进度: ebooks sit on white cards with chapter progress + 目录 / 接着读;
+ *  paper books sit on warm cream-parchment cards with status-only tracking (在读 · 想读 · 读过 · 搁置 · 弃读). */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BookRecordCard(book: BookSummary, library: Library, show: () -> Unit, read: () -> Unit, pick: () -> Unit, delete: () -> Unit) {
@@ -202,33 +221,43 @@ private fun BookRecordCard(book: BookSummary, library: Library, show: () -> Unit
     val current = rows.firstOrNull { it.state is ChapterRow.State.Current }
     val shape = RoundedCornerShape(14.dp)
     val press = remember { MutableInteractionSource() }
-    Box(Modifier.fillMaxWidth().pressScale(press, 0.98f).clip(shape).background(YY.c.card).border(0.5.dp, YY.c.line, shape)
+    val cardBg = if (book.record) paperCardColor else YY.c.card
+    val cardBorder = if (book.record) paperBorderColor else YY.c.line
+    Box(Modifier.fillMaxWidth().pressScale(press, 0.98f).clip(shape).background(cardBg).border(if (book.record) 0.75.dp else 0.5.dp, cardBorder, shape)
         .combinedClickable(press, null, onLongClick = { menu = true }, onClick = show)) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 136.dp).height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 128.dp).height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
             // The cover fills the card's left side, edge to edge, with a hairline after it.
-            Box(Modifier.width(100.dp).fillMaxHeight()) { CoverFill(book) }
-            Box(Modifier.width(0.5.dp).fillMaxHeight().background(YY.c.line))
+            Box(Modifier.width(96.dp).fillMaxHeight()) { CoverFill(book) }
+            Box(Modifier.width(0.5.dp).fillMaxHeight().background(cardBorder))
             Column(Modifier.weight(1f).padding(start = 14.dp, end = 12.dp, top = 12.dp, bottom = 12.dp)) {
-                Text(book.title, fontFamily = YY.serif, fontWeight = FontWeight.Bold, fontSize = 16.5.sp, color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(end = 34.dp))
-                val byline = listOfNotNull(book.authors.firstOrNull(), when {
-                    book.record -> t("纸书")
-                    book.openedAt != null && (book.status == ReadingStatus.READING || book.status == ReadingStatus.PAUSED) -> agoText(book.openedAt!!)
-                    else -> null
-                }).filter { it.isNotEmpty() }.joinToString(" · ")
-                Text(byline, fontSize = 11.5.sp, color = YY.c.t3, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
+                Text(book.title, fontFamily = YY.serif, fontWeight = FontWeight.Bold, fontSize = 16.5.sp, color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(end = if (book.record) 0.dp else 34.dp))
+                Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val byline = listOfNotNull(
+                        book.authors.firstOrNull(),
+                        if (!book.record && book.openedAt != null && (book.status == ReadingStatus.READING || book.status == ReadingStatus.PAUSED)) agoText(book.openedAt!!) else null,
+                    ).filter { it.isNotEmpty() }.joinToString(" · ")
+                    if (byline.isNotEmpty()) {
+                        Text(byline, fontSize = 11.5.sp, color = YY.c.t3, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    }
+                    if (book.record) PaperBookTag()
+                }
                 Column(Modifier.padding(top = 9.dp)) { Standing(book, rows, current) }
                 Spacer(Modifier.weight(1f).heightIn(min = 10.dp))
-                Bottom(book, library, show, read)
+                Bottom(book, library, show, read, openStatus = { menu = true }, statusMenu = {
+                    StatusMenu(menu, { menu = false }, book, library, pick, delete)
+                })
             }
         }
-        // The corner: what the book is now, and a small ⌄; it opens the menu to change it.
-        Box(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
-            Row(Modifier.size(34.dp, 24.dp).clip(RoundedCornerShape(7.dp)).clickable(onClickLabel = t("改状态")) { menu = true },
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterHorizontally)) {
-                Icon(book.status.icon, null, tint = YY.c.t3, modifier = Modifier.size(14.dp))
-                Icon(Icons.chevronDown, null, tint = YY.c.t3, modifier = Modifier.size(10.dp))
+        // Ebooks keep the compact status mark in the top-right corner; paper books show the 5-status pill on the bottom-right.
+        if (!book.record) {
+            Box(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
+                Row(Modifier.size(34.dp, 24.dp).clip(RoundedCornerShape(7.dp)).clickable(onClickLabel = t("改状态")) { menu = true },
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterHorizontally)) {
+                    Icon(book.status.icon, null, tint = YY.c.t3, modifier = Modifier.size(14.dp))
+                    Icon(Icons.chevronDown, null, tint = YY.c.t3, modifier = Modifier.size(10.dp))
+                }
+                StatusMenu(menu, { menu = false }, book, library, pick, delete)
             }
-            StatusMenu(menu, { menu = false }, book, library, pick, delete)
         }
     }
 }
@@ -244,7 +273,17 @@ private fun Standing(book: BookSummary, rows: List<ChapterRow>, current: Chapter
             book.comment?.let { Text(it, fontFamily = YY.serif, fontSize = 12.5.sp, lineHeight = 18.sp, color = YY.c.t2, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 5.dp)) }
         }
         ReadingStatus.WANT -> Text(wantLine(book, rows), fontSize = 11.5.sp, color = YY.c.t3)
-        else -> if (book.record && book.manual == null) Text(t("还没记读到哪"), fontSize = 11.5.sp, color = YY.c.t3) else {
+        else -> if (book.record) {
+            val timeText = if (book.status == ReadingStatus.READING && book.startedAt != null) {
+                t("%@开始", dayText(book.startedAt!!))
+            } else {
+                agoText(book.addedAt) + t("加的")
+            }
+            Text(timeText, fontSize = 11.5.sp, color = YY.c.t3, style = YY.tnum)
+            book.comment?.takeIf { it.isNotEmpty() }?.let {
+                Text(it, fontFamily = YY.serif, fontSize = 12.sp, color = YY.c.t2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
+            }
+        } else {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(buildAnnotatedString {
                     withStyle(SpanStyle(color = YY.c.t3)) { append(t("读到 ")) }
@@ -252,32 +291,21 @@ private fun Standing(book: BookSummary, rows: List<ChapterRow>, current: Chapter
                 }, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 Text(book.percent, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = YY.tint.accent, style = YY.tnum, modifier = Modifier.padding(start = 4.dp))
             }
-            ChapterBar(if (book.record) emptyList() else rows, book.progress, Modifier.padding(top = 6.dp))
+            ChapterBar(rows, book.progress, Modifier.padding(top = 6.dp))
         }
     }
 }
 
-/** 第 8 章 · Chapter 8 — 148 / 320 页 — 13% */
+/** 第 8 章 · Chapter 8 — 13% */
 private fun whereLine(book: BookSummary, current: ChapterRow?): String {
-    book.manual?.let { m ->
-        val v = m.value.toInt(); val n = m.total.toInt()
-        return when (m.unit) {
-            ProgressUnit.PAGE -> if (n > 0) t("%lld / %lld 页", v, n) else t("第 %lld 页", v)
-            ProgressUnit.PERCENT -> "$v%"
-            ProgressUnit.CHAPTER -> if (n > 0) t("第 %lld / %lld 章", v, n) else t("第 %lld 章", v)
-        }
-    }
     current ?: return book.percent
     val number = t("第 %lld 章", current.number)
     return if (current.title.isEmpty()) number else "$number · ${current.title}"
 }
 
-/** 共 3 章 · 约 7 小时 — 共 168 页 */
+/** 共 3 章 · 约 7 小时 — 昨天加的 */
 private fun wantLine(book: BookSummary, rows: List<ChapterRow>): String {
-    if (book.record) {
-        val m = book.manual
-        return if (m != null && m.unit == ProgressUnit.PAGE && m.total > 0u) t("共 %lld 页", m.total.toInt()) else t("纸书")
-    }
+    if (book.record) return agoText(book.addedAt) + t("加的")
     val parts = buildList {
         if (rows.isNotEmpty()) add(t("共 %lld 章", rows.size))
         if (book.readMinutes > 0u) add(t("约 %@", hoursText(book.readMinutes.toInt())))
@@ -285,29 +313,56 @@ private fun wantLine(book: BookSummary, rows: List<ChapterRow>): String {
     return if (parts.isEmpty()) t("还没读") else parts.joinToString(" · ")
 }
 
-/** The bottom: how long is left, 目录, the next thing. */
+/** The bottom: ebooks get remaining + 目录 + 接着读; paper books get the 5-status switcher pill. */
 @Composable
-private fun Bottom(book: BookSummary, library: Library, show: () -> Unit, read: () -> Unit) {
-    val left = when (book.status) {
-        ReadingStatus.READING, ReadingStatus.PAUSED, ReadingStatus.DROPPED ->
-            if (book.record) book.manual?.let { agoText(it.at) + t("记的") } ?: "" else if (book.progress > 0) book.remaining else ""
+private fun Bottom(
+    book: BookSummary,
+    library: Library,
+    show: () -> Unit,
+    read: () -> Unit,
+    openStatus: () -> Unit,
+    statusMenu: @Composable () -> Unit,
+) {
+    val left = if (book.record) "" else when (book.status) {
+        ReadingStatus.READING, ReadingStatus.PAUSED, ReadingStatus.DROPPED -> if (book.progress > 0) book.remaining else ""
         ReadingStatus.WANT -> agoText(book.addedAt) + t("加的")
         ReadingStatus.FINISHED -> ""
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(left, fontSize = 11.sp, color = YY.c.t3, style = YY.tnum, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        when (book.status) {
-            ReadingStatus.FINISHED -> if (book.rating == null) RecordButton(t("打分"), false, compact = true, action = show)
-            ReadingStatus.WANT -> {
-                RecordButton(t("目录"), false, compact = true, action = show)
-                RecordButton(t("开始读"), true, compact = true) { if (book.record) library.setStatus(book, ReadingStatus.READING) else read() }
+        if (book.record) {
+            if (book.status == ReadingStatus.FINISHED && book.rating == null) {
+                RecordButton(t("打分"), false, compact = true, action = show)
             }
-            else -> if (book.record) {
-                RecordButton(t("记到…"), false, compact = true, action = show)
-                book.stepTitle?.let { RecordButton("+$it", true, compact = true) { library.stepManualProgress(book) } }
-            } else {
-                RecordButton(t("目录"), false, compact = true, action = show)
-                RecordButton(t("接着读"), true, compact = true, action = read)
+            Box {
+                val pillShape = RoundedCornerShape(7.dp)
+                Row(
+                    Modifier
+                        .height(26.dp)
+                        .clip(pillShape)
+                        .background(paperPillBg)
+                        .border(0.5.dp, paperBorderColor, pillShape)
+                        .clickable(onClickLabel = t("改状态"), onClick = openStatus)
+                        .padding(horizontal = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(book.status.title, fontSize = 11.5.sp, fontWeight = FontWeight.Medium, color = paperTagInk)
+                    Icon(Icons.chevronDown, null, tint = paperTagInk, modifier = Modifier.size(10.dp))
+                }
+                statusMenu()
+            }
+        } else {
+            when (book.status) {
+                ReadingStatus.FINISHED -> if (book.rating == null) RecordButton(t("打分"), false, compact = true, action = show)
+                ReadingStatus.WANT -> {
+                    RecordButton(t("目录"), false, compact = true, action = show)
+                    RecordButton(t("开始读"), true, compact = true, action = read)
+                }
+                else -> {
+                    RecordButton(t("目录"), false, compact = true, action = show)
+                    RecordButton(t("接着读"), true, compact = true, action = read)
+                }
             }
         }
     }
