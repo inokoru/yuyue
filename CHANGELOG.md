@@ -13,7 +13,7 @@ Each version has a section, newest first. The app's changelog page and update no
 - 书伴与外文精读：外文书支持离线查词、行间难词简注、双击整句翻译与生词本；书伴可接端侧模型、本机或局域网模型（Ollama、LM Studio 等）或自有大模型 API，默认只在已读过的部分里回答，每句都指回原文。
 - 记书与导出：多样式划线、想法、今日回顾与书摘卡片；记录在读、读过、想读（纸书也能记）；支持导出到 Markdown、Obsidian、Notion、flomo、新枝、Anki、带划线的 EPUB 和阅读记录 CSV。
 - 同步与快照：用 iCloud Drive 或 WebDAV 在设备之间同步进度、笔记和播客（冲突并排可自选，Google Drive 即将支持），支持整库数据快照导入导出。
-- 应用内反馈：遇到问题或有建议可在书架、“我的”或菜单栏直接提交，邮箱、日志与私密附件先在本机加密再发出。
+- 应用内反馈：遇到问题或有建议可在书架、“我的”或菜单栏直接提交；正文与公开截图会发到 GitHub 问题板，不收集邮箱，非公开附件先在本机加密再发出。
 
 ### en
 - First release: read EPUB, PDF, TXT and DRM-free MOBI / AZW3 on Mac, Android, iPhone and iPad (Windows version in development), with Wi‑Fi transfer, watched folders and OPDS / WebDAV remote libraries; your books and notes stay on your own devices.
@@ -22,4 +22,4 @@ Each version has a section, newest first. The app's changelog page and update no
 - Foreign reading and companion: offline dictionary lookup, interlinear glosses, sentence translation and word list; connect an on-device model, a local LAN server (Ollama, LM Studio) or your own API key for spoiler-free answers grounded strictly in what you have read.
 - Notes, book tracking and export: multi-style highlights, thoughts, daily review and quote cards; track reading, read and to-read books (paper books included); export to Markdown, Obsidian, Notion, flomo, Xinzhi, Anki, highlighted EPUB and reading-log CSV.
 - Sync and snapshots: sync progress, notes and podcasts across devices via iCloud Drive or WebDAV with side-by-side conflict resolution (Google Drive coming soon), plus full-library snapshot import and export.
-- In-app feedback: send bug reports or suggestions right from the shelf, Me or the menu bar, with email, logs and private attachments encrypted on device before sending.
+- In-app feedback: send bug reports or suggestions right from the shelf, Me or the menu bar; text and public screenshots post to GitHub Issues without collecting email, while private attachments are encrypted on device before sending.

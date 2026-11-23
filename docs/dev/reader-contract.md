@@ -77,7 +77,7 @@ paper default in the reader CSS: `auto` or an absent variable means "use the pap
 | `--yy-fs` | px | font size (always set) |
 | `--yy-lh` | number | line height |
 | `--yy-ps` | em | paragraph spacing (margin after a paragraph) |
-| `--yy-font` | font stack | e.g. `var(--yy-sans)`, `var(--yy-serif)`, `var(--yy-kai)` |
+| `--yy-font` | font stack | e.g. `var(--yy-sans)`, `var(--yy-serif)`, `var(--yy-kaiti)`, `var(--yy-wenkai)`, `var(--yy-mono)` |
 | `--yy-margin` | px | left/right page margin (always set) |
 | `--yy-top`, `--yy-bottom` | px | top/bottom page padding, chosen by native so text clears the status bar, safe areas and floating controls (always set) |
 | `--yy-cols` | `1` `2` | columns per page (2 = iPad/Mac landscape 双栏) |
@@ -155,7 +155,7 @@ Posted with `window.webkit.messageHandlers.yy.postMessage(obj)` on Apple,
 
 ## 7. The ink line (墨线)
 
-A 1.5px line in `--p-accent` under the sentence being read, growing from the
+A 1.5px line in `--yy-p-accent` under the sentence being read, growing from the
 start of the sentence to its end over the sentence's audio duration (`.s { padding-bottom: 2px }`).
 Fragments of one sentence grow one after another, each for its share of the characters.
 `setPlaying(false)` freezes it. With `data-yy-motion="reduced"` the full line is drawn at once
@@ -167,7 +167,7 @@ A place in the text is `{s, o}`: sentence `s` and the UTF-16 offset into the sen
 counted over its fragments' text nodes in document order, leaving out ruby readings (`rt`, `rp`)
 and note markers (`.yy-noteref`). Core stores highlights in these terms and never looks inside.
 
-Highlights and hits are drawn with the CSS Custom Highlight API (`::highlight(yy-yellow)`,
-`yy-blue`, `yy-pink`, `yy-wave`, `yy-underline`, `yy-dotted`, `yy-hit`, `yy-hit-now`), so they
-change nothing in the DOM and never cause a re-layout. Colours follow the paper (`--yy-mk-*`).
-Engines without the API show no marks; selection and taps still work.
+Line-style highlights and search hits are drawn with the CSS Custom Highlight API
+(`::highlight(yy-wave)`, `yy-underline`, `yy-dotted`, `yy-hit`, `yy-hit-now`), while background-fill
+highlights (`yy-yellow`, `yy-blue`, `yy-pink`) are rendered as non-interactive overlays inside
+`yy-fills` so they never shift layout. Colours follow the paper (`--yy-mk-*`).

@@ -1,12 +1,12 @@
 name: 出了问题 / Bug
-description: 崩溃、丢数据、哪里不对。App 里“我的 › 反馈”会自动带上版本和日志，更省事。
+description: 崩溃、丢数据、哪里不对。App 里“我的 › 反馈”会自动带上版本和系统信息，更省事。
 labels: [bug]
 body:
   - type: markdown
     attributes:
       value: |
-        谢谢来报。App 里 **我的 › 反馈**（Mac：帮助 › 反馈）能自动带上版本、系统和日志摘要，用它发最省事。
-        Thanks! **Me › Feedback** in the app (Mac: Help › Feedback) attaches version, system and a log summary for you.
+        谢谢来报。App 里 **我的 › 反馈**（Mac：帮助 › 给语阅反馈…）会自动带上版本和系统信息，用它发最省事。
+        Thanks! **Me › Feedback** in the app (Mac: Help › Send Feedback to Yuyue…) attaches your app version and system info for you.
 
         请不要上传有版权的书文件。需要样本时，用公版书或自己做一个小文件。
         Please don't attach copyrighted books. A public-domain book or a small file you made is fine.
