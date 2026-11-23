@@ -108,7 +108,7 @@ struct PhoneEInk: View {
     /// when off, the reader's current shared paper so flipping the switch previews the change live.
     private var sample: some View {
         let shared = (try? library.core.readerSettings()) ?? .standard
-        let shownPaper = on ? EInk.paper : shared.paperTokens
+        let shownPaper = on ? EInk.paper : PaperAppearance.shared.resolve(shared).tokens
         let size = YYUI.s(13.5)
         var text = AttributedString(String(localized: "父亲说：“事已如此，不必难过，"))
         var marked = AttributedString(String(localized: "好在天无绝人之路！”"))

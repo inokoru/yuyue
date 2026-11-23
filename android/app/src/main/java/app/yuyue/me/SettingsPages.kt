@@ -524,13 +524,15 @@ fun ReadingPage(library: Library, push: (MePage) -> Unit) {
         runCatching { library.core.setReaderSettings(new) }
     }
     fun choosePaper(mine: CustomPaper) {
-        val preset = uniffi.yuyue_core.paperColors(mine).preset
-        change { it.copy(customPaper = mine.id, paper = preset) }
+        app.yuyue.reader.PaperAppearance.pick(mine, s) { change(it) }
     }
     fun deletePaper(mine: CustomPaper) {
         if (s.customPaper == mine.id) change { it.copy(customPaper = null) }
+        app.yuyue.reader.PaperAppearance.forget(mine.id)
         Papers.delete(mine.id)
     }
+    val resolvedPaper = app.yuyue.reader.PaperAppearance.resolve(s)
+    val followAppearance = app.yuyue.reader.PaperAppearance.follow
     ConfirmHost(asking) { asking = null }
     YYPage {
         SettingsLead(t("新书的默认排版；单本书可在阅读页 Aa 中单独调整"))
@@ -539,7 +541,18 @@ fun ReadingPage(library: Library, push: (MePage) -> Unit) {
         YYGroup {
             row {
                 Column(Modifier.padding(vertical = YY.s(12)), verticalArrangement = Arrangement.spacedBy(YY.s(8))) {
-                    Text(t("纸色"), style = YY.font(11.5f, FontWeight.Medium), color = YY.c.t1)
+                    Row(
+                        Modifier.fillMaxWidth().alpha(if (eink) 0.45f else 1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(YY.s(8)),
+                    ) {
+                        Text(t("纸色"), style = YY.font(11.5f, FontWeight.Medium), color = YY.c.t1)
+                        Spacer(Modifier.weight(1f))
+                        Text(t("跟随外观"), style = YY.font(10.5f), color = YY.c.t2)
+                        SettingSwitch(followAppearance, {
+                            app.yuyue.reader.PaperAppearance.setFollow(it, s) { editFn -> change(editFn) }
+                        }, enabled = !eink)
+                    }
                     if (eink) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(6))) {
                             Icon(Icons.eink, null, tint = YY.c.t2, modifier = Modifier.size(YY.s(12)))
@@ -564,7 +577,7 @@ fun ReadingPage(library: Library, push: (MePage) -> Unit) {
                                             paper,
                                             custom.texture,
                                             custom.name,
-                                            s.paperChoice == id,
+                                            resolvedPaper.choiceID == id,
                                             Modifier.fillMaxWidth(),
                                             onLongClick = if (eink) null else ({ menu = true }),
                                         ) { if (!eink) choosePaper(custom) }
@@ -590,10 +603,13 @@ fun ReadingPage(library: Library, push: (MePage) -> Unit) {
                                         paper,
                                         if (id == Paper.EINK.tokens.id) PaperTexture.GRAIN else PaperTexture.NONE,
                                         t(paper.name),
-                                        s.paperChoice == id,
+                                        resolvedPaper.choiceID == id,
                                         m,
                                     ) {
-                                        if (!eink) change { it.copy(paper = paperPresets.first { p -> p.tokens.id == id }, customPaper = null) }
+                                        if (!eink) {
+                                            val preset = paperPresets.first { p -> p.tokens.id == id }
+                                            app.yuyue.reader.PaperAppearance.pick(preset, s) { change(it) }
+                                        }
                                     }
                                 }
                             }
@@ -688,11 +704,12 @@ fun ReadingPage(library: Library, push: (MePage) -> Unit) {
 /** The opening of 《故乡》 on the chosen paper, in the chosen font, size and spacing. */
 @Composable
 private fun Sample(s: ReaderSettings, preview: CustomPaper?, eink: Boolean, modifier: Modifier) {
-    val paper = if (eink) EInk.paper else (preview?.let { customTokens(it) } ?: s.paperTokens)
+    val resolved = app.yuyue.reader.PaperAppearance.resolve(s)
+    val paper = if (eink) EInk.paper else (preview?.let { customTokens(it) } ?: resolved.tokens)
     val size = (s.fontSize * 0.8).roundToInt().toFloat()
     val lineHeight = (s.lineHeight?.toFloat() ?: paper.text.lineHeight).coerceAtLeast(1.3f)
     val indent = if (s.indent ?: true) "　　" else ""
-    val texture = if (eink) PaperTexture.NONE else (preview?.texture ?: Papers.paper(s.customPaper)?.texture ?: if (s.paper == Paper.EINK) PaperTexture.GRAIN else PaperTexture.NONE)
+    val texture = if (eink) PaperTexture.NONE else (preview?.texture ?: resolved.texture)
     Box(
         modifier.fillMaxWidth().clip(RoundedCornerShape(YY.s(12))).background(paper.bg)
             .border(0.5.dp, if (paper.isDark) Color.Transparent else YY.c.line, RoundedCornerShape(YY.s(12))),
@@ -825,6 +842,7 @@ object SettingsLog {
         "appearance.tint" to Watched({ t("主题色") }, MePage.Appearance, YYTints.Default.id) { v -> YYTints.All.firstOrNull { it.id == v }?.name?.let { t(it) } ?: "$v" },
         Shelf.COVER_SIZE to Watched({ t("封面大小") }, MePage.Appearance, 100f, look = "mono") { "${(it as? Float ?: 100f).roundToInt()}" },
         Shelf.SHOW_PROGRESS to Watched({ t("封面下显示进度") }, MePage.Appearance, true),
+        app.yuyue.reader.PaperAppearance.FOLLOW_KEY to Watched({ t("纸色跟随外观") }, MePage.Reading, true),
         ImmersivePrefs.ALWAYS to Watched({ t("打开书籍时自动进入") }, MePage.Reading, false),
         ImmersivePrefs.LINE to Watched({ t("进度细线") }, MePage.Reading, true),
         ImmersivePrefs.MARKS to Watched({ t("沉浸时隐藏划线") }, MePage.Reading, false),
@@ -1001,6 +1019,7 @@ object SettingsLog {
                             else -> putString(u.key, "$v")
                         }
                     }.commit()
+                    if (u.key == app.yuyue.reader.PaperAppearance.FOLLOW_KEY) app.yuyue.reader.PaperAppearance.reloadFromPrefs()
                     snapshot = read()
                     Undo.Pref(u.key, now)
                 }

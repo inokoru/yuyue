@@ -82,6 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Started by macOS as a login item (开机时打开语阅): no window, only the menu bar.
     func applicationDidFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated { AppAppearance.apply() }
         #if DEBUG
         DebugShots.run()
         #endif

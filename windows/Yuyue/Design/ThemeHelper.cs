@@ -14,11 +14,24 @@ namespace Yuyue.Design;
 /// </summary>
 public static class ThemeHelper
 {
+    public static bool IsSystemDark()
+    {
+        try
+        {
+            var bg = new Windows.UI.ViewManagement.UISettings().GetColorValue(Windows.UI.ViewManagement.UIColorType.Background);
+            return (bg.R + bg.G + bg.B) < 384;
+        }
+        catch
+        {
+            return Application.Current.RequestedTheme == ApplicationTheme.Dark;
+        }
+    }
+
     public static bool IsDark(ElementTheme theme) => theme switch
     {
         ElementTheme.Dark => true,
         ElementTheme.Light => false,
-        _ => Application.Current.RequestedTheme == ApplicationTheme.Dark,
+        _ => IsSystemDark(),
     };
 
     public static YYPalette Palette(bool dark) => dark ? YYColors.Dark : YYColors.Light;

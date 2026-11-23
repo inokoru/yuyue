@@ -654,6 +654,14 @@
                                     <!-- 主排版页 (1:1 MacReaderCards.swift:65-175) -->
                                     <StackPanel x:Name="TypesetMainPanel" Spacing="11" Padding="2">
                                         <TextBlock x:Name="EinkPaperLockNote" Text="墨水屏模式已接管纸色，关闭后恢复原纸色" FontSize="11" Foreground="{ThemeResource YYText2Brush}" Visibility="Collapsed" />
+                                        <!-- 纸色标题 + 跟随外观开关 -->
+                                        <Grid x:Name="FollowAppearanceRow">
+                                            <TextBlock Text="纸色" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{ThemeResource YYText2Brush}" />
+                                            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                                <TextBlock Text="跟随外观" FontSize="11" VerticalAlignment="Center" Foreground="{ThemeResource YYText2Brush}" />
+                                                <ToggleSwitch x:Name="FollowAppearanceToggle" MinWidth="0" OnContent="" OffContent="" Toggled="FollowAppearanceToggle_Toggled" />
+                                            </StackPanel>
+                                        </Grid>
                                         <!-- 5 列预设纸张网格：素白 / 暗黑 / 纸本 / 纸本 · 夜 / 芦苇 / 铅纸 -->
                                         <Grid x:Name="PaperSwatchesGrid" ColumnSpacing="7" RowSpacing="8">
                                             <Grid.ColumnDefinitions>

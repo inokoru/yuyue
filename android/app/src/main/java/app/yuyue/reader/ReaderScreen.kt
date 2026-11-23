@@ -129,7 +129,7 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
     }
     val paper = model.paperTokens
     model.pager.background = paper.bg.toArgb()
-    LaunchedEffect(model, Papers.version) { model.papersChanged() }
+    LaunchedEffect(model, Papers.version, PaperAppearance.version) { model.papersChanged() }
     LaunchedEffect(model, bookID) { model.consumeIntent() }
     DisposableEffect(model) {
         // 音量键翻页: on unless reading aloud, when the keys are for the volume.

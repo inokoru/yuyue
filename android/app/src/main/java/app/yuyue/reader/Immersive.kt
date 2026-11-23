@@ -225,7 +225,7 @@ fun EInkPage(core: YuyueCore) {
     var on by rememberPref(EInk.KEY, false)
     var grayscale by rememberPref(EInk.GRAYSCALE_KEY, true)
     val shared = runCatching { core.readerSettings() }.getOrNull()
-    val paper = if (on) EInk.paper else (shared?.paperTokens ?: YYPapers.Plain)
+    val paper = if (on) EInk.paper else (shared?.let { PaperAppearance.resolve(it).tokens } ?: YYPapers.Plain)
     YYPage {
         Spacer(Modifier.height(YY.s(10)))
         YYGroup {

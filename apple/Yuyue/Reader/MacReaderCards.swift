@@ -313,11 +313,32 @@ struct TypesetCard: View {
     }
     #endif
 
+    private var resolvedPaper: PaperAppearance.Resolved { PaperAppearance.shared.resolve(model.settings) }
+
+    private var followAppearance: Binding<Bool> {
+        Binding(
+            get: { PaperAppearance.shared.follow },
+            set: { PaperAppearance.shared.setFollow($0, in: model.settings) { model.update($0) } }
+        )
+    }
+
+    private var paperHeader: some View {
+        HStack(spacing: 8) {
+            Text("纸色").font(.yy(size: 11, weight: .semibold)).foregroundStyle(YYColor.t2)
+            Spacer()
+            Text("跟随外观").font(.yy(size: 11)).foregroundStyle(YYColor.t2)
+            YYSwitch(isOn: followAppearance, label: String(localized: "跟随外观"))
+        }
+        .opacity(einkOn ? 0.45 : 1)
+        .disabled(einkOn)
+    }
+
     #if os(iOS)
     /// The phone keeps the strip: the presets, then 我的纸, a finger swipes along them; ＋ stays
     /// pinned at the right so making one is always in sight.
     private var papers: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let choice = resolvedPaper.choiceID
+        return VStack(alignment: .leading, spacing: 8) {
             if einkOn {
                 HStack(spacing: 6) {
                     Image(systemName: "rectangle.portrait.on.rectangle.portrait")
@@ -327,18 +348,21 @@ struct TypesetCard: View {
                 }
                 .foregroundStyle(YYColor.t2)
             }
+            paperHeader
             HStack(alignment: .top, spacing: 0) {
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal) {
                         HStack(spacing: 4) {
                             ForEach(YYPaper.all) { paper in
-                                PaperTile(paper: paper, texture: paper.hasNoiseTexture ? .grain : .none, name: paper.name, selected: model.settings.paperChoice == paper.id) {
-                                    if let id = Paper(id: paper.id) { model.update { $0.paper = id; $0.customPaper = nil } }
+                                PaperTile(paper: paper, texture: paper.hasNoiseTexture ? .grain : .none, name: paper.name, selected: choice == paper.id) {
+                                    if let id = Paper(id: paper.id) {
+                                        PaperAppearance.shared.pick(preset: id, in: model.settings) { model.update($0) }
+                                    }
                                 }
                                 .id(paper.id)
                             }
                             ForEach(Papers.shared.list, id: \.id) { mine in
-                                PaperTile(paper: YYPaper(custom: mine), texture: mine.texture, name: mine.name, selected: model.settings.paperChoice == mine.id) { choose(mine) }
+                                PaperTile(paper: YYPaper(custom: mine), texture: mine.texture, name: mine.name, selected: choice == mine.id) { choose(mine) }
                                     .id(mine.id)
                                     // 长按 / 右键: a menu card, 删除 in red in a group of its own.
                                     .contextMenu {
@@ -354,8 +378,8 @@ struct TypesetCard: View {
                     }
                     .scrollIndicators(.never)
                     // The paper the page is on stays in sight, a new one too.
-                    .onAppear { proxy.scrollTo(model.settings.paperChoice, anchor: .center) }
-                    .onChange(of: model.settings.paperChoice) { _, id in withAnimation(YYMotion.standard) { proxy.scrollTo(id, anchor: .center) } }
+                    .onAppear { proxy.scrollTo(choice, anchor: .center) }
+                    .onChange(of: choice) { _, id in withAnimation(YYMotion.standard) { proxy.scrollTo(id, anchor: .center) } }
                 }
                 .mask {
                     HStack(spacing: 0) {
@@ -403,6 +427,7 @@ struct TypesetCard: View {
                 }
                 .foregroundStyle(YYColor.t2)
             }
+            paperHeader
             Group {
                 paperGrid { ForEach(YYPaper.all) { presetTile($0) } }
                 if mine.isEmpty {
@@ -463,7 +488,8 @@ struct TypesetCard: View {
     private func shownMine(_ mine: [CustomPaper]) -> [CustomPaper] {
         guard mine.count > Self.shown else { return mine }
         var head = Array(mine.prefix(Self.shown - 1))
-        if let on = mine.firstIndex(where: { $0.id == model.settings.paperChoice }), on >= head.count { head[head.count - 1] = mine[on] }
+        let choice = resolvedPaper.choiceID
+        if let on = mine.firstIndex(where: { $0.id == choice }), on >= head.count { head[head.count - 1] = mine[on] }
         return head
     }
 
@@ -500,7 +526,7 @@ struct TypesetCard: View {
                 .scrollIndicators(.automatic)
                 .frame(maxHeight: 320)
                 .fixedSize(horizontal: false, vertical: true)
-                .onAppear { proxy.scrollTo(model.settings.paperChoice, anchor: .center) }
+                .onAppear { proxy.scrollTo(resolvedPaper.choiceID, anchor: .center) }
             }
             Text("右键一张自己调的纸：调整颜色、重命名、复制、删除。")
                 .font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
@@ -522,14 +548,16 @@ struct TypesetCard: View {
     }
 
     private func presetTile(_ paper: YYPaper) -> some View {
-        PaperTile(paper: paper, texture: paper.hasNoiseTexture ? .grain : .none, name: paper.name, selected: model.settings.paperChoice == paper.id) {
-            if let id = Paper(id: paper.id) { model.update { $0.paper = id; $0.customPaper = nil } }
+        PaperTile(paper: paper, texture: paper.hasNoiseTexture ? .grain : .none, name: paper.name, selected: resolvedPaper.choiceID == paper.id) {
+            if let id = Paper(id: paper.id) {
+                PaperAppearance.shared.pick(preset: id, in: model.settings) { model.update($0) }
+            }
         }
         .id(paper.id)
     }
 
     private func mineTile(_ mine: CustomPaper) -> some View {
-        PaperTile(paper: YYPaper(custom: mine), texture: mine.texture, name: mine.name, selected: model.settings.paperChoice == mine.id) { choose(mine) }
+        PaperTile(paper: YYPaper(custom: mine), texture: mine.texture, name: mine.name, selected: resolvedPaper.choiceID == mine.id) { choose(mine) }
             .id(mine.id)
             // 长按 / 右键: a menu card, 删除 in red in a group of its own.
             .contextMenu {
@@ -571,8 +599,7 @@ struct TypesetCard: View {
     }
 
     private func choose(_ mine: CustomPaper) {
-        let preset = paperColors(paper: mine).preset
-        model.update { $0.customPaper = mine.id; $0.paper = preset }
+        PaperAppearance.shared.pick(custom: mine, in: model.settings) { model.update($0) }
     }
 
     private func newPaper() -> CustomPaper { Papers.shared.newDraft(from: model.settings) }
@@ -584,14 +611,14 @@ struct TypesetCard: View {
 
     /// 删除, with 撤销 for a few seconds.
     private func delete(_ mine: CustomPaper) {
-        let wasOn = model.settings.customPaper == mine.id
-        if wasOn { model.update { $0.customPaper = nil } }
+        let wasOn = resolvedPaper.custom?.id == mine.id || model.settings.customPaper == mine.id
+        if model.settings.customPaper == mine.id { model.update { $0.customPaper = nil } }
+        PaperAppearance.shared.forget(mine.id)
         Papers.shared.delete(mine.id)
         model.show(Library.Toast(icon: "trash", danger: true, title: String(localized: "已删除“\(mine.name)”"), detail: "", undo: { [model] in
             Papers.shared.restore(mine.id)
             if wasOn {
-                let preset = paperColors(paper: mine).preset
-                model.update { $0.customPaper = mine.id; $0.paper = preset }
+                PaperAppearance.shared.pick(custom: mine, in: model.settings) { model.update($0) }
             }
         }))
     }

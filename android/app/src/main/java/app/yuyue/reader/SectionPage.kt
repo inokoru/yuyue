@@ -101,7 +101,7 @@ sealed interface Target {
 /** One section of the book in its own WebView, shown by the pager (as `SectionPage` on Apple).
  *  The document is served by the core at the reader contract's origin. */
 @SuppressLint("SetJavaScriptEnabled", "ViewConstructor")
-class SectionPage(context: Context, private val core: YuyueCore, private val geometry: () -> PageGeometry, private val received: (SectionPage, ReaderMessage) -> Unit) {
+class SectionPage(context: Context, private val core: YuyueCore, private val bookID: String, private val geometry: () -> PageGeometry, private val received: (SectionPage, ReaderMessage) -> Unit) {
     val webView = ReaderWebView(context)
     var section: Int? = null
         private set
@@ -258,6 +258,14 @@ class SectionPage(context: Context, private val core: YuyueCore, private val geo
                         "content=\"width=device-width, initial-scale=1, viewport-fit=cover\"",
                         "content=\"width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover\"",
                     )
+                    val own = runCatching { core.bookReaderSettings(bookID) }.getOrNull()
+                    val rs = own ?: runCatching { core.readerSettings() }.getOrNull()
+                    if (rs != null) {
+                        val resolved = PaperAppearance.resolveForThread(rs)
+                        if (resolved != PaperAppearance.raw(rs)) {
+                            html = PaperAppearance.applyToHTML(html, resolved)
+                        }
+                    }
                     if (EInk.on) {
                         val attrs = if (EInk.grayscale) "data-yy-eink=\"1\" data-yy-eink-gray=\"1\" " else "data-yy-eink=\"1\" "
                         html = html.replaceFirst("<html ", "<html $attrs")

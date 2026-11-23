@@ -333,8 +333,12 @@ public sealed partial class ReaderWindow : Window
 
     public void ReloadReaderSettingsFromCore()
     {
-        if (_ownSettings) return;
-        _settings = _library.GetReaderSettings();
+        if (!_ownSettings) _settings = _library.GetReaderSettings();
+        PushSettingsToReader(save: false);
+    }
+
+    public void OnAppearanceChanged()
+    {
         PushSettingsToReader(save: false);
     }
 
@@ -417,15 +421,13 @@ public sealed partial class ReaderWindow : Window
 
     public void ApplyTintAndChrome()
     {
-        CustomPaper? custom = _previewPaper;
-        if (custom is null && !string.IsNullOrEmpty(_settings.CustomPaper))
-        {
-            try { custom = _library.Core.CustomPapers().FirstOrDefault(cp => cp.Id == _settings.CustomPaper); }
-            catch { }
-        }
+        var resolved = _previewPaper is not null
+            ? new PaperAppearance.Resolved(YuyueCoreMethods.PaperColors(_previewPaper).Preset, _previewPaper)
+            : PaperAppearance.Resolve(_library, _settings);
+        CustomPaper? custom = resolved.Custom;
 
         bool einkOn = _library.Prefs.GlobalEinkMode;
-        var paper = YYPapers.FromId(PaperCssId(_settings.Paper));
+        var paper = YYPapers.FromId(PaperCssId(resolved.Preset));
         bool isDark = einkOn ? false : paper.IsDark;
         Color bgCol = einkOn ? Colors.White : paper.Bg;
         Color inkCol = einkOn ? Colors.Black : paper.Ink;
@@ -656,26 +658,31 @@ public sealed partial class ReaderWindow : Window
         var activeBg = ThemeHelper.Brush(palette.Card);
         var clear = new SolidColorBrush(Colors.Transparent);
 
-        bool usingCustom = !string.IsNullOrEmpty(_settings.CustomPaper);
-        (Border Box, Paper Kind)[] paperBoxes =
+        var resolved = PaperAppearance.Resolve(_library, _settings);
+        FollowAppearanceToggle.IsOn = _library.Prefs.PaperFollowAppearance;
+
+        bool usingCustom = resolved.Custom is not null;
+        (Border Box, Paper Kind, Color DefaultBorder)[] paperBoxes =
         [
-            (PaperPlainBox, Paper.Plain),
-            (PaperDarkBox, Paper.Dark),
-            (PaperKamiBox, Paper.Kami),
-            (PaperKamiNightBox, Paper.KamiNight),
-            (PaperSageBox, Paper.Sage),
-            (PaperEinkBox, Paper.Eink),
+            (PaperPlainBox, Paper.Plain, YYPapers.Plain.Line),
+            (PaperDarkBox, Paper.Dark, YYPapers.Dark.Line),
+            (PaperKamiBox, Paper.Kami, YYPapers.Kami.Line),
+            (PaperKamiNightBox, Paper.KamiNight, YYPapers.Kaminight.Line),
+            (PaperSageBox, Paper.Sage, YYPapers.Sage.Line),
+            (PaperEinkBox, Paper.Eink, YYPapers.Eink.Ink),
         ];
-        foreach (var (box, kind) in paperBoxes)
+        foreach (var (box, kind, defBorder) in paperBoxes)
         {
-            bool on = !usingCustom && _settings.Paper == kind;
-            box.BorderThickness = new Thickness(on ? 2 : 1);
-            box.BorderBrush = on ? accentBrush : ThemeHelper.Brush(palette.Line);
+            bool on = !usingCustom && resolved.Preset == kind;
+            box.BorderThickness = new Thickness(on ? 2 : 1.5);
+            box.BorderBrush = on ? accentBrush : ThemeHelper.Brush(defBorder);
         }
 
         RebuildCustomPapersMainHost(palette, tint);
         bool einkLocked = _library.Prefs.GlobalEinkMode;
         EinkPaperLockNote.Visibility = einkLocked ? Visibility.Visible : Visibility.Collapsed;
+        FollowAppearanceRow.Opacity = einkLocked ? 0.45 : 1.0;
+        FollowAppearanceToggle.IsEnabled = !einkLocked;
         PaperSwatchesGrid.Opacity = einkLocked ? 0.45 : 1.0;
         PaperSwatchesGrid.IsHitTestVisible = !einkLocked;
         CustomPapersMainHost.Opacity = einkLocked ? 0.45 : 1.0;
@@ -756,9 +763,9 @@ public sealed partial class ReaderWindow : Window
                 var created = await CustomPaperDialog.ShowEditorAsync(RootGrid.XamlRoot, _library, onPreview: PreviewCustomPaper);
                 if (created is not null)
                 {
-                    var pc = YuyueCoreMethods.PaperColors(created);
-                    _settings = _settings with { Paper = pc.Preset, CustomPaper = created.Id };
-                    PushSettingsToReader();
+                    bool save = PaperAppearance.PickCustom(_library, created, _settings, out var updated);
+                    _settings = updated;
+                    PushSettingsToReader(save: save);
                 }
             };
             CustomPapersMainHost.Children.Add(tuneBtn);
@@ -799,11 +806,12 @@ public sealed partial class ReaderWindow : Window
         for (int c = 0; c < 5; c++) grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         for (int r = 0; r < rows; r++) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
+        var resolvedPaper = PaperAppearance.Resolve(_library, _settings);
         for (int i = 0; i < shown.Length; i++)
         {
             var cp = shown[i];
             var pc = YuyueCoreMethods.PaperColors(cp);
-            bool on = _settings.CustomPaper == cp.Id;
+            bool on = resolvedPaper.Custom?.Id == cp.Id;
             var swatch = new Border
             {
                 Width = 46,
@@ -824,16 +832,18 @@ public sealed partial class ReaderWindow : Window
             {
                 TypesetBtn.Flyout?.Hide();
                 var edited = await CustomPaperDialog.ShowEditorAsync(RootGrid.XamlRoot, _library, cp, PreviewCustomPaper);
+                bool save = true;
                 if (edited is not null)
                 {
-                    var epc = YuyueCoreMethods.PaperColors(edited);
-                    _settings = _settings with { Paper = epc.Preset, CustomPaper = edited.Id };
+                    save = PaperAppearance.PickCustom(_library, edited, _settings, out var updated);
+                    _settings = updated;
                 }
                 else if (_settings.CustomPaper == cp.Id && !_library.Core.CustomPapers().Any(x => x.Id == cp.Id))
                 {
+                    PaperAppearance.Forget(_library, cp.Id);
                     _settings = _settings with { CustomPaper = null };
                 }
-                PushSettingsToReader();
+                PushSettingsToReader(save: save);
             };
             var dupMi = new MenuFlyoutItem { Text = "复制一张" };
             dupMi.Click += (_, _) =>
@@ -841,9 +851,9 @@ public sealed partial class ReaderWindow : Window
                 var copy = CustomPaperDialog.DuplicateCustomPaper(_library, cp);
                 if (copy is not null)
                 {
-                    var cpc = YuyueCoreMethods.PaperColors(copy);
-                    _settings = _settings with { Paper = cpc.Preset, CustomPaper = copy.Id };
-                    PushSettingsToReader();
+                    bool save = PaperAppearance.PickCustom(_library, copy, _settings, out var updated);
+                    _settings = updated;
+                    PushSettingsToReader(save: save);
                 }
             };
             var delMi = new MenuFlyoutItem { Text = "删除", Foreground = ThemeHelper.Brush(p.Danger) };
@@ -851,18 +861,33 @@ public sealed partial class ReaderWindow : Window
             {
                 string delId = cp.Id;
                 string delName = cp.Name;
-                bool wasActive = _settings.CustomPaper == delId;
+                bool wasActive = resolvedPaper.Custom?.Id == delId || _settings.CustomPaper == delId;
+                bool save = false;
                 try { _library.Core.DeleteCustomPaper(delId); } catch { }
-                if (wasActive)
+                PaperAppearance.Forget(_library, delId);
+                if (_settings.CustomPaper == delId)
+                {
                     _settings = _settings with { CustomPaper = null };
-                PushSettingsToReader();
+                    save = true;
+                }
+                PushSettingsToReader(save: save);
                 ShowReaderToast($"已删掉自定义纸张“{delName}”", "撤销", () =>
                 {
                     try
                     {
                         _library.Core.RestoreCustomPaper(delId);
-                        if (wasActive) _settings = _settings with { CustomPaper = delId };
-                        PushSettingsToReader();
+                        if (wasActive)
+                        {
+                            var restored = _library.Core.CustomPapers().FirstOrDefault(x => x.Id == delId);
+                            if (restored is not null)
+                            {
+                                bool restoreSave = PaperAppearance.PickCustom(_library, restored, _settings, out var updated);
+                                _settings = updated;
+                                PushSettingsToReader(save: restoreSave);
+                                return;
+                            }
+                        }
+                        PushSettingsToReader(save: false);
                     }
                     catch { }
                 });
@@ -875,8 +900,9 @@ public sealed partial class ReaderWindow : Window
             var b = new Button { Padding = new Thickness(0), Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch, UseSystemFocusVisuals = false, Content = sp, ContextFlyout = ctx };
             b.Click += (_, _) =>
             {
-                _settings = _settings with { Paper = pc.Preset, CustomPaper = cp.Id };
-                PushSettingsToReader();
+                bool save = PaperAppearance.PickCustom(_library, cp, _settings, out var updated);
+                _settings = updated;
+                PushSettingsToReader(save: save);
             };
             Grid.SetRow(b, i / 5);
             Grid.SetColumn(b, i % 5);
@@ -901,9 +927,9 @@ public sealed partial class ReaderWindow : Window
             var created = await CustomPaperDialog.ShowEditorAsync(RootGrid.XamlRoot, _library, onPreview: PreviewCustomPaper);
             if (created is not null)
             {
-                var pc = YuyueCoreMethods.PaperColors(created);
-                _settings = _settings with { Paper = pc.Preset, CustomPaper = created.Id };
-                PushSettingsToReader();
+                bool save = PaperAppearance.PickCustom(_library, created, _settings, out var updated);
+                _settings = updated;
+                PushSettingsToReader(save: save);
             }
         };
         Grid.SetRow(addBtn, shown.Length / 5);
@@ -1313,13 +1339,11 @@ public sealed partial class ReaderWindow : Window
 
         string? paperStyle = null;
         string? texture = null;
-        Paper effectivePreset = _settings.Paper;
-        CustomPaper? activeCustom = _previewPaper;
-        if (activeCustom is null && !string.IsNullOrEmpty(_settings.CustomPaper))
-        {
-            try { activeCustom = _library.Core.CustomPapers().FirstOrDefault(x => x.Id == _settings.CustomPaper); }
-            catch { }
-        }
+        var resolved = _previewPaper is not null
+            ? new PaperAppearance.Resolved(YuyueCoreMethods.PaperColors(_previewPaper).Preset, _previewPaper)
+            : PaperAppearance.Resolve(_library, _settings);
+        Paper effectivePreset = resolved.Preset;
+        CustomPaper? activeCustom = resolved.Custom;
         if (activeCustom is not null)
         {
             try
@@ -2294,8 +2318,19 @@ public sealed partial class ReaderWindow : Window
     private void PaperChip_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button btn || btn.Tag is not string id) return;
-        _settings = _settings with { Paper = ParsePaper(id), CustomPaper = null };
-        PushSettingsToReader();
+        bool save = PaperAppearance.PickPreset(_library, ParsePaper(id), _settings, out var updated);
+        _settings = updated;
+        PushSettingsToReader(save: save);
+        if (!_ownSettings) App.CurrentApp.BroadcastReaderSettingsChanged();
+    }
+
+    private void FollowAppearanceToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_initializingControls) return;
+        bool save = PaperAppearance.SetFollow(_library, FollowAppearanceToggle.IsOn, _settings, out var updated);
+        _settings = updated;
+        PushSettingsToReader(save: save);
+        App.CurrentApp.BroadcastReaderSettingsChanged();
     }
 
     private void FontStepDown_Click(object sender, RoutedEventArgs e)

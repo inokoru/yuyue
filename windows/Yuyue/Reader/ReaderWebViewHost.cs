@@ -444,7 +444,22 @@ public sealed class ReaderWebViewHost : IDisposable
             switch (served)
             {
                 case Served.Html html:
-                    args.Response = FromBytes(env, Encoding.UTF8.GetBytes(html.Body), "text/html; charset=utf-8");
+                    string body = html.Body;
+                    if (_library.Prefs.PaperFollowAppearance && !_library.Prefs.GlobalEinkMode)
+                    {
+                        var segs = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                        string? bookId = segs.Length >= 2 ? Uri.UnescapeDataString(segs[1]) : null;
+                        try
+                        {
+                            var rs = (bookId is not null ? _library.GetBookReaderSettings(bookId) : null)
+                                ?? _library.GetReaderSettings();
+                            var resolved = PaperAppearance.Resolve(_library, rs);
+                            if (resolved != PaperAppearance.Raw(_library, rs))
+                                body = PaperAppearance.ApplyToHtml(body, resolved);
+                        }
+                        catch { }
+                    }
+                    args.Response = FromBytes(env, Encoding.UTF8.GetBytes(body), "text/html; charset=utf-8");
                     return;
                 case Served.File file when File.Exists(file.Path):
                     args.Response = FromBytes(env, File.ReadAllBytes(file.Path), file.Mime);

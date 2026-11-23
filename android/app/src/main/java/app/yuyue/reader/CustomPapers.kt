@@ -32,6 +32,8 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -71,7 +73,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.yuyue.design.Appearance
 import app.yuyue.design.Icons
+import app.yuyue.design.Prefs
 import app.yuyue.design.YY
 import app.yuyue.design.YYPaper
 import app.yuyue.design.YYSegments
@@ -145,8 +149,9 @@ object Papers {
     /** ＋ starts from the current settings: a copy of 我的纸, or the made colour closest to the
      *  preset. No name: the core gives it one on 完成. */
     fun newDraft(settings: ReaderSettings): CustomPaper {
-        paper(settings.customPaper)?.let { return it.copy(id = "", name = "") }
-        val p = settings.paper
+        val resolved = PaperAppearance.resolve(settings)
+        resolved.custom?.let { return it.copy(id = "", name = "") }
+        val p = resolved.preset
         val night = p == Paper.DARK || p == Paper.KAMI_NIGHT
         val made = paperPalette(night).swatches
         val start = if (night) made[0] else made[when (p) { Paper.KAMI -> 1; Paper.SAGE -> 2; Paper.EINK -> 5; else -> 0 }]
@@ -184,6 +189,261 @@ val ReaderSettings.paperTokens: YYPaper get() = customPaper?.let { Papers.tokens
 /** The paper as the swatches know it: a 我的纸 id, or a preset's. */
 val ReaderSettings.paperChoice: String get() = customPaper?.takeIf { Papers.paper(it) != null } ?: paper.tokens.id
 
+/** 纸色跟随外观: pairs light and dark papers with the app's effective appearance (`浅色` / `深色` / `跟随系统`)
+ *  and remembers the reader's preferred paper for each side without overwriting synced day settings at night. */
+object PaperAppearance {
+    const val FOLLOW_KEY = "paper.followAppearance"
+    const val LIGHT_KEY = "paper.light"
+    const val DARK_KEY = "paper.dark"
+
+    data class Resolved(val preset: Paper, val custom: CustomPaper?) {
+        val tokens: YYPaper get() = custom?.let { Papers.tokens(it.id) ?: customTokens(it) } ?: preset.tokens
+        val choiceID: String get() = custom?.id ?: preset.tokens.id
+        val isDark: Boolean get() = custom?.let { paperColors(it).dark } ?: preset.tokens.isDark
+        val texture: PaperTexture get() = custom?.texture ?: if (preset == Paper.EINK) PaperTexture.GRAIN else PaperTexture.NONE
+    }
+
+    /** Increments whenever follow, appearance, or remembered light/dark slots change. */
+    var version by mutableIntStateOf(0)
+        private set
+
+    @Volatile private var darkFlag = false
+    @Volatile private var initialized = false
+    @Volatile private var followFlag = true
+    @Volatile private var lightSlot: String? = null
+    @Volatile private var darkSlot: String? = null
+
+    private fun ensureLoaded() {
+        if (initialized || !Prefs.isReady) return
+        followFlag = Prefs.bool(FOLLOW_KEY, true)
+        lightSlot = Prefs.string(LIGHT_KEY, "").ifEmpty { null }
+        darkSlot = Prefs.string(DARK_KEY, "").ifEmpty { null }
+        initialized = true
+    }
+
+    val follow: Boolean
+        get() {
+            val _v = version
+            ensureLoaded()
+            return followFlag
+        }
+
+    val isDark: Boolean
+        get() {
+            val _v = version
+            return darkFlag
+        }
+
+    fun syncAppearance(dark: Boolean) {
+        ensureLoaded()
+        if (darkFlag == dark) return
+        darkFlag = dark
+        if (followFlag) version++
+    }
+
+    fun syncFromContext(context: android.content.Context) {
+        ensureLoaded()
+        val mode = if (Prefs.isReady) Prefs.string(Appearance.KEY, Appearance.SYSTEM) else Appearance.SYSTEM
+        val dark = when (mode) {
+            Appearance.LIGHT -> false
+            Appearance.DARK -> true
+            else -> (context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        }
+        syncAppearance(dark)
+    }
+
+    fun reloadFromPrefs() {
+        if (!Prefs.isReady) return
+        val next = Prefs.bool(FOLLOW_KEY, true)
+        lightSlot = Prefs.string(LIGHT_KEY, "").ifEmpty { null }
+        darkSlot = Prefs.string(DARK_KEY, "").ifEmpty { null }
+        initialized = true
+        if (next != followFlag) {
+            followFlag = next
+            version++
+        }
+    }
+
+    fun raw(settings: ReaderSettings): Resolved {
+        val mine = Papers.paper(settings.customPaper)
+        return if (mine != null) Resolved(paperColors(mine).preset, mine) else Resolved(settings.paper, null)
+    }
+
+    fun resolve(settings: ReaderSettings, dark: Boolean = isDark): Resolved {
+        val _v = version
+        ensureLoaded()
+        return resolveForThread(settings, dark)
+    }
+
+    /** Safe to call from WebView's background `shouldInterceptRequest` thread (no Compose snapshot reads). */
+    fun resolveForThread(settings: ReaderSettings, dark: Boolean = darkFlag): Resolved {
+        ensureLoaded()
+        val base = raw(settings)
+        if (!followFlag) return base
+        if (base.isDark == dark) return base
+        val savedID = if (dark) darkSlot else lightSlot
+        if (savedID != null) {
+            val saved = resolveID(savedID)
+            if (saved != null && saved.isDark == dark) return saved
+        }
+        return Resolved(pairedPreset(base, dark), null)
+    }
+
+    private fun resolveID(id: String): Resolved? {
+        presetFromID(id)?.let { return Resolved(it, null) }
+        Papers.paper(id)?.let { return Resolved(paperColors(it).preset, it) }
+        return null
+    }
+
+    private fun presetFromID(id: String): Paper? = when (id) {
+        "plain" -> Paper.PLAIN
+        "dark" -> Paper.DARK
+        "kami" -> Paper.KAMI
+        "kaminight" -> Paper.KAMI_NIGHT
+        "sage" -> Paper.SAGE
+        "eink" -> Paper.EINK
+        else -> null
+    }
+
+    fun pairedPreset(base: Resolved, dark: Boolean): Paper {
+        val layout = base.custom?.layout ?: base.preset
+        return when {
+            (layout == Paper.PLAIN || layout == Paper.DARK) && !dark -> Paper.PLAIN
+            (layout == Paper.PLAIN || layout == Paper.DARK) && dark -> Paper.DARK
+            !dark -> Paper.KAMI
+            else -> Paper.KAMI_NIGHT
+        }
+    }
+
+    fun pick(preset: Paper, settings: ReaderSettings, apply: ((ReaderSettings) -> ReaderSettings) -> Unit) {
+        pick(Resolved(preset, null), settings, apply)
+    }
+
+    fun pick(custom: CustomPaper, settings: ReaderSettings, apply: ((ReaderSettings) -> ReaderSettings) -> Unit) {
+        pick(Resolved(paperColors(custom).preset, custom), settings, apply)
+    }
+
+    private fun pick(chosen: Resolved, settings: ReaderSettings, apply: ((ReaderSettings) -> ReaderSettings) -> Unit) {
+        ensureLoaded()
+        val base = raw(settings)
+        remember(chosen.choiceID, chosen.isDark)
+
+        if (followFlag) {
+            if (chosen.isDark == darkFlag) {
+                if (base.isDark == chosen.isDark) {
+                    apply { it.copy(paper = chosen.preset, customPaper = chosen.custom?.id) }
+                } else if (!darkFlag) {
+                    if (darkSlot == null) remember(base.choiceID, true)
+                    apply { it.copy(paper = chosen.preset, customPaper = chosen.custom?.id) }
+                } else {
+                    version++
+                }
+            } else {
+                if (base.isDark == darkFlag) remember(base.choiceID, darkFlag)
+                setFollowRaw(false)
+                apply { it.copy(paper = chosen.preset, customPaper = chosen.custom?.id) }
+            }
+        } else {
+            apply { it.copy(paper = chosen.preset, customPaper = chosen.custom?.id) }
+        }
+    }
+
+    fun setFollow(on: Boolean, settings: ReaderSettings, apply: ((ReaderSettings) -> ReaderSettings) -> Unit) {
+        ensureLoaded()
+        if (on == followFlag) return
+        if (!on) {
+            val visible = resolveForThread(settings)
+            val base = raw(settings)
+            if (base.isDark != visible.isDark) {
+                remember(base.choiceID, base.isDark)
+            }
+            setFollowRaw(false)
+            if (visible.preset != settings.paper || visible.custom?.id != settings.customPaper) {
+                apply { it.copy(paper = visible.preset, customPaper = visible.custom?.id) }
+            }
+        } else {
+            setFollowRaw(true)
+        }
+    }
+
+    fun forget(id: String) {
+        ensureLoaded()
+        var changed = false
+        if (lightSlot == id) {
+            lightSlot = null
+            if (Prefs.isReady) Prefs.set(LIGHT_KEY, "")
+            changed = true
+        }
+        if (darkSlot == id) {
+            darkSlot = null
+            if (Prefs.isReady) Prefs.set(DARK_KEY, "")
+            changed = true
+        }
+        if (changed) version++
+    }
+
+    private fun remember(id: String, dark: Boolean) {
+        if (dark) {
+            if (darkSlot == id) return
+            darkSlot = id
+            if (Prefs.isReady) Prefs.set(DARK_KEY, id)
+        } else {
+            if (lightSlot == id) return
+            lightSlot = id
+            if (Prefs.isReady) Prefs.set(LIGHT_KEY, id)
+        }
+    }
+
+    private fun setFollowRaw(on: Boolean) {
+        followFlag = on
+        if (Prefs.isReady) Prefs.set(FOLLOW_KEY, on)
+        version++
+    }
+
+    internal fun resetForTest(follow: Boolean = true, dark: Boolean = false) {
+        followFlag = follow
+        darkFlag = dark
+        lightSlot = null
+        darkSlot = null
+        initialized = true
+        version++
+    }
+
+    fun applyToHTML(body: String, resolved: Resolved): String =
+        applyToHTML(body, resolved.preset.tokens.id, resolved.custom?.let { paperStyle(it) }, resolved.custom?.texture?.css)
+
+    fun applyToHTML(body: String, presetID: String, customStyle: String?, customTexture: String?): String {
+        val start = body.indexOf("<html ")
+        if (start < 0) return body
+        val end = body.indexOf('>', start)
+        if (end < 0) return body
+        var tag = body.substring(start, end)
+        if (!tag.contains("data-yy-paper=")) return body
+
+        tag = tag.replace(Regex("""data-yy-paper="[^"]*""""), """data-yy-paper="$presetID"""")
+        tag = tag.replace(Regex(""" data-yy-texture="[^"]*""""), "")
+        if (!customTexture.isNullOrEmpty()) {
+            val styleIdx = tag.indexOf(" style=\"")
+            if (styleIdx >= 0) {
+                tag = tag.substring(0, styleIdx) + """ data-yy-texture="$customTexture"""" + tag.substring(styleIdx)
+            }
+        }
+        val styleMatch = Regex("""style="[^"]*"""").find(tag)
+        if (styleMatch != null) {
+            var styleAttr = styleMatch.value
+            val customIdx = styleAttr.indexOf(";--yy-p-bg:")
+            if (customIdx >= 0) {
+                styleAttr = styleAttr.substring(0, customIdx) + "\""
+            }
+            if (!customStyle.isNullOrEmpty()) {
+                styleAttr = styleAttr.dropLast(1) + ";" + customStyle + "\""
+            }
+            tag = tag.replaceRange(styleMatch.range, styleAttr)
+        }
+        return body.substring(0, start) + tag + body.substring(end)
+    }
+}
+
 /** `data-yy-texture` (reader contract §2). */
 val PaperTexture.css: String?
     get() = when (this) {
@@ -220,7 +480,9 @@ fun PaperRow(model: ReaderModel, edit: (CustomPaper) -> Unit) {
     var asking by remember { mutableStateOf<app.yuyue.me.Confirm?>(null) }
     app.yuyue.me.ConfirmHost(asking) { asking = null }
     val einkOn by rememberPref(EInk.KEY, false)
-    val choice = model.settings.paperChoice
+    val resolved = PaperAppearance.resolve(model.settings)
+    val choice = resolved.choiceID
+    val follow = PaperAppearance.follow
     val scroll = rememberScrollState()
     var renaming by remember { mutableStateOf<CustomPaper?>(null) }
     // The paper the page is on stays in sight, a new one too.
@@ -234,11 +496,27 @@ fun PaperRow(model: ReaderModel, edit: (CustomPaper) -> Unit) {
                 Text(t("墨水屏模式已接管纸色，关闭后恢复原纸色"), style = YY.font(10.5f), color = YY.c.t2)
             }
         }
+        Row(
+            Modifier.fillMaxWidth().alpha(if (einkOn) 0.45f else 1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(t("纸色"), style = YY.font(11f, FontWeight.SemiBold), color = YY.c.t2)
+            Spacer(Modifier.weight(1f))
+            Text(t("跟随外观"), style = YY.font(11f), color = YY.c.t2)
+            Switch(
+                checked = follow,
+                onCheckedChange = { PaperAppearance.setFollow(it, model.settings) { editFn -> model.update(editFn) } },
+                enabled = !einkOn,
+                modifier = Modifier.semantics { contentDescription = t("跟随外观") },
+                colors = SwitchDefaults.colors(checkedTrackColor = YY.tint.fill, checkedThumbColor = YY.c.card, uncheckedTrackColor = YY.c.inset, uncheckedBorderColor = YY.c.line),
+            )
+        }
         Row(Modifier.fillMaxWidth().alpha(if (einkOn) 0.45f else 1f), verticalAlignment = Alignment.Top) {
             Row(Modifier.weight(1f).horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for (p in paperPresets) {
                     PaperTile(p.tokens, if (p == Paper.EINK) PaperTexture.GRAIN else PaperTexture.NONE, t(p.tokens.name), choice == p.tokens.id,
-                        Modifier.clickable(enabled = !einkOn) { model.update { it.copy(paper = p, customPaper = null) } })
+                        Modifier.clickable(enabled = !einkOn) { PaperAppearance.pick(p, model.settings) { model.update(it) } })
                 }
                 for (mine in Papers.list) {
                     var menu by remember { mutableStateOf(false) }

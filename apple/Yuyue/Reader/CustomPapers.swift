@@ -72,10 +72,14 @@ final class Papers {
     /// Starts a new paper from the current settings: a copy of 我的纸, or the made colour closest
     /// to the preset. No name: the core gives it one on 完成.
     func newDraft(from settings: ReaderSettings) -> CustomPaper {
-        if let mine = paper(settings.customPaper) {
+        newDraft(from: PaperAppearance.shared.resolve(settings))
+    }
+
+    func newDraft(from resolved: PaperAppearance.Resolved) -> CustomPaper {
+        if let mine = resolved.custom {
             return CustomPaper(id: "", name: "", bg: mine.bg, ink: mine.ink, layout: mine.layout, texture: mine.texture)
         }
-        let preset = settings.paper
+        let preset = resolved.preset
         let night = preset == .dark || preset == .kamiNight
         let made = paperPalette(night: night).swatches
         let start = night ? made[0] : made[preset == .kami ? 1 : preset == .sage ? 2 : preset == .eink ? 5 : 0]
@@ -127,6 +131,307 @@ extension ReaderSettings {
     var paperChoice: String {
         if let id = customPaper, Papers.shared.paper(id) != nil { return id }
         return paper.tokens.id
+    }
+}
+
+// MARK: - 纸色跟随外观
+
+/// 纸色跟随外观: pairs light and dark papers with the app's effective appearance (`浅色` / `深色` / `跟随系统`)
+/// and remembers the reader's preferred paper for each side without overwriting synced day settings at night.
+@MainActor @Observable
+final class PaperAppearance {
+    static let shared = PaperAppearance()
+
+    static let followKey = "paper.followAppearance"
+    static let lightKey = "paper.light"
+    static let darkKey = "paper.dark"
+
+    /// A resolved paper ready for both native chrome and WebView HTML/JS.
+    struct Resolved: Equatable {
+        let preset: Paper
+        let custom: CustomPaper?
+
+        var tokens: YYPaper {
+            if let custom { return Papers.shared.tokens(for: custom.id) ?? YYPaper(custom: custom) }
+            return preset.tokens
+        }
+
+        var choiceID: String { custom?.id ?? preset.tokens.id }
+        var isDark: Bool { custom.map { paperColors(paper: $0).dark } ?? preset.tokens.isDark }
+        var texture: PaperTexture { custom?.texture ?? (preset.tokens.hasNoiseTexture ? .grain : .none) }
+    }
+
+    private(set) var follow: Bool
+    private(set) var lightID: String?
+    private(set) var darkID: String?
+    /// The app's effective dark appearance, unaffected by a reader window's `.preferredColorScheme`.
+    private(set) var isDark: Bool
+
+    #if os(macOS)
+    @ObservationIgnored private var appearanceObserver: NSKeyValueObservation?
+    #endif
+
+    private init() {
+        let d = UserDefaults.standard
+        follow = d.object(forKey: Self.followKey) as? Bool ?? true
+        lightID = Self.nonEmpty(d.string(forKey: Self.lightKey))
+        darkID = Self.nonEmpty(d.string(forKey: Self.darkKey))
+        isDark = Self.currentEffectiveDark()
+        #if os(macOS)
+        ensureMacObserver()
+        #endif
+    }
+
+    private static func nonEmpty(_ s: String?) -> String? {
+        guard let s, !s.isEmpty else { return nil }
+        return s
+    }
+
+    static func currentEffectiveDark() -> Bool {
+        switch AppAppearance.current {
+        case .light: return false
+        case .dark: return true
+        case .system:
+            #if os(macOS)
+            if let app = NSApp {
+                return app.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            }
+            return UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+            #else
+            let style = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first?.traitCollection.userInterfaceStyle
+                ?? UIScreen.main.traitCollection.userInterfaceStyle
+            return style == .dark
+            #endif
+        }
+    }
+
+    #if os(macOS)
+    func ensureMacObserver() {
+        guard appearanceObserver == nil, let app = NSApp else { return }
+        appearanceObserver = app.observe(\.effectiveAppearance, options: [.new]) { _, _ in
+            Task { @MainActor in
+                PaperAppearance.shared.refreshAppearance()
+            }
+        }
+    }
+
+    func refreshAppearance() {
+        ensureMacObserver()
+        setIsDark(Self.currentEffectiveDark())
+    }
+    #else
+    func syncFromRoot(scheme: ColorScheme, mode: AppAppearance) {
+        let next: Bool = switch mode {
+        case .light: false
+        case .dark: true
+        case .system: scheme == .dark
+        }
+        setIsDark(next)
+    }
+    #endif
+
+    private func setIsDark(_ next: Bool) {
+        guard next != isDark else { return }
+        isDark = next
+        if follow {
+            NotificationCenter.default.post(name: .readerSettingsChanged, object: nil)
+        }
+    }
+
+    /// Re-reads `paper.followAppearance` after an undo in 设置历史.
+    func reloadFromDefaults() {
+        let d = UserDefaults.standard
+        let next = d.object(forKey: Self.followKey) as? Bool ?? true
+        if next != follow {
+            follow = next
+            NotificationCenter.default.post(name: .readerSettingsChanged, object: nil)
+        }
+    }
+
+    func raw(_ settings: ReaderSettings) -> Resolved {
+        if let id = settings.customPaper, let mine = Papers.shared.paper(id) {
+            return Resolved(preset: paperColors(paper: mine).preset, custom: mine)
+        }
+        return Resolved(preset: settings.paper, custom: nil)
+    }
+
+    func resolve(_ settings: ReaderSettings) -> Resolved {
+        let base = raw(settings)
+        guard follow else { return base }
+        if base.isDark == isDark { return base }
+        let savedID = isDark ? darkID : lightID
+        if let savedID, let saved = resolveID(savedID), saved.isDark == isDark {
+            return saved
+        }
+        return Resolved(preset: Self.pairedPreset(for: base, dark: isDark), custom: nil)
+    }
+
+    private func resolveID(_ id: String) -> Resolved? {
+        if let preset = Paper(id: id) {
+            return Resolved(preset: preset, custom: nil)
+        }
+        if let mine = Papers.shared.paper(id) {
+            return Resolved(preset: paperColors(paper: mine).preset, custom: mine)
+        }
+        return nil
+    }
+
+    /// Mirrors `core/src/paper.rs`'s `preset(layout, dark)`: Plain/Dark keep Sans; Kami/Sage/Eink keep Serif.
+    nonisolated static func pairedPreset(for base: Resolved, dark: Bool) -> Paper {
+        let layout = base.custom?.layout ?? base.preset
+        switch (layout, dark) {
+        case (.plain, false), (.dark, false): return .plain
+        case (.plain, true), (.dark, true): return .dark
+        case (_, false): return .kami
+        case (_, true): return .kamiNight
+        }
+    }
+
+    /// Picks a preset paper from Aa or 设置 · 阅读.
+    func pick(preset: Paper, in settings: ReaderSettings, apply: ((inout ReaderSettings) -> Void) -> Void) {
+        pick(Resolved(preset: preset, custom: nil), in: settings, apply: apply)
+    }
+
+    /// Picks a custom paper (我的纸) from Aa or 设置 · 阅读.
+    func pick(custom: CustomPaper, in settings: ReaderSettings, apply: ((inout ReaderSettings) -> Void) -> Void) {
+        let preset = paperColors(paper: custom).preset
+        pick(Resolved(preset: preset, custom: custom), in: settings, apply: apply)
+    }
+
+    private func pick(_ chosen: Resolved, in settings: ReaderSettings, apply: ((inout ReaderSettings) -> Void) -> Void) {
+        let base = raw(settings)
+        remember(chosen.choiceID, dark: chosen.isDark)
+
+        if follow {
+            if chosen.isDark == isDark {
+                // Same polarity as current appearance: stay on 跟随外观.
+                if base.isDark == chosen.isDark {
+                    apply { $0.paper = chosen.preset; $0.customPaper = chosen.custom?.id }
+                } else if !isDark {
+                    // Daytime choice: preserve prior dark base if none saved yet, then sync daytime choice.
+                    if darkID == nil { remember(base.choiceID, dark: true) }
+                    apply { $0.paper = chosen.preset; $0.customPaper = chosen.custom?.id }
+                } else {
+                    // Nighttime choice while base is light: keep synced daytime paper intact.
+                    NotificationCenter.default.post(name: .readerSettingsChanged, object: nil)
+                }
+            } else {
+                // Opposite polarity tapped: honor immediately and turn off 跟随外观.
+                if base.isDark == isDark {
+                    remember(base.choiceID, dark: isDark)
+                }
+                setFollowRaw(false)
+                apply { $0.paper = chosen.preset; $0.customPaper = chosen.custom?.id }
+            }
+        } else {
+            apply { $0.paper = chosen.preset; $0.customPaper = chosen.custom?.id }
+        }
+    }
+
+    /// Turns 跟随外观 on or off. Turning off freezes the currently visible paper so the screen never flashes.
+    func setFollow(_ on: Bool, in settings: ReaderSettings, apply: ((inout ReaderSettings) -> Void) -> Void) {
+        guard on != follow else { return }
+        if !on {
+            let visible = resolve(settings)
+            let base = raw(settings)
+            if base.isDark != visible.isDark {
+                remember(base.choiceID, dark: base.isDark)
+            }
+            setFollowRaw(false)
+            if visible.preset != settings.paper || visible.custom?.id != settings.customPaper {
+                apply { $0.paper = visible.preset; $0.customPaper = visible.custom?.id }
+            } else {
+                NotificationCenter.default.post(name: .readerSettingsChanged, object: nil)
+            }
+        } else {
+            setFollowRaw(true)
+            NotificationCenter.default.post(name: .readerSettingsChanged, object: nil)
+        }
+    }
+
+    /// Clears a deleted custom paper from the remembered light/dark slots.
+    func forget(_ id: String) {
+        let d = UserDefaults.standard
+        var changed = false
+        if lightID == id {
+            lightID = nil
+            d.removeObject(forKey: Self.lightKey)
+            changed = true
+        }
+        if darkID == id {
+            darkID = nil
+            d.removeObject(forKey: Self.darkKey)
+            changed = true
+        }
+        if changed {
+            NotificationCenter.default.post(name: .readerSettingsChanged, object: nil)
+        }
+    }
+
+    private func remember(_ id: String, dark: Bool) {
+        let d = UserDefaults.standard
+        if dark {
+            guard darkID != id else { return }
+            darkID = id
+            d.set(id, forKey: Self.darkKey)
+        } else {
+            guard lightID != id else { return }
+            lightID = id
+            d.set(id, forKey: Self.lightKey)
+        }
+    }
+
+    private func setFollowRaw(_ on: Bool) {
+        follow = on
+        UserDefaults.standard.set(on, forKey: Self.followKey)
+    }
+
+    /// Rewrites the opening `<html ...>` attributes before the WebView paints its first frame
+    /// so opening a book at night never flashes white.
+    func applyToHTML(_ body: String, resolved: Resolved) -> String {
+        Self.applyToHTML(
+            body,
+            presetID: resolved.preset.tokens.id,
+            customStyle: resolved.custom.map { paperStyle(paper: $0) },
+            customTexture: resolved.custom?.texture.css
+        )
+    }
+
+    nonisolated static func applyToHTML(_ body: String, presetID: String, customStyle: String?, customTexture: String?) -> String {
+        guard let htmlStart = body.range(of: "<html "),
+              let htmlEnd = body[htmlStart.lowerBound...].firstIndex(of: ">") else {
+            return body
+        }
+        var tag = String(body[htmlStart.lowerBound ..< htmlEnd])
+        guard tag.contains("data-yy-paper=") else { return body }
+
+        tag = tag.replacingOccurrences(
+            of: #"data-yy-paper="[^"]*""#,
+            with: #"data-yy-paper="\#(presetID)""#,
+            options: .regularExpression
+        )
+        tag = tag.replacingOccurrences(
+            of: #" data-yy-texture="[^"]*""#,
+            with: "",
+            options: .regularExpression
+        )
+        if let customTexture, !customTexture.isEmpty, let styleRange = tag.range(of: " style=\"") {
+            tag.insert(contentsOf: #" data-yy-texture="\#(customTexture)""#, at: styleRange.lowerBound)
+        }
+        if let styleRange = tag.range(of: #"style="[^"]*""#, options: .regularExpression) {
+            var styleAttr = String(tag[styleRange])
+            if let customRange = styleAttr.range(of: ";--yy-p-bg:") {
+                styleAttr.replaceSubrange(customRange.lowerBound ..< styleAttr.index(before: styleAttr.endIndex), with: "")
+            }
+            if let customStyle, !customStyle.isEmpty {
+                let closeQuote = styleAttr.index(before: styleAttr.endIndex)
+                styleAttr.insert(contentsOf: ";" + customStyle, at: closeQuote)
+            }
+            tag.replaceSubrange(styleRange, with: styleAttr)
+        }
+        return body.replacingCharacters(in: htmlStart.lowerBound ..< htmlEnd, with: tag)
     }
 }
 

@@ -72,6 +72,7 @@ fun YuyueTheme(content: @Composable () -> Unit) {
         Appearance.DARK -> true
         else -> isSystemInDarkTheme()
     }
+    app.yuyue.reader.PaperAppearance.syncAppearance(dark)
     CompositionLocalProvider(
         LocalPalette provides if (dark) YYColors.Dark else YYColors.Light,
         LocalDark provides dark,

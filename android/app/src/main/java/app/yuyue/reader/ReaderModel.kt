@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.toArgb
 import app.yuyue.design.Prefs
 import app.yuyue.library.Library
 import app.yuyue.t
@@ -179,6 +180,7 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
     private var lastTurn = System.currentTimeMillis()
 
     init {
+        PaperAppearance.syncFromContext(context)
         val own = runCatching { core.bookReaderSettings(bookID) }.getOrNull()
         val s = own ?: runCatching { core.readerSettings() }.getOrNull() ?: settings
         settings = s
@@ -188,6 +190,7 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         pager.mode = s.mode
         pager.calm = EInk.on
         pager.bubbles = bubbles
+        pager.background = paperTokens.bg.toArgb()
         // A few quotes in the first chapters: a book with dialogue.
         kotlinx.coroutines.MainScope().launch {
             val n = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -631,8 +634,9 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
 
     /** 删除, with 撤销 for a few seconds. */
     fun deletePaper(mine: uniffi.yuyue_core.CustomPaper) {
-        val wasOn = settings.customPaper == mine.id
-        if (wasOn) update { it.copy(customPaper = null) }
+        val wasOn = PaperAppearance.resolve(settings).custom?.id == mine.id || settings.customPaper == mine.id
+        if (settings.customPaper == mine.id) update { it.copy(customPaper = null) }
+        PaperAppearance.forget(mine.id)
         Papers.delete(mine.id)
         show(Library.Toast(Library.Toast.Icon.Delete, app.yuyue.t("已删除“%@”", mine.name), "", danger = true) {
             Papers.restore(mine.id)
@@ -641,15 +645,14 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
     }
 
     fun choose(mine: uniffi.yuyue_core.CustomPaper) {
-        val preset = uniffi.yuyue_core.paperColors(mine).preset
-        update { it.copy(customPaper = mine.id, paper = preset) }
+        PaperAppearance.pick(mine, settings) { update(it) }
     }
 
     /** The paper 调纸 shows, over the one in the settings. */
     var previewing by mutableStateOf<app.yuyue.design.YYPaper?>(null)
         private set
     /** The paper the page and the controls over it are drawn on. */
-    val paperTokens: app.yuyue.design.YYPaper get() = if (EInk.on) EInk.paper else (previewing ?: settings.paperTokens)
+    val paperTokens: app.yuyue.design.YYPaper get() = if (EInk.on) EInk.paper else (previewing ?: PaperAppearance.resolve(settings).tokens)
 
     /** 调纸 being set: the page and the controls on `draft` until it is done or cancelled (null). */
     fun previewPaper(draft: uniffi.yuyue_core.CustomPaper?) {
@@ -677,6 +680,7 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         val modeChanged = pager.mode != s.mode
         pager.mode = s.mode
         if (modeChanged) barsAway(false)
+        pager.background = paperTokens.bg.toArgb()
         applyImmersive()
         pager.apply(s.script(pager.geometry()))
         if (modeChanged) pager.reload()
@@ -1197,8 +1201,9 @@ val MarkStyle.css: String
 
 /** The reader's `applySettings` for these settings (contract §4). */
 fun ReaderSettings.script(g: uniffi.yuyue_core.PageGeometry): JSONObject = JSONObject().apply {
-    put("paper", when (paper) { Paper.PLAIN -> "plain"; Paper.DARK -> "dark"; Paper.KAMI -> "kami"; Paper.KAMI_NIGHT -> "kaminight"; Paper.SAGE -> "sage"; Paper.EINK -> "eink" })
-    val mine = Papers.paper(customPaper)
+    val resolved = PaperAppearance.resolve(this@script)
+    put("paper", when (resolved.preset) { Paper.PLAIN -> "plain"; Paper.DARK -> "dark"; Paper.KAMI -> "kami"; Paper.KAMI_NIGHT -> "kaminight"; Paper.SAGE -> "sage"; Paper.EINK -> "eink" })
+    val mine = resolved.custom
     put("paperStyle", mine?.let { uniffi.yuyue_core.paperStyle(it) } ?: JSONObject.NULL)
     put("texture", mine?.texture?.css ?: JSONObject.NULL)
     put("mode", if (mode == LayoutMode.SCROLLED) "scrolled" else "paginated")

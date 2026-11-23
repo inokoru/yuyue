@@ -30352,6 +30352,26 @@
         }
       }
     },
+    "纸色跟随外观" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paper follows appearance"
+          }
+        }
+      }
+    },
+    "跟随外观" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Match Appearance"
+          }
+        }
+      }
+    },
     "跟随系统" : {
       "localizations" : {
         "en" : {

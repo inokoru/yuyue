@@ -344,14 +344,12 @@ struct ReadingSample: View {
 
     static func paper(_ s: ReaderSettings, preview: CustomPaper? = nil) -> YYPaper {
         if let preview { return YYPaper(custom: preview) }
-        if let mine = Papers.shared.paper(s.customPaper) { return YYPaper(custom: mine) }
-        return YYPaper.all.first { $0.id == s.paperChoice } ?? .plain
+        return PaperAppearance.shared.resolve(s).tokens
     }
 
     private static func texture(_ s: ReaderSettings, preview: CustomPaper? = nil) -> PaperTexture {
         if let preview { return preview.texture }
-        if let mine = Papers.shared.paper(s.customPaper) { return mine.texture }
-        return paper(s).hasNoiseTexture ? .grain : .none
+        return PaperAppearance.shared.resolve(s).texture
     }
 
     /// The face the page is in now: the chosen one, or the built-in one standing in while it downloads.
@@ -676,6 +674,7 @@ final class SettingsLog {
         },
         "shelf.showProgress": Watched(title: String(localized: "封面下显示进度"), kind: .bool, standard: .bool(true)),
         LiquidGlass.key: Watched(title: String(localized: "液态玻璃"), kind: .bool, standard: .bool(false)),
+        PaperAppearance.followKey: Watched(title: String(localized: "纸色跟随外观"), kind: .bool, standard: .bool(true)),
         "reader.twoColumns": Watched(title: String(localized: "宽窗口下双栏显示"), kind: .bool, standard: .bool(true)),
         ImmersivePrefs.alwaysKey: Watched(title: String(localized: "打开书籍时自动进入"), kind: .bool, standard: .bool(false)),
         ImmersivePrefs.lineKey: Watched(title: String(localized: "进度细线"), kind: .bool, standard: .bool(true)),
@@ -711,7 +710,7 @@ final class SettingsLog {
         "general.reopenLast": (.general, .toggle), "general.keepAwake": (.general, .toggle),
         AppAppearance.key: (.appearance, nil),
         "shelf.coverSize": (.appearance, nil), "shelf.showProgress": (.appearance, .toggle), LiquidGlass.key: (.appearance, .toggle),
-        "reader.twoColumns": (.reading, .toggle), ImmersivePrefs.alwaysKey: (.reading, .toggle), ImmersivePrefs.lineKey: (.reading, .toggle),
+        "reader.twoColumns": (.reading, .toggle), PaperAppearance.followKey: (.reading, .toggle), ImmersivePrefs.alwaysKey: (.reading, .toggle), ImmersivePrefs.lineKey: (.reading, .toggle),
         ImmersivePrefs.marksKey: (.reading, .toggle), ImmersivePrefs.hintsKey: (.reading, .toggle), ImmersivePrefs.stillKey: (.reading, .toggle),
         "companion.provider": (.companion, nil),
         "player.rate": (.listening, nil), "player.voice.zh": (.listening, .voice), "player.voice.en": (.listening, .voice),
@@ -1004,6 +1003,7 @@ final class SettingsLog {
             #if os(macOS)
             if key == AppAppearance.key { AppAppearance.apply() }
             #endif
+            if key == PaperAppearance.followKey { PaperAppearance.shared.reloadFromDefaults() }
         case .reader(let field, let old):
             guard let core = library?.core, var s = try? core.readerSettings(), let f = ReaderField(rawValue: field) else { break }
             f.apply(old, to: &s)
@@ -1021,14 +1021,14 @@ final class SettingsLog {
 
 /// The paper a book opens on, and its grain: the user's own or one of ours.
 enum ReaderPaperOf {
+    @MainActor
     static func paper(_ s: ReaderSettings) -> YYPaper {
-        if let mine = Papers.shared.paper(s.customPaper) { return YYPaper(custom: mine) }
-        return YYPaper.all.first { $0.id == s.paperChoice } ?? .plain
+        PaperAppearance.shared.resolve(s).tokens
     }
 
+    @MainActor
     static func texture(_ s: ReaderSettings) -> PaperTexture {
-        if let mine = Papers.shared.paper(s.customPaper) { return mine.texture }
-        return paper(s).hasNoiseTexture ? .grain : .none
+        PaperAppearance.shared.resolve(s).texture
     }
 }
 

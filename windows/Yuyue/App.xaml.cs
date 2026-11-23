@@ -23,6 +23,7 @@ public partial class App : Application
     private readonly Dictionary<string, PodcastReaderWindow> _podcastWindows = new();
     private DispatcherTimer? _syncTimer;
     private Microsoft.UI.Dispatching.DispatcherQueue? _uiQueue;
+    private Windows.UI.ViewManagement.UISettings? _uiSettings;
     private object? _activeAudioClaimant;
     private Action? _pauseActiveAudio;
     private bool _exitingApp;
@@ -62,6 +63,12 @@ public partial class App : Application
         var uiQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         _uiQueue = uiQueue;
         Library.SystemIntegration.AttachUiQueue(uiQueue);
+        try
+        {
+            _uiSettings = new Windows.UI.ViewManagement.UISettings();
+            _uiSettings.ColorValuesChanged += (_, _) => uiQueue.TryEnqueue(BroadcastAppearanceChanged);
+        }
+        catch { }
         Library.SystemIntegration.ShowShelfCallback = () => uiQueue.TryEnqueue(ShowShelf);
         Library.SystemIntegration.OpenSettingsCallback = () => uiQueue.TryEnqueue(() => OpenSettings("general"));
         Library.SystemIntegration.PlayPodcastIssueCallback = id => uiQueue.TryEnqueue(() => OpenPodcastIssue(id));
@@ -486,7 +493,7 @@ public partial class App : Application
     {
         ApplyAccentResources();
         _shelfWindow?.ApplyAppearance();
-        foreach (var r in _readerWindows.Values) r.ApplyTintAndChrome();
+        foreach (var r in _readerWindows.Values) r.OnAppearanceChanged();
         foreach (var p in _pdfWindows.Values) p.ApplyTintAndChrome();
         foreach (var a in _audioWindows.Values) a.ApplyAppearance();
         foreach (var pod in _podcastWindows.Values) pod.ApplyAppearance();

@@ -1022,17 +1022,28 @@ private struct ReadingSettings: View {
     @State private var confirming: YYConfirm?
 
     var body: some View {
+        let resolved = PaperAppearance.shared.resolve(settings)
         VStack(alignment: .leading, spacing: 12) {
             SettingsCard {
                 // The papers and fonts as tiles, so each is seen before it's chosen.
-                tiles(String(localized: "纸色"), columns: YYPaper.all.count) {
+                tiles(String(localized: "纸色"), columns: YYPaper.all.count, trailing: {
+                    HStack(spacing: 8) {
+                        Text("跟随外观").font(.yy(size: 11.5)).foregroundStyle(YYColor.t2)
+                        SettingsSwitch(isOn: Binding(
+                            get: { PaperAppearance.shared.follow },
+                            set: { PaperAppearance.shared.setFollow($0, in: settings) { change($0) } }
+                        ))
+                    }
+                }) {
                     ForEach(YYPaper.all) { paper in
-                        SettingsPaperTile(paper: paper, texture: paper.hasNoiseTexture ? .grain : .none, name: paper.name, selected: settings.paperChoice == paper.id) {
-                            change { $0.paper = Paper(id: paper.id) ?? .plain; $0.customPaper = nil }
+                        SettingsPaperTile(paper: paper, texture: paper.hasNoiseTexture ? .grain : .none, name: paper.name, selected: resolved.choiceID == paper.id) {
+                            if let id = Paper(id: paper.id) {
+                                PaperAppearance.shared.pick(preset: id, in: settings) { change($0) }
+                            }
                         }
                     }
                     ForEach(Papers.shared.list, id: \.id) { mine in
-                        SettingsPaperTile(paper: YYPaper(custom: mine), texture: mine.texture, name: mine.name, selected: settings.paperChoice == mine.id) {
+                        SettingsPaperTile(paper: YYPaper(custom: mine), texture: mine.texture, name: mine.name, selected: resolved.choiceID == mine.id) {
                             choosePaper(mine)
                         }
                         .contextMenu {
@@ -1167,21 +1178,31 @@ private struct ReadingSettings: View {
     }
 
     private func choosePaper(_ mine: CustomPaper) {
-        let preset = paperColors(paper: mine).preset
-        change { $0.customPaper = mine.id; $0.paper = preset }
+        PaperAppearance.shared.pick(custom: mine, in: settings) { change($0) }
     }
 
     private func deletePaper(_ mine: CustomPaper) {
         if settings.customPaper == mine.id { change { $0.customPaper = nil } }
+        PaperAppearance.shared.forget(mine.id)
         Papers.shared.delete(mine.id)
     }
 
     /// A titled row of tiles in the card: what it is on top, the choices filling the width.
     private func tiles<Content: View>(_ title: String, detail: String? = nil, columns: Int, @ViewBuilder content: () -> Content) -> some View {
+        tiles(title, detail: detail, columns: columns, trailing: { EmptyView() }, content: content)
+    }
+
+    private func tiles<Trailing: View, Content: View>(_ title: String, detail: String? = nil, columns: Int,
+                                                      @ViewBuilder trailing: () -> Trailing,
+                                                      @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.yy(size: 12.5, weight: .medium)).foregroundStyle(YYColor.t1)
-                if let detail { Text(detail).font(.yy(size: 10.5)).foregroundStyle(YYColor.t3) }
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.yy(size: 12.5, weight: .medium)).foregroundStyle(YYColor.t1)
+                    if let detail { Text(detail).font(.yy(size: 10.5)).foregroundStyle(YYColor.t3) }
+                }
+                Spacer(minLength: 8)
+                trailing()
             }
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columns), spacing: 8) { content() }
         }
@@ -1556,6 +1577,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         case .dark: NSApp.appearance = NSAppearance(named: .darkAqua)
         case .system: NSApp.appearance = nil
         }
+        PaperAppearance.shared.refreshAppearance()
     }
     #endif
 

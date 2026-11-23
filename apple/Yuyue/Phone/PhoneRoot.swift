@@ -81,9 +81,16 @@ struct PhoneRoot: View {
         }
         .onChange(of: phase, initial: true) { _, now in
             if now == .active {
+                PaperAppearance.shared.syncFromRoot(scheme: scheme, mode: mode)
                 Task { await library.watched.scan(into: library) }
                 Task { await Feedback.shared.flush() }
             }
+        }
+        .onChange(of: scheme, initial: true) { _, now in
+            PaperAppearance.shared.syncFromRoot(scheme: now, mode: mode)
+        }
+        .onChange(of: mode, initial: true) { _, now in
+            PaperAppearance.shared.syncFromRoot(scheme: scheme, mode: now)
         }
         .openingSnapshots(library)
         .overlay(alignment: .top) {

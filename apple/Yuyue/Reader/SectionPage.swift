@@ -348,10 +348,12 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
     private static let bundle = Bundle.main.resourceURL!.appending(path: "dist", directoryHint: .isDirectory)
 
     private let core: YuyueCore
+    private let bookID: String
     var geometry: () -> PageGeometry
 
-    init(core: YuyueCore, geometry: @escaping () -> PageGeometry) {
+    init(core: YuyueCore, bookID: String, geometry: @escaping () -> PageGeometry) {
         self.core = core
+        self.bookID = bookID
         self.geometry = geometry
     }
 
@@ -366,12 +368,18 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
         }
         switch core.serve(path: path, geometry: geometry()) {
         case .html(let body):
-            let html: String
-            if EInk.on, let range = body.range(of: "<html ") {
+            var html = body
+            if PaperAppearance.shared.follow {
+                let own = (try? core.bookReaderSettings(bookId: bookID)) ?? nil
+                let settings = own ?? (try? core.readerSettings()) ?? .standard
+                let resolved = PaperAppearance.shared.resolve(settings)
+                if resolved != PaperAppearance.shared.raw(settings) {
+                    html = PaperAppearance.shared.applyToHTML(html, resolved: resolved)
+                }
+            }
+            if EInk.on, let range = html.range(of: "<html ") {
                 let attrs = EInk.grayscale ? #"data-yy-eink="1" data-yy-eink-gray="1" "# : #"data-yy-eink="1" "#
-                html = body.replacingCharacters(in: range, with: "<html " + attrs)
-            } else {
-                html = body
+                html = html.replacingCharacters(in: range, with: "<html " + attrs)
             }
             respond(task, url, data: Data(html.utf8), mime: "text/html; charset=utf-8")
         case .file(let file, let mime):

@@ -189,4 +189,37 @@ struct WalkthroughRegressionTests {
         let chapterPrompt = try #require(chapterCmd.question(argument: "", hasQuote: false, chapterTitle: "孔乙己"))
         #expect(chapterPrompt.contains("孔乙己"))
     }
+
+    @Test func `paper appearance pairs day and night presets keeping typography`() {
+        #expect(PaperAppearance.pairedPreset(for: .init(preset: .plain, custom: nil), dark: true) == .dark)
+        #expect(PaperAppearance.pairedPreset(for: .init(preset: .kami, custom: nil), dark: true) == .kamiNight)
+        #expect(PaperAppearance.pairedPreset(for: .init(preset: .sage, custom: nil), dark: true) == .kamiNight)
+        #expect(PaperAppearance.pairedPreset(for: .init(preset: .eink, custom: nil), dark: true) == .kamiNight)
+        #expect(PaperAppearance.pairedPreset(for: .init(preset: .dark, custom: nil), dark: false) == .plain)
+        #expect(PaperAppearance.pairedPreset(for: .init(preset: .kamiNight, custom: nil), dark: false) == .kami)
+    }
+
+    @Test func `paper appearance rewrites initial section HTML without flashing`() {
+        let raw = """
+        <!DOCTYPE html>
+        <html lang="zh-CN" data-yy-paper="kami" data-yy-mode="paginated" data-yy-texture="xuan" style="--yy-fs:18px;--yy-p-bg:#F5F4ED;color-scheme:light">
+        <body><p>故乡</p></body></html>
+        """
+
+        let nightPreset = PaperAppearance.applyToHTML(raw, presetID: "kaminight", customStyle: nil, customTexture: nil)
+        #expect(nightPreset.contains(#"data-yy-paper="kaminight""#))
+        #expect(!nightPreset.contains("data-yy-texture="))
+        #expect(nightPreset.contains(#"style="--yy-fs:18px""#))
+        #expect(!nightPreset.contains("--yy-p-bg:"))
+
+        let nightCustom = PaperAppearance.applyToHTML(
+            raw,
+            presetID: "dark",
+            customStyle: "--yy-p-bg:#18202B;--yy-p-ink:#C9D3DE;color-scheme:dark",
+            customTexture: "linen"
+        )
+        #expect(nightCustom.contains(#"data-yy-paper="dark""#))
+        #expect(nightCustom.contains(#"data-yy-texture="linen""#))
+        #expect(nightCustom.contains(#"style="--yy-fs:18px;--yy-p-bg:#18202B;--yy-p-ink:#C9D3DE;color-scheme:dark""#))
+    }
 }

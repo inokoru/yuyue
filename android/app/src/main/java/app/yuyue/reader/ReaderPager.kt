@@ -170,7 +170,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
     }
 
     private fun makePage(): SectionPage {
-        val p = spare.removeLastOrNull() ?: SectionPage(context, core, ::geometry, ::received).also {
+        val p = spare.removeLastOrNull() ?: SectionPage(context, core, bookID, ::geometry, ::received).also {
             it.setBackground(background)
             addView(it.webView, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             it.webView.scrolled = { dy -> trackBars(it, dy) }

@@ -53,6 +53,8 @@ final class ReaderModel {
     /// Local device 墨水屏模式 state (never synced across devices).
     private(set) var einkOn = EInk.on
     private(set) var einkGrayscale = EInk.grayscale
+    /// The resolved paper currently applied to the pager, so appearance switches trigger an update.
+    private var appliedPaper: PaperAppearance.Resolved
     /// The section on screen, and its page.
     private(set) var section: UInt32?
     private(set) var page = 0
@@ -205,7 +207,9 @@ final class ReaderModel {
         let settings = own ?? (try? core.readerSettings()) ?? .standard
         self.settings = settings
         self.ownSettings = own != nil
-        let initialBg = (EInk.on ? EInk.paper : settings.paperTokens).platformBackground
+        let resolved = PaperAppearance.shared.resolve(settings)
+        self.appliedPaper = resolved
+        let initialBg = (EInk.on ? EInk.paper : resolved.tokens).platformBackground
         pager = ReaderPager(core: core, bookID: bookID, mode: settings.mode, background: initialBg)
         player = detail.map { Player(core: core, detail: $0) }
         self.failure = failure
@@ -711,7 +715,7 @@ final class ReaderModel {
     }
 
     /// 设置 · 阅读 changed the shared settings: books without their own follow.
-    /// 墨水屏模式 is a local display override and never mutates the synced paper settings.
+    /// 墨水屏模式 and 纸色跟随外观 are local display overrides and never mutate the synced paper settings.
     private func sharedSettingsChanged() {
         let einkChanged = einkOn != EInk.on || einkGrayscale != EInk.grayscale
         if einkChanged {
@@ -719,19 +723,23 @@ final class ReaderModel {
             einkGrayscale = EInk.grayscale
         }
         let target = ownSettings ? ((try? core.bookReaderSettings(bookId: bookID)) ?? nil) : (try? core.readerSettings())
+        let effective = target ?? settings
+        let paperChanged = appliedPaper != PaperAppearance.shared.resolve(effective)
         if let target, target != settings {
             settings = target
             applyToPager(target)
-        } else if einkChanged {
+        } else if einkChanged || paperChanged {
             applyToPager(settings)
         }
     }
 
     private func applyToPager(_ new: ReaderSettings) {
+        let resolved = PaperAppearance.shared.resolve(new)
+        appliedPaper = resolved
         pager.fontSize = new.fontSize
         pager.mode = new.mode
-        pager.background = (einkOn ? EInk.paper : new.paperTokens).platformBackground
-        pager.apply(settings: new.script)
+        pager.background = (einkOn ? EInk.paper : resolved.tokens).platformBackground
+        pager.apply(settings: new.script(resolved: resolved))
         applyImmersive()
     }
 
@@ -746,7 +754,7 @@ final class ReaderModel {
         let tokens = YYPaper(custom: draft)
         previewing = tokens
         pager.background = tokens.platformBackground
-        var script = settings.script
+        var script = settings.script()
         script["paper"] = paperColors(paper: draft).preset.tokens.id
         script["paperStyle"] = paperStyle(paper: draft)
         script["texture"] = draft.texture.css ?? NSNull()
@@ -755,7 +763,7 @@ final class ReaderModel {
     /// The paper 调纸 shows, over the one in the settings.
     private(set) var previewing: YYPaper?
     /// The paper the page and the controls over it are drawn on.
-    var paperTokens: YYPaper { einkOn ? EInk.paper : (previewing ?? settings.paperTokens) }
+    var paperTokens: YYPaper { einkOn ? EInk.paper : (previewing ?? PaperAppearance.shared.resolve(settings).tokens) }
 
     // MARK: Progress
 
@@ -1049,13 +1057,13 @@ extension ReaderSettings {
     )
 
     /// As `yy.applySettings` takes them (reader contract §4). nil means the paper's default.
-    var script: [String: Any] {
+    func script(resolved: PaperAppearance.Resolved? = nil) -> [String: Any] {
         func js(_ value: Any?) -> Any { value ?? NSNull() }
-        let mine = Papers.shared.paper(customPaper)
+        let r = resolved ?? PaperAppearance.shared.resolve(self)
         return [
-            "paper": paper.tokens.id,
-            "paperStyle": js(mine.map { paperStyle(paper: $0) }),
-            "texture": js(mine?.texture.css),
+            "paper": r.preset.tokens.id,
+            "paperStyle": js(r.custom.map { paperStyle(paper: $0) }),
+            "texture": js(r.custom?.texture.css),
             "mode": mode == .paginated ? "paginated" : "scrolled",
             "font": js(font?.name),
             "fontSize": fontSize,

@@ -996,20 +996,17 @@ public sealed partial class SettingsWindow : Window
     {
         if (_library.Prefs.GlobalEinkMode)
             return ("墨水屏", Colors.White, Colors.Black, false);
-        if (!string.IsNullOrEmpty(rs.CustomPaper))
+        var resolved = PaperAppearance.Resolve(_library, rs);
+        if (resolved.Custom is CustomPaper cp)
         {
             try
             {
-                var cp = _library.Core.CustomPapers().FirstOrDefault(x => x.Id == rs.CustomPaper);
-                if (cp is not null)
-                {
-                    var pc = YuyueCoreMethods.PaperColors(cp);
-                    return (cp.Name, CustomPaperDialog.ParseHexColor(pc.Bg, Colors.Beige), CustomPaperDialog.ParseHexColor(pc.Ink, Colors.Black), pc.Dark);
-                }
+                var pc = YuyueCoreMethods.PaperColors(cp);
+                return (cp.Name, CustomPaperDialog.ParseHexColor(pc.Bg, Colors.Beige), CustomPaperDialog.ParseHexColor(pc.Ink, Colors.Black), pc.Dark);
             }
             catch { }
         }
-        var tok = rs.Paper switch
+        var tok = resolved.Preset switch
         {
             Paper.Dark => YYPapers.Dark,
             Paper.Kami => YYPapers.Kami,
@@ -1018,7 +1015,7 @@ public sealed partial class SettingsWindow : Window
             Paper.Eink => YYPapers.Eink,
             _ => YYPapers.Plain,
         };
-        string swiftName = rs.Paper switch
+        string swiftName = resolved.Preset switch
         {
             Paper.Dark => "暗黑",
             Paper.Kami => "纸本",
@@ -1293,8 +1290,48 @@ public sealed partial class SettingsWindow : Window
         }
 
         // 1. 纸张磁贴网格（YYPaper.all 顺序 + 自定义纸 + 新建，内绘两道墨水短线 26x2 & 18x2）
+        var resolvedPaper = PaperAppearance.Resolve(_library, rs);
         var paperWrap = new StackPanel { Spacing = 10, Padding = new Thickness(16, 14, 16, 14) };
-        paperWrap.Children.Add(new TextBlock { Text = "纸张", FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) });
+        var paperHeader = new Grid();
+        paperHeader.Children.Add(new TextBlock { Text = "纸色", FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center });
+        var followBox = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Opacity = _library.Prefs.GlobalEinkMode ? 0.45 : 1.0 };
+        followBox.Children.Add(new TextBlock { Text = "跟随外观", FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center });
+        var followSwitch = MakeSwitch(_library.Prefs.PaperFollowAppearance, v =>
+        {
+            bool prevFollow = _library.Prefs.PaperFollowAppearance;
+            var prevRs = rs;
+            bool save = PaperAppearance.SetFollow(_library, v, rs, out var updated);
+            var nextRs = save ? updated : rs;
+            if (save)
+            {
+                rs = updated;
+                _library.SaveReaderSettings(rs);
+            }
+            App.CurrentApp.BroadcastReaderSettingsChanged();
+            RecordChange(
+                "纸色跟随外观",
+                v ? "开" : "关",
+                undo: () =>
+                {
+                    _library.Prefs.PaperFollowAppearance = prevFollow;
+                    _library.SavePrefs();
+                    if (save) _library.SaveReaderSettings(prevRs);
+                    App.CurrentApp.BroadcastReaderSettingsChanged();
+                },
+                redo: () =>
+                {
+                    _library.Prefs.PaperFollowAppearance = v;
+                    _library.SavePrefs();
+                    if (save) _library.SaveReaderSettings(nextRs);
+                    App.CurrentApp.BroadcastReaderSettingsChanged();
+                });
+            RenderInspector("reading");
+            RenderDynamicPage("reading");
+        });
+        followSwitch.IsEnabled = !_library.Prefs.GlobalEinkMode;
+        followBox.Children.Add(followSwitch);
+        paperHeader.Children.Add(followBox);
+        paperWrap.Children.Add(paperHeader);
         if (_library.Prefs.GlobalEinkMode)
         {
             paperWrap.Children.Add(new TextBlock
@@ -1344,7 +1381,7 @@ public sealed partial class SettingsWindow : Window
         int cellIdx = 0;
         foreach (var (kind, name, tok) in presets)
         {
-            bool on = string.IsNullOrEmpty(rs.CustomPaper) && rs.Paper == kind;
+            bool on = resolvedPaper.Custom is null && resolvedPaper.Preset == kind;
             var tileSp = new StackPanel { Spacing = 4 };
             tileSp.Children.Add(MakePaperStrip(tok.Bg, tok.Ink, tok.Line, on));
             tileSp.Children.Add(new TextBlock { Text = name, FontSize = 10.5, FontWeight = on ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal, Foreground = ThemeHelper.Brush(on ? p.T1 : p.T2), HorizontalAlignment = HorizontalAlignment.Center, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
@@ -1352,7 +1389,13 @@ public sealed partial class SettingsWindow : Window
             var btn = new Button { Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0), UseSystemFocusVisuals = false, Content = tileSp };
             Paper pk = kind;
             string pName = name;
-            btn.Click += (_, _) => { Update("纸张", pName, s => s with { Paper = pk, CustomPaper = null }); RenderDynamicPage("reading"); };
+            btn.Click += (_, _) =>
+            {
+                bool save = PaperAppearance.PickPreset(_library, pk, rs, out var updated);
+                if (save) Update("纸色", pName, _ => updated);
+                else { App.CurrentApp.BroadcastReaderSettingsChanged(); RenderInspector("reading"); }
+                RenderDynamicPage("reading");
+            };
             Grid.SetRow(btn, cellIdx / cols);
             Grid.SetColumn(btn, cellIdx % cols);
             paperGrid.Children.Add(btn);
@@ -1363,7 +1406,7 @@ public sealed partial class SettingsWindow : Window
         {
             var cpItem = cp;
             var pc = YuyueCoreMethods.PaperColors(cpItem);
-            bool on = rs.CustomPaper == cpItem.Id;
+            bool on = resolvedPaper.Custom?.Id == cpItem.Id;
             var tileSp = new StackPanel { Spacing = 4 };
             tileSp.Children.Add(MakePaperStrip(CustomPaperDialog.ParseHexColor(pc.Bg, Colors.Beige), CustomPaperDialog.ParseHexColor(pc.Ink, Colors.Black), p.Line, on));
             tileSp.Children.Add(new TextBlock { Text = cpItem.Name, FontSize = 10.5, FontWeight = on ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal, Foreground = ThemeHelper.Brush(on ? p.T1 : p.T2), HorizontalAlignment = HorizontalAlignment.Center, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
@@ -1375,8 +1418,9 @@ public sealed partial class SettingsWindow : Window
                 var edited = await CustomPaperDialog.ShowEditorAsync(RootGrid.XamlRoot, _library, cpItem);
                 if (edited is not null)
                 {
-                    var epc = YuyueCoreMethods.PaperColors(edited);
-                    Update("纸张", edited.Name, s => s with { Paper = epc.Preset, CustomPaper = edited.Id });
+                    bool save = PaperAppearance.PickCustom(_library, edited, rs, out var updated);
+                    if (save) Update("纸色", edited.Name, _ => updated);
+                    else { App.CurrentApp.BroadcastReaderSettingsChanged(); RenderInspector("reading"); }
                 }
                 RenderDynamicPage("reading");
             };
@@ -1386,8 +1430,9 @@ public sealed partial class SettingsWindow : Window
                 var copy = CustomPaperDialog.DuplicateCustomPaper(_library, cpItem);
                 if (copy is not null)
                 {
-                    var cpc = YuyueCoreMethods.PaperColors(copy);
-                    Update("纸张", copy.Name, s => s with { Paper = cpc.Preset, CustomPaper = copy.Id });
+                    bool save = PaperAppearance.PickCustom(_library, copy, rs, out var updated);
+                    if (save) Update("纸色", copy.Name, _ => updated);
+                    else { App.CurrentApp.BroadcastReaderSettingsChanged(); RenderInspector("reading"); }
                 }
                 RenderDynamicPage("reading");
             };
@@ -1395,8 +1440,14 @@ public sealed partial class SettingsWindow : Window
             delMi.Click += (_, _) =>
             {
                 try { _library.Core.DeleteCustomPaper(cpItem.Id); } catch { }
+                PaperAppearance.Forget(_library, cpItem.Id);
                 if (rs.CustomPaper == cpItem.Id)
-                    Update("纸张", "纸本", s => s with { Paper = Paper.Kami, CustomPaper = null });
+                    Update("纸色", "纸本", s => s with { Paper = Paper.Kami, CustomPaper = null });
+                else
+                {
+                    App.CurrentApp.BroadcastReaderSettingsChanged();
+                    RenderInspector("reading");
+                }
                 RenderDynamicPage("reading");
             };
             ctx.Items.Add(editMi);
@@ -1405,7 +1456,13 @@ public sealed partial class SettingsWindow : Window
             ctx.Items.Add(delMi);
 
             var btn = new Button { Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0), UseSystemFocusVisuals = false, Content = tileSp, ContextFlyout = ctx };
-            btn.Click += (_, _) => { Update("纸张", cpItem.Name, s => s with { Paper = pc.Preset, CustomPaper = cpItem.Id }); RenderDynamicPage("reading"); };
+            btn.Click += (_, _) =>
+            {
+                bool save = PaperAppearance.PickCustom(_library, cpItem, rs, out var updated);
+                if (save) Update("纸色", cpItem.Name, _ => updated);
+                else { App.CurrentApp.BroadcastReaderSettingsChanged(); RenderInspector("reading"); }
+                RenderDynamicPage("reading");
+            };
             Grid.SetRow(btn, cellIdx / cols);
             Grid.SetColumn(btn, cellIdx % cols);
             paperGrid.Children.Add(btn);
@@ -1428,8 +1485,9 @@ public sealed partial class SettingsWindow : Window
             var created = await CustomPaperDialog.ShowEditorAsync(RootGrid.XamlRoot, _library);
             if (created is not null)
             {
-                var pc = YuyueCoreMethods.PaperColors(created);
-                Update("纸张", created.Name, s => s with { Paper = pc.Preset, CustomPaper = created.Id });
+                bool save = PaperAppearance.PickCustom(_library, created, rs, out var updated);
+                if (save) Update("纸色", created.Name, _ => updated);
+                else { App.CurrentApp.BroadcastReaderSettingsChanged(); RenderInspector("reading"); }
                 RenderDynamicPage("reading");
             }
         };

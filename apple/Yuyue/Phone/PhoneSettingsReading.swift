@@ -198,6 +198,7 @@ struct PhoneReading: View {
     @State private var confirming: YYConfirm?
 
     var body: some View {
+        let resolved = PaperAppearance.shared.resolve(settings)
         YYPage {
             PhoneSettingsLead(String(localized: "新书的默认排版；单本书可在阅读页 Aa 中单独调整"))
             sample.padding(.top, YYUI.s(12))
@@ -213,16 +214,26 @@ struct PhoneReading: View {
                         .foregroundStyle(YYColor.t2)
                         .padding(.top, YYUI.s(10))
                     }
-                    tiles(String(localized: "纸色"), columns: 3) {
+                    tiles(String(localized: "纸色"), columns: 3, trailing: {
+                        HStack(spacing: YYUI.s(6)) {
+                            Text("跟随外观").font(YYUI.font(10.5)).foregroundStyle(YYColor.t2)
+                            YYSwitch(isOn: Binding(
+                                get: { PaperAppearance.shared.follow },
+                                set: { PaperAppearance.shared.setFollow($0, in: settings) { change($0) } }
+                            ), label: String(localized: "跟随外观"))
+                        }
+                    }) {
                         ForEach(YYPaper.all) { paper in
                             SettingsPaperTile(paper: paper, texture: paper.hasNoiseTexture ? .grain : .none, name: paper.name,
-                                              selected: settings.paperChoice == paper.id) {
-                                change { $0.paper = Paper(id: paper.id) ?? .plain; $0.customPaper = nil }
+                                              selected: resolved.choiceID == paper.id) {
+                                if let id = Paper(id: paper.id) {
+                                    PaperAppearance.shared.pick(preset: id, in: settings) { change($0) }
+                                }
                             }
                         }
                         ForEach(Papers.shared.list, id: \.id) { mine in
                             SettingsPaperTile(paper: YYPaper(custom: mine), texture: mine.texture, name: mine.name,
-                                              selected: settings.paperChoice == mine.id) {
+                                              selected: resolved.choiceID == mine.id) {
                                 choosePaper(mine)
                             }
                             .contextMenu {
@@ -363,12 +374,12 @@ struct PhoneReading: View {
     }
 
     private func choosePaper(_ mine: CustomPaper) {
-        let preset = paperColors(paper: mine).preset
-        change { $0.customPaper = mine.id; $0.paper = preset }
+        PaperAppearance.shared.pick(custom: mine, in: settings) { change($0) }
     }
 
     private func deletePaper(_ mine: CustomPaper) {
         if settings.customPaper == mine.id { change { $0.customPaper = nil } }
+        PaperAppearance.shared.forget(mine.id)
         Papers.shared.delete(mine.id)
     }
 
@@ -422,14 +433,24 @@ struct PhoneReading: View {
         .overlay(RoundedRectangle(cornerRadius: YYUI.s(12)).strokeBorder(YYColor.line, lineWidth: paper.isDark ? 0 : 0.5))
         .onAppear { if !FontShelf.shared.isReady(id) { FontPreview.shared.load(id, text: line) } }
         .onChange(of: id) { if !FontShelf.shared.isReady(id) { FontPreview.shared.load(id, text: line) } }
-        .animation(previewPaper == nil ? YYMotion.standard : nil, value: settings.paperChoice)
+        .animation(previewPaper == nil ? YYMotion.standard : nil, value: PaperAppearance.shared.resolve(settings).choiceID)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("样张"))
     }
 
     private func tiles<Content: View>(_ title: String, columns: Int, @ViewBuilder content: () -> Content) -> some View {
+        tiles(title, columns: columns, trailing: { EmptyView() }, content: content)
+    }
+
+    private func tiles<Trailing: View, Content: View>(_ title: String, columns: Int,
+                                                      @ViewBuilder trailing: () -> Trailing,
+                                                      @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: YYUI.s(8)) {
-            Text(title).font(YYUI.font(11.5, .medium)).foregroundStyle(YYColor.t1)
+            HStack(alignment: .center, spacing: YYUI.s(8)) {
+                Text(title).font(YYUI.font(11.5, .medium)).foregroundStyle(YYColor.t1)
+                Spacer(minLength: YYUI.s(8))
+                trailing()
+            }
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: YYUI.s(6)), count: columns), spacing: YYUI.s(6)) { content() }
         }
         .padding(.vertical, YYUI.s(12))

@@ -78,7 +78,7 @@ final class ReaderPager: PlatformView {
         self.background = background
         super.init(frame: .zero)
         messages.receiver = self
-        schemeHandler = SchemeHandler(core: core) { [weak self] in
+        schemeHandler = SchemeHandler(core: core, bookID: bookID) { [weak self] in
             self?.geometry() ?? PageGeometry(paging: .snap, margin: 24, top: 56, bottom: 88, columns: 1, reducedMotion: false)
         }
         configuration = .reader(schemeHandler: schemeHandler, messages: messages)
