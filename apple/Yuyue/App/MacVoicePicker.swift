@@ -334,7 +334,7 @@ enum VoiceSource: Hashable {
         switch self {
         case .neural:
             var out: [any Voice] = []
-            if KokoroModel.isInstalled, CardVoice.supportsLanguage(tag) {
+            if !KokoroModel.deviceUnsupported, CardVoice.supportsLanguage(tag) {
                 out += KokoroModel.builtinVoices(for: tag)
             }
             if LiveVoiceModel.isInstalled, CardVoice.supportsLanguage(tag) {
@@ -391,9 +391,7 @@ enum VoiceBook: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var key: String { "player.voice." + rawValue }
     var title: String { self == .zh ? String(localized: "中文书") : String(localized: "英文书") }
-    var line: String {
-        self == .zh ? "我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。" : "It was the best of times, it was the worst of times."
-    }
+    var line: String { DailyQuote.shared.current(rawValue).text }
 
     /// The voice reading it: the one chosen, or Kokoro/Live narrator, or keyless online voice, or system fallback.
     var current: (any Voice)? {
@@ -415,9 +413,9 @@ enum VoiceBook: String, CaseIterable, Identifiable {
     /// Lines to try a voice on, for the “ at the start of the box.
     var quickLines: [(name: String, line: String)] {
         self == .zh
-            ? [(String(localized: "叙述"), line), (String(localized: "对话"), "“这是谁？”我问。“这是闰土呀，你忘了么？”"),
+            ? [(String(localized: "对话"), "“这是谁？”我问。“这是闰土呀，你忘了么？”"),
                (String(localized: "数字"), "第 12 章，1986 年 3 月 4 日，下午 3:40。"), (String(localized: "中英夹杂"), "Hello，今天读到 Chapter 3 了。")]
-            : [("Narration", line), ("Dialogue", "\"Is it you?\" she asked. \"Of course it is,\" he said."), ("Numbers", "Chapter 12, page 304: the year was 1859.")]
+            : [("Dialogue", "\"Is it you?\" she asked. \"Of course it is,\" he said."), ("Numbers", "Chapter 12, page 304: the year was 1859.")]
     }
 
     /// Put in the box for you to change, not sent.
@@ -659,8 +657,12 @@ struct VoiceSourcePage: View {
             if let current { PinnedVoice(voice: current, book: book, elsewhere: VoiceSource.of(current) != source).padding(.bottom, 6) }
             if source == .neural {
                 if !KokoroModel.isInstalled {
-                    KokoroPrepBanner(language: book.rawValue, alwaysShowIdle: true)
-                        .padding(.bottom, 6)
+                    KokoroPrepBanner(
+                        language: book.rawValue,
+                        alwaysShowIdle: true,
+                        pendingName: KokoroDownload.shared.pendingVoiceName(for: book.key)
+                    )
+                    .padding(.bottom, 6)
                 }
             } else if source == .mac {
                 HStack(spacing: 6) {
@@ -681,7 +683,18 @@ struct VoiceSourcePage: View {
                 .padding(.horizontal, 10).padding(.bottom, 6)
             }
             // What they're all saying stays in sight; only the voices under it scroll.
-            YourLine(text: focus.line(book)).padding(.top, 4).padding(.bottom, 4)
+            if let custom = focus.customLine(book) {
+                YourLine(text: custom).padding(.top, 4).padding(.bottom, 4)
+            } else {
+                DailyQuoteCard(
+                    quote: DailyQuote.shared.current(book.rawValue),
+                    refreshing: DailyQuote.shared.refreshing
+                ) {
+                    focus.clearCustomLine(book)
+                    Task { await DailyQuote.shared.refresh(book.rawValue) }
+                }
+                .padding(.top, 4).padding(.bottom, 4)
+            }
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -745,11 +758,28 @@ struct VoiceSourcePage: View {
         .overlay {
             if linesOpen {
                 Color.clear.contentShape(.rect).onTapGesture { linesOpen = false }
-                QuickLines(book: book, send: { linesOpen = false; send($0) }, fill: {
-                    linesOpen = false
-                    draft = $0
-                    typing = true
-                })
+                QuickLines(
+                    book: book,
+                    useDaily: {
+                        let wasDaily = !focus.hasCustomLine(book)
+                        linesOpen = false
+                        focus.clearCustomLine(book)
+                        Task {
+                            if wasDaily {
+                                await DailyQuote.shared.refresh(book.rawValue)
+                            }
+                            if let v = book.current {
+                                focus.listen(v, text: focus.line(book))
+                            }
+                        }
+                    },
+                    send: { linesOpen = false; send($0) },
+                    fill: {
+                        linesOpen = false
+                        draft = $0
+                        typing = true
+                    }
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 .padding(.bottom, 48)
             }
@@ -757,6 +787,11 @@ struct VoiceSourcePage: View {
         #if os(macOS)
         .background(VoiceKeys { key($0, book: book, order: (current.map { [$0] } ?? []) + groups.flatMap(\.voices)) })
         #endif
+        .task(id: book) {
+            await DailyQuote.shared.ensureToday(book.rawValue) {
+                !focus.hasCustomLine(book) && PreviewState.shared.voiceID == nil
+            }
+        }
         .onAppear {
             #if DEBUG
             if UserDefaults.standard.bool(forKey: "debugVoiceLines") { linesOpen = true }
@@ -1022,14 +1057,19 @@ struct ReadyLinesCard<Content: View>: View {
 /// The ready lines, over the box.
 private struct QuickLines: View {
     let book: VoiceBook
+    let useDaily: () -> Void
     let send: (String) -> Void
     let fill: (String) -> Void
     private var focus: ListeningFocus { .shared }
 
     var body: some View {
+        let dailyLabel = book == .zh ? String(localized: "每日一言") : "Daily quote"
+        let usingDaily = !focus.hasCustomLine(book)
+        let daily = DailyQuote.shared.current(book.rawValue)
         ReadyLinesCard(width: 330) {
+            QuickLine(name: usingDaily ? String(localized: "\(dailyLabel) · 正在用") : dailyLabel, line: daily.text, action: useDaily)
             ForEach(book.quickLines, id: \.name) { q in
-                let using = focus.line(book) == q.line
+                let using = focus.hasCustomLine(book) && focus.line(book) == q.line
                 QuickLine(name: using ? String(localized: "\(q.name) · 正在用") : q.name, line: q.line) { send(q.line) }
             }
             QuickLine(name: book == .zh ? String(localized: "书里的一句") : "From a book", line: book.bookLine.hint) { fill(book.bookLine.line) }
@@ -1323,6 +1363,75 @@ private struct DayLine: View {
     }
 }
 
+/// Default trial line before you type your own: a quiet literary card (no fake "我" avatar), tappable to swap.
+private struct DailyQuoteCard: View {
+    let quote: DailyQuote.Entry
+    let refreshing: Bool
+    let onRefresh: () -> Void
+    @State private var spin = 0.0
+    @State private var hovering = false
+
+    var body: some View {
+        Button {
+            guard !refreshing else { return }
+            withAnimation(YYMotion.standard) { spin += 180 }
+            onRefresh()
+        } label: {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 5) {
+                    SVGShape(d: VoiceGlyph.quote)
+                        .fill(YYColor.t3)
+                        .frame(width: 11, height: 11)
+                    Text("每日一言")
+                        .font(.yy(size: 10.5, weight: .semibold))
+                        .foregroundStyle(YYColor.t2)
+                    if !quote.source.isEmpty {
+                        Text("· \(quote.source)")
+                            .font(.yy(size: 10.5))
+                            .foregroundStyle(YYColor.t3)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 4)
+                    HStack(spacing: 3.5) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .rotationEffect(.degrees(spin))
+                        Text("换一句")
+                            .font(.yy(size: 10.5, weight: .medium))
+                    }
+                    .foregroundStyle(hovering ? YYColor.t1 : YYColor.t3)
+                }
+                Text(quote.text)
+                    .font(.custom("Songti SC", size: 13))
+                    .lineSpacing(3.7)
+                    .foregroundStyle(YYColor.t1)
+                    .lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .id(quote.text)
+                    .transition(YYMotion.swap)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(YYColor.card, in: .rect(cornerRadius: 12))
+            .ring(hovering ? YYColor.t3.opacity(0.6) : YYColor.line, radius: 12)
+            .shadow(color: Color(yy: YYRGBA(51, 46, 41, 0.04)), radius: 1, y: 1)
+            .contentShape(.rect(cornerRadius: 12))
+        }
+        .buttonStyle(DailyQuotePressStyle())
+        .onHover { hovering = $0 }
+        .accessibilityLabel(Text("每日一言：\(quote.text)"))
+        .accessibilityHint(Text("换一句"))
+    }
+}
+
+private struct DailyQuotePressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !YYMotion.reduce ? 0.985 : 1)
+            .animation(YYMotion.quick, value: configuration.isPressed)
+    }
+}
+
 /// What every voice says back: your line, as your own dark bubble on the right.
 private struct YourLine: View {
     let text: String
@@ -1558,8 +1667,13 @@ private struct VoiceMessage: View {
 
     var body: some View {
         let open = hovering || focus.listening == voice.id
+        let kokoroUninstalled = (voice is KokoroVoice) && !KokoroModel.isInstalled
+        let phase = KokoroDownload.shared.phase
+        let isQueued = kokoroUninstalled && KokoroDownload.shared.pendingVoice[book.key] == voice.id
+        let failedHere = PreviewState.shared.failedID == voice.id
         HStack(alignment: .bottom, spacing: 10) {
             VoiceAvatar(voice: voice).padding(.bottom, 1)
+                .opacity(kokoroUninstalled ? 0.72 : 1)
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Text(voice.name).font(.yy(size: 12.5, weight: .medium)).foregroundStyle(YYColor.t1)
@@ -1587,29 +1701,74 @@ private struct VoiceMessage: View {
                 .frame(height: 18)
                 .padding(.leading, 2)
                 HStack(spacing: 8) {
-                    VoiceBubble(voice: voice, text: focus.line(book), lifted: focus.listening == voice.id)
-                    if !focus.heard.contains(voice.id) {
-                        Circle().fill(Color(yy: YYRGBA(229, 72, 59))).frame(width: 6, height: 6)
-                    }
-                    ChooseButton(chosen: false, small: true) { focus.pick(voice, book: book) }
-                        .padding(.leading, 4)
-                        .opacity(open ? 1 : 0)
-                        .allowsHitTesting(open)
-                        .animation(YYMotion.quick, value: open)
-                    if let onDetail {
-                        Button(action: onDetail) {
-                            Image(systemName: "ellipsis")
-                                .font(.yy(size: 11, weight: .semibold))
-                                .foregroundStyle(YYColor.t2)
-                                .frame(width: 26, height: 26)
-                                .background(YYColor.card, in: .circle)
-                                .ring(YYColor.line, radius: 13)
+                    if kokoroUninstalled {
+                        Button {
+                            focus.listen(voice, text: focus.line(book))
+                        } label: {
+                            HStack(spacing: 7) {
+                                switch phase {
+                                case .downloading(let frac):
+                                    ProgressView().controlSize(.mini)
+                                    Text(isQueued
+                                        ? String(localized: "下载中 \(Int((frac * 100).rounded()))% · 下好后自动启用")
+                                        : String(localized: "下载中 \(Int((frac * 100).rounded()))% · 点此预约选用"))
+                                        .font(.yy(size: 11.5, weight: isQueued ? .semibold : .medium))
+                                        .monospacedDigit()
+                                        .foregroundStyle(isQueued ? YYTint.standard.accent : YYColor.t2)
+                                case .failed:
+                                    Image(systemName: "arrow.clockwise.circle")
+                                        .font(.yy(size: 12, weight: .semibold))
+                                        .foregroundStyle(YYColor.danger)
+                                    Text("下载中断 · 点此继续下载")
+                                        .font(.yy(size: 11.5, weight: .medium))
+                                        .foregroundStyle(YYColor.danger)
+                                default:
+                                    Image(systemName: "arrow.down.circle")
+                                        .font(.yy(size: 12, weight: .semibold))
+                                        .foregroundStyle(YYTint.standard.accent)
+                                    Text("需先下载离线语音包 · 点此下载")
+                                        .font(.yy(size: 11.5, weight: .medium))
+                                        .foregroundStyle(YYColor.t2)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .frame(height: 36)
+                            .background(YYColor.card, in: .rect(cornerRadius: 14))
+                            .ring(isQueued ? YYTint.standard.accent.opacity(0.6) : YYColor.line, radius: 14)
                         }
                         .buttonStyle(.plain)
-                        .opacity(open ? 1 : 0)
-                        .allowsHitTesting(open)
-                        .help(Text("管理克隆声音"))
+                    } else {
+                        VoiceBubble(voice: voice, text: focus.line(book), lifted: focus.listening == voice.id)
+                        if !focus.heard.contains(voice.id) {
+                            Circle().fill(Color(yy: YYRGBA(229, 72, 59))).frame(width: 6, height: 6)
+                        }
+                        ChooseButton(chosen: false, small: true) { focus.pick(voice, book: book) }
+                            .padding(.leading, 4)
+                            .opacity(open ? 1 : 0)
+                            .allowsHitTesting(open)
+                            .animation(YYMotion.quick, value: open)
+                        if let onDetail {
+                            Button(action: onDetail) {
+                                Image(systemName: "ellipsis")
+                                    .font(.yy(size: 11, weight: .semibold))
+                                    .foregroundStyle(YYColor.t2)
+                                    .frame(width: 26, height: 26)
+                                    .background(YYColor.card, in: .circle)
+                                    .ring(YYColor.line, radius: 13)
+                            }
+                            .buttonStyle(.plain)
+                            .opacity(open ? 1 : 0)
+                            .allowsHitTesting(open)
+                            .help(Text("管理克隆声音"))
+                        }
                     }
+                }
+                if failedHere {
+                    Text(PreviewState.shared.failedMessage ?? String(localized: "试听暂不可用，请检查网络或稍后再试"))
+                        .font(.yy(size: 10.5))
+                        .foregroundStyle(YYColor.danger)
+                        .lineLimit(2)
+                        .padding(.leading, 2)
                 }
             }
             Spacer(minLength: 0)

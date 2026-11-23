@@ -168,4 +168,19 @@ class VoiceExperienceTest {
         // Reaching 1.2 s of trailing silence triggers auto-stop.
         assertTrue(stopper.pushFrame(-48f, 0.1))
     }
+
+    @Test
+    fun dailyQuoteDefaultsAndSourceFormattingStayClean() {
+        val zh = DailyQuote.current("zh")
+        assertTrue(zh.text.isNotBlank())
+        assertFalse(zh.text.contains("我冒了严寒"))
+
+        val en = DailyQuote.current("en")
+        assertTrue(en.text.isNotBlank())
+
+        assertEquals("苏轼《赤壁赋》", DailyQuote.formatSource("苏轼", "赤壁赋"))
+        assertEquals("《月亮与六便士》", DailyQuote.formatSource("null", "月亮与六便士"))
+        assertEquals("鲁迅《野草》", DailyQuote.formatSource("鲁迅", "《野草》"))
+        assertEquals("", DailyQuote.formatSource("佚名", "原创"))
+    }
 }

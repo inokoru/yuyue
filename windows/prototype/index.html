@@ -6024,7 +6024,21 @@ function renderSettingsMiddleBody(page, S) {
 function renderVoiceSourcePage(S) {
   const src = S.voiceSourceTab || 'mac';
   const langBook = S.voiceBookLang || 'zh';
-  const promptLine = S.voiceCustomLine || (langBook === 'zh' ? '我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。' : 'It was the best of times, it was the worst of times.');
+  const zhQuotes = [
+    ['江上之清风，与山间之明月，耳得之而为声，目遇之而成色。', '苏轼《赤壁赋》'],
+    ['庭下如积水空明，水中藻、荇交横，盖竹柏影也。', '苏轼《记承天寺夜游》'],
+    ['一个人只拥有此生此世是不够的，他还应该拥有诗意的世界。', '王小波《万寿寺》'],
+    ['醉后不知天在水，满船清梦压星河。', '唐温如《题龙阳县青草湖》']
+  ];
+  const enQuotes = [
+    ['I declare after all there is no enjoyment like reading!', 'Jane Austen · Pride and Prejudice'],
+    ['Whatever our souls are made of, his and mine are the same.', 'Emily Brontë · Wuthering Heights'],
+    ['Only that day dawns to which we are awake. There is more day to dawn.', 'Henry David Thoreau · Walden']
+  ];
+  const pool = langBook === 'zh' ? zhQuotes : enQuotes;
+  const daily = pool[(S.dailyQuoteIdx || 0) % pool.length];
+  const hasCustom = Boolean(S.voiceCustomLine);
+  const promptLine = S.voiceCustomLine || daily[0];
   const voices = [
     { id: 'chenzhou', name: '沉舟', mark: '默认旁白', sum: '温润叙事男声', dur: '5″', bg: '#E3EAEF', fg: '#2F475B', heard: true, pinned: true },
     { id: 'suwan', name: '苏晚', mark: '推荐', sum: '清澈书卷女声', dur: '5″', bg: '#F2E4E6', fg: '#7A3E48', heard: false, pinned: false },
@@ -6071,13 +6085,24 @@ function renderVoiceSourcePage(S) {
         <span style="margin-left:auto;font-size:11px;color:var(--yy-t2);display:inline-flex;align-items:center;gap:4px;">${ICONS.pin}<span>念你的${langBook === 'zh' ? '中文书' : '英文书'}</span></span>
       </div>
 
-      <!-- Fixed User Prompt Bubble ("我" right-aligned!) -->
+      <!-- DailyQuoteCard by default; User Prompt Bubble ("我") only when user sends custom line -->
+      ${hasCustom ? `
       <div style="display:flex;justify-content:flex-end;align-items:flex-start;gap:9px;padding-left:60px;">
         <div class="${langBook === 'zh' ? 'serif' : 'georgia'}" style="max-width:290px;padding:8px 12px;border-radius:14px;background:var(--yy-t1);color:var(--yy-card);font-size:12.5px;line-height:1.55;">
           ${promptLine}
         </div>
         <span style="width:34px;height:34px;border-radius:50%;background:var(--yy-inset);border:0.5px solid var(--yy-line);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--yy-t2);flex-shrink:0;">我</span>
       </div>
+      ` : `
+      <button onclick="cycleDailyQuote()" style="width:100%;padding:9px 12px;border-radius:12px;background:var(--yy-card);border:0.5px solid var(--yy-line);text-align:left;display:flex;flex-direction:column;gap:5px;box-shadow:0 1px 2px rgba(0,0,0,0.03);">
+        <div style="display:flex;align-items:center;gap:5px;width:100%;font-size:10.5px;">
+          <span style="font-weight:600;color:var(--yy-t2);">“ 每日一言</span>
+          <span style="color:var(--yy-t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">· ${daily[1]}</span>
+          <span style="margin-left:auto;color:var(--yy-t3);font-weight:500;">↻ 换一句</span>
+        </div>
+        <div class="${langBook === 'zh' ? 'serif' : 'georgia'}" style="font-size:12.5px;line-height:1.55;color:var(--yy-t1);">${daily[0]}</div>
+      </button>
+      `}
 
       <!-- Scrolling Voice Feed -->
       <div style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:2px 2px 6px;">
@@ -7182,6 +7207,7 @@ window.setVoiceAuditionOpen = (v, src) => {
   renderApp();
 };
 window.setVoiceBookLang = l => { STATE.voiceBookLang = l; STATE.voiceCustomLine = ''; renderApp(); };
+window.cycleDailyQuote = () => { STATE.dailyQuoteIdx = (STATE.dailyQuoteIdx || 0) + 1; STATE.voiceCustomLine = ''; renderApp(); };
 window.selectAuditionVoice = id => { STATE.auditionVoiceId = id; renderApp(); };
 window.toggleQuickLines = () => { STATE.quickLinesOpen = !STATE.quickLinesOpen; renderApp(); };
 window.pickQuickLine = line => { STATE.voiceCustomLine = line; STATE.quickLinesOpen = false; renderApp(); };

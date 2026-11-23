@@ -91,9 +91,7 @@ struct SettingsHistoryValue: View {
             if playing {
                 Voices.stopPreview()
             } else {
-                let sample = voice.speaks("en") && !voice.speaks("zh")
-                    ? "It was the best of times."
-                    : "我冒了严寒，回到相隔二千余里的故乡去。"
+                let sample = DailyQuote.shared.current(voice.speaks("en") && !voice.speaks("zh") ? "en" : "zh").text
                 Voices.preview(voice, text: sample)
             }
         } label: {

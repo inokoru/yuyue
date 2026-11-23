@@ -428,6 +428,7 @@ window.setVoiceAuditionOpen = (v, src) => {
   renderApp();
 };
 window.setVoiceBookLang = l => { STATE.voiceBookLang = l; STATE.voiceCustomLine = ''; renderApp(); };
+window.cycleDailyQuote = () => { STATE.dailyQuoteIdx = (STATE.dailyQuoteIdx || 0) + 1; STATE.voiceCustomLine = ''; renderApp(); };
 window.selectAuditionVoice = id => { STATE.auditionVoiceId = id; renderApp(); };
 window.toggleQuickLines = () => { STATE.quickLinesOpen = !STATE.quickLinesOpen; renderApp(); };
 window.pickQuickLine = line => { STATE.voiceCustomLine = line; STATE.quickLinesOpen = false; renderApp(); };

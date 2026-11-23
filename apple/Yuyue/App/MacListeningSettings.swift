@@ -1,7 +1,204 @@
 import SwiftUI
+import Foundation
 #if os(macOS)
 import AppKit
 #endif
+
+/// 每日一言 for voice auditioning:
+/// - Chinese books pull once per calendar day from Hitokoto (文学 / 诗词 / 哲学), cached in UserDefaults,
+///   with curated literary lines ready immediately offline.
+/// - English books rotate curated literary classics by date, with manual refresh cycling cleanly.
+@MainActor @Observable
+final class DailyQuote {
+    struct Entry: Equatable, Sendable {
+        let text: String
+        let source: String
+    }
+
+    static let shared = DailyQuote()
+
+    nonisolated private static let hitokotoURL = URL(string: "https://v1.hitokoto.cn/?c=d&c=i&c=k&max_length=46")!
+    nonisolated private static let genericSources: Set<String> = ["原创", "网络", "一言", "未知", "佚名", "网友", "其他", "自创"]
+
+    private static let builtinZh: [Entry] = [
+        Entry(text: "江上之清风，与山间之明月，耳得之而为声，目遇之而成色。", source: "苏轼《赤壁赋》"),
+        Entry(text: "庭下如积水空明，水中藻、荇交横，盖竹柏影也。", source: "苏轼《记承天寺夜游》"),
+        Entry(text: "行到水穷处，坐看云起时。偶然值林叟，谈笑无还期。", source: "王维《终南别业》"),
+        Entry(text: "醉后不知天在水，满船清梦压星河。", source: "唐温如《题龙阳县青草湖》"),
+        Entry(text: "落霞与孤鹜齐飞，秋水共长天一色。", source: "王勃《滕王阁序》"),
+        Entry(text: "赌书消得泼茶香，当时只道是寻常。", source: "纳兰性德《浣溪沙》"),
+        Entry(text: "我见青山多妩媚，料青山见我应如是。", source: "辛弃疾《贺新郎》"),
+        Entry(text: "一个人只拥有此生此世是不够的，他还应该拥有诗意的世界。", source: "王小波《万寿寺》"),
+        Entry(text: "太阳，它每时每刻都是夕阳也都是旭日。", source: "史铁生《我与地坛》"),
+        Entry(text: "溪流如弓背，山路如弓弦，故远近有了小小差异。", source: "沈从文《边城》"),
+        Entry(text: "花开了，就像睡醒了似的。鸟飞了，就像在天上逛似的。", source: "萧红《呼兰河传》"),
+        Entry(text: "月光如流水一般，静静地泻在这一片叶子和花上。", source: "朱自清《荷塘月色》"),
+        Entry(text: "最妙的是下点小雪呀。看吧，山上的矮松越发的青黑，树尖上顶着一髻儿白花。", source: "老舍《济南的冬天》"),
+        Entry(text: "雾凇沆砀，天与云与山与水，上下一白。", source: "张岱《湖心亭看雪》"),
+    ]
+
+    private static let builtinEn: [Entry] = [
+        Entry(text: "I declare after all there is no enjoyment like reading!", source: "Jane Austen · Pride and Prejudice"),
+        Entry(text: "Whatever our souls are made of, his and mine are the same.", source: "Emily Brontë · Wuthering Heights"),
+        Entry(text: "I am no bird; and no net ensnares me: I am a free human being with an independent will.", source: "Charlotte Brontë · Jane Eyre"),
+        Entry(text: "The world is full of obvious things which nobody by any chance ever observes.", source: "Arthur Conan Doyle"),
+        Entry(text: "We are all in the gutter, but some of us are looking at the stars.", source: "Oscar Wilde"),
+        Entry(text: "To live is the rarest thing in the world. Most people exist, that is all.", source: "Oscar Wilde"),
+        Entry(text: "Only that day dawns to which we are awake. There is more day to dawn.", source: "Henry David Thoreau · Walden"),
+        Entry(text: "I went to the woods because I wished to live deliberately.", source: "Henry David Thoreau · Walden"),
+        Entry(text: "So we beat on, boats against the current, borne back ceaselessly into the past.", source: "F. Scott Fitzgerald · The Great Gatsby"),
+        Entry(text: "Mrs. Dalloway said she would buy the flowers herself.", source: "Virginia Woolf · Mrs Dalloway"),
+        Entry(text: "A room without books is like a body without a soul.", source: "Cicero"),
+        Entry(text: "Hope is the thing with feathers that perches in the soul, and sings the tune without the words.", source: "Emily Dickinson"),
+        Entry(text: "You have power over your mind — not outside events. Realize this, and you will find strength.", source: "Marcus Aurelius · Meditations"),
+        Entry(text: "It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife.", source: "Jane Austen · Pride and Prejudice"),
+    ]
+
+    private var entries: [String: Entry] = [:]
+    private var offsets: [String: Int] = [:]
+    private(set) var refreshing = false
+
+    private static func norm(_ tag: String) -> String {
+        tag.lowercased().hasPrefix("en") ? "en" : "zh"
+    }
+
+    private static func pool(_ lang: String) -> [Entry] {
+        lang == "en" ? builtinEn : builtinZh
+    }
+
+    private static func todayKey() -> String {
+        let comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        return String(format: "%04d-%02d-%02d", comps.year ?? 2026, comps.month ?? 1, comps.day ?? 1)
+    }
+
+    private static func builtinForToday(_ lang: String, offset: Int = 0) -> Entry {
+        let list = pool(lang)
+        let days = Int(Date().timeIntervalSince1970 / 86_400)
+        let mod = ((days + offset) % list.count + list.count) % list.count
+        return list[mod]
+    }
+
+    func current(_ tag: String) -> Entry {
+        let lang = Self.norm(tag)
+        let today = Self.todayKey()
+        let ud = UserDefaults.standard
+        if let cached = entries[lang], ud.string(forKey: "voice.daily.\(lang).date") == today || offsets[lang] != nil {
+            return cached
+        }
+        if ud.string(forKey: "voice.daily.\(lang).date") == today,
+           let savedText = ud.string(forKey: "voice.daily.\(lang).text")?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !savedText.isEmpty {
+            let saved = Entry(text: savedText, source: ud.string(forKey: "voice.daily.\(lang).source") ?? "")
+            entries[lang] = saved
+            return saved
+        }
+        let fallback = Self.builtinForToday(lang, offset: offsets[lang] ?? 0)
+        entries[lang] = fallback
+        return fallback
+    }
+
+    func ensureToday(_ tag: String, canUpdateUI: @escaping @MainActor () -> Bool = { true }) async {
+        let lang = Self.norm(tag)
+        _ = current(lang)
+        guard lang == "zh" else { return }
+        let today = Self.todayKey()
+        let ud = UserDefaults.standard
+        if ud.string(forKey: "voice.daily.zh.date") == today && ud.bool(forKey: "voice.daily.zh.online") {
+            return
+        }
+        guard let fetched = await Self.fetchHitokoto(timeout: 3.0) else { return }
+        save(lang: "zh", today: today, entry: fetched, online: true)
+        if canUpdateUI() {
+            withAnimation(YYMotion.standard) {
+                entries["zh"] = fetched
+            }
+        }
+    }
+
+    @discardableResult
+    func refresh(_ tag: String) async -> Entry {
+        let lang = Self.norm(tag)
+        let previous = current(lang).text
+        refreshing = true
+        defer { refreshing = false }
+        let today = Self.todayKey()
+        var next: Entry?
+        var online = false
+        if lang == "zh" {
+            if let first = await Self.fetchHitokoto(timeout: 1.8, avoid: previous) {
+                next = first
+            } else {
+                next = await Self.fetchHitokoto(timeout: 1.5, avoid: previous)
+            }
+            online = next != nil
+        }
+        let chosen = next ?? nextBuiltin(lang: lang, avoid: previous)
+        save(lang: lang, today: today, entry: chosen, online: online)
+        withAnimation(YYMotion.standard) {
+            entries[lang] = chosen
+        }
+        return chosen
+    }
+
+    private func nextBuiltin(lang: String, avoid: String) -> Entry {
+        let list = Self.pool(lang)
+        var step = (offsets[lang] ?? 0) + 1
+        var candidate = Self.builtinForToday(lang, offset: step)
+        if candidate.text == avoid && list.count > 1 {
+            step += 1
+            candidate = Self.builtinForToday(lang, offset: step)
+        }
+        offsets[lang] = step
+        return candidate
+    }
+
+    private func save(lang: String, today: String, entry: Entry, online: Bool) {
+        let ud = UserDefaults.standard
+        ud.set(today, forKey: "voice.daily.\(lang).date")
+        ud.set(entry.text, forKey: "voice.daily.\(lang).text")
+        ud.set(entry.source, forKey: "voice.daily.\(lang).source")
+        ud.set(online, forKey: "voice.daily.\(lang).online")
+    }
+
+    nonisolated private struct HitokotoPayload: Decodable {
+        let hitokoto: String?
+        let from: String?
+        let from_who: String?
+    }
+
+    nonisolated private static func fetchHitokoto(timeout: TimeInterval, avoid: String? = nil) async -> Entry? {
+        var req = URLRequest(url: hitokotoURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("Yuyue/0.1", forHTTPHeaderField: "User-Agent")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let payload = try? JSONDecoder().decode(HitokotoPayload.self, from: data) else {
+            return nil
+        }
+        let text = (payload.hitokoto ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count >= 4, text.count <= 80, !text.contains("我冒了严寒") else { return nil }
+        if let avoid, text == avoid { return nil }
+        return Entry(text: text, source: formatSource(rawWho: payload.from_who, rawFrom: payload.from))
+    }
+
+    nonisolated static func formatSource(rawWho: String?, rawFrom: String?) -> String {
+        let cleanWho = (rawWho ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanFrom = (rawFrom ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let who = (cleanWho.isEmpty || genericSources.contains(cleanWho)) ? "" : cleanWho
+        let from = (cleanFrom.isEmpty || genericSources.contains(cleanFrom)) ? "" : cleanFrom
+        let wrappedFrom: String = if from.isEmpty {
+            ""
+        } else if from.hasPrefix("《") || from.contains("·") || from.unicodeScalars.allSatisfy({ $0.value < 128 }) {
+            from
+        } else {
+            "《\(from)》"
+        }
+        if !who.isEmpty && !wrappedFrom.isEmpty {
+            return who == from ? who : "\(who)\(wrappedFrom)"
+        }
+        return !who.isEmpty ? who : wrappedFrom
+    }
+}
 
 /// What the right column of 朗读 shows, and the state the two columns share.
 @MainActor @Observable
@@ -34,9 +231,20 @@ final class ListeningFocus {
     var debugApplied = false
     #endif
 
+    func hasCustomLine(_ book: VoiceBook) -> Bool { lines[book] != nil }
+    func customLine(_ book: VoiceBook) -> String? { lines[book] }
     func line(_ book: VoiceBook) -> String { lines[book] ?? book.line }
 
     func listen(_ voice: any Voice, text: String) {
+        if voice is KokoroVoice, !KokoroModel.isInstalled {
+            Voices.stopPreview()
+            page = nil
+            macPanel = false
+            listening = voice.id
+            KokoroDownload.shared.queueSelection(voice.id, for: book.key)
+            tick &+= 1
+            return
+        }
         if PreviewState.shared.voiceID == voice.id { Voices.stopPreview(); return }
         page = nil
         macPanel = false
@@ -54,7 +262,22 @@ final class ListeningFocus {
         if let v = book.current { listen(v, text: t) }
     }
 
+    func clearCustomLine(_ book: VoiceBook) {
+        Voices.stopPreview()
+        lines.removeValue(forKey: book)
+        heard = []
+    }
+
     func pick(_ voice: any Voice, book: VoiceBook) {
+        if voice is KokoroVoice, !KokoroModel.isInstalled {
+            Voices.stopPreview()
+            KokoroDownload.shared.queueSelection(voice.id, for: book.key)
+            withAnimation(YYMotion.layout) {
+                listening = voice.id
+                tick &+= 1
+            }
+            return
+        }
         Voices.stopPreview()
         heard.insert(voice.id)
         withAnimation(YYMotion.layout) {
@@ -184,9 +407,9 @@ extension CloudVoice.Provider {
     var keyStep: (title: String, detail: String, url: URL) {
         switch self {
         case .free:
-            (String(localized: "了解开源语音模型"),
-             String(localized: "默认连接魔搭 / Hugging Face 开源 Kokoro 在线推理服务，无需注册或填写 Key"),
-             URL(string: "https://modelscope.cn/studios/k2-fsa/text-to-speech")!)
+            (String(localized: "了解在线自然语音"),
+             String(localized: "内置免 Key 公共直连语音线路，无需注册或填写 Key，已朗读句子缓存在本机"),
+             URL(string: "https://dict.youdao.com")!)
         case .volcengine:
             (String(localized: "获取火山引擎 AppID 与 Token"),
              String(localized: "console.volcengine.com › 豆包语音 › 语音合成大模型，复制 AppID 与 Access Token"),
@@ -274,7 +497,7 @@ extension CloudVoice.Provider {
         switch self {
         case .free:
             (UserDefaults.standard.string(forKey: urlName)?.trimmingCharacters(in: .whitespacesAndNewlines))
-                .flatMap { $0.isEmpty ? nil : (URL(string: $0)?.host() ?? $0) } ?? "modelscope.cn / hf.space"
+                .flatMap { $0.isEmpty ? nil : (URL(string: $0)?.host() ?? $0) } ?? "dict.youdao.com / fanyi.baidu.com"
         case .volcengine: "openspeech.bytedance.com"
         case .fish: "api.fish.audio"
         case .xiaomi: "api.xiaomimimo.com"
@@ -420,10 +643,13 @@ struct VoiceProviderSheet: View {
     let pick: (CloudVoice.Provider) -> Void
     @State private var picked: CloudVoice.Provider?
     @State private var query = ""
-    @State private var hovered: CloudVoice.Provider?
     @Environment(\.dismiss) private var dismiss
 
-    private static let columns = 4
+    #if os(macOS)
+    private static let columns = 3
+    #else
+    private static let columns = 2
+    #endif
 
     init(initial: CloudVoice.Provider? = nil, pick: @escaping (CloudVoice.Provider) -> Void) {
         self.initial = initial
@@ -451,15 +677,15 @@ struct VoiceProviderSheet: View {
             }
         }
         .animation(YYMotion.standard, value: picked?.id)
-        .padding(.horizontal, 18)
-        .padding(.bottom, 14)
+        .padding(.horizontal, YYUI.s(16))
+        .padding(.bottom, YYUI.s(16))
         .padding(.top, YYUI.sheetGrabberTop)
-        .frame(width: picked == nil ? 656 : 480, height: picked == nil ? 476 : 468)
+        .frame(width: 480, height: 468)
         .background(YYColor.bg)
         #else
         picker
-            .padding(.horizontal, 18)
-            .padding(.bottom, 12)
+            .padding(.horizontal, YYUI.s(16))
+            .padding(.bottom, YYUI.s(16))
             .padding(.top, YYUI.sheetGrabberTop)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .presentationDetents([.large])
@@ -473,35 +699,36 @@ struct VoiceProviderSheet: View {
         let matches = CloudVoice.Provider.available(matching: query).filter { $0 != .local }
         return VStack(alignment: .leading, spacing: 0) {
             YYSheetHeader(title: String(localized: "添加声音来源"), subtitle: String(localized: "朗读"), close: { dismiss() })
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").font(.yy(size: 11.5, weight: .medium)).foregroundStyle(YYColor.t3)
+            HStack(spacing: YYUI.s(6)) {
+                Image(systemName: "magnifyingglass").font(YYUI.font(10.5, .medium)).foregroundStyle(YYColor.t3)
                 TextField("", text: $query, prompt: Text("搜索语音来源，比如 火山豆包、Fish Audio、小米、VoiceStudio"))
                     .textFieldStyle(.plain)
-                    .font(.yy(size: 12.5))
+                    .font(YYUI.font(11.5))
                     .autocorrectionDisabled()
                     #if os(iOS)
                     .textInputAutocapitalization(.never)
                     #endif
                     .onSubmit { if let first = matches.first { choose(first) } }
             }
-            .padding(.horizontal, 10)
-            .frame(height: 32)
-            .background(YYColor.inset, in: .rect(cornerRadius: 8))
-            .padding(.top, 10)
+            .padding(.horizontal, YYUI.s(9))
+            .frame(height: YYUI.s(30))
+            .background(YYColor.inset, in: .rect(cornerRadius: YYUI.s(8)))
+            .padding(.top, YYUI.s(10))
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: YYUI.s(10)) {
                     ForEach(CloudVoice.Group.allCases, id: \.self) { group in
                         let list = matches.filter { $0.group == group }
                         if !list.isEmpty {
-                            VStack(alignment: .leading, spacing: 5) {
+                            VStack(alignment: .leading, spacing: YYUI.s(2)) {
                                 Text(group.title)
-                                    .font(.yy(size: 11, weight: .semibold))
+                                    .font(YYUI.font(10, .semibold))
                                     .foregroundStyle(YYColor.t3)
-                                    .padding(.leading, 4)
+                                    .padding(.leading, YYUI.s(8))
+                                    .padding(.bottom, YYUI.s(2))
                                 LazyVGrid(
-                                    columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: Self.columns),
-                                    spacing: 7
+                                    columns: Array(repeating: GridItem(.flexible(), spacing: YYUI.s(2)), count: Self.columns),
+                                    spacing: YYUI.s(2)
                                 ) {
                                     ForEach(list) { p in providerTile(p) }
                                 }
@@ -510,49 +737,26 @@ struct VoiceProviderSheet: View {
                     }
                     if matches.isEmpty {
                         Text("没找到匹配的内置渠道，可在下方添加自定义 OpenAI 兼容接口")
-                            .font(.yy(size: 12)).foregroundStyle(YYColor.t3)
-                            .frame(maxWidth: .infinity).padding(.vertical, 32)
+                            .font(YYUI.font(11)).foregroundStyle(YYColor.t3)
+                            .frame(maxWidth: .infinity).padding(.vertical, YYUI.s(36))
                     }
                 }
-                .padding(.vertical, 10)
+                .padding(.vertical, YYUI.s(12))
             }
             .scrollBounceBehavior(.basedOnSize)
 
-            #if os(macOS)
-            HStack(spacing: 6) {
-                if let h = hovered {
-                    Text(h.title).font(.yy(size: 11, weight: .semibold)).foregroundStyle(YYColor.t2).fixedSize()
-                    Text("·").foregroundStyle(YYColor.t3)
-                    Text(h.blurb).font(.yy(size: 11)).foregroundStyle(YYColor.t3).lineLimit(1)
-                    if let badge = h.badge {
-                        Text(badge)
-                            .font(.yy(size: 10, weight: .medium))
-                            .foregroundStyle(h == .xiaomi ? YYColor.ok : YYTint.standard.accent)
-                            .fixedSize()
-                    }
-                } else {
-                    Text("鼠标移到任意来源可查看详情；绿点含免费额度，钥匙图标可直接复用「书伴」Key")
-                        .font(.yy(size: 11)).foregroundStyle(YYColor.t3).lineLimit(1)
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(height: 20)
-            .padding(.bottom, 6)
-            #endif
-
-            Rectangle().fill(YYColor.line).frame(height: 0.5).padding(.horizontal, -18)
+            Rectangle().fill(YYColor.line).frame(height: 0.5).padding(.horizontal, -YYUI.s(16))
             Button { choose(.local) } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "plus").font(.yy(size: 11.5, weight: .semibold)).foregroundStyle(YYColor.t2)
-                        .frame(width: 20, height: 20)
-                    Text("自定义语音接口").font(.yy(size: 12.5, weight: .medium)).foregroundStyle(YYColor.t1).fixedSize()
-                    Text("GPT-SoVITS、Kokoro、unspeech 或局域网 /v1/audio/speech").font(.yy(size: 11)).foregroundStyle(YYColor.t3).lineLimit(1)
+                HStack(spacing: YYUI.s(8)) {
+                    Image(systemName: "plus").font(YYUI.font(10.5, .semibold)).foregroundStyle(YYColor.t2)
+                        .frame(width: YYUI.s(16), height: YYUI.s(16))
+                    Text("自定义语音接口").font(YYUI.font(11.5)).foregroundStyle(YYColor.t1).fixedSize()
+                    Text("GPT-SoVITS、Kokoro、unspeech 或局域网 /v1/audio/speech").font(YYUI.font(10.5)).foregroundStyle(YYColor.t3).lineLimit(1)
                     Spacer(minLength: 0)
-                    Image(systemName: "chevron.right").font(.yy(size: 10, weight: .semibold)).foregroundStyle(YYColor.t3)
                 }
             }
             .buttonStyle(VoicePickRowStyle())
-            .padding(.top, 6)
+            .padding(.top, YYUI.s(8))
         }
     }
 
@@ -563,7 +767,6 @@ struct VoiceProviderSheet: View {
             dismiss()
             pick(p)
         } else {
-            hovered = nil
             picked = p
         }
         #else
@@ -574,94 +777,26 @@ struct VoiceProviderSheet: View {
 
     private func providerTile(_ p: CloudVoice.Provider) -> some View {
         Button { choose(p) } label: {
-            #if os(macOS)
-            HStack(spacing: 8) {
-                ServiceTile(mark: .cloud(p), size: 24)
-                VStack(alignment: .leading, spacing: 1.5) {
-                    HStack(spacing: 4) {
-                        Text(p.title)
-                            .font(.yy(size: 12, weight: .medium))
-                            .foregroundStyle(YYColor.t1)
-                            .lineLimit(1)
-                        Spacer(minLength: 0)
-                        if p.companionSharedKey != nil {
-                            Image(systemName: "key.fill")
-                                .font(.system(size: 8, weight: .semibold))
-                                .foregroundStyle(YYColor.ok)
-                        } else if p == .free || p == .xiaomi || p == .azure || p == .deepgram {
-                            Circle()
-                                .fill(YYColor.ok)
-                                .frame(width: 5, height: 5)
-                        }
-                    }
-                    Text(p.shortTag)
-                        .font(.yy(size: 10))
-                        .foregroundStyle(p == .free || p == .xiaomi || p.companionSharedKey != nil ? YYColor.ok : YYColor.t3)
-                        .lineLimit(1)
-                }
-            }
-            #else
-            VStack(spacing: 5) {
+            HStack(spacing: YYUI.s(8)) {
                 ZStack(alignment: .topTrailing) {
-                    ServiceTile(mark: .cloud(p), size: 28)
+                    ServiceTile(mark: .cloud(p), size: YYUI.s(18))
                     if p.companionSharedKey != nil || p == .free || p == .xiaomi || p == .azure || p == .deepgram {
                         Circle()
                             .fill(YYColor.ok)
-                            .frame(width: 6, height: 6)
-                            .offset(x: 2, y: -2)
+                            .frame(width: 5, height: 5)
+                            .offset(x: 1.5, y: -1.5)
                     }
                 }
-                Text(p.title)
-                    .font(.yy(size: 11, weight: .medium))
-                    .foregroundStyle(YYColor.t1)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                Text(p.title).font(YYUI.font(11.5)).foregroundStyle(YYColor.t1).lineLimit(1)
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity)
-            #endif
         }
-        .buttonStyle(VoiceGridTileStyle())
-        .onHover { inside in
-            if inside { hovered = p }
-            else if hovered == p { hovered = nil }
-        }
+        .buttonStyle(VoicePickRowStyle())
         .help(Text("\(p.title) · \(p.blurb)"))
     }
 }
 
-private struct VoiceGridTileStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View { Tile(configuration: configuration) }
-
-    private struct Tile: View {
-        let configuration: Configuration
-        @State private var hovering = false
-
-        var body: some View {
-            #if os(macOS)
-            let h: CGFloat = 48
-            #else
-            let h: CGFloat = 64
-            #endif
-            configuration.label
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .frame(maxWidth: .infinity, minHeight: h)
-                .background(
-                    hovering || configuration.isPressed ? YYColor.inset : YYColor.card,
-                    in: .rect(cornerRadius: 9)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 9)
-                        .strokeBorder(hovering ? YYColor.t3.opacity(0.45) : YYColor.line, lineWidth: 0.5)
-                )
-                .scaleEffect(configuration.isPressed && !YYMotion.reduce ? 0.985 : 1.0)
-                .animation(.easeOut(duration: configuration.isPressed ? 0.08 : YYDuration.quick), value: configuration.isPressed)
-                .contentShape(.rect)
-                .onHover { hovering = $0 }
-        }
-    }
-}
-
+/// A row to pick: no box, the inset grey under it on hover and press (matches `PickRow`).
 private struct VoicePickRowStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View { Row(configuration: configuration) }
 
@@ -672,8 +807,8 @@ private struct VoicePickRowStyle: ButtonStyle {
         var body: some View {
             configuration.label
                 .padding(.horizontal, YYUI.s(8))
-                .padding(.vertical, YYUI.s(6))
-                .background(hovering || configuration.isPressed ? YYColor.inset : .clear, in: .rect(cornerRadius: YYUI.s(8)))
+                .frame(height: YYUI.s(32))
+                .background(hovering || configuration.isPressed ? YYColor.inset : .clear, in: .rect(cornerRadius: YYUI.s(7)))
                 .contentShape(.rect)
                 .onHover { hovering = $0 }
         }

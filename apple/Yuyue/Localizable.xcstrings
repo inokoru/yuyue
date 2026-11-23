@@ -43006,6 +43006,36 @@
           }
         }
       }
+    },
+    "每日一言" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Daily quote"
+          }
+        }
+      }
+    },
+    "换一句" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Another line"
+          }
+        }
+      }
+    },
+    "每日一言：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Daily quote: %@"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

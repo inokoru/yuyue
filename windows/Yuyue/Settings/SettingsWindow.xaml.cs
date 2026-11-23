@@ -1819,14 +1819,55 @@ public sealed partial class SettingsWindow : Window
                 }
             };
 
+            var initialQuote = DailyQuote.Current(_library);
+            var quoteHeader = new Grid { ColumnSpacing = 6 };
+            quoteHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            quoteHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var quoteSourceText = new TextBlock
+            {
+                Text = string.IsNullOrEmpty(initialQuote.Source) ? "每日一言" : $"每日一言 · {initialQuote.Source}",
+                FontSize = 11,
+                Foreground = ThemeHelper.Brush(p.T3),
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            };
+            quoteHeader.Children.Add(quoteSourceText);
+
             var sampleBox = new TextBox
             {
-                Text = "我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。",
+                Text = initialQuote.Text,
+                PlaceholderText = "想听他们念什么，写一句",
                 AcceptsReturn = true,
                 TextWrapping = TextWrapping.Wrap,
                 FontSize = 12,
                 CornerRadius = new CornerRadius(8),
             };
+
+            var nextQuoteBtn = new Button
+            {
+                Content = "↻ 换一句",
+                FontSize = 11,
+                Padding = new Thickness(8, 2, 8, 2),
+                CornerRadius = new CornerRadius(6),
+                Background = new SolidColorBrush(Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                Foreground = ThemeHelper.Brush(p.T2),
+            };
+            nextQuoteBtn.Click += async (_, _) =>
+            {
+                nextQuoteBtn.IsEnabled = false;
+                try
+                {
+                    var next = await DailyQuote.RefreshAsync(_library);
+                    sampleBox.Text = next.Text;
+                    quoteSourceText.Text = string.IsNullOrEmpty(next.Source) ? "每日一言" : $"每日一言 · {next.Source}";
+                }
+                finally { nextQuoteBtn.IsEnabled = true; }
+            };
+            Grid.SetColumn(nextQuoteBtn, 1);
+            quoteHeader.Children.Add(nextQuoteBtn);
+
+            _ = EnsureWindowsDailyQuoteAsync(sampleBox, quoteSourceText, initialQuote.Text);
 
             // 波形试听条
             var playRow = new Grid { ColumnSpacing = 8 };
@@ -1849,7 +1890,8 @@ public sealed partial class SettingsWindow : Window
                 try
                 {
                     string previewId = (combo.SelectedItem as ComboBoxItem)?.Tag as string ?? _library.Prefs.VoiceId;
-                    await AudioPlayer.PreviewVoiceAsync(_library, previewId, _library.Prefs.SpeechRate, sampleBox.Text);
+                    string line = string.IsNullOrWhiteSpace(sampleBox.Text) ? DailyQuote.Current(_library).Text : sampleBox.Text;
+                    await AudioPlayer.PreviewVoiceAsync(_library, previewId, _library.Prefs.SpeechRate, line);
                 }
                 finally { playCircle.IsEnabled = true; }
             };
@@ -1865,6 +1907,7 @@ public sealed partial class SettingsWindow : Window
             var cardStack = new StackPanel { Spacing = 10 };
             cardStack.Children.Add(combo);
             cardStack.Children.Add(playRow);
+            cardStack.Children.Add(quoteHeader);
             cardStack.Children.Add(sampleBox);
 
             InspectorHost.Children.Add(new Border { CornerRadius = new CornerRadius(11), Background = ThemeHelper.Brush(p.Card), BorderBrush = ThemeHelper.Brush(p.Line), BorderThickness = new Thickness(1), Padding = new Thickness(12), Child = cardStack });
@@ -2014,7 +2057,7 @@ public sealed partial class SettingsWindow : Window
             {
                 string fid = (vCombo.SelectedItem as ComboBoxItem)?.Tag as string ?? voices[0].FullId;
                 auditionCloudBtn.IsEnabled = false;
-                try { await AudioPlayer.PreviewVoiceAsync(_library, fid, _library.Prefs.SpeechRate, "我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。"); }
+                try { await AudioPlayer.PreviewVoiceAsync(_library, fid, _library.Prefs.SpeechRate, DailyQuote.Current(_library).Text); }
                 finally { auditionCloudBtn.IsEnabled = true; }
             };
             stack.Children.Add(auditionCloudBtn);
@@ -2046,6 +2089,16 @@ public sealed partial class SettingsWindow : Window
                 RenderInspector("listening");
             };
             InspectorHost.Children.Add(discBtn);
+        }
+    }
+
+    private async Task EnsureWindowsDailyQuoteAsync(TextBox sampleBox, TextBlock sourceLabel, string initialText)
+    {
+        var updated = await DailyQuote.EnsureTodayAsync(_library);
+        if (updated.Text != initialText && sampleBox.Text == initialText)
+        {
+            sampleBox.Text = updated.Text;
+            sourceLabel.Text = string.IsNullOrEmpty(updated.Source) ? "每日一言" : $"每日一言 · {updated.Source}";
         }
     }
 

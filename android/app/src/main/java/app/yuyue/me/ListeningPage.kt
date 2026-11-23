@@ -55,6 +55,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
@@ -65,6 +66,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.yuyue.R
 import app.yuyue.design.Icons
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.Prefs
 import app.yuyue.design.RateMenu
 import app.yuyue.design.YY
@@ -76,12 +78,14 @@ import app.yuyue.design.YYPage
 import app.yuyue.design.YYRow
 import app.yuyue.design.YYSheetHeader
 import app.yuyue.design.YYSlider
+import app.yuyue.design.pressable
 import app.yuyue.design.rateLabel
 import app.yuyue.design.rememberPref
 import app.yuyue.library.Keys
 import app.yuyue.shelf.Field
 import app.yuyue.speech.BookVoice
 import app.yuyue.speech.CloudVoice
+import app.yuyue.speech.DailyQuote
 import app.yuyue.speech.Player
 import app.yuyue.speech.Speech
 import app.yuyue.speech.SystemVoice
@@ -191,13 +195,19 @@ private enum class VoiceBook(val tag: String) {
 
     val title: String get() = if (this == ZH) t("中文书") else t("英文书")
     val key: String get() = "player.voice.$tag"
-    val line: String get() = if (this == ZH) "我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。" else "It was the best of times, it was the worst of times."
+    val line: String get() = DailyQuote.current(tag).text
 
     /** Lines to try a voice on, under “ at the start of the box. */
     val quickLines: List<Pair<String, String>>
-        get() = if (this == ZH) listOf(t("叙述") to line, t("对话") to "“这是谁？”我问。“这是闰土呀，你忘了么？”",
-            t("数字") to "第 12 章，1986 年 3 月 4 日，下午 3:40。", t("中英夹杂") to "Hello，今天读到 Chapter 3 了。")
-        else listOf("Narration" to line, "Dialogue" to "\"Is it you?\" she asked. \"Of course it is,\" he said.", "Numbers" to "Chapter 12, page 304: the year was 1859.")
+        get() = if (this == ZH) listOf(
+            t("对话") to "“这是谁？”我问。“这是闰土呀，你忘了么？”",
+            t("数字") to "第 12 章，1986 年 3 月 4 日，下午 3:40。",
+            t("中英夹杂") to "Hello，今天读到 Chapter 3 了。",
+        )
+        else listOf(
+            "Dialogue" to "\"Is it you?\" she asked. \"Of course it is,\" he said.",
+            "Numbers" to "Chapter 12, page 304: the year was 1859.",
+        )
 }
 
 /** What 朗读's pages share while it's open: the line each kind of book is tried on, the voices
@@ -211,9 +221,12 @@ private object ListeningFocus {
     var lasts by mutableStateOf(1L)
     /** The one tapped last: 选择 shows beside it. */
     var listening by mutableStateOf<String?>(null)
+    var failedId by mutableStateOf<String?>(null)
+    var failedMessage by mutableStateOf<String?>(null)
     var book by mutableStateOf(VoiceBook.ZH)
     private var job: Job? = null
 
+    fun hasCustomLine(b: VoiceBook) = lines.containsKey(b)
     fun line(b: VoiceBook) = lines[b] ?: b.line
 
     fun stop() {
@@ -226,6 +239,8 @@ private object ListeningFocus {
         if (playing == v.id) { stop(); return }
         stop()
         listening = v.id
+        failedId = null
+        failedMessage = null
         heard += v.id
         playing = v.id
         val text = line(book)
@@ -238,11 +253,18 @@ private object ListeningFocus {
                 }
             } else {
                 startedAt = 0L
-                val s = runCatching { withContext(Dispatchers.IO) { v.render(text, book.tag) } }.getOrNull()
+                val result = runCatching { withContext(Dispatchers.IO) { v.render(text, book.tag) } }
+                val s = result.getOrNull()
                 if (s != null) {
                     startedAt = System.currentTimeMillis(); lasts = s.samples.size * 1000L / s.rate
                     SystemVoice.Engine.preview(s)
                     delay(lasts)
+                } else {
+                    val err = result.exceptionOrNull()
+                    if (err !is kotlinx.coroutines.CancellationException) {
+                        failedId = v.id
+                        failedMessage = err?.message?.ifBlank { null } ?: t("试听暂不可用，请检查网络或稍后再试")
+                    }
                 }
             }
             playing = null
@@ -437,7 +459,7 @@ private fun VoiceProviderSheet(close: () -> Unit, pick: (CloudVoice.Provider) ->
     val matches = CloudVoice.Provider.entries.filter { p ->
         p != CloudVoice.Provider.Local && !p.isSetUp && (q.isEmpty() || "${p.key}${p.title}${p.aliases}${p.blurb}".lowercase().replace(" ", "").contains(q))
     }
-    ModalBottomSheet(close, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(close, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle(bottom = 2.dp) }) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 28.dp)) {
             YYSheetHeader(t("添加声音来源"), t("朗读"), close)
             Spacer(Modifier.height(YY.s(10)))
@@ -451,31 +473,35 @@ private fun VoiceProviderSheet(close: () -> Unit, pick: (CloudVoice.Provider) ->
             for (group in CloudVoice.Group.entries) {
                 val list = matches.filter { it.group == group }
                 if (list.isEmpty()) continue
-                Text(group.title, style = YY.font(10f, FontWeight.SemiBold), color = YY.c.t3, modifier = Modifier.padding(start = YY.s(4), top = YY.s(12), bottom = YY.s(4)))
-                Column(verticalArrangement = Arrangement.spacedBy(YY.s(6))) {
-                    for (rowItems in list.chunked(4)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(YY.s(6))) {
-                            for (p in rowItems) {
-                                Column(
-                                    Modifier.weight(1f).height(YY.s(58))
-                                        .clip(RoundedCornerShape(YY.s(9)))
-                                        .background(YY.c.card)
-                                        .border(0.5.dp, YY.c.line, RoundedCornerShape(YY.s(9)))
+                Text(group.title, style = YY.font(10f, FontWeight.SemiBold), color = YY.c.t3, modifier = Modifier.padding(start = YY.s(8), top = YY.s(12), bottom = YY.s(2)))
+                Column(verticalArrangement = Arrangement.spacedBy(YY.s(2))) {
+                    for (pair in list.chunked(2)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(YY.s(2))) {
+                            for (p in pair) {
+                                Row(
+                                    Modifier.weight(1f).height(YY.s(36))
+                                        .clip(RoundedCornerShape(YY.s(8)))
                                         .clickable { pick(p) }
-                                        .padding(horizontal = YY.s(4), vertical = YY.s(6)),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(YY.s(4), Alignment.CenterVertically),
+                                        .padding(horizontal = YY.s(8)),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(YY.s(8)),
                                 ) {
                                     Box {
-                                        SourceTile(p.key, 26f)
-                                        if (p.companionSharedKey != null || p == CloudVoice.Provider.Xiaomi || p == CloudVoice.Provider.Azure || p == CloudVoice.Provider.Deepgram) {
-                                            Box(Modifier.align(Alignment.TopEnd).offset(x = 2.dp, y = (-2).dp).size(6.dp).background(YY.c.ok, CircleShape))
+                                        SourceTile(p.key, 18f)
+                                        if (p.companionSharedKey != null || p == CloudVoice.Provider.Free || p == CloudVoice.Provider.Xiaomi || p == CloudVoice.Provider.Azure || p == CloudVoice.Provider.Deepgram) {
+                                            Box(Modifier.align(Alignment.TopEnd).offset(x = 1.5.dp, y = (-1.5).dp).size(5.dp).background(YY.c.ok, CircleShape))
                                         }
                                     }
-                                    Text(p.title, style = YY.font(10f, FontWeight.Medium), color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                                    Text(
+                                        p.title,
+                                        style = YY.font(11.5f),
+                                        color = YY.c.t1,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
                                 }
                             }
-                            repeat(4 - rowItems.size) { Spacer(Modifier.weight(1f)) }
+                            if (pair.size == 1) Spacer(Modifier.weight(1f))
                         }
                     }
                 }
@@ -534,13 +560,33 @@ fun VoiceSourcePage(id: String, openSettings: () -> Unit) {
         current = (if (chosenID.isNotEmpty()) Voices.find(chosenID)?.takeIf { it.speaks(book.tag) } else null) ?: Voices.best(book.tag)
         SettingsLog.voiceNames += all.associate { it.id to it.name }
     }
+    LaunchedEffect(book) {
+        DailyQuote.ensureToday(book.tag) {
+            !focus.hasCustomLine(book) && focus.playing == null
+        }
+    }
     androidx.compose.runtime.DisposableEffect(Unit) { onDispose { focus.stop() } }
     fun send(text: String) {
         if (text.isBlank()) return
+        focus.stop()
         focus.lines[book] = text.trim()
+        focus.heard.clear()
         draft = ""
         linesOpen = false
         current?.let { focus.listen(it, scope) }
+    }
+    fun pickDailyQuote(refreshIfActive: Boolean) {
+        val wasDaily = !focus.hasCustomLine(book)
+        focus.stop()
+        focus.lines.remove(book)
+        focus.heard.clear()
+        linesOpen = false
+        scope.launch {
+            if (wasDaily && refreshIfActive) {
+                DailyQuote.refresh(book.tag)
+            }
+            current?.let { focus.listen(it, scope) }
+        }
     }
     Box(Modifier.fillMaxSize().background(YY.c.bg)) {
         Column(Modifier.fillMaxSize().padding(horizontal = YY.s(16))) {
@@ -581,7 +627,23 @@ fun VoiceSourcePage(id: String, openSettings: () -> Unit) {
             }
             val others = voices.orEmpty().filter { it.id != current?.id }
             current?.let { PinnedVoice(it, book, elsewhere = sourceOf(it) != id, scope) }
-            YourLine(focus.line(book), Modifier.padding(top = YY.s(10), bottom = YY.s(4)))
+            val customLine = focus.lines[book]
+            if (customLine != null) {
+                YourLine(customLine, Modifier.padding(top = YY.s(10), bottom = YY.s(4)))
+            } else {
+                DailyQuoteCard(
+                    quote = DailyQuote.current(book.tag),
+                    refreshing = DailyQuote.refreshing,
+                    onRefresh = {
+                        scope.launch {
+                            focus.stop()
+                            focus.heard.clear()
+                            DailyQuote.refresh(book.tag)
+                        }
+                    },
+                    modifier = Modifier.padding(top = YY.s(10), bottom = YY.s(4)),
+                )
+            }
             LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
                 val list = voices
                 if (list == null) item { Box(Modifier.fillMaxWidth().padding(YY.s(20)), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(YY.s(16)), color = YY.c.t3, strokeWidth = 1.5.dp) } }
@@ -606,7 +668,7 @@ fun VoiceSourcePage(id: String, openSettings: () -> Unit) {
             enter = androidx.compose.animation.fadeIn(app.yuyue.design.YYMotion.quick()) + androidx.compose.animation.scaleIn(app.yuyue.design.YYMotion.quick(), initialScale = 0.92f, transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 1f)),
             exit = androidx.compose.animation.fadeOut(app.yuyue.design.YYMotion.exit()) + androidx.compose.animation.scaleOut(app.yuyue.design.YYMotion.exit(), targetScale = 0.92f, transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 1f)),
         ) {
-            QuickLines(book, Modifier, send = ::send, fill = { draft = it; linesOpen = false })
+            QuickLines(book, Modifier, useDaily = { pickDailyQuote(refreshIfActive = true) }, send = ::send, fill = { draft = it; linesOpen = false })
         }
         if (pickerOpen) {
             app.yuyue.reader.VoicePickerSheet(
@@ -644,6 +706,88 @@ private fun DayLine(title: String) {
         Box(Modifier.weight(1f).height(0.5.dp).background(YY.c.line))
         Text(title, style = YY.font(10f), color = YY.c.t3)
         Box(Modifier.weight(1f).height(0.5.dp).background(YY.c.line))
+    }
+}
+
+/** Default trial line before you type your own: a quiet literary card (no fake "我" avatar), tappable to swap. */
+@Composable
+private fun DailyQuoteCard(
+    quote: DailyQuote.Entry,
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var spinCount by remember { mutableIntStateOf(0) }
+    val spinDeg by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = spinCount * 180f,
+        animationSpec = app.yuyue.design.YYMotion.standard(),
+        label = "quoteSpin",
+    )
+    Column(
+        modifier
+            .fillMaxWidth()
+            .shadow(0.5.dp, RoundedCornerShape(YY.s(12)))
+            .clip(RoundedCornerShape(YY.s(12)))
+            .background(YY.c.card)
+            .border(0.5.dp, YY.c.line, RoundedCornerShape(YY.s(12)))
+            .pressable(label = t("换一句"), enabled = !refreshing, scale = 0.985f) {
+                spinCount++
+                onRefresh()
+            }
+            .padding(horizontal = YY.s(12), vertical = YY.s(9)),
+        verticalArrangement = Arrangement.spacedBy(YY.s(5)),
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(YY.s(5)),
+        ) {
+            Icon(Icons.quote, null, tint = YY.c.t3, modifier = Modifier.size(YY.s(11)))
+            Text(t("每日一言"), style = YY.font(10f, FontWeight.SemiBold), color = YY.c.t2)
+            if (quote.source.isNotEmpty()) {
+                Text(
+                    "· ${quote.source}",
+                    style = YY.font(10f),
+                    color = YY.c.t3,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                Spacer(Modifier.weight(1f))
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(YY.s(3)),
+            ) {
+                Icon(
+                    Icons.clockwise,
+                    null,
+                    tint = YY.c.t3,
+                    modifier = Modifier
+                        .size(YY.s(10.5f))
+                        .graphicsLayer { rotationZ = spinDeg },
+                )
+                Text(t("换一句"), style = YY.font(10f, FontWeight.Medium), color = YY.c.t3)
+            }
+        }
+        val reduceMotion = app.yuyue.design.YYMotion.isReduceMotion()
+        androidx.compose.animation.AnimatedContent(
+            targetState = quote.text,
+            transitionSpec = { app.yuyue.design.YYMotion.swap(reduceMotion) },
+            label = "dailyQuoteText",
+        ) { line ->
+            Text(
+                line,
+                fontFamily = FontFamily.Serif,
+                fontSize = YY.sp(12.5f),
+                lineHeight = YY.sp(19f),
+                color = YY.c.t1,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
@@ -777,6 +921,14 @@ private fun VoiceMessage(v: BookVoice, book: VoiceBook, scope: kotlinx.coroutine
                 if (v.id !in focus.heard) Box(Modifier.size(6.dp).background(Color(0xFFE5483B), CircleShape))
                 if (open) ChooseButton(false) { focus.pick(v) }
             }
+            if (focus.failedId == v.id) {
+                Text(
+                    focus.failedMessage ?: t("试听暂不可用，请检查网络或稍后再试"),
+                    style = YY.font(10f),
+                    color = YY.c.danger,
+                    maxLines = 2,
+                )
+            }
         }
     }
 }
@@ -832,13 +984,17 @@ private fun Composer(book: VoiceBook, draft: String, change: (String) -> Unit, l
 
 /** The ready lines, over the box: one sends it; 书里的一句 puts one in the box to change. */
 @Composable
-private fun QuickLines(book: VoiceBook, modifier: Modifier, send: (String) -> Unit, fill: (String) -> Unit) {
+private fun QuickLines(book: VoiceBook, modifier: Modifier, useDaily: () -> Unit, send: (String) -> Unit, fill: (String) -> Unit) {
+    val dailyLabel = if (book == VoiceBook.ZH) t("每日一言") else "Daily quote"
+    val usingDaily = !ListeningFocus.hasCustomLine(book)
+    val daily = DailyQuote.current(book.tag)
     Column(
         modifier.fillMaxWidth().shadow(16.dp, RoundedCornerShape(YY.s(12)), ambientColor = Color(0x29282420), spotColor = Color(0x29282420))
             .clip(RoundedCornerShape(YY.s(12))).background(YY.c.card).border(0.5.dp, YY.c.line, RoundedCornerShape(YY.s(12))).padding(YY.s(5)),
     ) {
+        QuickLine(if (usingDaily) t("%@ · 正在用", dailyLabel) else dailyLabel, daily.text, onClick = useDaily)
         for ((name, line) in book.quickLines) {
-            val using = ListeningFocus.line(book) == line
+            val using = ListeningFocus.hasCustomLine(book) && ListeningFocus.line(book) == line
             QuickLine(if (using) t("%@ · 正在用", name) else name, line) { send(line) }
         }
         QuickLine(if (book == VoiceBook.ZH) t("书里的一句") else "From a book", if (book == VoiceBook.ZH) t("从《故乡》里随手取一句") else "A line from Pride and Prejudice") {
