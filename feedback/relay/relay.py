@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 """把 ntfy 上的反馈搬进语阅仓库的 Issue（公开的），每条一个。不解密任何东西。
 
-语阅是开源项目，反馈本来就要公开，所以 App 发来的正文、类别、版本、系统都是明文
-（`{"v":2,…}`）。不公开的那几样在 App 里就用开发者的公钥封好了，这里原样搬运：
+语阅是开源项目，反馈本来就要公开，不收集邮箱或联系方式，所以 App 发来的正文、类别、
+版本、系统都是明文（`{"v":2,…}`）。不公开的附件在 App 里用开发者的公钥封好，这里原样搬运：
 
-- 邮箱：密文放进 Issue 正文的 HTML 注释（`<!-- contact: v1.… -->`），页面上只显示「留了邮箱」。
 - 截图（用户同意公开的，消息正文 `v2shot`，附件是 JPEG）：推到公开的截图仓库
   （SHOTS_REPO，本地检出在 SHOTS_DIR），贴进 Issue。
 - 其他附件（日志、打不开的书、用户不想公开的截图；消息正文 `v1file`，附件是密封箱）：
   原样提交到私有仓库（GH_REPO 的 feedback-files/），Issue 里只写「只有开发者能看到」。
 
-私钥只在开发者自己的 Mac 上（kaneo_import.py 导入时解开邮箱和附件）。这个脚本和它跑的
+私钥只在开发者自己的 Mac 上（kaneo_import.py 导入时解开私密附件）。这个脚本和它跑的
 GitHub Actions 都拿不到私钥，所以私有仓库或 Actions 出了问题，也解不开任何东西。
 
-ntfy.sh 只缓存大约 12 小时，附件只留 3 小时，所以这个脚本要在那之前跑（工作流每小时一次）。
+ntfy.sh 只缓存大约 12 小时，附件只留 3 小时，所以这个脚本要在那之前跑（由 Worker 每 5 分钟检查并按需唤醒）。
 格式不对的消息跳过。已经开过的（正文里有 ntfy-id）不会再开，和已有 Issue 正文一样的也跳过。
 话题名打包在 App 里，谁都能往里发，所以每次最多开 MAX_ISSUES 个（默认 10，剩下的下一次），
 公开的附件只收 JPEG。
@@ -39,7 +38,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import binascii
 import datetime
 import hashlib
 import json
@@ -59,10 +57,8 @@ SEALED_MARK = "v1file"
 SHOT_MARK = "v2shot"
 FILES_MAX = 3
 TEXT_MAX = 1000          # the app caps at 800; a bit of room, then junk
-CONTACT_B64_MAX = 700    # a sealed email of at most 80 chars is well under this
 DOWNLOAD_MAX = 2_100_000
 CATEGORIES = {"bug": "问题", "idea": "建议", "other": "其他"}
-B64_RE = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
 
 
 # ---------------------------------------------------------------- messages
@@ -86,23 +82,11 @@ def open_message(message: str) -> dict | None:
     for key, limit in (("app", 80), ("platform", 40), ("os", 80)):
         value = data.get(key)
         data[key] = clean_line(value)[:limit] if isinstance(value, str) else ""
-    contact = data.get("contact")
-    data["contact"] = contact if isinstance(contact, str) and is_sealed(contact) else ""
     files = data.get("files")
     if not isinstance(files, list):
         files = []
     data["files"] = [safe_id(str(i)) for i in files[:FILES_MAX] if safe_id(str(i))]
     return data
-
-
-def is_sealed(text: str) -> bool:
-    """Standard base64 of a sealed box (48 bytes of overhead, so never shorter)."""
-    if not text or len(text) > CONTACT_B64_MAX or not B64_RE.match(text):
-        return False
-    try:
-        return len(base64.b64decode(text, validate=True)) > 48
-    except (binascii.Error, ValueError):
-        return False
 
 
 def clean_line(text: str) -> str:
@@ -138,17 +122,13 @@ def issue_body(ntfy_id: str, data: dict, lines: list[str] | None = None) -> str:
     """`lines`: one Markdown line per attachment (a picture, a private note, or why it is missing)."""
     ntfy_id = safe_id(ntfy_id)
     label = CATEGORIES.get(data.get("category"), "其他")
-    contact = data.get("contact") or ""
-    sealed = f"<!-- contact: v1.{contact} -->\n" if contact else ""
     tail = ("\n" + "\n\n".join(lines) + "\n") if lines else ""
     return (
-        f"<!-- ntfy-id: {ntfy_id} text-hash: {text_hash(data)} -->\n"
-        f"{sealed}\n"
+        f"<!-- ntfy-id: {ntfy_id} text-hash: {text_hash(data)} -->\n\n"
         f"**类别**：{label}\n"
         f"**平台**：{data.get('platform') or ''}\n"
         f"**系统**：{data.get('os') or ''}\n"
         f"**版本**：{data.get('app') or ''}\n"
-        f"**联系**：{'留了邮箱（加密，只有开发者能看到）' if contact else '未留'}\n"
         f"**时间**：{_when(data.get('sentAt'))}\n\n"
         f"{public_text(str(data.get('text') or ''))}\n"
         f"{tail}"

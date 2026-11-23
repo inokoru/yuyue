@@ -487,13 +487,6 @@ public sealed class UpdateAndFeedbackService
             catch { }
         };
 
-        var emailBox = new TextBox
-        {
-            Header = "回复邮箱（可选，仅加密发给开发者）",
-            PlaceholderText = "name@example.com",
-            Text = _library.Prefs.FeedbackEmail,
-            MaxLength = 80,
-        };
         var infoCheck = new CheckBox
         {
             Content = $"附带基础环境信息（语阅 v{CurrentVersion} · Windows {Environment.OSVersion.Version}）",
@@ -502,6 +495,14 @@ public sealed class UpdateAndFeedbackService
         };
         infoCheck.Checked += (_, _) => withDeviceInfo = true;
         infoCheck.Unchecked += (_, _) => withDeviceInfo = false;
+
+        var mailLink = new HyperlinkButton
+        {
+            Content = "需要回复或不想公开？直接发邮件 ↗",
+            NavigateUri = new Uri("mailto:yuyue.app@icloud.com"),
+            FontSize = 11.5,
+            Padding = new Thickness(0, 2, 0, 2),
+        };
 
         var toolBar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { snapWindowBtn, addFileBtn } };
         var root = new StackPanel
@@ -516,11 +517,11 @@ public sealed class UpdateAndFeedbackService
                 toolBar,
                 attachList,
                 publicShotToggle,
-                emailBox,
                 infoCheck,
+                mailLink,
                 new TextBlock
                 {
-                    Text = "公开文字会整理为 GitHub Issue 便于追踪修复；邮箱与私密附件全程使用 X25519 公钥加密传输。",
+                    Text = "公开文字会整理为 GitHub Issue 便于追踪修复；不收集邮箱，私密附件与日志全程使用 X25519 公钥加密传输。",
                     FontSize = 11,
                     Foreground = ThemeHelper.Brush(p.T3),
                     TextWrapping = TextWrapping.Wrap,
@@ -542,15 +543,12 @@ public sealed class UpdateAndFeedbackService
         var res = await dlg.ShowAsync();
         if (res == ContentDialogResult.None) return;
 
-        _library.Prefs.FeedbackEmail = emailBox.Text.Trim();
-        _library.SavePrefs();
-
         string text = bodyBox.Text.Trim();
         if (string.IsNullOrEmpty(text)) return;
 
         if (res == ContentDialogResult.Primary)
         {
-            bool sentViaRelay = await TrySubmitViaRelayAsync(category, text, emailBox.Text.Trim(), withDeviceInfo, publicShots, attachments);
+            bool sentViaRelay = await TrySubmitViaRelayAsync(category, text, withDeviceInfo, publicShots, attachments);
             _library.Prefs.FeedbackDraftText = "";
             _library.SavePrefs();
             if (!sentViaRelay)
@@ -567,7 +565,7 @@ public sealed class UpdateAndFeedbackService
     }
 
     private async Task<bool> TrySubmitViaRelayAsync(
-        string category, string text, string contact, bool withInfo, bool publicShots,
+        string category, string text, bool withInfo, bool publicShots,
         List<(string Name, byte[] Data, bool IsImage)> attachments)
     {
         string? topic = Environment.GetEnvironmentVariable("YuyueFeedbackTopic");
@@ -600,13 +598,12 @@ public sealed class UpdateAndFeedbackService
             var draft = new FeedbackDraft(
                 Category: category,
                 Text: text,
-                Contact: contact,
                 AppVersion: withInfo ? CurrentVersion : "",
                 Platform: withInfo ? "Windows" : "",
                 OsVersion: withInfo ? Environment.OSVersion.VersionString : "",
                 Files: fileIds.ToArray());
 
-            string sealedJson = YuyueCoreMethods.FeedbackMessage(pubKey, draft);
+            string sealedJson = YuyueCoreMethods.FeedbackMessage(draft);
             try
             {
                 using var postReq = new HttpRequestMessage(HttpMethod.Post, $"https://ntfy.sh/{topic}")

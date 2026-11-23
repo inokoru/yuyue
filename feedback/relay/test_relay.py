@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """离线检查：v2 消息的校验、Issue 正文、公开和私密附件、Mac 上的解密和回写规则。"""
 
-import base64
 import json
 import os
 import subprocess
@@ -21,9 +20,6 @@ class RelayTest(unittest.TestCase):
         self.secret = PrivateKey.generate()
         self.box = SealedBox(self.secret.public_key)
 
-    def sealed_email(self, email: str) -> str:
-        return base64.b64encode(self.box.encrypt(email.encode())).decode()
-
     def message(self, **fields) -> str:
         return json.dumps({"v": 2, "category": "bug", "text": "翻页卡住", **fields}, ensure_ascii=False)
 
@@ -31,30 +27,23 @@ class RelayTest(unittest.TestCase):
         opened = relay.open_message(self.message(platform="ios", os="iOS 18", app="0.1.0 (1)"))
         self.assertEqual(opened["text"], "翻页卡住")
         self.assertEqual(opened["platform"], "ios")
-        self.assertEqual(opened["contact"], "")
         for junk in ("hello", "v1.abc", "{", json.dumps({"v": 1, "text": "x"}), self.message(text="  "),
                      self.message(text="字" * (relay.TEXT_MAX + 1)), "[1]"):
             self.assertIsNone(relay.open_message(junk), junk[:30])
         self.assertEqual(relay.open_message(self.message(category="nope"))["category"], "other")
         # A header field can't fake another line or carry markup.
-        self.assertEqual(relay.open_message(self.message(os="iOS\n**联系**：<b>x</b>"))["os"], "iOS 联系 ： b x /b")
+        self.assertEqual(relay.open_message(self.message(os="iOS\n**平台**：<b>x</b>"))["os"], "iOS 平台 ： b x /b")
         self.assertEqual(relay.open_message(self.message(platform=5))["platform"], "")
-        # The email must look like a sealed box; anything else is dropped, never shown.
-        self.assertEqual(relay.open_message(self.message(contact="reader@example.com"))["contact"], "")
-        self.assertEqual(relay.open_message(self.message(contact="QUJD"))["contact"], "")
-        email = self.sealed_email("reader@example.com")
-        self.assertEqual(relay.open_message(self.message(contact=email))["contact"], email)
         files = relay.open_message(self.message(files=["ab1", "../x", 5, "c", "d", "e"]))["files"]
         self.assertEqual(files, ["ab1", "x", "5"])
 
     def test_issue_body(self):
-        email = self.sealed_email("reader@example.com")
-        data = relay.open_message(self.message(contact=email, text="见 @someone 和 <!-- x --> 第二段", sentAt=1_700_000_000_000))
+        data = relay.open_message(self.message(contact="reader@example.com", text="见 @someone 和 <!-- x --> 第二段", sentAt=1_700_000_000_000))
         body = relay.issue_body("abc123", data, ["![截图 1](u)"])
         self.assertTrue(relay.issue_title(data).startswith("[问题]"))
         self.assertNotIn("reader@example.com", body)
-        self.assertIn("留了邮箱（加密", body)
-        self.assertIn(f"<!-- contact: v1.{email} -->", body)
+        self.assertNotIn("contact:", body)
+        self.assertNotIn("联系", body)
         self.assertIn("@​someone", body)
         self.assertNotIn("<!-- x -->", body)
         self.assertIn("2023-11-14", body)
@@ -69,7 +58,6 @@ class RelayTest(unittest.TestCase):
             ], now=now),
             {relay.text_hash(data)},
         )
-        self.assertNotIn("contact:", relay.issue_body("id2", relay.open_message(self.message())))
         self.assertEqual(relay.safe_id("ab c-->x"), "abc--x")
 
     def test_attachments(self):
@@ -103,10 +91,7 @@ class RelayTest(unittest.TestCase):
             self.assertEqual(shots.url("abc/1.jpg"), "https://raw.githubusercontent.com/inokoru/yuyue-feedback-assets/main/abc/1.jpg")
 
     def test_mac_side_opens_what_the_app_sealed(self):
-        body = relay.issue_body("id9", relay.open_message(self.message(contact=self.sealed_email("reader@example.com"))))
-        self.assertEqual(kaneo_import.open_contact(self.secret, body), "reader@example.com")
-        self.assertIsNone(kaneo_import.open_contact(PrivateKey.generate(), body))
-        self.assertIsNone(kaneo_import.open_contact(None, body))
+        body = relay.issue_body("id9", relay.open_message(self.message()))
 
         def pack(name: str, data: bytes) -> bytes:
             raw = name.encode()
@@ -117,9 +102,8 @@ class RelayTest(unittest.TestCase):
         self.assertIsNone(kaneo_import.open_file(self.secret, pack("empty", b"")))
         self.assertIsNone(kaneo_import.open_file(self.secret, b"junk"))
 
-        task = kaneo_import.task_description("inokoru/yuyue", 3, body, "reader@example.com", ["- 附件 1：/x/1-日志.txt"])
+        task = kaneo_import.task_description("inokoru/yuyue", 3, body, ["- 附件 1：/x/1-日志.txt"])
         self.assertTrue(task.startswith("yuyue-feedback-issue:3\n"))
-        self.assertIn("**联系**：reader@example.com", task)
         self.assertIn("/x/1-日志.txt", task)
         self.assertNotIn("contact:", task)
         self.assertEqual(kaneo_import.MARKER_RE.findall(task), ["3"])

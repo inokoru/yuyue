@@ -1,6 +1,9 @@
 package app.yuyue.feedback
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
@@ -32,7 +35,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.width
@@ -65,7 +67,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.yuyue.BuildConfig
@@ -99,9 +100,9 @@ import java.util.concurrent.TimeUnit
 /**
  * 反馈: the core turns what the form holds into one ntfy message (`feedbackMessage`) and it is
  * POSTed to ntfy.sh (docs/dev/feedback.md). 语阅 is open source: the words become a public GitHub
- * Issue, and so do the screenshots unless the person turns that off. The email, logs and other
- * files are sealed so only the developer reads them. Without a network the message waits on this
- * phone and goes on the next try. Same rules as the Apple app.
+ * Issue, and so do the screenshots unless the person turns that off. No email or contact info is
+ * collected; logs and other private files are sealed so only the developer reads them. Without a
+ * network the message waits on this phone and goes on the next try. Same rules as the Apple app.
  */
 object Feedback {
     enum class Category(val id: String) {
@@ -125,9 +126,9 @@ object Feedback {
 
     /** The core's caps, counted in code points as Rust counts chars. */
     const val TEXT_MAX = 800
-    const val CONTACT_MAX = 80
     const val FILES_MAX = 3
     const val FILE_BYTES_MAX = 1_500_000
+    const val SUPPORT_EMAIL = "yuyue.app@icloud.com"
     /** 早期版本: the entries wear the theme colour. Set to false once 语阅 settles. */
     const val EARLY = true
 
@@ -163,7 +164,7 @@ object Feedback {
      * Only the words wait in the queue (ntfy keeps an attachment 3 hours, too short to hold).
      */
     suspend fun send(
-        category: Category, text: String, contact: String, withInfo: Boolean = true, publicShots: Boolean = true,
+        category: Category, text: String, withInfo: Boolean = true, publicShots: Boolean = true,
         files: List<Attachment> = emptyList(),
     ): Outcome {
         if (!isConfigured) throw Problem(t("这个版本没有配置反馈地址，发不出去。"))
@@ -176,8 +177,8 @@ object Feedback {
                 throw Problem(t("附件没传上去，可能是没网。写的都还在，联网后再点发送。"))
             }
         }
-        val body = feedbackMessage(publicKey, FeedbackDraft(
-            category = category.id, text = text, contact = contact,
+        val body = feedbackMessage(FeedbackDraft(
+            category = category.id, text = text,
             appVersion = if (withInfo) appVersion else "",
             platform = if (withInfo) "android" else "",
             osVersion = if (withInfo) osVersion else "",
@@ -188,7 +189,7 @@ object Feedback {
             flush()
             Outcome.Sent
         } catch (e: Exception) {
-            // At most 10, the newest kept. The email in it is sealed.
+            // At most 10, the newest kept.
             writeList(QUEUE_KEY, (queued + body).takeLast(10))
             if (e is Busy) Outcome.QueuedBusy else Outcome.Queued
         }
@@ -297,18 +298,12 @@ object Feedback {
         null
     }.getOrNull()
 
-    // Draft and email
+    // Draft
 
     private const val DRAFT_KEY = "feedback.draft"
-    private const val EMAIL_KEY = "feedback.email"
 
     /** What the form held when it closed, so nothing written is lost. Cleared once sent (or queued). */
     class Draft(val category: Category, val text: String, val withInfo: Boolean, val publicShots: Boolean, val files: List<Attachment>)
-
-    /** The email last typed, offered next time. Kept after sending. */
-    var savedEmail: String
-        get() = Prefs.string(EMAIL_KEY)
-        set(value) = Prefs.set(EMAIL_KEY, value.trim().ifEmpty { null })
 
     private fun draftDir(context: Context) = java.io.File(context.filesDir, "feedback-draft")
 
@@ -365,8 +360,11 @@ object Feedback {
         t("设备") to listOf(Build.MANUFACTURER.replaceFirstChar { it.uppercase() }, Build.MODEL).distinct().joinToString(" "),
     )
 
-    /** Empty is fine (no reply wanted); otherwise something@something.something. */
-    fun isEmail(text: String): Boolean = text.isBlank() || Regex("[^@\\s]+@[^@\\s]+\\.[^@\\s]+").matches(text.trim())
+    /** Opens the user's mail app to write to the developer without the app collecting their email. */
+    fun openMail(context: Context): Boolean {
+        val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$SUPPORT_EMAIL"))
+        return runCatching { context.startActivity(intent) }.isSuccess
+    }
 
     val appVersion: String get() = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
     val osVersion: String get() = "Android ${Build.VERSION.RELEASE}"
@@ -386,14 +384,13 @@ object Feedback {
     private fun writeList(key: String, list: List<String>) = Prefs.set(key, JSONArray(list).toString())
 }
 
-/** The form: 类别, 想说的 (Markdown, with attachments), an optional 邮箱, 附加信息, then 发送. Its own page. */
+/** The form: 类别, 想说的 (Markdown, with attachments), 附加信息, a mailto hint, then 发送. Its own page. */
 @Composable
 fun FeedbackPage(close: () -> Unit) {
     var category by remember { mutableStateOf(Feedback.Category.Bug) }
     var text by remember { mutableStateOf("") }
-    var contact by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
-    var done by remember { mutableStateOf<Boolean?>(null) }
+    var done by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var withInfo by remember { mutableStateOf(true) }
     // Screenshots shown in the public Issue. On until the person turns it off; the card says what it means.
@@ -406,8 +403,15 @@ fun FeedbackPage(close: () -> Unit) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val blank = text.isBlank()
-    val emailOK = Feedback.isEmail(contact)
-    val canSend = !blank && emailOK && !sending && Feedback.isConfigured
+    val canSend = !blank && !sending && Feedback.isConfigured
+
+    fun openMail() {
+        if (!Feedback.openMail(context)) {
+            (context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager)
+                ?.setPrimaryClip(ClipData.newPlainText("email", Feedback.SUPPORT_EMAIL))
+            notice = t("没有找到邮件应用，已复制邮箱：%@。", Feedback.SUPPORT_EMAIL)
+        }
+    }
 
     fun take(uris: List<Uri>) {
         scope.launch {
@@ -432,17 +436,20 @@ fun FeedbackPage(close: () -> Unit) {
             publicShots = draft.publicShots
             files.addAll(draft.files)
         }
-        contact = Feedback.savedEmail
         restored = true
         runCatching { focus.requestFocus() }
     }
     LaunchedEffect(category, text, withInfo, publicShots) {
-        if (restored && done == null) Feedback.saveDraft(category, text, withInfo, publicShots)
+        if (restored && !done) Feedback.saveDraft(category, text, withInfo, publicShots)
     }
     LaunchedEffect(files.toList()) { if (restored) Feedback.saveDraftFiles(context, files.toList()) }
 
-    done?.let { replied ->
-        Thanks(replied, again = { text = ""; category = Feedback.Category.Bug; withInfo = true; publicShots = true; files.clear(); done = null }, close = close)
+    if (done) {
+        Thanks(
+            onMail = { openMail() },
+            again = { text = ""; category = Feedback.Category.Bug; withInfo = true; publicShots = true; files.clear(); done = false },
+            close = close,
+        )
         return
     }
 
@@ -567,33 +574,6 @@ fun FeedbackPage(close: () -> Unit) {
                     )
                 }
             }
-            // 邮箱
-            Row(
-                Modifier.fillMaxWidth().height(YY.s(40))
-                    .background(YY.c.card, RoundedCornerShape(YY.s(12)))
-                    .border(if (emailOK) 0.5.dp else 1.dp, if (emailOK) YY.c.line else YY.c.warn, RoundedCornerShape(YY.s(12)))
-                    .padding(horizontal = YY.s(12)),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(t("邮箱"), style = YY.font(11.5f), color = YY.c.t1)
-                Spacer(Modifier.size(YY.s(10)))
-                BasicTextField(
-                    contact, {
-                        contact = Feedback.clip(it.trim(), Feedback.CONTACT_MAX)
-                        if (Feedback.isEmail(contact)) Feedback.savedEmail = contact
-                    }, singleLine = true,
-                    textStyle = YY.font(11.5f).copy(color = YY.c.t1, textAlign = TextAlign.End),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                    cursorBrush = SolidColor(YY.tint.accent),
-                    decorationBox = { inner ->
-                        Box(contentAlignment = Alignment.CenterEnd) {
-                            if (contact.isEmpty()) Text(t("想收到回复就留一个，可不填"), style = YY.font(11.5f), color = YY.c.t3)
-                            inner()
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                )
-            }
             // 附加信息: what goes along besides the words, shown as it is.
             Column(
                 Modifier.fillMaxWidth()
@@ -628,7 +608,15 @@ fun FeedbackPage(close: () -> Unit) {
             }
             Row(Modifier.padding(horizontal = YY.s(2)), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.globe, null, tint = YY.c.t3, modifier = Modifier.size(YY.s(11)))
-                Text(t("内容会公开在 GitHub 上。邮箱、日志和其他文件只有开发者能看到"), style = YY.font(10.5f), color = YY.c.t3, modifier = Modifier.padding(start = YY.s(5)))
+                Text(t("内容会公开在 GitHub 上。日志和私密附件只有开发者能看到"), style = YY.font(10.5f), color = YY.c.t3, modifier = Modifier.padding(start = YY.s(5)))
+            }
+            Row(Modifier.padding(horizontal = YY.s(2)), verticalAlignment = Alignment.CenterVertically) {
+                Text(t("需要回复或不想公开？"), style = YY.font(10.5f), color = YY.c.t3)
+                Text(
+                    t("直接发邮件 ↗"),
+                    style = YY.font(10.5f), color = YY.tint.accent,
+                    modifier = Modifier.clickable(onClickLabel = t("直接发邮件 ↗")) { openMail() }.padding(horizontal = YY.s(4), vertical = YY.s(2)),
+                )
             }
             notice?.let {
                 Row(
@@ -651,11 +639,11 @@ fun FeedbackPage(close: () -> Unit) {
                 notice = null
                 scope.launch {
                     try {
-                        val outcome = Feedback.send(category, text, contact, withInfo, publicShots, files.toList())
+                        val outcome = Feedback.send(category, text, withInfo, publicShots, files.toList())
                         when (outcome) {
                             Feedback.Outcome.Sent -> {
                                 Feedback.clearDraft(context)
-                                done = contact.isNotBlank()
+                                done = true
                             }
                             Feedback.Outcome.Queued, Feedback.Outcome.QueuedBusy -> {
                                 val busy = outcome == Feedback.Outcome.QueuedBusy
@@ -674,17 +662,15 @@ fun FeedbackPage(close: () -> Unit) {
                 }
             }
             // The daily cap only speaks once it is reached; a count before that reads like a quota.
-            when {
-                !Feedback.isConfigured -> t("这个版本发不出反馈")
-                !emailOK -> t("邮箱好像不对")
-                else -> null
-            }?.let { Text(it, style = YY.font(10f), color = if (emailOK) YY.c.t3 else YY.c.warn) }
+            if (!Feedback.isConfigured) {
+                Text(t("这个版本发不出反馈"), style = YY.font(10f), color = YY.c.t3)
+            }
         }
     }
 }
 
 @Composable
-private fun Thanks(replied: Boolean, again: () -> Unit, close: () -> Unit) {
+private fun Thanks(onMail: () -> Unit, again: () -> Unit, close: () -> Unit) {
     Column(
         Modifier.fillMaxSize().background(YY.c.bg).padding(horizontal = YY.s(24)),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -696,10 +682,21 @@ private fun Thanks(replied: Boolean, again: () -> Unit, close: () -> Unit) {
         ) { Icon(Icons.check, null, tint = YY.tint.accent, modifier = Modifier.size(YY.s(26))) }
         Text(t("收到了，谢谢"), style = YY.font(15f, FontWeight.SemiBold), color = YY.c.t1, modifier = Modifier.padding(top = YY.s(14)))
         Text(
-            if (replied) t("稍后会出现在 GitHub 上，需要的话也会发邮件回复你。") else t("稍后会出现在 GitHub 上，没留邮箱，所以不会发邮件回复。"),
+            t("稍后会出现在 GitHub 问题板上，不会收集你的邮箱。"),
             style = YY.font(11.5f), color = YY.c.t2, textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = YY.s(8)).widthIn(max = YY.s(240)),
         )
+        Row(
+            Modifier.padding(top = YY.s(8)),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(t("需要回复或补充私密内容？"), style = YY.font(10.5f), color = YY.c.t3)
+            Text(
+                t("直接发邮件 ↗"),
+                style = YY.font(10.5f), color = YY.tint.accent,
+                modifier = Modifier.clickable(onClickLabel = t("直接发邮件 ↗"), onClick = onMail).padding(horizontal = YY.s(4), vertical = YY.s(2)),
+            )
+        }
         Row(Modifier.padding(top = YY.s(18)), horizontalArrangement = Arrangement.spacedBy(YY.s(10))) {
             YYButton(t("再写一条"), ButtonKind.Plain, onClick = again)
             YYButton(t("完成"), ButtonKind.Main, onClick = close)

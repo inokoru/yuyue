@@ -137,7 +137,7 @@
           <li><b>克隆声音</b>：本机克隆全程在设备上完成、不上传录音；仅在你主动接上自己的 ElevenLabs 账号克隆时，那段录音才会传到你自己的账号。</li>
           <li><b>笔记导出</b>：填了 Notion、flomo 或新枝的令牌或链接时，你发出去的划线直接发给那个服务。</li>
           <li><b>按需模型、声音包与字体</b>：用到有声书对齐、本机离线语音或下载字体时，会从 GitHub Releases 下载对齐模型、离线语音模型、内置声音包和开源字体（Mac 可选的精做层模型从 Hugging Face 下载）；运行全在你的设备上完成，原文与录音不出本机。</li>
-          <li><b>应用内反馈</b>（仅在你主动提交时）：你写的反馈、分类、可选的设备与版本信息及公开截图会通过 ntfy.sh（关闭 Firebase 推送）中转为公开的 GitHub Issue；你选择附带的邮箱、日志或私密文件会在发送前用开发者公钥在本机加密。</li>
+          <li><b>应用内反馈</b>（仅在你主动提交时）：你写的反馈、分类、可选的设备与版本信息及公开截图会通过 ntfy.sh（关闭 Firebase 推送）中转为公开的 GitHub Issue；不收集邮箱，你选择附带的日志或私密文件会在发送前用开发者公钥在本机加密。</li>
           <li><b>检查更新</b>（从 GitHub 下载安装的版本，默认开，可在设置里关掉）：每天从 GitHub 取一个小文件，看哪一版最新，不带任何关于你和设备的信息。App Store 和 Google Play 的版本不查，由商店更新。</li>
         </ul>
 
@@ -191,7 +191,7 @@
           <li><b>Voice cloning</b> with your own ElevenLabs account: the short recording of you reading is kept on your device and sent to that account only when you explicitly clone a voice there; on-device voice cloning never uploads audio.</li>
           <li><b>Note export</b> to Notion, flomo or Xinzhi (新枝) with your own token or webhook: the highlights you send go directly to that service.</li>
           <li><b>On-demand models, voice packs and fonts</b>: alignment models, offline voice models, the built-in voice pack and optional open-source fonts are downloaded from GitHub Releases (and optional Mac studio voice models from Hugging Face) when you use those features. They run locally on your device; your books and recordings never leave the device.</li>
-          <li><b>In-app feedback</b> (only when you choose to send it): your message, category, optional device/app info and any public screenshots are sent via ntfy.sh (with Firebase push disabled) and posted as a public GitHub Issue. Any email, logs or private attachments you opt in to include are sealed on your device with the developer's public key before sending.</li>
+          <li><b>In-app feedback</b> (only when you choose to send it): your message, category, optional device/app info and any public screenshots are sent via ntfy.sh (with Firebase push disabled) and posted as a public GitHub Issue. No email or contact info is collected; any logs or private attachments you opt in to include are sealed on your device with the developer's public key before sending.</li>
           <li><b>Update checks</b> (versions downloaded from GitHub, on unless you turn it off in Settings): once a day the app reads a small file from GitHub saying which version is newest, sending nothing about you or your device. App Store and Google Play versions don't check; the store updates them.</li>
         </ul>
 

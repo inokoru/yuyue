@@ -83,7 +83,6 @@ public sealed class DevicePrefs
     public long UpdateRemindUntilMs { get; set; }
     public long? UpdateLastCheckedMs { get; set; }
     public string FeedbackDraftText { get; set; } = "";
-    public string FeedbackEmail { get; set; } = "";
     public List<string> FeedbackOfflineQueue { get; set; } = [];
     public Dictionary<string, long[]> SleepReturnSpots { get; set; } = new();
     public Dictionary<string, string> AudiobookPairOverrides { get; set; } = new();

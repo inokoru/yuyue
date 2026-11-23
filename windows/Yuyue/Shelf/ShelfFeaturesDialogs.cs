@@ -109,10 +109,12 @@ public static class ShelfFeaturesDialogs
             TextWrapping = TextWrapping.Wrap,
             MinHeight = 110,
         };
-        var contactBox = new TextBox
+        var mailLink = new HyperlinkButton
         {
-            Header = "联系方式（可选）",
-            PlaceholderText = "邮箱或 GitHub ID，方便跟进回复",
+            Content = "需要回复或不想公开？直接发邮件 ↗",
+            NavigateUri = new Uri("mailto:yuyue.app@icloud.com"),
+            FontSize = 11.5,
+            Padding = new Thickness(0, 2, 0, 2),
         };
 
         foreach (var (id, label, hint) in new[]
@@ -151,7 +153,7 @@ public static class ShelfFeaturesDialogs
                     new TextBlock { Text = "语阅是开源阅读器，你可以直接在 GitHub 提交 Issue，或复制诊断文本。", FontSize = 12, Foreground = (Brush)Application.Current.Resources["YYText3Brush"], TextWrapping = TextWrapping.Wrap },
                     catRow,
                     bodyBox,
-                    contactBox,
+                    mailLink,
                 },
             },
             PrimaryButtonText = "前往 GitHub 提交",
@@ -163,7 +165,7 @@ public static class ShelfFeaturesDialogs
         var res = await dlg.ShowAsync();
         if (res == ContentDialogResult.None) return;
 
-        string summary = $"[{category.ToUpperInvariant()}] {bodyBox.Text.Trim()}\n\n---\nPlatform: Windows ({Environment.OSVersion.VersionString})\nApp: Yuyue 0.1.0\nContact: {contactBox.Text.Trim()}";
+        string summary = $"[{category.ToUpperInvariant()}] {bodyBox.Text.Trim()}\n\n---\nPlatform: Windows ({Environment.OSVersion.VersionString})\nApp: Yuyue 0.1.0";
         if (res == ContentDialogResult.Secondary)
         {
             var dp = new DataPackage();

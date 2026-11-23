@@ -923,5 +923,7 @@
   "连接局域网电脑 17493 端口多引擎语音": "Connects to port 17493 multi-engine speech over LAN",
   "连接局域网电脑 3900 端口与克隆音色": "Connects to port 3900 & cloned voices over LAN",
   "连接局域网电脑或 NAS Docker 语音服务": "Connects to PC or NAS Docker speech server over LAN",
-  "通过 Docker 部署 Speaches（默认端口 8000），适合电脑或家里 NAS 局域网共享。": "Deploy Speaches via Docker (default port 8000) to share across your home LAN or NAS."
+  "通过 Docker 部署 Speaches（默认端口 8000），适合电脑或家里 NAS 局域网共享。": "Deploy Speaches via Docker (default port 8000) to share across your home LAN or NAS.",
+  "内容会公开在 GitHub 上。日志和私密附件只有开发者能看到": "Posted publicly on GitHub. Logs and private files are visible only to the developer.",
+  "没有找到邮件应用，已复制邮箱：%@。": "No mail app found. Copied email: %@."
 }

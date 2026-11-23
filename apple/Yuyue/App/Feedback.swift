@@ -12,9 +12,9 @@ import AppKit
 
 /// 反馈: the core turns what the form holds into one ntfy message (`feedbackMessage`) and it is
 /// POSTed to ntfy.sh (docs/dev/feedback.md). 语阅 is open source: the words become a public
-/// GitHub Issue, and so do the screenshots unless the person turns that off. The email, logs and
-/// other files are sealed so only the developer reads them. Without a network the message waits
-/// on this device and goes on the next try.
+/// GitHub Issue, and so do the screenshots unless the person turns that off. No email or contact
+/// info is collected; logs and other private files are sealed so only the developer reads them.
+/// Without a network the message waits on this device and goes on the next try.
 @Observable
 final class Feedback {
     static let shared = Feedback()
@@ -68,12 +68,13 @@ final class Feedback {
         var isShot: Bool { preview != nil }
     }
 
-    /// The core's own caps (`TEXT_MAX`, `CONTACT_MAX`), counted in Unicode scalars as Rust counts chars.
+    /// The core's own caps (`TEXT_MAX`), counted in Unicode scalars as Rust counts chars.
     static let textMax = 800
-    static let contactMax = 80
     static let filesMax = 3
     nonisolated static let fileBytesMax = 1_500_000
     static let issuesURL = URL(string: "https://github.com/inokoru/yuyue/issues")!
+    static let supportEmail = "yuyue.app@icloud.com"
+    static let mailURL = URL(string: "mailto:\(supportEmail)")!
     /// 早期版本: the entries wear the theme colour. Set to false once 语阅 settles.
     static let early = true
 
@@ -185,7 +186,7 @@ final class Feedback {
     /// Attachments go first, each its own ntfy attachment; the report then names them.
     /// They need a network now: if one fails nothing is counted and the form keeps everything.
     /// Only the words wait in the queue (ntfy keeps an attachment 3 hours, too short to hold).
-    func send(_ category: Category, text: String, contact: String, withInfo: Bool = true, publicShots: Bool = true,
+    func send(_ category: Category, text: String, withInfo: Bool = true, publicShots: Bool = true,
               files: [Attachment] = []) async throws -> Outcome {
         guard isConfigured else { throw Problem.notConfigured }
         var ids: [String] = []
@@ -196,10 +197,9 @@ final class Feedback {
                 ids.append(try await upload(data, shown: shown, n: n + 1))
             } catch Problem.busy { throw Problem.filesBusy } catch { throw Problem.filesOffline }
         }
-        let body = try feedbackMessage(publicKeyB64: publicKey, draft: FeedbackDraft(
+        let body = try feedbackMessage(draft: FeedbackDraft(
             category: category.rawValue,
             text: text,
-            contact: contact,
             appVersion: withInfo ? Self.appVersion : "",
             platform: withInfo ? Self.platform : "",
             osVersion: withInfo ? Self.osVersion : "",
@@ -211,7 +211,7 @@ final class Feedback {
             return .sent
         } catch {
             let busy = (error as? Problem).map { if case .busy = $0 { true } else { false } } ?? false
-            // At most 10, the newest kept. The email in it is sealed.
+            // At most 10, the newest kept.
             queued = Array((queued + [body]).suffix(10))
             UserDefaults.standard.set(queued, forKey: queueKey)
             return .queued(busy: busy)
@@ -261,7 +261,7 @@ final class Feedback {
         return data
     }
 
-    // MARK: Draft and email
+    // MARK: Draft
 
     /// What the form held when it closed, so nothing written is lost. Cleared once it is sent
     /// (or queued). Attachments are files beside it, in order.
@@ -275,19 +275,9 @@ final class Feedback {
     }
 
     private let draftKey = "feedback.draft"
-    private let emailKey = "feedback.email"
 
     private var draftDir: URL {
         URL.applicationSupportDirectory.appending(path: "Yuyue/Feedback/Draft", directoryHint: .isDirectory)
-    }
-
-    /// The email last typed, offered next time. Kept after sending.
-    var savedEmail: String {
-        get { UserDefaults.standard.string(forKey: emailKey) ?? "" }
-        set {
-            let t = newValue.trimmingCharacters(in: .whitespaces)
-            if t.isEmpty { UserDefaults.standard.removeObject(forKey: emailKey) } else { UserDefaults.standard.set(t, forKey: emailKey) }
-        }
     }
 
     func saveDraft(category: Category, text: String, withInfo: Bool, publicShots: Bool) {
@@ -441,12 +431,6 @@ final class Feedback {
         #endif
     }
 
-    /// Empty is fine (no reply wanted); otherwise something@something.something.
-    static func isEmail(_ text: String) -> Bool {
-        let t = text.trimmingCharacters(in: .whitespaces)
-        return t.isEmpty || t.wholeMatch(of: /[^@\s]+@[^@\s]+\.[^@\s]+/) != nil
-    }
-
     static func clip(_ text: String, _ max: Int) -> String {
         guard text.unicodeScalars.count > max else { return text }
         var scalars = String.UnicodeScalarView()
@@ -455,15 +439,14 @@ final class Feedback {
     }
 }
 
-/// The form: 类别, 想说的 (Markdown, with attachments), an optional 邮箱, 附加信息, then 发送.
-/// A sheet on the phone and on the Mac.
+/// The form: 类别, 想说的 (Markdown, with attachments), 附加信息, a mailto hint for private
+/// replies, then 发送. A sheet on the phone and on the Mac.
 struct FeedbackForm: View {
     let close: () -> Void
     @State private var category = Feedback.Category.bug
     @State private var text = ""
-    @State private var contact = ""
     @State private var sending = false
-    @State private var done: Bool?          // true: left an email
+    @State private var done = false
     @State private var notice: String?
     @State private var withInfo = true
     @State private var infoExpanded = false
@@ -472,7 +455,6 @@ struct FeedbackForm: View {
     @State private var files: [Feedback.Attachment] = []
     @State private var choosingFiles = false
     @State private var restored = false
-    @FocusState private var editingEmail: Bool
     #if os(macOS)
     @State private var pasteMonitor: Any?
     @State private var writing = false
@@ -487,16 +469,15 @@ struct FeedbackForm: View {
 
     private var blank: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var hasDraft: Bool { !blank || !files.isEmpty }
-    private var emailOK: Bool { Feedback.isEmail(contact) }
     private var canSend: Bool {
-        !blank && emailOK && !sending && feedback.isConfigured
+        !blank && !sending && feedback.isConfigured
     }
 
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: YYUI.s(3)) {
                 YYSheetHeader(title: String(localized: "反馈"), close: close)
-                if done == nil {
+                if !done {
                     Text("语阅还在早期，哪里不对、想要什么，直接写。")
                         .font(YYUI.font(12))
                         .foregroundStyle(YYColor.t3)
@@ -510,8 +491,8 @@ struct FeedbackForm: View {
             .padding(.top, YYUI.s(14))
             #endif
             .padding(.bottom, YYUI.s(10))
-            if let replied = done {
-                thanks(replied)
+            if done {
+                thanks
             } else {
                 form
                     .disabled(sending)
@@ -526,7 +507,6 @@ struct FeedbackForm: View {
         .onChange(of: withInfo) { save() }
         .onChange(of: publicShots) { save() }
         .onChange(of: files.map(\.id)) { if restored { feedback.saveDraftFiles(files) } }
-        .onChange(of: contact) { _, new in if Feedback.isEmail(new) { feedback.savedEmail = new } }
         #if os(macOS)
         .onAppear(perform: watchPaste)
         .onDisappear {
@@ -543,7 +523,6 @@ struct FeedbackForm: View {
     private func debugFill() async {
         guard UserDefaults.standard.string(forKey: "debugFeedback") == "full" else { return }
         text = "打开《红楼梦》第三回，翻到一半就**卡住**了，点哪里都没反应。\n\n- 重启后还是一样\n- 别的书正常\n- 换成 PDF 版也一样\n\n第三回开头那几页都能翻，到「林黛玉抛父进京都」后面一点开始卡，卡住以后窗口拖不动，只能强制退出。"
-        contact = "reader@example.com"
         let ctx = CGContext(data: nil, width: 1200, height: 800, bitsPerComponent: 8, bytesPerRow: 0,
                             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
         ctx?.setFillColor(CGColor(red: 0.95, green: 0.94, blue: 0.91, alpha: 1)); ctx?.fill(CGRect(x: 0, y: 0, width: 1200, height: 800))
@@ -572,7 +551,6 @@ struct FeedbackForm: View {
             publicShots = draft.publicShots
             files = draft.files
         }
-        contact = feedback.savedEmail
         restored = true
         #if os(macOS)
         if let shot = feedback.takePendingShot() {
@@ -584,7 +562,7 @@ struct FeedbackForm: View {
     }
 
     private func save() {
-        guard restored, done == nil else { return }
+        guard restored, !done else { return }
         feedback.saveDraft(category: category, text: text, withInfo: withInfo, publicShots: publicShots)
     }
 
@@ -630,7 +608,8 @@ struct FeedbackForm: View {
                 if files.contains(where: \.isShot) {
                     shotsCard
                 }
-                optionsCard
+                infoCard
+                mailHint
                 if let notice {
                     HStack(alignment: .top, spacing: YYUI.s(8)) {
                         Image(systemName: "exclamationmark.circle").foregroundStyle(YYAlertTone.warn.ink)
@@ -924,122 +903,102 @@ struct FeedbackForm: View {
         try Feedback.attachment(name: name, data: data)
     }
 
-    /// Email and device info grouped in one calm card: left-aligned email on top, compact expandable
-    /// device summary below.
-    private var optionsCard: some View {
+    /// Compact single-line device summary card, expandable on click.
+    private var infoCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Row 1: left-aligned email with inline validation feedback.
             HStack(spacing: YYUI.s(10)) {
-                Text("回复邮箱")
-                    .font(YYUI.font(12.5))
-                    .foregroundStyle(YYColor.t2)
-                    .frame(width: YYUI.s(54), alignment: .leading)
-                TextField("想收到回复就留一个，可不填", text: $contact)
-                    .textFieldStyle(.plain)
-                    .font(YYUI.font(12.5))
-                    .focused($editingEmail)
-                    .textContentType(.emailAddress)
-                    #if os(iOS)
-                    .keyboardType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    #endif
-                    .onChange(of: contact) { _, new in
-                        let clipped = Feedback.clip(new, Feedback.contactMax)
-                        if clipped != new { contact = clipped }
+                Button {
+                    guard withInfo else { return }
+                    withAnimation(.easeOut(duration: YYMotion.reduce ? 0.01 : 0.18)) {
+                        infoExpanded.toggle()
                     }
-                if !emailOK {
-                    Text("格式好像不对")
-                        .font(YYUI.font(11))
-                        .foregroundStyle(YYAlertTone.warn.ink)
-                        .fixedSize()
+                } label: {
+                    HStack(spacing: YYUI.s(6)) {
+                        Text("附带设备信息")
+                            .font(YYUI.font(12.5))
+                            .foregroundStyle(YYColor.t1)
+                            .fixedSize()
+                        Text(withInfo ? Feedback.shortInfo : String(localized: "已关闭，查问题会难一点"))
+                            .font(YYUI.font(11.5))
+                            .foregroundStyle(YYColor.t3)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        if withInfo {
+                            Image(systemName: "chevron.down")
+                                .font(YYUI.font(9, .semibold))
+                                .foregroundStyle(YYColor.t3)
+                                .rotationEffect(.degrees(infoExpanded ? 180 : 0))
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(.rect)
                 }
+                .buttonStyle(.plain)
+                .disabled(!withInfo)
+                Toggle(String(localized: "附带设备信息"), isOn: $withInfo.animation(.easeOut(duration: YYMotion.reduce ? 0.01 : 0.18)))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(tint.accent)
+                    #if os(macOS)
+                    .controlSize(.small)
+                    #endif
+                    .onChange(of: withInfo) { _, on in
+                        if !on { infoExpanded = false }
+                    }
             }
             .padding(.horizontal, YYUI.s(14))
             .frame(height: YYUI.s(40))
 
-            Rectangle()
-                .fill(YYColor.line)
-                .frame(height: 0.5)
-                .padding(.horizontal, YYUI.s(14))
-
-            // Row 2: compact single-line device summary, expandable on click.
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: YYUI.s(10)) {
-                    Button {
-                        guard withInfo else { return }
-                        withAnimation(.easeOut(duration: YYMotion.reduce ? 0.01 : 0.18)) {
-                            infoExpanded.toggle()
-                        }
-                    } label: {
-                        HStack(spacing: YYUI.s(6)) {
-                            Text("附带设备信息")
-                                .font(YYUI.font(12.5))
-                                .foregroundStyle(YYColor.t1)
-                                .fixedSize()
-                            Text(withInfo ? Feedback.shortInfo : String(localized: "已关闭，查问题会难一点"))
-                                .font(YYUI.font(11.5))
+            if withInfo && infoExpanded {
+                Rectangle()
+                    .fill(YYColor.line)
+                    .frame(height: 0.5)
+                    .padding(.horizontal, YYUI.s(14))
+                HStack(alignment: .top, spacing: YYUI.s(16)) {
+                    ForEach(Feedback.info, id: \.label) { item in
+                        VStack(alignment: .leading, spacing: YYUI.s(2)) {
+                            Text(item.label)
+                                .font(YYUI.font(10.5))
                                 .foregroundStyle(YYColor.t3)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                            if withInfo {
-                                Image(systemName: "chevron.down")
-                                    .font(YYUI.font(9, .semibold))
-                                    .foregroundStyle(YYColor.t3)
-                                    .rotationEffect(.degrees(infoExpanded ? 180 : 0))
-                            }
-                            Spacer(minLength: 0)
+                            Text(verbatim: item.value)
+                                .font(YYUI.font(11.5))
+                                .foregroundStyle(YYColor.t2)
+                                .textSelection(.enabled)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(.rect)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!withInfo)
-                    Toggle(String(localized: "附带设备信息"), isOn: $withInfo.animation(.easeOut(duration: YYMotion.reduce ? 0.01 : 0.18)))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .tint(tint.accent)
-                        #if os(macOS)
-                        .controlSize(.small)
-                        #endif
-                        .onChange(of: withInfo) { _, on in
-                            if !on { infoExpanded = false }
-                        }
                 }
                 .padding(.horizontal, YYUI.s(14))
-                .frame(height: YYUI.s(40))
-
-                if withInfo && infoExpanded {
-                    Rectangle()
-                        .fill(YYColor.line)
-                        .frame(height: 0.5)
-                        .padding(.horizontal, YYUI.s(14))
-                    HStack(alignment: .top, spacing: YYUI.s(16)) {
-                        ForEach(Feedback.info, id: \.label) { item in
-                            VStack(alignment: .leading, spacing: YYUI.s(2)) {
-                                Text(item.label)
-                                    .font(YYUI.font(10.5))
-                                    .foregroundStyle(YYColor.t3)
-                                Text(verbatim: item.value)
-                                    .font(YYUI.font(11.5))
-                                    .foregroundStyle(YYColor.t2)
-                                    .textSelection(.enabled)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(.horizontal, YYUI.s(14))
-                    .padding(.vertical, YYUI.s(10))
-                    .transition(.opacity)
-                }
+                .padding(.vertical, YYUI.s(10))
+                .transition(.opacity)
             }
         }
         .background(YYColor.card, in: .rect(cornerRadius: YYUI.s(12)))
         .overlay {
             RoundedRectangle(cornerRadius: YYUI.s(12))
-                .strokeBorder(!emailOK ? YYAlertTone.warn.ink : (editingEmail ? tint.edge : YYColor.line),
-                              lineWidth: (!emailOK || editingEmail) ? 1 : 0.5)
+                .strokeBorder(YYColor.line, lineWidth: 0.5)
         }
+    }
+
+    /// Out-of-band mail link for anyone who wants a reply or prefers not to post publicly.
+    /// Opening Mail lets the user write directly without the app ever collecting their email.
+    private var mailHint: some View {
+        HStack(spacing: YYUI.s(5)) {
+            Image(systemName: "envelope")
+                .font(YYUI.font(11))
+                .foregroundStyle(YYColor.t3)
+            Text("需要回复或不想公开？")
+                .foregroundStyle(YYColor.t3)
+            Link(destination: Feedback.mailURL) {
+                Text("直接发邮件 ↗")
+                    .foregroundStyle(tint.accent)
+            }
+            .buttonStyle(.plain)
+            Spacer(minLength: 0)
+        }
+        .font(YYUI.font(11.5))
+        .padding(.horizontal, YYUI.s(4))
     }
 
     /// Only with a screenshot attached. On by default; what it means is said right there, and off
@@ -1072,9 +1031,7 @@ struct FeedbackForm: View {
     }
 
     private var meta: String {
-        if !feedback.isConfigured { return String(localized: "这个版本发不出反馈") }
-        if !emailOK { return String(localized: "邮箱好像不对") }
-        return ""
+        feedback.isConfigured ? "" : String(localized: "这个版本发不出反馈")
     }
 
     private func resetDraft() {
@@ -1099,7 +1056,7 @@ struct FeedbackForm: View {
                     .foregroundStyle(tint.accent)
             }
             .buttonStyle(.plain)
-            Text("· 邮箱和日志仅开发者可见")
+            Text("· 日志和私密附件仅开发者可见")
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
             Spacer(minLength: 0)
@@ -1118,7 +1075,7 @@ struct FeedbackForm: View {
                     if !meta.isEmpty {
                         Text(meta)
                             .font(YYUI.font(11.5))
-                            .foregroundStyle(emailOK ? YYColor.t3 : YYAlertTone.warn.ink)
+                            .foregroundStyle(YYColor.t3)
                             .lineLimit(1)
                     } else if hasDraft && !sending {
                         HStack(spacing: YYUI.s(6)) {
@@ -1172,7 +1129,7 @@ struct FeedbackForm: View {
                 .buttonStyle(YYButtonStyle(kind: .main, wide: true, height: 44))
                 .disabled(!canSend)
                 if !meta.isEmpty {
-                    Text(meta).font(YYUI.font(11)).foregroundStyle(emailOK ? YYColor.t3 : YYAlertTone.warn.ink)
+                    Text(meta).font(YYUI.font(11)).foregroundStyle(YYColor.t3)
                 } else if hasDraft && !sending {
                     HStack(spacing: YYUI.s(6)) {
                         Text("草稿已自动保存")
@@ -1198,12 +1155,12 @@ struct FeedbackForm: View {
         Task {
             defer { sending = false }
             do {
-                switch try await feedback.send(category, text: text, contact: contact, withInfo: withInfo,
+                switch try await feedback.send(category, text: text, withInfo: withInfo,
                                                publicShots: publicShots, files: files) {
                 case .sent:
                     feedback.clearDraft()
                     withAnimation(.easeOut(duration: YYMotion.reduce ? 0.01 : 0.25)) {
-                        done = !contact.trimmingCharacters(in: .whitespaces).isEmpty
+                        done = true
                     }
                 case .queued(let busy):
                     text = ""
@@ -1221,7 +1178,7 @@ struct FeedbackForm: View {
 
     // MARK: Sent
 
-    private func thanks(_ replied: Bool) -> some View {
+    private var thanks: some View {
         VStack(spacing: YYUI.s(12)) {
             Spacer(minLength: YYUI.s(24))
             Image(systemName: "checkmark")
@@ -1232,11 +1189,21 @@ struct FeedbackForm: View {
                 .overlay(Circle().strokeBorder(tint.edge, lineWidth: 0.5))
                 .symbolEffect(.bounce, value: done)
             Text("收到了，谢谢").font(YYUI.font(17, .semibold)).foregroundStyle(YYColor.t1)
-            Text(replied ? "稍后会出现在 GitHub 上，需要的话也会发邮件回复你。" : "稍后会出现在 GitHub 上，没留邮箱，所以不会发邮件回复。")
+            Text("稍后会出现在 GitHub 问题板上，不会收集你的邮箱。")
                 .font(YYUI.font(12.5))
                 .foregroundStyle(YYColor.t2)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 260)
+            HStack(spacing: YYUI.s(4)) {
+                Text("需要回复或补充私密内容？")
+                    .foregroundStyle(YYColor.t3)
+                Link(destination: Feedback.mailURL) {
+                    Text("直接发邮件 ↗")
+                        .foregroundStyle(tint.accent)
+                }
+                .buttonStyle(.plain)
+            }
+            .font(YYUI.font(11.5))
             // 非实时中转，提交后立刻点过去看不到，先注释掉。
             // Link(destination: Feedback.issuesURL) {
             //     Text(verbatim: "去 GitHub Issues 查看 ↗")
@@ -1252,7 +1219,7 @@ struct FeedbackForm: View {
                     infoExpanded = false
                     publicShots = true
                     files = []
-                    done = nil
+                    done = false
                 }
                 .buttonStyle(YYButtonStyle(kind: .plain))
                 Button("完成", action: close)

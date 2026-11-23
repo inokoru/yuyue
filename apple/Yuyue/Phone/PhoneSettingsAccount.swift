@@ -732,7 +732,7 @@ struct PhoneAbout: View {
          String(localized: "书伴默认用设备自带的模型，不联网。你填了自己的 Key 时，提问和书里相关的几段原文会直接发给你选的服务商，费用和隐私条款按你和它的约定；Key 只存在这台设备的钥匙串里。"),
          String(localized: "云端声音和笔记导出（Notion、flomo、新枝）也只在你填了 Key 或链接时联网：要读的句子、要发的笔记直接发给你选的服务。读过的声音存在这台设备上。"),
          String(localized: "离线翻译与本地模型：翻译用系统的离线翻译；按需从 GitHub Releases 下载的对齐模型、声音包与离线语音模型都在本机运行，原文与录音不出这台设备。"),
-         String(localized: "问题反馈：只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；你选择附带的邮箱、日志或私密文件会在发送前用开发者公钥在本机加密。"),
+         String(localized: "问题反馈：只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；不收集邮箱，你选择附带的日志或私密文件会在发送前用开发者公钥在本机加密。"),
          String(localized: "检查更新：从 GitHub 下载安装的版本每天从 GitHub 取一个小文件，看有没有新版本，不带任何关于你和设备的信息；在设置 › 关于 › 检查更新里能关掉。App Store 和 Google Play 的版本不查，由商店更新。")].joined(separator: "\n\n")
     }
 }

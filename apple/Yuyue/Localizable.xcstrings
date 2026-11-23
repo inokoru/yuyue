@@ -42936,6 +42936,76 @@
           }
         }
       }
+    },
+    "· 日志和私密附件仅开发者可见" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· Logs and private files visible only to the developer"
+          }
+        }
+      }
+    },
+    "只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；不收集邮箱，你选择附带的日志或私密文件会在发送前用开发者公钥在本机加密。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Goes online only when you send feedback, relayed via ntfy.sh to a public GitHub Issue. No email is collected; logs and private files you attach are sealed on your device with the developer's public key before sending."
+          }
+        }
+      }
+    },
+    "问题反馈：只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；不收集邮箱，你选择附带的日志或私密文件会在发送前用开发者公钥在本机加密。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Feedback: goes online only when you send feedback, relayed via ntfy.sh to a public GitHub Issue. No email is collected; logs and private files you attach are sealed on your device with the developer's public key before sending."
+          }
+        }
+      }
+    },
+    "需要回复或不想公开？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Want a reply or prefer privacy?"
+          }
+        }
+      }
+    },
+    "需要回复或补充私密内容？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Want a reply or need to share privately?"
+          }
+        }
+      }
+    },
+    "直接发邮件 ↗" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send an email ↗"
+          }
+        }
+      }
+    },
+    "稍后会出现在 GitHub 问题板上，不会收集你的邮箱。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It'll appear on GitHub Issues shortly. Your email isn't collected."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

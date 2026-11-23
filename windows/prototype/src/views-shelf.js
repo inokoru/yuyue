@@ -1804,11 +1804,6 @@ function renderFeedbackSheet(S) {
           </div>
 
           <div class="yy-card" style="border-radius:12px;overflow:hidden;">
-            <div style="height:40px;padding:0 14px;display:flex;align-items:center;gap:10px;">
-              <span style="width:54px;font-size:12.5px;color:var(--yy-t2);">回复邮箱</span>
-              <input placeholder="想收到回复就留一个，可不填" style="flex:1;font-size:12.5px;" />
-            </div>
-            <div style="height:0.5px;background:var(--yy-line);margin:0 14px;"></div>
             <div style="height:40px;padding:0 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;">
               <button onclick="toggleFbInfoExpand()" style="display:inline-flex;align-items:center;gap:6px;text-align:left;">
                 <span style="font-size:12.5px;color:var(--yy-t1);">附带设备信息</span>
@@ -1826,6 +1821,10 @@ function renderFeedbackSheet(S) {
               </div>
             ` : ''}
           </div>
+          <div style="display:flex;align-items:center;gap:5px;padding:0 4px;font-size:11.5px;color:var(--yy-t3);">
+            <span>需要回复或不想公开？</span>
+            <a href="mailto:yuyue.app@icloud.com" style="color:var(--tint-accent);">直接发邮件 ↗</a>
+          </div>
         </div>
 
         <!-- Footer -->
@@ -1834,7 +1833,7 @@ function renderFeedbackSheet(S) {
             <span style="color:var(--tint-accent);display:inline-flex;">${ICONS.globe}</span>
             <span>正文将公开在</span>
             <span style="color:var(--tint-accent);">GitHub Issues ↗</span>
-            <span>· 邮箱和日志仅开发者可见</span>
+            <span>· 日志和私密附件仅开发者可见</span>
           </div>
           <div style="display:flex;align-items:center;gap:8px;">
             <span style="font-size:11px;color:var(--yy-t3);">草稿已自动保存</span>
