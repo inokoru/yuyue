@@ -1,0 +1,297 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="Yuyue.Audiobook.AudiobookWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="有声书">
+
+    <!-- 1:1 对齐 AudiobookScreen.swift：左侧无白框直接铺在暖白纸底（240 方封面 + 当前章名在上 / 书名作者在下 + 单章进度 + 5 枚播控 + 底部键位条），右侧 300px 章节书签卡与配对卡 -->
+    <Grid x:Name="RootGrid" Background="{ThemeResource YYBgBrush}" KeyDown="RootGrid_KeyDown">
+        <Grid x:Name="ShadowReceiver" Background="Transparent" />
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="312" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 左主舞台：居中 420px 播控列，底部快捷键胶囊条 -->
+            <Grid Grid.Column="0">
+                <StackPanel
+                    Width="420"
+                    Spacing="0"
+                    VerticalAlignment="Center"
+                    HorizontalAlignment="Center"
+                    Margin="24,36,24,48">
+
+                    <!-- 240x240 方形封面（对齐 SquareCover） -->
+                    <Border
+                        x:Name="CoverFrame"
+                        Width="240"
+                        Height="240"
+                        CornerRadius="10"
+                        Background="{ThemeResource YYInsetBrush}"
+                        BorderBrush="{ThemeResource YYLineBrush}"
+                        BorderThickness="0.5"
+                        HorizontalAlignment="Center"
+                        Margin="0,0,0,20">
+                        <Grid>
+                            <Image x:Name="CoverImage" Stretch="UniformToFill" />
+                            <ContentPresenter
+                                x:Name="CoverFallbackIcon"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
+
+                    <!-- 标题层级：上为当前章节名（19px Bold），下为 书名 · 作者（11.5px t2） -->
+                    <StackPanel Spacing="4" HorizontalAlignment="Center" Margin="0,0,0,16">
+                        <TextBlock
+                            x:Name="ChapterLabel"
+                            FontSize="19"
+                            FontWeight="Bold"
+                            Foreground="{ThemeResource YYText1Brush}"
+                            TextAlignment="Center"
+                            MaxLines="1"
+                            TextTrimming="CharacterEllipsis" />
+                        <TextBlock
+                            x:Name="BookBylineLabel"
+                            FontSize="11.5"
+                            Foreground="{ThemeResource YYText2Brush}"
+                            TextAlignment="Center"
+                            MaxLines="1"
+                            TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+
+                    <!-- 单章进度条（带书签刻度）+ 三栏时间（本章已播 · 全书还剩 X 小时 · 本章总长） -->
+                    <StackPanel Spacing="4" Margin="0,0,0,20">
+                        <Grid>
+                            <Slider
+                                x:Name="ChapterSlider"
+                                Minimum="0"
+                                Maximum="100"
+                                Value="0"
+                                ValueChanged="ChapterSlider_ValueChanged" />
+                            <Canvas x:Name="BookmarkTicksCanvas" Height="10" VerticalAlignment="Center" IsHitTestVisible="False" />
+                        </Grid>
+                        <Grid>
+                            <TextBlock x:Name="ChapterElapsedText" Text="00:00" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" />
+                            <TextBlock x:Name="BookRemainingText" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Center" />
+                            <TextBlock x:Name="ChapterTotalText" Text="00:00" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Right" />
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- 5 枚播控按钮：倍速菜单 · -15秒 · 60x60 深色圆钮播放 · +30秒 · 月亮定时菜单 -->
+                    <Grid Padding="36,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Button
+                            x:Name="RateBtn"
+                            Grid.Column="0"
+                            Style="{StaticResource YYIconButtonStyle}"
+                            Width="44"
+                            Height="40"
+                            CornerRadius="20"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            FontSize="12.5"
+                            FontWeight="SemiBold"
+                            Content="1×"
+                            ToolTipService.ToolTip="播放速度"
+                            Click="Rate_Click" />
+
+                        <Button
+                            x:Name="Rewind15Btn"
+                            Grid.Column="1"
+                            Style="{StaticResource YYIconButtonStyle}"
+                            Width="40"
+                            Height="40"
+                            CornerRadius="20"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            ToolTipService.ToolTip="后退 15 秒 (←)"
+                            Click="Rewind15_Click" />
+
+                        <Button
+                            x:Name="PlayPauseBtn"
+                            Grid.Column="2"
+                            Width="60"
+                            Height="60"
+                            Padding="0"
+                            CornerRadius="30"
+                            BorderThickness="0"
+                            Background="{ThemeResource YYText1Brush}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Margin="10,0"
+                            UseSystemFocusVisuals="False"
+                            ToolTipService.ToolTip="播放 / 暂停 (空格)"
+                            Click="PlayPause_Click" />
+
+                        <Button
+                            x:Name="Forward30Btn"
+                            Grid.Column="3"
+                            Style="{StaticResource YYIconButtonStyle}"
+                            Width="40"
+                            Height="40"
+                            CornerRadius="20"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            ToolTipService.ToolTip="前进 30 秒 (→)"
+                            Click="Forward30_Click" />
+
+                        <Button
+                            x:Name="SleepBtn"
+                            Grid.Column="4"
+                            Style="{StaticResource YYIconButtonStyle}"
+                            Width="40"
+                            Height="40"
+                            CornerRadius="20"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            ToolTipService.ToolTip="睡眠定时"
+                            Click="SleepTimer_Click" />
+                    </Grid>
+
+                    <TextBlock
+                        x:Name="SleepCountdownText"
+                        FontSize="11"
+                        FontWeight="Medium"
+                        Foreground="{ThemeResource YYAccentBrush}"
+                        HorizontalAlignment="Center"
+                        Margin="0,10,0,0" />
+                </StackPanel>
+
+                <!-- 顶部书签反馈横幅 -->
+                <Border
+                    x:Name="ToastBanner"
+                    Visibility="Collapsed"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Top"
+                    Margin="0,54,0,0"
+                    Height="36"
+                    Padding="12,0"
+                    CornerRadius="18"
+                    Background="{ThemeResource YYCardBrush}"
+                    BorderBrush="{ThemeResource YYLineBrush}"
+                    BorderThickness="1">
+                    <TextBlock x:Name="ToastText" FontSize="12.5" FontWeight="Medium" Foreground="{ThemeResource YYText1Brush}" VerticalAlignment="Center" />
+                </Border>
+
+                <!-- 底部快捷键说明（对齐 AudiobookScreen.keys） -->
+                <StackPanel
+                    Orientation="Horizontal"
+                    Spacing="14"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom"
+                    Margin="0,0,0,18">
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <Border CornerRadius="4" Background="{ThemeResource YYInsetBrush}" Padding="5,1">
+                            <TextBlock Text="空格" FontSize="10" Foreground="{ThemeResource YYText2Brush}" />
+                        </Border>
+                        <TextBlock Text="暂停" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <Border CornerRadius="4" Background="{ThemeResource YYInsetBrush}" Padding="5,1">
+                            <TextBlock Text="←" FontSize="10" Foreground="{ThemeResource YYText2Brush}" />
+                        </Border>
+                        <Border CornerRadius="4" Background="{ThemeResource YYInsetBrush}" Padding="5,1">
+                            <TextBlock Text="→" FontSize="10" Foreground="{ThemeResource YYText2Brush}" />
+                        </Border>
+                        <TextBlock Text="后退 15 秒 / 前进 30 秒" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <Border CornerRadius="4" Background="{ThemeResource YYInsetBrush}" Padding="5,1">
+                            <TextBlock Text="Ctrl+D" FontSize="10" Foreground="{ThemeResource YYText2Brush}" />
+                        </Border>
+                        <TextBlock Text="加书签" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+
+            <!-- 右栏 300px：ChapterColumn（章节 + 书签同卡） + 底部电子书配对卡 -->
+            <Grid Grid.Column="1" Padding="0,46,14,14" RowSpacing="10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border
+                    Grid.Row="0"
+                    CornerRadius="14"
+                    Background="{ThemeResource YYCardBrush}"
+                    BorderBrush="{ThemeResource YYLineBrush}"
+                    BorderThickness="1"
+                    Padding="0,4">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="ChapterListPanel" Spacing="0" />
+                    </ScrollViewer>
+                </Border>
+
+                <Border
+                    x:Name="PairCardHost"
+                    Grid.Row="1"
+                    CornerRadius="14"
+                    Background="{ThemeResource YYCardBrush}"
+                    BorderBrush="{ThemeResource YYLineBrush}"
+                    BorderThickness="1"
+                    Padding="12,10" />
+            </Grid>
+        </Grid>
+
+        <!-- 顶部：左上 < 书架 胶囊 + 右侧「这本录音」设置胶囊，中间透明供系统标题栏拖动 -->
+        <Grid Height="50" VerticalAlignment="Top" Padding="14,0,148,0" Background="Transparent">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <Button
+                x:Name="BackToShelfBtn"
+                Grid.Column="0"
+                Height="32"
+                Padding="11,0"
+                CornerRadius="16"
+                Background="{ThemeResource YYCardBrush}"
+                BorderBrush="{ThemeResource YYLineBrush}"
+                BorderThickness="1"
+                VerticalAlignment="Center"
+                UseSystemFocusVisuals="False"
+                Click="BackToShelf_Click">
+                <StackPanel Orientation="Horizontal" Spacing="5">
+                    <ContentPresenter x:Name="IconBack" VerticalAlignment="Center" />
+                    <TextBlock Text="书架" FontSize="12.5" Foreground="{ThemeResource YYText1Brush}" VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
+
+            <Border x:Name="TitleDragRegion" Grid.Column="1" Background="Transparent" Margin="8,0,8,0" />
+
+            <Button
+                x:Name="RecordingSettingsBtn"
+                Grid.Column="2"
+                Height="32"
+                Padding="12,0"
+                CornerRadius="16"
+                Background="{ThemeResource YYCardBrush}"
+                BorderBrush="{ThemeResource YYLineBrush}"
+                BorderThickness="1"
+                VerticalAlignment="Center"
+                UseSystemFocusVisuals="False"
+                ToolTipService.ToolTip="片头跳过、缩短停顿与有声 EPUB 导出">
+                <TextBlock Text="这本录音" FontSize="12" FontWeight="Medium" Foreground="{ThemeResource YYText1Brush}" VerticalAlignment="Center" />
+                <Button.Flyout>
+                    <Flyout x:Name="RecordingSettingsFlyout" Placement="BottomEdgeAlignedRight" Opened="RecordingSettingsFlyout_Opened">
+                        <StackPanel x:Name="RecordingSettingsHost" Width="304" Spacing="8" />
+                    </Flyout>
+                </Button.Flyout>
+            </Button>
+        </Grid>
+    </Grid>
+</Window>

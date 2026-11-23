@@ -1,0 +1,166 @@
+<!doctype html>
+<html
+  lang="zh-CN"
+  data-lang="zh"
+  data-title-zh="使用帮助与反馈 · Yuyue Support"
+  data-title-en="Yuyue Support · 使用帮助与反馈"
+  data-desc-zh="语阅使用帮助、常见问题解答与联系渠道。"
+  data-desc-en="Help, FAQ, and contact channels for Yuyue (语阅)."
+>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F8F5F0">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1A1613">
+  <meta name="color-scheme" content="light dark">
+  <title>使用帮助与反馈 · Yuyue Support</title>
+  <meta name="description" content="Help, FAQ, and contact options for Yuyue (语阅).">
+  <link rel="manifest" href="/site.webmanifest">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23FBFAF7'/%3E%3Ctext x='32' y='42' font-size='32' text-anchor='middle' font-family='serif' font-weight='700' fill='%231C1D20'%3E%E9%98%85%3C/text%3E%3Crect x='20' y='50' width='24' height='2.5' rx='1.2' fill='%232B4C7E'/%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="/images/icon-256.png">
+  <script>
+    (function () {
+      var d = document.documentElement;
+      try {
+        var q = new URLSearchParams(location.search).get('lang');
+        var saved = localStorage.getItem('yuyue-lang');
+        var sys = ((navigator.languages && navigator.languages[0]) || navigator.language || '').toLowerCase();
+        var lang = (q === 'zh' || q === 'en') ? q : (saved === 'zh' || saved === 'en') ? saved : (sys.indexOf('zh') === 0 ? 'zh' : 'en');
+        d.dataset.lang = lang;
+        d.lang = lang === 'en' ? 'en' : 'zh-CN';
+        var theme = localStorage.getItem('yuyue-theme');
+        if (theme === 'light' || theme === 'dark') d.dataset.theme = theme;
+      } catch (_) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main"><span class="i18n-zh">跳到正文</span><span class="i18n-en">Skip to content</span></a>
+
+  <div class="mobile-drawer" id="mobile-drawer" aria-hidden="true">
+    <div class="mobile-sheet">
+      <div class="mobile-sheet-head">
+        <span style="display:inline-flex;align-items:center;gap:10px;font-weight:700"><span class="mark mark-sm" aria-hidden="true">阅</span><span class="i18n-zh">语阅 Yuyue</span><span class="i18n-en">Yuyue 语阅</span></span>
+        <button type="button" data-menu-close style="font-size:20px;color:var(--t2);padding:2px 6px">×</button>
+      </div>
+      <nav class="mobile-nav-list">
+        <a href="/"><span class="i18n-zh">首页</span><span class="i18n-en">Home</span></a>
+        <a href="/download/"><span class="i18n-zh">免费下载</span><span class="i18n-en">Download</span></a>
+        <a href="/changelog/"><span class="i18n-zh">更新记录</span><span class="i18n-en">Updates</span></a>
+        <a href="/support/"><span class="i18n-zh">使用帮助</span><span class="i18n-en">Support</span></a>
+        <a href="/privacy/"><span class="i18n-zh">隐私承诺</span><span class="i18n-en">Privacy</span></a>
+      </nav>
+    </div>
+  </div>
+
+  <header class="col top-strip">
+    <a class="mark-link" href="/" data-aria-zh="语阅首页" data-aria-en="Yuyue Home">
+      <div class="mark" aria-hidden="true">阅</div>
+    </a>
+    <div class="top-right">
+      <nav class="top-nav">
+        <a href="/download/"><span class="i18n-zh">下载</span><span class="i18n-en">Download</span></a>
+        <a href="/changelog/"><span class="i18n-zh">更新</span><span class="i18n-en">Updates</span></a>
+        <a href="/support/" aria-current="page"><span class="i18n-zh">帮助</span><span class="i18n-en">Support</span></a>
+        <a href="/privacy/"><span class="i18n-zh">隐私</span><span class="i18n-en">Privacy</span></a>
+      </nav>
+      <div class="lang-switch" role="group" data-aria-zh="切换语言" data-aria-en="Switch language">
+        <button type="button" class="lang-btn" data-set-lang="zh" aria-pressed="true">中文</button>
+        <span class="lang-dot" aria-hidden="true">·</span>
+        <button type="button" class="lang-btn" data-set-lang="en" aria-pressed="false">EN</button>
+      </div>
+      <button type="button" class="theme-btn" data-toggle-theme data-aria-zh="切换深浅色" data-aria-en="Toggle appearance">
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      </button>
+      <button type="button" class="menu-btn" data-menu-toggle aria-expanded="false" aria-controls="mobile-drawer" data-aria-zh="打开菜单" data-aria-en="Open menu">
+        <svg class="icon-menu" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="8" x2="20" y2="8"/><line x1="4" y1="16" x2="20" y2="16"/></svg>
+        <svg class="icon-close" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="main" class="col">
+    <div class="doc-head">
+      <h1><span class="i18n-zh">使用帮助</span><span class="i18n-en">Support</span></h1>
+      <p class="doc-lead">
+        <span class="i18n-zh">使用中遇到任何问题或有想法，欢迎直接联系我们。遇到异常时，附上你的设备、App 版本（在“我的 → 关于”里）和操作步骤，能帮我们更快解决。</span>
+        <span class="i18n-en">Have a question or suggestion? Reach out anytime. If something misbehaves, telling us your device, version (in Me → About), and what you tapped helps us fix it quickly.</span>
+      </p>
+    </div>
+
+    <div class="channel-grid">
+      <article class="channel-card">
+        <h3><span class="i18n-zh">在语阅里直接反馈</span><span class="i18n-en">Inside the app</span></h3>
+        <p><span class="i18n-zh">在书架右上角、“我的 → 反馈”，或 Mac 菜单栏“帮助 → 给语阅反馈…”里就能直接提交，无需登录任何账号。</span><span class="i18n-en">Send feedback from the shelf, Me → Feedback, or Help → Send Feedback on the Mac—no account needed.</span></p>
+        <span class="channel-act subtle"><span class="i18n-zh">最方便推荐</span><span class="i18n-en">Fastest option</span></span>
+      </article>
+      <article class="channel-card">
+        <h3><span class="i18n-zh">电子邮件</span><span class="i18n-en">Email</span></h3>
+        <p><span class="i18n-zh">任何使用疑问、隐私咨询或想私下交流的内容，都可以直接写信。</span><span class="i18n-en">For questions, privacy inquiries, or private notes, email us directly.</span></p>
+        <a class="channel-act" href="mailto:yuyue.app@icloud.com">yuyue.app@icloud.com</a>
+      </article>
+      <article class="channel-card">
+        <h3><span class="i18n-zh">社区问题板</span><span class="i18n-en">Issue Tracker</span></h3>
+        <p><span class="i18n-zh">在 GitHub 上公开提交建议或查看已知问题的修复进度。</span><span class="i18n-en">Share ideas or follow public bug fixes on GitHub.</span></p>
+        <a class="channel-act" href="https://github.com/inokoru/yuyue/issues" target="_blank" rel="noopener"><span class="i18n-zh">前往反馈板 →</span><span class="i18n-en">Open Issues →</span></a>
+      </article>
+    </div>
+
+    <h2 id="faq" style="font-size:20px;margin:0 0 12px;font-weight:700"><span class="i18n-zh">常见问题</span><span class="i18n-en">Frequently asked questions</span></h2>
+    <div class="faq-list">
+      <details class="faq-item" open>
+        <summary><span><span class="i18n-zh">语阅收费吗？</span><span class="i18n-en">Is Yuyue free?</span></span><span class="faq-plus" aria-hidden="true">+</span></summary>
+        <div class="faq-body">
+          <p class="i18n-zh">完全免费。没有广告，不用注册账号，也没有会员订阅。</p>
+          <p class="i18n-en">Yes—completely free. No ads, no account, and no subscription.</p>
+        </div>
+      </details>
+      <details class="faq-item" open>
+        <summary><span><span class="i18n-zh">我的书和笔记存在哪？</span><span class="i18n-en">Where are my books and notes?</span></span><span class="faq-plus" aria-hidden="true">+</span></summary>
+        <div class="faq-body">
+          <p class="i18n-zh">全部存在你自己的设备上。打开同步后，只在你的设备和你自己选的网盘（iCloud 云盘或私人网盘，Google Drive 即将支持）之间传输，开发者看不到也收不到。</p>
+          <p class="i18n-en">On your own device. When you turn on sync, they travel only between your devices and your chosen iCloud Drive or personal cloud drive (Google Drive coming soon).</p>
+        </div>
+      </details>
+      <details class="faq-item" open>
+        <summary><span><span class="i18n-zh">能打开哪些电子书和音频？</span><span class="i18n-en">Which books and audio files can I open?</span></span><span class="faq-plus" aria-hidden="true">+</span></summary>
+        <div class="faq-body">
+          <p class="i18n-zh">支持 EPUB、TXT、PDF 和无加密的 MOBI / AZW3 电子书，M4B、MP3 等有声书与长音频，播客 RSS / OPML 订阅，以及语阅整库备份快照（<code>.yuyue</code>）。</p>
+          <p class="i18n-en">EPUB, TXT, PDF, and DRM-free MOBI / AZW3 books, M4B or MP3 audiobooks, podcast RSS / OPML feeds, and Yuyue library snapshots (<code>.yuyue</code>).</p>
+        </div>
+      </details>
+      <details class="faq-item">
+        <summary><span><span class="i18n-zh">Mac 首次打开提示无法验证开发者怎么办？</span><span class="i18n-en">macOS blocked the first launch—what should I do?</span></span><span class="faq-plus" aria-hidden="true">+</span></summary>
+        <div class="faq-body">
+          <p class="i18n-zh">把「语阅」拖入「应用程序」并双击一次后，前往「系统设置 → 隐私与安全性」，点一次「仍要打开」即可正常使用。详见 <a href="/download/">下载与安装指南</a>。</p>
+          <p class="i18n-en">Move Yuyue into Applications and open it once, then open System Settings → Privacy &amp; Security and click Open Anyway. See our <a href="/download/">Download Guide</a>.</p>
+        </div>
+      </details>
+      <details class="faq-item">
+        <summary><span><span class="i18n-zh">两台设备同时离线改了笔记，同步会覆盖吗？</span><span class="i18n-en">Will offline edits on two devices overwrite each other?</span></span><span class="faq-plus" aria-hidden="true">+</span></summary>
+        <div class="faq-body">
+          <p class="i18n-zh">不会。遇到冲突时，语阅会把两边的版本并排展示出来交给你决定，绝不暗中覆盖任何一条划线或想法。</p>
+          <p class="i18n-en">Never. Conflicts appear side by side so you choose what to keep—nothing is silently overwritten.</p>
+        </div>
+      </details>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="col">
+      <div class="footer-meta" style="margin-top:0;padding-top:0;border-top:none">
+        <span>© 2026 <span class="i18n-zh">语阅 Yuyue</span><span class="i18n-en">Yuyue 语阅</span></span>
+        <span style="display:flex;gap:16px">
+          <a href="/"><span class="i18n-zh">首页</span><span class="i18n-en">Home</span></a>
+          <a href="/download/"><span class="i18n-zh">下载</span><span class="i18n-en">Download</span></a>
+          <a href="/privacy/"><span class="i18n-zh">隐私</span><span class="i18n-en">Privacy</span></a>
+        </span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/site.js" defer></script>
+</body>
+</html>

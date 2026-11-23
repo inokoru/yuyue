@@ -1,0 +1,464 @@
+#if os(iOS)
+import SwiftUI
+import YuyueCore
+
+/// 搜索 · 问 on the phone: book names, every book's own sentences, highlights
+/// and thoughts, and 生词, looked for at once; the chips under the field keep one kind. The first
+/// row always hands the words to 书伴 instead. A tap goes to the page.
+struct PhoneSearch: View {
+    let library: Library
+    @State private var search: QuickSearch?
+    @State private var query = ""
+    @State private var scope = Scope.all
+    @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
+    /// Regular width (iPhone Duo open, iPad): the results at most 720 wide, in the middle.
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
+
+    enum Scope: Hashable { case all, books, lines, notes, words }
+
+    private var q: String { query.trimmingCharacters(in: .whitespaces) }
+
+    var body: some View {
+        NavigationStack {
+            if InnerDisplay.isOn(sizeClass) {
+                // iPhone Duo's inner display: the field and the chips left of the fold, what they
+                // find right of it.
+                FoldSplit {
+                    VStack(alignment: .leading, spacing: 0) {
+                        field
+                        if let search, !q.isEmpty { chips(search) }
+                        Spacer(minLength: 0)
+                    }
+                } trailing: {
+                    Group {
+                        if let search {
+                            results(search)
+                        } else {
+                            Color.clear
+                        }
+                    }
+                }
+                .background(YYColor.bg)
+                .navigationTitle("搜索")
+            } else if liquid {
+                found
+                    .navigationTitle("搜索")
+                    // The title as on the other pages (the mark and 搜索 in 宋体, at the top), the
+                    // system's glass field under it.
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .principal) { Color.clear.frame(width: 1, height: 1) }
+                        if #available(iOS 26, *) {
+                            ToolbarItem(placement: .topBarLeading) { title }
+                                .sharedBackgroundVisibility(.hidden)
+                        } else {
+                            ToolbarItem(placement: .topBarLeading) { title }
+                        }
+                    }
+                    .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: String(localized: "书名、原文、笔记、生词"))
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        if let search, !q.isEmpty { chips(search) }
+                    }
+            } else {
+                // 液态玻璃 off: the field as it was before the glass, a grey rounded box.
+                found
+                    .navigationTitle("搜索")
+                    .toolbar(.hidden, for: .navigationBar)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        VStack(spacing: 0) {
+                            VStack(alignment: .leading, spacing: 0) {
+                                title
+                                    .padding(.leading, 20)
+                                    .padding(.top, 14)
+                                    .padding(.bottom, 10)
+                                plainField
+                                if let search, !q.isEmpty { chips(search) }
+                            }
+                            .background(YYColor.bg)
+                            LinearGradient(colors: [YYColor.bg, YYColor.fade0], startPoint: .top, endPoint: .bottom)
+                                .frame(height: 10)
+                                .allowsHitTesting(false)
+                        }
+                    }
+            }
+        }
+        .onAppear {
+            // The library may have changed since: books, marks and words are read again.
+            let s = QuickSearch(library: library, many: true)
+            s.query = query
+            search = s
+            Task { await s.prepare() }
+        }
+        .onChange(of: query) {
+            search?.query = query
+            if q.isEmpty { scope = .all }
+        }
+    }
+
+    @AppStorage(LiquidGlass.key) private var liquidChosen = false
+    private var liquid: Bool { liquidChosen && LiquidGlass.supported }
+
+    @ViewBuilder private var found: some View {
+        Group {
+            if let search {
+                results(search)
+            } else {
+                Color.clear
+            }
+        }
+        .background(YYColor.bg)
+    }
+
+    /// The search field from before Liquid Glass.
+    private var plainField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("", text: $query, prompt: Text("书名、原文、笔记、生词"))
+                .submitLabel(.search)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("清除")
+            }
+        }
+        .font(.system(size: 17))
+        .padding(.horizontal, 8)
+        .frame(height: 36)
+        .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 10))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+    }
+
+    private var title: some View {
+        PageTitle(symbol: "magnifyingglass", title: "搜索").fixedSize()
+    }
+
+    // MARK: Field
+
+    /// iPhone Duo's left pane: the words to look for, in place of `.searchable`.
+    private var field: some View {
+        HStack(spacing: YYUI.s(6)) {
+            Image(systemName: "magnifyingglass").font(YYUI.font(12, .medium)).foregroundStyle(YYColor.t3)
+            TextField("", text: $query, prompt: Text("书名、原文、笔记、生词"))
+                .font(YYUI.font(13))
+                .foregroundStyle(YYColor.t1)
+                .submitLabel(.search)
+                .autocorrectionDisabled()
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(YYColor.t3)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("清空")
+            }
+        }
+        .padding(.horizontal, YYUI.s(12))
+        .frame(height: YYUI.s(36))
+        .yyCard()
+        .padding(.horizontal, YYUI.s(16))
+        .padding(.top, YYUI.s(8))
+        .padding(.bottom, YYUI.s(8))
+    }
+
+    // MARK: Chips
+
+    /// One kind at a time.
+    private func chips(_ s: QuickSearch) -> some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: YYUI.s(6)) {
+                chip(.all, String(localized: "全部"), nil)
+                chip(.books, String(localized: "书"), s.titles.count)
+                chip(.lines, String(localized: "全文"), s.lineCount)
+                chip(.notes, String(localized: "笔记"), s.noteCount)
+                chip(.words, String(localized: "生词"), s.words.count)
+            }
+            .padding(.horizontal, YYUI.s(16))
+            .padding(.top, YYUI.s(4))
+            .padding(.bottom, YYUI.s(8))
+        }
+        .scrollIndicators(.never)
+    }
+
+    private func chip(_ value: Scope, _ title: String, _ count: Int?) -> some View {
+        let on = scope == value
+        return Button { scope = value } label: {
+            HStack(spacing: YYUI.s(4)) {
+                Text(title)
+                if let count, count > 0 {
+                    Text(count.formatted()).monospacedDigit().foregroundStyle(on ? tint.onBlack.opacity(0.55) : YYColor.t3)
+                }
+            }
+            .font(YYUI.font(10.5, on ? .semibold : .regular))
+            .foregroundStyle(on ? tint.onBlack : YYColor.t2)
+            .padding(.horizontal, YYUI.s(11))
+            .frame(height: YYUI.s(28))
+            .background(on ? AnyShapeStyle(tint.black) : AnyShapeStyle(YYColor.card), in: .capsule)
+            .overlay(Capsule().strokeBorder(on ? .clear : YYColor.line, lineWidth: 0.5))
+            .animation(YYMotion.quick, value: on)
+        }
+        .buttonStyle(YYPressStyle(scale: 0.97))
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    // MARK: Results
+
+    /// 问书伴 on top, then each kind under its own label, in white cards.
+    private func results(_ s: QuickSearch) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if q.isEmpty {
+                    if !s.titles.isEmpty {
+                        label(String(localized: "最近读过"), nil)
+                        card { ForEach(s.titles) { titleRow($0) } }
+                    }
+                } else {
+                    if scope == .all, let book = askBook(s) { askCard(book) }
+                    if (scope == .all || scope == .books), !s.titles.isEmpty {
+                        label(String(localized: "书"), "\(s.titles.count)")
+                        card { ForEach(s.titles) { titleRow($0) } }
+                    }
+                    if (scope == .all || scope == .lines), !s.lines.isEmpty {
+                        label(String(localized: "全文"), String(localized: "\(s.lineCount) 处 · \(s.lineBooks) 本书"))
+                        card { ForEach(scope == .all ? Array(s.lines.prefix(4)) : s.lines) { lineRow($0) } }
+                    }
+                    if (scope == .all || scope == .notes), !s.notes.isEmpty {
+                        label(String(localized: "笔记"), String(localized: "\(s.noteCount) 条"))
+                        card { ForEach(scope == .all ? Array(s.notes.prefix(3)) : s.notes) { noteRow($0) } }
+                    }
+                    if (scope == .all || scope == .words), !s.words.isEmpty {
+                        label(String(localized: "生词"), String(localized: "\(s.words.count) 个"))
+                        card { ForEach(scope == .all ? Array(s.words.prefix(3)) : s.words, id: \.word) { wordRow($0) } }
+                    }
+                    if let none = nothing(s) {
+                        Text(none)
+                            .font(YYUI.font(10.5)).foregroundStyle(YYColor.t3)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, YYUI.s(24))
+                    }
+                }
+            }
+            .padding(.horizontal, YYUI.s(16))
+            .padding(.bottom, YYUI.s(24))
+            .frame(maxWidth: sizeClass == .regular ? 720 : .infinity)
+            .frame(maxWidth: .infinity)
+        }
+        .scrollDismissesKeyboard(.immediately)
+    }
+
+    /// What to say when the chosen kind has nothing for the words; nil when something shows.
+    private func nothing(_ s: QuickSearch) -> String? {
+        switch scope {
+        case .all: s.titles.isEmpty && s.lines.isEmpty && s.notes.isEmpty && s.words.isEmpty ? String(localized: "书名、原文、笔记里都没有“\(q)”。可以问问书伴") : nil
+        case .books: s.titles.isEmpty ? String(localized: "没有书名里带“\(q)”的书") : nil
+        case .lines: s.lines.isEmpty ? String(localized: "书里的原文没有“\(q)”") : nil
+        case .notes: s.notes.isEmpty ? String(localized: "划线和想法里没有“\(q)”") : nil
+        case .words: s.words.isEmpty ? String(localized: "生词本里没有“\(q)”") : nil
+        }
+    }
+
+    /// The row that's always first, handing the words to 书伴.
+    private func askCard(_ book: BookSummary) -> some View {
+        Button {
+            dismissKeyboard()
+            library.ask(q, in: book.id)
+        } label: {
+            HStack(spacing: YYUI.s(10)) {
+                Image(systemName: "sparkle")
+                    .font(YYUI.font(14, .semibold))
+                    .foregroundStyle(tint.accent)
+                    .frame(width: YYUI.s(32), height: YYUI.s(32))
+                    .background(tint.accentSoft, in: .rect(cornerRadius: YYUI.s(10)))
+                VStack(alignment: .leading, spacing: YYUI.s(1)) {
+                    Text("问书伴“\(q)”").font(YYUI.font(12, .semibold)).foregroundStyle(tint.accent).lineLimit(1)
+                    Text("只用《\(book.title)》里你读过的部分回答，带出处").font(YYUI.font(10)).foregroundStyle(YYColor.t3).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                chevron
+            }
+            .padding(.vertical, YYUI.s(10))
+            .padding(.horizontal, YYUI.s(12))
+            .yyCard()
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, YYUI.s(6))
+    }
+
+    /// The book 书伴 answers from: one whose name was typed, else the one read last or hit.
+    private func askBook(_ s: QuickSearch) -> BookSummary? {
+        if let t = s.titles.first(where: { $0.chapter == nil && Self.canAsk($0.book) }) { return t.book }
+        if let last = library.books.filter({ $0.available && Self.canAsk($0) && $0.openedAt != nil }).max(by: { ($0.openedAt ?? 0) < ($1.openedAt ?? 0) }) {
+            return last
+        }
+        let hitBooks = Dictionary(grouping: s.lines.filter { Self.canAsk($0.book) }, by: \.book.id)
+        if hitBooks.count == 1, let only = hitBooks.values.first?.first?.book { return only }
+        return library.books.filter { $0.available && Self.canAsk($0) }.max { $0.addedAt < $1.addedAt }
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    /// 书伴 reads books set as text: not PDFs.
+    private static func canAsk(_ book: BookSummary) -> Bool {
+        book.format != .pdf
+    }
+
+    /// A little closer to its card than elsewhere.
+    private func label(_ title: String, _ detail: String?) -> some View {
+        YYLabel(title, detail)
+            .monospacedDigit()
+            .padding(.top, -YYUI.s(2))
+            .padding(.bottom, -YYUI.s(1))
+    }
+
+    /// `.grp`: rows in one white card, a hairline between.
+    private func card(@ViewBuilder _ rows: () -> some View) -> some View {
+        YYGroup { rows() }
+    }
+
+    private var chevron: some View {
+        Image(systemName: "chevron.right").font(YYUI.font(10, .semibold)).foregroundStyle(YYColor.t3)
+    }
+
+    // MARK: Rows
+
+    private func titleRow(_ t: QuickSearch.TitleHit) -> some View {
+        Button {
+            dismissKeyboard()
+            if let chapter = t.chapter {
+                library.open(t.book.id, at: Position(section: chapter.section, sentence: 0))
+            } else {
+                library.open(t.book, nil)
+            }
+        } label: {
+            HStack(spacing: YYUI.s(10)) {
+                BookCover(book: t.book).frame(width: YYUI.s(26))
+                VStack(alignment: .leading, spacing: YYUI.s(2)) {
+                    Group {
+                        if let chapter = t.chapter {
+                            Text(t.book.title + " · ") + Text(hit(chapter.title))
+                        } else {
+                            Text(NameMatcher(q).highlighted(t.book.title, color: tint.accent))
+                        }
+                    }
+                    .font(YYUI.font(11.5, .semibold)).foregroundStyle(YYColor.t1).lineLimit(1)
+                    Text([t.book.author, t.book.shelfNote].compactMap { $0 }.joined(separator: " · "))
+                        .font(YYUI.font(10)).monospacedDigit().foregroundStyle(YYColor.t3).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                chevron
+            }
+            .padding(.vertical, YYUI.s(9))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// The book's own sentence, two lines at most.
+    private func passage(_ text: Text) -> some View {
+        text
+            .font(YYUI.font(12.5, design: .serif))
+            .tracking(YYUI.s(12.5) * 0.02)
+            .lineSpacing(YYUI.s(12.5) * 0.8)
+            .foregroundStyle(YYColor.t1)
+            .lineLimit(2)
+    }
+
+    private func hitRow(_ action: @escaping () -> Void, @ViewBuilder content: () -> some View) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: YYUI.s(4)) { content() }
+                .padding(.top, YYUI.s(10))
+                .padding(.bottom, YYUI.s(9))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func lineRow(_ l: QuickSearch.LineHit) -> some View {
+        hitRow {
+            dismissKeyboard()
+            library.open(l.book.id, at: Position(section: l.hit.section, sentence: l.hit.sentence), query: q, hit: l.hit)
+        } content: {
+            passage(Text(l.hit.before) + Text(mark(l.hit.matched)) + Text(l.hit.after))
+            source(l.book, l.chapter)
+        }
+    }
+
+    private func noteRow(_ n: QuickSearch.NoteHit) -> some View {
+        hitRow {
+            dismissKeyboard()
+            library.open(n.book.id, at: Position(section: n.mark.section, sentence: n.mark.start.sentence), query: q)
+        } content: {
+            MarkText(mark: n.mark)
+                .font(YYUI.font(12.5, design: .serif))
+                .lineSpacing(YYUI.s(12.5) * 0.8)
+                .foregroundStyle(YYColor.t1)
+                .lineLimit(2)
+            if let note = n.mark.note {
+                Text(hit(note))
+                    .font(.custom("Kaiti SC", size: YYUI.s(12)))
+                    .lineSpacing(YYUI.s(12) * 0.7)
+                    .foregroundStyle(tint.accent).lineLimit(2)
+                    .padding(.leading, YYUI.s(9))
+                    .overlay(alignment: .leading) { Rectangle().fill(tint.accent).frame(width: 1.5) }
+                    .padding(.top, YYUI.s(1))
+            }
+            source(n.book, n.chapter)
+        }
+    }
+
+    private func wordRow(_ w: VocabWord) -> some View {
+        hitRow {
+            guard library.books.contains(where: { $0.id == w.book && $0.available }) else { return }
+            dismissKeyboard()
+            library.open(w.book, at: Position(section: w.section, sentence: w.sentence), query: w.word)
+        } content: {
+            HStack(alignment: .firstTextBaseline, spacing: YYUI.s(6)) {
+                Text(hit(w.word)).font(.custom("Georgia", size: YYUI.s(14)).weight(.bold)).foregroundStyle(YYColor.t1)
+                if let p = w.phonetic { Text(p).font(YYUI.font(10)).foregroundStyle(YYColor.t3) }
+            }
+            if let m = w.meaning {
+                Text(m).font(YYUI.font(11)).foregroundStyle(YYColor.t2).lineLimit(2)
+            }
+        }
+    }
+
+    /// A tiny cover, the book, where in it.
+    private func source(_ book: BookSummary, _ chapter: String?) -> some View {
+        HStack(spacing: YYUI.s(5)) {
+            BookCover(book: book).frame(width: YYUI.s(10))
+            Text([book.title, chapter == book.title ? nil : chapter].compactMap { $0 }.joined(separator: " · "))
+                .font(YYUI.font(10)).monospacedDigit().foregroundStyle(YYColor.t3).lineLimit(1)
+        }
+    }
+
+    /// The words typed, in the accent wherever they appear.
+    private func hit(_ s: String) -> AttributedString {
+        var text = AttributedString(s)
+        guard !q.isEmpty else { return text }
+        var from = text.startIndex
+        while let r = text[from...].range(of: q, options: .caseInsensitive) {
+            text[r].foregroundColor = tint.accent
+            text[r].inlinePresentationIntent = .stronglyEmphasized
+            text[r].underlineStyle = .single
+            from = r.upperBound
+        }
+        return text
+    }
+
+    private func mark(_ s: String) -> AttributedString {
+        var a = AttributedString(s)
+        a.foregroundColor = tint.accent
+        a.inlinePresentationIntent = .stronglyEmphasized
+        a.underlineStyle = .single
+        return a
+    }
+}
+#endif

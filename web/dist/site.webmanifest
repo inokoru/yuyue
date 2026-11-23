@@ -1,0 +1,16 @@
+{
+  "name": "语阅 Yuyue",
+  "short_name": "语阅",
+  "description": "Free, open-source local app for reading and listening to the same book.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F8F5F0",
+  "theme_color": "#F8F5F0",
+  "icons": [
+    {
+      "src": "/images/icon-256.png",
+      "sizes": "256x256",
+      "type": "image/png"
+    }
+  ]
+}

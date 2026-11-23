@@ -1,0 +1,543 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="Yuyue.Shelf.ShelfWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="语阅">
+
+    <!-- 1:1 对照 macOS MacShelfView：暖灰书桌 (#EAE8E3) + 桌面顶部窗控条（不切纸页圆角）+ 完整浮起的暖白纸页 (#F8F5F0) -->
+    <Grid
+        x:Name="RootGrid"
+        Background="{ThemeResource YYDeskBrush}"
+        AllowDrop="True"
+        DragOver="RootGrid_DragOver"
+        DragLeave="RootGrid_DragLeave"
+        Drop="RootGrid_Drop"
+        KeyDown="RootGrid_KeyDown">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="32" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition x:Name="SidebarColumn" Width="220" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- 阴影接收面（铺满整个书桌底层，让纸页与封面投出柔和阴影） -->
+        <Grid x:Name="DeskShadowReceiver" Grid.RowSpan="2" Grid.ColumnSpan="2" Background="Transparent" />
+
+        <!-- 顶部 32px 极简窗头拖动区：右上角 Windows 窗控键安静落在书桌上，绝不破坏纸页完整圆角 -->
+        <Grid x:Name="TopDragBar" Grid.Row="0" Grid.ColumnSpan="2" Background="Transparent" />
+
+        <!-- 左侧栏：无卡片，直接写在书桌上 -->
+        <Grid x:Name="SidebarPanel" Grid.Row="1" Grid.Column="0" Padding="10,0,10,10">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- 搜索 · 问 框 -->
+            <Button
+                x:Name="QuickSearchTrigger"
+                Grid.Row="0"
+                Margin="0,2,0,8"
+                Height="30"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch"
+                Padding="9,0"
+                CornerRadius="9"
+                BorderThickness="0"
+                Background="{ThemeResource YYSidebarFieldBrush}"
+                UseSystemFocusVisuals="False"
+                Click="QuickSearchTrigger_Click">
+                <Grid ColumnSpacing="7">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ContentPresenter x:Name="SearchIconHost" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Text="搜索 · 问" FontSize="12" Foreground="{ThemeResource YYText2Brush}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Text="Ctrl+K" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                </Grid>
+            </Button>
+
+            <!-- 侧栏分组（资料库 / 笔记 / 合集，对照 Mac sidebarRows） -->
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Hidden" Padding="0,0,0,8">
+                <StackPanel Spacing="1">
+                    <Button Style="{StaticResource YYSidebarGroupStyle}" Tag="library" Click="ToggleGroup_Click">
+                        <TextBlock Text="资料库" />
+                    </Button>
+                    <StackPanel x:Name="GroupLibrary" Spacing="1">
+                        <Button x:Name="NavAll" Style="{StaticResource YYSidebarItemStyle}" Tag="all" Click="NavItem_Click">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter x:Name="IconAll" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="书" VerticalAlignment="Center" />
+                                <TextBlock x:Name="CountAll" Grid.Column="2" FontSize="11" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                            </Grid>
+                        </Button>
+
+                        <Button x:Name="NavProgress" Style="{StaticResource YYSidebarItemStyle}" Tag="progress" Click="NavItem_Click">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter x:Name="IconProgress" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="进度" VerticalAlignment="Center" />
+                                <TextBlock x:Name="CountProgress" Grid.Column="2" FontSize="11" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                            </Grid>
+                        </Button>
+
+                        <Button x:Name="NavPodcasts" Style="{StaticResource YYSidebarItemStyle}" Tag="podcasts" Click="NavItem_Click">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter x:Name="IconPodcasts" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="播客" VerticalAlignment="Center" />
+                                <TextBlock x:Name="CountPodcasts" Grid.Column="2" FontSize="11" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                            </Grid>
+                        </Button>
+
+                        <Button x:Name="NavAudio" Style="{StaticResource YYSidebarItemStyle}" Tag="audio" Click="NavItem_Click">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter x:Name="IconAudio" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="有声" VerticalAlignment="Center" />
+                                <TextBlock x:Name="CountAudio" Grid.Column="2" FontSize="11" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                            </Grid>
+                        </Button>
+                    </StackPanel>
+
+                    <Button Style="{StaticResource YYSidebarGroupStyle}" Tag="notes" Click="ToggleGroup_Click">
+                        <TextBlock Text="笔记" />
+                    </Button>
+                    <StackPanel x:Name="GroupNotes" Spacing="1">
+                        <Button x:Name="NavNotes" Style="{StaticResource YYSidebarItemStyle}" Tag="notes" Click="NavItem_Click">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter x:Name="IconNotes" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="笔记" VerticalAlignment="Center" />
+                                <TextBlock x:Name="CountNotes" Grid.Column="2" FontSize="11" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                            </Grid>
+                        </Button>
+
+                        <Button x:Name="NavWords" Style="{StaticResource YYSidebarItemStyle}" Tag="words" Click="NavItem_Click">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter x:Name="IconWords" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="生词本" VerticalAlignment="Center" />
+                                <TextBlock x:Name="CountWords" Grid.Column="2" FontSize="11" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                            </Grid>
+                        </Button>
+                    </StackPanel>
+
+                    <Button Style="{StaticResource YYSidebarGroupStyle}" Tag="collections" Click="ToggleGroup_Click">
+                        <TextBlock Text="合集" />
+                    </Button>
+                    <StackPanel x:Name="GroupCollections" Spacing="1">
+                        <Button x:Name="NavCollections" Style="{StaticResource YYSidebarItemStyle}" Tag="collections" Click="NavItem_Click">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter x:Name="IconCollections" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="合集" VerticalAlignment="Center" />
+                                <TextBlock x:Name="CountCollections" Grid.Column="2" FontSize="11" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                            </Grid>
+                        </Button>
+                        <StackPanel x:Name="CollectionsStack" Spacing="1" />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- 侧栏底部（对照 Mac sidebarFoot：同步状态 + 设置 + 反馈） -->
+            <Grid Grid.Row="2" Padding="2,4,0,0" ColumnSpacing="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Button
+                    Grid.Column="0"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Padding="6,6"
+                    HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Left"
+                    CornerRadius="6"
+                    UseSystemFocusVisuals="False"
+                    Click="SyncStatus_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                        <Ellipse x:Name="SyncDot" Width="6" Height="6" Fill="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                        <TextBlock x:Name="SyncStatusText" Text="尚未开启同步" FontSize="11" Foreground="{ThemeResource YYText2Brush}" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </Button>
+
+                <Button
+                    x:Name="SettingsFootBtn"
+                    Grid.Column="1"
+                    Style="{StaticResource YYIconButtonStyle}"
+                    ToolTipService.ToolTip="设置 (Ctrl+,)"
+                    Click="OpenSettings_Click" />
+
+                <Button
+                    x:Name="FeedbackFootBtn"
+                    Grid.Column="2"
+                    Style="{StaticResource YYIconButtonStyle}"
+                    ToolTipService.ToolTip="反馈"
+                    Click="Feedback_Click" />
+            </Grid>
+        </Grid>
+
+        <!-- 右侧浮起的暖白纸页（完整四圆角 + ThemeShadow 柔和投影，+ 导入与下方排序精准右对齐） -->
+        <Border
+            x:Name="PaperSheet"
+            Grid.Row="1"
+            Grid.Column="1"
+            Margin="0,0,8,8"
+            CornerRadius="12"
+            Background="{ThemeResource YYBgBrush}"
+            BorderBrush="{ThemeResource YYPaperBorderBrush}"
+            BorderThickness="1">
+            <Grid x:Name="PaperInnerGrid">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="58" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- 纸页标题行：左 侧栏开关 + 动态自定义区（播客托盘 / 返回按钮）或 22px 标题 + 副标题，右 动态页头操作区 -->
+                <Grid Grid.Row="0" Padding="18,4,28,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Button
+                        x:Name="SidebarToggleBtn"
+                        Grid.Column="0"
+                        Style="{StaticResource YYIconButtonStyle}"
+                        ToolTipService.ToolTip="显示或隐藏侧栏 (Ctrl+Alt+S)"
+                        VerticalAlignment="Center"
+                        Click="ToggleSidebar_Click" />
+
+                    <StackPanel
+                        x:Name="HeaderLeftCustomHost"
+                        Grid.Column="1"
+                        Orientation="Horizontal"
+                        Spacing="8"
+                        Margin="8,0,8,0"
+                        VerticalAlignment="Center" />
+
+                    <TextBlock
+                        x:Name="ViewTitleText"
+                        Grid.Column="2"
+                        Text="书"
+                        FontSize="22"
+                        FontWeight="Bold"
+                        VerticalAlignment="Center"
+                        Margin="8,0,12,0"
+                        Foreground="{ThemeResource YYText1Brush}" />
+
+                    <TextBlock
+                        x:Name="ViewSubtitleText"
+                        Grid.Column="3"
+                        FontSize="12"
+                        VerticalAlignment="Center"
+                        Margin="0,3,12,0"
+                        Foreground="{ThemeResource YYText2Brush}" />
+
+                    <StackPanel x:Name="HeaderRightHost" Grid.Column="5" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <Button
+                            x:Name="ImportBtn"
+                            Style="{StaticResource YYPillButtonStyle}"
+                            ToolTipService.ToolTip="导入书 (Ctrl+O)：EPUB、PDF、MOBI、AZW3、TXT 或有声书；右键可无线传书"
+                            Click="ImportButton_Click">
+                            <Button.ContextFlyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem Text="选择本地书籍或音频导入…" Click="ImportButton_Click" />
+                                    <MenuFlyoutItem Text="导入有声书文件夹 / 压缩包…" Click="ImportAudioFolder_Click" />
+                                    <MenuFlyoutItem Text="从 OPDS / WebDAV 远程书库导入…" Click="RemoteLibrary_Click" />
+                                    <MenuFlyoutItem Text="局域网无线传书 (Wi-Fi)…" Click="WifiTransfer_Click" />
+                                    <MenuFlyoutSeparator />
+                                    <MenuFlyoutItem Text="恢复 .yuyue 书库快照…" Click="RestoreSnapshotMenu_Click" />
+                                </MenuFlyout>
+                            </Button.ContextFlyout>
+                            <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                <ContentPresenter x:Name="ImportPlusIcon" VerticalAlignment="Center" />
+                                <TextBlock Text="导入" FontSize="12" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+
+                <!-- 主体内容区 -->
+                <Grid Grid.Row="1">
+                    <!-- 1. 书架主视图 -->
+                    <ScrollViewer x:Name="ShelfScroll" VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="ShelfContentStack" Padding="0,0,0,48">
+                            <!-- 在读横带（默认单行横排，绝不折成半空第二行，1:1 对齐 01-shelf.png） -->
+                            <Border
+                                x:Name="ReadingBand"
+                                Visibility="Collapsed"
+                                Background="{ThemeResource YYReadingBandBrush}"
+                                BorderBrush="{ThemeResource YYReadingBandLineBrush}"
+                                BorderThickness="0,1,0,1"
+                                Padding="22,14,28,20"
+                                Margin="0,0,0,20">
+                                <StackPanel Spacing="10">
+                                    <Grid>
+                                        <TextBlock Text="在读" FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{ThemeResource YYText1Brush}" />
+                                        <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                            <TextBlock x:Name="ReadingBandCount" FontSize="11" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                                            <Button
+                                                x:Name="ReadingExpandBtn"
+                                                Visibility="Collapsed"
+                                                Background="Transparent"
+                                                BorderThickness="0"
+                                                Padding="4,2"
+                                                FontSize="11.5"
+                                                Foreground="{ThemeResource YYText2Brush}"
+                                                UseSystemFocusVisuals="False"
+                                                Click="ReadingExpand_Click" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <Grid x:Name="ReadingCardsHost" />
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 书籍网格区 -->
+                            <StackPanel x:Name="GridSection" Padding="22,4,28,0">
+                                <Grid Margin="2,0,0,14">
+                                    <TextBlock x:Name="GridCountText" FontSize="12.5" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" VerticalAlignment="Center" />
+                                    <Button
+                                        x:Name="SortButton"
+                                        HorizontalAlignment="Right"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Padding="4,2"
+                                        UseSystemFocusVisuals="False">
+                                        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                            <TextBlock x:Name="SortLabelText" Text="最近读过" FontSize="11.5" Foreground="{ThemeResource YYText2Brush}" />
+                                            <ContentPresenter x:Name="SortChevronIcon" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <Button.Flyout>
+                                            <MenuFlyout>
+                                                <MenuFlyoutItem Text="最近读过" Tag="recent" Click="SortItem_Click" />
+                                                <MenuFlyoutItem Text="加入时间" Tag="added" Click="SortItem_Click" />
+                                                <MenuFlyoutItem Text="书名" Tag="title" Click="SortItem_Click" />
+                                                <MenuFlyoutItem Text="作者" Tag="author" Click="SortItem_Click" />
+                                            </MenuFlyout>
+                                        </Button.Flyout>
+                                    </Button>
+                                </Grid>
+
+                                <ItemsRepeater x:Name="BooksRepeater">
+                                    <ItemsRepeater.Layout>
+                                        <UniformGridLayout
+                                            x:Name="BooksGridLayout"
+                                            MinItemWidth="100"
+                                            MinItemHeight="198"
+                                            MinColumnSpacing="18"
+                                            MinRowSpacing="22"
+                                            ItemsStretch="None" />
+                                    </ItemsRepeater.Layout>
+                                </ItemsRepeater>
+
+                                <!-- 空书架 -->
+                                <StackPanel
+                                    x:Name="EmptyStatePanel"
+                                    Visibility="Collapsed"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Margin="0,120,0,0"
+                                    Spacing="10">
+                                    <ContentPresenter x:Name="EmptyIconHost" HorizontalAlignment="Center" />
+                                    <TextBlock
+                                        x:Name="EmptyTitleText"
+                                        Text="书架是空的，把 EPUB、PDF、MOBI、TXT 拖进窗口就能开始读"
+                                        FontSize="12.5"
+                                        Foreground="{ThemeResource YYText2Brush}"
+                                        HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- 2. 进度 / 播客 / 笔记 / 生词本 / 合集子页 -->
+                    <ScrollViewer x:Name="SubPageScroll" Visibility="Collapsed" Padding="22,4,28,40" VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="SubPageStack" Spacing="12" />
+                    </ScrollViewer>
+
+                    <!-- 子页底部常驻浮坞（访谈书页 46px 迷你播放条） -->
+                    <ContentControl
+                        x:Name="SubPageBottomDockHost"
+                        Visibility="Collapsed"
+                        VerticalAlignment="Bottom"
+                        HorizontalAlignment="Center"
+                        Margin="22,0,28,14" />
+
+                    <!-- 顶部撤销/提示横幅（对齐 UndoToast.swift：40px 白瓷胶囊 + 左圆底对勾 + 右 24x24 圆形撤销钮） -->
+                    <Border
+                        x:Name="ToastBanner"
+                        Visibility="Collapsed"
+                        VerticalAlignment="Top"
+                        HorizontalAlignment="Center"
+                        Margin="0,8,0,0"
+                        Height="38"
+                        Padding="11,0,8,0"
+                        CornerRadius="19"
+                        Background="{ThemeResource YYCardBrush}"
+                        BorderBrush="{ThemeResource YYLineBrush}"
+                        BorderThickness="1">
+                        <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                            <Border x:Name="ToastDisc" Width="17" Height="17" CornerRadius="8.5" Background="#2DBE60">
+                                <ContentPresenter x:Name="ToastCheckIcon" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <TextBlock x:Name="ToastText" FontSize="12.5" FontWeight="Medium" VerticalAlignment="Center" Foreground="{ThemeResource YYText1Brush}" />
+                            <Button
+                                x:Name="ToastUndoButton"
+                                Visibility="Collapsed"
+                                Width="24"
+                                Height="24"
+                                Padding="0"
+                                CornerRadius="12"
+                                Background="{ThemeResource YYInsetBrush}"
+                                BorderThickness="0"
+                                ToolTipService.ToolTip="撤销 (Ctrl+Z)"
+                                Click="ToastUndo_Click" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 拖入文件提示蒙层（对齐 MacImport.swift MacDropHint） -->
+                    <Border
+                        x:Name="DropOverlay"
+                        Visibility="Collapsed"
+                        Background="#DBF7F5F1"
+                        Padding="22"
+                        CornerRadius="12">
+                        <Border
+                            CornerRadius="18"
+                            BorderBrush="{ThemeResource YYAccentBrush}"
+                            BorderThickness="1.5"
+                            Background="#088A653F">
+                            <StackPanel Spacing="12" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Border Width="60" Height="60" CornerRadius="30" Background="{ThemeResource YYAccentSoftBrush}" HorizontalAlignment="Center">
+                                    <ContentPresenter x:Name="DropArrowIcon" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock Text="松开即可导入书库" FontSize="20" FontWeight="Bold" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" />
+                                <TextBlock Text="书名、作者和封面从文件里读出来，之后都能改" FontSize="12.5" Foreground="{ThemeResource YYText2Brush}" HorizontalAlignment="Center" />
+                                <Border CornerRadius="12" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="1" Padding="14,10" HorizontalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <Border CornerRadius="5" Background="{ThemeResource YYInsetBrush}" Padding="7,2"><TextBlock Text="EPUB" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource YYText2Brush}" /></Border>
+                                        <Border CornerRadius="5" Background="{ThemeResource YYInsetBrush}" Padding="7,2"><TextBlock Text="TXT" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource YYText2Brush}" /></Border>
+                                        <Border CornerRadius="5" Background="{ThemeResource YYInsetBrush}" Padding="7,2"><TextBlock Text="PDF" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource YYText2Brush}" /></Border>
+                                        <Border CornerRadius="5" Background="{ThemeResource YYInsetBrush}" Padding="7,2"><TextBlock Text="MOBI" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource YYText2Brush}" /></Border>
+                                        <Border CornerRadius="5" Background="{ThemeResource YYInsetBrush}" Padding="7,2"><TextBlock Text="AZW3" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource YYText2Brush}" /></Border>
+                                        <Border CornerRadius="5" Background="{ThemeResource YYInsetBrush}" Padding="7,2"><TextBlock Text="M4B" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource YYText2Brush}" /></Border>
+                                        <Border CornerRadius="5" Background="{ThemeResource YYInsetBrush}" Padding="7,2"><TextBlock Text="MP3" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource YYText2Brush}" /></Border>
+                                    </StackPanel>
+                                </Border>
+                                <TextBlock Text="✓ 同一个文件只导入一次：按内容认，改过名字也认得出来" FontSize="11.5" Foreground="{ThemeResource YYOkBrush}" HorizontalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- 搜索 · 问 悬浮框（Ctrl+K，对齐 QuickSearch.swift：640px 宽 + 52px 搜索头 + 三组结果 + 36px 快捷键底栏） -->
+        <Grid
+            x:Name="QuickSearchOverlay"
+            Grid.RowSpan="2"
+            Grid.ColumnSpan="2"
+            Visibility="Collapsed"
+            Background="#32000000"
+            PointerPressed="QuickSearchBackdrop_Pressed">
+            <Border
+                Width="640"
+                MaxHeight="530"
+                VerticalAlignment="Top"
+                Margin="0,54,0,0"
+                CornerRadius="18"
+                Background="{ThemeResource YYCardBrush}"
+                BorderBrush="{ThemeResource YYLineBrush}"
+                BorderThickness="1">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="52" />
+                        <RowDefinition Height="1" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="1" />
+                        <RowDefinition Height="36" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" Padding="16,0" ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="22" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ContentPresenter x:Name="QuickSearchLeadIcon" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                        <TextBox
+                            x:Name="QuickSearchBox"
+                            Grid.Column="1"
+                            PlaceholderText="搜书名、原文、笔记，或者问书伴"
+                            BorderThickness="0"
+                            Background="Transparent"
+                            FontSize="16"
+                            VerticalAlignment="Center"
+                            Padding="4,6"
+                            TextChanged="QuickSearchBox_TextChanged"
+                            KeyDown="QuickSearchBox_KeyDown" />
+                        <Border Grid.Column="2" CornerRadius="5" Background="{ThemeResource YYInsetBrush}" Padding="7,2" VerticalAlignment="Center">
+                            <TextBlock Text="esc" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" />
+                        </Border>
+                    </Grid>
+
+                    <Border Grid.Row="1" Background="{ThemeResource YYLineBrush}" />
+
+                    <ScrollViewer Grid.Row="2" MaxHeight="420" Padding="10,8" VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="QuickSearchResults" Spacing="3" />
+                    </ScrollViewer>
+
+                    <Border Grid.Row="3" Background="{ThemeResource YYLineBrush}" />
+
+                    <Grid Grid.Row="4" Padding="16,0" Background="{ThemeResource YYBgBrush}" CornerRadius="0,0,18,18">
+                        <TextBlock Text="↑↓ 选择  ·  ↵ 打开  ·  Ctrl+↵ 问书伴" FontSize="11" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                        <TextBlock x:Name="QuickSearchScopeText" FontSize="11" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

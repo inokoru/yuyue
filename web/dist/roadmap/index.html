@@ -1,0 +1,175 @@
+<!doctype html>
+<html
+  lang="zh-CN"
+  data-lang="zh"
+  data-title-zh="未来计划 · Yuyue Roadmap"
+  data-title-en="Yuyue Roadmap · 未来计划"
+  data-desc-zh="语阅接下来打算做成什么样：先把声音与稳妥做好，再把听读一体和记得住做深，最后带到更多设备。"
+  data-desc-en="Where Yuyue is headed next: natural voices and rock-solid reliability first, deeper read-listen craft next, more devices after."
+>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F8F5F0">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1A1613">
+  <meta name="color-scheme" content="light dark">
+  <title>未来计划 · Yuyue Roadmap</title>
+  <meta name="description" content="Where Yuyue is headed next, without empty date promises.">
+  <link rel="manifest" href="/site.webmanifest">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23FBFAF7'/%3E%3Ctext x='32' y='42' font-size='32' text-anchor='middle' font-family='serif' font-weight='700' fill='%231C1D20'%3E%E9%98%85%3C/text%3E%3Crect x='20' y='50' width='24' height='2.5' rx='1.2' fill='%232B4C7E'/%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="/images/icon-256.png">
+  <script>
+    (function () {
+      var d = document.documentElement;
+      try {
+        var q = new URLSearchParams(location.search).get('lang');
+        var saved = localStorage.getItem('yuyue-lang');
+        var sys = ((navigator.languages && navigator.languages[0]) || navigator.language || '').toLowerCase();
+        var lang = (q === 'zh' || q === 'en') ? q : (saved === 'zh' || saved === 'en') ? saved : (sys.indexOf('zh') === 0 ? 'zh' : 'en');
+        d.dataset.lang = lang;
+        d.lang = lang === 'en' ? 'en' : 'zh-CN';
+        var theme = localStorage.getItem('yuyue-theme');
+        if (theme === 'light' || theme === 'dark') d.dataset.theme = theme;
+      } catch (_) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main"><span class="i18n-zh">跳到正文</span><span class="i18n-en">Skip to content</span></a>
+
+  <div class="mobile-drawer" id="mobile-drawer" aria-hidden="true">
+    <div class="mobile-sheet">
+      <div class="mobile-sheet-head">
+        <span style="display:inline-flex;align-items:center;gap:10px;font-weight:700"><span class="mark mark-sm" aria-hidden="true">阅</span><span class="i18n-zh">语阅 Yuyue</span><span class="i18n-en">Yuyue 语阅</span></span>
+        <button type="button" data-menu-close style="font-size:20px;color:var(--t2);padding:2px 6px">×</button>
+      </div>
+      <nav class="mobile-nav-list">
+        <a href="/"><span class="i18n-zh">首页</span><span class="i18n-en">Home</span></a>
+        <a href="/download/"><span class="i18n-zh">免费下载</span><span class="i18n-en">Download</span></a>
+        <a href="/changelog/"><span class="i18n-zh">更新记录</span><span class="i18n-en">Updates</span></a>
+        <a href="/support/"><span class="i18n-zh">使用帮助</span><span class="i18n-en">Support</span></a>
+        <a href="/privacy/"><span class="i18n-zh">隐私承诺</span><span class="i18n-en">Privacy</span></a>
+      </nav>
+    </div>
+  </div>
+
+  <header class="col top-strip">
+    <a class="mark-link" href="/" data-aria-zh="语阅首页" data-aria-en="Yuyue Home">
+      <div class="mark" aria-hidden="true">阅</div>
+    </a>
+    <div class="top-right">
+      <nav class="top-nav">
+        <a href="/download/"><span class="i18n-zh">下载</span><span class="i18n-en">Download</span></a>
+        <a href="/changelog/"><span class="i18n-zh">更新</span><span class="i18n-en">Updates</span></a>
+        <a href="/support/"><span class="i18n-zh">帮助</span><span class="i18n-en">Support</span></a>
+        <a href="/privacy/"><span class="i18n-zh">隐私</span><span class="i18n-en">Privacy</span></a>
+      </nav>
+      <div class="lang-switch" role="group" data-aria-zh="切换语言" data-aria-en="Switch language">
+        <button type="button" class="lang-btn" data-set-lang="zh" aria-pressed="true">中文</button>
+        <span class="lang-dot" aria-hidden="true">·</span>
+        <button type="button" class="lang-btn" data-set-lang="en" aria-pressed="false">EN</button>
+      </div>
+      <button type="button" class="theme-btn" data-toggle-theme data-aria-zh="切换深浅色" data-aria-en="Toggle appearance">
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      </button>
+      <button type="button" class="menu-btn" data-menu-toggle aria-expanded="false" aria-controls="mobile-drawer" data-aria-zh="打开菜单" data-aria-en="Open menu">
+        <svg class="icon-menu" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="8" x2="20" y2="8"/><line x1="4" y1="16" x2="20" y2="16"/></svg>
+        <svg class="icon-close" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="main" class="col">
+    <div class="doc-head">
+      <h1><span class="i18n-zh">未来计划</span><span class="i18n-en">What’s Ahead</span></h1>
+      <p class="doc-lead">
+        <span class="i18n-zh">我们不画空头时间表，只定一个规矩：前一步真正稳妥好用了，再往后走下一步。</span>
+        <span class="i18n-en">No empty deadlines—one simple promise: every step becomes truly dependable before we start the next.</span>
+      </p>
+    </div>
+
+    <section class="stage-block" style="margin-top:0">
+      <div class="stage-head">
+        <h2><span class="i18n-zh">第一阶段 · 先让它真正信得过</span><span class="i18n-en">Stage 1 · Built to Trust</span></h2>
+        <span class="subtle" style="font-size:13px"><span class="i18n-zh">现在正在走</span><span class="i18n-en">In progress</span></span>
+      </div>
+      <div class="ms-grid">
+        <div class="ms-card is-now">
+          <div class="ms-head">
+            <h3><span class="i18n-zh">公开发布与日常打磨</span><span class="i18n-en">Public Release &amp; Daily Polish</span></h3>
+            <span class="ms-badge"><span class="i18n-zh">当前阶段</span><span class="i18n-en">Now</span></span>
+          </div>
+          <p><span class="i18n-zh">在 Mac、Android、iPhone 与 iPad 上顺畅完成阅读、听书、划线、外文查词与个人网盘同步。</span><span class="i18n-en">Smooth everyday reading, listening, highlighting, lookup, and private cloud sync across desktop and mobile.</span></p>
+        </div>
+
+        <div class="ms-card">
+          <div class="ms-head"><h3><span class="i18n-zh">更好听的本机离线声音</span><span class="i18n-en">Richer Offline Voices</span></h3><span class="ms-badge"><span class="i18n-zh">下一步</span><span class="i18n-en">Next</span></span></div>
+          <p><span class="i18n-zh">让新装好语阅的人第一次点开朗读，就能听到自然温暖的人声，不再是机械的系统朗读；并逐步完善手机端分角色朗读体验。</span><span class="i18n-en">Natural, warm offline voices right out of the box—no robotic defaults—plus expressive multi-voice narration on mobile.</span></p>
+        </div>
+
+        <div class="ms-card">
+          <div class="ms-head"><h3><span class="i18n-zh">滴水不漏的数据稳妥</span><span class="i18n-en">Rock-Solid Reliability</span></h3><span class="ms-badge">1.0</span></div>
+          <p><span class="i18n-zh">反复验证换版本不丢笔记、断网多端编辑不覆盖、无障碍读屏与大字体体验，同时提供更省心的安装渠道。</span><span class="i18n-en">Zero lost notes across upgrades or offline edits, full accessibility polish, and easier installation channels.</span></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="stage-block">
+      <div class="stage-head">
+        <h2><span class="i18n-zh">第二阶段 · 把「听、读、记」做到极致</span><span class="i18n-en">Stage 2 · Going Deeper</span></h2>
+      </div>
+      <div class="ms-grid">
+        <div class="ms-card">
+          <div class="ms-head"><h3><span class="i18n-zh">逐词高亮与边听边盲划</span><span class="i18n-en">Word-Level Follow &amp; Eyes-Free Highlights</span></h3></div>
+          <p><span class="i18n-zh">听书时不用掏出手机看屏幕，按一下耳机键就能把刚才那一句划下来；支持听外文原声对照中文译文、单句跟读对比，生词本里还能回放书里那一句原声。</span><span class="i18n-en">Press your headphone button to highlight the sentence you just heard without looking at a screen; listen in the original language beside translations and replay vocabulary in context.</span></p>
+        </div>
+        <div class="ms-card">
+          <div class="ms-head"><h3><span class="i18n-zh">让读过的书真正留下来</span><span class="i18n-en">Remembering What You Read</span></h3></div>
+          <p><span class="i18n-zh">读完一本书后，自动把你的划线、想法、生词与收听时长排成清爽的「一本书的一页」留作纪念；支持按意思在全书库搜索旧笔记，也把纸书手记做得更顺手。</span><span class="i18n-en">A clean single-page summary of your highlights, thoughts, and words when you finish a book—plus meaning-based search across all your notes and richer paper-book logs.</span></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="stage-block">
+      <div class="stage-head">
+        <h2><span class="i18n-zh">第三阶段 · 陪你去到更多地方</span><span class="i18n-en">Stage 3 · More Places to Read</span></h2>
+      </div>
+      <div class="ms-grid">
+        <div class="ms-card">
+          <div class="ms-head"><h3><span class="i18n-zh">车载、手表、小组件与墨水屏</span><span class="i18n-en">Car, Watch, Widgets &amp; E-Ink</span></h3></div>
+          <p><span class="i18n-zh">开车时支持 CarPlay 与 Android Auto 接着听，抬腕用手表切句划线，桌面小组件安静展示今天的一条旧划线，还有专为墨水屏准备的无动画界面。</span><span class="i18n-en">CarPlay &amp; Android Auto for drives, watch remote for skipping and marking, calm desktop widgets, and a dedicated zero-animation e-ink interface.</span></p>
+        </div>
+        <div class="ms-card">
+          <div class="ms-head"><h3><span class="i18n-zh">上架应用商店 · Windows 与 Linux 桌面版</span><span class="i18n-en">App Stores · Windows &amp; Linux</span></h3></div>
+          <p><span class="i18n-zh">让更多人不用折腾安装包就能一键装上语阅，并把同样安静顺手的阅读与同步体验带到 Windows 与 Linux 电脑。</span><span class="i18n-en">One-click store installs without compromising openness, alongside Windows and Linux desktop apps synced seamlessly with your phone.</span></p>
+        </div>
+      </div>
+    </section>
+
+    <div class="pledge-note" style="margin-top:36px">
+      <blockquote>
+        <span class="i18n-zh">“永远不做：账号系统、自己的服务器、收集数据、广告、书城、推荐流、社交。不是做不了，是做了就不是语阅了。”</span>
+        <span class="i18n-en">“Never building: accounts, our own servers, telemetry, ads, a bookstore, feeds, or social networks. Not because we can’t—because then it wouldn’t be Yuyue.”</span>
+      </blockquote>
+      <p><span class="i18n-zh">你有特别期待的能力？欢迎随时在 <a href="/support/">帮助与反馈</a> 告诉我们。</span><span class="i18n-en">Have a wish or suggestion? Let us know on the <a href="/support/">Support page</a>.</span></p>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="col">
+      <div class="footer-meta" style="margin-top:0;padding-top:0;border-top:none">
+        <span>© 2026 <span class="i18n-zh">语阅 Yuyue</span><span class="i18n-en">Yuyue 语阅</span></span>
+        <span style="display:flex;gap:16px">
+          <a href="/"><span class="i18n-zh">首页</span><span class="i18n-en">Home</span></a>
+          <a href="/changelog/"><span class="i18n-zh">更新</span><span class="i18n-en">Updates</span></a>
+          <a href="/download/"><span class="i18n-zh">下载</span><span class="i18n-en">Download</span></a>
+        </span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/site.js" defer></script>
+</body>
+</html>

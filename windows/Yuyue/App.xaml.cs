@@ -1,0 +1,493 @@
+using Microsoft.UI.Xaml;
+using Yuyue.Audiobook;
+using Yuyue.Core;
+using Yuyue.Pdf;
+using Yuyue.Podcast;
+using Yuyue.Reader;
+using Yuyue.Settings;
+using Yuyue.Shelf;
+
+namespace Yuyue;
+
+public partial class App : Application
+{
+    public static App CurrentApp => (App)Current;
+
+    public LibraryService Library { get; private set; } = null!;
+
+    private ShelfWindow? _shelfWindow;
+    private SettingsWindow? _settingsWindow;
+    private readonly Dictionary<string, ReaderWindow> _readerWindows = new();
+    private readonly Dictionary<string, PdfReaderWindow> _pdfWindows = new();
+    private readonly Dictionary<string, AudiobookWindow> _audioWindows = new();
+    private readonly Dictionary<string, PodcastReaderWindow> _podcastWindows = new();
+    private DispatcherTimer? _syncTimer;
+    private object? _activeAudioClaimant;
+    private Action? _pauseActiveAudio;
+
+    /// <summary>
+    /// 1:1 <c>NowPlaying.swift</c> (<c>yyAudioClaimed</c>): whenever any reader, PDF, audiobook, or podcast engine
+    /// starts speaking/playing, any previously playing engine yields and pauses cleanly.
+    /// </summary>
+    public void ClaimAudioPlayback(object claimant, Action pauseCallback)
+    {
+        if (_activeAudioClaimant is not null && !ReferenceEquals(_activeAudioClaimant, claimant))
+        {
+            try { _pauseActiveAudio?.Invoke(); } catch { }
+        }
+        _activeAudioClaimant = claimant;
+        _pauseActiveAudio = pauseCallback;
+    }
+
+    public App()
+    {
+        InitializeComponent();
+        UnhandledException += OnUnhandledException;
+    }
+
+    protected override void OnLaunched(LaunchActivatedEventArgs args)
+    {
+        Library = new LibraryService();
+        ApplyAccentResources();
+
+        Library.Sync.LibraryChanged += () => _shelfWindow?.DispatcherQueue.TryEnqueue(() => _shelfWindow.RefreshBooks());
+        Library.Sync.StatusChanged += () => _shelfWindow?.DispatcherQueue.TryEnqueue(() => _shelfWindow.UpdateSyncFooter());
+        Library.WatchedFolder.Imported += () => _shelfWindow?.DispatcherQueue.TryEnqueue(() => _shelfWindow.RefreshBooks());
+
+        var cliArgs = Environment.GetCommandLineArgs();
+        bool startBackground = cliArgs.Any(a => a == "--background");
+
+        var uiQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        Library.SystemIntegration.ShowShelfCallback = () => uiQueue.TryEnqueue(ShowShelf);
+        Library.SystemIntegration.OpenSettingsCallback = () => uiQueue.TryEnqueue(() => OpenSettings("general"));
+        Library.SystemIntegration.PlayPodcastIssueCallback = id => uiQueue.TryEnqueue(() => OpenPodcastIssue(id));
+        Library.SystemIntegration.ExitAppCallback = () => uiQueue.TryEnqueue(() =>
+        {
+            Library.Dispose();
+            Environment.Exit(0);
+        });
+
+        if (startBackground)
+            Library.SystemIntegration.EnsureTrayVisible(forceVisible: true);
+        else
+            ShowShelf();
+
+        // Background auto-sync (startup + every 5 minutes when enabled) & 24h silent update check
+        if (Library.Sync.IsEnabled) _ = Library.Sync.SyncNowAsync();
+        _ = Library.Updates.CheckForUpdatesAsync(manual: false);
+        _syncTimer = new DispatcherTimer { Interval = System.TimeSpan.FromMinutes(5) };
+        _syncTimer.Tick += (_, _) => { if (Library.Sync.IsEnabled) _ = Library.Sync.SyncNowAsync(); };
+        _syncTimer.Start();
+
+        var files = new List<string>();
+        bool openSettings = false;
+        string? settingsPage = null;
+        string? shelfTab = null;
+#if DEBUG
+        bool seedDemo = false;
+        string? debugOpenQuery = null;
+        string? debugPanel = null;
+        bool debugListenBar = false;
+        uint? debugSection = null;
+#endif
+        for (int i = 1; i < cliArgs.Length; i++)
+        {
+            if (cliArgs[i] == "--library") { i++; continue; }
+            if (cliArgs[i] == "--background") continue;
+            if (cliArgs[i] == "--tab" && i + 1 < cliArgs.Length) { shelfTab = cliArgs[++i]; continue; }
+#if DEBUG
+            if (cliArgs[i] == "--seed-demo") { seedDemo = true; continue; }
+            if (cliArgs[i] == "--open" && i + 1 < cliArgs.Length) { debugOpenQuery = cliArgs[++i]; continue; }
+            if (cliArgs[i] == "--section" && i + 1 < cliArgs.Length && uint.TryParse(cliArgs[++i], out var ds)) { debugSection = ds; continue; }
+            if (cliArgs[i] == "--panel" && i + 1 < cliArgs.Length) { debugPanel = cliArgs[++i]; continue; }
+            if (cliArgs[i] == "--listen-bar") { debugListenBar = true; continue; }
+#endif
+            if (cliArgs[i] == "--settings")
+            {
+                openSettings = true;
+                if (i + 1 < cliArgs.Length && !cliArgs[i + 1].StartsWith("-") && !File.Exists(cliArgs[i + 1]))
+                {
+                    settingsPage = cliArgs[++i];
+                }
+                continue;
+            }
+            if (File.Exists(cliArgs[i])) files.Add(cliArgs[i]);
+        }
+
+#if DEBUG
+        if (seedDemo) SeedDemoLibrary();
+#endif
+
+        if (files.Count > 0 && _shelfWindow is not null)
+        {
+            _ = _shelfWindow.ImportPathsAsync(files, openFirst: true);
+        }
+#if DEBUG
+        else if (!string.IsNullOrEmpty(debugOpenQuery))
+        {
+            var match = Library.GetKeptBooks().FirstOrDefault(b =>
+                b.Title.Contains(debugOpenQuery, StringComparison.OrdinalIgnoreCase) ||
+                b.Id.Contains(debugOpenQuery, StringComparison.OrdinalIgnoreCase) ||
+                b.Authors.Any(a => a.Contains(debugOpenQuery, StringComparison.OrdinalIgnoreCase)) ||
+                (debugOpenQuery.Equals("hlm", StringComparison.OrdinalIgnoreCase) && b.Authors.Any(a => a.Contains("Cao", StringComparison.OrdinalIgnoreCase))));
+            if (match is not null)
+            {
+                OpenBook(match.Id, section: debugSection);
+                if (_readerWindows.TryGetValue(match.Id, out var rwin))
+                    rwin.ConfigureDebugView(debugPanel, debugListenBar);
+            }
+        }
+#endif
+        else if (Library.Prefs.ReopenLast)
+        {
+            var last = Library.GetShelfBooks()
+                .Where(b => b.OpenedAt is not null)
+                .OrderByDescending(b => b.OpenedAt)
+                .FirstOrDefault();
+            if (last is not null) OpenBook(last.Id);
+        }
+
+        if (shelfTab is not null)
+        {
+            _shelfWindow?.SwitchTab(shelfTab);
+        }
+
+        if (openSettings)
+        {
+            OpenSettings(settingsPage ?? "general");
+        }
+
+#if DEBUG
+        if (Environment.GetEnvironmentVariable("YUYUE_DUMP_WINDOW") is string dumpWinPath && !string.IsNullOrEmpty(dumpWinPath))
+        {
+            _ = DumpActiveWindowForDebugAsync(dumpWinPath);
+        }
+#endif
+    }
+
+#if DEBUG
+    private async Task DumpActiveWindowForDebugAsync(string path)
+    {
+        await Task.Delay(1800);
+        UIElement? target = _settingsWindow?.Content
+            ?? _audioWindows.Values.LastOrDefault()?.Content
+            ?? _pdfWindows.Values.LastOrDefault()?.Content
+            ?? _readerWindows.Values.LastOrDefault()?.Content
+            ?? _shelfWindow?.Content;
+        if (target is not null)
+        {
+            try { await QuoteShareDialog.SaveElementPngAsync(target, path); } catch { }
+        }
+    }
+#endif
+
+#if DEBUG
+    private void SeedDemoLibrary()
+    {
+        if (Library.GetShelfBooks().Count > 0) return;
+        string? repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", ".."));
+        string fixtures = Path.Combine(repoRoot, "fixtures", "books");
+        if (!Directory.Exists(fixtures)) fixtures = @"c:\Users\PC\Desktop\yuyue\fixtures\books";
+        if (!Directory.Exists(fixtures)) return;
+
+        string? hlmId = null, gatsbyId = null, prideId = null, beiyingId = null;
+        foreach (var file in new[] { "hongloumeng.epub", "great-gatsby.epub", "pride-and-prejudice.epub", "beiying.epub", "sample.pdf" })
+        {
+            string full = Path.Combine(fixtures, file);
+            if (!File.Exists(full)) continue;
+            try
+            {
+                var b = Library.ImportBook(full);
+                if (file.StartsWith("hongloumeng")) hlmId = b.Id;
+                else if (file.StartsWith("great-gatsby")) gatsbyId = b.Id;
+                else if (file.StartsWith("pride")) prideId = b.Id;
+                else if (file.StartsWith("beiying")) beiyingId = b.Id;
+                else Library.SetStatus(b.Id, ReadingStatus.Finished);
+            }
+            catch { }
+        }
+
+        if (beiyingId is not null) Library.SetStatus(beiyingId, ReadingStatus.Finished);
+        if (prideId is not null) Library.SetStatus(prideId, ReadingStatus.Want);
+
+        uint PickProseSection(string id, double targetRatio)
+        {
+            var d = Library.GetBookDetail(id);
+            int start = Math.Clamp((int)Math.Round(d.Sections.Length * targetRatio), 0, Math.Max(0, d.Sections.Length - 1));
+            for (int offset = 0; offset < d.Sections.Length; offset++)
+            {
+                uint cand = (uint)((start + offset) % Math.Max(1, d.Sections.Length));
+                var sents = Library.GetSpokenSentences(id, cand);
+                if (sents.Count >= 10 && sents.Sum(s => s.Length) >= 900) return cand;
+            }
+            return (uint)start;
+        }
+
+        if (gatsbyId is not null)
+        {
+            Library.SetStatus(gatsbyId, ReadingStatus.Reading);
+            uint gSec = PickProseSection(gatsbyId, 0.24);
+            Library.SaveProgress(gatsbyId, gSec, 280);
+            Library.AddTime(gatsbyId, gSec, 1260, 420);
+            try
+            {
+                Library.AddWord("vulnerable", "/ˈvʌlnərəbl/", "adj. 易受伤害的；脆弱的", gatsbyId, gSec, 0, "In my younger and more vulnerable years my father gave me some advice.");
+                var w2 = Library.AddWord("consequence", "/ˈkɒnsɪkwəns/", "n. 结果；重要性", gatsbyId, gSec, 2, "Reserving judgments is a matter of infinite hope.");
+                Library.SetWordKnown(w2.Word, true);
+            }
+            catch { }
+        }
+
+        if (hlmId is not null)
+        {
+            Library.SetStatus(hlmId, ReadingStatus.Reading);
+            uint sec = PickProseSection(hlmId, 0.36);
+            Library.SaveProgress(hlmId, sec, 0);
+            Library.AddTime(hlmId, sec, 2400, 900);
+            try
+            {
+                var sents = Library.GetSpokenSentences(hlmId, sec);
+                if (sents.Count >= 5)
+                {
+                    string s0 = sents[1];
+                    string s1 = sents[2];
+                    string s2 = sents[4];
+                    Library.AddMark(hlmId, sec, new TextPoint(1, 0), new TextPoint(1, (uint)Math.Min(28, s0.Length)), s0[..Math.Min(28, s0.Length)], MarkStyle.Yellow, null);
+                    Library.AddMark(hlmId, sec, new TextPoint(2, 0), new TextPoint(2, (uint)Math.Min(32, s1.Length)), s1[..Math.Min(32, s1.Length)], MarkStyle.Wave, "所有的伏笔都在不经意的闲笔里悄然种下。");
+                    Library.AddMark(hlmId, sec, new TextPoint(4, 0), new TextPoint(4, (uint)Math.Min(26, s2.Length)), s2[..Math.Min(26, s2.Length)], MarkStyle.Pink, "读懂热闹很容易，读出苍凉却要走很远的路。");
+                }
+            }
+            catch { }
+        }
+
+        try
+        {
+            var c1 = Library.CreateCollection("文学经典", hlmId);
+            if (beiyingId is not null) Library.SetInCollection(c1.Id, beiyingId, true);
+            var c2 = Library.CreateCollection("英文原版", gatsbyId);
+            if (prideId is not null) Library.SetInCollection(c2.Id, prideId, true);
+            Library.CreateCollection("睡前读物", beiyingId);
+            Library.Prefs.PinnedCollectionIds = [c1.Id, c2.Id];
+            Library.SavePrefs();
+
+            var studioBooks = new[] { hlmId, gatsbyId }.Where(x => x is not null).Cast<string>().ToArray();
+            if (studioBooks.Length > 0)
+            {
+                var brief = Library.Core.BuildStudioBrief(StudioKind.WeeklyDigest, studioBooks, 8, null);
+                var draft = Library.Core.FinalizeStudioScript(brief, "");
+                Library.Core.PodcastSaveStudioIssue(StudioKind.WeeklyDigest, draft, studioBooks, "zh-Hans");
+            }
+        }
+        catch { }
+
+        _shelfWindow?.RefreshBooks();
+    }
+#endif
+
+    public void ShowShelf()
+    {
+        if (_shelfWindow is null)
+        {
+            _shelfWindow = new ShelfWindow(Library);
+            _shelfWindow.Closed += (_, _) =>
+            {
+                _shelfWindow = null;
+                // Windows desktop habit: closing the main shelf window cleanly closes settings if no reader is open
+                if (_readerWindows.Count == 0 && _pdfWindows.Count == 0 && _audioWindows.Count == 0 && _podcastWindows.Count == 0)
+                    _settingsWindow?.Close();
+            };
+        }
+        _shelfWindow.Activate();
+    }
+
+    public void OpenPodcastIssue(string issueId)
+    {
+        ShowShelf();
+        _shelfWindow?.OpenPodcastInline(issueId);
+    }
+
+    public void OpenBook(string bookId, bool autoListen = false, uint? section = null, int? sentence = null)
+    {
+        if (_audioWindows.TryGetValue(bookId, out var existingAudio))
+        {
+            existingAudio.Activate();
+            return;
+        }
+
+        if (_pdfWindows.TryGetValue(bookId, out var existingPdf))
+        {
+            existingPdf.Activate();
+            if (sentence is int page) existingPdf.JumpToPage(page);
+            if (autoListen) existingPdf.TriggerListen();
+            return;
+        }
+
+        if (_readerWindows.TryGetValue(bookId, out var existing))
+        {
+            existing.Activate();
+            if (section is uint s) existing.JumpTo(s, sentence ?? 0);
+            if (autoListen) existing.TriggerListen();
+            return;
+        }
+
+        BookFormat fmt = BookFormat.Epub;
+        string knownTitle = "书籍";
+        try
+        {
+            var found = Library.GetKeptBooks().FirstOrDefault(b => b.Id == bookId);
+            if (found is not null)
+            {
+                fmt = found.Format;
+                knownTitle = found.Title;
+            }
+            else
+            {
+                var det = Library.GetBookDetail(bookId);
+                fmt = det.Summary.Format;
+                knownTitle = det.Summary.Title;
+            }
+        }
+        catch { }
+
+        if (!ReaderRecapAndSleepHelper.TryValidateBookOpen(Library, bookId, fmt, out string failTitle, out string failDetail))
+        {
+            ShowShelf();
+            if (_shelfWindow is not null)
+            {
+                _ = _shelfWindow.DispatcherQueue.TryEnqueue(async () =>
+                {
+                    // Yield one frame so WindowXamlRoot is ready if ShelfWindow was just created
+                    await Task.Delay(50);
+                    if (_shelfWindow?.WindowXamlRoot is XamlRoot xr)
+                    {
+                        await ReaderRecapAndSleepHelper.ShowBookOpenFailureAsync(
+                            _shelfWindow,
+                            xr,
+                            Library,
+                            knownTitle,
+                            failTitle,
+                            failDetail,
+                            reimportedId =>
+                            {
+                                _shelfWindow?.RefreshBooks();
+                                OpenBook(reimportedId, autoListen);
+                                return Task.CompletedTask;
+                            });
+                    }
+                });
+            }
+            return;
+        }
+
+        if (fmt == BookFormat.Audio)
+        {
+            var audioWin = new AudiobookWindow(Library, bookId, autoPlay: autoListen);
+            _audioWindows[bookId] = audioWin;
+            audioWin.Closed += (_, _) =>
+            {
+                _audioWindows.Remove(bookId);
+                _shelfWindow?.RefreshBooks();
+            };
+            audioWin.Activate();
+            return;
+        }
+
+        if (fmt == BookFormat.Pdf)
+        {
+            uint? startPage = sentence is int p && p >= 0 ? (uint)p : null;
+            var pdfWin = new PdfReaderWindow(Library, bookId, autoListen, startPage);
+            _pdfWindows[bookId] = pdfWin;
+            pdfWin.Closed += (_, _) =>
+            {
+                _pdfWindows.Remove(bookId);
+                _shelfWindow?.RefreshBooks();
+            };
+            pdfWin.Activate();
+            return;
+        }
+
+        var win = new ReaderWindow(Library, bookId, autoListen, section, sentence);
+        _readerWindows[bookId] = win;
+        win.Closed += (_, _) =>
+        {
+            _readerWindows.Remove(bookId);
+            _shelfWindow?.RefreshBooks();
+        };
+        win.Activate();
+    }
+
+    public void OpenSettings(string? initialPage = null)
+    {
+        if (_settingsWindow is null)
+        {
+            _settingsWindow = new SettingsWindow(Library, initialPage ?? "general");
+            _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+        }
+        else if (initialPage is not null)
+        {
+            _settingsWindow.NavigateTo(initialPage);
+        }
+        _settingsWindow.Activate();
+    }
+
+    public void BroadcastAppearanceChanged()
+    {
+        ApplyAccentResources();
+        _shelfWindow?.ApplyAppearance();
+        foreach (var r in _readerWindows.Values) r.ApplyTintAndChrome();
+        foreach (var p in _pdfWindows.Values) p.ApplyTintAndChrome();
+        foreach (var a in _audioWindows.Values) a.ApplyAppearance();
+        foreach (var pod in _podcastWindows.Values) pod.ApplyAppearance();
+        _settingsWindow?.ApplyAppearance();
+    }
+
+    public void BroadcastReaderSettingsChanged()
+    {
+        foreach (var r in _readerWindows.Values) r.ReloadReaderSettingsFromCore();
+    }
+
+    public void BroadcastVoiceChanged()
+    {
+        foreach (var r in _readerWindows.Values) r.ReloadVoicePrefs();
+        foreach (var p in _pdfWindows.Values) p.ReloadVoicePrefs();
+    }
+
+    public void BroadcastForeignPrefsChanged()
+    {
+        foreach (var r in _readerWindows.Values) r.ReloadForeignPrefs();
+    }
+
+    public void ApplyAccentResources()
+    {
+        var tint = Library.Prefs.Tint;
+        string[] fillKeys =
+        [
+            "YYAccentBrush",
+            "AccentFillColorDefaultBrush", "AccentFillColorSecondaryBrush", "AccentFillColorTertiaryBrush",
+            "SliderTrackValueFill", "SliderTrackValueFillPointerOver", "SliderTrackValueFillPressed",
+            "SliderThumbBackground", "SliderThumbBackgroundPointerOver", "SliderThumbBackgroundPressed",
+            "ToggleSwitchFillOn", "ToggleSwitchFillOnPointerOver", "ToggleSwitchFillOnPressed",
+        ];
+
+        void UpdateDict(ResourceDictionary dict, Design.YYTintColors c)
+        {
+            foreach (var k in fillKeys)
+            {
+                if (dict.TryGetValue(k, out var v) && v is Microsoft.UI.Xaml.Media.SolidColorBrush b) b.Color = c.Fill;
+            }
+            if (dict.TryGetValue("YYAccentSoftBrush", out var s) && s is Microsoft.UI.Xaml.Media.SolidColorBrush soft) soft.Color = c.Soft;
+            if (dict.TryGetValue("YYAccentEdgeBrush", out var e) && e is Microsoft.UI.Xaml.Media.SolidColorBrush edge) edge.Color = c.Edge;
+        }
+
+        UpdateDict(Resources, tint.Light);
+        if (Resources.ThemeDictionaries.TryGetValue("Light", out var l) && l is ResourceDictionary ld) UpdateDict(ld, tint.Light);
+        if (Resources.ThemeDictionaries.TryGetValue("Dark", out var d) && d is ResourceDictionary dd) UpdateDict(dd, tint.Dark);
+    }
+
+    public void NotifyShelfRefresh() => _shelfWindow?.RefreshBooks();
+
+    private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+    {
+        System.Diagnostics.Debug.WriteLine($"[Yuyue Unhandled] {e.Exception}");
+    }
+}

@@ -1,0 +1,4 @@
+[bindings.csharp]
+namespace = "Yuyue.Core"
+cdylib_name = "yuyue_core"
+access_modifier = "public"

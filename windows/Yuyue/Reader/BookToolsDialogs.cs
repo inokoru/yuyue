@@ -1,0 +1,1347 @@
+using Microsoft.UI;
+using Microsoft.UI.Text;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Documents;
+using Microsoft.UI.Xaml.Media;
+using Windows.UI;
+using Windows.UI.Text;
+using Yuyue.Core;
+using Yuyue.Design;
+
+namespace Yuyue.Reader;
+
+/// <summary>
+/// 1:1 alignment with macOS <c>ReplaceRules.swift</c> (<c>替换规则</c>) and
+/// <c>TxtLayout.swift</c> (<c>编码和目录</c>):
+/// live 250ms debounced rule preview with strikethrough before/after sample,
+/// midpoint reordering, 5-second undo, cross-scope banner, TXT long-chapter anomaly warning &amp; jump.
+/// </summary>
+public static class BookToolsDialogs
+{
+    public static async Task<bool> ShowReplaceRulesDialogAsync(
+        XamlRoot xamlRoot, LibraryService library, string bookId, string bookTitle)
+    {
+        bool anyChanged = false;
+        bool scopeBook = true;
+        string subMode = "list"; // list | edit | common
+        ReplaceRule? editingRule = null;
+        List<ReplaceRule> removedRules = [];
+        Guid removedToken = Guid.Empty;
+        CancellationTokenSource? previewCts = null;
+
+        bool dark = xamlRoot.Content is FrameworkElement fe && ThemeHelper.IsDark(fe.ActualTheme);
+        var p = ThemeHelper.Palette(dark);
+        var tint = ThemeHelper.TintColors(library.Prefs.Tint, dark);
+
+        BookDetail? detail = null;
+        try { detail = library.GetBookDetail(bookId); } catch { }
+
+        ContentDialog? dlgRef = null;
+        var host = new Grid { Width = 440 };
+
+        void TriggerUndoExpiry(Guid token)
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(5000);
+                host.DispatcherQueue?.TryEnqueue(() =>
+                {
+                    if (removedToken == token && removedRules.Count > 0)
+                    {
+                        removedRules.Clear();
+                        if (subMode == "list") RenderHost();
+                    }
+                });
+            });
+        }
+
+        void RenderHost()
+        {
+            previewCts?.Cancel();
+            host.Children.Clear();
+            if (subMode == "edit" && editingRule is not null)
+                host.Children.Add(BuildEditorView(editingRule));
+            else if (subMode == "common")
+                host.Children.Add(BuildCommonView());
+            else
+                host.Children.Add(BuildListView());
+        }
+
+        UIElement BuildListView()
+        {
+            if (dlgRef is not null)
+            {
+                dlgRef.Title = $"替换规则 · {bookTitle}";
+                dlgRef.CloseButtonText = "好了";
+            }
+
+            ReplaceRule[] mine;
+            ReplaceRule[] shared;
+            try { mine = library.Core.ReplaceRules(bookId); } catch { mine = []; }
+            try { shared = library.Core.ReplaceRules(null); } catch { shared = []; }
+            var rules = scopeBook ? mine : shared;
+
+            var root = new StackPanel { Spacing = 10 };
+
+            // Segmented scope bar with counts
+            var segGrid = new Grid { ColumnSpacing = 3 };
+            segGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            segGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            Button MakeScopeSeg(int col, bool isBook, string label, int count)
+            {
+                bool on = scopeBook == isBook;
+                var b = new Button
+                {
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    Height = 28,
+                    MinHeight = 28,
+                    CornerRadius = new CornerRadius(8),
+                    BorderThickness = new Thickness(0),
+                    Background = on ? ThemeHelper.Brush(p.Card) : new SolidColorBrush(Colors.Transparent),
+                    Foreground = ThemeHelper.Brush(on ? p.T1 : p.T2),
+                    FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal,
+                    FontSize = 12,
+                    UseSystemFocusVisuals = false,
+                    Content = count > 0 ? $"{label} ({count})" : label,
+                };
+                b.Click += (_, _) => { scopeBook = isBook; RenderHost(); };
+                Grid.SetColumn(b, col);
+                return b;
+            }
+            segGrid.Children.Add(MakeScopeSeg(0, true, "这本书", mine.Length));
+            segGrid.Children.Add(MakeScopeSeg(1, false, "全部书", shared.Length));
+            root.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(10),
+                Background = ThemeHelper.Brush(p.Inset),
+                Padding = new Thickness(3),
+                Child = segGrid,
+            });
+
+            // Group card
+            var groupStack = new StackPanel { Spacing = 0 };
+            if (rules.Length == 0)
+            {
+                groupStack.Children.Add(new TextBlock
+                {
+                    Text = scopeBook ? "这本书还没有自己的规则" : "还没有用于全部书的规则",
+                    FontSize = 11.5,
+                    Foreground = ThemeHelper.Brush(p.T3),
+                    Margin = new Thickness(12, 14, 12, 14),
+                });
+            }
+
+            for (int i = 0; i < rules.Length; i++)
+            {
+                if (i > 0)
+                    groupStack.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(12, 0, 12, 0) });
+
+                int idx = i;
+                var rule = rules[i];
+                var row = new Grid { ColumnSpacing = 6, Padding = new Thickness(12, 9, 10, 9) };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var infoStack = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
+                infoStack.Children.Add(new TextBlock
+                {
+                    Text = rule.Find,
+                    FontFamily = new FontFamily(rule.Regex ? YYFontFamily.Mono.WindowsFamily() : YYFontFamily.Sans.WindowsFamily()),
+                    FontSize = rule.Regex ? 11.5 : 12.5,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = ThemeHelper.Brush(rule.Enabled ? p.T1 : p.T3),
+                    MaxLines = 1,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                });
+
+                var subLine = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
+                subLine.Children.Add(new TextBlock
+                {
+                    Text = string.IsNullOrEmpty(rule.Replace) ? "→ 删掉" : $"→ {rule.Replace}",
+                    FontSize = 11,
+                    Foreground = ThemeHelper.Brush(rule.Enabled ? p.T2 : p.T3),
+                    MaxWidth = 170,
+                    MaxLines = 1,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    VerticalAlignment = VerticalAlignment.Center,
+                });
+                if (rule.Regex)
+                {
+                    subLine.Children.Add(new Border
+                    {
+                        CornerRadius = new CornerRadius(4),
+                        Background = ThemeHelper.Brush(p.Inset),
+                        Padding = new Thickness(5, 1, 5, 1),
+                        Child = new TextBlock { Text = "正则", FontSize = 9.5, Foreground = ThemeHelper.Brush(p.T2) },
+                    });
+                }
+                if (rule.SpeechOnly)
+                {
+                    subLine.Children.Add(new Border
+                    {
+                        CornerRadius = new CornerRadius(4),
+                        Background = ThemeHelper.Brush(p.Inset),
+                        Padding = new Thickness(5, 1, 5, 1),
+                        Child = new TextBlock { Text = "只改朗读", FontSize = 9.5, Foreground = ThemeHelper.Brush(p.T2) },
+                    });
+                }
+                infoStack.Children.Add(subLine);
+
+                var editBtn = new Button
+                {
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Left,
+                    Padding = new Thickness(0),
+                    Background = new SolidColorBrush(Colors.Transparent),
+                    BorderThickness = new Thickness(0),
+                    UseSystemFocusVisuals = false,
+                    Content = infoStack,
+                };
+                editBtn.Click += (_, _) =>
+                {
+                    editingRule = rule;
+                    subMode = "edit";
+                    RenderHost();
+                };
+                row.Children.Add(editBtn);
+
+                // Reorder up / down buttons (1:1 ReplaceRules.swift:268-282 midpoint order)
+                if (rules.Length > 1)
+                {
+                    var orderBtns = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+                    var upBtn = new Button { Style = (Style)Application.Current.Resources["YYIconButtonStyle"], Content = "↑", Width = 22, Height = 24, FontSize = 11, IsEnabled = idx > 0 };
+                    upBtn.Click += (_, _) =>
+                    {
+                        MoveRule(rules, idx, idx - 1);
+                        anyChanged = true;
+                        RenderHost();
+                    };
+                    var downBtn = new Button { Style = (Style)Application.Current.Resources["YYIconButtonStyle"], Content = "↓", Width = 22, Height = 24, FontSize = 11, IsEnabled = idx < rules.Length - 1 };
+                    downBtn.Click += (_, _) =>
+                    {
+                        MoveRule(rules, idx, idx + 1);
+                        anyChanged = true;
+                        RenderHost();
+                    };
+                    orderBtns.Children.Add(upBtn);
+                    orderBtns.Children.Add(downBtn);
+                    Grid.SetColumn(orderBtns, 1);
+                    row.Children.Add(orderBtns);
+                }
+
+                var sw = new ToggleSwitch { IsOn = rule.Enabled, MinWidth = 0, OnContent = "", OffContent = "", VerticalAlignment = VerticalAlignment.Center };
+                sw.Toggled += (_, _) =>
+                {
+                    try { library.Core.SetReplaceRuleEnabled(rule.Id, sw.IsOn); anyChanged = true; RenderHost(); } catch { }
+                };
+                Grid.SetColumn(sw, 2);
+                row.Children.Add(sw);
+
+                var delBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources["YYIconButtonStyle"],
+                    Content = "✕",
+                    Width = 24,
+                    Height = 24,
+                    FontSize = 11,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                delBtn.Click += (_, _) =>
+                {
+                    try
+                    {
+                        library.Core.DeleteReplaceRule(rule.Id);
+                        anyChanged = true;
+                        removedRules = [rule];
+                        removedToken = Guid.NewGuid();
+                        TriggerUndoExpiry(removedToken);
+                        RenderHost();
+                    }
+                    catch { }
+                };
+                Grid.SetColumn(delBtn, 3);
+                row.Children.Add(delBtn);
+
+                var ctx = new MenuFlyout();
+                var editMi = new MenuFlyoutItem { Text = "编辑" };
+                editMi.Click += (_, _) => { editingRule = rule; subMode = "edit"; RenderHost(); };
+                var delMi = new MenuFlyoutItem { Text = "删掉", Foreground = ThemeHelper.Brush(p.Danger) };
+                delMi.Click += (_, _) => delBtn.Focus(FocusState.Programmatic);
+                delMi.Click += (_, _) =>
+                {
+                    try
+                    {
+                        library.Core.DeleteReplaceRule(rule.Id);
+                        anyChanged = true;
+                        removedRules = [rule];
+                        removedToken = Guid.NewGuid();
+                        TriggerUndoExpiry(removedToken);
+                        RenderHost();
+                    }
+                    catch { }
+                };
+                ctx.Items.Add(editMi);
+                ctx.Items.Add(delMi);
+                row.ContextFlyout = ctx;
+
+                groupStack.Children.Add(row);
+            }
+
+            // 5s inline undo row (1:1 ReplaceRules.swift:238-265)
+            if (removedRules.Count > 0)
+            {
+                groupStack.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(12, 0, 12, 0) });
+                var undoGrid = new Grid { Padding = new Thickness(12, 8, 12, 8), ColumnSpacing = 8 };
+                undoGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                undoGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                string msg = removedRules.Count == 1
+                    ? $"删掉了“{removedRules[0].Find} → {(string.IsNullOrEmpty(removedRules[0].Replace) ? "删掉" : removedRules[0].Replace)}”"
+                    : $"删掉了 {removedRules.Count} 条规则";
+                undoGrid.Children.Add(new TextBlock { Text = msg, FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
+                var undoBtn = new Button
+                {
+                    Background = new SolidColorBrush(Colors.Transparent),
+                    BorderThickness = new Thickness(0),
+                    Padding = new Thickness(6, 2, 6, 2),
+                    FontSize = 11.5,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = ThemeHelper.Brush(tint.Accent),
+                    Content = "撤销",
+                };
+                undoBtn.Click += (_, _) =>
+                {
+                    foreach (var r in removedRules)
+                    {
+                        try { library.Core.RestoreReplaceRule(r.Id); } catch { }
+                    }
+                    removedRules.Clear();
+                    anyChanged = true;
+                    RenderHost();
+                };
+                Grid.SetColumn(undoBtn, 1);
+                undoGrid.Children.Add(undoBtn);
+                groupStack.Children.Add(undoGrid);
+            }
+
+            // + 添加一条规则
+            groupStack.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(12, 0, 12, 0) });
+            var addRuleBtn = new Button
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Padding = new Thickness(12, 9, 12, 9),
+                Background = new SolidColorBrush(Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                FontSize = 12,
+                FontWeight = FontWeights.Medium,
+                Foreground = ThemeHelper.Brush(tint.Accent),
+                UseSystemFocusVisuals = false,
+                Content = "＋ 添加一条规则",
+            };
+            addRuleBtn.Click += (_, _) =>
+            {
+                editingRule = new ReplaceRule("", scopeBook ? bookId : null, "", "", false, false, true, 0);
+                subMode = "edit";
+                RenderHost();
+            };
+            groupStack.Children.Add(addRuleBtn);
+
+            var listScroll = new ScrollViewer
+            {
+                MaxHeight = 290,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = new Border
+                {
+                    CornerRadius = new CornerRadius(12),
+                    Background = ThemeHelper.Brush(p.Card),
+                    BorderBrush = ThemeHelper.Brush(p.Line),
+                    BorderThickness = new Thickness(1),
+                    Child = groupStack,
+                },
+            };
+            root.Children.Add(listScroll);
+
+            // Secondary card: 从常用规则里挑 + 全部书的 N 条也在生效 (1:1 ReplaceRules.swift:146-162)
+            var extraGroup = new StackPanel { Spacing = 0 };
+            var commonRowBtn = new Button
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Padding = new Thickness(12, 9, 12, 9),
+                Background = new SolidColorBrush(Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                UseSystemFocusVisuals = false,
+            };
+            var cg = new Grid();
+            cg.Children.Add(new TextBlock { Text = "＋ 从常用规则里挑", FontSize = 12, FontWeight = FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) });
+            cg.Children.Add(new TextBlock { Text = "网址水印、多余空行 ›", FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), HorizontalAlignment = HorizontalAlignment.Right });
+            commonRowBtn.Content = cg;
+            commonRowBtn.Click += (_, _) => { subMode = "common"; RenderHost(); };
+            extraGroup.Children.Add(commonRowBtn);
+
+            if (scopeBook && shared.Length > 0)
+            {
+                extraGroup.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(12, 0, 12, 0) });
+                var crossBtn = new Button
+                {
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    Padding = new Thickness(12, 9, 12, 9),
+                    Background = new SolidColorBrush(Colors.Transparent),
+                    BorderThickness = new Thickness(0),
+                    UseSystemFocusVisuals = false,
+                };
+                var xg = new Grid();
+                xg.Children.Add(new TextBlock { Text = $"全部书的 {shared.Length} 条也在生效", FontSize = 12, Foreground = ThemeHelper.Brush(p.T1) });
+                xg.Children.Add(new TextBlock { Text = "看看 ›", FontSize = 11, Foreground = ThemeHelper.Brush(tint.Accent), HorizontalAlignment = HorizontalAlignment.Right });
+                crossBtn.Content = xg;
+                crossBtn.Click += (_, _) => { scopeBook = false; RenderHost(); };
+                extraGroup.Children.Add(crossBtn);
+            }
+
+            root.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(12),
+                Background = ThemeHelper.Brush(p.Card),
+                BorderBrush = ThemeHelper.Brush(p.Line),
+                BorderThickness = new Thickness(1),
+                Child = extraGroup,
+            });
+
+            root.Children.Add(new TextBlock
+            {
+                Text = "规则从上往下依次执行。只改朗读的规则不动屏幕上的字，只改读出来的音。",
+                FontSize = 11,
+                Foreground = ThemeHelper.Brush(p.T3),
+                TextWrapping = TextWrapping.Wrap,
+            });
+
+            return root;
+        }
+
+        void MoveRule(ReplaceRule[] current, int fromIdx, int toIdx)
+        {
+            if (toIdx < 0 || toIdx >= current.Length || fromIdx == toIdx) return;
+            var list = current.ToList();
+            var moved = list[fromIdx];
+            list.RemoveAt(fromIdx);
+            list.Insert(toIdx, moved);
+
+            double? before = toIdx > 0 ? list[toIdx - 1].Order : null;
+            double? after = toIdx < list.Count - 1 ? list[toIdx + 1].Order : null;
+            double newOrder = (before, after) switch
+            {
+                (double b, double a) => (b + a) / 2.0,
+                (double b, null) => b + 1.0,
+                (null, double a) => a - 1.0,
+                _ => moved.Order,
+            };
+            try { library.Core.MoveReplaceRule(moved.Id, newOrder); } catch { }
+        }
+
+        // ---------- Sub-view: ReplaceRuleEditor with 250ms live preview ----------
+        UIElement BuildEditorView(ReplaceRule initial)
+        {
+            bool isNew = string.IsNullOrEmpty(initial.Id);
+            if (dlgRef is not null)
+            {
+                dlgRef.Title = isNew ? "添加规则" : "编辑规则";
+                dlgRef.CloseButtonText = "关闭";
+            }
+
+            var draft = initial;
+            var root = new StackPanel { Spacing = 10 };
+
+            var backBtn = new Button
+            {
+                Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+                Content = "‹ 返回规则列表",
+                Height = 26,
+                MinHeight = 26,
+                FontSize = 11.5,
+                HorizontalAlignment = HorizontalAlignment.Left,
+            };
+            backBtn.Click += (_, _) => { subMode = "list"; RenderHost(); };
+            root.Children.Add(backBtn);
+
+            var findBox = new TextBox
+            {
+                Header = "查找",
+                Text = draft.Find,
+                PlaceholderText = "要换掉的字",
+                FontFamily = new FontFamily(draft.Regex ? YYFontFamily.Mono.WindowsFamily() : YYFontFamily.Sans.WindowsFamily()),
+            };
+            var replaceBox = new TextBox
+            {
+                Header = "替换为",
+                Text = draft.Replace,
+                PlaceholderText = "留空就是删掉",
+                FontFamily = new FontFamily(draft.Regex ? YYFontFamily.Mono.WindowsFamily() : YYFontFamily.Sans.WindowsFamily()),
+            };
+            root.Children.Add(findBox);
+            root.Children.Add(replaceBox);
+
+            var optStack = new StackPanel { Spacing = 8 };
+            var regexRow = new Grid();
+            regexRow.Children.Add(new TextBlock { Text = "正则表达式", FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = ThemeHelper.Brush(p.T1) });
+            var regexSw = new ToggleSwitch { IsOn = draft.Regex, MinWidth = 0, OnContent = "", OffContent = "", HorizontalAlignment = HorizontalAlignment.Right };
+            regexRow.Children.Add(regexSw);
+            optStack.Children.Add(regexRow);
+
+            var whereRow = new Grid();
+            whereRow.Children.Add(new TextBlock { Text = "改哪里", FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = ThemeHelper.Brush(p.T1) });
+            var whereBtns = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, HorizontalAlignment = HorizontalAlignment.Right };
+            var bothBtn = new Button { Content = "显示和朗读", Height = 25, MinHeight = 25, FontSize = 11 };
+            var speechBtn = new Button { Content = "只改朗读", Height = 25, MinHeight = 25, FontSize = 11 };
+            whereBtns.Children.Add(bothBtn);
+            whereBtns.Children.Add(speechBtn);
+            whereRow.Children.Add(whereBtns);
+            optStack.Children.Add(whereRow);
+
+            var scopeRow = new Grid();
+            scopeRow.Children.Add(new TextBlock { Text = "用于", FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = ThemeHelper.Brush(p.T1) });
+            var scopeBtns = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, HorizontalAlignment = HorizontalAlignment.Right };
+            var thisBookBtn = new Button { Content = "这本书", Height = 25, MinHeight = 25, FontSize = 11 };
+            var allBookBtn = new Button { Content = "全部书", Height = 25, MinHeight = 25, FontSize = 11 };
+            scopeBtns.Children.Add(thisBookBtn);
+            scopeBtns.Children.Add(allBookBtn);
+            scopeRow.Children.Add(scopeBtns);
+            optStack.Children.Add(scopeRow);
+
+            root.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(12),
+                Background = ThemeHelper.Brush(p.Card),
+                BorderBrush = ThemeHelper.Brush(p.Line),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(12, 8, 12, 8),
+                Child = optStack,
+            });
+
+            // Live Preview Card (1:1 ReplaceRules.swift:520-578)
+            var previewHost = new StackPanel { Spacing = 6 };
+            root.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(12),
+                Background = ThemeHelper.Brush(p.Card),
+                BorderBrush = ThemeHelper.Brush(p.Line),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(12, 10, 12, 10),
+                Child = previewHost,
+            });
+
+            var errTb = new TextBlock { FontSize = 11.5, Foreground = ThemeHelper.Brush(p.Danger), Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
+            root.Children.Add(errTb);
+
+            var saveBtn = new Button
+            {
+                Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"],
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Height = 34,
+                Content = "保存",
+            };
+            root.Children.Add(saveBtn);
+
+            if (!isNew)
+            {
+                var delBtn = new Button
+                {
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Background = new SolidColorBrush(Colors.Transparent),
+                    BorderThickness = new Thickness(0),
+                    Foreground = ThemeHelper.Brush(p.Danger),
+                    FontSize = 11.5,
+                    Content = "删掉这条规则",
+                };
+                delBtn.Click += (_, _) =>
+                {
+                    try
+                    {
+                        library.Core.DeleteReplaceRule(draft.Id);
+                        anyChanged = true;
+                        removedRules = [draft];
+                        removedToken = Guid.NewGuid();
+                        TriggerUndoExpiry(removedToken);
+                        subMode = "list";
+                        RenderHost();
+                    }
+                    catch (Exception ex) { errTb.Text = ex.Message; errTb.Visibility = Visibility.Visible; }
+                };
+                root.Children.Add(delBtn);
+            }
+
+            void RefreshOptionPills()
+            {
+                bothBtn.Style = (Style)Application.Current.Resources[!draft.SpeechOnly ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
+                speechBtn.Style = (Style)Application.Current.Resources[draft.SpeechOnly ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
+                thisBookBtn.Style = (Style)Application.Current.Resources[draft.Book is not null ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
+                allBookBtn.Style = (Style)Application.Current.Resources[draft.Book is null ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
+                findBox.FontFamily = new FontFamily(draft.Regex ? YYFontFamily.Mono.WindowsFamily() : YYFontFamily.Sans.WindowsFamily());
+                replaceBox.FontFamily = new FontFamily(draft.Regex ? YYFontFamily.Mono.WindowsFamily() : YYFontFamily.Sans.WindowsFamily());
+            }
+
+            void RenderPreview(RulePreview? pv)
+            {
+                previewHost.Children.Clear();
+                saveBtn.IsEnabled = !string.IsNullOrEmpty(draft.Find) && string.IsNullOrEmpty(pv?.Error);
+
+                var top = new Grid();
+                if (!string.IsNullOrEmpty(pv?.Error))
+                {
+                    top.Children.Add(new TextBlock { Text = pv.Error, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.Danger), TextWrapping = TextWrapping.Wrap });
+                }
+                else if (pv is not null && !string.IsNullOrEmpty(draft.Find))
+                {
+                    string cntText = pv.Count == 0 ? "这本书里没有找到" : $"这本书里有 {pv.Count}{(pv.More ? "+" : "")} 处";
+                    top.Children.Add(new TextBlock { Text = cntText, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
+                    if (pv.First is RuleSample fst)
+                    {
+                        string? chap = fst.Section < (detail?.Sections.Length ?? 0) ? detail!.Sections[fst.Section].Title : null;
+                        string loc = string.IsNullOrWhiteSpace(chap) ? "第 1 处" : $"第 1 处 · {chap}";
+                        top.Children.Add(new TextBlock { Text = loc, FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3), HorizontalAlignment = HorizontalAlignment.Right, MaxWidth = 200, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
+                    }
+                }
+                else
+                {
+                    top.Children.Add(new TextBlock { Text = "预览", FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
+                }
+                previewHost.Children.Add(top);
+
+                if (pv?.First is RuleSample sample && string.IsNullOrEmpty(pv.Error))
+                {
+                    Grid MakeSampleRow(string label, bool isBefore)
+                    {
+                        var g = new Grid { ColumnSpacing = 8 };
+                        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                        g.Children.Add(new TextBlock { Text = label, FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3), Margin = new Thickness(0, 2, 0, 0) });
+
+                        var tb = new TextBlock
+                        {
+                            FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
+                            FontSize = 12,
+                            Foreground = ThemeHelper.Brush(p.T1),
+                            TextWrapping = TextWrapping.Wrap,
+                            LineHeight = 19,
+                        };
+                        if (!string.IsNullOrEmpty(sample.Lead)) tb.Inlines.Add(new Run { Text = sample.Lead });
+                        if (isBefore)
+                        {
+                            tb.Inlines.Add(new Run
+                            {
+                                Text = sample.Matched,
+                                Foreground = ThemeHelper.Brush(p.Danger),
+                                TextDecorations = TextDecorations.Strikethrough,
+                                FontWeight = FontWeights.SemiBold,
+                            });
+                        }
+                        else
+                        {
+                            tb.Inlines.Add(new Run
+                            {
+                                Text = string.IsNullOrEmpty(sample.Replaced) ? "（已删）" : sample.Replaced,
+                                Foreground = ThemeHelper.Brush(tint.Accent),
+                                FontWeight = FontWeights.SemiBold,
+                            });
+                        }
+                        if (!string.IsNullOrEmpty(sample.Tail)) tb.Inlines.Add(new Run { Text = sample.Tail });
+
+                        Grid.SetColumn(tb, 1);
+                        g.Children.Add(tb);
+                        return g;
+                    }
+
+                    previewHost.Children.Add(MakeSampleRow("改前", isBefore: true));
+                    previewHost.Children.Add(MakeSampleRow("改后", isBefore: false));
+                    if (draft.SpeechOnly)
+                    {
+                        previewHost.Children.Add(new TextBlock
+                        {
+                            Text = "屏幕上还是改前的样子，只有朗读按改后的读",
+                            FontSize = 10.5,
+                            Foreground = ThemeHelper.Brush(p.T3),
+                        });
+                    }
+                }
+                else if (string.IsNullOrEmpty(pv?.Error))
+                {
+                    previewHost.Children.Add(new TextBlock
+                    {
+                        Text = string.IsNullOrEmpty(draft.Find) ? "写好要查找的字，这里马上显示改前改后" : "没有可以预览的地方",
+                        FontSize = 11,
+                        Foreground = ThemeHelper.Brush(p.T3),
+                    });
+                }
+            }
+
+            void SchedulePreview(bool immediate = false)
+            {
+                previewCts?.Cancel();
+                var cts = new CancellationTokenSource();
+                previewCts = cts;
+                var snap = draft;
+                _ = Task.Run(async () =>
+                {
+                    if (!immediate)
+                    {
+                        try { await Task.Delay(250, cts.Token); } catch { return; }
+                    }
+                    if (cts.IsCancellationRequested) return;
+                    RulePreview? res = null;
+                    if (!string.IsNullOrEmpty(snap.Find))
+                    {
+                        try { res = library.Core.PreviewReplaceRule(bookId, snap); } catch { }
+                    }
+                    host.DispatcherQueue?.TryEnqueue(() =>
+                    {
+                        if (!cts.IsCancellationRequested) RenderPreview(res);
+                    });
+                });
+            }
+
+            findBox.TextChanged += (_, _) => { draft = draft with { Find = findBox.Text }; SchedulePreview(); };
+            replaceBox.TextChanged += (_, _) => { draft = draft with { Replace = replaceBox.Text }; SchedulePreview(); };
+            regexSw.Toggled += (_, _) => { draft = draft with { Regex = regexSw.IsOn }; RefreshOptionPills(); SchedulePreview(immediate: true); };
+            bothBtn.Click += (_, _) => { draft = draft with { SpeechOnly = false }; RefreshOptionPills(); SchedulePreview(immediate: true); };
+            speechBtn.Click += (_, _) => { draft = draft with { SpeechOnly = true }; RefreshOptionPills(); SchedulePreview(immediate: true); };
+            thisBookBtn.Click += (_, _) => { draft = draft with { Book = bookId }; RefreshOptionPills(); };
+            allBookBtn.Click += (_, _) => { draft = draft with { Book = null }; RefreshOptionPills(); };
+
+            saveBtn.Click += (_, _) =>
+            {
+                if (string.IsNullOrEmpty(draft.Find)) return;
+                try
+                {
+                    var saved = library.Core.SaveReplaceRule(draft);
+                    scopeBook = saved.Book is not null;
+                    anyChanged = true;
+                    subMode = "list";
+                    RenderHost();
+                }
+                catch (CoreException.Invalid inv) { errTb.Text = inv.detail; errTb.Visibility = Visibility.Visible; }
+                catch (Exception ex) { errTb.Text = ex.Message; errTb.Visibility = Visibility.Visible; }
+            };
+
+            RefreshOptionPills();
+            RenderPreview(null);
+            if (!string.IsNullOrEmpty(draft.Find)) SchedulePreview(immediate: true);
+
+            return root;
+        }
+
+        // ---------- Sub-view: Common Presets ----------
+        UIElement BuildCommonView()
+        {
+            if (dlgRef is not null)
+            {
+                dlgRef.Title = scopeBook ? $"加到《{bookTitle}》" : "加到全部书";
+                dlgRef.CloseButtonText = "好了";
+            }
+
+            ReplaceRule[] existing;
+            try { existing = library.Core.ReplaceRules(scopeBook ? bookId : null); } catch { existing = []; }
+
+            var root = new StackPanel { Spacing = 10 };
+            var backBtn = new Button
+            {
+                Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+                Content = "‹ 返回规则列表",
+                Height = 26,
+                MinHeight = 26,
+                FontSize = 11.5,
+                HorizontalAlignment = HorizontalAlignment.Left,
+            };
+            backBtn.Click += (_, _) => { subMode = "list"; RenderHost(); };
+            root.Children.Add(backBtn);
+
+            var group = new StackPanel { Spacing = 0 };
+            CommonRule[] presets;
+            try { presets = library.Core.CommonReplaceRules(); } catch { presets = []; }
+
+            for (int i = 0; i < presets.Length; i++)
+            {
+                if (i > 0) group.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(12, 0, 12, 0) });
+                var c = presets[i];
+                bool added = existing.Any(r => r.Find == c.Rule.Find && r.Regex == c.Rule.Regex);
+
+                var row = new Grid { Padding = new Thickness(12, 10, 12, 10), ColumnSpacing = 10 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var meta = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+                meta.Children.Add(new TextBlock { Text = c.Title, FontSize = 12.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
+                meta.Children.Add(new TextBlock { Text = c.Detail, FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), TextWrapping = TextWrapping.Wrap });
+                row.Children.Add(meta);
+
+                var addBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources[added ? "YYIconButtonStyle" : "YYPillButtonStyle"],
+                    Content = added ? "✓ 加上了" : "＋ 加上",
+                    Height = 26,
+                    MinHeight = 26,
+                    FontSize = 11.5,
+                    IsEnabled = !added,
+                };
+                addBtn.Click += (_, _) =>
+                {
+                    try
+                    {
+                        library.Core.SaveReplaceRule(c.Rule with { Id = "", Book = scopeBook ? bookId : null, Enabled = true });
+                        anyChanged = true;
+                        RenderHost();
+                    }
+                    catch { }
+                };
+                Grid.SetColumn(addBtn, 1);
+                row.Children.Add(addBtn);
+                group.Children.Add(row);
+            }
+
+            root.Children.Add(new ScrollViewer
+            {
+                MaxHeight = 340,
+                Content = new Border
+                {
+                    CornerRadius = new CornerRadius(12),
+                    Background = ThemeHelper.Brush(p.Card),
+                    BorderBrush = ThemeHelper.Brush(p.Line),
+                    BorderThickness = new Thickness(1),
+                    Child = group,
+                },
+            });
+            root.Children.Add(new TextBlock { Text = "加完还能改、能关。", FontSize = 11, Foreground = ThemeHelper.Brush(p.T3) });
+            return root;
+        }
+
+        RenderHost();
+
+        dlgRef = new ContentDialog
+        {
+            XamlRoot = xamlRoot,
+            Title = $"替换规则 · {bookTitle}",
+            Content = host,
+            CloseButtonText = "好了",
+        };
+        await dlgRef.ShowAsync();
+        previewCts?.Cancel();
+        return anyChanged;
+    }
+
+    // ---------- 2. 编码和目录 (1:1 TxtLayout.swift) ----------
+
+    public static async Task<bool> ShowTxtLayoutDialogAsync(
+        XamlRoot xamlRoot,
+        LibraryService library,
+        string bookId,
+        string bookTitle,
+        Action<uint>? onJumpToSection = null)
+    {
+        TxtChoice applied;
+        try { applied = library.Core.TxtChoice(bookId); }
+        catch { applied = new TxtChoice(null, null); }
+
+        string? selectedEnc = applied.Encoding;
+        string ruleText = applied.Rule ?? "";
+        TxtLayout? currentLayout = null;
+        string? readFailure = null;
+        bool showAllChapters = false;
+        uint? pendingJumpSection = null;
+        CancellationTokenSource? debounceCts = null;
+
+        bool dark = xamlRoot.Content is FrameworkElement fe && ThemeHelper.IsDark(fe.ActualTheme);
+        var p = ThemeHelper.Palette(dark);
+        var tint = ThemeHelper.TintColors(library.Prefs.Tint, dark);
+
+        ContentDialog? dlgRef = null;
+        var host = new Grid { Width = 460 };
+
+        bool IsChoiceChanged()
+        {
+            string? r = string.IsNullOrWhiteSpace(ruleText) ? null : ruleText.Trim();
+            return !string.Equals(selectedEnc, applied.Encoding, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(r, applied.Rule, StringComparison.Ordinal);
+        }
+
+        static string FormatWan(uint n)
+        {
+            double w = n / 10_000.0;
+            int tenths = (int)Math.Round(w * 10.0);
+            return (w >= 2.0 || tenths % 10 == 0) ? $"{(int)Math.Round(w)} 万" : $"{tenths / 10}.{tenths % 10} 万";
+        }
+
+        static string FormatRoughly(uint n)
+        {
+            if (n >= 10_000) return FormatWan(n);
+            if (n >= 1_000) return $"{(int)Math.Round(n / 1_000.0)} 千";
+            return $"{(int)Math.Round(n / 100.0) * 100} ";
+        }
+
+        static string FormatBytesShort(ulong b)
+        {
+            if (b >= 1024 * 1024) return $"{b / (1024.0 * 1024.0):0.1} MB";
+            if (b >= 1024) return $"{b / 1024.0:0} KB";
+            return $"{b} B";
+        }
+
+        void RefreshLayout(bool debounce)
+        {
+            debounceCts?.Cancel();
+            var cts = new CancellationTokenSource();
+            debounceCts = cts;
+            string? enc = selectedEnc;
+            string? r = string.IsNullOrWhiteSpace(ruleText) ? null : ruleText.Trim();
+
+            _ = Task.Run(async () =>
+            {
+                if (debounce)
+                {
+                    try { await Task.Delay(250, cts.Token); } catch { return; }
+                }
+                if (cts.IsCancellationRequested) return;
+                TxtLayout? found = null;
+                string? err = null;
+                try { found = library.Core.TxtLayout(bookId, new TxtChoice(enc, r)); }
+                catch (Exception ex) { err = ex.Message; }
+
+                host.DispatcherQueue?.TryEnqueue(() =>
+                {
+                    if (cts.IsCancellationRequested) return;
+                    currentLayout = found;
+                    readFailure = err;
+                    if (!showAllChapters) RenderMainContent();
+                });
+            });
+        }
+
+        var ruleBox = new TextBox
+        {
+            Text = ruleText,
+            FontFamily = new FontFamily(YYFontFamily.Mono.WindowsFamily()),
+            FontSize = 11.5,
+        };
+        var encHost = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        var encTrailTb = new TextBlock { FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), HorizontalAlignment = HorizontalAlignment.Right };
+        var chapTrailTb = new TextBlock { FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), HorizontalAlignment = HorizontalAlignment.Right };
+        var previewCardHost = new StackPanel { Spacing = 4 };
+        var unreadableTb = new TextBlock { FontSize = 11, Foreground = ThemeHelper.Brush(p.Danger), Visibility = Visibility.Collapsed };
+        var chaptersHost = new StackPanel { Spacing = 0 };
+        var resetRuleBtn = new Button
+        {
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(4, 2, 4, 2),
+            FontSize = 11,
+            FontWeight = FontWeights.Medium,
+            Foreground = ThemeHelper.Brush(tint.Accent),
+            Content = "用回自动识别",
+            Visibility = Visibility.Collapsed,
+        };
+        var warningHost = new ContentControl();
+
+        ruleBox.TextChanged += (_, _) =>
+        {
+            ruleText = ruleBox.Text;
+            resetRuleBtn.Visibility = !string.IsNullOrWhiteSpace(ruleText) ? Visibility.Visible : Visibility.Collapsed;
+            RefreshLayout(debounce: true);
+        };
+        resetRuleBtn.Click += (_, _) =>
+        {
+            ruleBox.Text = "";
+            ruleText = "";
+            resetRuleBtn.Visibility = Visibility.Collapsed;
+            RefreshLayout(debounce: false);
+        };
+
+        Grid MakeChapterRow(TxtChapter c, bool isLong)
+        {
+            var g = new Grid { Height = 32, Padding = new Thickness(12, 0, 12, 0), ColumnSpacing = 8 };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.Children.Add(new TextBlock
+            {
+                Text = c.Title,
+                FontSize = 12.5,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = ThemeHelper.Brush(p.T1),
+                VerticalAlignment = VerticalAlignment.Center,
+                MaxLines = 1,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+            var charsTb = new TextBlock
+            {
+                Text = $"{c.Chars:N0} 字",
+                FontFamily = new FontFamily(YYFontFamily.Mono.WindowsFamily()),
+                FontSize = 11,
+                FontWeight = isLong ? FontWeights.SemiBold : FontWeights.Normal,
+                Foreground = ThemeHelper.Brush(isLong ? p.Warn : p.T3),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(charsTb, 1);
+            g.Children.Add(charsTb);
+            return g;
+        }
+
+        void RenderAllChaptersView()
+        {
+            if (currentLayout is null) return;
+            if (dlgRef is not null)
+            {
+                dlgRef.Title = $"全部 {currentLayout.Chapters.Length} 章 · {bookTitle}";
+                dlgRef.IsPrimaryButtonEnabled = false;
+            }
+            host.Children.Clear();
+            var sp = new StackPanel { Spacing = 10 };
+            var backBtn = new Button
+            {
+                Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+                Content = "‹ 返回编码和目录",
+                Height = 26,
+                MinHeight = 26,
+                FontSize = 11.5,
+                HorizontalAlignment = HorizontalAlignment.Left,
+            };
+            backBtn.Click += (_, _) =>
+            {
+                showAllChapters = false;
+                BuildMainFrame();
+                RenderMainContent();
+            };
+            sp.Children.Add(backBtn);
+
+            var allStack = new StackPanel { Spacing = 0 };
+            int? longIdx = currentLayout.Long is uint l ? (int)l : null;
+            for (int i = 0; i < currentLayout.Chapters.Length; i++)
+            {
+                if (i > 0) allStack.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(12, 0, 12, 0) });
+                allStack.Children.Add(MakeChapterRow(currentLayout.Chapters[i], longIdx == i));
+            }
+            sp.Children.Add(new ScrollViewer
+            {
+                MaxHeight = 380,
+                Content = new Border
+                {
+                    CornerRadius = new CornerRadius(12),
+                    Background = ThemeHelper.Brush(p.Card),
+                    BorderBrush = ThemeHelper.Brush(p.Line),
+                    BorderThickness = new Thickness(1),
+                    Child = allStack,
+                },
+            });
+            host.Children.Add(sp);
+        }
+
+        void RenderMainContent()
+        {
+            if (dlgRef is not null)
+            {
+                string sub = currentLayout is not null ? $" · {FormatBytesShort(currentLayout.Size)}" : "";
+                dlgRef.Title = $"编码和目录 · {bookTitle}.txt{sub}";
+                dlgRef.IsPrimaryButtonEnabled = string.IsNullOrEmpty(currentLayout?.Error);
+            }
+
+            encTrailTb.Text = currentLayout is not null ? $"自动识别为 {currentLayout.Detected}" : "";
+            chapTrailTb.Text = currentLayout is not null && string.IsNullOrEmpty(currentLayout.Error)
+                ? $"识别出 {currentLayout.Chapters.Length} 章"
+                : "";
+            if (currentLayout is not null && string.IsNullOrEmpty(ruleBox.PlaceholderText))
+                ruleBox.PlaceholderText = currentLayout.DefaultRule;
+            else if (currentLayout is not null)
+                ruleBox.PlaceholderText = currentLayout.DefaultRule;
+
+            // Encoding buttons ("自动 · GBK", "UTF-8", "GB18030", "Big5")
+            encHost.Children.Clear();
+            string autoLabel = currentLayout is not null ? $"自动 · {currentLayout.Detected}" : "自动";
+            foreach (var (id, lbl) in new (string? Id, string Label)[] { (null, autoLabel), ("UTF-8", "UTF-8"), ("GB18030", "GB18030"), ("Big5", "Big5") })
+            {
+                bool on = string.Equals(id, selectedEnc, StringComparison.OrdinalIgnoreCase);
+                var b = new Button
+                {
+                    Style = (Style)Application.Current.Resources[on ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"],
+                    Content = lbl,
+                    Height = 27,
+                    MinHeight = 27,
+                    FontSize = 11.5,
+                };
+                string? targetEnc = id;
+                b.Click += (_, _) => { selectedEnc = targetEnc; RefreshLayout(debounce: false); };
+                encHost.Children.Add(b);
+            }
+
+            // Preview card
+            previewCardHost.Children.Clear();
+            if (currentLayout is not null && currentLayout.Preview.Length > 0)
+            {
+                if (!string.IsNullOrWhiteSpace(currentLayout.PreviewTitle))
+                {
+                    previewCardHost.Children.Add(new TextBlock
+                    {
+                        Text = currentLayout.PreviewTitle,
+                        FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
+                        FontSize = 13,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = ThemeHelper.Brush(p.T1),
+                    });
+                }
+                previewCardHost.Children.Add(new TextBlock
+                {
+                    Text = "　　" + currentLayout.Preview[0],
+                    FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
+                    FontSize = 12.5,
+                    Foreground = ThemeHelper.Brush(p.T1),
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxLines = 2,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    LineHeight = 21,
+                });
+            }
+            else
+            {
+                previewCardHost.Children.Add(new TextBlock
+                {
+                    Text = readFailure ?? (currentLayout?.Error is null ? "正在读…" : "这种编码读不出字"),
+                    FontSize = 12,
+                    Foreground = ThemeHelper.Brush(p.T3),
+                });
+            }
+
+            if (currentLayout is not null && currentLayout.Unreadable > 0)
+            {
+                unreadableTb.Text = $"⚠ 有 {currentLayout.Unreadable} 处字认不出来，换一种编码试试";
+                unreadableTb.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                unreadableTb.Visibility = Visibility.Collapsed;
+            }
+
+            // Chapters list (first 3 + 全部 N 章 / long jump)
+            chaptersHost.Children.Clear();
+            if (!string.IsNullOrEmpty(currentLayout?.Error))
+            {
+                chaptersHost.Children.Add(new TextBlock
+                {
+                    Text = currentLayout.Error,
+                    FontSize = 11,
+                    Foreground = ThemeHelper.Brush(p.Danger),
+                    Margin = new Thickness(12, 8, 12, 8),
+                    TextWrapping = TextWrapping.Wrap,
+                });
+            }
+            else if (currentLayout is not null)
+            {
+                int? longIdx = currentLayout.Long is uint l ? (int)l : null;
+                int shown = Math.Min(3, currentLayout.Chapters.Length);
+                for (int i = 0; i < shown; i++)
+                {
+                    if (i > 0) chaptersHost.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(12, 0, 12, 0) });
+                    chaptersHost.Children.Add(MakeChapterRow(currentLayout.Chapters[i], longIdx == i));
+                }
+
+                if (currentLayout.Chapters.Length > 3)
+                {
+                    chaptersHost.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(12, 0, 12, 0) });
+                    if (longIdx is int li && li >= 3 && li < currentLayout.Chapters.Length)
+                    {
+                        var dotsBtn = new Button
+                        {
+                            HorizontalAlignment = HorizontalAlignment.Stretch,
+                            Height = 24,
+                            Background = new SolidColorBrush(Colors.Transparent),
+                            BorderThickness = new Thickness(0),
+                            Content = new TextBlock { Text = $"⋯ 全部 {currentLayout.Chapters.Length} 章 ›", FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), HorizontalAlignment = HorizontalAlignment.Center },
+                        };
+                        dotsBtn.Click += (_, _) => { showAllChapters = true; RenderAllChaptersView(); };
+                        chaptersHost.Children.Add(dotsBtn);
+                        chaptersHost.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(12, 0, 12, 0) });
+                        chaptersHost.Children.Add(MakeChapterRow(currentLayout.Chapters[li], isLong: true));
+                    }
+                    else
+                    {
+                        var allBtn = new Button
+                        {
+                            HorizontalAlignment = HorizontalAlignment.Stretch,
+                            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                            Padding = new Thickness(12, 8, 12, 8),
+                            Background = new SolidColorBrush(Colors.Transparent),
+                            BorderThickness = new Thickness(0),
+                        };
+                        var ag = new Grid();
+                        ag.Children.Add(new TextBlock { Text = $"全部 {currentLayout.Chapters.Length} 章", FontSize = 12, Foreground = ThemeHelper.Brush(p.T1) });
+                        ag.Children.Add(new TextBlock { Text = "›", FontSize = 13, Foreground = ThemeHelper.Brush(p.T3), HorizontalAlignment = HorizontalAlignment.Right });
+                        allBtn.Content = ag;
+                        allBtn.Click += (_, _) => { showAllChapters = true; RenderAllChaptersView(); };
+                        chaptersHost.Children.Add(allBtn);
+                    }
+                }
+            }
+
+            // Long-chapter anomaly warning card (1:1 TxtLayout.swift:266-310)
+            warningHost.Content = null;
+            if (currentLayout is not null && currentLayout.Long is uint lu && lu < currentLayout.Chapters.Length)
+            {
+                int li = (int)lu;
+                var c = currentLayout.Chapters[li];
+                int n = li + (currentLayout.Chapters.FirstOrDefault()?.Title == "开头" ? 0 : 1);
+                bool hasNext = li + 1 < currentLayout.Chapters.Length;
+                var sortedSizes = currentLayout.Chapters.Select(x => x.Chars).OrderBy(x => x).ToArray();
+                uint usual = sortedSizes[sortedSizes.Length / 2];
+
+                var wStack = new StackPanel { Spacing = 4 };
+                wStack.Children.Add(new TextBlock
+                {
+                    Text = hasNext
+                        ? $"⚠ 第 {n} 和 {n + 1} 章之间有 {FormatWan(c.Chars)}字，可能漏了一章"
+                        : $"⚠ 第 {n} 章之后有 {FormatWan(c.Chars)}字，可能漏了几章",
+                    FontSize = 11.5,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = ThemeHelper.Brush(p.T1),
+                    TextWrapping = TextWrapping.Wrap,
+                });
+                wStack.Children.Add(new TextBlock
+                {
+                    Text = $"别的章都在 {FormatRoughly(usual)}字上下，多半是这里有一章的标题写法不一样，没认出来。",
+                    FontSize = 11,
+                    Foreground = ThemeHelper.Brush(p.T2),
+                    TextWrapping = TextWrapping.Wrap,
+                });
+
+                if (onJumpToSection is not null && !IsChoiceChanged())
+                {
+                    uint targetSec = c.Section;
+                    var goBtn = new Button
+                    {
+                        Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+                        Content = $"去第 {n} 章看看",
+                        Height = 26,
+                        MinHeight = 26,
+                        FontSize = 11.5,
+                        Margin = new Thickness(0, 4, 0, 0),
+                    };
+                    goBtn.Click += (_, _) =>
+                    {
+                        pendingJumpSection = targetSec;
+                        dlgRef?.Hide();
+                    };
+                    wStack.Children.Add(goBtn);
+                }
+                else if (onJumpToSection is not null)
+                {
+                    wStack.Children.Add(new TextBlock { Text = "点保存后可以去这一章看看", FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3) });
+                }
+
+                warningHost.Content = new Border
+                {
+                    CornerRadius = new CornerRadius(12),
+                    Background = ThemeHelper.Brush(Color.FromArgb(28, p.Warn.R, p.Warn.G, p.Warn.B)),
+                    Padding = new Thickness(12, 10, 12, 10),
+                    Child = wStack,
+                };
+            }
+            else if (!string.IsNullOrEmpty(currentLayout?.Doubt) && currentLayout.Unreadable == 0)
+            {
+                warningHost.Content = new TextBlock
+                {
+                    Text = $"⚠ {currentLayout.Doubt}",
+                    FontSize = 11,
+                    Foreground = ThemeHelper.Brush(p.Warn),
+                    TextWrapping = TextWrapping.Wrap,
+                };
+            }
+        }
+
+        void BuildMainFrame()
+        {
+            host.Children.Clear();
+            var sp = new StackPanel { Spacing = 8 };
+
+            var encHead = new Grid();
+            encHead.Children.Add(new TextBlock { Text = "编码", FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T2) });
+            encHead.Children.Add(encTrailTb);
+            sp.Children.Add(encHead);
+            sp.Children.Add(encHost);
+            sp.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(12),
+                Background = ThemeHelper.Brush(p.Card),
+                BorderBrush = ThemeHelper.Brush(p.Line),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(14, 10, 14, 10),
+                Child = previewCardHost,
+            });
+            sp.Children.Add(unreadableTb);
+
+            var chapHead = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+            chapHead.Children.Add(new TextBlock { Text = "目录", FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T2) });
+            chapHead.Children.Add(chapTrailTb);
+            sp.Children.Add(chapHead);
+
+            var chapCard = new StackPanel { Spacing = 0 };
+            var ruleRow = new Grid { Padding = new Thickness(12, 8, 12, 8), ColumnSpacing = 8 };
+            ruleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
+            ruleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            ruleRow.Children.Add(new TextBlock { Text = "规则", FontSize = 12, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center });
+            Grid.SetColumn(ruleBox, 1);
+            ruleRow.Children.Add(ruleBox);
+            chapCard.Children.Add(ruleRow);
+            chapCard.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(12, 0, 12, 0) });
+            chapCard.Children.Add(chaptersHost);
+
+            sp.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(12),
+                Background = ThemeHelper.Brush(p.Card),
+                BorderBrush = ThemeHelper.Brush(p.Line),
+                BorderThickness = new Thickness(1),
+                Child = chapCard,
+            });
+
+            resetRuleBtn.Visibility = !string.IsNullOrWhiteSpace(ruleText) ? Visibility.Visible : Visibility.Collapsed;
+            sp.Children.Add(resetRuleBtn);
+            sp.Children.Add(warningHost);
+            sp.Children.Add(new TextBlock { Text = "自动识别还认得序章、楔子、Chapter 1。", FontSize = 11, Foreground = ThemeHelper.Brush(p.T3) });
+
+            host.Children.Add(new ScrollViewer { MaxHeight = 470, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = sp });
+        }
+
+        BuildMainFrame();
+        RenderMainContent();
+        RefreshLayout(debounce: false);
+
+        dlgRef = new ContentDialog
+        {
+            XamlRoot = xamlRoot,
+            Title = $"编码和目录 · {bookTitle}",
+            Content = host,
+            PrimaryButtonText = "保存",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+
+        var result = await dlgRef.ShowAsync();
+        debounceCts?.Cancel();
+
+        if (pendingJumpSection is uint jumpSec)
+        {
+            onJumpToSection?.Invoke(jumpSec);
+            return false;
+        }
+
+        if (result != ContentDialogResult.Primary || !IsChoiceChanged())
+            return false;
+
+        try
+        {
+            var finalChoice = new TxtChoice(selectedEnc, string.IsNullOrWhiteSpace(ruleText) ? null : ruleText.Trim());
+            await Task.Run(() => library.Core.SetTxtChoice(bookId, finalChoice));
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+}

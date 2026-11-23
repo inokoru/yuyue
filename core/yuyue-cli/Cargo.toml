@@ -1,0 +1,15 @@
+[package]
+name = "yuyue-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "yuyue"
+path = "src/main.rs"
+
+[dependencies]
+yuyue-core = { path = "../yuyue-core", features = ["eval"] }
+blake3 = "1.8.7"
+serde_json = "1.0.154"

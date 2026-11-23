@@ -1,0 +1,340 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="Yuyue.Settings.SettingsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="设置">
+
+    <!-- 1:1 对齐 macOS MacSettings + MacSettingsSide：980x660，左 184px 侧栏 + 中间主设置页 + 右 260px 按需样张/检查器栏 -->
+    <Grid x:Name="RootGrid" Background="{ThemeResource YYBgBrush}" KeyDown="RootGrid_KeyDown">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="184" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition x:Name="InspectorColumn" Width="0" />
+        </Grid.ColumnDefinitions>
+
+        <!-- 左栏：11 项完整分组侧栏 -->
+        <Border
+            Grid.Column="0"
+            Background="{ThemeResource YYSettingsSideBrush}"
+            BorderBrush="{ThemeResource YYLineBrush}"
+            BorderThickness="0,0,1,0"
+            Padding="10,38,10,12">
+            <ScrollViewer VerticalScrollBarVisibility="Hidden">
+                <StackPanel Spacing="2">
+                    <Button x:Name="NavGeneral" Style="{StaticResource YYSidebarItemStyle}" Tag="general" Click="Nav_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="9">
+                            <ContentPresenter x:Name="IconGeneral" Width="18" VerticalAlignment="Center" />
+                            <TextBlock Text="通用" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="NavAppearance" Style="{StaticResource YYSidebarItemStyle}" Tag="appearance" Click="Nav_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="9">
+                            <ContentPresenter x:Name="IconAppearance" Width="18" VerticalAlignment="Center" />
+                            <TextBlock Text="外观" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+
+                    <TextBlock Text="阅读与朗读" FontSize="10.5" FontWeight="Medium" Foreground="{ThemeResource YYText3Brush}" Margin="8,12,0,2" />
+                    <Button x:Name="NavReading" Style="{StaticResource YYSidebarItemStyle}" Tag="reading" Click="Nav_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="9">
+                            <ContentPresenter x:Name="IconReading" Width="18" VerticalAlignment="Center" />
+                            <TextBlock Text="阅读" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="NavForeign" Style="{StaticResource YYSidebarItemStyle}" Tag="foreign" Click="Nav_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="9">
+                            <ContentPresenter x:Name="IconForeign" Width="18" VerticalAlignment="Center" />
+                            <TextBlock Text="外文" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="NavListening" Style="{StaticResource YYSidebarItemStyle}" Tag="listening" Click="Nav_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="9">
+                            <ContentPresenter x:Name="IconListening" Width="18" VerticalAlignment="Center" />
+                            <TextBlock Text="朗读" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+
+                    <TextBlock Text="连接" FontSize="10.5" FontWeight="Medium" Foreground="{ThemeResource YYText3Brush}" Margin="8,12,0,2" />
+                    <Button x:Name="NavCompanion" Style="{StaticResource YYSidebarItemStyle}" Tag="companion" Click="Nav_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="9">
+                            <ContentPresenter x:Name="IconCompanion" Width="18" VerticalAlignment="Center" />
+                            <TextBlock Text="书伴" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="NavSync" Style="{StaticResource YYSidebarItemStyle}" Tag="sync" Click="Nav_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="9">
+                            <ContentPresenter x:Name="IconSync" Width="18" VerticalAlignment="Center" />
+                            <TextBlock Text="同步" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="NavExport" Style="{StaticResource YYSidebarItemStyle}" Tag="export" Click="Nav_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="9">
+                            <ContentPresenter x:Name="IconExport" Width="18" VerticalAlignment="Center" />
+                            <TextBlock Text="笔记导出" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+
+                    <TextBlock Text="数据与关于" FontSize="10.5" FontWeight="Medium" Foreground="{ThemeResource YYText3Brush}" Margin="8,12,0,2" />
+                    <Button x:Name="NavStorage" Style="{StaticResource YYSidebarItemStyle}" Tag="storage" Click="Nav_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="9">
+                            <ContentPresenter x:Name="IconStorage" Width="18" VerticalAlignment="Center" />
+                            <TextBlock Text="存储" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="NavData" Style="{StaticResource YYSidebarItemStyle}" Tag="data" Click="Nav_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="9">
+                            <ContentPresenter x:Name="IconData" Width="18" VerticalAlignment="Center" />
+                            <TextBlock Text="数据" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="NavAbout" Style="{StaticResource YYSidebarItemStyle}" Tag="about" Click="Nav_Click">
+                        <Grid>
+                            <StackPanel Orientation="Horizontal" Spacing="9">
+                                <ContentPresenter x:Name="IconAbout" Width="18" VerticalAlignment="Center" />
+                                <TextBlock Text="关于" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Grid>
+                    </Button>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <!-- 中栏：固定页面头 + 滚动内容区 + 无检查器页右上角 SettingsCorner -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="32" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- 固定页眉（关于页使用双页书扉不显示通用页眉，但保留右上角 SettingsCorner） -->
+            <Grid x:Name="PageHeaderGrid" Grid.Row="1" Padding="26,2,24,8">
+                <StackPanel Spacing="2" Margin="0,0,160,0">
+                    <TextBlock x:Name="PageTitleText" Text="通用" FontSize="16.5" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" />
+                    <TextBlock x:Name="PageSubtitleText" Text="语言、启动行为与导入方式" FontSize="11.5" Foreground="{ThemeResource YYText2Brush}" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Grid>
+
+            <ScrollViewer
+                Grid.Row="2"
+                Padding="26,4,24,28"
+                VerticalScrollBarVisibility="Auto"
+                HorizontalScrollMode="Disabled"
+                HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Spacing="12" HorizontalAlignment="Stretch">
+                    <!-- 外观页（1:1 对齐 Mac AppearanceSettings） -->
+                    <StackPanel x:Name="AppearancePage" Visibility="Collapsed" Spacing="12">
+                        <Border CornerRadius="12" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="1" Padding="16,14">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="界面" FontSize="12.5" FontWeight="Medium" VerticalAlignment="Center" Foreground="{ThemeResource YYText1Brush}" />
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                                    <Button Tag="light" Background="Transparent" BorderThickness="0" Padding="0" UseSystemFocusVisuals="False" Click="ThemeMode_Click">
+                                        <StackPanel Spacing="6" HorizontalAlignment="Center">
+                                            <Border x:Name="ThemeLightPreview" Width="88" Height="56" CornerRadius="9" Background="#F6F3EB" BorderThickness="2" BorderBrush="#E7E5E1">
+                                                <Grid Padding="12,10,8,8">
+                                                    <Border Width="4" Height="9" CornerRadius="0,0,1.5,1.5" Background="{ThemeResource YYAccentBrush}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-10,2,0" />
+                                                    <StackPanel Spacing="4.5" VerticalAlignment="Top" Margin="0,2,0,0">
+                                                        <Border Height="3" Width="24" CornerRadius="1.5" Background="#552A2B2E" HorizontalAlignment="Left" />
+                                                        <Border Height="2" Width="50" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
+                                                        <Border Height="2" Width="44" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
+                                                        <Border Height="2" Width="34" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
+                                                    </StackPanel>
+                                                    <Border Height="1.5" Width="10" CornerRadius="1" Background="#408A8682" HorizontalAlignment="Left" VerticalAlignment="Bottom" />
+                                                </Grid>
+                                            </Border>
+                                            <TextBlock x:Name="ThemeLightLabel" Text="浅色" FontSize="11.5" HorizontalAlignment="Center" Foreground="{ThemeResource YYText2Brush}" />
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button Tag="dark" Background="Transparent" BorderThickness="0" Padding="0" UseSystemFocusVisuals="False" Click="ThemeMode_Click">
+                                        <StackPanel Spacing="6" HorizontalAlignment="Center">
+                                            <Border x:Name="ThemeDarkPreview" Width="88" Height="56" CornerRadius="9" Background="#1D1E21" BorderThickness="2" BorderBrush="#2C2D30">
+                                                <Grid Padding="12,10,8,8">
+                                                    <Border Width="4" Height="9" CornerRadius="0,0,1.5,1.5" Background="{ThemeResource YYAccentBrush}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-10,2,0" />
+                                                    <StackPanel Spacing="4.5" VerticalAlignment="Top" Margin="0,2,0,0">
+                                                        <Border Height="3" Width="24" CornerRadius="1.5" Background="#B8EDEDEE" HorizontalAlignment="Left" />
+                                                        <Border Height="2" Width="50" CornerRadius="1" Background="#689A9895" HorizontalAlignment="Left" />
+                                                        <Border Height="2" Width="44" CornerRadius="1" Background="#689A9895" HorizontalAlignment="Left" />
+                                                        <Border Height="2" Width="34" CornerRadius="1" Background="#689A9895" HorizontalAlignment="Left" />
+                                                    </StackPanel>
+                                                    <Border Height="1.5" Width="10" CornerRadius="1" Background="#509A9895" HorizontalAlignment="Left" VerticalAlignment="Bottom" />
+                                                </Grid>
+                                            </Border>
+                                            <TextBlock x:Name="ThemeDarkLabel" Text="深色" FontSize="11.5" HorizontalAlignment="Center" Foreground="{ThemeResource YYText2Brush}" />
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button Tag="system" Background="Transparent" BorderThickness="0" Padding="0" UseSystemFocusVisuals="False" Click="ThemeMode_Click">
+                                        <StackPanel Spacing="6" HorizontalAlignment="Center">
+                                            <Border x:Name="ThemeSystemPreview" Width="88" Height="56" CornerRadius="9" BorderThickness="2" BorderBrush="#8A653F" Background="#F6F3EB">
+                                                <Grid Width="84" Height="52">
+                                                    <StackPanel Spacing="4.5" VerticalAlignment="Top" Margin="11,12,0,0">
+                                                        <Border Height="3" Width="24" CornerRadius="1.5" Background="#552A2B2E" HorizontalAlignment="Left" />
+                                                        <Border Height="2" Width="46" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
+                                                        <Border Height="2" Width="42" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
+                                                        <Border Height="2" Width="32" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
+                                                    </StackPanel>
+                                                    <Border Height="1.5" Width="10" CornerRadius="1" Background="#408A8682" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="11,0,0,8" />
+                                                    <Path Fill="#1D1E21" Data="M48,0 H77 A7,7 0 0,1 84,7 V45 A7,7 0 0,1 77,52 H34 Z" />
+                                                    <StackPanel Spacing="4.5" VerticalAlignment="Top" Margin="44,19.5,0,0">
+                                                        <Border Height="2" Width="17" CornerRadius="1" Background="#689A9895" HorizontalAlignment="Left" />
+                                                        <Border Height="2" Width="13" CornerRadius="1" Background="#689A9895" HorizontalAlignment="Left" />
+                                                    </StackPanel>
+                                                    <Border Width="4" Height="9" CornerRadius="0,0,1.5,1.5" Background="{ThemeResource YYAccentBrush}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,0,10,0" />
+                                                </Grid>
+                                            </Border>
+                                            <TextBlock x:Name="ThemeSystemLabel" Text="跟随系统" FontSize="11.5" FontWeight="SemiBold" HorizontalAlignment="Center" Foreground="{ThemeResource YYText1Brush}" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- 主题色：暖纸 / 草木 / 烟雨 / 海棠 -->
+                        <Border CornerRadius="12" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="1" Padding="16">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="2" VerticalAlignment="Center">
+                                    <TextBlock Text="主题色" FontSize="13" FontWeight="Medium" Foreground="{ThemeResource YYText1Brush}" />
+                                    <TextBlock Text="用于按钮、开关与进度标记" FontSize="11.5" Foreground="{ThemeResource YYText2Brush}" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+                                    <Button Tag="camel" Background="Transparent" BorderThickness="0" Padding="0" UseSystemFocusVisuals="False" Click="TintDot_Click">
+                                        <StackPanel Spacing="5" HorizontalAlignment="Center">
+                                            <Border x:Name="TintDotCamel" Width="32" Height="32" CornerRadius="16" BorderThickness="2" Padding="3">
+                                                <Ellipse Fill="#8A653F" />
+                                            </Border>
+                                            <TextBlock x:Name="TintLabelCamel" Text="暖纸" FontSize="11.5" HorizontalAlignment="Center" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Tag="sage" Background="Transparent" BorderThickness="0" Padding="0" UseSystemFocusVisuals="False" Click="TintDot_Click">
+                                        <StackPanel Spacing="5" HorizontalAlignment="Center">
+                                            <Border x:Name="TintDotSage" Width="32" Height="32" CornerRadius="16" BorderThickness="2" Padding="3">
+                                                <Ellipse Fill="#4F7657" />
+                                            </Border>
+                                            <TextBlock x:Name="TintLabelSage" Text="草木" FontSize="11.5" HorizontalAlignment="Center" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Tag="mist" Background="Transparent" BorderThickness="0" Padding="0" UseSystemFocusVisuals="False" Click="TintDot_Click">
+                                        <StackPanel Spacing="5" HorizontalAlignment="Center">
+                                            <Border x:Name="TintDotMist" Width="32" Height="32" CornerRadius="16" BorderThickness="2" Padding="3">
+                                                <Ellipse Fill="#4F6D88" />
+                                            </Border>
+                                            <TextBlock x:Name="TintLabelMist" Text="烟雨" FontSize="11.5" HorizontalAlignment="Center" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Tag="blush" Background="Transparent" BorderThickness="0" Padding="0" UseSystemFocusVisuals="False" Click="TintDot_Click">
+                                        <StackPanel Spacing="5" HorizontalAlignment="Center">
+                                            <Border x:Name="TintDotBlush" Width="32" Height="32" CornerRadius="16" BorderThickness="2" Padding="3">
+                                                <Ellipse Fill="#A5656F" />
+                                            </Border>
+                                            <TextBlock x:Name="TintLabelBlush" Text="海棠" FontSize="11.5" HorizontalAlignment="Center" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- 书架封面大小 & 封面下显示进度 -->
+                        <Border CornerRadius="12" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="1" Padding="16,12">
+                            <StackPanel Spacing="10">
+                                <Grid ColumnSpacing="10" MinHeight="38">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="180" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="书架封面大小" FontSize="12.5" FontWeight="Medium" Foreground="{ThemeResource YYText1Brush}" />
+                                        <TextBlock Text="每行本数随窗口宽度自动排布" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" />
+                                    </StackPanel>
+                                    <Border Grid.Column="1" Width="8" Height="11" CornerRadius="2" Background="{ThemeResource YYAccentBrush}" Opacity="0.72" VerticalAlignment="Center" />
+                                    <Slider
+                                        x:Name="CoverSizeSlider"
+                                        Grid.Column="2"
+                                        Minimum="76"
+                                        Maximum="140"
+                                        StepFrequency="4"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="CoverSizeSlider_ValueChanged" />
+                                    <Border Grid.Column="3" Width="11" Height="16" CornerRadius="2.5" Background="{ThemeResource YYAccentBrush}" Opacity="0.85" VerticalAlignment="Center" />
+                                </Grid>
+
+                                <Border Height="1" Background="{ThemeResource YYLineBrush}" />
+
+                                <Grid MinHeight="38">
+                                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="封面下显示进度" FontSize="12.5" FontWeight="Medium" Foreground="{ThemeResource YYText1Brush}" />
+                                        <TextBlock Text="关闭后仅显示书名" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" />
+                                    </StackPanel>
+                                    <ToggleSwitch x:Name="ShowProgressToggle" HorizontalAlignment="Right" MinWidth="0" OnContent="" OffContent="" Toggled="ShowProgressToggle_Toggled" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- 其余 10 个页面（1:1 复刻 Mac 布局） -->
+                    <StackPanel x:Name="DynamicPageHost" Spacing="12" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- 无右栏检查器的页面（通用 / 外观 / 同步 / 关于）右上角 SettingsCorner -->
+            <StackPanel x:Name="CenterCornerStack" Grid.Row="1" Grid.RowSpan="2" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,4,22,0">
+                <TextBlock x:Name="CenterSavedFlashText" FontSize="11.5" Foreground="{ThemeResource YYOkBrush}" VerticalAlignment="Center" />
+                <Button
+                    x:Name="CornerHistoryBtn"
+                    Style="{StaticResource YYIconButtonStyle}"
+                    Width="28"
+                    Height="28"
+                    CornerRadius="14"
+                    ToolTipService.ToolTip="最近修改的设置 (Ctrl+Z 撤销)"
+                    Click="HistoryBtn_Click" />
+            </StackPanel>
+        </Grid>
+
+        <!-- 右栏检查器（SettingsInspector：阅读/外文/笔记导出样张、书伴/朗读面板、存储/数据状态卡） -->
+        <Border
+            x:Name="InspectorBorder"
+            Grid.Column="2"
+            Visibility="Collapsed"
+            Background="{ThemeResource YYSettingsSideBrush}"
+            BorderBrush="{ThemeResource YYLineBrush}"
+            BorderThickness="1,0,0,0"
+            Padding="16,38,16,16">
+            <Grid RowSpacing="10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0">
+                    <TextBlock x:Name="SavedFlashText" FontSize="11.5" Foreground="{ThemeResource YYOkBrush}" VerticalAlignment="Center" MaxWidth="190" TextTrimming="CharacterEllipsis" />
+                    <Button
+                        x:Name="InspectorHistoryBtn"
+                        HorizontalAlignment="Right"
+                        Style="{StaticResource YYIconButtonStyle}"
+                        Width="26"
+                        Height="26"
+                        CornerRadius="13"
+                        ToolTipService.ToolTip="最近修改的设置 (Ctrl+Z 撤销)"
+                        Click="HistoryBtn_Click" />
+                </Grid>
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Hidden" HorizontalScrollMode="Disabled">
+                    <StackPanel x:Name="InspectorHost" Spacing="12" />
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- 顶部跨栏窗口拖动条（覆盖左/中/右顶部 32px） -->
+        <Border x:Name="TitleDragRegion" Grid.ColumnSpan="3" Height="32" VerticalAlignment="Top" Background="Transparent" />
+    </Grid>
+</Window>

@@ -1,0 +1,236 @@
+import SwiftUI
+
+/// 液态玻璃效果, one switch for the whole app (设置 · 外观 on the Mac, 我的 · 外观 on the phone):
+/// everything that floats — capsules, tool capsules, the tabs along the top of 设置 — in the
+/// system's Liquid Glass, or our own: frosted, with a soft pad under what's
+/// chosen. Systems before 26 have no Liquid Glass and always get ours.
+enum LiquidGlass {
+    static let key = "appearance.liquidGlass"
+
+    static var supported: Bool {
+        if #available(macOS 26, iOS 26, *) { true } else { false }
+    }
+
+    /// The switch, and the system can do it.
+    static var on: Bool {
+        supported && (UserDefaults.standard.object(forKey: key) as? Bool ?? false)
+    }
+}
+
+extension YYPaper {
+    /// 墨水屏: no glass, no shadow, no animation.
+    var isEink: Bool { id == YYPaper.eink.id }
+}
+
+extension View {
+    /// The glass under something that floats. Off, or before 26, our frost: `fill`
+    /// over the material, a soft shadow, a hairline. `liquid: false` keeps the frost whatever the
+    /// switch says (墨水屏 has no glass).
+    func yyGlass(
+        _ shape: some Shape,
+        fill: Color,
+        line: Color? = nil,
+        material: Material = .regularMaterial,
+        shadow: Double = 0.08, radius: CGFloat = 12, y: CGFloat = 4,
+        tint: Color? = nil,
+        interactive: Bool = false,
+        liquid: Bool = true
+    ) -> some View {
+        modifier(YYGlass(shape: shape, fill: fill, line: line, material: material, shadow: shadow, radius: radius,
+                         y: y, tint: tint, interactive: interactive, allowed: liquid))
+    }
+}
+
+private struct YYGlass<S: Shape>: ViewModifier {
+    let shape: S
+    let fill: Color
+    let line: Color?
+    let material: Material
+    let shadow: Double, radius: CGFloat, y: CGFloat
+    let tint: Color?
+    let interactive: Bool
+    let allowed: Bool
+    @AppStorage(LiquidGlass.key) private var chosen = false
+    @AppStorage(EInk.key) private var eink = false
+
+    func body(content: Content) -> some View {
+        if eink || !allowed && !chosen {
+            if eink {
+                content
+                    .background(fill, in: shape)
+                    .overlay {
+                        if let line { shape.stroke(line, lineWidth: 0.75) }
+                    }
+            } else {
+                frosted(content)
+            }
+        } else if chosen && allowed, #available(macOS 26, iOS 26, *) {
+            content.glassEffect(glass, in: shape)
+        } else {
+            frosted(content)
+        }
+    }
+
+    private func frosted(_ content: Content) -> some View {
+        content
+            .background {
+                // Like CSS box-shadow: one shadow, drawn only outside the shape. Put on the glass
+                // itself it would come twice (fill and material) and show through the frost.
+                shape.fill(.black)
+                    .shadow(color: .black.opacity(shadow), radius: radius, y: y)
+                    .mask {
+                        Rectangle().padding(-(radius * 3 + abs(y)))
+                            .overlay(shape.blendMode(.destinationOut))
+                            .compositingGroup()
+                    }
+                shape.fill(fill)
+                    .background(material, in: shape)
+            }
+            .overlay {
+                if let line { shape.stroke(line, lineWidth: 0.5) }
+            }
+    }
+
+    @available(macOS 26, iOS 26, *)
+    private var glass: Glass {
+        var glass = Glass.regular
+        if let tint { glass = glass.tint(tint) }
+        return interactive ? glass.interactive() : glass
+    }
+}
+
+extension View {
+    /// A card that floats over the page: the selection card, notes and recaps over
+    /// the text, the book menu, the side panel. Liquid Glass with a wash of the card colour, so
+    /// the words on it stay easy to read over the page; off or before 26, a white card and its
+    /// float shadow; on 墨水屏, flat card with a border and no shadow.
+    func yyFloatCard(_ shape: some Shape, shadow: [YYShadowLayer]) -> some View {
+        modifier(YYFloatCard(shape: shape, shadow: shadow))
+    }
+}
+
+private struct YYFloatCard<S: Shape>: ViewModifier {
+    let shape: S
+    let shadow: [YYShadowLayer]
+    @AppStorage(LiquidGlass.key) private var chosen = false
+    @AppStorage(EInk.key) private var eink = false
+
+    func body(content: Content) -> some View {
+        let card = content.environment(\.yyButtonOnPaper, false)
+        if eink {
+            card
+                .background(YYColor.card, in: shape)
+                .overlay { shape.stroke(YYColor.line, lineWidth: 0.75) }
+        } else if chosen, #available(macOS 26, iOS 26, *) {
+            card.glassEffect(.regular.tint(YYColor.card.opacity(0.6)), in: shape)
+        } else {
+            card
+                .background(YYColor.card, in: shape)
+                // One shadow for the card, not one under every line of text.
+                .compositingGroup()
+                .yyShadow(shadow)
+        }
+    }
+}
+
+extension View {
+    /// macOS 26 and iOS 26 fade whatever scrolls under a bar; here it shouldn't.
+    @ViewBuilder func noScrollEdgeFade() -> some View {
+        if #available(macOS 26, iOS 26, *) {
+            scrollEdgeEffectHidden(true, for: .vertical)
+        } else {
+            self
+        }
+    }
+}
+
+#if os(macOS)
+
+/// A tool in a tool capsule, 34 × 26: what's open is in `accent` on a soft
+/// pad of it. Both `symbol` and `asset` nil is a Latin "Aa".
+struct GlassTool: View {
+    let title: String
+    var symbol: String? = nil
+    var asset: String? = nil
+    let help: String
+    let on: Bool
+    let accent: Color
+    let soft: Color
+    let ink: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Group {
+                if let asset {
+                    Image(asset)
+                        .resizable()
+                        .renderingMode(.template)
+                        .scaledToFit()
+                        .frame(width: 15, height: 15)
+                } else if let symbol {
+                    // A label, not a bare image: in the window's toolbar the capsule becomes one
+                    // item, and only a button's own title survives as what VoiceOver reads.
+                    Label(title, systemImage: symbol).labelStyle(.iconOnly).font(.yy(size: 13, weight: .medium))
+                        // A tool whose icon changes (朗读 ⇄ 暂停) turns one into the other.
+                        .contentTransition(.symbolEffect(.replace))
+                        .animation(YYMotion.quick, value: symbol)
+                } else {
+                    Text("Aa").font(.yy(size: 12.5, weight: .semibold))
+                }
+            }
+            .foregroundStyle(on ? accent : ink)
+            .frame(width: 34, height: 26)
+            .background(on ? soft : .clear, in: .capsule)
+            .animation(YYMotion.quick, value: on)
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(on ? .isSelected : [])
+        .help(help)
+    }
+}
+
+/// 书架 at the top left, the system's own toolbar button in Liquid Glass, or a
+/// frosted capsule.
+struct ShelfButtonToolbar: ToolbarContent {
+    let liquid: Bool
+    let ink: Color
+    let glass: Color
+    let line: Color
+    /// 书架, or 播客 in an episode's window: where the button goes back to.
+    var title = String(localized: "书架")
+    let open: () -> Void
+
+    var body: some ToolbarContent {
+        if liquid {
+            ToolbarItem(placement: .navigation) {
+                Button(action: open) {
+                    Label(title, systemImage: "chevron.left").labelStyle(.titleAndIcon)
+                }
+                .help(String(localized: "回到\(title)"))
+            }
+        } else {
+            ToolbarItem(placement: .navigation) {
+                Button(action: open) {
+                    HStack(spacing: 2) {
+                        Image(systemName: "chevron.left").font(.yy(size: 11, weight: .semibold))
+                        Text(title).font(.yy(size: 12))
+                    }
+                    .foregroundStyle(ink)
+                    .padding(.leading, 7)
+                    .padding(.trailing, 12)
+                    .frame(height: 30)
+                    .yyGlass(Capsule(), fill: glass, line: line, shadow: 0.06, radius: 7, liquid: false)
+                    .contentShape(.capsule)
+                }
+                .buttonStyle(.plain)
+                .help(String(localized: "回到\(title)"))
+            }
+            .withoutGlass()
+        }
+    }
+}
+
+#endif

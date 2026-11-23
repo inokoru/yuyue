@@ -1,0 +1,182 @@
+<!doctype html>
+<html
+  lang="zh-CN"
+  data-lang="zh"
+  data-title-zh="免费下载语阅 · Download Yuyue"
+  data-title-en="Download Yuyue · 免费下载语阅"
+  data-desc-zh="免费下载语阅：Mac、Android、iPhone 与 iPad 详细安装步骤。"
+  data-desc-en="Download Yuyue free for Mac, Android, iPhone, and iPad."
+>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F8F5F0">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1A1613">
+  <meta name="color-scheme" content="light dark">
+  <title>免费下载语阅 · Download Yuyue</title>
+  <meta name="description" content="Download Yuyue free for Mac, Android, iPhone, and iPad.">
+  <link rel="manifest" href="/site.webmanifest">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23FBFAF7'/%3E%3Ctext x='32' y='42' font-size='32' text-anchor='middle' font-family='serif' font-weight='700' fill='%231C1D20'%3E%E9%98%85%3C/text%3E%3Crect x='20' y='50' width='24' height='2.5' rx='1.2' fill='%232B4C7E'/%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="/images/icon-256.png">
+  <script>
+    (function () {
+      var d = document.documentElement;
+      try {
+        var q = new URLSearchParams(location.search).get('lang');
+        var saved = localStorage.getItem('yuyue-lang');
+        var sys = ((navigator.languages && navigator.languages[0]) || navigator.language || '').toLowerCase();
+        var lang = (q === 'zh' || q === 'en') ? q : (saved === 'zh' || saved === 'en') ? saved : (sys.indexOf('zh') === 0 ? 'zh' : 'en');
+        d.dataset.lang = lang;
+        d.lang = lang === 'en' ? 'en' : 'zh-CN';
+        var theme = localStorage.getItem('yuyue-theme');
+        if (theme === 'light' || theme === 'dark') d.dataset.theme = theme;
+      } catch (_) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main"><span class="i18n-zh">跳到正文</span><span class="i18n-en">Skip to content</span></a>
+
+  <div class="mobile-drawer" id="mobile-drawer" aria-hidden="true">
+    <div class="mobile-sheet">
+      <div class="mobile-sheet-head">
+        <span style="display:inline-flex;align-items:center;gap:10px;font-weight:700"><span class="mark mark-sm" aria-hidden="true">阅</span><span class="i18n-zh">语阅 Yuyue</span><span class="i18n-en">Yuyue 语阅</span></span>
+        <button type="button" data-menu-close style="font-size:20px;color:var(--t2);padding:2px 6px">×</button>
+      </div>
+      <nav class="mobile-nav-list">
+        <a href="/"><span class="i18n-zh">首页</span><span class="i18n-en">Home</span></a>
+        <a href="/download/"><span class="i18n-zh">免费下载</span><span class="i18n-en">Download</span></a>
+        <a href="/changelog/"><span class="i18n-zh">更新记录</span><span class="i18n-en">Updates</span></a>
+        <a href="/support/"><span class="i18n-zh">使用帮助</span><span class="i18n-en">Support</span></a>
+        <a href="/privacy/"><span class="i18n-zh">隐私承诺</span><span class="i18n-en">Privacy</span></a>
+      </nav>
+    </div>
+  </div>
+
+  <header class="col top-strip">
+    <a class="mark-link" href="/" data-aria-zh="语阅首页" data-aria-en="Yuyue Home">
+      <div class="mark" aria-hidden="true">阅</div>
+    </a>
+    <div class="top-right">
+      <nav class="top-nav">
+        <a href="/download/" aria-current="page"><span class="i18n-zh">下载</span><span class="i18n-en">Download</span></a>
+        <a href="/changelog/"><span class="i18n-zh">更新</span><span class="i18n-en">Updates</span></a>
+        <a href="/support/"><span class="i18n-zh">帮助</span><span class="i18n-en">Support</span></a>
+        <a href="/privacy/"><span class="i18n-zh">隐私</span><span class="i18n-en">Privacy</span></a>
+      </nav>
+      <div class="lang-switch" role="group" data-aria-zh="切换语言" data-aria-en="Switch language">
+        <button type="button" class="lang-btn" data-set-lang="zh" aria-pressed="true">中文</button>
+        <span class="lang-dot" aria-hidden="true">·</span>
+        <button type="button" class="lang-btn" data-set-lang="en" aria-pressed="false">EN</button>
+      </div>
+      <button type="button" class="theme-btn" data-toggle-theme data-aria-zh="切换深浅色" data-aria-en="Toggle appearance">
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      </button>
+      <button type="button" class="menu-btn" data-menu-toggle aria-expanded="false" aria-controls="mobile-drawer" data-aria-zh="打开菜单" data-aria-en="Open menu">
+        <svg class="icon-menu" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="8" x2="20" y2="8"/><line x1="4" y1="16" x2="20" y2="16"/></svg>
+        <svg class="icon-close" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="main" class="col">
+    <div class="doc-head">
+      <h1><span class="i18n-zh">免费下载语阅</span><span class="i18n-en">Download Yuyue</span></h1>
+      <p class="doc-lead">
+        <span class="i18n-zh">免费使用，没有广告，无需注册。目前通过发布页直接提供安装包，Mac 与 Android 几步就能装好。</span>
+        <span class="i18n-en">Free, ad-free, and no sign-in needed. Mac and Android take just a moment to set up.</span>
+      </p>
+      <div style="margin-top:18px;display:flex;flex-wrap:wrap;gap:10px">
+        <a class="btn btn-primary" href="https://github.com/inokoru/yuyue/releases" target="_blank" rel="noopener">
+          <span class="i18n-zh">获取最新版安装包</span><span class="i18n-en">Get Latest Installer</span>
+        </a>
+        <a class="btn btn-ghost" href="/changelog/">
+          <span class="i18n-zh">看看更新了什么</span><span class="i18n-en">What’s New</span>
+        </a>
+      </div>
+    </div>
+
+    <section class="doc">
+      <h2 id="mac">Mac（Apple 芯片 · macOS 15 及以上）</h2>
+      <div class="i18n-zh">
+        <p><strong>目前最省心的版本</strong>，装好后软件内会自动提醒更新。</p>
+        <ol>
+          <li>在发布页下载 <code>.dmg</code> 安装包，打开后把「语阅」拖进「应用程序」。</li>
+          <li>因为语阅是个人免费开源软件、暂未购买苹果商业签名，第一次双击打开时系统会提醒无法验证开发者。请打开「系统设置 → 隐私与安全性」，拉到下面点一次「仍要打开」即可，以后就不再提示。</li>
+        </ol>
+      </div>
+      <div class="i18n-en">
+        <p><strong>Easiest way to try Yuyue today</strong>, with built-in update notices.</p>
+        <ol>
+          <li>Download the <code>.dmg</code> installer and drag Yuyue into Applications.</li>
+          <li>Because Yuyue is an independent free app without a paid Apple developer certificate yet, macOS warns on the very first launch. Open System Settings → Privacy &amp; Security and click Open Anyway once.</li>
+        </ol>
+      </div>
+
+      <h2 id="android">Android（Android 8.0 及以上）</h2>
+      <p class="i18n-zh"><strong>同样非常顺手</strong>。下载 <code>.apk</code> 文件后点击安装，在系统提示时允许来自浏览器或文件管理器的安装即可；后续新版会在应用内直接提醒你更新。</p>
+      <p class="i18n-en"><strong>Quick to install</strong>. Download the <code>.apk</code>, allow installation when prompted, and you’ll get update notices right inside the app.</p>
+
+      <h2 id="ios">iPhone &amp; iPad（iOS / iPadOS 18 及以上）</h2>
+      <div class="i18n-zh">
+        <p>语阅暂未上架 App Store，目前提供未签名 <code>.ipa</code> 安装包，适合熟悉侧载的朋友配合电脑使用 <a href="https://github.com/claration/Impactor" target="_blank" rel="noopener">Impactor</a> 用自己的 Apple ID 签名安装：</p>
+        <ul>
+          <li>免费 Apple ID 签名的应用每 <b>7 天</b>需要重新续签一次；</li>
+          <li>需在手机设置里开启开发者模式，并连接电脑操作；</li>
+          <li>建议搭配备用 Apple ID 使用。等正式上架商店的准备工作完成后，就可以一键安装。</li>
+        </ul>
+      </div>
+      <div class="i18n-en">
+        <p>Yuyue is not on the App Store yet. If you’re comfortable with sideloading, you can install the unsigned <code>.ipa</code> with your own Apple ID using <a href="https://github.com/claration/Impactor" target="_blank" rel="noopener">Impactor</a>:</p>
+        <ul>
+          <li>Free Apple ID signatures expire every <b>7 days</b> and require re-signing;</li>
+          <li>Requires Developer Mode and a computer; using a secondary Apple ID is recommended.</li>
+        </ul>
+      </div>
+
+      <h2 id="windows">Windows &amp; Linux</h2>
+      <p class="i18n-zh">Windows 与 Linux 桌面版正在推进中，优先带来书架、阅读、划线、离线朗读与跨设备同步。你可以随时在 <a href="/roadmap/">未来计划</a> 里看最新进展。</p>
+      <p class="i18n-en">Windows and Linux desktop versions are in progress—starting with library, reading, highlights, offline voices, and cross-device sync. Follow along on our <a href="/roadmap/">Roadmap</a>.</p>
+    </section>
+
+    <!-- Tucked cleanly away for developers so normal readers stay focused -->
+    <div class="faq-list" style="margin-top:24px">
+      <details class="faq-item">
+        <summary>
+          <span><span class="i18n-zh">给开发者：从源码自行构建</span><span class="i18n-en">For developers: Build from source</span></span>
+          <span class="faq-plus" aria-hidden="true">+</span>
+        </summary>
+        <div class="faq-body">
+          <p class="i18n-zh">需要 Rust、Node、pnpm；Apple 端另需 Xcode 与 XcodeGen，Android 端另需 Android SDK 与 NDK。</p>
+          <p class="i18n-en">Requires Rust, Node, and pnpm; Apple builds require Xcode &amp; XcodeGen; Android requires Android SDK &amp; NDK.</p>
+          <div class="code-box">
+            <button type="button" class="copy-btn" data-copy><span class="i18n-zh">复制</span><span class="i18n-en">Copy</span></button>
+<pre>git clone https://github.com/inokoru/yuyue.git
+cd yuyue
+(cd reader &amp;&amp; pnpm install &amp;&amp; pnpm build)
+apple/build-core.sh &amp;&amp; (cd apple &amp;&amp; xcodegen)
+android/build-core.sh &amp;&amp; (cd android &amp;&amp; ./gradlew assembleDebug)</pre>
+          </div>
+        </div>
+      </details>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="col">
+      <div class="footer-meta" style="margin-top:0;padding-top:0;border-top:none">
+        <span>© 2026 <span class="i18n-zh">语阅 Yuyue</span><span class="i18n-en">Yuyue 语阅</span></span>
+        <span style="display:flex;gap:16px">
+          <a href="/"><span class="i18n-zh">首页</span><span class="i18n-en">Home</span></a>
+          <a href="/support/"><span class="i18n-zh">帮助</span><span class="i18n-en">Support</span></a>
+          <a href="/privacy/"><span class="i18n-zh">隐私</span><span class="i18n-en">Privacy</span></a>
+        </span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/site.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+name: 想法 / Idea
+description: 想要一个功能，或者觉得哪里可以更好用。
+labels: [想法]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        语阅只做读、听、记，而且都对着书里的同一句话。下面这些不做：账号、自己的服务器、收集数据、广告、书城、推荐流、社交。
+        Yuyue is about reading, listening and noting the same sentence. Out of scope: accounts, our own servers, data collection, ads, a store, feeds, social.
+  - type: textarea
+    id: when
+    attributes:
+      label: 在什么时候想要它 / When would you use it
+      description: 讲一次真实的场景：在读什么书、在做什么、卡在哪。
+      placeholder: 通勤听外文书时，想把刚听到的那句存进生词本，但手上拿着东西……
+    validations:
+      required: true
+  - type: textarea
+    id: now
+    attributes:
+      label: 现在怎么凑合 / What you do now
+      description: 用了别的办法、别的 App，或者干脆放弃了。
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你的设想 / What you'd like
+      description: 可以写得很粗，草图也行。
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 设备 / Platform
+      multiple: true
+      options: [Mac, iPhone, iPad, Android, 都要 / All]

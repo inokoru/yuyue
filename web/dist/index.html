@@ -1,0 +1,910 @@
+<!doctype html>
+<html
+  lang="zh-CN"
+  data-lang="zh"
+  data-title-zh="语阅 Yuyue · 读着听，听着读，进度接得上"
+  data-title-en="Yuyue 语阅 · Read it, or listen to it. Same page."
+  data-desc-zh="语阅是一款安静、免费的本地读书与听书软件。点任意一句就能接着听，停下来看正好停在同一行。支持外文原著、划线笔记与个人网盘同步，无账号、无广告。"
+  data-desc-en="Yuyue is a quiet, free app for reading and listening to your own books. Tap any sentence to hear it aloud, look back down at the exact same line. No accounts, no ads."
+>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F8F5F0">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1A1613">
+  <meta name="color-scheme" content="light dark">
+  <title>语阅 Yuyue · 读着听，听着读，进度接得上</title>
+  <meta name="description" content="语阅是一款安静、免费的本地读书与听书软件。点任意一句就能接着听，停下来看正好停在同一行。支持外文原著、划线笔记与个人网盘同步，无账号、无广告。">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="语阅 Yuyue · 读着听，听着读，进度接得上">
+  <meta property="og:description" content="安静、免费的本地读书与听书软件。没有账号，没有广告，书和笔记只留在你自己的设备上。">
+  <meta property="og:image" content="/images/icon-256.png">
+  <meta name="twitter:card" content="summary">
+  <link rel="manifest" href="/site.webmanifest">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23FBFAF7'/%3E%3Ctext x='32' y='42' font-size='32' text-anchor='middle' font-family='serif' font-weight='700' fill='%231C1D20'%3E%E9%98%85%3C/text%3E%3Crect x='20' y='50' width='24' height='2.5' rx='1.2' fill='%232B4C7E'/%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="/images/icon-256.png">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Yuyue 语阅",
+    "applicationCategory": "LifestyleApplication",
+    "operatingSystem": "macOS 15+, Android 8+, iOS 18+, iPadOS 18+",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "url": "https://github.com/inokoru/yuyue"
+  }
+  </script>
+  <script>
+    (function () {
+      var d = document.documentElement;
+      try {
+        var q = new URLSearchParams(location.search).get('lang');
+        var saved = localStorage.getItem('yuyue-lang');
+        var sys = ((navigator.languages && navigator.languages[0]) || navigator.language || '').toLowerCase();
+        var lang = (q === 'zh' || q === 'en') ? q : (saved === 'zh' || saved === 'en') ? saved : (sys.indexOf('zh') === 0 ? 'zh' : 'en');
+        d.dataset.lang = lang;
+        d.lang = lang === 'en' ? 'en' : 'zh-CN';
+        var theme = localStorage.getItem('yuyue-theme');
+        if (theme === 'light' || theme === 'dark') d.dataset.theme = theme;
+      } catch (_) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main"><span class="i18n-zh">跳到正文</span><span class="i18n-en">Skip to content</span></a>
+
+  <!-- Floating Yuyue Glass Pill (appears softly once scrolled past Hero) -->
+  <nav class="float-nav" aria-hidden="true" data-aria-zh="快速导航" data-aria-en="Quick navigation">
+    <a href="/" style="text-decoration:none" data-aria-zh="回到顶部" data-aria-en="Back to top">
+      <span class="mark mark-sm" aria-hidden="true">阅</span>
+    </a>
+    <div class="float-links">
+      <a href="#papers"><span class="i18n-zh">纸张</span><span class="i18n-en">Papers</span></a>
+      <a href="#export"><span class="i18n-zh">笔记</span><span class="i18n-en">Notes</span></a>
+      <a href="/download/"><span class="i18n-zh">下载</span><span class="i18n-en">Download</span></a>
+      <a href="/changelog/"><span class="i18n-zh">更新</span><span class="i18n-en">Updates</span></a>
+      <a href="/support/"><span class="i18n-zh">帮助</span><span class="i18n-en">Support</span></a>
+      <a href="/privacy/"><span class="i18n-zh">隐私</span><span class="i18n-en">Privacy</span></a>
+    </div>
+    <span class="float-sep" aria-hidden="true"></span>
+    <div class="lang-switch" role="group" data-aria-zh="切换语言" data-aria-en="Switch language">
+      <button type="button" class="lang-btn" data-set-lang="zh" aria-pressed="true">中文</button>
+      <span class="lang-dot" aria-hidden="true">·</span>
+      <button type="button" class="lang-btn" data-set-lang="en" aria-pressed="false">EN</button>
+    </div>
+    <button type="button" class="theme-btn" data-toggle-theme data-aria-zh="切换深浅色" data-aria-en="Toggle appearance">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+    </button>
+    <button type="button" class="menu-btn" data-menu-toggle aria-expanded="false" aria-controls="mobile-drawer" data-aria-zh="打开菜单" data-aria-en="Open menu">
+      <svg class="icon-menu" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="8" x2="20" y2="8"/><line x1="4" y1="16" x2="20" y2="16"/></svg>
+      <svg class="icon-close" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+    </button>
+  </nav>
+
+  <!-- Mobile Navigation Sheet -->
+  <div class="mobile-drawer" id="mobile-drawer" aria-hidden="true">
+    <div class="mobile-sheet">
+      <div class="mobile-sheet-head">
+        <span style="display:inline-flex;align-items:center;gap:10px;font-weight:700">
+          <span class="mark mark-sm" aria-hidden="true">阅</span>
+          <span class="i18n-zh">语阅 Yuyue</span><span class="i18n-en">Yuyue 语阅</span>
+        </span>
+        <button type="button" data-menu-close style="font-size:20px;color:var(--t2);padding:2px 6px" data-aria-zh="关闭菜单" data-aria-en="Close menu">×</button>
+      </div>
+      <nav class="mobile-nav-list">
+        <a href="/"><span class="i18n-zh">首页</span><span class="i18n-en">Home</span></a>
+        <a href="#papers"><span class="i18n-zh">纸张体验</span><span class="i18n-en">Papers</span></a>
+        <a href="#export"><span class="i18n-zh">笔记导出</span><span class="i18n-en">Notes &amp; Export</span></a>
+        <a href="#companion"><span class="i18n-zh">不剧透书伴</span><span class="i18n-en">Companion</span></a>
+        <a href="/download/"><span class="i18n-zh">免费下载</span><span class="i18n-en">Download</span></a>
+        <a href="/changelog/"><span class="i18n-zh">更新记录</span><span class="i18n-en">Updates</span></a>
+        <a href="/support/"><span class="i18n-zh">使用帮助</span><span class="i18n-en">Support</span></a>
+        <a href="/privacy/"><span class="i18n-zh">隐私承诺</span><span class="i18n-en">Privacy</span></a>
+      </nav>
+    </div>
+  </div>
+
+  <!-- Top Strip (Clean warm-paper opening) -->
+  <header class="col top-strip">
+    <a class="mark-link" href="/" data-aria-zh="语阅首页" data-aria-en="Yuyue Home">
+      <div class="mark" aria-hidden="true">阅</div>
+    </a>
+
+    <div class="top-right">
+      <nav class="top-nav" data-aria-zh="主导航" data-aria-en="Primary navigation">
+        <a href="/download/"><span class="i18n-zh">下载</span><span class="i18n-en">Download</span></a>
+        <a href="/changelog/"><span class="i18n-zh">更新</span><span class="i18n-en">Updates</span></a>
+        <a href="/support/"><span class="i18n-zh">帮助</span><span class="i18n-en">Support</span></a>
+        <a href="/privacy/"><span class="i18n-zh">隐私</span><span class="i18n-en">Privacy</span></a>
+      </nav>
+
+      <div class="lang-switch" role="group" data-aria-zh="切换语言" data-aria-en="Switch language">
+        <button type="button" class="lang-btn" data-set-lang="zh" aria-pressed="true">中文</button>
+        <span class="lang-dot" aria-hidden="true">·</span>
+        <button type="button" class="lang-btn" data-set-lang="en" aria-pressed="false">EN</button>
+      </div>
+
+      <button type="button" class="theme-btn" data-toggle-theme data-aria-zh="切换浅色或深色外观" data-aria-en="Toggle light or dark appearance">
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      </button>
+
+      <button type="button" class="menu-btn" data-menu-toggle aria-expanded="false" aria-controls="mobile-drawer" data-aria-zh="打开导航菜单" data-aria-en="Open navigation menu">
+        <svg class="icon-menu" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="8" x2="20" y2="8"/><line x1="4" y1="16" x2="20" y2="16"/></svg>
+        <svg class="icon-close" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- Hero + INTERACTION #1: The Living Book Page with Acoustic Ink-Wave -->
+    <section class="col hero">
+      <h1>
+        <span class="i18n-zh">读着听，听着读，<br>进度接得上。</span>
+        <span class="i18n-en">Read it, or listen to it.<br>Same page.</span>
+      </h1>
+
+      <p class="sub">
+        <span class="i18n-zh">眼睛累了就闭眼听，想看时睁眼正好停在同一行。语阅是一款为认真读书的人准备的本地阅读器——没有账号、没有广告、没有推荐流，你的书和笔记永远只属于你自己。</span>
+        <span class="i18n-en">Close your eyes and listen; look back down and you are on the exact same line. A quiet reading and listening app with no accounts, no ads, and no feeds—just your books, on your own devices.</span>
+      </p>
+
+      <div class="hero-cta-row">
+        <a class="btn btn-primary" href="/download/">
+          <span class="i18n-zh">免费下载</span>
+          <span class="i18n-en">Download Free</span>
+        </a>
+        <a class="btn btn-ghost" href="#papers">
+          <span class="i18n-zh">看看它能做什么</span>
+          <span class="i18n-en">Explore features</span>
+        </a>
+        <span class="hero-inline-meta">
+          <span class="i18n-zh">支持 Mac、Android、iPhone 与 iPad · 永久免费</span>
+          <span class="i18n-en">For Mac, Android, iPhone &amp; iPad · Free forever</span>
+        </span>
+      </div>
+
+      <!-- INTERACTION #1: Living Book Page (Pure Siddhartha & Pure Walden) -->
+      <figure class="page" id="live-reader" data-paper="plain" data-font="serif" aria-label="Interactive book page">
+        <div class="page-top">
+          <div class="page-books" role="tablist" data-aria-zh="选择试读书页" data-aria-en="Choose sample book">
+            <button type="button" class="book-switch" role="tab" data-book-tab="zh" aria-selected="true">
+              <span class="i18n-zh">悉达多</span><span class="i18n-en">Siddhartha</span>
+            </button>
+            <button type="button" class="book-switch" role="tab" data-book-tab="en" aria-selected="false">
+              <span class="i18n-zh">Walden · 英文原著</span><span class="i18n-en">Walden · English</span>
+            </button>
+          </div>
+
+          <div class="page-top-tools">
+            <span class="mini-pill" data-vocab-wrap hidden style="cursor:default">
+              <span class="i18n-zh">生词</span><span class="i18n-en">Words</span>
+              <span class="vocab-badge" data-vocab-count>0</span>
+            </span>
+
+            <button type="button" class="mini-pill" data-toggle-gloss aria-pressed="true" hidden>
+              <span class="i18n-zh">行间简注</span><span class="i18n-en">Glosses</span>
+            </button>
+
+            <button type="button" class="mini-pill" data-toggle-voice aria-pressed="false"
+              data-title-tip-zh="点一下即可听到真实朗读声音" data-title-tip-en="Listen aloud using your browser’s voice">
+              <span aria-hidden="true">♪</span>
+              <span class="i18n-zh">有声试听</span><span class="i18n-en">Voice</span>
+            </button>
+
+            <button type="button" class="mini-pill" data-toggle-typeset aria-pressed="false"
+              data-aria-zh="展开纸张与字体设置" data-aria-en="Toggle paper and typography sheet">
+              Aa
+            </button>
+          </div>
+        </div>
+
+        <div class="page-prose-area">
+          <!-- Pure Siddhartha Part I (ZH) -->
+          <div class="page-pane" data-book="zh" lang="zh-CN">
+            <p><span class="sent">在房屋的阴影中，在河岸的阳光下，在小船边，在柳树林与无花果树的浓荫里，英俊的婆罗门之子悉达多渐渐长大，陪伴他的是他的朋友乔文达。</span></p>
+            <p><span class="sent is-active-instant">阳光晒亮他浅色的肩头：在河中沐浴时，在神圣的净礼中，在虔诚的祭祀里。芒果林的阴影潜入他黑色的眼睛，留在少年的游戏、母亲的歌声与父亲的教诲之间。</span></p>
+            <p><span class="sent">很早以前，悉达多就已经参与智者们的交谈，同乔文达一道练习辩论之术，练习沉思与内观的技艺。</span></p>
+          </div>
+
+          <!-- Pure Walden Chapter II (EN) -->
+          <div class="page-pane" data-book="en" lang="en" hidden>
+            <p>
+              <span class="sent">When I wrote the following pages, I lived alone, in the woods, a mile from any neighbor, in a house which I had built myself, on the shore of Walden Pond, in <span class="word-gloss" data-word="Concord" role="button" tabindex="0"><ruby>Concord<rt>康科德</rt></ruby></span>, Massachusetts.</span>
+            </p>
+            <p>
+              <span class="sent is-active-instant">I went to the woods because I wished to live <span class="word-gloss" data-word="deliberately" role="button" tabindex="0"><ruby>deliberately<rt>审慎地</rt></ruby></span>, to front only the essential facts of life, and see if I could not learn what it had to teach, and not, when I came to die, discover that I had not lived.</span>
+            </p>
+            <p>
+              <span class="sent">I wanted to live deep and suck out all the <span class="word-gloss" data-word="marrow" role="button" tabindex="0"><ruby>marrow<rt>精髓</rt></ruby></span> of life, to live so <span class="word-gloss" data-word="sturdily" role="button" tabindex="0"><ruby>sturdily<rt>笃实地</rt></ruby></span> and Spartan-like as to put to <span class="word-gloss" data-word="rout" role="button" tabindex="0"><ruby>rout<rt>击溃</rt></ruby></span> all that was not life.</span>
+            </p>
+          </div>
+
+          <!-- User-typed live thoughts mount here -->
+          <div id="live-thoughts"></div>
+
+          <!-- Floating Text-Selection Highlighter Bar -->
+          <div class="sel-bar" id="sel-bar" aria-hidden="true" role="toolbar" data-aria-zh="划线工具栏" data-aria-en="Highlight toolbar">
+            <button type="button" class="sel-dot" data-hl="y" data-aria-zh="黄色荧光划线" data-aria-en="Yellow highlight"></button>
+            <button type="button" class="sel-dot" data-hl="w" data-aria-zh="红色波浪线" data-aria-en="Red wavy underline"></button>
+            <button type="button" class="sel-dot" data-hl="b" data-aria-zh="蓝色虚线" data-aria-en="Blue dashed underline"></button>
+            <button type="button" class="sel-note-btn" data-add-note>
+              <span class="i18n-zh">写想法</span><span class="i18n-en">Add note</span>
+            </button>
+          </div>
+
+          <!-- Floating Dictionary Popover -->
+          <div class="dict-popover" id="dict-popover" role="dialog" aria-hidden="true" aria-label="Word definition">
+            <div class="dict-head">
+              <span class="dict-word" data-dict-word></span>
+              <span class="dict-ipa" data-dict-ipa></span>
+            </div>
+            <p class="dict-def" data-dict-def></p>
+            <div class="dict-foot">
+              <button type="button" class="dict-save-btn" data-dict-save></button>
+              <button type="button" class="dict-close-btn" data-dict-close>
+                <span class="i18n-zh">关闭</span><span class="i18n-en">Close</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Inline Aa Typesetting Drawer -->
+        <div class="typeset-drawer" id="typeset-drawer">
+          <div class="typeset-inner">
+            <div class="typeset-content">
+              <div class="paper-tiles" role="group" data-aria-zh="选择纸张" data-aria-en="Choose paper">
+                <button type="button" class="paper-tile" data-set-paper="plain" aria-pressed="true">
+                  <span class="paper-swatch">文</span>
+                  <span class="i18n-zh">素白</span><span class="i18n-en">Plain</span>
+                </button>
+                <button type="button" class="paper-tile" data-set-paper="kami" aria-pressed="false">
+                  <span class="paper-swatch">文</span>
+                  <span class="i18n-zh">纸本</span><span class="i18n-en">Paper</span>
+                </button>
+                <button type="button" class="paper-tile" data-set-paper="sage" aria-pressed="false">
+                  <span class="paper-swatch">文</span>
+                  <span class="i18n-zh">芦苇</span><span class="i18n-en">Reed</span>
+                </button>
+                <button type="button" class="paper-tile" data-set-paper="eink" aria-pressed="false">
+                  <span class="paper-swatch">文</span>
+                  <span class="i18n-zh">铅纸</span><span class="i18n-en">E-Ink</span>
+                </button>
+                <button type="button" class="paper-tile" data-set-paper="kaminight" aria-pressed="false">
+                  <span class="paper-swatch">文</span>
+                  <span class="i18n-zh">纸本·夜</span><span class="i18n-en">Night</span>
+                </button>
+                <button type="button" class="paper-tile" data-set-paper="dark" aria-pressed="false">
+                  <span class="paper-swatch">文</span>
+                  <span class="i18n-zh">暗黑</span><span class="i18n-en">Dark</span>
+                </button>
+              </div>
+
+              <div class="typeset-row">
+                <div class="font-pills" role="group" data-aria-zh="选择字体" data-aria-en="Choose font">
+                  <button type="button" class="font-pill" data-set-font="serif" aria-pressed="true"><span class="i18n-zh">宋体</span><span class="i18n-en">Serif</span></button>
+                  <button type="button" class="font-pill" data-set-font="kai" aria-pressed="false"><span class="i18n-zh">楷体</span><span class="i18n-en">Kai</span></button>
+                  <button type="button" class="font-pill" data-set-font="sans" aria-pressed="false"><span class="i18n-zh">黑体</span><span class="i18n-en">Sans</span></button>
+                </div>
+
+                <label class="size-control">
+                  <span>A</span>
+                  <input type="range" min="15" max="22" value="18" data-font-size data-aria-zh="调整字号" data-aria-en="Adjust font size">
+                  <span style="font-size:16px">A</span>
+                  <span data-font-size-val style="font-family:var(--font-mono);font-size:12px;min-width:20px">18</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="page-bar" aria-live="polite">
+          <div class="page-bar-track" aria-hidden="true">
+            <div class="page-bar-fill" data-page-fill></div>
+          </div>
+          <span class="ink-wave-wrap">
+            <svg class="ink-wave-svg" viewBox="0 0 54 16" aria-hidden="true">
+              <path class="ink-wave-path" d="M 0 8 L 54 8"/>
+            </svg>
+            <span data-page-meta>悉达多 · 第一部</span>
+          </span>
+          <div class="bar-controls">
+            <span data-page-count style="margin-right:4px">第 2 / 3 句</span>
+            <button type="button" class="bar-btn" data-cap-prev data-aria-zh="上一句" data-aria-en="Previous sentence">‹</button>
+            <button type="button" class="bar-btn bar-btn-play" data-cap-play aria-pressed="false">
+              <span data-play-label>朗读</span>
+            </button>
+            <button type="button" class="bar-btn" data-cap-next data-aria-zh="下一句" data-aria-en="Next sentence">›</button>
+          </div>
+        </div>
+      </figure>
+
+      <p class="page-tip">
+        <span class="i18n-zh">直接在上面玩：点任意一句切换跟读、点「朗读」看墨线化作声波、拖选文字划线写下想法、点 <strong>Aa</strong> 换纸张字号，或切到《Walden》点词收入生词本。</span>
+        <span class="i18n-en">Try it right here: tap any sentence, hit Listen to watch the ink rule ripple, drag text to highlight or write a note, open <strong>Aa</strong> for papers &amp; fonts, or tap a word in Walden.</span>
+      </p>
+    </section>
+
+    <!-- INTERACTION #2: Draggable Paper & Night Curtain (Real Literature!) -->
+    <section class="chapter" id="papers">
+      <div class="col">
+        <h2 class="chapter-title">
+          <span class="i18n-zh">白天像纸书，深夜不刺眼</span>
+          <span class="i18n-en">Warm print by day, calm ink by night</span>
+        </h2>
+        <p class="chapter-sub">
+          <span class="i18n-zh">左右拖动中间滑块，或直接点页面任意位置，在同一页书上对比日间纸本、墨水屏铅纸与深夜模式。</span>
+          <span class="i18n-en">Drag the handle—or click anywhere across the page—to compare daytime print, matte e-ink grain, and bedtime dark paper.</span>
+        </p>
+
+        <div class="curtain-shell" id="paper-curtain">
+          <div class="curtain-layer curtain-day" data-day-paper="kami">
+            <div class="curtain-head">
+              <span data-day-label>纸本 · 温暖纸书</span>
+              <span data-night-label>纸本·夜 · 深夜暖黑</span>
+            </div>
+            <p class="curtain-text">
+              <span class="i18n-zh">清晨是万物苏醒的时刻，也是我一天中最值得珍视的时光。<span class="c-hl">湖面如同一面未被惊动的镜子</span>，映出岸边松林的倒影；每当我静下心来翻开一页书，<span class="c-ink">周遭的喧嚣便退到很远的地方</span>。</span>
+              <span class="i18n-en">It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife. <span class="c-hl">However little known the feelings or views of such a man may be</span> on his first entering a neighbourhood, <span class="c-ink">this truth is so well fixed in the minds of the surrounding families</span>.</span>
+            </p>
+          </div>
+
+          <div class="curtain-layer curtain-night" data-night-paper="kaminight" aria-hidden="true">
+            <div class="curtain-head">
+              <span data-day-label>纸本 · 温暖纸书</span>
+              <span data-night-label>纸本·夜 · 深夜暖黑</span>
+            </div>
+            <p class="curtain-text">
+              <span class="i18n-zh">清晨是万物苏醒的时刻，也是我一天中最值得珍视的时光。<span class="c-hl">湖面如同一面未被惊动的镜子</span>，映出岸边松林的倒影；每当我静下心来翻开一页书，<span class="c-ink">周遭的喧嚣便退到很远的地方</span>。</span>
+              <span class="i18n-en">It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife. <span class="c-hl">However little known the feelings or views of such a man may be</span> on his first entering a neighbourhood, <span class="c-ink">this truth is so well fixed in the minds of the surrounding families</span>.</span>
+            </p>
+          </div>
+
+          <div class="curtain-divider" aria-hidden="true"></div>
+          <button type="button" class="curtain-handle" role="slider" aria-valuemin="8" aria-valuemax="92" aria-valuenow="54"
+            data-aria-zh="左右拖动对比日夜纸张" data-aria-en="Drag left or right to compare papers">
+            ‹›
+          </button>
+        </div>
+
+        <div class="curtain-pickers">
+          <div class="picker-group">
+            <span class="subtle"><span class="i18n-zh">左侧：</span><span class="i18n-en">Left:</span></span>
+            <button type="button" class="chip-btn" data-curtain-day="kami" aria-pressed="true"><span class="i18n-zh">纸本</span><span class="i18n-en">Paper</span></button>
+            <button type="button" class="chip-btn" data-curtain-day="plain" aria-pressed="false"><span class="i18n-zh">素白</span><span class="i18n-en">Plain</span></button>
+            <button type="button" class="chip-btn" data-curtain-day="sage" aria-pressed="false"><span class="i18n-zh">芦苇</span><span class="i18n-en">Reed</span></button>
+            <button type="button" class="chip-btn" data-curtain-day="eink" aria-pressed="false"><span class="i18n-zh">铅纸</span><span class="i18n-en">E-Ink</span></button>
+          </div>
+          <div class="picker-group">
+            <span class="subtle"><span class="i18n-zh">右侧：</span><span class="i18n-en">Right:</span></span>
+            <button type="button" class="chip-btn" data-curtain-night="kaminight" aria-pressed="true"><span class="i18n-zh">纸本·夜</span><span class="i18n-en">Night Paper</span></button>
+            <button type="button" class="chip-btn" data-curtain-night="dark" aria-pressed="false"><span class="i18n-zh">暗黑</span><span class="i18n-en">Dark</span></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- INTERACTION #4: Highlight → Export & 3D Flippable Anki Studio -->
+    <section class="chapter" id="export">
+      <div class="col">
+        <h2 class="chapter-title">
+          <span class="i18n-zh">划过的句子，体面地带去任何地方</span>
+          <span class="i18n-en">Every highlight, ready for wherever you think</span>
+        </h2>
+        <p class="chapter-sub">
+          <span class="i18n-zh">划线、想法与生词永远属于你。切换下面的格式，看看同一段读书摘录如何变成书摘卡、纯文本笔记、卡片盒或可翻面的记忆卡。</span>
+          <span class="i18n-en">Your highlights, thoughts, and saved words are never locked in. Switch formats below to see one reading passage turn into a quote card, plain Markdown, Obsidian note, flomo memo, or flippable Anki flashcard.</span>
+        </p>
+
+        <div id="export-studio">
+          <div class="export-tabs" role="tablist" data-aria-zh="选择笔记导出形态" data-aria-en="Choose note export format">
+            <button type="button" class="export-tab" role="tab" data-export-tab="card" aria-selected="true">
+              <span class="i18n-zh">书摘卡片</span><span class="i18n-en">Quote Card</span>
+            </button>
+            <button type="button" class="export-tab" role="tab" data-export-tab="md" aria-selected="false" tabindex="-1">Markdown</button>
+            <button type="button" class="export-tab" role="tab" data-export-tab="obsidian" aria-selected="false" tabindex="-1">Obsidian</button>
+            <button type="button" class="export-tab" role="tab" data-export-tab="flomo" aria-selected="false" tabindex="-1">flomo</button>
+            <button type="button" class="export-tab" role="tab" data-export-tab="anki" aria-selected="false" tabindex="-1">
+              <span class="i18n-zh">Anki 记忆卡</span><span class="i18n-en">Anki Card</span>
+            </button>
+          </div>
+
+          <div class="export-stage">
+            <!-- Tab 1: 3D Pointer-Tilting Quote Card -->
+            <div class="export-pane" data-export-pane="card">
+              <div class="quote-tilt-wrap">
+                <article class="quote-card-3d" data-qpaper="kami">
+                  <div class="quote-sheen" aria-hidden="true"></div>
+                  <div class="quote-mark-glyph" aria-hidden="true">“</div>
+                  <p class="quote-card-body">
+                    <span class="i18n-zh">阳光晒亮他浅色的肩头：在河中沐浴时，在神圣的净礼中，在虔诚的祭祀里。芒果林的阴影潜入他黑色的眼睛。</span>
+                    <span class="i18n-en">The sun tanned his light shoulders by the banks of the river when bathing, performing the sacred ablutions, the sacred offerings.</span>
+                  </p>
+                  <div class="quote-card-thought">
+                    <span class="i18n-zh">想法 · 黑塞写光影总是安静而有重量，读到这里仿佛真的听见了河水的声音。</span>
+                    <span class="i18n-en">Note · Hesse paints light and shadow with a quiet weight—you can almost hear the river moving behind the lines.</span>
+                  </div>
+                  <div class="quote-card-foot">
+                    <span>
+                      <span class="i18n-zh">《悉达多》 · 赫尔曼·黑塞</span>
+                      <span class="i18n-en">Siddhartha · Hermann Hesse</span>
+                    </span>
+                    <span class="mark mark-sm" aria-hidden="true">阅</span>
+                  </div>
+                </article>
+              </div>
+              <div class="quote-controls">
+                <div class="quote-paper-dots" role="group" data-aria-zh="选择书摘卡纸张" data-aria-en="Choose quote card paper">
+                  <button type="button" class="qpaper-dot" data-qpaper-pick="kami" aria-pressed="true" data-aria-zh="暖白纸本" data-aria-en="Warm paper"></button>
+                  <button type="button" class="qpaper-dot" data-qpaper-pick="sage" aria-pressed="false" data-aria-zh="芦苇护眼" data-aria-en="Soft reed"></button>
+                  <button type="button" class="qpaper-dot" data-qpaper-pick="night" aria-pressed="false" data-aria-zh="深夜暖黑" data-aria-en="Night paper"></button>
+                </div>
+                <span>
+                  <span class="i18n-zh">轻移光标可感受纸面微倾光泽</span>
+                  <span class="i18n-en">Move pointer across the card for paper sheen</span>
+                </span>
+              </div>
+            </div>
+
+            <!-- Tab 2: Clean Markdown -->
+            <div class="export-pane" data-export-pane="md" hidden>
+              <div class="code-box" style="margin-top:0">
+                <button type="button" class="copy-btn" data-copy>
+                  <span class="i18n-zh">复制</span><span class="i18n-en">Copy</span>
+                </button>
+                <pre class="i18n-zh"># 悉达多
+作者：赫尔曼·黑塞 · 第一部
+
+> 阳光晒亮他浅色的肩头：在河中沐浴时，在神圣的净礼中，在虔诚的祭祀里。芒果林的阴影潜入他黑色的眼睛。
+
+- **想法**：黑塞写光影总是安静而有重量，读到这里仿佛真的听见了河水的声音。
+- **位置**：第一部 · 36%</pre>
+                <pre class="i18n-en"># Siddhartha
+Author: Hermann Hesse · Part I
+
+> The sun tanned his light shoulders by the banks of the river when bathing, performing the sacred ablutions, the sacred offerings.
+
+- **Note**: Hesse paints light and shadow with a quiet weight—you can almost hear the river moving behind the lines.
+- **Location**: Part I · 36%</pre>
+              </div>
+            </div>
+
+            <!-- Tab 3: Obsidian Frontmatter + Wikilinks -->
+            <div class="export-pane" data-export-pane="obsidian" hidden>
+              <div class="code-box" style="margin-top:0">
+                <button type="button" class="copy-btn" data-copy>
+                  <span class="i18n-zh">复制</span><span class="i18n-en">Copy</span>
+                </button>
+                <pre class="i18n-zh">---
+book: "[[悉达多]]"
+author: "[[赫尔曼·黑塞]]"
+tags: [读书笔记, 文学]
+progress: 36%
+---
+
+> [!quote] 第一部 · 婆罗门之子
+> 阳光晒亮他浅色的肩头：在河中沐浴时，在神圣的净礼中，在虔诚的祭祀里。
+
+黑塞写光影总是安静而有重量，读到这里仿佛真的听见了河水的声音。</pre>
+                <pre class="i18n-en">---
+book: "[[Siddhartha]]"
+author: "[[Hermann Hesse]]"
+tags: [reading-notes, fiction]
+progress: 36%
+---
+
+> [!quote] Part I · The Brahmin’s Son
+> The sun tanned his light shoulders by the banks of the river when bathing, performing the sacred ablutions, the sacred offerings.
+
+Hesse paints light and shadow with a quiet weight—you can almost hear the river moving behind the lines.</pre>
+              </div>
+            </div>
+
+            <!-- Tab 4: flomo Memo Card -->
+            <div class="export-pane" data-export-pane="flomo" hidden>
+              <article class="memo-card">
+                <span class="memo-tag"><span class="i18n-zh">#读书/悉达多</span><span class="i18n-en">#reading/siddhartha</span></span>
+                <p class="memo-quote">
+                  <span class="i18n-zh">“阳光晒亮他浅色的肩头：在河中沐浴时，在神圣的净礼中，在虔诚的祭祀里。芒果林的阴影潜入他黑色的眼睛。”</span>
+                  <span class="i18n-en">“The sun tanned his light shoulders by the banks of the river when bathing, performing the sacred ablutions, the sacred offerings.”</span>
+                </p>
+                <p style="margin:0">
+                  <span class="i18n-zh">黑塞写光影总是安静而有重量，读到这里仿佛真的听见了河水的声音。</span>
+                  <span class="i18n-en">Hesse paints light and shadow with a quiet weight—you can almost hear the river moving behind the lines.</span>
+                </p>
+              </article>
+            </div>
+
+            <!-- Tab 5: 3D Flippable Anki Flashcard -->
+            <div class="export-pane" data-export-pane="anki" hidden>
+              <div class="anki-stage">
+                <button type="button" class="anki-card" id="anki-card" aria-pressed="false"
+                  data-aria-zh="翻转 Anki 记忆卡查看释义" data-aria-en="Flip Anki flashcard to reveal meaning">
+                  <span class="anki-face anki-front">
+                    <span class="anki-label">
+                      <span><span class="i18n-zh">正面 · 原文语境</span><span class="i18n-en">Front · In Context</span></span>
+                      <span>Walden · Ch. II</span>
+                    </span>
+                    <span>
+                      <span class="anki-word" style="display:block">deliberately</span>
+                      <span class="anki-context" style="display:block">I went to the woods because I wished to live <mark>deliberately</mark>, to front only the essential facts of life.</span>
+                    </span>
+                    <span class="anki-flip-hint">
+                      <span class="i18n-zh">点击翻面查看释义 ↻</span>
+                      <span class="i18n-en">Tap card to flip ↻</span>
+                    </span>
+                  </span>
+
+                  <span class="anki-face anki-back">
+                    <span class="anki-label">
+                      <span><span class="i18n-zh">背面 · 词典释义</span><span class="i18n-en">Back · Definition</span></span>
+                      <span style="font-family:var(--font-mono)">/dɪˈlɪb.ər.ət.li/</span>
+                    </span>
+                    <span>
+                      <span class="anki-meaning" style="display:block">
+                        <span class="i18n-zh">adv. 审慎地、从容不迫地；清醒自觉地</span>
+                        <span class="i18n-en">adv. Consciously, intentionally, and unhurriedly</span>
+                      </span>
+                      <span class="anki-context" style="display:block;font-family:var(--font-sans);font-size:13.5px">
+                        <span class="i18n-zh">来自你在《瓦尔登湖》点词收录的生词，自动连同原句一起导入 Anki 牌组。</span>
+                        <span class="i18n-en">Captured directly from Walden with its original sentence and ready for your Anki deck.</span>
+                      </span>
+                    </span>
+                    <span class="anki-flip-hint">
+                      <span class="i18n-zh">再次点击翻回正面 ↺</span>
+                      <span class="i18n-en">Tap to flip back ↺</span>
+                    </span>
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- INTERACTION #5: Spoiler-Free Reading Companion (The Great Gatsby!) -->
+    <section class="chapter" id="companion">
+      <div class="col">
+        <h2 class="chapter-title">
+          <span class="i18n-zh">有一位不剧透的「书伴」</span>
+          <span class="i18n-en">A reading companion that never spoils</span>
+        </h2>
+        <p class="chapter-sub">
+          <span class="i18n-zh">长篇人物记混了、句子没读懂，随手问一句就好。它默认只看你已经读过的页数，每句话都能点回原文核对——不用担心被剧透结局。</span>
+          <span class="i18n-en">Forgot who a character is or want to unpack a passage? Ask naturally—your companion reads only up to your bookmark and cites the exact line so endings stay safe.</span>
+        </p>
+
+        <div class="companion-box" id="companion-demo">
+          <div class="companion-excerpt">
+            <div class="subtle" style="font:600 12px/1.4 var(--font-sans);margin-bottom:10px">
+              <span class="i18n-zh">《了不起的盖茨比》 · 第一章</span>
+              <span class="i18n-en">The Great Gatsby · Chapter 1</span>
+            </div>
+            <p style="margin:0 0 8px">
+              <span class="comp-line" data-comp-line="1">
+                <span class="i18n-zh">在我年纪还轻、阅历不深的时候，父亲教导过我一句话，我至今还念念不忘。</span>
+                <span class="i18n-en">In my younger and more vulnerable years my father gave me some advice that I’ve been turning over in my mind ever since.</span>
+              </span>
+            </p>
+            <p style="margin:0">
+              <span class="comp-line" data-comp-line="2">
+                <span class="i18n-zh">“每逢你想要批评任何人的时候，”他对我说，“你就记住，这个世界上所有的人，并不是个个都有过你拥有的那些优越条件。”</span>
+                <span class="i18n-en">“Whenever you feel like criticizing any one,” he told me, “just remember that all the people in this world haven’t had the advantages that you’ve had.”</span>
+              </span>
+            </p>
+
+            <div class="bookmark-rule">
+              <span class="i18n-zh">你读到这里（第一章） · 以下内容对书伴不可见</span>
+              <span class="i18n-en">Your bookmark (Chapter 1) · Hidden below</span>
+            </div>
+
+            <p style="margin:0">
+              <span class="comp-line is-unread" data-comp-line="3">
+                <span class="i18n-zh">……于是我们继续奋力向前，逆水行舟，被不断地向后推，直至回到往昔岁月。</span>
+                <span class="i18n-en">…So we beat on, boats against the current, borne back ceaselessly into the past.</span>
+              </span>
+            </p>
+          </div>
+
+          <div class="companion-chat">
+            <div class="comp-prompts" role="group" data-aria-zh="选择向书伴提问" data-aria-en="Choose a sample question">
+              <button type="button" class="prompt-btn" data-comp-q="q1" aria-pressed="true">
+                <span class="i18n-zh">父亲的话看出「我」是什么性格？</span>
+                <span class="i18n-en">What does this reveal about Nick?</span>
+              </button>
+              <button type="button" class="prompt-btn" data-comp-q="q2" aria-pressed="false">
+                <span class="i18n-zh">这两句开篇起到了什么作用？</span>
+                <span class="i18n-en">Why open the novel this way?</span>
+              </button>
+              <button type="button" class="prompt-btn" data-comp-q="q3" aria-pressed="false">
+                <span class="i18n-zh">盖茨比最后的结局是什么？（试剧透）</span>
+                <span class="i18n-en">How does Gatsby’s story end? (Spoiler test)</span>
+              </button>
+            </div>
+
+            <div class="comp-reply" data-comp-reply aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Everyday Reading Moments (Reader-First Storytelling) -->
+    <section class="chapter" id="moments">
+      <div class="col">
+        <h2 class="chapter-title">
+          <span class="i18n-zh">一天里，怎么用语阅</span>
+          <span class="i18n-en">A day with Yuyue</span>
+        </h2>
+        <p class="chapter-sub">
+          <span class="i18n-zh">不用学复杂设置，在每个你想看书或听书的空隙里，它都顺手接得上。</span>
+          <span class="i18n-en">No complicated setup—just a calm companion across every quiet pocket of your day.</span>
+        </p>
+
+        <div class="moments-grid">
+          <article class="moment-item">
+            <div class="moment-time"><span class="i18n-zh">清晨通勤</span><span class="i18n-en">Morning commute</span></div>
+            <h3><span class="i18n-zh">戴上耳机，从昨晚那一句继续</span><span class="i18n-en">Put on headphones, keep going</span></h3>
+            <p><span class="i18n-zh">锁屏也能切句暂停，离线声音自然耐听；下了地铁拿出手机，页面正好停在刚才听到的那一行。</span><span class="i18n-en">Control playback from your lock screen or earbuds. Step off the train, unlock your phone, and pick up on the exact same line.</span></p>
+          </article>
+
+          <article class="moment-item">
+            <div class="moment-time"><span class="i18n-zh">午后书桌</span><span class="i18n-en">Afternoon desk</span></div>
+            <h3><span class="i18n-zh">第一次顺畅读完一本英文原著</span><span class="i18n-en">Finish a book in another language</span></h3>
+            <p><span class="i18n-zh">生词上方轻浮中文简注，不再切出去查词典；遇到难懂的长句双击看翻译，生词自动收进生词本。</span><span class="i18n-en">Quiet interlinear hints above tough words, instant offline definitions on tap, double-tap sentence translation, and a saved word list.</span></p>
+          </article>
+
+          <article class="moment-item">
+            <div class="moment-time"><span class="i18n-zh">傍晚散步</span><span class="i18n-en">Evening walk</span></div>
+            <h3><span class="i18n-zh">把喜欢的播客和有声书当书读</span><span class="i18n-en">Read podcasts like a magazine</span></h3>
+            <p><span class="i18n-zh">订阅播客节目或导入有声书，排成清爽可查词的文字页；听到金句顺手一划，连文字带原声一起留下来。</span><span class="i18n-en">Turn podcast episodes and audiobooks into readable, searchable pages where you can look up words and save favorite clips.</span></p>
+          </article>
+
+          <article class="moment-item">
+            <div class="moment-time"><span class="i18n-zh">睡前十分钟</span><span class="i18n-en">Before sleep</span></div>
+            <h3><span class="i18n-zh">在「今日回顾」里重逢旧划线</span><span class="i18n-en">Meet old highlights again</span></h3>
+            <p><span class="i18n-zh">划过的句子不会埋在角落里。每天安静重逢几条旧摘录，也能随时一键导出到 Obsidian、Notion、flomo 或 Markdown。</span><span class="i18n-en">Your highlights don’t disappear into a drawer—revisit them in Daily Review, or export anytime to Obsidian, Notion, flomo, or Markdown.</span></p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Reader-Friendly Compatibility & Quiet Promise -->
+    <section class="chapter" id="promise">
+      <div class="col">
+        <h2 class="chapter-title">
+          <span class="i18n-zh">放进来就能读，随时都能带走</span>
+          <span class="i18n-en">Bring your own books, take your notes anywhere</span>
+        </h2>
+        <p class="chapter-sub">
+          <span class="i18n-zh">不绑定书城、不锁死格式，也不把你的阅读记录留在我们的服务器上。</span>
+          <span class="i18n-en">No proprietary formats, no store lock-in, and none of your reading history sits on our servers.</span>
+        </p>
+
+        <div class="spec-ledger">
+          <div class="spec-row">
+            <div class="spec-key"><span class="i18n-zh">能打开的书</span><span class="i18n-en">Books &amp; Audio</span></div>
+            <div class="spec-val">
+              <span class="i18n-zh"><strong>EPUB</strong>、<strong>PDF</strong>、<strong>TXT</strong>、无加密的 <strong>MOBI / AZW3</strong> 电子书，以及 <strong>M4B / MP3</strong> 有声书与 <strong>RSS / OPML</strong> 播客。</span>
+              <span class="i18n-en"><strong>EPUB</strong>, <strong>PDF</strong>, <strong>TXT</strong>, DRM-free <strong>MOBI / AZW3</strong>, plus <strong>M4B / MP3</strong> audiobooks and <strong>RSS / OPML</strong> podcasts.</span>
+            </div>
+          </div>
+          <div class="spec-row">
+            <div class="spec-key"><span class="i18n-zh">传书方式</span><span class="i18n-en">Adding Books</span></div>
+            <div class="spec-val">
+              <span class="i18n-zh">本地直接打开、同一网络下 <strong>Wi‑Fi 无线传书</strong>，或连接自己的家庭书库（Calibre、NAS 等）。</span>
+              <span class="i18n-en">Open local files, send over <strong>local Wi‑Fi</strong>, or connect your personal home library (Calibre, NAS, and more).</span>
+            </div>
+          </div>
+          <div class="spec-row">
+            <div class="spec-key"><span class="i18n-zh">跨设备同步</span><span class="i18n-en">Device Sync</span></div>
+            <div class="spec-val">
+              <span class="i18n-zh">使用你自己的 <strong>iCloud 云盘</strong>或<strong>私人网盘</strong>（坚果云、群晖、Nextcloud 等，Google Drive 即将支持），支持整库一键备份。</span>
+              <span class="i18n-en">Through your own <strong>iCloud Drive</strong> or <strong>WebDAV cloud</strong> (Google Drive coming soon), plus one-file full-library backups.</span>
+            </div>
+          </div>
+          <div class="spec-row">
+            <div class="spec-key"><span class="i18n-zh">导出笔记</span><span class="i18n-en">Export Notes</span></div>
+            <div class="spec-val">
+              <span class="i18n-zh">一键导出 <strong>Markdown</strong>、<strong>带划线的 EPUB</strong>、<strong>表格 CSV</strong>，或直发 <strong>Obsidian</strong>、<strong>Notion</strong>、<strong>flomo</strong>、<strong>新枝</strong>与 <strong>Anki</strong>。</span>
+              <span class="i18n-en">Export to <strong>Markdown</strong>, <strong>highlighted EPUB</strong>, <strong>CSV</strong>, or send straight to <strong>Obsidian</strong>, <strong>Notion</strong>, <strong>flomo</strong>, <strong>Xinzhi</strong>, and <strong>Anki</strong>.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="pledge-note">
+          <blockquote>
+            <span class="i18n-zh">“永远不做：账号系统、自己的服务器、收集数据、广告、书城、推荐流、社交。不是做不了，是做了就不是语阅了。”</span>
+            <span class="i18n-en">“Never building: accounts, our own servers, telemetry, ads, a bookstore, feeds, or social networks. Not because we can’t—because then it wouldn’t be Yuyue.”</span>
+          </blockquote>
+          <p>
+            <span class="i18n-zh">阅读完整的 <a href="/privacy/">隐私承诺</a> 与 <a href="/roadmap/">未来计划</a>。</span>
+            <span class="i18n-en">Read our plain-language <a href="/privacy/">Privacy Policy</a> and <a href="/roadmap/">Roadmap</a>.</span>
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Download Section (Warm, Clear, Reassuring) -->
+    <section class="chapter" id="download">
+      <div class="col">
+        <h2 class="chapter-title">
+          <span class="i18n-zh">免费下载语阅</span>
+          <span class="i18n-en">Get Yuyue free</span>
+        </h2>
+        <p class="chapter-sub">
+          <span class="i18n-zh">目前直接提供安装包下载，暂未上架应用商店。<strong>Mac 与 Android 最容易装上</strong>，装好后就能直接在应用内收到新版提醒。</span>
+          <span class="i18n-en">Available free as direct downloads while we prepare for app stores. <strong>Mac and Android are quickest to install</strong>, with built-in update notifications.</span>
+        </p>
+
+        <div class="platform-grid">
+          <article class="platform-card" data-platform="mac">
+            <div class="platform-head">
+              <h3>Mac</h3>
+              <div style="display:flex;gap:6px;align-items:center">
+                <span class="platform-detected"><span class="i18n-zh">当前设备</span><span class="i18n-en">This device</span></span>
+                <span class="platform-tag"><span class="i18n-zh">推荐</span><span class="i18n-en">Ready</span></span>
+              </div>
+            </div>
+            <div class="platform-req"><span class="i18n-zh">Apple 芯片 · macOS 15 及以上</span><span class="i18n-en">Apple Silicon · macOS 15+</span></div>
+            <ol>
+              <li><span class="i18n-zh">下载 <code>.dmg</code>，拖进“应用程序”。</span><span class="i18n-en">Download the <code>.dmg</code> and drag into Applications.</span></li>
+              <li><span class="i18n-zh">首次打开在“系统设置 → 隐私与安全性”里点一次“仍要打开”。</span><span class="i18n-en">On first launch, click Open Anyway in Privacy &amp; Security.</span></li>
+            </ol>
+          </article>
+
+          <article class="platform-card" data-platform="android">
+            <div class="platform-head">
+              <h3>Android</h3>
+              <div style="display:flex;gap:6px;align-items:center">
+                <span class="platform-detected"><span class="i18n-zh">当前设备</span><span class="i18n-en">This device</span></span>
+                <span class="platform-tag"><span class="i18n-zh">推荐</span><span class="i18n-en">Ready</span></span>
+              </div>
+            </div>
+            <div class="platform-req"><span class="i18n-zh">Android 8.0 及以上</span><span class="i18n-en">Android 8.0+</span></div>
+            <p><span class="i18n-zh">下载 <code>.apk</code> 安装包直接安装即可，装好后支持应用内提醒更新。</span><span class="i18n-en">Download and install the <code>.apk</code> directly; updates appear right inside the app.</span></p>
+          </article>
+
+          <article class="platform-card" data-platform="ios">
+            <div class="platform-head">
+              <h3>iPhone &amp; iPad</h3>
+              <div style="display:flex;gap:6px;align-items:center">
+                <span class="platform-detected"><span class="i18n-zh">当前设备</span><span class="i18n-en">This device</span></span>
+                <span class="platform-tag"><span class="i18n-zh">需自签安装</span><span class="i18n-en">Sideload</span></span>
+              </div>
+            </div>
+            <div class="platform-req"><span class="i18n-zh">iOS / iPadOS 18 及以上</span><span class="i18n-en">iOS / iPadOS 18+</span></div>
+            <p><span class="i18n-zh">暂未上架 App Store，目前需配合电脑自签安装包使用，详细步骤见 <a href="/download/#ios">安装说明</a>。</span><span class="i18n-en">Not on the App Store yet—currently installed via computer sideloading. See our <a href="/download/#ios">step-by-step guide</a>.</span></p>
+          </article>
+
+          <article class="platform-card" data-platform="windows">
+            <div class="platform-head">
+              <h3>Windows</h3>
+              <div style="display:flex;gap:6px;align-items:center">
+                <span class="platform-detected"><span class="i18n-zh">当前设备</span><span class="i18n-en">This device</span></span>
+                <span class="platform-tag"><span class="i18n-zh">准备中</span><span class="i18n-en">Coming soon</span></span>
+              </div>
+            </div>
+            <div class="platform-req"><span class="i18n-zh">Windows 与 Linux 同步规划中</span><span class="i18n-en">Windows &amp; Linux in progress</span></div>
+            <p><span class="i18n-zh">正在推进书架、阅读、划线、离线朗读与跨设备同步，进展可看 <a href="/roadmap/">未来计划</a>。</span><span class="i18n-en">Reading, highlights, offline voices, and cross-device sync are on the way—follow along on the <a href="/roadmap/">Roadmap</a>.</span></p>
+          </article>
+        </div>
+
+        <div class="get-bar">
+          <div style="display:flex;flex-wrap:wrap;gap:10px">
+            <a class="btn btn-primary" href="https://github.com/inokoru/yuyue/releases" target="_blank" rel="noopener">
+              <span class="i18n-zh">下载最新版安装包</span><span class="i18n-en">Download Latest Release</span>
+            </a>
+            <a class="btn btn-ghost" href="/download/">
+              <span class="i18n-zh">查看详细安装步骤</span><span class="i18n-en">Installation Guide</span>
+            </a>
+          </div>
+          <a href="/changelog/" style="font-size:14px;color:var(--t2)">
+            <span class="i18n-zh">看看这版带来了什么 →</span><span class="i18n-en">See what’s new →</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Reader-First FAQ -->
+    <section class="chapter" id="faq">
+      <div class="col">
+        <h2 class="chapter-title"><span class="i18n-zh">你可能想问</span><span class="i18n-en">Good to know</span></h2>
+        <div class="faq-list" style="margin-top:20px">
+          <details class="faq-item">
+            <summary><span><span class="i18n-zh">语阅真的完全免费、没有广告吗？</span><span class="i18n-en">Is Yuyue really free with no ads?</span></span><span class="faq-plus" aria-hidden="true">+</span></summary>
+            <div class="faq-body">
+              <p class="i18n-zh">是的。没有会员墙、没有开屏广告，也不需要注册账号，打开就能安心看书、听书、做笔记。</p>
+              <p class="i18n-en">Yes—no subscriptions, no splash ads, and no sign-in wall. Just open the app and start reading.</p>
+            </div>
+          </details>
+          <details class="faq-item">
+            <summary><span><span class="i18n-zh">怎么把我自己存的电子书放进语阅？</span><span class="i18n-en">How do I add my own e-books?</span></span><span class="faq-plus" aria-hidden="true">+</span></summary>
+            <div class="faq-body">
+              <p class="i18n-zh">在电脑上可以直接拖进窗口，在手机上可以直接导入本地文件或用同一 Wi‑Fi 无线传书；如果你平时用 Calibre 或家庭 NAS 管书，也能直接连上来挑书。</p>
+              <p class="i18n-en">Drop files straight into the Mac window, import from your phone, send books over local Wi‑Fi, or browse your own Calibre or home library directly.</p>
+            </div>
+          </details>
+          <details class="faq-item">
+            <summary><span><span class="i18n-zh">不用注册账号，手机和电脑怎么同步进度？</span><span class="i18n-en">How do my phone and computer stay in sync without an account?</span></span><span class="faq-plus" aria-hidden="true">+</span></summary>
+            <div class="faq-body">
+              <p class="i18n-zh">在设置里连上你自己的 iCloud 云盘或私人网盘（如坚果云、群晖、Nextcloud）就行。你的书和笔记只在你的设备和自己的网盘之间传，别人看不到。</p>
+              <p class="i18n-en">Connect your own iCloud Drive or personal cloud drive in Settings. Your library travels strictly between your own devices and your own storage.</p>
+            </div>
+          </details>
+          <details class="faq-item">
+            <summary><span><span class="i18n-zh">以后想换软件，划过的笔记能带走吗？</span><span class="i18n-en">Can I take my highlights and notes out anytime?</span></span><span class="faq-plus" aria-hidden="true">+</span></summary>
+            <div class="faq-body">
+              <p class="i18n-zh">随时可以。所有划线和想法都能导出为通用的 Markdown、带划线的电子书、表格，或者直接发到 Obsidian、Notion、flomo 和 Anki。</p>
+              <p class="i18n-en">Anytime. Export every highlight and note to plain Markdown, highlighted EPUB, CSV, or send directly to Obsidian, Notion, flomo, and Anki.</p>
+            </div>
+          </details>
+        </div>
+        <p style="margin-top:16px;font-size:14.5px;color:var(--t2)">
+          <span class="i18n-zh">还有其他疑问或建议？前往 <a href="/support/">使用帮助与反馈</a>。</span>
+          <span class="i18n-en">More questions or feedback? Visit <a href="/support/">Support</a>.</span>
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Quiet Structured Footer -->
+  <footer class="site-footer">
+    <div class="col">
+      <div class="footer-cols">
+        <div class="footer-brand">
+          <div style="display:flex;align-items:center;gap:10px;font-weight:700;color:var(--t1);margin-bottom:8px">
+            <span class="mark mark-sm" aria-hidden="true">阅</span>
+            <span class="i18n-zh">语阅 Yuyue</span><span class="i18n-en">Yuyue 语阅</span>
+          </div>
+          <p style="margin:0;font-size:13.5px;line-height:1.6">
+            <span class="i18n-zh">安静、免费的本地读书与听书软件。书和笔记永远留在你自己的设备上。</span>
+            <span class="i18n-en">A quiet, free app for reading and listening to the books you own.</span>
+          </p>
+        </div>
+
+        <div>
+          <h3><span class="i18n-zh">了解语阅</span><span class="i18n-en">Explore</span></h3>
+          <ul>
+            <li><a href="#papers"><span class="i18n-zh">纸张体验</span><span class="i18n-en">Papers</span></a></li>
+            <li><a href="#export"><span class="i18n-zh">笔记导出</span><span class="i18n-en">Notes &amp; Export</span></a></li>
+            <li><a href="#companion"><span class="i18n-zh">不剧透书伴</span><span class="i18n-en">Companion</span></a></li>
+            <li><a href="#moments"><span class="i18n-zh">使用场景</span><span class="i18n-en">Daily Use</span></a></li>
+          </ul>
+        </div>
+
+        <div>
+          <h3><span class="i18n-zh">动态</span><span class="i18n-en">Updates</span></h3>
+          <ul>
+            <li><a href="/download/"><span class="i18n-zh">免费下载</span><span class="i18n-en">Download</span></a></li>
+            <li><a href="/changelog/"><span class="i18n-zh">更新记录</span><span class="i18n-en">Changelog</span></a></li>
+            <li><a href="/roadmap/"><span class="i18n-zh">未来计划</span><span class="i18n-en">Roadmap</span></a></li>
+            <li><a href="https://github.com/inokoru/yuyue" target="_blank" rel="noopener"><span class="i18n-zh">开源代码</span><span class="i18n-en">Open Source</span></a></li>
+          </ul>
+        </div>
+
+        <div>
+          <h3><span class="i18n-zh">帮助与隐私</span><span class="i18n-en">Help</span></h3>
+          <ul>
+            <li><a href="/support/"><span class="i18n-zh">使用帮助</span><span class="i18n-en">Support</span></a></li>
+            <li><a href="/privacy/"><span class="i18n-zh">隐私承诺</span><span class="i18n-en">Privacy</span></a></li>
+            <li><a href="mailto:yuyue.app@icloud.com">yuyue.app@icloud.com</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-meta">
+        <span>© 2026 <span class="i18n-zh">语阅 Yuyue</span><span class="i18n-en">Yuyue 语阅</span> · <span class="i18n-zh">免费开源</span><span class="i18n-en">Free &amp; Open Source</span></span>
+        <span>
+          <span class="i18n-zh">感谢 <a href="https://linux.do/" target="_blank" rel="noopener">LINUX DO</a> 社区的交流与反馈</span>
+          <span class="i18n-en">With thanks to <a href="https://linux.do/" target="_blank" rel="noopener">LINUX DO</a></span>
+        </span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/site.js" defer></script>
+</body>
+</html>

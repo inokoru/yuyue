@@ -1,0 +1,487 @@
+# 语阅自带声音包（voices-1）清单：48 张卡（中文 32 张 + 英文 16 张）
+# 每门语言男女各半；年纪比例：少年(Teen) 1/8、青年(Young) 3/8、中年(Middle) 3/8、老年(Old) 1/8。
+# 全部由 Qwen3-TTS VoiceDesign 按文字描述生成，不使用任何真人录音，成品按 CC0 1.0 发布。
+
+# ==================== 中文男声 16 张（Teen 2 · Young 6 · Middle 6 · Old 2） ====================
+- id: card.b.01
+  dir: b01
+  name: 沉舟
+  lang: zh
+  gender: M
+  age: Middle
+  narrator: true
+  tags: [厚, 稳]
+  description: 三十八岁上下的中国男人，男中音，声音浑厚沉稳，吐字清楚从容，语速适中偏稳，像深夜书房里娓娓道来的讲述者。
+
+- id: card.b.02
+  dir: b02
+  name: 明澈
+  lang: zh
+  gender: M
+  age: Teen
+  narrator: false
+  tags: [亮, 脆]
+  description: 十六七岁的少年男声，音色明亮清脆，带着少年人的朝气与干净利落的咬字，语速轻快自然。
+
+- id: card.b.03
+  dir: b03
+  name: 知远
+  lang: zh
+  gender: M
+  age: Teen
+  narrator: false
+  tags: [清, 软]
+  description: 十七八岁的斯文少年男声，声线清瘦温和，说话略带书卷气与腼腆感，尾音柔和干净。
+
+- id: card.b.04
+  dir: b04
+  name: 朗星
+  lang: zh
+  gender: M
+  age: Young
+  narrator: false
+  tags: [亮, 爽]
+  description: 二十四五岁的青年男声，音色清朗高挑，共鸣明亮有精神，说话坦率爽利。
+
+- id: card.b.05
+  dir: b05
+  name: 温言
+  lang: zh
+  gender: M
+  age: Young
+  narrator: false
+  tags: [软, 稳]
+  description: 二十七八岁的温和青年男声，嗓音柔和细腻，气息平稳温暖，听起来亲切耐心。
+
+- id: card.b.06
+  dir: b06
+  name: 寒川
+  lang: zh
+  gender: M
+  age: Young
+  narrator: false
+  tags: [冷, 净]
+  description: 二十六岁的冷峻青年男声，音调偏低而干净利落，情绪克制，字字清晰带一点疏离感。
+
+- id: card.b.07
+  dir: b07
+  name: 惊鸿
+  lang: zh
+  gender: M
+  age: Young
+  narrator: false
+  tags: [亮, 劲]
+  description: 二十三岁的爽朗青年男声，声音结实有穿透力，干脆果断，带着江湖少侠般的劲头。
+
+- id: card.b.08
+  dir: b08
+  name: 怀瑾
+  lang: zh
+  gender: M
+  age: Young
+  narrator: false
+  tags: [清, 雅]
+  description: 二十九岁的儒雅青年男声，音色清润端方，吐字讲究，节奏舒缓有分寸。
+
+- id: card.b.09
+  dir: b09
+  name: 砺石
+  lang: zh
+  gender: M
+  age: Young
+  narrator: false
+  tags: [沙, 厚]
+  description: 二十八岁的粗犷青年男声，嗓音略带一点颗粒与微哑质感，低沉实在，朴素有力。
+
+- id: card.b.10
+  dir: b10
+  name: 崇山
+  lang: zh
+  gender: M
+  age: Middle
+  narrator: false
+  tags: [厚, 低]
+  description: 四十二岁的中年男低音，胸腔共鸣深厚，语调威严稳重，说话不疾不徐很有分量。
+
+- id: card.b.11
+  dir: b11
+  name: 听松
+  lang: zh
+  gender: M
+  age: Middle
+  narrator: false
+  tags: [稳, 缓]
+  description: 四十岁左右的温和中年男声，音色圆润宽厚，语速偏慢，带着长辈般的宽容与平和。
+
+- id: card.b.12
+  dir: b12
+  name: 铁崖
+  lang: zh
+  gender: M
+  age: Middle
+  narrator: false
+  tags: [沙, 硬]
+  description: 四十五岁的硬朗中年男声，嗓音沙哑粗粝，语气短促干练，像久经风霜的行伍之人。
+
+- id: card.b.13
+  dir: b13
+  name: 慎行
+  lang: zh
+  gender: M
+  age: Middle
+  narrator: false
+  tags: [冷, 稳]
+  description: 三十九岁的精明中年男声，音色偏窄而清晰锐利，说话条理分明、冷静克制。
+
+- id: card.b.14
+  dir: b14
+  name: 逢春
+  lang: zh
+  gender: M
+  age: Middle
+  narrator: false
+  tags: [亮, 活]
+  description: 四十三岁的热情中年男声，嗓门敞亮带笑意，语调起伏生动，极具市井烟火气。
+
+- id: card.b.15
+  dir: b15
+  name: 鹤年
+  lang: zh
+  gender: M
+  age: Old
+  narrator: false
+  tags: [沙, 缓]
+  description: 六十五岁的老年男声，声音苍老温和，略带岁月沙哑与轻微气息声，语速缓慢慈祥。
+
+- id: card.b.16
+  dir: b16
+  name: 古柏
+  lang: zh
+  gender: M
+  age: Old
+  narrator: false
+  tags: [低, 劲]
+  description: 六十八岁的硬朗老者男声，中气依然充沛，音色低沉浑厚，说话铿锵有力、威严庄重。
+
+# ==================== 中文女声 16 张（Teen 2 · Young 6 · Middle 6 · Old 2） ====================
+- id: card.b.17
+  dir: b17
+  name: 清禾
+  lang: zh
+  gender: F
+  age: Young
+  narrator: true
+  tags: [亮, 稳]
+  description: 二十七八岁的中国青年女声，音色清亮温润、不尖不腻，吐字自然平稳，久听不累。
+
+- id: card.b.18
+  dir: b18
+  name: 灵溪
+  lang: zh
+  gender: F
+  age: Teen
+  narrator: false
+  tags: [脆, 亮]
+  description: 十五六岁的少女声音，银铃般清脆明亮，语调轻盈灵动，充满好奇与生机。
+
+- id: card.b.19
+  dir: b19
+  name: 采薇
+  lang: zh
+  gender: F
+  age: Teen
+  narrator: false
+  tags: [软, 轻]
+  description: 十七岁的文静少女声音，声线细软轻柔，说话斯文含蓄，带着淡淡的羞怯与纯粹。
+
+- id: card.b.20
+  dir: b20
+  name: 疏影
+  lang: zh
+  gender: F
+  age: Young
+  narrator: false
+  tags: [冷, 清]
+  description: 二十五岁的清冷青年女声，音色干净利落，语调平直克制，透着独立果敢的气质。
+
+- id: card.b.21
+  dir: b21
+  name: 晚晴
+  lang: zh
+  gender: F
+  age: Young
+  narrator: false
+  tags: [软, 暖]
+  description: 二十六岁的温柔青年女声，嗓音绵软亲切，像春风拂面，说话慢条斯理、富有同理心。
+
+- id: card.b.22
+  dir: b22
+  name: 映雪
+  lang: zh
+  gender: F
+  age: Young
+  narrator: false
+  tags: [脆, 爽]
+  description: 二十三岁的明快青年女声，咬字爽利干脆，音色偏亮有活力，说话直率不拖泥带水。
+
+- id: card.b.23
+  dir: b23
+  name: 若兰
+  lang: zh
+  gender: F
+  age: Young
+  narrator: false
+  tags: [雅, 缓]
+  description: 二十九岁的温婉书卷气女声，女中音偏轻，气息匀净舒缓，带着古典闺秀的端庄。
+
+- id: card.b.24
+  dir: b24
+  name: 绛珠
+  lang: zh
+  gender: F
+  age: Young
+  narrator: false
+  tags: [细, 敏]
+  description: 二十二岁的纤细青年女声，音色清丽敏感，带着一点轻柔的气声与细腻的情感起伏。
+
+- id: card.b.25
+  dir: b25
+  name: 知微
+  lang: zh
+  gender: F
+  age: Middle
+  narrator: false
+  tags: [稳, 暖]
+  description: 三十八岁的知性中年女声，女中音醇厚柔和，吐字沉稳大方，令人安心信服。
+
+- id: card.b.26
+  dir: b26
+  name: 霜华
+  lang: zh
+  gender: F
+  age: Middle
+  narrator: false
+  tags: [冷, 厉]
+  description: 四十二岁的干练中年女声，声线偏低而有锋芒，语气果断严厉，气场强大。
+
+- id: card.b.27
+  dir: b27
+  name: 素心
+  lang: zh
+  gender: F
+  age: Middle
+  narrator: false
+  tags: [软, 缓]
+  description: 四十岁的温厚中年女声，嗓音柔和宽厚，说话慈爱从容，富有生活质感。
+
+- id: card.b.28
+  dir: b28
+  name: 锦书
+  lang: zh
+  gender: F
+  age: Middle
+  narrator: false
+  tags: [亮, 爽]
+  description: 三十六岁的爽朗中年女声，声音洪亮麻利，语速略快，透着精明能干的当家主母气派。
+
+- id: card.b.29
+  dir: b29
+  name: 秋水
+  lang: zh
+  gender: F
+  age: Middle
+  narrator: false
+  tags: [沙, 低]
+  description: 四十四岁的低沉中年女声，嗓音带一点微沙的磁性，语调淡然内敛，故事感很强。
+
+- id: card.b.30
+  dir: b30
+  name: 静姝
+  lang: zh
+  gender: F
+  age: Middle
+  narrator: false
+  tags: [净, 雅]
+  description: 三十九岁的端庄中年女声，发音标准讲究，音色干净通透，不偏不倚。
+
+- id: card.b.31
+  dir: b31
+  name: 慈云
+  lang: zh
+  gender: F
+  age: Old
+  narrator: false
+  tags: [暖, 缓]
+  description: 六十六岁的慈祥老太太声音，声线温暖松弛，语速慢慢悠悠，带着疼爱晚辈的笑意。
+
+- id: card.b.32
+  dir: b32
+  name: 银杏
+  lang: zh
+  gender: F
+  age: Old
+  narrator: false
+  tags: [沙, 稳]
+  description: 六十八岁的威严老年女声，音调偏低略带沧桑沙哑，吐字清晰稳健，很有主见。
+
+# ==================== 英文女声 8 张（Teen 1 · Young 3 · Middle 3 · Old 1） ====================
+- id: card.b.33
+  dir: b33
+  name: Clara
+  lang: en
+  gender: F
+  age: Young
+  narrator: true
+  tags: [warm, steady]
+  description: A twenty-eight-year-old woman with a clear, warm mezzo-soprano voice, natural British-leaning literary diction, steady pacing, effortless to listen to for hours.
+
+- id: card.b.34
+  dir: b34
+  name: Pippa
+  lang: en
+  gender: F
+  age: Teen
+  narrator: false
+  tags: [bright, light]
+  description: A sixteen-year-old teenage girl with a bright, lively, youthful voice, crisp articulation, and spirited curiosity.
+
+- id: card.b.35
+  dir: b35
+  name: Nora
+  lang: en
+  gender: F
+  age: Young
+  narrator: false
+  tags: [soft, gentle]
+  description: A twenty-five-year-old young woman with a soft, intimate, gentle voice and delicate breathiness, calm and empathetic.
+
+- id: card.b.36
+  dir: b36
+  name: Rosalind
+  lang: en
+  gender: F
+  age: Young
+  narrator: false
+  tags: [crisp, cool]
+  description: A twenty-seven-year-old young woman with a crisp, poised, quick-witted voice, sharp diction, and composed confidence.
+
+- id: card.b.37
+  dir: b37
+  name: Helen
+  lang: en
+  gender: F
+  age: Middle
+  narrator: false
+  tags: [rich, calm]
+  description: A forty-year-old woman with a rich, grounded alto voice, unhurried cadence, and mature warmth.
+
+- id: card.b.38
+  dir: b38
+  name: Diana
+  lang: en
+  gender: F
+  age: Middle
+  narrator: false
+  tags: [cool, firm]
+  description: A forty-six-year-old woman with a deep, dark contralto chest voice, very low pitch, cool detached steeliness, and measured cadence.
+
+- id: card.b.39
+  dir: b39
+  name: Tess
+  lang: en
+  gender: F
+  age: Middle
+  narrator: false
+  tags: [husky, warm]
+  description: A thirty-nine-year-old American woman with a raspy, smoky husky voice, audible vocal grain, candid rhythm, and earthy warmth.
+
+- id: card.b.40
+  dir: b40
+  name: Margaret
+  lang: en
+  gender: F
+  age: Old
+  narrator: false
+  tags: [gentle, aged]
+  description: A seventy-four-year-old elderly grandmother with a frail, papery, slightly tremulous aged voice, slow breathy phrasing, and tender warmth.
+
+# ==================== 英文男声 8 张（Teen 1 · Young 3 · Middle 3 · Old 1） ====================
+- id: card.b.41
+  dir: b41
+  name: Arthur
+  lang: en
+  gender: M
+  age: Middle
+  narrator: true
+  tags: [deep, steady]
+  description: A forty-one-year-old man with a warm, resonant baritone voice, measured storytelling rhythm, clear articulation from the very first syllable, and unstrained warmth.
+
+- id: card.b.42
+  dir: b42
+  name: Toby
+  lang: en
+  gender: M
+  age: Teen
+  narrator: false
+  tags: [bright, brisk]
+  description: A seventeen-year-old teenage boy with a light, earnest young tenor voice and brisk, energetic phrasing.
+
+- id: card.b.43
+  dir: b43
+  name: Julian
+  lang: en
+  gender: M
+  age: Young
+  narrator: false
+  tags: [clear, smooth]
+  description: A twenty-four-year-old British young man with a clear, high lyric tenor voice, crisp Received Pronunciation diction, bright timbre, and refined poise.
+
+- id: card.b.44
+  dir: b44
+  name: Miles
+  lang: en
+  gender: M
+  age: Young
+  narrator: false
+  tags: [warm, easy]
+  description: A twenty-eight-year-old young man with a relaxed, friendly, approachable voice and natural warmth.
+
+- id: card.b.45
+  dir: b45
+  name: Gideon
+  lang: en
+  gender: M
+  age: Young
+  narrator: false
+  tags: [cool, low]
+  description: A twenty-nine-year-old man with a low, dry, restrained voice, steady intensity, and spare inflection.
+
+- id: card.b.46
+  dir: b46
+  name: Edward
+  lang: en
+  gender: M
+  age: Middle
+  narrator: false
+  tags: [firm, resonant]
+  description: A forty-five-year-old man with a commanding, resonant chest voice, deliberate pacing, and dignified presence.
+
+- id: card.b.47
+  dir: b47
+  name: Sam
+  lang: en
+  gender: M
+  age: Middle
+  narrator: false
+  tags: [gravelly, candid]
+  description: A forty-three-year-old man with a rugged, slightly gravelly voice, plainspoken and grounded.
+
+- id: card.b.48
+  dir: b48
+  name: Walter
+  lang: en
+  gender: M
+  age: Old
+  narrator: false
+  tags: [aged, warm]
+  description: A seventy-six-year-old elderly grandfather with a thin, weathered, slightly quavering old voice, slow deliberate breath pauses, and gentle aged warmth.

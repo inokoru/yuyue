@@ -1,0 +1,60 @@
+<!doctype html>
+<html
+  lang="zh-CN"
+  data-lang="zh"
+  data-title-zh="找不到这一页 · 语阅 Yuyue"
+  data-title-en="Page not found · Yuyue 语阅"
+>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F8F5F0">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1A1613">
+  <meta name="color-scheme" content="light dark">
+  <title>找不到这一页 · 语阅 Yuyue</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23FBFAF7'/%3E%3Ctext x='32' y='42' font-size='32' text-anchor='middle' font-family='serif' font-weight='700' fill='%231C1D20'%3E%E9%98%85%3C/text%3E%3Crect x='20' y='50' width='24' height='2.5' rx='1.2' fill='%232B4C7E'/%3E%3C/svg%3E">
+  <script>
+    (function () {
+      var d = document.documentElement;
+      try {
+        var saved = localStorage.getItem('yuyue-lang');
+        var sys = ((navigator.languages && navigator.languages[0]) || navigator.language || '').toLowerCase();
+        var lang = (saved === 'zh' || saved === 'en') ? saved : (sys.indexOf('zh') === 0 ? 'zh' : 'en');
+        d.dataset.lang = lang;
+        d.lang = lang === 'en' ? 'en' : 'zh-CN';
+        var theme = localStorage.getItem('yuyue-theme');
+        if (theme === 'light' || theme === 'dark') d.dataset.theme = theme;
+      } catch (_) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="col top-strip">
+    <a class="mark-link" href="/"><div class="mark" aria-hidden="true">阅</div></a>
+    <div class="lang-switch" role="group" data-aria-zh="切换语言" data-aria-en="Switch language">
+      <button type="button" class="lang-btn" data-set-lang="zh" aria-pressed="true">中文</button>
+      <span class="lang-dot" aria-hidden="true">·</span>
+      <button type="button" class="lang-btn" data-set-lang="en" aria-pressed="false">EN</button>
+    </div>
+  </header>
+
+  <main class="col" style="padding: 48px 20px 96px">
+    <h1 style="margin:0 0 12px;font-size:clamp(2rem,6vw,3rem);font-weight:750;letter-spacing:-0.03em">
+      <span class="i18n-zh">这一页不在书里。</span>
+      <span class="i18n-en">This page isn’t in the book.</span>
+    </h1>
+    <p class="sub">
+      <span class="i18n-zh">你打开的链接可能已移动或拼写有误（404）。</span>
+      <span class="i18n-en">The link you followed may be broken or moved (404).</span>
+    </p>
+    <div style="display:flex;flex-wrap:wrap;gap:10px">
+      <a class="btn btn-primary" href="/"><span class="i18n-zh">返回首页</span><span class="i18n-en">Back to Home</span></a>
+      <a class="btn btn-ghost" href="/download/"><span class="i18n-zh">下载</span><span class="i18n-en">Download</span></a>
+      <a class="btn btn-ghost" href="/support/"><span class="i18n-zh">帮助</span><span class="i18n-en">Support</span></a>
+    </div>
+  </main>
+
+  <script src="/site.js" defer></script>
+</body>
+</html>

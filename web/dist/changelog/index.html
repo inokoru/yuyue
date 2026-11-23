@@ -1,0 +1,167 @@
+<!doctype html>
+<html
+  lang="zh-CN"
+  data-lang="zh"
+  data-title-zh="更新记录 · Yuyue Updates"
+  data-title-en="Yuyue Updates · 更新记录"
+  data-desc-zh="语阅每一版的新功能与改进记录。"
+  data-desc-en="What’s new in each release of Yuyue (语阅)."
+>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F8F5F0">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1A1613">
+  <meta name="color-scheme" content="light dark">
+  <title>更新记录 · Yuyue Updates</title>
+  <meta name="description" content="What’s new in each release of Yuyue (语阅).">
+  <link rel="manifest" href="/site.webmanifest">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23FBFAF7'/%3E%3Ctext x='32' y='42' font-size='32' text-anchor='middle' font-family='serif' font-weight='700' fill='%231C1D20'%3E%E9%98%85%3C/text%3E%3Crect x='20' y='50' width='24' height='2.5' rx='1.2' fill='%232B4C7E'/%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="/images/icon-256.png">
+  <script>
+    (function () {
+      var d = document.documentElement;
+      try {
+        var q = new URLSearchParams(location.search).get('lang');
+        var saved = localStorage.getItem('yuyue-lang');
+        var sys = ((navigator.languages && navigator.languages[0]) || navigator.language || '').toLowerCase();
+        var lang = (q === 'zh' || q === 'en') ? q : (saved === 'zh' || saved === 'en') ? saved : (sys.indexOf('zh') === 0 ? 'zh' : 'en');
+        d.dataset.lang = lang;
+        d.lang = lang === 'en' ? 'en' : 'zh-CN';
+        var theme = localStorage.getItem('yuyue-theme');
+        if (theme === 'light' || theme === 'dark') d.dataset.theme = theme;
+      } catch (_) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main"><span class="i18n-zh">跳到正文</span><span class="i18n-en">Skip to content</span></a>
+
+  <div class="mobile-drawer" id="mobile-drawer" aria-hidden="true">
+    <div class="mobile-sheet">
+      <div class="mobile-sheet-head">
+        <span style="display:inline-flex;align-items:center;gap:10px;font-weight:700"><span class="mark mark-sm" aria-hidden="true">阅</span><span class="i18n-zh">语阅 Yuyue</span><span class="i18n-en">Yuyue 语阅</span></span>
+        <button type="button" data-menu-close style="font-size:20px;color:var(--t2);padding:2px 6px">×</button>
+      </div>
+      <nav class="mobile-nav-list">
+        <a href="/"><span class="i18n-zh">首页</span><span class="i18n-en">Home</span></a>
+        <a href="/download/"><span class="i18n-zh">免费下载</span><span class="i18n-en">Download</span></a>
+        <a href="/changelog/"><span class="i18n-zh">更新记录</span><span class="i18n-en">Updates</span></a>
+        <a href="/support/"><span class="i18n-zh">使用帮助</span><span class="i18n-en">Support</span></a>
+        <a href="/privacy/"><span class="i18n-zh">隐私承诺</span><span class="i18n-en">Privacy</span></a>
+      </nav>
+    </div>
+  </div>
+
+  <header class="col top-strip">
+    <a class="mark-link" href="/" data-aria-zh="语阅首页" data-aria-en="Yuyue Home">
+      <div class="mark" aria-hidden="true">阅</div>
+    </a>
+    <div class="top-right">
+      <nav class="top-nav">
+        <a href="/download/"><span class="i18n-zh">下载</span><span class="i18n-en">Download</span></a>
+        <a href="/changelog/" aria-current="page"><span class="i18n-zh">更新</span><span class="i18n-en">Updates</span></a>
+        <a href="/support/"><span class="i18n-zh">帮助</span><span class="i18n-en">Support</span></a>
+        <a href="/privacy/"><span class="i18n-zh">隐私</span><span class="i18n-en">Privacy</span></a>
+      </nav>
+      <div class="lang-switch" role="group" data-aria-zh="切换语言" data-aria-en="Switch language">
+        <button type="button" class="lang-btn" data-set-lang="zh" aria-pressed="true">中文</button>
+        <span class="lang-dot" aria-hidden="true">·</span>
+        <button type="button" class="lang-btn" data-set-lang="en" aria-pressed="false">EN</button>
+      </div>
+      <button type="button" class="theme-btn" data-toggle-theme data-aria-zh="切换深浅色" data-aria-en="Toggle appearance">
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      </button>
+      <button type="button" class="menu-btn" data-menu-toggle aria-expanded="false" aria-controls="mobile-drawer" data-aria-zh="打开菜单" data-aria-en="Open menu">
+        <svg class="icon-menu" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="8" x2="20" y2="8"/><line x1="4" y1="16" x2="20" y2="16"/></svg>
+        <svg class="icon-close" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="main" class="col">
+    <div class="doc-head">
+      <h1><span class="i18n-zh">更新记录</span><span class="i18n-en">What’s New</span></h1>
+      <p class="doc-lead">
+        <span class="i18n-zh">每一次版本更新都写在这里，最新的一版排在最上面。</span>
+        <span class="i18n-en">Every release and improvement, newest first.</span>
+      </p>
+    </div>
+
+    <div class="filter-row" role="group" data-aria-zh="按功能筛选" data-aria-en="Filter by area">
+      <button type="button" class="filter-btn" data-filter="all" aria-pressed="true"><span class="i18n-zh">全部</span><span class="i18n-en">All</span></button>
+      <button type="button" class="filter-btn" data-filter="read" aria-pressed="false"><span class="i18n-zh">阅读与书架</span><span class="i18n-en">Reading</span></button>
+      <button type="button" class="filter-btn" data-filter="audio" aria-pressed="false"><span class="i18n-zh">听书与播客</span><span class="i18n-en">Listening</span></button>
+      <button type="button" class="filter-btn" data-filter="notes" aria-pressed="false"><span class="i18n-zh">笔记与同步</span><span class="i18n-en">Notes &amp; Sync</span></button>
+    </div>
+
+    <section class="doc" style="padding-bottom:24px">
+      <div class="release-meta">
+        <span class="release-ver"><span class="i18n-zh">0.1.0 · 首个公开版</span><span class="i18n-en">0.1.0 · First Public Release</span></span>
+        <span class="release-date">2026-11-22</span>
+      </div>
+      <ul class="change-list">
+        <li class="change-item" data-cat="read">
+          <span class="change-cat"><span class="i18n-zh">阅读与书架</span><span class="i18n-en">Reading</span></span>
+          <div class="change-text">
+            <span class="i18n-zh"><strong>安静的本地书房</strong>：支持在 Mac、Android、iPhone 与 iPad 上打开 EPUB、PDF、TXT 与无加密 MOBI / AZW3 电子书，内置六套纸张与单双栏排版；支持 Wi‑Fi 无线传书与连接家庭书库。</span>
+            <span class="i18n-en"><strong>A quiet local library</strong>: read EPUB, PDF, TXT, and DRM-free MOBI / AZW3 across Mac, Android, iPhone, and iPad with six papers, local Wi‑Fi transfer, and home library connections.</span>
+          </div>
+        </li>
+        <li class="change-item" data-cat="audio">
+          <span class="change-cat"><span class="i18n-zh">逐句听读</span><span class="i18n-en">Read Aloud</span></span>
+          <div class="change-text">
+            <span class="i18n-zh">点任意一句开始朗读，墨线跟着声音逐句推进、自动翻页；支持本机离线声音、系统声音与自接云端人声，锁屏和耳机线控都能切句暂停。</span>
+            <span class="i18n-en">Tap any sentence to hear it aloud as the ink line moves forward and pages turn automatically—supporting local offline voices, system voices, cloud voices, and lock-screen controls.</span>
+          </div>
+        </li>
+        <li class="change-item" data-cat="audio">
+          <span class="change-cat"><span class="i18n-zh">播客与有声</span><span class="i18n-en">Podcasts</span></span>
+          <div class="change-text">
+            <span class="i18n-zh">订阅播客节目或导入有声书，排成清爽可查词、可划原声切片的访谈书页；无电子书的有声文件也能离线转成文字对照着看。</span>
+            <span class="i18n-en">Turn podcast subscriptions and audiobooks into readable, searchable pages where you can look up words and save audio quotes—even transcribing recordings offline.</span>
+          </div>
+        </li>
+        <li class="change-item" data-cat="read">
+          <span class="change-cat"><span class="i18n-zh">外文与书伴</span><span class="i18n-en">Companion</span></span>
+          <div class="change-text">
+            <span class="i18n-zh">外文书支持离线查词、行间难词简注、双击整句翻译与生词本；<strong>防剧透「书伴」</strong>默认只在你已读过的部分里回答，每句话都能直接点回原文。</span>
+            <span class="i18n-en">Offline dictionary, subtle interlinear glosses, sentence translation, and word list—paired with a <strong>spoiler-free Reading Companion</strong> grounded strictly in what you’ve already read.</span>
+          </div>
+        </li>
+        <li class="change-item" data-cat="notes">
+          <span class="change-cat"><span class="i18n-zh">笔记与回顾</span><span class="i18n-en">Notes</span></span>
+          <div class="change-text">
+            <span class="i18n-zh">多样式划线、想法、今日回顾、书摘卡片与纸书记录；随时一键导出到 Markdown、Obsidian、Notion、flomo、新枝、Anki、带划线的 EPUB 与阅读记录表。</span>
+            <span class="i18n-en">Multi-style highlights, thoughts, Daily Review, quote cards, and paper-book logging—exportable to Markdown, Obsidian, Notion, flomo, Xinzhi, Anki, highlighted EPUB, and CSV.</span>
+          </div>
+        </li>
+        <li class="change-item" data-cat="notes">
+          <span class="change-cat"><span class="i18n-zh">同步与反馈</span><span class="i18n-en">Sync</span></span>
+          <div class="change-text">
+            <span class="i18n-zh">经由你自己的 iCloud 云盘或私人网盘同步阅读进度、划线与播客（遇到冲突并排自选），支持整库一键备份，以及应用内直接反馈问题。</span>
+            <span class="i18n-en">Sync progress, notes, and podcasts via your own iCloud Drive or personal cloud storage with side-by-side conflict resolution, full-library backups, and private in-app feedback.</span>
+          </div>
+        </li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="col">
+      <div class="footer-meta" style="margin-top:0;padding-top:0;border-top:none">
+        <span>© 2026 <span class="i18n-zh">语阅 Yuyue</span><span class="i18n-en">Yuyue 语阅</span></span>
+        <span style="display:flex;gap:16px">
+          <a href="/"><span class="i18n-zh">首页</span><span class="i18n-en">Home</span></a>
+          <a href="/roadmap/"><span class="i18n-zh">计划</span><span class="i18n-en">Roadmap</span></a>
+          <a href="/download/"><span class="i18n-zh">下载</span><span class="i18n-en">Download</span></a>
+        </span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/site.js" defer></script>
+</body>
+</html>

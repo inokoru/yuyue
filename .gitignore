@@ -1,0 +1,69 @@
+.DS_Store
+
+# Rust
+core/target
+
+# Node
+node_modules/
+reader/dist/
+reader/test-results/
+reader/playwright-report/
+
+# Apple
+apple/build/
+apple/*.xcodeproj/
+apple/YuyueCore/YuyueCoreFFI.xcframework/
+apple/YuyueCore/Sources/YuyueCore/yuyue_core.swift
+apple/YuyueCore/Sources/YuyueCoreFFI/
+apple/OnnxRuntime/.build/
+apple/OnnxRuntime/.swiftpm/
+apple/OnnxRuntime/onnxruntime.xcframework/
+DerivedData/
+xcuserdata/
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/feedback.properties
+apple/Config/Feedback.local.xcconfig
+__pycache__/
+android/app/src/main/jniLibs/
+android/app/src/main/java/uniffi/
+android/.kotlin/
+android/keystore.properties
+*.jks
+*.keystore
+/build/window-catalog/
+/build/snapshot-catalog/
+
+# Release files
+/dist/
+
+# Local models, voice auditions, and internal tooling (kept local, excluded from open-source repo)
+/models/
+/voice-audition/
+/.agents/
+/.alma-snapshots/
+/.claude/
+/skills-lock.json
+/docs/test/
+/docs/dev/walkthrough-2026-11-22.md
+/feedback/relay/kaneo_import.py
+/feedback/relay/com.yuyue.feedback-kaneo.plist.example
+/scripts/voice-lab/audition.py
+/scripts/align-bench/
+/scripts/actor-server/
+/scripts/sound-lab/
+/scripts/drama-gold/
+
+# Windows
+windows/Yuyue/bin/
+windows/Yuyue/obj/
+windows/Yuyue/Native/
+windows/Yuyue/Core/Generated/
+windows/Yuyue/Assets/Reader/
+windows/.vs/
+windows/dist/
+
