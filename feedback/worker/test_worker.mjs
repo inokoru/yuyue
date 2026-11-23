@@ -216,6 +216,39 @@ test("enforces MIN_INTERVAL_MINUTES cooldown against burst spam, but fires immed
   assert.deepEqual(recentRes, { triggered: false, reason: "cooldown", pending: 1 });
 });
 
+test("does not re-trigger for deleted Issues whose ntfy timestamp predates last successful run", async () => {
+  const nowMs = Date.parse("2026-11-23T14:00:00Z");
+  const deletedIssueMsgTime = Math.floor(Date.parse("2026-11-23T11:50:00Z") / 1000);
+  const ndjson = makeNtfyLine(
+    "deletedMsg1",
+    { v: 2, category: "bug", text: "已被手动删掉的测试帖" },
+    { time: deletedIssueMsgTime }
+  );
+
+  const res = await checkAndTrigger(BASE_ENV, {
+    nowMs,
+    log: () => {},
+    fetch: async (url) => {
+      if (url.startsWith("https://ntfy.sh/")) return new Response(ndjson, { status: 200 });
+      if (url.includes("/repos/inokoru/yuyue/issues?")) return jsonResponse([]); // Issue was deleted!
+      if (url.includes("/actions/workflows/relay.yml/runs?")) {
+        return jsonResponse({
+          workflow_runs: [
+            {
+              status: "completed",
+              conclusion: "success",
+              created_at: "2026-11-23T11:55:25Z",
+              run_started_at: "2026-11-23T11:55:25Z",
+            },
+          ],
+        });
+      }
+      throw new Error(`should not re-trigger deleted message: ${url}`);
+    },
+  });
+  assert.deepEqual(res, { triggered: false, reason: "deleted_or_older_than_last_run", pending: 0 });
+});
+
 test("fetch handler returns 404", async () => {
   const resp = await worker.fetch();
   assert.equal(resp.status, 404);

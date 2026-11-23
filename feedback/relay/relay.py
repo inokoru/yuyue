@@ -53,6 +53,8 @@ import urllib.request
 ID_RE = re.compile(r"ntfy-id:\s*([^\s<]+)")
 HASH_RE = re.compile(r"text-hash:\s*([0-9a-f]{16})")
 DEDUP_WINDOW_SECONDS = 24 * 3600
+SEEN_RETENTION_SECONDS = 48 * 3600
+SEEN_PATH = "feedback-files/seen.json"
 SEALED_MARK = "v1file"
 SHOT_MARK = "v2shot"
 FILES_MAX = 3
@@ -352,6 +354,57 @@ def commit_sealed(repo: str, token: str, ntfy_id: str, sealed: list[tuple[int, b
     return done
 
 
+def parse_seen_ledger(raw_ledger, now: float | None = None) -> tuple[dict[str, int], dict[str, int]]:
+    """Pruned {ntfy_id: unix_sec} (48h) and {text_hash: unix_sec} (24h) so deleted Issues stay dead."""
+    ts_now = int(time.time() if now is None else now)
+    id_cutoff = ts_now - SEEN_RETENTION_SECONDS
+    hash_cutoff = ts_now - DEDUP_WINDOW_SECONDS
+    ids: dict[str, int] = {}
+    hashes: dict[str, int] = {}
+    if isinstance(raw_ledger, dict):
+        raw_ids = raw_ledger.get("ids")
+        if isinstance(raw_ids, dict):
+            for k, v in raw_ids.items():
+                sid = safe_id(str(k))
+                if sid and isinstance(v, (int, float)) and int(v) >= id_cutoff:
+                    ids[sid] = int(v)
+        raw_hashes = raw_ledger.get("hashes")
+        if isinstance(raw_hashes, dict):
+            for k, v in raw_hashes.items():
+                h = str(k)
+                if re.fullmatch(r"[0-9a-f]{16}", h) and isinstance(v, (int, float)) and int(v) >= hash_cutoff:
+                    hashes[h] = int(v)
+    return ids, hashes
+
+
+def load_seen_ledger(repo: str, token: str) -> tuple[dict[str, int], dict[str, int], str | None]:
+    status, data = github("GET", f"/repos/{repo}/contents/{urllib.parse.quote(SEEN_PATH)}", token)
+    if status == 404 or not isinstance(data, dict):
+        return {}, {}, None
+    if status != 200:
+        print(f"读取 {SEEN_PATH} 失败：HTTP {status}", file=sys.stderr)
+        return {}, {}, None
+    try:
+        decoded = json.loads(base64.b64decode(data.get("content") or "").decode("utf-8"))
+    except (ValueError, TypeError):
+        decoded = {}
+    ids, hashes = parse_seen_ledger(decoded)
+    return ids, hashes, data.get("sha")
+
+
+def save_seen_ledger(repo: str, token: str, ids: dict[str, int], hashes: dict[str, int], sha: str | None) -> None:
+    payload = json.dumps({"ids": dict(sorted(ids.items())), "hashes": dict(sorted(hashes.items()))}, indent=2) + "\n"
+    body: dict = {
+        "message": "chore: record processed feedback ids",
+        "content": base64.b64encode(payload.encode("utf-8")).decode(),
+    }
+    if sha:
+        body["sha"] = sha
+    status, detail = github("PUT", f"/repos/{repo}/contents/{urllib.parse.quote(SEEN_PATH)}", token, body)
+    if status not in (200, 201):
+        print(f"写入 {SEEN_PATH} 失败：HTTP {status} {detail}", file=sys.stderr)
+
+
 # ---------------------------------------------------------------- main
 
 def main() -> int:
@@ -388,7 +441,11 @@ def main() -> int:
 
     files = {safe_id(str(m.get("id") or "")): found for m in messages if (found := attachment(server, m))}
     issues = [] if args.dry_run else list_issues(issue_repo, issue_token, label)
-    seen, hashes = known_ids(issues), known_hashes(issues)
+    ledger_ids, ledger_hashes, ledger_sha = ({}, {}, None) if args.dry_run else load_seen_ledger(repo, token)
+    before_ids, before_hashes = dict(ledger_ids), dict(ledger_hashes)
+    now_sec = int(time.time())
+    seen = known_ids(issues) | set(ledger_ids)
+    hashes = known_hashes(issues) | set(ledger_hashes)
     opened = skipped = junk = failed = held = 0
     labelled = False
     for item in messages:
@@ -396,6 +453,7 @@ def main() -> int:
         if not ntfy_id or ntfy_id in files:
             continue
         if ntfy_id in seen:
+            ledger_ids.setdefault(ntfy_id, now_sec)
             skipped += 1
             continue
         data = open_message(str(item.get("message") or ""))
@@ -403,7 +461,10 @@ def main() -> int:
             junk += 1
             print(f"跳过格式不对的消息 {ntfy_id}")
             continue
-        if text_hash(data) in hashes:
+        h = text_hash(data)
+        if h in hashes:
+            ledger_ids.setdefault(ntfy_id, now_sec)
+            ledger_hashes.setdefault(h, now_sec)
             junk += 1
             print(f"跳过重复的反馈 {ntfy_id}")
             continue
@@ -441,9 +502,14 @@ def main() -> int:
                 print(f"开 Issue 失败 {ntfy_id}：HTTP {status} {detail}", file=sys.stderr)
                 continue
             print(f"已开 Issue：{issue_title(data)}")
+            ledger_ids[ntfy_id] = now_sec
+            ledger_hashes[h] = now_sec
         seen.add(ntfy_id)
-        hashes.add(text_hash(data))
+        hashes.add(h)
         opened += 1
+
+    if not args.dry_run and (ledger_ids != before_ids or ledger_hashes != before_hashes):
+        save_seen_ledger(repo, token, ledger_ids, ledger_hashes, ledger_sha)
 
     verb = "会开" if args.dry_run else "新开"
     print(f"完成：{verb} {opened}，已有 {skipped}，跳过 {junk}，留到下次 {held}，失败 {failed}")

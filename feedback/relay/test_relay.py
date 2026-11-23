@@ -69,6 +69,15 @@ class RelayTest(unittest.TestCase):
             {relay.text_hash(data)},
         )
         self.assertEqual(relay.safe_id("ab c-->x"), "abc--x")
+        ids, hashes = relay.parse_seen_ledger(
+            {
+                "ids": {"keep1": 1_700_050_000, "expired1": 1_699_000_000},
+                "hashes": {"0123456789abcdef": 1_700_050_000, "fedcba9876543210": 1_699_900_000},
+            },
+            now=now,
+        )
+        self.assertEqual(ids, {"keep1": 1_700_050_000})
+        self.assertEqual(hashes, {"0123456789abcdef": 1_700_050_000})
 
     def test_attachments(self):
         server = "https://ntfy.sh"

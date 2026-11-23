@@ -81,6 +81,7 @@ export async function parseNtfyCandidates(ndjson) {
     seenInBatch.add(id);
     candidates.push({
       id,
+      time: typeof item.time === "number" && Number.isFinite(item.time) ? item.time : 0,
       hash: await textHash(data.text),
     });
   }
@@ -146,26 +147,38 @@ async function fetchRecentMarkers(fetchFn, issueRepo, label, token, nowMs) {
 }
 
 async function checkRelayRuns(fetchFn, relayRepo, workflowFile, token, nowMs, minIntervalMs) {
-  const url = `https://api.github.com/repos/${relayRepo}/actions/workflows/${encodeURIComponent(workflowFile)}/runs?per_page=5`;
+  const url = `https://api.github.com/repos/${relayRepo}/actions/workflows/${encodeURIComponent(workflowFile)}/runs?per_page=10`;
   const resp = await fetchFn(url, { headers: githubHeaders(token) });
-  if (!resp.ok) return { active: false, coolingDown: false };
+  if (!resp.ok) return { active: false, coolingDown: false, lastSuccessStartedSec: null };
   const data = await resp.json();
   const runs = Array.isArray(data?.workflow_runs) ? data.workflow_runs : [];
+
+  let lastSuccessStartedSec = null;
+  for (const r of runs) {
+    if (r && r.status === "completed" && r.conclusion === "success") {
+      const ts = Date.parse(r.run_started_at || r.created_at || "");
+      if (!Number.isNaN(ts)) {
+        lastSuccessStartedSec = Math.floor(ts / 1000);
+        break;
+      }
+    }
+  }
+
   const active = runs.some(
     (r) => r && (r.status === "queued" || r.status === "in_progress" || r.status === "waiting")
   );
-  if (active) return { active: true, coolingDown: false };
+  if (active) return { active: true, coolingDown: false, lastSuccessStartedSec };
 
   if (minIntervalMs > 0) {
     for (const r of runs) {
       if (!r || r.conclusion === "cancelled") continue;
       const createdMs = r.created_at ? Date.parse(r.created_at) : NaN;
       if (!Number.isNaN(createdMs) && nowMs - createdMs < minIntervalMs) {
-        return { active: false, coolingDown: true };
+        return { active: false, coolingDown: true, lastSuccessStartedSec };
       }
     }
   }
-  return { active: false, coolingDown: false };
+  return { active: false, coolingDown: false, lastSuccessStartedSec };
 }
 
 export async function checkAndTrigger(env, options = {}) {
@@ -212,13 +225,21 @@ export async function checkAndTrigger(env, options = {}) {
   }
 
   const { seenIds, seenHashes } = await fetchRecentMarkers(fetchFn, issueRepo, label, token, nowMs);
-  const pending = candidates.filter((c) => !seenIds.has(c.id) && !seenHashes.has(c.hash));
-  if (pending.length === 0) {
+  const unmatched = candidates.filter((c) => !seenIds.has(c.id) && !seenHashes.has(c.hash));
+  if (unmatched.length === 0) {
     log(`ntfy 中有 ${candidates.length} 条消息，均已处理，跳过触发`);
     return { triggered: false, reason: "already_handled", pending: 0 };
   }
 
   const runState = await checkRelayRuns(fetchFn, relayRepo, workflowFile, token, nowMs, minIntervalMs);
+  const pending =
+    runState.lastSuccessStartedSec === null
+      ? unmatched
+      : unmatched.filter((c) => c.time === 0 || c.time >= runState.lastSuccessStartedSec - 15);
+  if (pending.length === 0) {
+    log("ntfy 中未匹配 Issue 的消息均早于上次成功运行（对应 Issue 可能已手动删除），跳过触发");
+    return { triggered: false, reason: "deleted_or_older_than_last_run", pending: 0 };
+  }
   if (runState.active) {
     log(`发现 ${pending.length} 条待处理反馈，但工作流正在运行中，等下一轮`);
     return { triggered: false, reason: "already_running", pending: pending.length };
