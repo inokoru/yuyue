@@ -2,8 +2,8 @@
 //! report becomes a public GitHub Issue, so the words, the category, the version and
 //! the OS travel as plain JSON (`v: 2`). No email or contact info is collected. What
 //! is not for the public is sealed here to one public key: every attachment that is
-//! not a screenshot the person agreed to show (a log, a book that won't open, a
-//! screenshot they kept private).
+//! not a screenshot the person agreed to show (another file such as a book that
+//! won't open, or a screenshot they kept private).
 //!
 //! A seal is a libsodium sealed box (`crypto_box_seal`): anyone can write one, only
 //! the private key can open it. That key stays on the developer's own Mac, not in the
@@ -25,7 +25,7 @@ use crate::error::{CoreError, Result};
 /// the cap is on the characters and the whole message is checked again at the end.
 pub const TEXT_MAX: usize = 800;
 /// Attachments per report, and the bytes of one (a screenshot after the app shrinks
-/// it, a log, a book that won't open). ntfy.sh takes 2 MB per attachment from an
+/// it, or another file such as a book that won't open). ntfy.sh takes 2 MB per attachment from an
 /// anonymous sender; this leaves room for the seal.
 pub const FILES_MAX: usize = 3;
 pub const FILE_BYTES_MAX: usize = 1_500_000;

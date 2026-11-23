@@ -973,7 +973,7 @@ function renderSettingsMiddleBody(page, S) {
           <!-- AboutCard 2 -->
           <div class="settings-card" style="border-radius:13px;">
             <div class="settings-row">
-              <div><div style="font-size:12.5px;">问题与建议</div><div style="font-size:10.5px;color:var(--yy-t3);">可附截图或日志直达开发者，无需注册账号</div></div>
+              <div><div style="font-size:12.5px;">问题与建议</div><div style="font-size:10.5px;color:var(--yy-t3);">可附截图或文件，无需注册账号</div></div>
               <div style="display:flex;align-items:center;gap:10px;">
                 <span style="font-size:12px;color:var(--yy-t2);">GitHub ↗</span>
                 <button class="yy-pill sm" onclick="setModal('feedback')">写反馈…</button>
@@ -1736,12 +1736,13 @@ function renderSettingsModals(S) {
             <div class="yy-card" style="padding:12px 16px;display:flex;flex-direction:column;gap:8px;font-size:12.5px;line-height:1.65;">
               <div>1. <strong>无服务器、无账号</strong>：语阅没有后台服务器，不收集任何阅读行为统计或崩溃遥测。</div>
               <div>2. <strong>书籍与笔记留在本机</strong>：所有 EPUB/PDF、划线、想法与生词默认仅保存在你的电脑本地目录。</div>
-              <div>3. <strong>直连你选的服务</strong>：同步仅连接你自己的云盘 / WebDAV；书伴与云端语音仅使用你自己的 API Key 直连对应服务商。</div>
+              <div>3. <strong>直连你选的服务</strong>：同步仅连接你自己的云盘 / WebDAV；免费在线语音发送当前朗读句；书伴与自行配置的云端语音仅使用你自己的 API Key 直连对应服务商。</div>
+              <div>4. <strong>问题反馈</strong>：仅在主动提交时通过 ntfy.sh 中转为公开的 GitHub Issue；不收集邮箱，非图片附件和未公开截图在本机加密，仅开发者可见。</div>
             </div>
           ` : S.modal === 'creditsSheet' ? `
             <div class="yy-card" style="padding:12px 16px;display:flex;flex-direction:column;gap:8px;font-size:12px;line-height:1.6;">
               <div><strong>语阅 (Yuyue)</strong> 以 <strong>GPL-3.0</strong> 开源协议发布。</div>
-              <div style="color:var(--yy-t2);">核心组件致谢：Rust (yuyue-core)、SQLite (FTS5)、Sherpa-ONNX / Qwen3-TTS（本机语音与句级对齐）、PDFium、Readability、MDict 解析器。</div>
+              <div style="color:var(--yy-t2);">核心组件致谢：Rust (yuyue-core)、SQLite (FTS5)、UniFFI、ONNX Runtime、Kokoro-82M-v1.1-zh、ZipVoice / Vocos、Meta MMS、3D-Speaker CAM++、PdfPig、ECDICT。</div>
             </div>
           ` : `
             <div class="yy-card" style="padding:12px 16px;display:flex;flex-direction:column;gap:6px;font-size:12.5px;line-height:1.65;">

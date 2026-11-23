@@ -2,7 +2,7 @@
 """生成语阅反馈的密钥和 ntfy 话题。
 
 私钥只留在开发者自己的 Mac 上（~/.config/yuyue/feedback-keys.env），不放进 GitHub：
-云端只搬运密文，解私密附件的是本机的 kaneo_import.py。
+云端只搬运密文，私密附件仅在维护者本机解密。
 公钥写进 App 的构建配置。话题写进 NTFY_TOPIC secret，不要提交到公开仓库。
 
 依赖：pip install -r feedback/relay/requirements.txt

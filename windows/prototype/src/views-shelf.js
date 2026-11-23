@@ -1740,7 +1740,7 @@ function renderShelfModals(S) {
     `;
   }
 
-  // Exact FeedbackForm (Feedback.swift: 500x532, 问题|建议|其他, attachments bar, email + expandable device info, GitHub Issues notice)
+  // Exact FeedbackForm (Feedback.swift: 500x532, 问题|建议|其他, attachments bar, expandable device info, mailto hint, GitHub Issues notice)
   if (S.modal === 'feedback') {
     out += renderFeedbackSheet(S);
   }
@@ -1833,7 +1833,7 @@ function renderFeedbackSheet(S) {
             <span style="color:var(--tint-accent);display:inline-flex;">${ICONS.globe}</span>
             <span>正文将公开在</span>
             <span style="color:var(--tint-accent);">GitHub Issues ↗</span>
-            <span>· 日志和私密附件仅开发者可见</span>
+            <span>· 非公开附件仅开发者可见</span>
           </div>
           <div style="display:flex;align-items:center;gap:8px;">
             <span style="font-size:11px;color:var(--yy-t3);">草稿已自动保存</span>

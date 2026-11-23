@@ -101,8 +101,9 @@ import java.util.concurrent.TimeUnit
  * 反馈: the core turns what the form holds into one ntfy message (`feedbackMessage`) and it is
  * POSTed to ntfy.sh (docs/dev/feedback.md). 语阅 is open source: the words become a public GitHub
  * Issue, and so do the screenshots unless the person turns that off. No email or contact info is
- * collected; logs and other private files are sealed so only the developer reads them. Without a
- * network the message waits on this phone and goes on the next try. Same rules as the Apple app.
+ * collected; non-image attachments and private screenshots are sealed so only the developer reads
+ * them. Without a network the message waits on this phone and goes on the next try. Same rules as
+ * the Apple app.
  */
 object Feedback {
     enum class Category(val id: String) {
@@ -145,9 +146,9 @@ object Feedback {
     val queued: List<String> get() = readList(QUEUE_KEY)
 
     /**
-     * One attachment: a screenshot, a log, a book that won't open. A picture is shrunk first (at
-     * most 1600 px on the long side, re-encoded as JPEG from the pixels, so what the original
-     * carried — place, camera, time — is gone); anything else goes as it is, up to 1.5 MB.
+     * One attachment: a screenshot, or another file such as a book that won't open. A picture is
+     * shrunk first (at most 1600 px on the long side, re-encoded as JPEG from the pixels, so what
+     * the original carried — place, camera, time — is gone); anything else goes as it is, up to 1.5 MB.
      */
     class Attachment(val name: String, val data: ByteArray, val preview: ImageBitmap?) {
         /** A picture (shrunk to a JPEG here); only these may go public. */
@@ -181,7 +182,7 @@ object Feedback {
             category = category.id, text = text,
             appVersion = if (withInfo) appVersion else "",
             platform = if (withInfo) "android" else "",
-            osVersion = if (withInfo) osVersion else "",
+            osVersion = if (withInfo) "$osVersion · $device" else "",
             files = ids,
         ))
         return try {
@@ -197,6 +198,8 @@ object Feedback {
 
     /** Sends what waited for a network, oldest first; stops at the first one that fails. */
     suspend fun flush() {
+        // Clean up email key left over from earlier versions.
+        Prefs.set("feedback.email", null)
         if (!isConfigured || !flushing.tryLock()) return
         try {
             while (true) {
@@ -357,8 +360,19 @@ object Feedback {
     val info: List<Pair<String, String>> get() = listOf(
         t("版本") to t("语阅 %@", appVersion),
         t("系统") to osVersion,
-        t("设备") to listOf(Build.MANUFACTURER.replaceFirstChar { it.uppercase() }, Build.MODEL).distinct().joinToString(" "),
+        t("设备") to device,
     )
+
+    val device: String get() {
+        val mfr = Build.MANUFACTURER.trim().replaceFirstChar { it.uppercase() }
+        val model = Build.MODEL.trim()
+        return when {
+            mfr.isEmpty() -> model
+            model.isEmpty() -> mfr
+            model.startsWith(mfr, ignoreCase = true) -> model
+            else -> "$mfr $model"
+        }
+    }
 
     /** Opens the user's mail app to write to the developer without the app collecting their email. */
     fun openMail(context: Context): Boolean {
@@ -373,8 +387,6 @@ object Feedback {
         if (text.codePointCount(0, text.length) <= max) text else text.substring(0, text.offsetByCodePoints(0, max))
 
     fun length(text: String): Int = text.codePointCount(0, text.length)
-
-    private const val DAY = 86_400_000L
 
     private fun readList(key: String): List<String> = runCatching {
         val array = JSONArray(Prefs.string(key, "[]"))
@@ -463,7 +475,7 @@ fun FeedbackPage(close: () -> Unit) {
                 // Builds without a topic and key (see docs/dev/feedback.md) can't send; mail still works.
                 androidx.compose.foundation.text.selection.SelectionContainer {
                     Text(
-                        t("这个版本发不出反馈。可以发邮件到 %@。", "yuyue.app@icloud.com"), style = YY.font(11f), color = YY.c.t2,
+                        t("这个版本发不出反馈。可以发邮件到 %@。", Feedback.SUPPORT_EMAIL), style = YY.font(11f), color = YY.c.t2,
                         modifier = Modifier.fillMaxWidth().background(YY.c.inset, RoundedCornerShape(YY.s(12))).padding(YY.s(11)),
                     )
                 }
@@ -608,7 +620,7 @@ fun FeedbackPage(close: () -> Unit) {
             }
             Row(Modifier.padding(horizontal = YY.s(2)), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.globe, null, tint = YY.c.t3, modifier = Modifier.size(YY.s(11)))
-                Text(t("内容会公开在 GitHub 上。日志和私密附件只有开发者能看到"), style = YY.font(10.5f), color = YY.c.t3, modifier = Modifier.padding(start = YY.s(5)))
+                Text(t("内容会公开在 GitHub 上，非公开附件只有开发者能看到"), style = YY.font(10.5f), color = YY.c.t3, modifier = Modifier.padding(start = YY.s(5)))
             }
             Row(Modifier.padding(horizontal = YY.s(2)), verticalAlignment = Alignment.CenterVertically) {
                 Text(t("需要回复或不想公开？"), style = YY.font(10.5f), color = YY.c.t3)
@@ -661,7 +673,6 @@ fun FeedbackPage(close: () -> Unit) {
                     }
                 }
             }
-            // The daily cap only speaks once it is reached; a count before that reads like a quota.
             if (!Feedback.isConfigured) {
                 Text(t("这个版本发不出反馈"), style = YY.font(10f), color = YY.c.t3)
             }
@@ -682,7 +693,7 @@ private fun Thanks(onMail: () -> Unit, again: () -> Unit, close: () -> Unit) {
         ) { Icon(Icons.check, null, tint = YY.tint.accent, modifier = Modifier.size(YY.s(26))) }
         Text(t("收到了，谢谢"), style = YY.font(15f, FontWeight.SemiBold), color = YY.c.t1, modifier = Modifier.padding(top = YY.s(14)))
         Text(
-            t("稍后会出现在 GitHub 问题板上，不会收集你的邮箱。"),
+            t("稍后会出现在 GitHub 问题板上。"),
             style = YY.font(11.5f), color = YY.c.t2, textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = YY.s(8)).widthIn(max = YY.s(240)),
         )

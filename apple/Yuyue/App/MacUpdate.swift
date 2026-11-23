@@ -296,7 +296,7 @@ struct MacUpdateSettings: View {
 
             AboutCard {
                 AboutRow(String(localized: "问题与建议"),
-                         detail: String(localized: "可附截图或日志直达开发者，无需注册账号")) {
+                         detail: String(localized: "可附截图或文件，无需注册账号")) {
                     HStack(spacing: 10) {
                         AboutLinkButton(title: "GitHub", prominent: false) {
                             NSWorkspace.shared.open(Self.issues)
@@ -791,11 +791,11 @@ private struct PrivacySheetContent: View {
             (String(localized: "你自己的服务密钥"),
              String(localized: "书伴默认用设备自带的模型，不联网。你填了自己的 Key 时，提问和书里相关的几段原文会直接发给你选的服务商，费用和隐私条款按你和它的约定；Key 只存在这台 Mac 上 App 沙盒文件夹里的明文文件中，只有你的用户账号能读，不同步、不上传。")),
             (String(localized: "云端声音与笔记导出"),
-             String(localized: "云端声音和笔记导出（Notion、flomo、新枝）也只在你填了 Key 或链接时联网：要读的句子、要发的笔记直接发给你选的服务。读过的声音存在这台设备上。")),
+             String(localized: "免费在线语音会把当前要读的句子发给在线语音服务；自行配置的云端声音和笔记导出（Notion、flomo、新枝）只在你选用并填了 Key 或链接时联网，要读的句子或要发的笔记直接发给你选的服务。读过的声音存在这台设备上。")),
             (String(localized: "离线翻译与本地语音"),
-             String(localized: "外文查词与翻译使用系统离线翻译；按需从 GitHub Releases 或魔搭（ModelScope）下载的对齐模型、声音包与本地语音模型都在设备上离线运行，原文与录音不出本机。")),
+             String(localized: "外文查词与翻译使用系统离线翻译；按需从 GitHub Releases、魔搭（ModelScope）或 Hugging Face 下载的对齐模型、声音包、开源字体与本地语音模型都在设备上离线运行（字体预览样字按需从 Google Fonts 加载），原文与录音不出本机。")),
             (String(localized: "问题反馈"),
-             String(localized: "只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；不收集邮箱，你选择附带的日志或私密文件会在发送前用开发者公钥在本机加密。")),
+             String(localized: "只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；不收集邮箱，非图片附件和未公开的截图会在发送前用开发者公钥在本机加密。")),
             (String(localized: "匿名检查更新与签名校验"),
              String(localized: "自动检查更新每天只从 GitHub 读取一次版本号文件，不带任何关于你和设备的信息（可在「关于」页关闭）；安装包经 Sparkle EdDSA 签名校验后才会替换。")),
         ]
@@ -844,6 +844,9 @@ private struct LicencesSheetContent: View {
             (String(localized: "内置声音包 voices-1 · 声音素材库 sounds-1"),
              String(localized: "由模型按文字描述生成，不含真人录音"),
              "CC0 1.0"),
+            ("Kokoro-82M-v1.1-zh",
+             String(localized: "按需下载的本地中英离线旁白语音模型"),
+             "Apache-2.0"),
             ("3D-Speaker CAM++",
              String(localized: "按需下载的本地声纹识别模型"),
              "Apache-2.0"),

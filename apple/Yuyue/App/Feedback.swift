@@ -13,8 +13,8 @@ import AppKit
 /// 反馈: the core turns what the form holds into one ntfy message (`feedbackMessage`) and it is
 /// POSTed to ntfy.sh (docs/dev/feedback.md). 语阅 is open source: the words become a public
 /// GitHub Issue, and so do the screenshots unless the person turns that off. No email or contact
-/// info is collected; logs and other private files are sealed so only the developer reads them.
-/// Without a network the message waits on this device and goes on the next try.
+/// info is collected; non-image attachments and private screenshots are sealed so only the
+/// developer reads them. Without a network the message waits on this device and goes on the next try.
 @Observable
 final class Feedback {
     static let shared = Feedback()
@@ -56,9 +56,9 @@ final class Feedback {
         }
     }
 
-    /// One attachment: a screenshot, a log, a book that won't open. A picture is shrunk first (at
-    /// most 1600 px on the long side, re-encoded as JPEG, so what the original carried — place,
-    /// camera, time — is gone); anything else goes as it is, up to the core's 1.5 MB.
+    /// One attachment: a screenshot, or another file such as a book that won't open. A picture is
+    /// shrunk first (at most 1600 px on the long side, re-encoded as JPEG, so what the original
+    /// carried — place, camera, time — is gone); anything else goes as it is, up to the core's 1.5 MB.
     nonisolated struct Attachment: Identifiable, @unchecked Sendable {
         let id = UUID()
         let name: String
@@ -156,8 +156,9 @@ final class Feedback {
 
     private init() {
         queued = UserDefaults.standard.stringArray(forKey: queueKey) ?? []
-        // No daily cap any more; the old count goes.
+        // Clean up keys removed in earlier versions (daily cap & saved email).
         UserDefaults.standard.removeObject(forKey: "feedback.sentAt")
+        UserDefaults.standard.removeObject(forKey: "feedback.email")
         #if DEBUG
         // -debugFeedback 1|full: the window catalog opens the form (full: with words and files).
         requested = UserDefaults.standard.string(forKey: "debugFeedback") != nil
@@ -405,7 +406,10 @@ final class Feedback {
         #else
         let name = UIDevice.current.userInterfaceIdiom == .pad ? "iPadOS" : "iOS"
         #endif
-        return "\(name) \(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
+        let ver = v.patchVersion == 0
+            ? "\(v.majorVersion).\(v.minorVersion)"
+            : "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
+        return "\(name) \(ver)"
     }
 
     /// 附加信息 as the form lists it; the same values go in the report. More may join later.
@@ -535,7 +539,7 @@ struct FeedbackForm: View {
                 await attach(name: "截屏 2026-11-11.png", data: out as Data)
             }
         }
-        await attach(name: "yuyue.log", data: Data("debug\n".utf8))
+        await attach(name: "sample.txt", data: Data("debug\n".utf8))
     }
     #endif
 
@@ -595,13 +599,19 @@ struct FeedbackForm: View {
             VStack(alignment: .leading, spacing: YYUI.s(12)) {
                 if !feedback.isConfigured {
                     // Builds without a topic and key (see docs/dev/feedback.md) can't send; mail still works.
-                    Text("这个版本发不出反馈。可以发邮件到 \(Text(verbatim: "yuyue.app@icloud.com").foregroundStyle(tint.accent))。")
-                        .font(YYUI.font(12))
-                        .foregroundStyle(YYColor.t2)
-                        .textSelection(.enabled)
-                        .padding(YYUI.s(11))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(YYColor.inset, in: .rect(cornerRadius: YYUI.s(12)))
+                    HStack(spacing: YYUI.s(4)) {
+                        Text("这个版本发不出反馈。可以发邮件到")
+                        Link(destination: Feedback.mailURL) {
+                            Text(verbatim: Feedback.supportEmail)
+                                .foregroundStyle(tint.accent)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .font(YYUI.font(12))
+                    .foregroundStyle(YYColor.t2)
+                    .padding(YYUI.s(11))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(YYColor.inset, in: .rect(cornerRadius: YYUI.s(12)))
                 }
                 YYSegments(items: Feedback.Category.allCases.map { ($0, $0.title) }, selection: $category)
                 editor
@@ -792,7 +802,7 @@ struct FeedbackForm: View {
         .accessibilityLabel(String(localized: "加附件"))
         #else
         FeedbackToolButton(title: String(localized: "附件"), symbol: "paperclip",
-                           help: String(localized: "截图、日志或别的文件，最多 3 个。也可以拖进来，或者 ⌘V 粘贴")) {
+                           help: String(localized: "截图或文件，最多 3 个。也可以拖进来，或者 ⌘V 粘贴")) {
             choosingFiles = true
         }
         .accessibilityLabel(String(localized: "加附件"))
@@ -1056,7 +1066,7 @@ struct FeedbackForm: View {
                     .foregroundStyle(tint.accent)
             }
             .buttonStyle(.plain)
-            Text("· 日志和私密附件仅开发者可见")
+            Text("· 非公开附件仅开发者可见")
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
             Spacer(minLength: 0)
@@ -1189,7 +1199,7 @@ struct FeedbackForm: View {
                 .overlay(Circle().strokeBorder(tint.edge, lineWidth: 0.5))
                 .symbolEffect(.bounce, value: done)
             Text("收到了，谢谢").font(YYUI.font(17, .semibold)).foregroundStyle(YYColor.t1)
-            Text("稍后会出现在 GitHub 问题板上，不会收集你的邮箱。")
+            Text("稍后会出现在 GitHub 问题板上。")
                 .font(YYUI.font(12.5))
                 .foregroundStyle(YYColor.t2)
                 .multilineTextAlignment(.center)
@@ -1204,13 +1214,6 @@ struct FeedbackForm: View {
                 .buttonStyle(.plain)
             }
             .font(YYUI.font(11.5))
-            // 非实时中转，提交后立刻点过去看不到，先注释掉。
-            // Link(destination: Feedback.issuesURL) {
-            //     Text(verbatim: "去 GitHub Issues 查看 ↗")
-            //         .font(YYUI.font(12))
-            //         .foregroundStyle(tint.accent)
-            // }
-            // .buttonStyle(.plain)
             HStack(spacing: YYUI.s(10)) {
                 Button("再写一条") {
                     text = ""

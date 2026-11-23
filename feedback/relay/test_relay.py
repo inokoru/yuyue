@@ -7,9 +7,16 @@ import subprocess
 import tempfile
 import unittest
 
-from nacl.public import PrivateKey, SealedBox
+try:
+    from nacl.public import PrivateKey, SealedBox
+except ImportError:  # pragma: no cover - optional local crypto dep
+    PrivateKey = SealedBox = None
 
-import kaneo_import
+try:
+    import kaneo_import
+except ImportError:  # pragma: no cover - local-only gitignored script
+    kaneo_import = None
+
 import relay
 
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 20 + b"\xff\xd9"
@@ -17,8 +24,11 @@ JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 20 + b"\xff\xd9"
 
 class RelayTest(unittest.TestCase):
     def setUp(self):
-        self.secret = PrivateKey.generate()
-        self.box = SealedBox(self.secret.public_key)
+        if PrivateKey is not None:
+            self.secret = PrivateKey.generate()
+            self.box = SealedBox(self.secret.public_key)
+        else:
+            self.secret = self.box = None
 
     def message(self, **fields) -> str:
         return json.dumps({"v": 2, "category": "bug", "text": "翻页卡住", **fields}, ensure_ascii=False)
@@ -90,6 +100,7 @@ class RelayTest(unittest.TestCase):
             self.assertEqual(listed, ["abc/1.jpg", "abc/3.jpg"])
             self.assertEqual(shots.url("abc/1.jpg"), "https://raw.githubusercontent.com/inokoru/yuyue-feedback-assets/main/abc/1.jpg")
 
+    @unittest.skipIf(kaneo_import is None or PrivateKey is None, "local kaneo_import / pynacl not installed")
     def test_mac_side_opens_what_the_app_sealed(self):
         body = relay.issue_body("id9", relay.open_message(self.message()))
 
@@ -109,6 +120,7 @@ class RelayTest(unittest.TestCase):
         self.assertEqual(kaneo_import.MARKER_RE.findall(task), ["3"])
         self.assertEqual(kaneo_import.priority_for(task), "high")
 
+    @unittest.skipIf(kaneo_import is None, "local kaneo_import not installed")
     def test_sync_back_rules(self):
         cols = [{"slug": "to-do", "position": 0}, {"slug": "in-progress", "position": 1},
                 {"slug": "done", "position": 2, "isFinal": True}]

@@ -35,11 +35,6 @@ public sealed class UpdateAndFeedbackService
 
     public UpdateInfo? LatestOffer { get; private set; }
     public Release[] OfferNotes { get; private set; } = [];
-    public bool HasUnreadBadge =>
-        LatestOffer is not null &&
-        LatestOffer.Version != _library.Prefs.UpdateSkippedVersion &&
-        !(LatestOffer.Version == _library.Prefs.UpdateRemindVersion &&
-          _library.Prefs.UpdateRemindUntilMs > DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
     public UpdateAndFeedbackService(LibraryService library)
     {
@@ -133,6 +128,13 @@ public sealed class UpdateAndFeedbackService
         return $"https://github.com/{RepoSlug}/releases/latest/download/";
     }
 
+    private static string OsDisplayVersion()
+    {
+        var v = Environment.OSVersion.Version;
+        string name = v.Major >= 10 && v.Build >= 22000 ? "Windows 11" : $"Windows {v.Major}";
+        return v.Build > 0 ? $"{name} (Build {v.Build})" : name;
+    }
+
     public Release[] LoadBundledChangelog()
     {
         try
@@ -142,7 +144,6 @@ public sealed class UpdateAndFeedbackService
                 Path.Combine(AppContext.BaseDirectory, "Assets", "Shared", "CHANGELOG.md"),
                 Path.Combine(AppContext.BaseDirectory, "CHANGELOG.md"),
                 Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", "..", "CHANGELOG.md")),
-                @"c:\Users\PC\Desktop\yuyue\CHANGELOG.md",
             ];
             string? found = candidates.FirstOrDefault(File.Exists);
             if (found is not null)
@@ -156,18 +157,18 @@ public sealed class UpdateAndFeedbackService
 
         return
         [
-            new Release("0.1.0", "2026-11-22",
+            new Release("0.1.0", "2026-11-23",
             [
                 "全新桌面端书架、在读封面取色横带与内联书籍档案页",
                 "双栏仿真暖纸电子书阅读器、自定义调纸与字样册",
-                "本地离线 ZipVoice 24kHz 自然人声、多角色广播剧与声音克隆",
+                "本地离线 Kokoro / ZipVoice 24kHz 自然人声、多角色广播剧与声音克隆",
                 "书房电台双主播播客、有声书与电子书对齐",
                 "个人云盘 / WebDAV 无账号多端同步与本地快照备份",
             ],
             [
                 "Desktop library shelf, cover-dyed reading band, and inline book record page",
                 "Two-column warm-paper EPUB/MOBI/TXT/PDF reader with custom paper studio",
-                "On-device ZipVoice 24kHz neural TTS, multi-role drama, and voice cloning",
+                "On-device Kokoro / ZipVoice 24kHz neural TTS, multi-role drama, and voice cloning",
                 "Private Studio dual-host podcasts and audiobook-to-ebook alignment",
                 "Serverless personal cloud / WebDAV sync and portable .yuyue snapshots",
             ]),
@@ -321,8 +322,9 @@ public sealed class UpdateAndFeedbackService
         (string Title, string Body)[] items =
         [
             ("没有账号，也没有服务器", "语阅没有注册登录，不埋点、不接入任何第三方统计或崩溃分析 SDK。你的书库、阅读进度、划线想法与生词全部保存在本机目录中。"),
-            ("连接外部服务时直连服务商", "当你主动配置 WebDAV 云盘、AI 书伴（DeepSeek / OpenAI / Claude / Ollama 等）、云端语音或 Notion / flomo / 新枝笔记导出时，客户端直接向你指定的服务地址发起请求，API Key 使用 Windows DPAPI 加密存储在本机，从不经过语阅中转，也从不写入跨端同步包。"),
-            ("检查更新与模型下载", "检查更新与下载开源字体、离线语音模型时，仅向 GitHub Releases 发起普通 HTTPS GET 请求，不携带任何书库或设备标识。"),
+            ("连接外部服务时直连服务商", "使用免费在线语音时，当前要读的句子会直接发给在线语音服务；当你主动配置 WebDAV 云盘、AI 书伴（DeepSeek / OpenAI / Claude / Ollama 等）、云端语音或 Notion / flomo / 新枝笔记导出时，客户端直接向你指定的服务地址发起请求，API Key 使用 Windows DPAPI 加密存储在本机，从不经过语阅中转，也从不写入跨端同步包。"),
+            ("检查更新与模型下载", "检查更新与按需下载开源字体、离线语音模型、声音包时，仅向 GitHub Releases、魔搭（ModelScope）或 Hugging Face 发起普通 HTTPS GET 请求（字体预览按需访问 Google Fonts），不携带任何书库或设备标识。"),
+            ("问题反馈", "只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；不收集邮箱，非图片附件和未公开的截图会在发送前用开发者公钥在本机加密。"),
         ];
         foreach (var (t, b) in items)
         {
@@ -341,7 +343,11 @@ public sealed class UpdateAndFeedbackService
             ("yuyue-core (Rust)", "GPL-3.0", "跨端统一排版解析、全文检索、同步日志、有声对齐与播客引擎"),
             ("SQLite / rusqlite", "Public Domain / MIT", "本地资料库与全文索引存储"),
             ("UniFFI (Mozilla)", "MPL-2.0", "Rust ↔ Swift / Kotlin / C# 跨语言绑定生成"),
-            ("ONNX Runtime (Microsoft)", "MIT", "本地 ZipVoice + Vocos 24kHz 离线神经语音推理"),
+            ("ONNX Runtime (Microsoft)", "MIT", "本地 Kokoro / ZipVoice / 对齐等离线模型推理"),
+            ("Kokoro-82M-v1.1-zh", "Apache-2.0", "按需下载的本地中英离线旁白语音模型"),
+            ("ZipVoice · Meta MMS · Vocos", "CC-BY-NC 4.0 · MIT", "按需下载的多角色语音、对齐模型与声码器"),
+            ("3D-Speaker CAM++", "Apache-2.0", "按需下载的本地声纹识别模型"),
+            ("PdfPig", "Apache-2.0", "Windows 端 PDF 文档解析与文字提取"),
             ("Windows App SDK / WinUI 3", "MIT", "Windows 原生桌面界面与 WebView2 宿主"),
             ("霞鹜文楷 (LXGW WenKai)", "OFL-1.1", "开源中文字体排印支持"),
             ("ECDICT (skywind3000)", "MIT", "内置离线英汉词典与词频分级数据"),
@@ -422,7 +428,8 @@ public sealed class UpdateAndFeedbackService
             btn.Style = (Style)Application.Current.Resources[k == category ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
 
         var attachList = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var publicShotToggle = new CheckBox { Content = "截图可公开附在 GitHub Issue 中（已自动剥离 EXIF 位置信息）", IsChecked = true, FontSize = 11.5, Visibility = Visibility.Collapsed };
+        var attachNotice = new TextBlock { FontSize = 11, Foreground = ThemeHelper.Brush(p.Warn), TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        var publicShotToggle = new CheckBox { Content = "截图公开在 GitHub 上（已自动剥离 EXIF；关闭后仅开发者可见）", IsChecked = true, FontSize = 11.5, Visibility = Visibility.Collapsed };
         publicShotToggle.Checked += (_, _) => publicShots = true;
         publicShotToggle.Unchecked += (_, _) => publicShots = false;
 
@@ -447,20 +454,28 @@ public sealed class UpdateAndFeedbackService
         addFileBtn.Click += async (_, _) =>
         {
             if (attachments.Count >= 3) return;
+            attachNotice.Visibility = Visibility.Collapsed;
             var picker = new FileOpenPicker();
-            picker.FileTypeFilter.Add(".png");
-            picker.FileTypeFilter.Add(".jpg");
-            picker.FileTypeFilter.Add(".jpeg");
-            picker.FileTypeFilter.Add(".log");
-            picker.FileTypeFilter.Add(".txt");
+            picker.FileTypeFilter.Add("*");
             InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(ownerWindow));
             var f = await picker.PickSingleFileAsync();
             if (f is null) return;
             string ext = Path.GetExtension(f.Name).ToLowerInvariant();
-            bool isImg = ext is ".png" or ".jpg" or ".jpeg";
+            bool isImg = ext is ".png" or ".jpg" or ".jpeg" or ".webp" or ".bmp";
             byte[] raw = await File.ReadAllBytesAsync(f.Path);
             if (isImg) raw = await SanitizeImageToJpegAsync(f, raw);
-            if (raw.Length > 1_500_000) return;
+            if (raw.Length == 0)
+            {
+                attachNotice.Text = $"「{f.Name}」读不出来。";
+                attachNotice.Visibility = Visibility.Visible;
+                return;
+            }
+            if (raw.Length > 1_500_000)
+            {
+                attachNotice.Text = $"「{f.Name}」太大了，一个附件最多 1.5 MB。";
+                attachNotice.Visibility = Visibility.Visible;
+                return;
+            }
             attachments.Add((isImg ? Path.ChangeExtension(f.Name, ".jpg") : f.Name, raw, isImg));
             RebuildAttachments();
         };
@@ -489,7 +504,7 @@ public sealed class UpdateAndFeedbackService
 
         var infoCheck = new CheckBox
         {
-            Content = $"附带基础环境信息（语阅 v{CurrentVersion} · Windows {Environment.OSVersion.Version}）",
+            Content = $"附带基础环境信息（语阅 {CurrentVersion} ({CurrentBuild}) · {OsDisplayVersion()}）",
             IsChecked = true,
             FontSize = 11.5,
         };
@@ -516,12 +531,13 @@ public sealed class UpdateAndFeedbackService
                 counterText,
                 toolBar,
                 attachList,
+                attachNotice,
                 publicShotToggle,
                 infoCheck,
                 mailLink,
                 new TextBlock
                 {
-                    Text = "公开文字会整理为 GitHub Issue 便于追踪修复；不收集邮箱，私密附件与日志全程使用 X25519 公钥加密传输。",
+                    Text = "正文和公开截图会发布为 GitHub Issue，不收集邮箱；非图片附件与未公开截图会在本机加密，仅开发者可见。",
                     FontSize = 11,
                     Foreground = ThemeHelper.Brush(p.T3),
                     TextWrapping = TextWrapping.Wrap,
@@ -598,9 +614,9 @@ public sealed class UpdateAndFeedbackService
             var draft = new FeedbackDraft(
                 Category: category,
                 Text: text,
-                AppVersion: withInfo ? CurrentVersion : "",
-                Platform: withInfo ? "Windows" : "",
-                OsVersion: withInfo ? Environment.OSVersion.VersionString : "",
+                AppVersion: withInfo ? $"{CurrentVersion} ({CurrentBuild})" : "",
+                Platform: withInfo ? "windows" : "",
+                OsVersion: withInfo ? OsDisplayVersion() : "",
                 Files: fileIds.ToArray());
 
             string sealedJson = YuyueCoreMethods.FeedbackMessage(draft);
@@ -670,7 +686,7 @@ public sealed class UpdateAndFeedbackService
         if (firstLine.Length > 48) firstLine = firstLine[..48] + "…";
         string tag = category switch { "idea" => "[建议] ", "other" => "[反馈] ", _ => "[问题] " };
         string body = withInfo
-            ? $"{text}\n\n---\n- 平台：Windows ({Environment.OSVersion.VersionString})\n- 版本：语阅 v{CurrentVersion}"
+            ? $"{text}\n\n---\n- 平台：Windows ({OsDisplayVersion()})\n- 版本：语阅 {CurrentVersion} ({CurrentBuild})"
             : text;
         string url = $"https://github.com/{RepoSlug}/issues/new?title={Uri.EscapeDataString(tag + firstLine)}&body={Uri.EscapeDataString(body)}";
         _ = Launcher.LaunchUriAsync(new Uri(url));
