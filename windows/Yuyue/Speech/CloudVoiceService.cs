@@ -629,9 +629,8 @@ public sealed class CloudVoiceService
             byte[]? wav = await CallGradioWavAsync(b, "process", new object[] { langLabel, modelLabel, text, sid, 1.0 }, ct);
             if (wav is not null) return wav;
         }
-        string meloLang = isZh ? "ZH" : "EN-US";
-        string meloSpk = isZh ? "ZH" : "EN";
-        return await CallGradioWavAsync("https://mrfakename-melotts.hf.space", "synthesize", new object[] { text, meloLang, 1.0, meloSpk }, ct);
+        // 不跨模型静默回退到不同音色，失败时向上报错告知用户。
+        return null;
     }
 
     private static async Task<byte[]?> CallGradioWavAsync(string baseUrl, string fnName, object[] args, CancellationToken ct)

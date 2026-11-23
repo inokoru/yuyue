@@ -187,7 +187,8 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     /** Shown when critical phone heat temporarily falls back to system voice for the rest of a chapter. */
     var thermalNotice by mutableStateOf<String?>(null)
     private var thermalFallbackSection: Int? = null
-    private var pendingDefaultUpgrade = false
+    /** Remember where playback failed so 重试 / 换成系统声音 resumes from the same sentence. */
+    private var failedSpot: Spot? = null
     private var chapterLayer: Pair<Int, uniffi.yuyue_core.DramaLayer>? = null
     private var chapterLiveAllMade: Pair<Int, Boolean>? = null
     private var lastRenderedSection: Int? = null
@@ -198,6 +199,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
      *  recording (a word found by 搜索), not at its own start. */
     fun play(from: Position, word: Double? = null) {
         failure = null
+        failedSpot = null
         missingVoice = null
         thermalNotice = null
         thermalFallbackSection = null
@@ -233,20 +235,6 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
 
     fun resume() {
         if (state != State.Paused) return
-        // if the better voice finished downloading while playing or paused, switch on manual resume.
-        val cur = spot
-        val langTag = cur?.let { lang(it.section) } ?: language
-        val lib = runCatching { app.yuyue.YuyueApp.instance.library }.getOrNull()
-        val canUpgradeNow = pendingDefaultUpgrade ||
-            (lib != null && LiveVoiceModel.ready(lib.dataDir) &&
-                Prefs.string("player.voice.$langTag").isEmpty() &&
-                voices[langTag] is SystemVoice)
-        if (canUpgradeNow && cur != null) {
-            pendingDefaultUpgrade = false
-            voices.clear()
-            play(cur.position)
-            return
-        }
         if (queued.isEmpty()) feedTrack()
         if (queued.isEmpty()) {
             state = State.Loading
@@ -268,6 +256,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         fetching = null
         thermalNotice = null
         thermalFallbackSection = null
+        voices.clear()
         reset()
         state = State.Stopped
         spot = null
@@ -325,6 +314,28 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         restartHere()
     }
 
+    /** Switches to a local system voice and resumes from where playback failed. */
+    fun useSystemVoice() {
+        val langTag = language
+        val resumeAt = failedSpot ?: spot
+        failure = null
+        missingVoice = null
+        scope.launch {
+            val sys = Voices.systemBest(langTag) ?: return@launch
+            Prefs.set("player.voice.$langTag", sys.id)
+            voices[langTag] = sys
+            if (resumeAt != null) play(resumeAt.position) else restartHere()
+        }
+    }
+
+    /** Retries playback from the sentence where the last error occurred. */
+    fun retry() {
+        val resumeAt = failedSpot ?: spot
+        failure = null
+        missingVoice = null
+        if (resumeAt != null) play(resumeAt.position)
+    }
+
     suspend fun currentVoice(language: String): BookVoice? = voice(language)
 
     /** The sentence being read or paused on, for the 播放条 and the notification. */
@@ -335,7 +346,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
 
     val sectionProgress: Double get() = spot?.let { s -> sentences(s.section).size.takeIf { it > 0 }?.let { (s.sentence + 1.0) / it } } ?: 0.0
 
-    val language: String get() = spot?.let { lang(it.section) } ?: detail.summary.language
+    val language: String get() = (spot ?: failedSpot)?.let { lang(it.section) } ?: detail.summary.language
 
     fun textsChanged() = texts.clear()
 
@@ -441,11 +452,6 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                         if (thermalFallbackSection != null && thermalFallbackSection != s.section) {
                             thermalFallbackSection = null
                             thermalNotice = null
-                        }
-                        // switch to the newly downloaded default narrator card at chapter boundary.
-                        if (pendingDefaultUpgrade && Prefs.string("player.voice.${lang(s.section)}").isEmpty()) {
-                            pendingDefaultUpgrade = false
-                            voices.clear()
                         }
                         if (lib != null && lib.dramaSynth.isDramaActive(detail.summary.id)) {
                             lib.recordingFetch.want(detail.summary.id, s.section.toUInt())
@@ -783,7 +789,9 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     }
 
     private fun failed(message: String) {
+        val resumeAt = spot ?: nextToRender
         stop()
+        failedSpot = resumeAt
         failure = message
     }
 
@@ -913,14 +921,13 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         ClonedVoices.init(context)
         scope.launch {
             KokoroModel.readyEvents.collect {
-                pendingDefaultUpgrade = true
-                if (state != State.Playing) voices.clear()
+                // 正在听或暂停时不中途静默切声，等完全停下后下一次新开朗读再启用。
+                if (state == State.Stopped) voices.clear()
             }
         }
         scope.launch {
             LiveVoiceModel.readyEvents.collect {
-                pendingDefaultUpgrade = true
-                if (state == State.Paused) voices.clear()
+                if (state == State.Stopped) voices.clear()
             }
         }
         scope.launch {

@@ -247,7 +247,7 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
 
         var help: String {
             switch self {
-            case .free: String(localized: "基于开源社区公共语音服务（Next-gen Kaldi Kokoro / MeloTTS），免注册、免填 Key，合成后的句子自动缓存在本机。")
+            case .free: String(localized: "0 MB 免下载、免注册免填 Key，直连公共语音接口，已朗读句子自动缓存在本机。")
             case .volcengine: String(localized: "火山引擎语音技术控制台创建应用后，按「AppID|AccessToken」填入（竖线分隔），支持豆包灿灿 2.0 等自然声线。")
             case .xiaomi: String(localized: "platform.xiaomimimo.com 控制台新建 API Key，当前限时免费，支持自然语言语气控制。")
             case .siliconflow: String(localized: "cloud.siliconflow.cn › API 密钥新建。内置 CosyVoice2 音色并支持你在控制台克隆的声音。")
@@ -904,15 +904,10 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
     // MARK: Built-in preset voice tables
 
     static let freeOnlineVoices: [(id: String, name: String, lang: String, gender: String, age: String)] = [
-        ("3", "清禾 · 温润自然", "zh-CN", "female", "young"),
-        ("59", "沉舟 · 醇厚稳重", "zh-CN", "male", "middle_aged"),
-        ("4", "知夏 · 柔和舒缓", "zh-CN", "female", "young"),
-        ("58", "松风 · 清朗平和", "zh-CN", "male", "young"),
-        ("6", "云舒 · 沉静端庄", "zh-CN", "female", "middle_aged"),
-        ("67", "怀瑾 · 明快男声", "zh-CN", "male", "young"),
-        ("0", "Maple · Warm US", "en-US", "female", "young"),
-        ("2", "Vale · Crisp UK", "en-GB", "female", "young"),
-        ("1", "Sol · Bright US", "en-US", "female", "young"),
+        ("zh_youdao", "清岚 · 自然女声", "zh-CN", "female", "young"),
+        ("zh_baidu", "知声 · 清晰播报", "zh-CN", "female", "middle_aged"),
+        ("en_uk", "Clara · British", "en-GB", "female", "young"),
+        ("en_us", "Emma · American", "en-US", "female", "young"),
     ]
 
     static let volcengineVoices: [(id: String, name: String, lang: String, gender: String, age: String)] = [
@@ -1060,7 +1055,7 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
     static func refresh(_ p: Provider) async throws -> Int {
         switch p {
         case .free:
-            _ = try await fetchFreeOnline(text: "你好。", voiceID: "3", language: "zh-CN")
+            _ = try await fetchFreeOnline(text: "你好。", voiceID: "zh_youdao", language: "zh-CN")
             return freeOnlineVoices.count
 
         case .volcengine:
@@ -1255,8 +1250,8 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
         return (savedApp, rawKey)
     }
 
-    /// 免 Key 在线自然语音：支持自定免密兼容网关，默认直连 Next-gen Kaldi (`k2-fsa/text-to-speech`) 与
-    /// `MeloTTS` 官方公开 Gradio 语音接口（魔搭与 Hugging Face 双源自动回退）。
+    /// 免 Key 在线自然语音：支持自定免密兼容网关，默认直连与当前所选音色严格对应的公共 MP3 语音接口，
+    /// 不跨线路、不跨模型静默换声，连不上时直接向上报错告知用户。
     static func fetchFreeOnline(text: String, voiceID: String, language: String) async throws -> (Data, String) {
         let customBase = (UserDefaults.standard.string(forKey: Provider.free.urlName) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !customBase.isEmpty, let endpoint = speechEndpoint(from: customBase) {
@@ -1277,142 +1272,143 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
             return (data, sniffExt(data, fallback: "mp3"))
         }
 
-        let isEnglish = language.lowercased().hasPrefix("en") && !text.unicodeScalars.contains { (0x4E00 ... 0x9FFF).contains($0.value) }
-        let k2Data: [Any] = [
-            "Chinese+English",
-            "csukuangfj/kokoro-multi-lang-v1_1|103 speakers",
-            text,
-            Int(voiceID) != nil ? voiceID : (isEnglish ? "0" : "3"),
-            1.0,
-        ]
-        let meloData: [Any] = [
-            text,
-            isEnglish ? "EN-Default" : "ZH",
-            1.0,
-            isEnglish ? "EN" : "ZH",
-        ]
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { throw Failure.unreadable }
 
-        let cnFirst = ModelDownload.prefersChinaMirror
-        let routes: [(base: String, fn: String, args: [Any])] = cnFirst
-            ? [
-                ("https://k2-fsa-text-to-speech.ms.show", "process", k2Data),
-                ("https://k2-fsa-text-to-speech.hf.space", "process", k2Data),
-                ("https://mrfakename-melotts.hf.space", "synthesize", meloData),
-            ]
-            : [
-                ("https://k2-fsa-text-to-speech.hf.space", "process", k2Data),
-                ("https://mrfakename-melotts.hf.space", "synthesize", meloData),
-                ("https://k2-fsa-text-to-speech.ms.show", "process", k2Data),
-            ]
+        let hasCJK = clean.unicodeScalars.contains { (0x4E00 ... 0x9FFF).contains($0.value) }
+        let isEnglish = !hasCJK && (
+            language.lowercased().hasPrefix("en")
+                || voiceID.hasPrefix("en_")
+                || voiceID == "0" || voiceID == "1" || voiceID == "2"
+                || voiceID.hasPrefix("af_") || voiceID.hasPrefix("am_") || voiceID.hasPrefix("bf_")
+        )
+
+        let chunks = splitFreeChunks(clean, maxChars: 160)
+        // 每个免费音色严格绑定单一线路，避免单句超时后静默切到另一家的不同声线。
+        let route: FreeRoute
+        if isEnglish {
+            let preferUS = voiceID == "en_us" || voiceID == "0" || voiceID == "1" || voiceID.hasPrefix("af_") || voiceID.hasPrefix("am_")
+            route = preferUS ? .baiduEnUs : .youdaoEnUk
+        } else {
+            let preferBaidu = voiceID == "zh_baidu" || voiceID == "58" || voiceID == "67" || voiceID == "zm_009" || voiceID == "zm_010"
+            route = preferBaidu ? .baiduZh : .youdaoZh
+        }
 
         var lastError: Error = Failure.unreachable(.free)
-        for route in routes {
+        for attempt in 0 ..< 2 {
             try Task.checkCancellation()
+            if attempt > 0 {
+                try await Task.sleep(for: .milliseconds(250))
+            }
             do {
-                let (audioData, ext) = try await callGradioAudio(baseURL: route.base, fnName: route.fn, args: route.args)
-                if !audioData.isEmpty { return (audioData, ext) }
+                var combined = Data()
+                for chunk in chunks {
+                    try Task.checkCancellation()
+                    guard let url = freeRouteURL(route, text: chunk) else { throw Failure.unreadable }
+                    var req = URLRequest(url: url, timeoutInterval: 12)
+                    req.httpMethod = "GET"
+                    req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
+                    let (data, resp) = try await URLSession.shared.data(for: req)
+                    let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                    guard (200 ..< 300).contains(code), looksLikeAudio(data) else {
+                        throw Failure.server(.free, code, nil)
+                    }
+                    combined.append(data)
+                }
+                if !combined.isEmpty {
+                    return (combined, sniffExt(combined, fallback: "mp3"))
+                }
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
                 lastError = error
             }
         }
-
-        // 若已装好本机 Kokoro 轻量包且外网偶发离线，自动本机无感接管同音色朗读。
-        if let sid = UInt32(voiceID), let ctx = LiveVoiceModel.context, KokoroModel.installed(ctx.dataDir) {
-            let sp = KokoroModel.allSpeakers().first { $0.sid == sid } ?? KokoroSpeaker(
-                id: "kokoro.sid\(sid)", voiceId: "sid\(sid)", sid: sid, name: "Kokoro",
-                lang: isEnglish ? "en" : "zh", gender: .f, narrator: false, summary: ""
-            )
-            if let samples = try? await KokoroEngine.shared.synthesize(
-                core: ctx.core, dataDir: ctx.dataDir, speaker: sp, text: text, language: isEnglish ? "en" : "zh"
-            ), !samples.isEmpty {
-                var pcm16 = Data(capacity: samples.count * 2)
-                for s in samples {
-                    let v = Int16(max(-32767, min(32767, (s * 32767.0).rounded()))).littleEndian
-                    withUnsafeBytes(of: v) { pcm16.append(contentsOf: $0) }
-                }
-                return (wav(pcm: pcm16, rate: 24_000), "wav")
-            }
-        }
         throw lastError
     }
 
-    private static func callGradioAudio(baseURL: String, fnName: String, args: [Any]) async throws -> (Data, String) {
-        for apiPrefix in ["/gradio_api", ""] {
-            guard let postURL = URL(string: "\(baseURL)\(apiPrefix)/call/\(fnName)") else { continue }
-            var postReq = URLRequest(url: postURL, timeoutInterval: 14)
-            postReq.httpMethod = "POST"
-            postReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            postReq.httpBody = try JSONSerialization.data(withJSONObject: ["data": args])
-
-            let (postData, postResp): (Data, URLResponse)
-            do {
-                (postData, postResp) = try await URLSession.shared.data(for: postReq)
-            } catch {
-                continue
-            }
-            let pCode = (postResp as? HTTPURLResponse)?.statusCode ?? 0
-            if pCode == 404 { continue }
-            guard (200 ..< 300).contains(pCode),
-                  let postJSON = try? JSONSerialization.jsonObject(with: postData) as? [String: Any],
-                  let eventID = postJSON["event_id"] as? String, !eventID.isEmpty,
-                  let streamURL = URL(string: "\(baseURL)\(apiPrefix)/call/\(fnName)/\(eventID)") else {
-                throw Failure.server(.free, pCode, nil)
-            }
-
-            var getReq = URLRequest(url: streamURL, timeoutInterval: 28)
-            getReq.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-            let (sseData, sseResp) = try await URLSession.shared.data(for: getReq)
-            let sCode = (sseResp as? HTTPURLResponse)?.statusCode ?? 0
-            guard (200 ..< 300).contains(sCode),
-                  let text = String(data: sseData, encoding: .utf8) else {
-                throw Failure.server(.free, sCode, nil)
-            }
-
-            if let fileURL = extractGradioAudioURL(from: text, baseURL: baseURL, apiPrefix: apiPrefix) {
-                var dlReq = URLRequest(url: fileURL, timeoutInterval: 20)
-                dlReq.httpMethod = "GET"
-                let (audioData, dlResp) = try await URLSession.shared.data(for: dlReq)
-                let dCode = (dlResp as? HTTPURLResponse)?.statusCode ?? 0
-                guard (200 ..< 300).contains(dCode), audioData.count > 64 else {
-                    throw Failure.unreadable
-                }
-                return (audioData, sniffExt(audioData, fallback: "wav"))
-            }
-        }
-        throw Failure.unreachable(.free)
+    private enum FreeRoute {
+        case youdaoZh, baiduZh, youdaoEnUk, baiduEnUs, baiduEnUk
     }
 
-    private static func extractGradioAudioURL(from sseText: String, baseURL: String, apiPrefix: String) -> URL? {
-        var sawComplete = false
-        for rawLine in sseText.components(separatedBy: .newlines) {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            if line.hasPrefix("event:") {
-                let ev = line.dropFirst("event:".count).trimmingCharacters(in: .whitespaces)
-                sawComplete = (ev == "complete")
-                if ev == "error" { return nil }
-            } else if line.hasPrefix("data:"), sawComplete {
-                let payload = String(line.dropFirst("data:".count)).trimmingCharacters(in: .whitespaces)
-                guard let data = payload.data(using: .utf8),
-                      let arr = try? JSONSerialization.jsonObject(with: data) as? [Any],
-                      let first = arr.first else { continue }
-                if let dict = first as? [String: Any] {
-                    if let urlStr = dict["url"] as? String, !urlStr.isEmpty {
-                        if urlStr.hasPrefix("http") { return URL(string: urlStr) }
-                        return URL(string: baseURL + (urlStr.hasPrefix("/") ? urlStr : "/" + urlStr))
-                    }
-                    if let path = dict["path"] as? String, !path.isEmpty {
-                        let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
-                        return URL(string: "\(baseURL)\(apiPrefix)/file=\(encoded)")
-                    }
-                } else if let str = first as? String, !str.isEmpty {
-                    if str.hasPrefix("http") { return URL(string: str) }
-                    return URL(string: "\(baseURL)\(apiPrefix)/file=\(str)")
-                }
+    private static func freeRouteURL(_ route: FreeRoute, text: String) -> URL? {
+        var comps = URLComponents()
+        comps.scheme = "https"
+        switch route {
+        case .youdaoZh:
+            comps.host = "dict.youdao.com"
+            comps.path = "/dictvoice"
+            comps.queryItems = [
+                URLQueryItem(name: "le", value: "zh"),
+                URLQueryItem(name: "audio", value: text),
+            ]
+        case .youdaoEnUk:
+            comps.host = "dict.youdao.com"
+            comps.path = "/dictvoice"
+            comps.queryItems = [
+                URLQueryItem(name: "le", value: "en"),
+                URLQueryItem(name: "type", value: "1"),
+                URLQueryItem(name: "audio", value: text),
+            ]
+        case .baiduZh:
+            comps.host = "fanyi.baidu.com"
+            comps.path = "/gettts"
+            comps.queryItems = [
+                URLQueryItem(name: "lan", value: "zh"),
+                URLQueryItem(name: "spd", value: "5"),
+                URLQueryItem(name: "source", value: "web"),
+                URLQueryItem(name: "text", value: text),
+            ]
+        case .baiduEnUs:
+            comps.host = "fanyi.baidu.com"
+            comps.path = "/gettts"
+            comps.queryItems = [
+                URLQueryItem(name: "lan", value: "en"),
+                URLQueryItem(name: "spd", value: "3"),
+                URLQueryItem(name: "source", value: "web"),
+                URLQueryItem(name: "text", value: text),
+            ]
+        case .baiduEnUk:
+            comps.host = "fanyi.baidu.com"
+            comps.path = "/gettts"
+            comps.queryItems = [
+                URLQueryItem(name: "lan", value: "uk"),
+                URLQueryItem(name: "spd", value: "3"),
+                URLQueryItem(name: "source", value: "web"),
+                URLQueryItem(name: "text", value: text),
+            ]
+        }
+        return comps.url
+    }
+
+    private static func splitFreeChunks(_ text: String, maxChars: Int) -> [String] {
+        guard text.count > maxChars else { return [text] }
+        let breaks: Set<Character> = ["。", "！", "？", "；", "，", ".", "!", "?", ";", ","]
+        var chunks: [String] = []
+        var current = ""
+        for ch in text {
+            current.append(ch)
+            if current.count >= maxChars || (current.count >= maxChars * 2 / 3 && breaks.contains(ch)) {
+                let t = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !t.isEmpty { chunks.append(t) }
+                current = ""
             }
         }
-        return nil
+        let rem = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !rem.isEmpty { chunks.append(rem) }
+        return chunks.isEmpty ? [text] : chunks
+    }
+
+    private static func looksLikeAudio(_ data: Data) -> Bool {
+        guard data.count > 256 else { return false }
+        let b0 = data[0], b1 = data[1], b2 = data[2], b3 = data[3]
+        // MP3 frame sync (0xFF 0xE0..0xFF) or ID3 tag
+        if b0 == 0xFF && (b1 & 0xE0) == 0xE0 { return true }
+        if b0 == 0x49 && b1 == 0x44 && b2 == 0x33 { return true }
+        // RIFF WAV / OggS / fLaC / M4A
+        if b0 == 0x52 && b1 == 0x49 && b2 == 0x46 && b3 == 0x46 { return true }
+        if b0 == 0x4F && b1 == 0x67 && b2 == 0x67 && b3 == 0x53 { return true }
+        return false
     }
 }
 

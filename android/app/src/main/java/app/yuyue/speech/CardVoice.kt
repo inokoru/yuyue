@@ -67,8 +67,8 @@ class CardVoice(
             Engine.writeSentenceCache(app.cacheDir, bookID, card.id, card.version, style, language, text, speech)
             return@withContext speech
         }
-        // fallback: never interrupt playback if both synthesis seeds fail quality check.
-        Voices.systemBest(language)?.render(plain, language)
+        // 不静默切换系统声音，避免读到一半突然换人；明确报错交由播放器告知用户。
+        throw IllegalStateException(t("本机声音卡这一句合成失败，请重试或换一个声音"))
     }
 
     companion object {
@@ -230,9 +230,10 @@ class CardVoice(
             val baseSeed = ((card.id.hashCode().toLong() and 0xFFFF_FFFFL) xor
                 ((text.hashCode().toLong() and 0xFFFF_FFFFL) shl 13)).toULong() or 1uL
 
-            for (attempt in 0..1) {
+            var bestFloats: FloatArray? = null
+            for (attempt in 0..2) {
                 coroutineContext.ensureActive()
-                val seed = baseSeed + attempt.toULong()
+                val seed = baseSeed + attempt.toULong() * 0x9E37_79B9_7F4A_7C15uL
                 val floats = runCatching {
                     synthesizeClauses(core, sess, prompt, clauses, language, seed)
                 }.getOrNull()
@@ -250,9 +251,29 @@ class CardVoice(
                         }
                         return@withLock Speech(shorts, SAMPLE_RATE)
                     }
+                    if (bestFloats == null && isAudible(floats)) {
+                        bestFloats = floats
+                    }
                 }
             }
+            // 若三次均未过严格时长/静音门槛但产出了有效人声，保留同一声卡结果，避免中途切回系统音。
+            bestFloats?.let { floats ->
+                val shorts = ShortArray(floats.size) {
+                    (floats[it].coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+                }
+                return@withLock Speech(shorts, SAMPLE_RATE)
+            }
             null
+        }
+
+        private fun isAudible(samples: FloatArray): Boolean {
+            if (samples.isEmpty()) return false
+            var sumSq = 0.0
+            for (s in samples) {
+                if (!s.isFinite()) return false
+                sumSq += s.toDouble() * s.toDouble()
+            }
+            return kotlin.math.sqrt(sumSq / samples.size) >= 1e-4
         }
 
         /**

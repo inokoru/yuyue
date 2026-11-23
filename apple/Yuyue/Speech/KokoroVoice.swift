@@ -206,9 +206,23 @@ final class KokoroDownload {
 
     private(set) var phase: Phase = KokoroModel.deviceUnsupported ? .unsupported : .idle
     private(set) var isExpensive = false
+    /// 用户在离线包尚未下好时点选的音色（key 为 `VoiceBook.key`，如 `player.voice.zh`），下好后自动启用。
+    private(set) var pendingVoice: [String: String] = [:]
     @ObservationIgnored private var pathKnown = false
     @ObservationIgnored private let monitor = NWPathMonitor()
     @ObservationIgnored private var task: Task<Void, Never>?
+
+    func queueSelection(_ voiceID: String, for bookKey: String) {
+        pendingVoice[bookKey] = voiceID
+        if phase == .idle || phase == .failed {
+            start()
+        }
+    }
+
+    func pendingVoiceName(for bookKey: String) -> String? {
+        guard let id = pendingVoice[bookKey] else { return nil }
+        return KokoroModel.allSpeakers().first(where: { $0.id == id })?.name
+    }
 
     private init() {
         guard !KokoroModel.deviceUnsupported else {
@@ -276,6 +290,12 @@ final class KokoroDownload {
                 }
                 KokoroModel.register(core, dataDir)
                 guard let self else { return }
+                if !self.pendingVoice.isEmpty {
+                    for (bookKey, voiceID) in self.pendingVoice {
+                        UserDefaults.standard.set(voiceID, forKey: bookKey)
+                    }
+                    self.pendingVoice.removeAll()
+                }
                 self.phase = .ready
                 NotificationCenter.default.post(name: KokoroModel.ready, object: nil)
             } catch is CancellationError {
@@ -290,6 +310,17 @@ final class KokoroDownload {
         task?.cancel()
         task = nil
         if phase != .ready { phase = .idle }
+    }
+}
+
+nonisolated enum KokoroError: LocalizedError {
+    case notInstalled
+
+    var errorDescription: String? {
+        switch self {
+        case .notInstalled:
+            String(localized: "离线语音包还在下载中，下好后即可离线朗读")
+        }
     }
 }
 
@@ -316,7 +347,12 @@ nonisolated struct KokoroVoice: Voice {
         }
         let lang = CardVoice.inferLanguage(from: text, fallback: language.isEmpty ? speaker.lang : language)
         guard let ctx = LiveVoiceModel.context, KokoroModel.installed(ctx.dataDir) else {
-            return nil
+            Task { @MainActor in
+                if KokoroDownload.shared.phase == .idle || KokoroDownload.shared.phase == .failed {
+                    KokoroDownload.shared.start()
+                }
+            }
+            throw KokoroError.notInstalled
         }
         if let samples = try await KokoroEngine.shared.synthesize(
             core: ctx.core,
@@ -460,6 +496,7 @@ struct KokoroPrepBanner: View {
     let language: String
     var alwaysShowIdle = true
     var pill = false
+    var pendingName: String? = nil
     private var download: KokoroDownload { .shared }
 
     var body: some View {
@@ -479,7 +516,8 @@ struct KokoroPrepBanner: View {
                             .fontWeight(.semibold)
                             .foregroundStyle(YYTint.standard.accent))
                             .monospacedDigit()
-                        Text("下载完成后永久免联网朗读 · Apache-2.0 开源音色")
+                        Text(pendingName.map { String(localized: "下好后将自动启用「\($0)」· 下载期间可先听在线自然语音") }
+                            ?? String(localized: "下载完成后永久免联网朗读 · 期间可先听在线自然语音"))
                             .font(.yy(size: 10.5))
                             .foregroundStyle(YYColor.t3)
                     }

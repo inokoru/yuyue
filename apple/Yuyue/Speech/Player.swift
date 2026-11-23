@@ -154,8 +154,8 @@ final class Player {
     @ObservationIgnored private var resumedAt: Date?
     @ObservationIgnored private var texts: [UInt32: [String]] = [:]
     @ObservationIgnored private var voices: [String: (any Voice)?] = [:]
-    /// 首次点朗读时若即时层尚未装好，当前章固定用系统声音念完，从下一章（或暂停再播）起切默认旁白。
-    @ObservationIgnored private var holdSystemVoiceSection: UInt32?
+    /// 上一次因朗读出错而停下时的位置，供「重试」或「换成系统声音」后从原地续播。
+    @ObservationIgnored private var failedSpot: Spot?
     /// 整章锁定的广播剧音质层（`Studio` vs `Live`），绝不在章内句间切换音质。
     @ObservationIgnored private var sectionLayers: [UInt32: DramaLayer] = [:]
     /// 设备 `.critical` 过热时回退到系统声音的章节号。
@@ -252,6 +252,7 @@ final class Player {
     /// (a word found by 搜索), not at its own start.
     func play(from position: Position, word: Double? = nil) {
         failure = nil
+        failedSpot = nil
         reset()
         startWord = word.map { (Spot(section: position.section, sentence: Int(position.sentence)), $0) }
         guard let start = first(from: Spot(section: position.section, sentence: Int(position.sentence))) else {
@@ -261,15 +262,6 @@ final class Player {
         if !narrated {
             KokoroDownload.shared.startIfWifi(for: startLang)
             LiveVoiceDownload.shared.startIfWifi(for: startLang)
-            let hasNeural = KokoroModel.isInstalled || LiveVoiceModel.isInstalled
-            let userChose = UserDefaults.standard.string(forKey: Self.voiceKey(startLang)) != nil
-                || UserDefaults.standard.string(forKey: Self.voiceKey(CardVoice.canonicalLanguage(startLang))) != nil
-            if !hasNeural, !userChose {
-                holdSystemVoiceSection = start.section
-            } else if hasNeural, let held = holdSystemVoiceSection, held != start.section {
-                holdSystemVoiceSection = nil
-                voices.removeAll()
-            }
         }
         if let hotSec = thermalFallbackSection, hotSec != start.section, thermalState != .critical {
             thermalFallbackSection = nil
@@ -300,13 +292,6 @@ final class Player {
 
     func resume() {
         guard state == .paused else { return }
-        // 若后台刚准备完“朗读声音”，用户手动暂停再播时立即切换成默认旁白卡。
-        if holdSystemVoiceSection != nil, (KokoroModel.isInstalled || LiveVoiceModel.isInstalled), let current = spot {
-            holdSystemVoiceSection = nil
-            voices.removeAll()
-            play(from: current.position)
-            return
-        }
         if !narrated, let current = spot, DramaSynth.isDramaActive(core, detail.summary.id) {
             RecordingFetch.shared.readingDrama(bookID: detail.summary.id, section: current.section, core: core)
         }
@@ -335,7 +320,7 @@ final class Player {
         RecordingFetch.shared.stopReadingDrama(bookID: detail.summary.id)
         reset()
         sectionLayers.removeAll()
-        holdSystemVoiceSection = nil
+        voices.removeAll()
         thermalFallbackSection = nil
         thermalNotice = nil
         state = .stopped
@@ -488,13 +473,8 @@ final class Player {
     }
 
     private func liveVoiceBecameReady() {
-        if state == .playing || state == .loading {
-            if holdSystemVoiceSection == nil {
-                holdSystemVoiceSection = spot?.section
-            }
-            voices.removeAll()
-        } else {
-            holdSystemVoiceSection = nil
+        // 正在听或暂停在半路时不静默切声，等完全停下后下一次新开朗读再启用刚下好的离线语音。
+        if state == .stopped {
             voices.removeAll()
         }
     }
@@ -602,14 +582,9 @@ final class Player {
                         } catch {
                             // Another voice chosen, or a jump: this sentence was called off, nothing failed.
                             if error is CancellationError || Task.isCancelled || self.generation != generation || self.renderToken != token { return }
-                            if let cloud = voice as? CloudVoice, cloud.provider == .free,
-                               let fallback: any Voice = (KokoroModel.defaultNarrator(for: language) as (any Voice)?) ?? SystemVoice.best(for: language),
-                               let fbSpeech = try? await fallback.render(self.text(at: spot), language: language) {
-                                speech = fbSpeech
-                            } else {
-                                self.failed(String(localized: "朗读出错了（\(error.localizedDescription)）"))
-                                return
-                            }
+                            // 不静默切换成其他声音，明确停下并告知用户原因，由用户决定重试或换声音。
+                            self.failed(String(localized: "朗读出错了（\(error.localizedDescription)）"))
+                            return
                         }
                     }
                 }
@@ -824,10 +799,6 @@ final class Player {
         if line.extra == nil, skippedHead != nil, spot != nil, spot != line.spot { skippedHead = nil }
         spot = line.spot
         if newSection {
-            if let held = holdSystemVoiceSection, held != line.spot.section, (KokoroModel.isInstalled || LiveVoiceModel.isInstalled) {
-                holdSystemVoiceSection = nil
-                voices.removeAll()
-            }
             if let hot = thermalFallbackSection, hot != line.spot.section, thermalState != .critical {
                 thermalFallbackSection = nil
                 thermalNotice = nil
@@ -845,7 +816,9 @@ final class Player {
     }
 
     private func failed(_ message: String) {
+        let resumeSpot = spot ?? nextToRender
         stop()
+        failedSpot = resumeSpot
         failure = message
     }
 
@@ -954,7 +927,7 @@ final class Player {
 
     /// The language of the section being read, or of the book.
     var language: String {
-        spot.map { language(of: $0.section) } ?? detail.summary.language
+        (spot ?? failedSpot).map { language(of: $0.section) } ?? detail.summary.language
     }
 
     /// The voice reading `language` now.
@@ -965,16 +938,34 @@ final class Player {
     /// Reads `language` with another voice from now on, starting the sentence again in it.
     func choose(_ voice: any Voice, for language: String) {
         UserDefaults.standard.set(voice.id, forKey: Self.voiceKey(language))
-        holdSystemVoiceSection = nil
         voices[language] = voice
         restartHere()
     }
 
-    /// The cloud voice failed: keep reading with a voice that lives on this Mac.
+    /// The current voice failed: switch to a system voice on this device and continue from where it stopped.
     func useSystemVoice() {
         let lang = language
-        if let sys = SystemVoice.best(for: lang) { choose(sys, for: lang) }
+        let resumeAt = failedSpot ?? spot
         failure = nil
+        if let sys = SystemVoice.best(for: lang) {
+            UserDefaults.standard.set(sys.id, forKey: Self.voiceKey(lang))
+            voices[lang] = sys
+            if let resumeAt {
+                play(from: resumeAt.position)
+            } else {
+                restartHere()
+            }
+        }
+    }
+
+    /// Retries reading from the sentence where playback failed.
+    func retry() {
+        guard let resumeAt = failedSpot ?? spot else {
+            failure = nil
+            return
+        }
+        failure = nil
+        play(from: resumeAt.position)
     }
 
     /// 试听: a few words in `voice`, without moving the book.
@@ -986,30 +977,35 @@ final class Player {
     }
 
     private func voice(for language: String, section: UInt32? = nil) -> (any Voice)? {
-        let holdSys = (section != nil && holdSystemVoiceSection == section)
-        if !holdSys, let known = voices[language] { return known }
+        if let known = voices[language] { return known }
         let canon = CardVoice.canonicalLanguage(language)
         let savedID = UserDefaults.standard.string(forKey: Self.voiceKey(language))
             ?? UserDefaults.standard.string(forKey: Self.voiceKey(canon))
-        if let savedID, let chosen = Voices.find(savedID, bookID: detail.summary.id) {
-            voices[language] = chosen
-            return chosen
+        if let savedID {
+            if let chosen = Voices.find(savedID, bookID: detail.summary.id) {
+                voices[language] = chosen
+                return chosen
+            }
+            if savedID.hasPrefix("kokoro."),
+               let sp = KokoroModel.allSpeakers().first(where: { $0.id == savedID }) {
+                return KokoroVoice(speaker: sp)
+            }
         }
-        if !holdSys, KokoroModel.isInstalled, let def = KokoroModel.defaultNarrator(for: language) {
+        if KokoroModel.isInstalled, let def = KokoroModel.defaultNarrator(for: language) {
             voices[language] = def
             return def
         }
-        if !holdSys, LiveVoiceModel.isInstalled, let def = VoicePack.defaultNarrator(for: language) {
+        if LiveVoiceModel.isInstalled, let def = VoicePack.defaultNarrator(for: language) {
             voices[language] = def
             return def
         }
         if CloudVoice.Provider.free.isSetUp, CardVoice.supportsLanguage(language),
            let free = CloudVoice.all().first(where: { $0.provider == .free && $0.speaks(language) }) {
-            if !holdSys { voices[language] = free }
+            voices[language] = free
             return free
         }
         let sys = SystemVoice.best(for: language)
-        if !holdSys { voices[language] = sys }
+        voices[language] = sys
         return sys
     }
 

@@ -174,7 +174,15 @@ enum Voices {
             return nil
         }
         if id.hasPrefix("cloned.") { return ClonedVoices.resolveVoice(id, bookID: bookID) }
-        if id.hasPrefix("cloud.") { return CloudVoice.all().first { $0.id == id } }
+        if id.hasPrefix("cloud.") {
+            if let exact = CloudVoice.all().first(where: { $0.id == id }) { return exact }
+            if id.hasPrefix("cloud.free.") {
+                let raw = String(id.dropFirst("cloud.free.".count))
+                let isEn = raw.hasPrefix("en_") || raw == "0" || raw == "1" || raw == "2" || raw.hasPrefix("af_") || raw.hasPrefix("am_") || raw.hasPrefix("bf_")
+                return CloudVoice.all().first { $0.provider == .free && $0.speaks(isEn ? "en" : "zh") }
+            }
+            return nil
+        }
         if id.hasPrefix("actor.") { return ActorVoice.all().first { $0.id == id } }
         return SystemVoice.all().first { $0.id == id }
     }
@@ -189,9 +197,12 @@ enum Voices {
         if let v = voice as? SystemVoice { return SystemVoice.preview(v, text: text) }
         previewing?.cancel()
         PreviewState.shared.began(voice.id, seconds: nil)
+        let lang = (voice as? CloudVoice)?.language
+            ?? (voice as? KokoroVoice)?.speaker.lang
+            ?? ""
         previewing = Task {
             do {
-                guard let speech = try await voice.render(text, language: ""), !Task.isCancelled else {
+                guard let speech = try await voice.render(text, language: lang), !Task.isCancelled else {
                     PreviewState.shared.ended(voice.id)
                     return
                 }
@@ -202,7 +213,7 @@ enum Voices {
             } catch {
                 PreviewState.shared.ended(voice.id)
                 guard !Task.isCancelled else { return }
-                PreviewState.shared.failed(voice.id)
+                PreviewState.shared.failed(voice.id, message: error.localizedDescription)
                 failed(error.localizedDescription)
             }
         }
@@ -231,9 +242,11 @@ final class PreviewState {
     private(set) var seconds: Double?
     /// The last 试听 that didn't come out: said quietly where it was tried, never as a dialog.
     private(set) var failedID: String?
+    private(set) var failedMessage: String?
 
     func began(_ id: String, seconds: Double?) {
         failedID = nil
+        failedMessage = nil
         voiceID = id
         started = seconds == nil ? nil : .now
         self.seconds = seconds
@@ -246,7 +259,10 @@ final class PreviewState {
         self.seconds = seconds
     }
 
-    func failed(_ id: String) { failedID = id }
+    func failed(_ id: String, message: String? = nil) {
+        failedID = id
+        failedMessage = message
+    }
 
     /// nil: whatever is playing; otherwise only if it's still that one.
     func ended(_ id: String?) {
@@ -275,8 +291,22 @@ final class PreviewState {
     }
 
     func play(_ speech: Speech, id: String) {
+        #if os(iOS)
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .spokenAudio, options: [.allowAirPlay, .allowBluetoothA2DP])
+        try? session.setActive(true)
+        #endif
         node.stop()
-        if !engine.isRunning { try? engine.start() }
+        if !engine.isRunning {
+            do {
+                try engine.start()
+            } catch {
+                engine.stop()
+                engine.reset()
+                engine.connect(node, to: engine.mainMixerNode, format: Speech.format)
+                try? engine.start()
+            }
+        }
         generation += 1
         let mine = generation
         node.scheduleBuffer(speech.buffer, completionCallbackType: .dataPlayedBack) { _ in

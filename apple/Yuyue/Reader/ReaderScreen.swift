@@ -290,6 +290,11 @@ private struct ReaderContent: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { model.flush() }
             }
+            .onChange(of: model.player?.thermalNotice) { _, notice in
+                if let notice, !notice.isEmpty {
+                    model.show(Library.Toast(icon: "thermometer.high", title: notice, detail: ""))
+                }
+            }
             .bookFailure($model.failure, opened: model.detail != nil)
             .yyNotice(String(localized: "朗读停下了"),
                       message: model.player?.failure ?? "",

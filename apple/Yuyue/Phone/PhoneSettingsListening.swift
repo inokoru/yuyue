@@ -132,13 +132,21 @@ struct PhoneListening: View {
     private func detail(_ source: VoiceSource) -> String {
         switch source {
         case .neural:
-            KokoroModel.isInstalled
-                ? String(localized: "\(source.voiceCount) 个音色 · 跨端轻量离线，无需联网")
-                : String(localized: "一键下载（\(KokoroModel.totalMegabytes) MB）· 跨端离线自然语音")
+            if KokoroModel.isInstalled {
+                return String(localized: "\(source.voiceCount) 个音色 · 跨端轻量离线，无需联网")
+            }
+            switch KokoroDownload.shared.phase {
+            case .downloading(let frac):
+                return String(localized: "正在下载 \(Int((frac * 100).rounded()))% · 下载期间可先听在线自然语音")
+            case .failed:
+                return String(localized: "下载中断 · 点进去继续下载（支持断点续传）")
+            default:
+                return String(localized: "一键下载（\(KokoroModel.totalMegabytes) MB）· 跨端离线自然语音")
+            }
         case .mac:
-            String(localized: "\(source.voiceCount) 个音色 · 机械音明显，仅作断网兜底")
+            return String(localized: "\(source.voiceCount) 个音色 · 机械音明显，仅作断网兜底")
         case .cloud(let p):
-            p.isSetUp ? String(localized: "\(p.voiceCount) 个音色 · \(p.blurb)") : p.blurb
+            return p.isSetUp ? String(localized: "\(p.voiceCount) 个音色 · \(p.blurb)") : p.blurb
         }
     }
 }

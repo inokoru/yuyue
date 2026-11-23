@@ -3,6 +3,20 @@ import Foundation
 import OnnxRuntimeC
 import YuyueCore
 
+nonisolated enum CardVoiceError: LocalizedError {
+    case modelNotInstalled
+    case synthesisFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .modelNotInstalled:
+            String(localized: "本机声音卡模型尚未准备好，请先下载完成或改用系统声音")
+        case .synthesisFailed:
+            String(localized: "本机声音卡这一句合成失败，请重试或换一个声音")
+        }
+    }
+}
+
 /// 本机声音卡（自带 48 张声音、为某本书生成的角色声音、本机零样本克隆声音）。
 /// 统一走同一份参考音 + 文字特征，由 `ZipVoice-Distill-Int8` 与 `Vocos 24 kHz` 即时合成。
 nonisolated struct CardVoice: Voice {
@@ -107,8 +121,7 @@ nonisolated struct CardVoice: Voice {
         }
         let lang = Self.inferLanguage(from: text, fallback: language.isEmpty ? card.lang : language)
         guard let ctx = LiveVoiceModel.context, LiveVoiceModel.modelInstalled(ctx.dataDir) else {
-            let plain = LiveVoiceModel.context?.core.dramaPlainText(text: text) ?? text
-            return try await SystemVoice.best(for: lang)?.render(plain, language: lang)
+            throw CardVoiceError.modelNotInstalled
         }
         let plain = ctx.core.dramaPlainText(text: text)
         if let samples = try await LiveVoiceEngine.shared.synthesizeCard(
@@ -123,9 +136,9 @@ nonisolated struct CardVoice: Voice {
         ), let speech = Self.speech(from: samples, sampleRate: 24_000) {
             return speech
         }
-        // 轻把关两次均不过时，单句无缝退回同语言系统声音，绝不打断播放。
+        // 不静默切换成系统声音，避免读到一半突然换人；明确报错交由播放器告知用户。
         try Task.checkCancellation()
-        return try await SystemVoice.best(for: lang)?.render(plain, language: lang)
+        throw CardVoiceError.synthesisFailed
     }
 
     /// 克隆录音刚录完尚未存卡时，直接拿参考音文件合成试听句。
@@ -223,9 +236,10 @@ actor LiveVoiceEngine {
             lang: card.lang
         )
         let baseSeed = Self.seed(for: card.id, version: card.version, style: resolved.style, text: text)
-        for attempt in 0 ..< 2 {
+        var bestAudible: [Float]?
+        for attempt in 0 ..< 3 {
             try Task.checkCancellation()
-            let seed = attempt == 0 ? baseSeed : (baseSeed &+ 0x9E37_79B9_7F4A_7C15)
+            let seed = baseSeed &+ UInt64(attempt) &* 0x9E37_79B9_7F4A_7C15
             guard let samples = try runClauses(
                 core: core,
                 ort: ort,
@@ -233,7 +247,7 @@ actor LiveVoiceEngine {
                 text: text,
                 language: language,
                 seed: seed
-            ) else { continue }
+            ), !samples.isEmpty else { continue }
             if core.liveVoiceCheck(
                 samples: samples,
                 rate: 24_000,
@@ -243,8 +257,23 @@ actor LiveVoiceEngine {
             ) {
                 return samples
             }
+            if bestAudible == nil, Self.isAudible(samples) {
+                bestAudible = samples
+            }
         }
-        return nil
+        // 若严格时长/静音门槛三次均未过，但本声卡本身产出了有效人声，仍保留同一声卡结果，绝不中途偷换系统音。
+        return bestAudible
+    }
+
+    private static func isAudible(_ samples: [Float]) -> Bool {
+        guard !samples.isEmpty else { return false }
+        var sumSq: Double = 0
+        for s in samples {
+            if !s.isFinite { return false }
+            sumSq += Double(s) * Double(s)
+        }
+        let rms = (sumSq / Double(samples.count)).squareRoot()
+        return rms >= 1e-4
     }
 
     func synthesizeRawReference(

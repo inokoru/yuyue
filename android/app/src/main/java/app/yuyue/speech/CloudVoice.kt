@@ -186,7 +186,7 @@ class CloudVoice(
 
         val help: String
             get() = when (this) {
-                Free -> t("零配置免 Key 在线自然语音，自动调用魔搭 / Hugging Face 开源 Kokoro 在线推理服务；若已下载本机 Kokoro 则直接走离线极速合成。")
+                Free -> t("0 MB 免下载、免注册免填 Key，直连公共语音接口，已朗读句子自动缓存在本机。")
                 Volcengine -> t("火山引擎控制台 › 豆包语音 › 语音合成大模型，获取 AppID 与 Access Token。")
                 Fish -> t("fish.audio › API Keys 新建密钥，支持 OpenAudio S1 高表现力中英音色与社区声音库。")
                 Xiaomi -> t("platform.xiaomimimo.com 控制台新建 API Key，当前限时免费，支持自然语言语气控制。")
@@ -225,19 +225,8 @@ class CloudVoice(
             if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.recordTts(text.length, cached = true)
             return@withContext it
         }
-        if (provider == Provider.Free) {
-            renderLocalKokoroTakeover(text, language)?.let { return@withContext it }
-        }
         if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.checkTtsBudget(text.length)
-        val fetched = try {
-            fetch(text, language, parts, acted)
-        } catch (e: Exception) {
-            if (provider == Provider.Free) {
-                return@withContext Voices.systemBest(language)?.render(text, language)
-            }
-            throw e
-        }
-        val (data, ext) = fetched
+        val (data, ext) = fetch(text, language, parts, acted)
         if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.recordTts(text.length, cached = false)
         val file = writeCached(data, cacheKey, ext)
         decodeFile(file, ext) ?: throw Failure(t("声音数据读不出来"))
@@ -249,31 +238,11 @@ class CloudVoice(
             if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.recordTts(text.length, cached = true)
             return@withContext it
         }
-        if (provider == Provider.Free) {
-            renderLocalKokoroTakeover(text, language)?.let { return@withContext it }
-        }
         if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.checkTtsBudget(text.length)
-        val fetched = try {
-            fetch(text, language)
-        } catch (e: Exception) {
-            if (provider == Provider.Free) {
-                return@withContext Voices.systemBest(language)?.render(text, language)
-            }
-            throw e
-        }
-        val (data, ext) = fetched
+        val (data, ext) = fetch(text, language)
         if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.recordTts(text.length, cached = false)
         val file = writeCached(data, text, ext)
         decodeFile(file, ext) ?: throw Failure(t("声音数据读不出来"))
-    }
-
-    private suspend fun renderLocalKokoroTakeover(text: String, language: String): Speech? {
-        val app = runCatching { YuyueApp.instance }.getOrNull() ?: return null
-        if (!KokoroModel.canRun(app.library.dataDir)) return null
-        val targetId = "kokoro.$voiceID"
-        val kv = KokoroModel.voices(app.library.core, app.library.dataDir).firstOrNull { it.id == targetId }
-            ?: KokoroModel.defaultNarrator(language)
-        return kv?.render(text, language)
     }
 
     suspend fun prefetch(texts: List<String>, language: String) = coroutineScope {
@@ -710,14 +679,10 @@ class CloudVoice(
         data class PresetVoice(val id: String, val name: String, val lang: String?, val gender: String?, val age: String?)
 
         val freeOnlineVoices = listOf(
-            PresetVoice("zf_001", "晓语 · 温和女声", "zh-CN", "female", "young"),
-            PresetVoice("zf_002", "清禾 · 清润女声", "zh-CN", "female", "young"),
-            PresetVoice("zm_010", "云泽 · 沉稳男声", "zh-CN", "male", "middle_aged"),
-            PresetVoice("zm_009", "知行 · 明朗男声", "zh-CN", "male", "young"),
-            PresetVoice("af_heart", "Heart · Warm Narrator", "en-US", "female", "young"),
-            PresetVoice("af_bella", "Bella · Clear Female", "en-US", "female", "young"),
-            PresetVoice("am_michael", "Michael · Steady Male", "en-US", "male", "middle_aged"),
-            PresetVoice("bf_emma", "Emma · British Narrator", "en-GB", "female", "young"),
+            PresetVoice("zh_youdao", "清岚 · 自然女声", "zh-CN", "female", "young"),
+            PresetVoice("zh_baidu", "知声 · 清晰播报", "zh-CN", "female", "middle_aged"),
+            PresetVoice("en_uk", "Clara · British", "en-GB", "female", "young"),
+            PresetVoice("en_us", "Emma · American", "en-US", "female", "young"),
         )
 
         val volcengineVoices = listOf(
@@ -749,11 +714,6 @@ class CloudVoice(
             return appId to raw
         }
 
-        private val freeSidMap = mapOf(
-            "af_heart" to 3, "af_bella" to 2, "am_michael" to 16, "bf_emma" to 21,
-            "zf_001" to 55, "zf_002" to 56, "zm_009" to 99, "zm_010" to 100,
-        )
-
         private fun fetchFreeOnline(voiceID: String, text: String, language: String): Pair<ByteArray, String> {
             val customBase = Provider.Free.savedURL
             if (customBase.isNotEmpty()) {
@@ -769,65 +729,85 @@ class CloudVoice(
                 }
             }
 
-            val isZh = language.lowercase().startsWith("zh") || text.any { it.code in 0x4E00..0x9FFF }
-            val sid = freeSidMap[voiceID] ?: if (isZh) 55 else 3
-            val sherpaBases = if (ModelDownload.prefersChinaMirror()) {
-                listOf("https://www.modelscope.cn/api/v1/studio/k2-fsa/text-to-speech/gradio", "https://k2-fsa-text-to-speech.hf.space")
+            val clean = text.trim()
+            if (clean.isEmpty()) throw Failure(t("声音数据读不出来"))
+            val hasCjk = clean.any { it.code in 0x4E00..0x9FFF }
+            val isEn = !hasCjk && (
+                language.lowercase().startsWith("en")
+                    || voiceID.startsWith("en_")
+                    || voiceID.startsWith("af_") || voiceID.startsWith("am_") || voiceID.startsWith("bf_")
+            )
+            val chunks = splitFreeChunks(clean, 160)
+            // 每个免费音色严格绑定单一线路，避免单句超时后静默切到另一家的不同声线。
+            val route = if (isEn) {
+                val preferUs = voiceID == "en_us" || voiceID.startsWith("af_") || voiceID.startsWith("am_")
+                if (preferUs) "baidu_en" else "youdao_en"
             } else {
-                listOf("https://k2-fsa-text-to-speech.hf.space", "https://www.modelscope.cn/api/v1/studio/k2-fsa/text-to-speech/gradio")
+                val preferBaidu = voiceID == "zh_baidu" || voiceID == "zm_009" || voiceID == "zm_010"
+                if (preferBaidu) "baidu_zh" else "youdao_zh"
             }
-            for (base in sherpaBases) {
-                val langLabel = if (isZh) "Chinese+English (kokoro-v1.1-zh)" else "English (kokoro-v1.0)"
-                val modelLabel = if (isZh) "csukuangfj/kokoro-int8-multi-lang-v1_1|103" else "csukuangfj/kokoro-int8-en-v0_19|11"
-                val args = JSONArray().put(langLabel).put(modelLabel).put(text).put(sid).put(1.0)
-                callGradioAudio(base, "process", args)?.let { return it }
-            }
-            val meloArgs = JSONArray().put(text).put(if (isZh) "ZH" else "EN-US").put(1.0).put(if (isZh) "ZH" else "EN")
-            callGradioAudio("https://mrfakename-melotts.hf.space", "synthesize", meloArgs)?.let { return it }
-            throw Failure(t("在线自然语音当前繁忙，建议点击下载「语阅离线语音（Kokoro）」"))
-        }
 
-        private fun callGradioAudio(baseUrl: String, fnName: String, dataArgs: JSONArray): Pair<ByteArray, String>? = runCatching {
-            val base = baseUrl.trimEnd('/')
-            val joinUrl = "$base/gradio_api/call/$fnName"
-            val body = JSONObject().put("data", dataArgs).toString().toByteArray()
-            val c = URL(joinUrl).openConnection() as HttpURLConnection
-            c.requestMethod = "POST"
-            c.doOutput = true
-            c.connectTimeout = 12_000
-            c.readTimeout = 20_000
-            c.setRequestProperty("Content-Type", "application/json")
-            c.outputStream.use { it.write(body) }
-            if (c.responseCode !in 200..299) return null
-            val eventId = JSONObject(String(c.inputStream.use { it.readBytes() })).optString("event_id")
-            if (eventId.isEmpty()) return null
-
-            val sseConn = URL("$joinUrl/$eventId").openConnection() as HttpURLConnection
-            sseConn.connectTimeout = 12_000
-            sseConn.readTimeout = 25_000
-            if (sseConn.responseCode !in 200..299) return null
-            val sseText = sseConn.inputStream.use { String(it.readBytes()) }
-            var audioUrl: String? = null
-            var lastEvent = ""
-            for (line in sseText.lineSequence()) {
-                if (line.startsWith("event:")) {
-                    lastEvent = line.removePrefix("event:").trim()
-                } else if (line.startsWith("data:") && lastEvent == "complete") {
-                    val arr = JSONArray(line.removePrefix("data:").trim())
-                    for (i in 0 until arr.length()) {
-                        val el = arr.optJSONObject(i) ?: continue
-                        val u = el.optString("url")
-                        val p = el.optString("path")
-                        if (u.startsWith("http")) { audioUrl = u; break }
-                        if (p.isNotEmpty()) { audioUrl = "$base/gradio_api/file=$p"; break }
+            repeat(2) { attempt ->
+                if (attempt > 0) Thread.sleep(250)
+                val combined = runCatching {
+                    val out = java.io.ByteArrayOutputStream()
+                    for (chunk in chunks) {
+                        val enc = java.net.URLEncoder.encode(chunk, "UTF-8").replace("+", "%20")
+                        val url = when (route) {
+                            "youdao_zh" -> "https://dict.youdao.com/dictvoice?le=zh&audio=$enc"
+                            "youdao_en" -> "https://dict.youdao.com/dictvoice?le=en&type=1&audio=$enc"
+                            "baidu_zh" -> "https://fanyi.baidu.com/gettts?lan=zh&spd=5&source=web&text=$enc"
+                            else -> "https://fanyi.baidu.com/gettts?lan=en&spd=3&source=web&text=$enc"
+                        }
+                        val c = URL(url).openConnection() as HttpURLConnection
+                        c.requestMethod = "GET"
+                        c.connectTimeout = 10_000
+                        c.readTimeout = 12_000
+                        c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+                        if (c.responseCode !in 200..299) throw IllegalStateException("HTTP ${c.responseCode}")
+                        val bytes = c.inputStream.use { it.readBytes() }
+                        if (!looksLikeAudio(bytes)) throw IllegalStateException("Non-audio response")
+                        out.write(bytes)
                     }
+                    out.toByteArray()
+                }.getOrNull()
+                if (combined != null && combined.size > 256) {
+                    return combined to sniffExt(combined, "mp3")
                 }
             }
-            val finalUrl = audioUrl ?: return null
-            val bytes = getBytes(Provider.Free, finalUrl)
-            if (bytes.size < 128) return null
-            bytes to sniffExt(bytes, "wav")
-        }.getOrNull()
+            throw Failure(t("在线自然语音当前连不上，可重试，或改用本机离线/系统声音"))
+        }
+
+        private fun splitFreeChunks(text: String, maxChars: Int): List<String> {
+            if (text.length <= maxChars) return listOf(text)
+            val breaks = setOf('。', '！', '？', '；', '，', '.', '!', '?', ';', ',')
+            val chunks = mutableListOf<String>()
+            val sb = StringBuilder()
+            for (ch in text) {
+                sb.append(ch)
+                if (sb.length >= maxChars || (sb.length >= maxChars * 2 / 3 && ch in breaks)) {
+                    val s = sb.toString().trim()
+                    if (s.isNotEmpty()) chunks += s
+                    sb.clear()
+                }
+            }
+            val rem = sb.toString().trim()
+            if (rem.isNotEmpty()) chunks += rem
+            return chunks.ifEmpty { listOf(text) }
+        }
+
+        private fun looksLikeAudio(bytes: ByteArray): Boolean {
+            if (bytes.size <= 256) return false
+            val b0 = bytes[0].toInt() and 0xFF
+            val b1 = bytes[1].toInt() and 0xFF
+            val b2 = bytes[2].toInt() and 0xFF
+            val b3 = bytes[3].toInt() and 0xFF
+            if (b0 == 0xFF && (b1 and 0xE0) == 0xE0) return true
+            if (b0 == 0x49 && b1 == 0x44 && b2 == 0x33) return true
+            if (b0 == 0x52 && b1 == 0x49 && b2 == 0x46 && b3 == 0x46) return true
+            if (b0 == 0x4F && b1 == 0x67 && b2 == 0x67 && b3 == 0x53) return true
+            return false
+        }
 
         val xiaomiVoices = listOf(
             PresetVoice("冰糖", "冰糖 · 清甜活泼", "zh-CN", "female", "young"),
@@ -953,7 +933,7 @@ class CloudVoice(
             }
             when (p) {
                 Provider.Free -> {
-                    fetchFreeOnline("zf_001", "你好", "zh-CN")
+                    fetchFreeOnline("zh_youdao", "你好", "zh-CN")
                     freeOnlineVoices.size
                 }
                 Provider.Volcengine -> {

@@ -238,32 +238,50 @@ struct VoiceCatalogSections: View {
     /// 语阅离线语音（Kokoro） · 125 MB / 跨端自然朗读 · 断网可用 · 下载; while it comes, its percent.
     @ViewBuilder private var downloadRow: some View {
         let phase = KokoroDownload.shared.phase
-        HStack(spacing: YYUI.s(10)) {
-            VStack(alignment: .leading, spacing: 1) {
-                switch phase {
-                case .downloading(let frac):
-                    Text("正在准备离线语音 \(Int((frac * 100).rounded()))%")
-                        .monospacedDigit()
-                        .font(YYUI.font(12.5, .semibold)).foregroundStyle(YYColor.t1)
-                case .failed:
-                    Text("离线语音没下下来").font(YYUI.font(12.5, .semibold)).foregroundStyle(YYColor.t1)
-                default:
-                    Text("语阅离线语音（Kokoro） · \(KokoroModel.totalMegabytes) MB").font(YYUI.font(12.5, .semibold)).foregroundStyle(YYColor.t1)
+        Button {
+            if case .downloading = phase { return }
+            KokoroDownload.shared.start()
+        } label: {
+            HStack(spacing: YYUI.s(10)) {
+                VStack(alignment: .leading, spacing: 1) {
+                    switch phase {
+                    case .downloading(let frac):
+                        Text("正在准备离线语音 \(Int((frac * 100).rounded()))%")
+                            .monospacedDigit()
+                            .font(YYUI.font(12.5, .semibold)).foregroundStyle(YYColor.t1)
+                    case .failed:
+                        Text("离线语音没下下来").font(YYUI.font(12.5, .semibold)).foregroundStyle(YYColor.t1)
+                    default:
+                        Text("语阅离线语音（Kokoro） · \(KokoroModel.totalMegabytes) MB").font(YYUI.font(12.5, .semibold)).foregroundStyle(YYColor.t1)
+                    }
+                    Text(phase == .idle
+                        ? String(localized: "点此下载 · 跨端自然朗读，断网可用")
+                        : String(localized: "下载期间可先选下方「在线自然语音」立刻听"))
+                        .font(YYUI.font(10.5)).foregroundStyle(YYColor.t3)
                 }
-                Text("跨端自然朗读 · 断网可用").font(YYUI.font(10.5)).foregroundStyle(YYColor.t3)
+                Spacer()
+                switch phase {
+                case .downloading: ProgressView().controlSize(.small)
+                case .failed:
+                    Text("再试")
+                        .font(YYUI.font(11.5, .semibold))
+                        .foregroundStyle(YYColor.danger)
+                        .padding(.horizontal, 10)
+                        .frame(height: 25)
+                        .background(YYColor.danger.opacity(0.12), in: .capsule)
+                default:
+                    Text("下载")
+                        .font(YYUI.font(11.5, .semibold))
+                        .foregroundStyle(tint.accent)
+                        .padding(.horizontal, 10)
+                        .frame(height: 25)
+                        .background(tint.accentSoft, in: .capsule)
+                }
             }
-            Spacer()
-            switch phase {
-            case .downloading: ProgressView().controlSize(.small)
-            case .failed:
-                Button(String(localized: "再试")) { KokoroDownload.shared.start() }
-                    .buttonStyle(YYButtonStyle(kind: .danger, size: .small, height: 25))
-            default:
-                Button(String(localized: "下载")) { KokoroDownload.shared.start() }
-                    .buttonStyle(YYButtonStyle(kind: .soft, size: .small, height: 25))
-            }
+            .padding(.vertical, YYUI.s(9))
+            .contentShape(.rect)
         }
-        .padding(.vertical, YYUI.s(9))
+        .buttonStyle(.plain)
     }
 
     private func avatar(_ name: String, selected: Bool, plus: Bool = false) -> some View {
