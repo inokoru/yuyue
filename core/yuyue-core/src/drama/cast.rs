@@ -522,19 +522,6 @@ pub struct CalledBy {
     pub who: u32,
 }
 
-/// A temporary cast (before the whole book's) joined into the real one: a temporary character
-/// whose names meet a real one's is that one. Returns old id → new id.
-pub fn reconcile(provisional: &CastTable, real: &CastTable) -> HashMap<u32, u32> {
-    let mut out = HashMap::new();
-    for c in &provisional.chars {
-        let ids: HashSet<u32> = c.names.iter().filter_map(|n| real.resolve(n)).collect();
-        if ids.len() == 1 {
-            out.insert(c.id, ids.into_iter().next().unwrap());
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

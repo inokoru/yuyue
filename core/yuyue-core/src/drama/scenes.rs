@@ -21,9 +21,6 @@ fn is_break(s: &str) -> bool {
     t.is_empty() || t.chars().all(|c| "*＊※-—·• ~～".contains(c))
 }
 
-/// The most lines a scene sent to a model holds; longer ones are cut at the rules' cut points.
-pub const MAX_LINES: usize = 150;
-
 /// Where the rules cut the section: the first sentence of each scene.
 pub fn rule_cuts(sentences: &[String]) -> Vec<u32> {
     let mut cuts = vec![0u32];

@@ -723,10 +723,6 @@ pub fn builtin_clip(id: &str, style: CardStyle) -> Option<(PathBuf, CardClip)> {
     Some((p.dir.join(&clip.file), clip.clone()))
 }
 
-pub fn builtin_clip_path(id: &str, style: CardStyle) -> Option<PathBuf> {
-    builtin_clip(id, style).map(|(p, _)| p)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

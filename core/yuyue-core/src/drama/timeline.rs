@@ -30,7 +30,6 @@ pub mod gap {
 /// Levels (dB) relative to the voice bus.
 pub mod level {
     pub const BED: f32 = -12.0;
-    pub const BED_DUCK: f32 = -3.0;
     pub const SPOT: f32 = -6.0;
     pub const TRANSITION: f32 = -8.0;
     pub const WHISPER: f32 = -4.0;

@@ -27,9 +27,8 @@ impl YuyueCore {
         Ok(d)
     }
 
-    pub(super) fn materialize_book_cards(&self, book: &str) -> Result<Vec<super::card::VoiceCard>> {
-        let dir = self.book_cards_dir(book)?;
-        let fields = lock(&self.store).fields(&format!("drama/{book}/cards")).unwrap_or_default();
+    fn materialize_cards_from(&self, dir: &std::path::Path, namespace: &str) -> Vec<super::card::VoiceCard> {
+        let fields = lock(&self.store).fields(namespace).unwrap_or_default();
         let mut by_id: HashMap<String, super::card::VoiceCard> = HashMap::new();
         for (id, val) in fields {
             if let Ok(packed) = serde_json::from_value::<super::card::PackedCard>(val)
@@ -38,37 +37,7 @@ impl YuyueCore {
                 by_id.insert(c.id.clone(), c);
             }
         }
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for e in entries.flatten() {
-                let p = e.path();
-                if !p.is_dir() {
-                    continue;
-                }
-                if let Some(raw) = std::fs::read(p.join("card.json")).ok().and_then(|b| serde_json::from_slice::<super::card::VoiceCard>(&b).ok())
-                    && !by_id.contains_key(&raw.id)
-                    && let Some(c) = super::card::validate_in_dir(raw, &p)
-                {
-                    by_id.insert(c.id.clone(), c);
-                }
-            }
-        }
-        let mut out: Vec<_> = by_id.into_values().collect();
-        out.sort_by(|a, b| a.id.cmp(&b.id));
-        Ok(out)
-    }
-
-    pub(super) fn materialize_cloned_cards(&self) -> Vec<super::card::VoiceCard> {
-        let dir = self.clones_dir();
-        let fields = lock(&self.store).fields("clones").unwrap_or_default();
-        let mut by_id: HashMap<String, super::card::VoiceCard> = HashMap::new();
-        for (id, val) in fields {
-            if let Ok(packed) = serde_json::from_value::<super::card::PackedCard>(val)
-                && let Some(c) = packed.materialize(&dir.join(&id))
-            {
-                by_id.insert(c.id.clone(), c);
-            }
-        }
-        if let Ok(entries) = std::fs::read_dir(&dir) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
             for e in entries.flatten() {
                 let p = e.path();
                 if !p.is_dir() {
@@ -85,6 +54,16 @@ impl YuyueCore {
         let mut out: Vec<_> = by_id.into_values().collect();
         out.sort_by(|a, b| a.id.cmp(&b.id));
         out
+    }
+
+    pub(super) fn materialize_book_cards(&self, book: &str) -> Result<Vec<super::card::VoiceCard>> {
+        let dir = self.book_cards_dir(book)?;
+        Ok(self.materialize_cards_from(&dir, &format!("drama/{book}/cards")))
+    }
+
+    pub(super) fn materialize_cloned_cards(&self) -> Vec<super::card::VoiceCard> {
+        let dir = self.clones_dir();
+        self.materialize_cards_from(&dir, "clones")
     }
 
     pub(super) fn all_known_cards(&self, book: Option<&str>) -> HashMap<String, super::card::VoiceCard> {

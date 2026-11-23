@@ -8,10 +8,15 @@
 
 use std::collections::HashMap;
 use std::f32::consts::PI;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use pinyin::ToPinyin;
+
+use super::phoneme::{
+    self, FlatLexicon, append_english_word, count_units, expand_numbers, is_cjk,
+    normalize_pinyin_tone, split_spoken_parts,
+};
 
 pub const LIVE_RATE: u32 = 24_000;
 pub const N_FFT: usize = 1024;
@@ -30,44 +35,9 @@ pub struct ZipVoicePrompt {
     pub prompt_frames: u32,
 }
 
-#[derive(Clone, Copy)]
-struct LexEntry {
-    key_off: u32,
-    key_len: u16,
-    tok_off: u32,
-    tok_len: u8,
-}
-
-#[derive(Default)]
-struct LexiconState {
-    dir: PathBuf,
-    tokens: HashMap<String, u16>,
-    keys_arena: String,
-    toks_arena: Vec<u16>,
-    entries: Vec<LexEntry>,
-    max_cjk_phrase: usize,
-}
-
-impl LexiconState {
-    fn key_of(&self, e: &LexEntry) -> &str {
-        let s = e.key_off as usize;
-        &self.keys_arena[s..s + e.key_len as usize]
-    }
-
-    fn lookup(&self, key: &str) -> Option<&[u16]> {
-        let idx = self
-            .entries
-            .binary_search_by(|e| self.key_of(e).cmp(key))
-            .ok()?;
-        let e = &self.entries[idx];
-        let s = e.tok_off as usize;
-        Some(&self.toks_arena[s..s + e.tok_len as usize])
-    }
-}
-
-fn lex_state() -> &'static Mutex<LexiconState> {
-    static L: OnceLock<Mutex<LexiconState>> = OnceLock::new();
-    L.get_or_init(|| Mutex::new(LexiconState::default()))
+fn lex_state() -> &'static Mutex<FlatLexicon> {
+    static L: OnceLock<Mutex<FlatLexicon>> = OnceLock::new();
+    L.get_or_init(|| Mutex::new(FlatLexicon::default()))
 }
 
 /// Loads `tokens.txt`, `lexicon-zh.txt` (or `lexicon.txt`), and `lexicon-en.txt` (or
@@ -77,212 +47,27 @@ pub fn set_model_dir(dir: &Path) -> usize {
         && st.dir == dir
         && !st.tokens.is_empty()
     {
-        return st.entries.len();
+        return st.len();
     }
-    let Ok(tok_txt) = std::fs::read_to_string(dir.join("tokens.txt")) else {
+    let Some(loaded) = FlatLexicon::load(
+        dir,
+        &["lexicon-zh.txt", "lexicon.txt"],
+        &["lexicon-en.txt", "lexicon-en-us.txt"],
+        true,
+    ) else {
         return 0;
     };
-    let mut tokens: HashMap<String, u16> = HashMap::with_capacity(400);
-    for line in tok_txt.lines() {
-        let line = line.trim_end_matches(['\r', '\n']);
-        let Some((sym, id_s)) = line.rsplit_once('\t').or_else(|| line.rsplit_once(' ')) else {
-            continue;
-        };
-        if let Ok(id) = id_s.trim().parse::<u16>() {
-            tokens.insert(sym.to_string(), id);
-        }
-    }
-    if tokens.is_empty() {
-        return 0;
-    }
-
-    let mut raw_pairs: Vec<(String, Vec<u16>)> = Vec::with_capacity(240_000);
-    let mut max_cjk_phrase = 1usize;
-
-    // 1. Chinese lexicon (`word ph1 ph2 ...`)
-    for name in ["lexicon-zh.txt", "lexicon.txt"] {
-        let p = dir.join(name);
-        if let Ok(txt) = std::fs::read_to_string(&p) {
-            for line in txt.lines() {
-                let line = line.trim();
-                if line.is_empty() || line.starts_with('#') {
-                    continue;
-                }
-                let mut it = line.split_whitespace();
-                let Some(word) = it.next() else { continue };
-                let ids: Vec<u16> = it.filter_map(|ph| tokens.get(ph).copied()).collect();
-                if !ids.is_empty() && ids.len() <= u8::MAX as usize {
-                    let cjk_len = word.chars().count();
-                    if word.chars().any(is_cjk) && cjk_len > max_cjk_phrase && cjk_len <= 12 {
-                        max_cjk_phrase = cjk_len;
-                    }
-                    raw_pairs.push((word.to_lowercase(), ids));
-                }
-            }
-            break;
-        }
-    }
-
-    // 2. English lexicon (`word || ph1 ph2 ...` or `word ph1 ph2 ...`)
-    for name in ["lexicon-en.txt", "lexicon-en-us.txt"] {
-        let p = dir.join(name);
-        if let Ok(txt) = std::fs::read_to_string(&p) {
-            for line in txt.lines() {
-                let line = line.trim();
-                if line.is_empty() || line.starts_with('#') {
-                    continue;
-                }
-                let (word, phones_part) = if let Some((w, r)) = line.split_once("||") {
-                    (w.trim(), r.trim())
-                } else if let Some((w, r)) = line.split_once(' ') {
-                    (w.trim(), r.trim())
-                } else {
-                    continue;
-                };
-                if word.is_empty() || word.len() > u16::MAX as usize {
-                    continue;
-                }
-                let mut ids = Vec::new();
-                for ph in phones_part.split_whitespace() {
-                    if let Some(&id) = tokens.get(ph) {
-                        ids.push(id);
-                    } else {
-                        // Compound stress markers like `ˌeɪ` attached without spaces: scan longest token.
-                        let mut rest = ph;
-                        while !rest.is_empty() {
-                            let matched = (1..=rest.len())
-                                .rev()
-                                .filter(|&k| rest.is_char_boundary(k))
-                                .find_map(|k| tokens.get(&rest[..k]).map(|&id| (k, id)));
-                            if let Some((k, id)) = matched {
-                                ids.push(id);
-                                rest = &rest[k..];
-                            } else {
-                                let step = rest.chars().next().map(char::len_utf8).unwrap_or(1);
-                                rest = &rest[step..];
-                            }
-                        }
-                    }
-                }
-                if !ids.is_empty() && ids.len() <= u8::MAX as usize {
-                    raw_pairs.push((word.to_lowercase(), ids));
-                }
-            }
-            break;
-        }
-    }
-
-    raw_pairs.sort_by(|a, b| a.0.cmp(&b.0));
-    raw_pairs.dedup_by(|a, b| a.0 == b.0);
-
-    let key_bytes: usize = raw_pairs.iter().map(|(k, _)| k.len()).sum();
-    let tok_count: usize = raw_pairs.iter().map(|(_, v)| v.len()).sum();
-    let mut keys_arena = String::with_capacity(key_bytes);
-    let mut toks_arena = Vec::with_capacity(tok_count);
-    let mut entries = Vec::with_capacity(raw_pairs.len());
-
-    for (k, v) in raw_pairs {
-        if k.len() > u16::MAX as usize {
-            continue;
-        }
-        let key_off = keys_arena.len() as u32;
-        let key_len = k.len() as u16;
-        keys_arena.push_str(&k);
-        let tok_off = toks_arena.len() as u32;
-        let tok_len = v.len() as u8;
-        toks_arena.extend_from_slice(&v);
-        entries.push(LexEntry { key_off, key_len, tok_off, tok_len });
-    }
-
-    let count = entries.len();
+    let count = loaded.len();
     if let Ok(mut st) = lex_state().lock() {
-        *st = LexiconState { dir: dir.to_path_buf(), tokens, keys_arena, toks_arena, entries, max_cjk_phrase };
+        *st = loaded;
     }
     count
-}
-
-fn is_cjk(c: char) -> bool {
-    ('\u{4e00}'..='\u{9fff}').contains(&c) || ('\u{3400}'..='\u{4dbf}').contains(&c)
 }
 
 /// Splits a sentence into clauses short enough to keep ZipVoice's total attention window ≤ 9 s
 /// (`≤ 32` Chinese characters or `≤ 22` English words per chunk).
 pub fn split_clauses(text: &str, lang: &str) -> Vec<String> {
-    let clean = strip_reading_tags_keep_braces(text.trim());
-    if clean.is_empty() {
-        return Vec::new();
-    }
-    let chinese = !lang.to_ascii_lowercase().starts_with("en") || clean.chars().any(is_cjk);
-    let max_units = if chinese { 32usize } else { 22usize };
-    if count_units(&clean, chinese) <= max_units {
-        return vec![clean];
-    }
-
-    let mut pieces = Vec::new();
-    let mut cur = String::new();
-    let mut depth = 0i32;
-    for ch in clean.chars() {
-        if ch == '{' {
-            depth += 1;
-        } else if ch == '}' {
-            depth = (depth - 1).max(0);
-        }
-        cur.push(ch);
-        if depth == 0 && matches!(ch, '，' | '。' | '；' | '：' | '！' | '？' | '…' | '—' | ',' | '.' | ';' | ':' | '!' | '?') {
-            if !cur.trim().is_empty() {
-                pieces.push(std::mem::take(&mut cur));
-            }
-        }
-    }
-    if !cur.trim().is_empty() {
-        pieces.push(cur);
-    }
-
-    let mut out: Vec<String> = Vec::new();
-    let mut buf = String::new();
-    for p in pieces {
-        let p = p.trim();
-        if p.is_empty() {
-            continue;
-        }
-        let cand = if buf.is_empty() {
-            p.to_string()
-        } else if chinese {
-            format!("{buf}{p}")
-        } else {
-            format!("{buf} {p}")
-        };
-        if !buf.is_empty() && count_units(&cand, chinese) > max_units {
-            out.push(std::mem::take(&mut buf));
-            buf = p.to_string();
-        } else {
-            buf = cand;
-        }
-    }
-    if !buf.is_empty() {
-        if out.last().is_some() && count_units(&buf, chinese) < 3 {
-            let last = out.last_mut().unwrap();
-            if !chinese {
-                last.push(' ');
-            }
-            last.push_str(&buf);
-        } else {
-            out.push(buf);
-        }
-    }
-    out
-}
-
-fn strip_reading_tags_keep_braces(s: &str) -> String {
-    s.to_string()
-}
-
-fn count_units(s: &str, chinese: bool) -> usize {
-    if chinese {
-        s.chars().filter(|&c| is_cjk(c) || c.is_ascii_alphanumeric()).count()
-    } else {
-        s.split_whitespace().filter(|w| w.chars().any(char::is_alphanumeric)).count()
-    }
+    phoneme::split_clauses(text, lang, 32, 22, 3)
 }
 
 /// Converts `text` (supporting `{词|jiǎ zhēn}` reading annotations, Traditional Chinese, numbers,
@@ -321,33 +106,7 @@ pub fn tokenize(text: &str, lang: &str) -> Vec<i64> {
     out
 }
 
-fn split_spoken_parts(text: &str) -> Vec<(String, Option<String>)> {
-    let mut out = Vec::new();
-    let mut plain = String::new();
-    let mut rest = text;
-    while let Some(a) = rest.find('{') {
-        let Some(b) = rest[a..].find('}').map(|b| a + b) else { break };
-        let inner = &rest[a + 1..b];
-        let Some((word, reading)) = inner.split_once('|') else {
-            plain.push_str(&rest[..=b]);
-            rest = &rest[b + 1..];
-            continue;
-        };
-        plain.push_str(&rest[..a]);
-        if !plain.is_empty() {
-            out.push((std::mem::take(&mut plain), None));
-        }
-        out.push((word.to_string(), Some(reading.to_string())));
-        rest = &rest[b + 1..];
-    }
-    plain.push_str(rest);
-    if !plain.is_empty() {
-        out.push((plain, None));
-    }
-    out
-}
-
-fn tokenize_plain(raw: &str, chinese_ctx: bool, st: &LexiconState, out: &mut Vec<i64>) {
+fn tokenize_plain(raw: &str, chinese_ctx: bool, st: &FlatLexicon, out: &mut Vec<i64>) {
     let simp = if raw.chars().any(is_cjk) {
         zhconv::zhconv(raw, zhconv::Variant::ZhHans)
     } else {
@@ -418,25 +177,11 @@ fn tokenize_plain(raw: &str, chinese_ctx: bool, st: &LexiconState, out: &mut Vec
             if word.is_empty() {
                 continue;
             }
-            // Space between consecutive English words if not already added.
-            if let Some(&sp) = st.tokens.get(" ")
-                && let Some(&last) = out.last()
-                && last != sp as i64
-                && !matches_punct_id(last, &st.tokens)
-                && start > 0
-                && !chars[..start].iter().rev().find(|x| !x.is_whitespace()).is_none_or(|&x| is_cjk(x))
-            {
-                // Already handled by whitespace branch above when separated by space.
-            }
             append_english_word(&word, st, out);
             continue;
         }
         i += 1;
     }
-}
-
-fn matches_punct_id(id: i64, tokens: &HashMap<String, u16>) -> bool {
-    [",", ".", "!", "?", ";", ":"].iter().any(|p| tokens.get(*p).copied().map(i64::from) == Some(id))
 }
 
 fn map_punct(c: char) -> Option<&'static str> {
@@ -447,40 +192,6 @@ fn map_punct(c: char) -> Option<&'static str> {
         '？' | '?' => Some("?"),
         '！' | '!' => Some("!"),
         _ => None,
-    }
-}
-
-fn append_english_word(word: &str, st: &LexiconState, out: &mut Vec<i64>) {
-    if let Some(ids) = st.lookup(word) {
-        out.extend(ids.iter().map(|&x| x as i64));
-        return;
-    }
-    if word.contains('-') {
-        for (k, sub) in word.split('-').filter(|s| !s.is_empty()).enumerate() {
-            if k > 0
-                && let Some(&sp) = st.tokens.get(" ")
-            {
-                out.push(sp as i64);
-            }
-            append_english_word(sub, st, out);
-        }
-        return;
-    }
-    if let Some(stem) = word.strip_suffix("'s") {
-        append_english_word(stem, st, out);
-        if let Some(&z) = st.tokens.get("z") {
-            out.push(z as i64);
-        }
-        return;
-    }
-    // Spell/letter fallback using single-letter entries in lexicon (`a`, `b`, ...).
-    for ch in word.chars() {
-        let s = ch.to_string();
-        if let Some(ids) = st.lookup(&s) {
-            out.extend(ids.iter().map(|&x| x as i64));
-        } else if let Some(&id) = st.tokens.get(&s) {
-            out.push(id as i64);
-        }
     }
 }
 
@@ -518,114 +229,6 @@ fn append_pinyin_syllable(raw: &str, tokens: &HashMap<String, u16>, out: &mut Ve
                 out.push(id as i64);
             }
         }
-    }
-}
-
-fn normalize_pinyin_tone(raw: &str) -> (String, u8) {
-    let mut letters = String::new();
-    let mut tone = 5u8;
-    for ch in raw.trim().to_lowercase().chars() {
-        let mapped = match ch {
-            'ā' => Some(('a', 1)), 'á' => Some(('a', 2)), 'ǎ' => Some(('a', 3)), 'à' => Some(('a', 4)),
-            'ē' => Some(('e', 1)), 'é' => Some(('e', 2)), 'ě' => Some(('e', 3)), 'è' => Some(('e', 4)),
-            'ī' => Some(('i', 1)), 'í' => Some(('i', 2)), 'ǐ' => Some(('i', 3)), 'ì' => Some(('i', 4)),
-            'ō' => Some(('o', 1)), 'ó' => Some(('o', 2)), 'ǒ' => Some(('o', 3)), 'ò' => Some(('o', 4)),
-            'ū' => Some(('u', 1)), 'ú' => Some(('u', 2)), 'ǔ' => Some(('u', 3)), 'ù' => Some(('u', 4)),
-            'ǖ' => Some(('v', 1)), 'ǘ' => Some(('v', 2)), 'ǚ' => Some(('v', 3)), 'ǜ' => Some(('v', 4)),
-            'ü' => Some(('v', 0)),
-            '1'..='5' => {
-                tone = ch as u8 - b'0';
-                None
-            }
-            'a'..='z' => Some((ch, 0)),
-            _ => None,
-        };
-        if let Some((c, t)) = mapped {
-            letters.push(c);
-            if t > 0 {
-                tone = t;
-            }
-        }
-    }
-    (letters, tone)
-}
-
-fn expand_numbers(s: &str, chinese: bool) -> String {
-    const ZH_DIGITS: [char; 10] = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
-    const EN_DIGITS: [&str; 10] = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c.is_ascii_digit() {
-            let mut run = String::from(c);
-            while let Some(&nx) = chars.peek() {
-                if nx.is_ascii_digit() {
-                    run.push(nx);
-                    chars.next();
-                } else {
-                    break;
-                }
-            }
-            if chinese {
-                if let Ok(n) = run.parse::<u32>()
-                    && n < 100
-                {
-                    out.push_str(&zh_small_int(n));
-                } else {
-                    for d in run.bytes() {
-                        out.push(ZH_DIGITS[(d - b'0') as usize]);
-                    }
-                }
-            } else {
-                if !out.ends_with(' ') && !out.is_empty() {
-                    out.push(' ');
-                }
-                if let Ok(n) = run.parse::<u32>()
-                    && n < 100
-                {
-                    out.push_str(&en_small_int(n));
-                } else {
-                    for (k, d) in run.bytes().enumerate() {
-                        if k > 0 {
-                            out.push(' ');
-                        }
-                        out.push_str(EN_DIGITS[(d - b'0') as usize]);
-                    }
-                }
-                if chars.peek().is_some_and(|x| x.is_ascii_alphabetic()) {
-                    out.push(' ');
-                }
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
-fn zh_small_int(n: u32) -> String {
-    const D: [&str; 10] = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
-    match n {
-        0..=9 => D[n as usize].into(),
-        10 => "十".into(),
-        11..=19 => format!("十{}", D[(n % 10) as usize]),
-        _ if n.is_multiple_of(10) => format!("{}十", D[(n / 10) as usize]),
-        _ => format!("{}十{}", D[(n / 10) as usize], D[(n % 10) as usize]),
-    }
-}
-
-fn en_small_int(n: u32) -> String {
-    const ONES: [&str; 20] = [
-        "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-        "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",
-    ];
-    const TENS: [&str; 10] = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
-    if n < 20 {
-        ONES[n as usize].into()
-    } else if n.is_multiple_of(10) {
-        TENS[(n / 10) as usize].into()
-    } else {
-        format!("{} {}", TENS[(n / 10) as usize], ONES[(n % 10) as usize])
     }
 }
 
@@ -683,39 +286,6 @@ fn mel_filters_24k() -> &'static Vec<(usize, Vec<f32>)> {
     })
 }
 
-fn fft_in_place(re: &mut [f32; N_FFT], im: &mut [f32; N_FFT]) {
-    let n = N_FFT;
-    let mut j = 0usize;
-    for i in 1..n {
-        let mut bit = n >> 1;
-        while j & bit != 0 {
-            j ^= bit;
-            bit >>= 1;
-        }
-        j |= bit;
-        if i < j {
-            re.swap(i, j);
-            im.swap(i, j);
-        }
-    }
-    let mut len = 2usize;
-    while len <= n {
-        let ang = -2.0 * PI / len as f32;
-        for start in (0..n).step_by(len) {
-            for k in 0..len / 2 {
-                let (s, c) = (ang * k as f32).sin_cos();
-                let (a, b) = (start + k, start + k + len / 2);
-                let (xr, xi) = (re[b] * c - im[b] * s, re[b] * s + im[b] * c);
-                re[b] = re[a] - xr;
-                im[b] = im[a] - xi;
-                re[a] += xr;
-                im[a] += xi;
-            }
-        }
-        len <<= 1;
-    }
-}
-
 /// Extracts `ZipVoicePrompt` (tokens + 24 kHz 100-band Mel features scaled by `0.1`) for a
 /// reference clip.
 pub fn build_prompt(samples: &[f32], rate: u32, text: &str, lang: &str) -> Option<ZipVoicePrompt> {
@@ -762,7 +332,7 @@ pub fn build_prompt(samples: &[f32], rate: u32, text: &str, lang: &str) -> Optio
             re[i] = padded[off + i] * win[i];
             im[i] = 0.0;
         }
-        fft_in_place(&mut re, &mut im);
+        super::speaker::fft(&mut re, &mut im);
         for k in 0..BINS {
             mag[k] = (re[k] * re[k] + im[k] * im[k]).sqrt();
         }
@@ -848,7 +418,7 @@ pub fn vocos_istft(mag: &[f32], x_cos: &[f32], y_sin: &[f32], frames: usize) -> 
         for v in &mut im {
             *v = -*v;
         }
-        fft_in_place(&mut re, &mut im);
+        super::speaker::fft(&mut re, &mut im);
         let base = t * HOP;
         for i in 0..N_FFT {
             let sample = re[i] * inv_n;
@@ -958,7 +528,7 @@ mod tests {
                 re[i] = padded[t * HOP + i] * win[i];
                 im[i] = 0.0;
             }
-            fft_in_place(&mut re, &mut im);
+            crate::drama::speaker::fft(&mut re, &mut im);
             for k in 0..BINS {
                 let m = (re[k] * re[k] + im[k] * im[k]).sqrt();
                 mag[k * frames + t] = m;

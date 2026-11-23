@@ -14,7 +14,6 @@ use crate::drama::{LineBasis, CharacterGender, DramaScene, DramaSpeaker};
 
 pub const ATTRIBUTE_PROMPT: &str = include_str!("../prompts/attribute.v1.txt");
 pub const VERIFY_PROMPT: &str = include_str!("../prompts/verify.v1.txt");
-pub const PROMPT_VERSION: u32 = 1;
 
 /// One line of the scene as the model sees it.
 #[derive(Clone, Debug, PartialEq)]

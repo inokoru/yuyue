@@ -39,29 +39,10 @@ pub struct SpokenPart {
 }
 
 pub(super) fn spoken_parts(text: &str) -> Vec<SpokenPart> {
-    let mut out: Vec<SpokenPart> = Vec::new();
-    let mut plain = String::new();
-    let mut rest = text;
-    while let Some(a) = rest.find('{') {
-        let Some(b) = rest[a..].find('}').map(|b| a + b) else { break };
-        let inner = &rest[a + 1..b];
-        let Some((word, reading)) = inner.split_once('|') else {
-            plain.push_str(&rest[..=b]);
-            rest = &rest[b + 1..];
-            continue;
-        };
-        plain.push_str(&rest[..a]);
-        if !plain.is_empty() {
-            out.push(SpokenPart { text: std::mem::take(&mut plain), reading: None });
-        }
-        out.push(SpokenPart { text: word.to_string(), reading: Some(reading.to_string()) });
-        rest = &rest[b + 1..];
-    }
-    plain.push_str(rest);
-    if !plain.is_empty() {
-        out.push(SpokenPart { text: plain, reading: None });
-    }
-    out
+    super::phoneme::split_spoken_parts(text)
+        .into_iter()
+        .map(|(text, reading)| SpokenPart { text, reading })
+        .collect()
 }
 
 /// See `paragraph_starts`.
