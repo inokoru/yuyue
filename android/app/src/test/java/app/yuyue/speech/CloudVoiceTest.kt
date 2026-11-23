@@ -8,14 +8,15 @@ import org.junit.Test
 class CloudVoiceTest {
 
     @Test
-    fun providerCatalogFormsSymmetricFourByThreeGridPlusCustomEndpoint() {
+    fun providerCatalogGroupsAndPaidFlagsMatchCurrentProviders() {
         val gridTiles = CloudVoice.Provider.entries.filter { it != CloudVoice.Provider.Local }
-        assertEquals(12, gridTiles.size)
-        assertEquals(4, gridTiles.count { it.group == CloudVoice.Group.Domestic })
-        assertEquals(4, gridTiles.count { it.group == CloudVoice.Group.Global })
+        assertEquals(15, gridTiles.size)
+        assertEquals(6, gridTiles.count { it.group == CloudVoice.Group.Domestic })
+        assertEquals(5, gridTiles.count { it.group == CloudVoice.Group.Global })
         assertEquals(4, gridTiles.count { it.group == CloudVoice.Group.Local })
         assertTrue(CloudVoice.Provider.Local.isLocal)
         assertTrue(!CloudVoice.Provider.Local.isPaidCloud)
+        assertTrue(!CloudVoice.Provider.Free.isPaidCloud)
         assertTrue(CloudVoice.Provider.Xiaomi.isPaidCloud)
     }
 
