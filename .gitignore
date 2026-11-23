@@ -63,9 +63,12 @@ android/keystore.properties
 # Windows
 windows/Yuyue/bin/
 windows/Yuyue/obj/
+windows/Yuyue.Tests/bin/
+windows/Yuyue.Tests/obj/
 windows/Yuyue/Native/
 windows/Yuyue/Core/Generated/
 windows/Yuyue/Assets/Reader/
+windows/Yuyue/Assets/L10n/en.json
 windows/.vs/
 windows/dist/
 

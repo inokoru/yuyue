@@ -181,3 +181,40 @@ jobs:
               exit 1
             }
           tail -10 /tmp/xcodebuild-ios.log
+
+  windows:
+    name: Windows 编译
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+          key: windows
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: reader/package.json
+          version: 12
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: reader/pnpm-lock.yaml
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: 书页与 Rust 核心
+        shell: pwsh
+        run: ./windows/build-core.ps1 -Arch x64 -SkipTokens
+      - name: 英文词典合并与 XAML 覆盖审计
+        shell: pwsh
+        run: node windows/build-l10n.mjs --audit
+      - name: WinUI 3 编译
+        shell: pwsh
+        run: dotnet build windows/Yuyue/Yuyue.csproj -c Release -p:Platform=x64 --warnaserror:false
+      - name: Windows 单元测试
+        shell: pwsh
+        run: dotnet test windows/Yuyue.Tests/Yuyue.Tests.csproj -c Release -p:Platform=x64 --verbosity minimal
