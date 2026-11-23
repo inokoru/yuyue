@@ -183,6 +183,7 @@ public sealed partial class ReaderWindow : Window
         {
             _library.Prefs.ReaderPanelWidth = Math.Max(272.0, w - 14.0);
             _library.SavePrefs();
+            PushSettingsToReader();
         };
         ThemeHelper.ApplyElevation(ListenCapsule, PageShadowReceiver, 16f);
         ThemeHelper.ApplyElevation(SelectionCard, PageShadowReceiver, 16f);
@@ -554,7 +555,16 @@ public sealed partial class ReaderWindow : Window
 
     private async Task LoadInitialAsync(uint? startSection, int? startSentence)
     {
-        await _pager.InitializeAsync();
+        try
+        {
+            await _pager.InitializeAsync();
+        }
+        catch (Exception ex)
+        {
+            App.AppendCrashLog(_library.DataDir, "WEBVIEW2_INIT", $"Failed to initialize WebView2 for book {_bookId}", ex);
+            ShowWebView2UnavailableFallback(ex, startSection, startSentence);
+            return;
+        }
         if (startSection is uint forcedSec && forcedSec < _detail.Sections.Length)
         {
             _currentSection = forcedSec;
@@ -600,10 +610,79 @@ public sealed partial class ReaderWindow : Window
         }
     }
 
+    private void ShowWebView2UnavailableFallback(Exception ex, uint? startSection, int? startSentence)
+    {
+        bool dark = ThemeHelper.IsDark(RootGrid.ActualTheme);
+        var p = ThemeHelper.Palette(dark);
+        bool missingRuntime = !ReaderWebViewHost.IsWebView2RuntimeAvailable(out _);
+
+        WebViewSlotHost.Children.Clear();
+        var stack = new StackPanel
+        {
+            Spacing = 10,
+            MaxWidth = 420,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(24),
+        };
+        stack.Children.Add(new TextBlock
+        {
+            Text = missingRuntime ? "需要安装 WebView2 运行时" : "书页组件暂时无法启动",
+            FontSize = 17,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush(p.T1),
+            HorizontalAlignment = HorizontalAlignment.Center,
+        });
+        stack.Children.Add(new TextBlock
+        {
+            Text = missingRuntime
+                ? "语阅电子书阅读器需要 Microsoft Edge WebView2 运行时（Windows 11 默认自带，Windows 10 部分版本需手动安装一次）。"
+                : $"WebView2 初始化失败：{ex.Message}",
+            FontSize = 12.5,
+            Foreground = ThemeHelper.Brush(p.T2),
+            TextWrapping = TextWrapping.Wrap,
+            TextAlignment = TextAlignment.Center,
+        });
+
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 6, 0, 0) };
+        var dlBtn = new Button
+        {
+            Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"],
+            Content = "下载 WebView2 运行时 ↗",
+        };
+        dlBtn.Click += (_, _) => _ = Windows.System.Launcher.LaunchUriAsync(new Uri(ReaderWebViewHost.WebView2DownloadUrl));
+        var retryBtn = new Button
+        {
+            Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+            Content = "重试",
+        };
+        retryBtn.Click += (_, _) =>
+        {
+            WebViewSlotHost.Children.Clear();
+            _ = LoadInitialAsync(startSection, startSentence);
+        };
+        actions.Children.Add(dlBtn);
+        actions.Children.Add(retryBtn);
+        stack.Children.Add(actions);
+
+        WebViewSlotHost.Children.Add(new Border
+        {
+            CornerRadius = new CornerRadius(16),
+            Background = ThemeHelper.Brush(p.Card),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(1),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = stack,
+        });
+    }
+
     // 1:1 MacReaderView.swift：书页占满窗口全高，Top 留出 64px 悬浮顶栏安全区，Bottom 留出 88px 听书胶囊安全区
     private PageGeometry BuildGeometry()
     {
-        double panelW = _activePanel == "companion" ? 358 : (_activePanel is not null ? 322 : 0);
+        double panelW = _activePanel is not null
+            ? (SidePanelColumn.Width.Value > 0 ? SidePanelColumn.Width.Value : (_activePanel == "companion" ? 358 : 322))
+            : 0;
         double width = WebViewContainer.ActualWidth > 0
             ? WebViewContainer.ActualWidth
             : Math.Max(480, (RootGrid.ActualWidth > 0 ? RootGrid.ActualWidth : 1080) - panelW);

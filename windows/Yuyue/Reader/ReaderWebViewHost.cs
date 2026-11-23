@@ -17,10 +17,26 @@ namespace Yuyue.Reader;
 public sealed class ReaderWebViewHost : IDisposable
 {
     public const string Origin = "https://yuyue.local";
+    public const string WebView2DownloadUrl = "https://go.microsoft.com/fwlink/p/?LinkId=2124703";
 
     private static readonly object EnvLock = new();
     private static Task<CoreWebView2Environment>? _sharedEnvTask;
     private static string? _sharedEnvDataDir;
+
+    public static bool IsWebView2RuntimeAvailable(out string? version)
+    {
+        try
+        {
+            string v = CoreWebView2Environment.GetAvailableBrowserVersionString();
+            version = string.IsNullOrWhiteSpace(v) ? null : v;
+            return version is not null;
+        }
+        catch
+        {
+            version = null;
+            return false;
+        }
+    }
 
     public static Task<CoreWebView2Environment> GetSharedEnvironmentAsync(string dataDir)
     {

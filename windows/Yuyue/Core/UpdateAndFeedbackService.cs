@@ -88,8 +88,14 @@ public sealed class UpdateAndFeedbackService
             DownloadHttp.DefaultRequestHeaders.UserAgent.ParseAdd($"Yuyue/{CurrentVersion} (Windows)");
     }
 
-    private static (string? Url, string? Sha256) TryParseWinInstaller(string updateJson)
+    private static string CurrentArchSlug() =>
+        System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.Arm64
+            ? "arm64"
+            : "x64";
+
+    internal static (string? Url, string? Sha256) ParseWinInstallerJson(string updateJson, string? arch = null)
     {
+        string targetArch = string.IsNullOrWhiteSpace(arch) ? CurrentArchSlug() : arch.Trim().ToLowerInvariant();
         try
         {
             using var doc = JsonDocument.Parse(updateJson);
@@ -97,8 +103,13 @@ public sealed class UpdateAndFeedbackService
             string? url = null, sha = null;
             if (root.TryGetProperty("windows", out var winObj) && winObj.ValueKind == JsonValueKind.Object)
             {
-                if (winObj.TryGetProperty("url", out var u)) url = u.GetString();
-                if (winObj.TryGetProperty("sha256", out var s)) sha = s.GetString();
+                if (winObj.TryGetProperty(targetArch, out var archObj) && archObj.ValueKind == JsonValueKind.Object)
+                {
+                    if (archObj.TryGetProperty("url", out var au)) url = au.GetString();
+                    if (archObj.TryGetProperty("sha256", out var asha)) sha = asha.GetString();
+                }
+                if (string.IsNullOrWhiteSpace(url) && winObj.TryGetProperty("url", out var u)) url = u.GetString();
+                if (string.IsNullOrWhiteSpace(sha) && winObj.TryGetProperty("sha256", out var s)) sha = s.GetString();
             }
             if (string.IsNullOrWhiteSpace(url) && root.TryGetProperty("win", out var winStr))
             {
@@ -116,6 +127,84 @@ public sealed class UpdateAndFeedbackService
         }
         catch { }
         return (null, null);
+    }
+
+    internal static string? ParseSha256Sums(string sumsText, string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(sumsText) || string.IsNullOrWhiteSpace(fileName)) return null;
+        foreach (string rawLine in sumsText.Split('\n'))
+        {
+            string line = rawLine.Trim();
+            if (line.Length < 66) continue;
+            string[] parts = line.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2) continue;
+            string hash = parts[0].Trim().ToLowerInvariant();
+            string name = parts[^1].Trim().TrimStart('*');
+            if (hash.Length == 64 && hash.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) &&
+                string.Equals(Path.GetFileName(name), Path.GetFileName(fileName), StringComparison.OrdinalIgnoreCase))
+            {
+                return hash;
+            }
+        }
+        return null;
+    }
+
+    private static async Task<(string? Url, string? Sha256)> TryDiscoverGitHubWinAssetAsync(string version, CancellationToken ct)
+    {
+        string arch = CurrentArchSlug();
+        string tag = version.StartsWith("v", StringComparison.OrdinalIgnoreCase) ? version : "v" + version;
+        try
+        {
+            string json = await Http.GetStringAsync($"https://api.github.com/repos/{RepoSlug}/releases/tags/{tag}", ct);
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array)
+                return (null, null);
+
+            string? setupUrl = null, setupName = null, zipUrl = null, zipName = null, sumsUrl = null;
+            foreach (var asset in assets.EnumerateArray())
+            {
+                string name = asset.TryGetProperty("name", out var np) ? np.GetString() ?? "" : "";
+                string dl = asset.TryGetProperty("browser_download_url", out var up) ? up.GetString() ?? "" : "";
+                if (string.IsNullOrEmpty(name) || !dl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) continue;
+
+                if (name.Contains($"windows-{arch}", StringComparison.OrdinalIgnoreCase) && name.EndsWith("-Setup.exe", StringComparison.OrdinalIgnoreCase))
+                {
+                    setupUrl = dl;
+                    setupName = name;
+                }
+                else if (name.Contains($"windows-{arch}", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    zipUrl = dl;
+                    zipName = name;
+                }
+                else if (name.Equals($"SHA256SUMS-windows-{arch}.txt", StringComparison.OrdinalIgnoreCase) ||
+                         (sumsUrl is null && name.Equals("SHA256SUMS.txt", StringComparison.OrdinalIgnoreCase)))
+                {
+                    sumsUrl = dl;
+                }
+            }
+
+            string? chosenUrl = setupUrl ?? zipUrl;
+            string? chosenName = setupName ?? zipName;
+            if (string.IsNullOrEmpty(chosenUrl) || string.IsNullOrEmpty(chosenName))
+                return (null, null);
+
+            string? sha = null;
+            if (!string.IsNullOrEmpty(sumsUrl))
+            {
+                try
+                {
+                    string sumsText = await Http.GetStringAsync(sumsUrl, ct);
+                    sha = ParseSha256Sums(sumsText, chosenName);
+                }
+                catch { }
+            }
+            return (chosenUrl, sha);
+        }
+        catch
+        {
+            return (null, null);
+        }
     }
 
     public async Task<(bool HasUpdate, UpdateInfo? Info, string Message)> CheckForUpdatesAsync(bool manual = false, CancellationToken ct = default)
@@ -152,7 +241,9 @@ public sealed class UpdateAndFeedbackService
             }
 
             LatestOffer = info;
-            (LatestWinInstallerUrl, LatestWinInstallerSha256) = TryParseWinInstaller(updateJson);
+            (LatestWinInstallerUrl, LatestWinInstallerSha256) = ParseWinInstallerJson(updateJson);
+            if (string.IsNullOrWhiteSpace(LatestWinInstallerUrl))
+                (LatestWinInstallerUrl, LatestWinInstallerSha256) = await TryDiscoverGitHubWinAssetAsync(info.Version, ct);
             if (!string.IsNullOrWhiteSpace(info.Changelog))
             {
                 try
@@ -1023,12 +1114,31 @@ public sealed class UpdateAndFeedbackService
 
     private enum RelaySubmitOutcome { Unavailable, Sent, QueuedOffline }
 
+    internal static (string? Topic, string? PublicKey) ResolveFeedbackConfig()
+    {
+        string? topic = Environment.GetEnvironmentVariable("YuyueFeedbackTopic");
+        string? pubKey = Environment.GetEnvironmentVariable("YuyueFeedbackPublicKey");
+        if (string.IsNullOrWhiteSpace(topic) || string.IsNullOrWhiteSpace(pubKey))
+        {
+            try
+            {
+                var attrs = Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>();
+                foreach (var a in attrs)
+                {
+                    if (string.IsNullOrWhiteSpace(topic) && a.Key == "YuyueFeedbackTopic") topic = a.Value?.Trim();
+                    else if (string.IsNullOrWhiteSpace(pubKey) && a.Key == "YuyueFeedbackPublicKey") pubKey = a.Value?.Trim();
+                }
+            }
+            catch { }
+        }
+        return (string.IsNullOrWhiteSpace(topic) ? null : topic, string.IsNullOrWhiteSpace(pubKey) ? null : pubKey);
+    }
+
     private async Task<RelaySubmitOutcome> TrySubmitViaRelayAsync(
         string category, string text, bool withInfo, bool publicShots,
         List<(string Name, byte[] Data, bool IsImage)> attachments)
     {
-        string? topic = Environment.GetEnvironmentVariable("YuyueFeedbackTopic");
-        string? pubKey = Environment.GetEnvironmentVariable("YuyueFeedbackPublicKey");
+        var (topic, pubKey) = ResolveFeedbackConfig();
         if (string.IsNullOrWhiteSpace(topic) || string.IsNullOrWhiteSpace(pubKey))
             return RelaySubmitOutcome.Unavailable;
 

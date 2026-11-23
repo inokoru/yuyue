@@ -1,0 +1,156 @@
+# 打包 Windows 正式版（绿色免安装 ZIP + Inno Setup 安装包 + SHA-256 校验和）。
+# 支持手动触发（workflow_dispatch）或在新建 v* Release 时自动构建并附加产物。
+name: Windows Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（如 0.1.0，留空从 Yuyue.csproj 读取）"
+        required: false
+        default: ""
+      build_number:
+        description: "内部构建号（整数，如 1）"
+        required: false
+        default: "1"
+      arch:
+        description: "目标架构"
+        type: choice
+        options:
+          - x64
+          - arm64
+        default: x64
+      release_tag:
+        description: "可选：上传到指定 GitHub Release 标签（如 v0.1.0，留空仅保留工作流产物）"
+        required: false
+        default: ""
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  package-windows:
+    name: Windows 打包 (${{ github.event.inputs.arch || 'x64' }})
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v')
+    runs-on: windows-latest
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 解析版本与架构参数
+        id: meta
+        shell: pwsh
+        run: |
+          $arch = "${{ github.event.inputs.arch }}"
+          if ([string]::IsNullOrWhiteSpace($arch)) { $arch = "x64" }
+
+          $tag = "${{ github.event.inputs.release_tag }}"
+          if ([string]::IsNullOrWhiteSpace($tag) -and "${{ github.event_name }}" -eq "release") {
+            $tag = "${{ github.event.release.tag_name }}"
+          }
+
+          $ver = "${{ github.event.inputs.version }}"
+          if ([string]::IsNullOrWhiteSpace($ver) -and -not [string]::IsNullOrWhiteSpace($tag)) {
+            $ver = ($tag -replace '^v', '') -replace '-.*$', ''
+          }
+          if ([string]::IsNullOrWhiteSpace($ver)) {
+            [xml]$proj = Get-Content "windows/Yuyue/Yuyue.csproj"
+            $ver = $proj.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          }
+          if ([string]::IsNullOrWhiteSpace($ver)) { $ver = "0.1.0" }
+
+          $build = "${{ github.event.inputs.build_number }}"
+          if ([string]::IsNullOrWhiteSpace($build)) { $build = "1" }
+
+          $rustTarget = if ($arch -eq "arm64") { "aarch64-pc-windows-msvc" } else { "x86_64-pc-windows-msvc" }
+          $platform = if ($arch -eq "arm64") { "ARM64" } else { "x64" }
+
+          "arch=$arch" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "build=$build" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "rust_target=$rustTarget" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "platform=$platform" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Packaging Yuyue Windows $arch v$ver (build $build, tag='$tag')"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ steps.meta.outputs.rust_target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+          key: windows-release-${{ steps.meta.outputs.arch }}
+
+      - name: 缓存 uniffi-bindgen-cs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/uniffi-bindgen-cs.exe
+          key: ${{ runner.os }}-uniffi-bindgen-cs-v0.12.0+v0.32.0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: reader/package.json
+          version: 12
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: reader/pnpm-lock.yaml
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: 安装 Inno Setup 6
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ISCC.exe -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+
+      - name: 打包绿色版 ZIP 与安装包
+        shell: pwsh
+        env:
+          YUYUE_FEEDBACK_TOPIC: ${{ secrets.YUYUE_FEEDBACK_TOPIC }}
+          YUYUE_FEEDBACK_PUBLIC_KEY: ${{ secrets.YUYUE_FEEDBACK_PUBLIC_KEY }}
+        run: |
+          .\windows\package-release.ps1 `
+            -Arch ${{ steps.meta.outputs.arch }} `
+            -Version ${{ steps.meta.outputs.version }} `
+            -BuildNumber ${{ steps.meta.outputs.build }} `
+            -BuildInstaller
+
+      - name: 运行 Windows 单元测试
+        if: steps.meta.outputs.arch == 'x64'
+        shell: pwsh
+        run: dotnet test windows/Yuyue.Tests/Yuyue.Tests.csproj -c Release -p:Platform=x64 --verbosity minimal
+
+      - name: 上传工作流产物
+        uses: actions/upload-artifact@v5
+        with:
+          name: yuyue-windows-${{ steps.meta.outputs.arch }}-v${{ steps.meta.outputs.version }}
+          path: |
+            windows/dist/*.zip
+            windows/dist/*-Setup.exe
+            windows/dist/SHA256SUMS-windows-*.txt
+            windows/dist/windows-update-*.json
+          retention-days: 30
+
+      - name: 附加产物到 GitHub Release
+        if: steps.meta.outputs.tag != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ steps.meta.outputs.tag }}"
+          $files = Get-ChildItem "windows/dist" -File | Where-Object {
+            $_.Name -like "*.zip" -or $_.Name -like "*-Setup.exe" -or $_.Name -like "SHA256SUMS-windows-*.txt" -or $_.Name -like "windows-update-*.json"
+          } | Select-Object -ExpandProperty FullName
+          if ($files.Count -gt 0) {
+            gh release upload $tag @files --clobber
+          }

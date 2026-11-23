@@ -129,4 +129,72 @@ public sealed class UpstreamParityTests : IDisposable
         Assert.True(symEmb.IsSymbol);
         Assert.Equal("moon", symEmb.Value);
     }
+
+    [Fact]
+    public void DeepLinksUpdaterManifestAndCrashLogRotation_WorkCleanly()
+    {
+        // yuyue:// protocol deep links
+        var openLink = App.ParseDeepLinkUri("yuyue://open/book-123");
+        Assert.NotNull(openLink);
+        Assert.Equal("open", openLink!.Value.Action);
+        Assert.Equal("book-123", openLink.Value.Target);
+
+        var settingsLink = App.ParseDeepLinkUri("yuyue://settings/listening");
+        Assert.Equal(("settings", "listening"), settingsLink);
+
+        var bareSettings = App.ParseDeepLinkUri("yuyue://settings");
+        Assert.Equal(("settings", null), bareSettings);
+
+        Assert.Null(App.ParseDeepLinkUri("https://example.com/open/123"));
+
+        // Arch-aware Windows updater manifest JSON
+        const string json = """
+        {
+          "windows": {
+            "x64": { "url": "https://github.com/inokoru/yuyue/releases/download/v0.2.0/Yuyue-0.2.0-windows-x64-Setup.exe", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+            "arm64": { "url": "https://github.com/inokoru/yuyue/releases/download/v0.2.0/Yuyue-0.2.0-windows-arm64-Setup.exe", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+          }
+        }
+        """;
+        var x64 = UpdateAndFeedbackService.ParseWinInstallerJson(json, "x64");
+        Assert.EndsWith("windows-x64-Setup.exe", x64.Url);
+        Assert.Equal(new string('a', 64), x64.Sha256);
+
+        var arm = UpdateAndFeedbackService.ParseWinInstallerJson(json, "arm64");
+        Assert.EndsWith("windows-arm64-Setup.exe", arm.Url);
+        Assert.Equal(new string('b', 64), arm.Sha256);
+
+        // SHA256SUMS parser
+        string shaSample = new string('c', 64);
+        string sums = $"{shaSample}  Yuyue-0.2.0-windows-x64-Setup.exe\n{new string('d', 64)}  Yuyue-0.2.0-windows-x64.zip\n";
+        Assert.Equal(shaSample, UpdateAndFeedbackService.ParseSha256Sums(sums, "Yuyue-0.2.0-windows-x64-Setup.exe"));
+        Assert.Null(UpdateAndFeedbackService.ParseSha256Sums(sums, "missing.exe"));
+
+        // Crash log rotation at 2 MB
+        string logPath = Path.Combine(_tempDir, "yuyue.log");
+        File.WriteAllText(logPath, new string('x', 2 * 1024 * 1024 + 128));
+        App.AppendCrashLog(_tempDir, "TEST", "rotation check");
+        Assert.True(File.Exists(logPath + ".1"));
+        Assert.Contains("rotation check", File.ReadAllText(logPath));
+    }
+
+    [Fact]
+    public void PaperAppearance_AutoMatchesLightAndDarkPapers()
+    {
+        var rs = _library.GetReaderSettings() with { Paper = Paper.Kami, CustomPaper = null };
+        _library.Prefs.PaperFollowAppearance = true;
+
+        var day = PaperAppearance.Resolve(_library, rs, appDarkOverride: false);
+        Assert.Equal(Paper.Kami, day.Preset);
+        Assert.False(day.IsDark);
+
+        var night = PaperAppearance.Resolve(_library, rs, appDarkOverride: true);
+        Assert.Equal(Paper.KamiNight, night.Preset);
+        Assert.True(night.IsDark);
+
+        // Turning off PaperFollowAppearance keeps the user's chosen paper even in dark mode
+        _library.Prefs.PaperFollowAppearance = false;
+        var fixedDay = PaperAppearance.Resolve(_library, rs, appDarkOverride: true);
+        Assert.Equal(Paper.Kami, fixedDay.Preset);
+    }
 }

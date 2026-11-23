@@ -194,6 +194,11 @@ jobs:
         with:
           workspaces: core
           key: windows
+      - name: 缓存 uniffi-bindgen-cs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/uniffi-bindgen-cs.exe
+          key: ${{ runner.os }}-uniffi-bindgen-cs-v0.12.0+v0.32.0
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: reader/package.json

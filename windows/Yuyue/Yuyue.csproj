@@ -26,6 +26,13 @@
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
 
+  <!-- Optional local/CI build-time feedback relay config (gitignored windows/feedback.props or -p:YuyueFeedbackTopic=...) -->
+  <Import Project="..\feedback.props" Condition="Exists('..\feedback.props')" />
+  <ItemGroup Condition="'$(YuyueFeedbackTopic)' != '' and '$(YuyueFeedbackPublicKey)' != ''">
+    <AssemblyMetadata Include="YuyueFeedbackTopic" Value="$(YuyueFeedbackTopic)" />
+    <AssemblyMetadata Include="YuyueFeedbackPublicKey" Value="$(YuyueFeedbackPublicKey)" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.250205002" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.22621.3233" />

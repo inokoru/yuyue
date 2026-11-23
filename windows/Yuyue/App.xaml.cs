@@ -94,14 +94,16 @@ public partial class App : Application
         else
             ShowShelf();
 
-        // Background auto-sync (startup + every 5 minutes when enabled) & 24h silent update check
+        // Background auto-sync (startup + every 5 minutes when enabled), 24h silent update check, & offline feedback flush
         if (Library.Sync.IsEnabled) _ = Library.Sync.SyncNowAsync();
         _ = Library.Updates.CheckForUpdatesAsync(manual: false);
+        _ = Library.Updates.FlushOfflineFeedbackQueueAsync();
         _syncTimer = new DispatcherTimer { Interval = System.TimeSpan.FromMinutes(5) };
         _syncTimer.Tick += (_, _) => { if (Library.Sync.IsEnabled) _ = Library.Sync.SyncNowAsync(); };
         _syncTimer.Start();
 
         var files = new List<string>();
+        string? deepLinkUri = null;
         bool openSettings = false;
         string? settingsPage = null;
         string? shelfTab = null;
@@ -131,6 +133,11 @@ public partial class App : Application
                 {
                     settingsPage = cliArgs[++i];
                 }
+                continue;
+            }
+            if (cliArgs[i].StartsWith("yuyue://", StringComparison.OrdinalIgnoreCase))
+            {
+                deepLinkUri = cliArgs[i];
                 continue;
             }
             if (File.Exists(cliArgs[i])) files.Add(cliArgs[i]);
@@ -179,6 +186,11 @@ public partial class App : Application
         if (openSettings)
         {
             OpenSettings(settingsPage ?? "general");
+        }
+
+        if (!string.IsNullOrEmpty(deepLinkUri))
+        {
+            HandleDeepLink(deepLinkUri);
         }
 
 #if DEBUG
@@ -566,15 +578,58 @@ public partial class App : Application
         if (Resources.ThemeDictionaries.TryGetValue("Dark", out var d) && d is ResourceDictionary dd) UpdateDict(dd, tint.Dark, dark: true);
     }
 
+    internal static (string Action, string? Target)? ParseDeepLinkUri(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw) || !Uri.TryCreate(raw.Trim(), UriKind.Absolute, out var uri))
+            return null;
+        if (!string.Equals(uri.Scheme, "yuyue", StringComparison.OrdinalIgnoreCase))
+            return null;
+        string action = (uri.Host ?? "").Trim().ToLowerInvariant();
+        string target = Uri.UnescapeDataString(uri.AbsolutePath.Trim('/'));
+        if (string.IsNullOrEmpty(action)) return null;
+        return (action, string.IsNullOrWhiteSpace(target) ? null : target);
+    }
+
+    private void HandleDeepLink(string rawUri)
+    {
+        var parsed = ParseDeepLinkUri(rawUri);
+        if (parsed is null) return;
+        var (action, target) = parsed.Value;
+        switch (action)
+        {
+            case "open" when !string.IsNullOrWhiteSpace(target):
+                OpenBook(target);
+                break;
+            case "settings":
+                OpenSettings(target ?? "general");
+                break;
+            case "tab" when !string.IsNullOrWhiteSpace(target):
+                ShowShelf();
+                _shelfWindow?.SwitchTab(target);
+                break;
+            case "podcast" when !string.IsNullOrWhiteSpace(target):
+                OpenPodcastIssue(target);
+                break;
+            default:
+                ShowShelf();
+                break;
+        }
+    }
+
     private void OnInstanceActivated(object? sender, Microsoft.Windows.AppLifecycle.AppActivationArguments e)
     {
         var files = new List<string>();
+        string? deepLinkUri = null;
         string? settingsPage = null;
         string? shelfTab = null;
 
         try
         {
-            if (e.Data is Windows.ApplicationModel.Activation.IFileActivatedEventArgs fileArgs)
+            if (e.Data is Windows.ApplicationModel.Activation.IProtocolActivatedEventArgs protoArgs && protoArgs.Uri is not null)
+            {
+                deepLinkUri = protoArgs.Uri.AbsoluteUri;
+            }
+            else if (e.Data is Windows.ApplicationModel.Activation.IFileActivatedEventArgs fileArgs)
             {
                 foreach (var item in fileArgs.Files)
                 {
@@ -599,6 +654,11 @@ public partial class App : Application
                             : "general";
                         continue;
                     }
+                    if (tok.StartsWith("yuyue://", StringComparison.OrdinalIgnoreCase))
+                    {
+                        deepLinkUri = tok;
+                        continue;
+                    }
                     if (File.Exists(tok)) files.Add(tok);
                 }
             }
@@ -610,6 +670,7 @@ public partial class App : Application
             ShowShelf();
             if (shelfTab is not null) _shelfWindow?.SwitchTab(shelfTab);
             if (settingsPage is not null) OpenSettings(settingsPage);
+            if (!string.IsNullOrEmpty(deepLinkUri)) HandleDeepLink(deepLinkUri);
             if (files.Count > 0 && _shelfWindow is not null)
                 _ = _shelfWindow.ImportPathsAsync(files, openFirst: true);
         });
@@ -646,16 +707,36 @@ public partial class App : Application
         _settingsWindow?.ApplyAppearance();
     }
 
+    private static readonly object LogLock = new();
+
+    internal static void AppendCrashLog(string? dataDir, string tag, string message, Exception? ex = null)
+    {
+        try
+        {
+            string logDir = string.IsNullOrWhiteSpace(dataDir)
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Yuyue")
+                : dataDir;
+            Directory.CreateDirectory(logDir);
+            string logPath = Path.Combine(logDir, "yuyue.log");
+            lock (LogLock)
+            {
+                // Rotate log file at 2 MB so long-running installs never grow unbounded
+                if (File.Exists(logPath) && new FileInfo(logPath).Length > 2L * 1024L * 1024L)
+                {
+                    string prev = logPath + ".1";
+                    if (File.Exists(prev)) File.Delete(prev);
+                    File.Move(logPath, prev);
+                }
+                string detail = ex is not null ? $"\r\n{ex}" : "";
+                File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {tag}: {message}{detail}\r\n\r\n");
+            }
+        }
+        catch { }
+    }
+
     private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
         System.Diagnostics.Debug.WriteLine($"[Yuyue Unhandled] {e.Exception}");
-        try
-        {
-            string logDir = Library?.DataDir ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Yuyue");
-            Directory.CreateDirectory(logDir);
-            string logPath = Path.Combine(logDir, "yuyue.log");
-            File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] UNHANDLED: {e.Message}\r\n{e.Exception}\r\n\r\n");
-        }
-        catch { }
+        AppendCrashLog(Library?.DataDir, "UNHANDLED", e.Message, e.Exception);
     }
 }
