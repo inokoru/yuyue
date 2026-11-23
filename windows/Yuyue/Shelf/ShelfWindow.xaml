@@ -337,7 +337,7 @@
 
                             <!-- 书籍网格区 -->
                             <StackPanel x:Name="GridSection" Padding="22,4,28,0">
-                                <Grid Margin="2,0,0,14">
+                                <Grid x:Name="GridHeaderRow" Margin="2,0,0,14">
                                     <TextBlock x:Name="GridCountText" FontSize="12.5" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" VerticalAlignment="Center" />
                                     <Button
                                         x:Name="SortButton"
@@ -373,14 +373,14 @@
                                     </ItemsRepeater.Layout>
                                 </ItemsRepeater>
 
-                                <!-- 空书架 -->
+                                <!-- 空书架（1:1 testMacShelfEmpty.1.png） -->
                                 <StackPanel
                                     x:Name="EmptyStatePanel"
                                     Visibility="Collapsed"
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center"
-                                    Margin="0,120,0,0"
-                                    Spacing="10">
+                                    Margin="0,180,0,0"
+                                    Spacing="12">
                                     <ContentPresenter x:Name="EmptyIconHost" HorizontalAlignment="Center" />
                                     <TextBlock
                                         x:Name="EmptyTitleText"
@@ -418,7 +418,9 @@
                         CornerRadius="19"
                         Background="{ThemeResource YYCardBrush}"
                         BorderBrush="{ThemeResource YYLineBrush}"
-                        BorderThickness="1">
+                        BorderThickness="1"
+                        PointerEntered="ToastBanner_PointerEntered"
+                        PointerExited="ToastBanner_PointerExited">
                         <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
                             <Border x:Name="ToastDisc" Width="17" Height="17" CornerRadius="8.5" Background="#2DBE60">
                                 <ContentPresenter x:Name="ToastCheckIcon" HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -442,14 +444,15 @@
                     <Border
                         x:Name="DropOverlay"
                         Visibility="Collapsed"
-                        Background="#DBF7F5F1"
+                        Background="{ThemeResource YYBgBrush}"
                         Padding="22"
                         CornerRadius="12">
                         <Border
+                            x:Name="DropOverlayInner"
                             CornerRadius="18"
                             BorderBrush="{ThemeResource YYAccentBrush}"
                             BorderThickness="1.5"
-                            Background="#088A653F">
+                            Background="{ThemeResource YYAccentSoftBrush}">
                             <StackPanel Spacing="12" HorizontalAlignment="Center" VerticalAlignment="Center">
                                 <Border Width="60" Height="60" CornerRadius="30" Background="{ThemeResource YYAccentSoftBrush}" HorizontalAlignment="Center">
                                     <ContentPresenter x:Name="DropArrowIcon" HorizontalAlignment="Center" VerticalAlignment="Center" />

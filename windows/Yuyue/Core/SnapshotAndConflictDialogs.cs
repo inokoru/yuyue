@@ -33,11 +33,9 @@ public static class SnapshotAndConflictDialogs
         }
 
         SnapshotInfo info;
-        SnapshotCounts localCounts;
         try
         {
             info = await Task.Run(() => library.Core.ReadSnapshot(snapPath));
-            localCounts = library.Core.SnapshotCounts();
         }
         catch (Exception ex)
         {
@@ -71,6 +69,7 @@ public static class SnapshotAndConflictDialogs
         if (info.Parts.Notes) AddTag("笔记");
         if (info.Parts.Words) AddTag("生词");
         if (info.Parts.Settings) AddTag("设置与规则");
+        if (info.Parts.Files) AddTag("书文件");
 
         var mergeCard = new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(12, 10, 12, 10), BorderThickness = new Thickness(1.5) };
         var replaceCard = new Border { CornerRadius = new CornerRadius(10), Padding = new Thickness(12, 10, 12, 10), BorderThickness = new Thickness(1.5) };
@@ -95,6 +94,32 @@ public static class SnapshotAndConflictDialogs
             },
         };
 
+        ContentDialog? dlg = null;
+
+        bool IsMergeNoOp()
+        {
+            bool countsSame = info.Merged.Books == info.Now.Books
+                && info.Merged.Read == info.Now.Read
+                && info.Merged.Notes == info.Now.Notes
+                && info.Merged.Words == info.Now.Words
+                && info.Merged.Rules == info.Now.Rules;
+            bool snapshotEmpty = info.Counts.Books == 0
+                && info.Counts.Read == 0
+                && info.Counts.Notes == 0
+                && info.Counts.Words == 0
+                && info.Counts.Rules == 0
+                && info.Counts.FileBytes == 0
+                && !info.Parts.Settings;
+            return snapshotEmpty || (countsSame && info.Counts.FileBytes == 0 && !info.Parts.Settings);
+        }
+
+        string FormatDelta(uint before, uint after)
+        {
+            if (after == before) return $"{before}（不变）";
+            int diff = (int)after - (int)before;
+            return diff > 0 ? $"{before} → {after}（+{diff}）" : $"{before} → {after}（{diff}）";
+        }
+
         void SyncModeVisuals()
         {
             mergeCard.BorderBrush = ThemeHelper.Brush(!replaceMode ? tint.Accent : p.Line);
@@ -102,18 +127,31 @@ public static class SnapshotAndConflictDialogs
             replaceCard.BorderBrush = ThemeHelper.Brush(replaceMode ? p.Danger : p.Line);
             replaceCard.Background = ThemeHelper.Brush(replaceMode ? Color.FromArgb(20, p.Danger.R, p.Danger.G, p.Danger.B) : p.Card);
 
-            diffText.Text = replaceMode
-                ? $"覆盖后：书 {localCounts.Books} → {info.Counts.Books} 本 · 笔记 {localCounts.Notes} → {info.Counts.Notes} 条 · 生词 {localCounts.Words} → {info.Counts.Words} 个"
-                : $"合并预览：本机现有 {localCounts.Books} 本书 / {localCounts.Notes} 条笔记 / {localCounts.Words} 个生词，将与快照（{info.Counts.Books} 本 / {info.Counts.Notes} 条 / {info.Counts.Words} 词）无损合并";
+            var target = replaceMode ? info.Replaced : info.Merged;
+            bool noOp = !replaceMode && IsMergeNoOp();
+
+            if (noOp)
+            {
+                diffText.Text = "这份快照里的书籍、进度、笔记和生词已全部在本机中，无需重复合并（可切换「完全覆盖」或选择其他快照）。";
+                diffText.Foreground = ThemeHelper.Brush(p.T3);
+            }
+            else
+            {
+                string modeTag = replaceMode ? "覆盖后" : "合并后";
+                diffText.Text = $"{modeTag}：书 {FormatDelta(info.Now.Books, target.Books)} · 进度 {FormatDelta(info.Now.Read, target.Read)} · 笔记 {FormatDelta(info.Now.Notes, target.Notes)} · 生词 {FormatDelta(info.Now.Words, target.Words)}";
+                diffText.Foreground = ThemeHelper.Brush(replaceMode ? p.Danger : p.T2);
+            }
+
+            if (dlg is not null)
+                dlg.IsPrimaryButtonEnabled = !noOp;
         }
 
         mergeCard.PointerPressed += (_, _) => { replaceMode = false; SyncModeVisuals(); };
         replaceCard.PointerPressed += (_, _) => { replaceMode = true; SyncModeVisuals(); };
-        SyncModeVisuals();
 
         var root = new StackPanel
         {
-            Width = 410,
+            Width = 420,
             Spacing = 10,
             Children =
             {
@@ -125,7 +163,7 @@ public static class SnapshotAndConflictDialogs
             },
         };
 
-        var dlg = new ContentDialog
+        dlg = new ContentDialog
         {
             XamlRoot = xamlRoot,
             Title = "从快照恢复",
@@ -134,6 +172,7 @@ public static class SnapshotAndConflictDialogs
             CloseButtonText = "取消",
             DefaultButton = ContentDialogButton.Primary,
         };
+        SyncModeVisuals();
 
         if (await dlg.ShowAsync() != ContentDialogResult.Primary) return false;
 
@@ -148,7 +187,7 @@ public static class SnapshotAndConflictDialogs
                 await Task.Run(() => library.Core.MakeSnapshot(safetyPath, new SnapshotParts(true, true, true, true, false)));
             }
             await Task.Run(() => library.Core.RestoreSnapshot(snapPath, replaceMode));
-            App.CurrentApp.NotifyShelfRefresh();
+            App.CurrentApp.ReloadAllAfterRestore();
             return true;
         }
         catch (Exception ex)
@@ -339,7 +378,7 @@ public static class SnapshotAndConflictDialogs
                 };
                 keepBtn.Click += (_, _) =>
                 {
-                    library.Core.ResolveNoteConflict(c.Book, c.Mark, choice);
+                    try { library.Core.ResolveNoteConflict(c.Book, c.Mark, choice); } catch { }
                     onResolved();
                     RebuildConflicts();
                 };
@@ -381,14 +420,14 @@ public static class SnapshotAndConflictDialogs
             var bothBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "两份都留" };
             bothBtn.Click += (_, _) =>
             {
-                library.Core.ResolveNoteConflict(c.Book, c.Mark, ConflictChoice.Both);
+                try { library.Core.ResolveNoteConflict(c.Book, c.Mark, ConflictChoice.Both); } catch { }
                 onResolved();
                 RebuildConflicts();
             };
             var newerBtn = new Button { Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"], Content = "用较新的" };
             newerBtn.Click += (_, _) =>
             {
-                library.Core.ResolveNoteConflict(c.Book, c.Mark, ConflictChoice.Newer);
+                try { library.Core.ResolveNoteConflict(c.Book, c.Mark, ConflictChoice.Newer); } catch { }
                 onResolved();
                 RebuildConflicts();
             };

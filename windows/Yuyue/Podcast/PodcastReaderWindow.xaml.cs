@@ -64,6 +64,11 @@ public sealed partial class PodcastReaderWindow : Window
         IconBack.Content = YYIcons.Make("chevron-left", 12, ThemeHelper.Brush(p.T1));
         RateBtn.Content = $"{_rate:0.##}×";
         ThemeHelper.ConfigureTitleBar(this, dark);
+        L10n.Skip(ShowNameTopText);
+        L10n.Skip(IssueTitleText);
+        L10n.Skip(IssueSummaryText);
+        UpdatePlayButton();
+        L10n.ApplyTree(RootGrid);
     }
 
     private void RenderIssue()
@@ -293,7 +298,7 @@ public sealed partial class PodcastReaderWindow : Window
 
     private void UpdatePlayButton()
     {
-        PlayBtn.Content = (_playingStream || _playingTts) ? "⏸ 暂停" : "▶ 收听";
+        PlayBtn.Content = (_playingStream || _playingTts) ? L10n.Tr("⏸ 暂停", "⏸ Pause") : L10n.Tr("▶ 收听", "▶ Listen");
     }
 
     private void OnWindowClosed(object sender, WindowEventArgs args)

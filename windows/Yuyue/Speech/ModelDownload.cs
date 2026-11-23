@@ -2,12 +2,14 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using Windows.Networking.Connectivity;
 using Yuyue.Core;
 
 namespace Yuyue.Speech;
 
 /// <summary>
-/// 本机模型的统一多源自动下载（国内优先魔搭镜像，失败无感回退 GitHub Releases）与 HTTP Range 断点续传。
+/// 本机模型的统一多源自动下载（国内优先魔搭镜像，失败无感回退 GitHub Releases）、
+/// HTTP Range 断点续传、30 秒单次读包停滞超时、本地 <c>file://</c> 源支持，以及非计费网络检测。
 /// </summary>
 public static class ModelDownload
 {
@@ -15,14 +17,37 @@ public static class ModelDownload
     public const string ModelScopeRepo = "nowtin/yuyue-models";
     public const string ModelScopeBase = $"https://modelscope.cn/models/{ModelScopeRepo}/resolve/master/";
 
+    private static readonly System.TimeSpan RequestStallTimeout = System.TimeSpan.FromSeconds(30);
+
     private static readonly HttpClient Http = new(new HttpClientHandler
     {
         AllowAutoRedirect = true,
         MaxAutomaticRedirections = 10,
     })
     {
-        Timeout = System.TimeSpan.FromMinutes(30),
+        Timeout = System.Threading.Timeout.InfiniteTimeSpan,
     };
+
+    /// <summary>
+    /// Returns <c>true</c> when Windows reports a metered / roaming / over-data-limit connection.
+    /// </summary>
+    public static bool IsMeteredNetwork()
+    {
+        try
+        {
+            var profile = NetworkInformation.GetInternetConnectionProfile();
+            if (profile is null) return true;
+            var cost = profile.GetConnectionCost();
+            if (cost is null) return false;
+            return cost.NetworkCostType is NetworkCostType.Fixed or NetworkCostType.Variable
+                || cost.Roaming
+                || cost.OverDataLimit;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     public static bool PrefersChinaMirror()
     {
@@ -62,8 +87,8 @@ public static class ModelDownload
     }
 
     /// <summary>
-    /// 多源自动回退 + HTTP Range 断点续传；取消或断网时保留 <paramref name="partFile"/>，
-    /// 仅当 BLAKE3 校验失败时删除损坏文件并切换下一个源重下。
+    /// 多源自动回退 + HTTP Range 断点续传；支持 <c>file://</c> 本地源，单包超过 30 秒无字节流入即切源；
+    /// 取消或断网时保留 <paramref name="partFile"/>，仅当 BLAKE3 校验失败时删除损坏文件并切换下一个源重下。
     /// </summary>
     public static async Task DownloadWithResumeAsync(
         IReadOnlyList<string> urls,
@@ -101,13 +126,20 @@ public static class ModelDownload
             ct.ThrowIfCancellationRequested();
             try
             {
-                await StreamOneSourceAsync(url, partFile, expectedBytes, expectedBlake3, onBytes, ct);
+                if (Uri.TryCreate(url, UriKind.Absolute, out var fileUri) && fileUri.IsFile)
+                {
+                    await CopyLocalFileAsync(fileUri.LocalPath, partFile, onBytes, ct);
+                }
+                else
+                {
+                    await StreamOneSourceAsync(url, partFile, expectedBytes, expectedBlake3, onBytes, ct);
+                }
                 if (await MatchesDigestAsync(partFile, expectedBlake3, ct))
                     return;
                 if (File.Exists(partFile)) File.Delete(partFile);
                 lastError = new InvalidOperationException("文件校验不一致");
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 throw;
             }
@@ -117,6 +149,24 @@ public static class ModelDownload
             }
         }
         throw lastError;
+    }
+
+    private static async Task CopyLocalFileAsync(string srcPath, string partFile, Action<long, long> onBytes, CancellationToken ct)
+    {
+        if (!File.Exists(srcPath))
+            throw new FileNotFoundException("找不到本地模型源文件", srcPath);
+        long total = new FileInfo(srcPath).Length;
+        await using var src = new FileStream(srcPath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
+        await using var dst = new FileStream(partFile, FileMode.Create, FileAccess.Write, FileShare.None, 65536, useAsync: true);
+        byte[] buf = new byte[65536];
+        long done = 0;
+        int read;
+        while ((read = await src.ReadAsync(buf, ct)) > 0)
+        {
+            await dst.WriteAsync(buf.AsMemory(0, read), ct);
+            done += read;
+            onBytes(done, Math.Max(total, done));
+        }
     }
 
     private static async Task StreamOneSourceAsync(
@@ -159,7 +209,9 @@ public static class ModelDownload
         if (offset > 0)
             req.Headers.Range = new RangeHeaderValue(offset, null);
 
-        using var resp = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        using var headCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        headCts.CancelAfter(RequestStallTimeout);
+        using var resp = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, headCts.Token);
         if (resp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
             return resp.StatusCode;
         resp.EnsureSuccessStatusCode();
@@ -184,9 +236,13 @@ public static class ModelDownload
 
         byte[] buf = new byte[65536];
         long lastReported = done;
-        int read;
-        while ((read = await remote.ReadAsync(buf, ct)) > 0)
+        while (true)
         {
+            using var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            readCts.CancelAfter(RequestStallTimeout);
+            int read = await remote.ReadAsync(buf, readCts.Token);
+            if (read <= 0) break;
+
             await local.WriteAsync(buf.AsMemory(0, read), ct);
             done += read;
             if (done - lastReported >= 262_144)

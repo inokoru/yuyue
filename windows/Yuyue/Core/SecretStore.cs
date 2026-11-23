@@ -11,6 +11,7 @@ namespace Yuyue.Core;
 public sealed class SecretStore
 {
     private readonly string _path;
+    private readonly object _lock = new();
     private Dictionary<string, string> _cache = new();
 
     public SecretStore(string dataDir)
@@ -19,34 +20,44 @@ public sealed class SecretStore
         Load();
     }
 
-    public string Get(string key) => _cache.TryGetValue(key, out var val) ? val : "";
+    public string Get(string key)
+    {
+        lock (_lock)
+            return _cache.TryGetValue(key, out var val) ? val : "";
+    }
 
     public void Set(string key, string value)
     {
-        if (string.IsNullOrEmpty(value)) _cache.Remove(key);
-        else _cache[key] = value;
-        Save();
+        lock (_lock)
+        {
+            if (string.IsNullOrEmpty(value)) _cache.Remove(key);
+            else _cache[key] = value;
+            SaveLocked();
+        }
     }
 
     private void Load()
     {
         if (!File.Exists(_path)) return;
-        try
+        lock (_lock)
         {
-            var encrypted = File.ReadAllBytes(_path);
-            var plain = Unprotect(encrypted);
-            if (plain is not null)
+            try
             {
-                _cache = JsonSerializer.Deserialize<Dictionary<string, string>>(Encoding.UTF8.GetString(plain)) ?? new();
+                var encrypted = File.ReadAllBytes(_path);
+                var plain = Unprotect(encrypted);
+                if (plain is not null)
+                {
+                    _cache = JsonSerializer.Deserialize<Dictionary<string, string>>(Encoding.UTF8.GetString(plain)) ?? new();
+                }
             }
-        }
-        catch
-        {
-            _cache = new();
+            catch
+            {
+                _cache = new();
+            }
         }
     }
 
-    private void Save()
+    private void SaveLocked()
     {
         try
         {
@@ -55,7 +66,9 @@ public sealed class SecretStore
             var encrypted = Protect(plain);
             if (encrypted is not null)
             {
-                File.WriteAllBytes(_path, encrypted);
+                string tmp = _path + ".tmp";
+                File.WriteAllBytes(tmp, encrypted);
+                File.Move(tmp, _path, overwrite: true);
             }
         }
         catch { /* best effort */ }

@@ -12,10 +12,43 @@ namespace Yuyue.Reader;
 /// Hosts the shared TypeScript reader bundle inside WinUI 3's <see cref="WebView2"/>.
 /// Serves <c>https://yuyue.local/app/*</c> from bundled reader assets and
 /// <c>https://yuyue.local/book/*</c> directly from <see cref="YuyueCore.Serve"/> (zero temp files).
+/// Shares one prewarmed <see cref="CoreWebView2Environment"/> across all reader &amp; dictionary WebViews.
 /// </summary>
 public sealed class ReaderWebViewHost : IDisposable
 {
     public const string Origin = "https://yuyue.local";
+
+    private static readonly object EnvLock = new();
+    private static Task<CoreWebView2Environment>? _sharedEnvTask;
+    private static string? _sharedEnvDataDir;
+
+    public static Task<CoreWebView2Environment> GetSharedEnvironmentAsync(string dataDir)
+    {
+        string userDataDir = Path.Combine(dataDir, "webview2");
+        lock (EnvLock)
+        {
+            if (_sharedEnvTask is not null &&
+                string.Equals(_sharedEnvDataDir, userDataDir, StringComparison.OrdinalIgnoreCase) &&
+                !_sharedEnvTask.IsFaulted &&
+                !_sharedEnvTask.IsCanceled)
+            {
+                return _sharedEnvTask;
+            }
+            Directory.CreateDirectory(userDataDir);
+            _sharedEnvDataDir = userDataDir;
+            _sharedEnvTask = CoreWebView2Environment.CreateWithOptionsAsync(null, userDataDir, null).AsTask();
+            return _sharedEnvTask;
+        }
+    }
+
+    public static void PrewarmAsync(string dataDir)
+    {
+        _ = Task.Run(async () =>
+        {
+            try { await GetSharedEnvironmentAsync(dataDir); }
+            catch { }
+        });
+    }
 
     private readonly WebView2 _webView;
     private readonly LibraryService _library;
@@ -23,6 +56,11 @@ public sealed class ReaderWebViewHost : IDisposable
     private readonly string _readerAssetsDir;
 
     private bool _initialized;
+    private long _generation;
+
+    public WebView2 WebView => _webView;
+    public bool IsInitialized => _initialized;
+    public long Generation => _generation;
 
     public event Action<ReaderMessage>? MessageReceived;
 
@@ -38,14 +76,12 @@ public sealed class ReaderWebViewHost : IDisposable
     {
         if (_initialized) return;
 
-        var userDataDir = Path.Combine(_library.DataDir, "webview2");
-        Directory.CreateDirectory(userDataDir);
-
-        var env = await CoreWebView2Environment.CreateWithOptionsAsync(null, userDataDir, null);
+        var env = await GetSharedEnvironmentAsync(_library.DataDir);
         await _webView.EnsureCoreWebView2Async(env);
 
         var core = _webView.CoreWebView2;
         core.Settings.AreDefaultContextMenusEnabled = false;
+        core.Settings.AreBrowserAcceleratorKeysEnabled = false;
         core.Settings.IsStatusBarEnabled = false;
         core.Settings.IsZoomControlEnabled = false;
         core.Settings.IsBuiltInErrorPageEnabled = false;
@@ -60,10 +96,10 @@ public sealed class ReaderWebViewHost : IDisposable
         core.WebMessageReceived += OnWebMessageReceived;
         core.NewWindowRequested += OnNewWindowRequested;
 
-        // Windows ergonomics:
-        // 1. Mouse wheel turns pages in paginated mode (standard Windows desktop expectation).
-        // 2. Ctrl + Wheel zooms font size cleanly through native settings.
-        // 3. Right-click forwards coordinates so WinUI 3 shows a native context MenuFlyout.
+        // Windows desktop ergonomics + reliable keyboard interception when WebView2 holds focus:
+        // 1. Mouse wheel turns pages in paginated mode; Ctrl+Wheel zooms font size.
+        // 2. Right-click forwards coordinates so WinUI 3 shows a native context MenuFlyout.
+        // 3. Reader navigation/shortcut keys are forwarded to WinUI before Chromium swallows them.
         await core.AddScriptToExecuteOnDocumentCreatedAsync(@"
             (() => {
                 let lastWheel = 0;
@@ -85,6 +121,28 @@ public sealed class ReaderWebViewHost : IDisposable
                     e.preventDefault();
                     window.chrome?.webview?.postMessage({ type: 'winContext', x: e.clientX, y: e.clientY });
                 });
+                window.addEventListener('keydown', (e) => {
+                    const tag = (document.activeElement && document.activeElement.tagName) || '';
+                    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+                    const ctrl = e.ctrlKey || e.metaKey;
+                    const alt = e.altKey;
+                    const shift = e.shiftKey;
+                    const k = e.key;
+                    const c = e.code || '';
+                    if (ctrl && (k === 'c' || k === 'C' || k === 'a' || k === 'A')) return;
+                    const isCtrlShortcut = ctrl && (
+                        ['f','F','k','K','g','G','d','D','b','B','[',']','=','+','-','_',','].includes(k) ||
+                        (alt && ['t','T','n','N','ArrowUp','ArrowDown'].includes(k))
+                    );
+                    const isNavKey = !ctrl && !alt && (
+                        ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','PageUp','PageDown',' ','Escape','F11','1','2','3','4'].includes(k)
+                    );
+                    if (isCtrlShortcut || isNavKey) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        window.chrome?.webview?.postMessage({ type: 'winKey', key: k, code: c, ctrl, shift, alt });
+                    }
+                }, true);
             })();
         ");
 
@@ -94,7 +152,15 @@ public sealed class ReaderWebViewHost : IDisposable
     public void LoadSection(string bookId, uint section)
     {
         if (!_initialized) return;
-        _webView.CoreWebView2.Navigate($"{Origin}/book/{bookId}/s/{section}.html");
+        _generation++;
+        _webView.CoreWebView2.Navigate($"{Origin}/book/{bookId}/s/{section}.html?g={_generation}");
+    }
+
+    public void ClearBlank()
+    {
+        if (!_initialized) return;
+        _generation++;
+        _webView.CoreWebView2.Navigate("about:blank");
     }
 
     public Task<string> CallAsync(string script)
@@ -124,26 +190,86 @@ public sealed class ReaderWebViewHost : IDisposable
     public Task ScrollToPageAsync(int page, bool animated = false) =>
         CallAsync($"window.yy && window.yy.scrollToPage({page}, {(animated ? "true" : "false")});");
 
-    public Task ScrollToSentenceAsync(int sentence, bool animated = false) =>
-        CallAsync($"window.yy && window.yy.scrollToSentence({sentence}, {(animated ? "true" : "false")});");
-
-    public Task ScrollToAnchorAsync(string anchor, bool animated = false)
+    public Task ScrollToSentenceAsync(int sentence, bool animated = false, string? align = null)
     {
-        var escaped = JsonSerializer.Serialize(anchor);
-        return CallAsync($"window.yy && window.yy.scrollToAnchor({escaped}, {(animated ? "true" : "false")});");
+        string opts = align is "top" or "third" ? $", {{ align: '{align}' }}" : "";
+        return CallAsync($"window.yy && window.yy.scrollToSentence({sentence}, {(animated ? "true" : "false")}{opts});");
     }
 
-    public Task SetActiveAsync(int? sentence, int durationMs = 0, int elapsedMs = 0, bool playing = true)
+    public Task ScrollToAnchorAsync(string anchor, bool animated = false, string? align = null)
+    {
+        var escaped = JsonSerializer.Serialize(anchor);
+        string opts = align is "top" or "third" ? $", {{ align: '{align}' }}" : "";
+        return CallAsync($"window.yy && window.yy.scrollToAnchor({escaped}, {(animated ? "true" : "false")}{opts});");
+    }
+
+    public async Task<int> CurrentPageAsync()
+    {
+        var raw = await CallAsync("window.yy ? window.yy.currentPage() : 0");
+        return int.TryParse(raw.Trim(), out int p) ? p : 0;
+    }
+
+    public Task SetActiveAsync(int? sentence, int durationMs = 0, int elapsedMs = 0, bool playing = true, int[]? words = null)
     {
         if (sentence is null)
-        {
             return CallAsync("window.yy && window.yy.setActive(null);");
-        }
-        return CallAsync($"window.yy && window.yy.setActive({sentence.Value}, {{ durationMs: {durationMs}, elapsedMs: {elapsedMs}, playing: {(playing ? "true" : "false")} }});");
+        string wordsPart = words is { Length: >= 4 } ? $", words: {JsonSerializer.Serialize(words)}" : "";
+        return CallAsync($"window.yy && window.yy.setActive({sentence.Value}, {{ durationMs: {durationMs}, elapsedMs: {elapsedMs}, playing: {(playing ? "true" : "false")}{wordsPart} }});");
     }
 
     public Task SetPlayingAsync(bool playing) =>
         CallAsync($"window.yy && window.yy.setPlaying({(playing ? "true" : "false")});");
+
+    public Task SetUiAsync(string ui)
+    {
+        var escaped = JsonSerializer.Serialize(ui == "en" ? "en" : "zh");
+        return CallAsync($"window.yy && window.yy.setUi({escaped});");
+    }
+
+    public Task SetSourceAsync(int? sentence)
+    {
+        if (sentence is null) return CallAsync("window.yy && window.yy.setSource(null);");
+        return CallAsync($"window.yy && window.yy.setSource({sentence.Value});");
+    }
+
+    public Task SetFlagAsync(int? first, int? last = null)
+    {
+        if (first is null) return CallAsync("window.yy && window.yy.setFlag(null);");
+        return last is int l
+            ? CallAsync($"window.yy && window.yy.setFlag({first.Value}, {l});")
+            : CallAsync($"window.yy && window.yy.setFlag({first.Value});");
+    }
+
+    public Task SetUnreadAsync(IEnumerable<int>? sentences, string? tag = null)
+    {
+        if (sentences is null) return CallAsync("window.yy && window.yy.setUnread(null);");
+        var list = sentences.ToArray();
+        if (list.Length == 0) return CallAsync("window.yy && window.yy.setUnread(null);");
+        var json = JsonSerializer.Serialize(list);
+        var tagJs = tag is null ? "null" : JsonSerializer.Serialize(tag);
+        return CallAsync($"window.yy && window.yy.setUnread({json}, {tagJs});");
+    }
+
+    public Task SetBubblesAsync(IEnumerable<BubbleLine>? lines)
+    {
+        if (lines is null)
+            return CallAsync("window.yy && window.yy.setBubbles(null);");
+
+        var payload = lines.Select(b => new
+        {
+            first = b.First,
+            last = b.Last,
+            start = b.Start,
+            end = b.End,
+            who = b.Who,
+            avatar = b.Avatar,
+            color = b.Color,
+            right = b.Right,
+            choices = b.Choices,
+        });
+        var json = JsonSerializer.Serialize(payload);
+        return CallAsync($"window.yy && window.yy.setBubbles({json});");
+    }
 
     public Task SetMarksAsync(IEnumerable<Mark> marks)
     {
@@ -162,9 +288,7 @@ public sealed class ReaderWebViewHost : IDisposable
     public Task SetHitsAsync(string? query, int? sentence = null, int? nth = null)
     {
         if (string.IsNullOrEmpty(query))
-        {
             return CallAsync("window.yy && window.yy.setHits(null);");
-        }
         var q = JsonSerializer.Serialize(query);
         var cur = sentence is int s && nth is int n ? $"{{ s: {s}, nth: {n} }}" : "null";
         return CallAsync($"window.yy && window.yy.setHits({q}, {cur});");
@@ -172,6 +296,22 @@ public sealed class ReaderWebViewHost : IDisposable
 
     public Task ClearSelectionAsync() =>
         CallAsync("window.yy && window.yy.clearSelection();");
+
+    public Task SelectRangeAsync(ReaderPoint start, ReaderPoint end) =>
+        CallAsync($"window.yy && window.yy.select({{ s: {start.S}, o: {start.O} }}, {{ s: {end.S}, o: {end.O} }});");
+
+    public async Task<ReaderRect?> MarkRectAsync(string id)
+    {
+        try
+        {
+            var escaped = JsonSerializer.Serialize(id);
+            var raw = await CallAsync($"window.yy ? JSON.stringify(window.yy.markRect({escaped})) : 'null'");
+            string? unescaped = JsonSerializer.Deserialize<string>(raw);
+            if (string.IsNullOrWhiteSpace(unescaped) || unescaped == "null") return null;
+            return JsonSerializer.Deserialize<ReaderRect>(unescaped, ReaderMessage.JsonOptions);
+        }
+        catch { return null; }
+    }
 
     public Task SetLookupAsync(bool on) =>
         CallAsync($"window.yy && window.yy.setLookup({(on ? "true" : "false")});");
@@ -203,7 +343,6 @@ public sealed class ReaderWebViewHost : IDisposable
         try
         {
             var raw = await CallAsync("window.yy ? JSON.stringify(window.yy.paragraphs()) : '[]'");
-            // ExecuteScriptAsync returns a JSON-encoded string literal
             string? unescaped = JsonSerializer.Deserialize<string>(raw);
             if (string.IsNullOrWhiteSpace(unescaped)) return Array.Empty<ForeignParagraphDto>();
             return JsonSerializer.Deserialize<ForeignParagraphDto[]>(unescaped) ?? Array.Empty<ForeignParagraphDto>();
@@ -216,11 +355,34 @@ public sealed class ReaderWebViewHost : IDisposable
 
     public Task SetTranslationsAsync(IEnumerable<(int Last, string Text)>? items)
     {
+        // reader/src/main.ts:320-323 already runs relayout() inside setTranslations; no extra applySettings needed.
         if (items is null)
-            return CallAsync("if (window.yy) { window.yy.setTranslations(null); window.yy.applySettings({}); }");
+            return CallAsync("window.yy && window.yy.setTranslations(null);");
         var list = items.Select(x => new { last = x.Last, text = x.Text });
         var json = JsonSerializer.Serialize(list);
-        return CallAsync($"if (window.yy) {{ window.yy.setTranslations({json}); window.yy.applySettings({{}}); }}");
+        return CallAsync($"window.yy && window.yy.setTranslations({json});");
+    }
+
+    /// <summary>
+    /// Saves a PNG snapshot of the currently rendered page for instant-open preview (TECH.md §3).
+    /// </summary>
+    public async Task CapturePreviewPngAsync(string filePath)
+    {
+        if (!_initialized || _webView.CoreWebView2 is null) return;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+            using var mem = new InMemoryRandomAccessStream();
+            await _webView.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, mem);
+            if (mem.Size == 0) return;
+            mem.Seek(0);
+            var bytes = new byte[mem.Size];
+            await mem.ReadAsync(bytes.AsBuffer(), (uint)bytes.Length, InputStreamOptions.None);
+            string tmp = filePath + ".tmp";
+            await File.WriteAllBytesAsync(tmp, bytes);
+            File.Move(tmp, filePath, overwrite: true);
+        }
+        catch { }
     }
 
     private void OnWebResourceRequested(CoreWebView2 sender, CoreWebView2WebResourceRequestedEventArgs args)
@@ -265,7 +427,9 @@ public sealed class ReaderWebViewHost : IDisposable
                     ? "font/woff2"
                     : rel.EndsWith(".otf", StringComparison.OrdinalIgnoreCase)
                         ? "font/otf"
-                        : "font/ttf";
+                        : rel.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase)
+                            ? "font/collection"
+                            : "font/ttf";
                 args.Response = FromBytes(env, File.ReadAllBytes(full), mime);
                 return;
             }
@@ -312,11 +476,23 @@ public sealed class ReaderWebViewHost : IDisposable
 
     private void OnWebMessageReceived(CoreWebView2 sender, CoreWebView2WebMessageReceivedEventArgs args)
     {
-        var msg = ReaderMessage.Parse(args.WebMessageAsJson);
-        if (msg is not null)
+        // Guard against stale messages from a previous navigation generation
+        if (Uri.TryCreate(args.Source, UriKind.Absolute, out var srcUri))
         {
-            MessageReceived?.Invoke(msg);
+            var q = srcUri.Query;
+            int gIdx = q.IndexOf("g=", StringComparison.Ordinal);
+            if (gIdx >= 0 && long.TryParse(q[(gIdx + 2)..].Split('&')[0], out long msgGen) && msgGen != _generation)
+                return;
         }
+
+        var msg = ReaderMessage.Parse(args.WebMessageAsJson);
+        if (msg is null) return;
+        if (msg.Type == "log")
+        {
+            System.Diagnostics.Debug.WriteLine($"[ReaderJS/{msg.Level}] {msg.Message}");
+            return;
+        }
+        MessageReceived?.Invoke(msg);
     }
 
     private static void OnNewWindowRequested(CoreWebView2 sender, CoreWebView2NewWindowRequestedEventArgs args)

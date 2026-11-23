@@ -98,6 +98,18 @@ public sealed class ReaderMessage
     [JsonPropertyName("ctrl")]
     public bool? Ctrl { get; set; }
 
+    [JsonPropertyName("shift")]
+    public bool? Shift { get; set; }
+
+    [JsonPropertyName("alt")]
+    public bool? Alt { get; set; }
+
+    [JsonPropertyName("key")]
+    public string? Key { get; set; }
+
+    [JsonPropertyName("code")]
+    public string? Code { get; set; }
+
     public static ReaderMessage? Parse(string json)
     {
         try

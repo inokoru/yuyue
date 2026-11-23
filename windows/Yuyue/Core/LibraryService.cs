@@ -35,8 +35,10 @@ public sealed class DevicePrefs
     public bool ForeignSpeakOnLookup { get; set; } = true;
     public string ForeignAccent { get; set; } = "uk"; // uk | us
     public bool ForeignMarkVocab { get; set; } = true;
-    public byte GlossLevel { get; set; } = 3; // 0=关闭, 2=四级, 3=六级, 4=考研, 5=雅思, 6=GRE
+    public bool ForeignGlossEnabled { get; set; } = true;
+    public byte GlossLevel { get; set; } = 3; // 2=四级, 3=六级, 4=考研, 5=雅思, 6=GRE (0=兼容旧版关闭)
     public bool GlossVocabOnly { get; set; } = false;
+    public Dictionary<string, bool> BookTranslationsActive { get; set; } = new();
 
     // 沉浸阅读偏好（对齐 MacSettings ReadingSettings）
     public bool ImmersiveAutoEnter { get; set; } = false;
@@ -59,11 +61,64 @@ public sealed class DevicePrefs
 
     // 朗读偏好
     public string VoiceId { get; set; } = "";
+    public string VoiceIdEn { get; set; } = "";
     public double SpeechRate { get; set; } = 1.0;
     public string CloudVoiceAzureRegion { get; set; } = "eastasia";
     public bool DramaPreRenderPhone { get; set; } = false;
+    public HashSet<string> DramaPreparingBooks { get; set; } = new();
     public Dictionary<string, List<string[]>> CachedCloudVoices { get; set; } = new();
     public Dictionary<string, string> ClonedElevenLabsVoiceIds { get; set; } = new();
+    public HashSet<string> ClonedUseElevenLabs { get; set; } = new();
+    public Dictionary<string, string> CloudVoiceBaseUrls { get; set; } = new();
+    public Dictionary<string, string> CloudVoiceModels { get; set; } = new();
+    public Dictionary<string, string> CloudVoiceCustomNames { get; set; } = new();
+    public HashSet<string> CloudVoiceEnabled { get; set; } = new();
+    public HashSet<string> CloudVoiceDismissed { get; set; } = new();
+    public bool AiTierRoutingEnabled { get; set; } = true;
+    public bool DramaCloudSaveNarrator { get; set; } = true;
+    public long AiDailyLlmTokenCap { get; set; } = 0; // 0 = unlimited
+    public long AiDailyTtsCharCap { get; set; } = 0;  // 0 = unlimited
+    public Dictionary<string, string> AiProviderFastModels { get; set; } = new();
+    public List<string> PinnedFontIds { get; set; } = [];
+    public string LastHighlightStyle { get; set; } = "Yellow";
+    public bool GlobalEinkMode { get; set; } = false;
+    public bool GlobalEinkGray { get; set; } = true;
+    public double SettingsInspectorWidth { get; set; } = 304.0;
+    public double ReaderPanelWidth { get; set; } = 320.0;
+    public int ReaderWindowWidth { get; set; } = 1080;
+    public int ReaderWindowHeight { get; set; } = 740;
+    public string ReaderLastPanel { get; set; } = "";
+    public string CollectionSort { get; set; } = "custom";
+    public string QuoteShareLook { get; set; } = "paper";
+    public string QuoteShareShape { get; set; } = "card";
+    public bool QuoteShareIncludeThought { get; set; } = true;
+    public HashSet<string> DismissedTxtDoubtBooks { get; set; } = new();
+    public HashSet<string> FinishedPromptedBooks { get; set; } = new();
+    public string FeedbackDraftCategory { get; set; } = "bug";
+    public bool FeedbackAttachInfo { get; set; } = true;
+    public bool FeedbackAttachLogs { get; set; } = true;
+    public List<string> FeedbackDraftFiles { get; set; } = [];
+    public HashSet<string> RemoteAcquiredUrls { get; set; } = new();
+    public Dictionary<string, float> AudiobookLoudnessGain { get; set; } = new();
+    public Dictionary<string, string> SyncCompanionSeenTags { get; set; } = new();
+    public Dictionary<string, string> SyncCompanionSentStamps { get; set; } = new();
+    public Dictionary<string, string> SyncAudioSeenTags { get; set; } = new();
+    public Dictionary<string, string> SyncAudioSentStamps { get; set; } = new();
+
+    public string GetVoiceForLanguage(string? language)
+    {
+        if (!string.IsNullOrWhiteSpace(language) && language.StartsWith("en", StringComparison.OrdinalIgnoreCase))
+            return !string.IsNullOrWhiteSpace(VoiceIdEn) ? VoiceIdEn : VoiceId;
+        return VoiceId;
+    }
+
+    public void SetVoiceForLanguage(string? language, string voiceId)
+    {
+        if (!string.IsNullOrWhiteSpace(language) && language.StartsWith("en", StringComparison.OrdinalIgnoreCase))
+            VoiceIdEn = voiceId;
+        else
+            VoiceId = voiceId;
+    }
 
     // 笔记导出目标偏好（Obsidian / Notion / flomo / 新枝）
     public bool NotionExportOn { get; set; } = false;
@@ -114,6 +169,10 @@ public sealed class DevicePrefs
     public string AiModel { get; set; } = "deepseek-chat";
     public List<string> ConfiguredAiProviders { get; set; } = ["deepseek"];
     public Dictionary<string, string> AiProviderModels { get; set; } = new();
+    public Dictionary<string, List<string>> AiRecentModels { get; set; } = new();
+    public Dictionary<string, List<string>> CachedAiProviderModels { get; set; } = new();
+    public List<string> StarredAiModels { get; set; } = [];
+    public List<string> GlobalRecentAiModels { get; set; } = [];
     public Dictionary<string, string> AiProviderUrls { get; set; } = new();
     public Dictionary<string, string> AiCustomProviderNames { get; set; } = new();
 
@@ -143,9 +202,12 @@ public sealed class LibraryService : IDisposable
     public DevicePrefs Prefs { get; }
     public SecretStore Secrets { get; }
     public SyncService Sync { get; }
+    public CompanionUsageLedger Usage { get; }
     public CompanionClient Companion { get; }
     public BuiltInEcdict Ecdict { get; }
+    public KokoroVoiceModel Kokoro { get; }
     public LiveVoiceModel LiveVoice { get; }
+    public AudiobookWork AudiobookWork { get; }
     public CloudVoiceService CloudVoices { get; }
     public FontShelfService Fonts { get; }
     public PodcastService Podcasts { get; }
@@ -158,7 +220,7 @@ public sealed class LibraryService : IDisposable
 
     private readonly string _prefsPath;
 
-    public static readonly string[] SupportedExtensions = [".epub", ".txt", ".pdf", ".mobi", ".azw3"];
+    public static readonly string[] SupportedExtensions = [".epub", ".txt", ".pdf", ".mobi", ".azw3", ".azw", ".prc"];
 
     public LibraryService(string? customDataDir = null)
     {
@@ -188,8 +250,15 @@ public sealed class LibraryService : IDisposable
             catch { }
             SavePrefs();
         }
+        Usage = new CompanionUsageLedger(DataDir, () => Prefs.AiDailyLlmTokenCap, () => Prefs.AiDailyTtsCharCap);
         Ecdict = new BuiltInEcdict();
+        Kokoro = new KokoroVoiceModel(Core, DataDir, (langKey, vid) =>
+        {
+            Prefs.SetVoiceForLanguage(langKey, vid);
+            SavePrefs();
+        });
         LiveVoice = new LiveVoiceModel(Core, DataDir);
+        AudiobookWork = new AudiobookWork(Core, DataDir);
         CloudVoices = new CloudVoiceService(this);
         Fonts = new FontShelfService(Core.FontsDir());
         Sync = new SyncService(this);
@@ -384,6 +453,7 @@ public sealed class LibraryService : IDisposable
     }
 
     // Sections & Serving
+    public IReadOnlyList<string> GetSentences(string bookId, uint section) => Core.Sentences(bookId, section);
     public IReadOnlyList<string> GetSpokenSentences(string bookId, uint section)
     {
         try { return Core.SpokenSentences(bookId, section); }
@@ -404,6 +474,9 @@ public sealed class LibraryService : IDisposable
 
     public void Dispose()
     {
+        Kokoro.CancelDownload();
+        KokoroEngine.Instance.CloseSession();
+        AudiobookWork.Dispose();
         RecordingShare.Dispose();
         SystemIntegration.Dispose();
         WatchedFolder.Dispose();

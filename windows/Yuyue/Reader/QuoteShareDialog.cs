@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using WinRT.Interop;
+using Yuyue.Core;
 using Yuyue.Design;
 
 namespace Yuyue.Reader;
@@ -17,20 +18,23 @@ namespace Yuyue.Reader;
 /// <summary>
 /// 1:1 port of <c>apple/Yuyue/Library/QuoteShare.swift</c>:
 /// 4 color looks (<c>封面色 / 纸本 / 素白 / 暗黑</c>), 3 aspect shapes (<c>竖图 / 方图 / 横图</c>),
-/// <c>带上想法</c> switch, mini book cover in footer, and 3 actions (<c>纯文字 / 存图 / 复制图片</c>).
+/// <c>带上想法</c> switch, chapter subtitle, persisted preferences, long-quote scaling,
+/// mini book cover in footer, and 3 actions (<c>纯文字 / 存图 / 复制图片</c>).
 /// </summary>
 public static class QuoteShareDialog
 {
     public static async Task ShowAsync(
         Window ownerWindow, XamlRoot xamlRoot,
-        string quote, string? thought, string bookTitle, string? author, string? coverPath = null)
+        string quote, string? thought, string bookTitle, string? author, string? coverPath = null,
+        string? chapter = null, LibraryService? library = null)
     {
         bool darkUi = ThemeHelper.IsDark(xamlRoot.Content is FrameworkElement fe ? fe.ActualTheme : ElementTheme.Light);
         var uiPalette = ThemeHelper.Palette(darkUi);
+        var prefs = (library ?? App.CurrentApp.Library)?.Prefs;
 
-        string look = "kami";     // cover | kami | plain | dark
-        string shape = "tall";    // tall | square | wide
-        bool includeThought = !string.IsNullOrWhiteSpace(thought);
+        string look = prefs?.QuoteShareLook is "cover" or "kami" or "plain" or "dark" ? prefs.QuoteShareLook : "kami";
+        string shape = prefs?.QuoteShareShape is "tall" or "square" or "wide" ? prefs.QuoteShareShape : "tall";
+        bool includeThought = !string.IsNullOrWhiteSpace(thought) && (prefs?.QuoteShareIncludeThought ?? true);
 
         Color coverTone = Color.FromArgb(255, 58, 72, 92);
         if (!string.IsNullOrEmpty(coverPath) && File.Exists(coverPath))
@@ -107,12 +111,16 @@ public static class QuoteShareDialog
             });
 
             var bodyStack = new StackPanel { Spacing = 12, VerticalAlignment = VerticalAlignment.Center };
+            string trimmedQuote = quote.Trim();
+            double baseQuoteSize = shape == "wide" ? 14.5 : 15.5;
+            if (trimmedQuote.Length > 260) baseQuoteSize -= 2.5;
+            else if (trimmedQuote.Length > 140) baseQuoteSize -= 1.5;
             bodyStack.Children.Add(new TextBlock
             {
-                Text = quote.Trim(),
+                Text = trimmedQuote,
                 FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
-                FontSize = shape == "wide" ? 14.5 : 15.5,
-                LineHeight = shape == "wide" ? 24 : 26,
+                FontSize = baseQuoteSize,
+                LineHeight = Math.Round(baseQuoteSize * 1.65),
                 Foreground = ThemeHelper.Brush(ink),
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -170,11 +178,12 @@ public static class QuoteShareDialog
                 MaxLines = 1,
                 TextTrimming = TextTrimming.CharacterEllipsis,
             });
-            if (!string.IsNullOrWhiteSpace(author))
+            string subCite = string.Join(" · ", new[] { author, chapter }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            if (!string.IsNullOrWhiteSpace(subCite))
             {
                 citeStack.Children.Add(new TextBlock
                 {
-                    Text = author,
+                    Text = subCite,
                     FontSize = 10,
                     Foreground = ThemeHelper.Brush(ink2),
                     MaxLines = 1,
@@ -245,7 +254,13 @@ public static class QuoteShareDialog
             };
             ToolTipService.SetToolTip(b, lbl);
             string key = k;
-            b.Click += (_, _) => { look = key; SyncOptionVisuals(); RebuildCard(); };
+            b.Click += (_, _) =>
+            {
+                look = key;
+                if (prefs is not null) { prefs.QuoteShareLook = key; (library ?? App.CurrentApp.Library)?.SavePrefs(); }
+                SyncOptionVisuals();
+                RebuildCard();
+            };
             dotBtns.Add((key, ring));
             dotsRow.Children.Add(b);
         }
@@ -270,7 +285,13 @@ public static class QuoteShareDialog
                 UseSystemFocusVisuals = false,
             };
             string key = sk;
-            sb.Click += (_, _) => { shape = key; SyncOptionVisuals(); RebuildCard(); };
+            sb.Click += (_, _) =>
+            {
+                shape = key;
+                if (prefs is not null) { prefs.QuoteShareShape = key; (library ?? App.CurrentApp.Library)?.SavePrefs(); }
+                SyncOptionVisuals();
+                RebuildCard();
+            };
             Grid.SetColumn(sb, i);
             shapeSeg.Children.Add(sb);
             shapeBtns.Add((key, sb));
@@ -324,7 +345,12 @@ public static class QuoteShareDialog
             };
             thRow.Children.Add(new TextBlock { Text = "带上想法", FontSize = 12.5, Foreground = ThemeHelper.Brush(uiPalette.T1), VerticalAlignment = VerticalAlignment.Center });
             var sw = new ToggleSwitch { IsOn = includeThought, HorizontalAlignment = HorizontalAlignment.Right, MinWidth = 0, OnContent = "", OffContent = "" };
-            sw.Toggled += (_, _) => { includeThought = sw.IsOn; RebuildCard(); };
+            sw.Toggled += (_, _) =>
+            {
+                includeThought = sw.IsOn;
+                if (prefs is not null) { prefs.QuoteShareIncludeThought = includeThought; (library ?? App.CurrentApp.Library)?.SavePrefs(); }
+                RebuildCard();
+            };
             thRow.Children.Add(sw);
             rootStack.Children.Add(thRow);
         }

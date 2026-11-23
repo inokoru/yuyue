@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices.WindowsRuntime;
+using System.Text;
 using UglyToad.PdfPig.DocumentLayoutAnalysis.TextExtractor;
 using Windows.Data.Pdf;
 using Windows.Graphics.Imaging;
@@ -8,6 +9,15 @@ using Yuyue.Core;
 
 namespace Yuyue.Pdf;
 
+/// <summary>Normalized (0..1) top-down glyph rectangle on a PDF page, mapped to UTF-16 offsets in <see cref="PdfPageLayout.Text"/>.</summary>
+public sealed record PdfGlyphRect(int CharStart, int CharEnd, double X, double Y, double W, double H);
+
+/// <summary>Normalized (0..1) top-down line bounding box produced by merging adjacent glyphs on the same line.</summary>
+public sealed record PdfLineRect(double X, double Y, double W, double H);
+
+/// <summary>Reading-order extracted text and exact normalized glyph geometry for a single 0-based PDF page.</summary>
+public sealed record PdfPageLayout(int PageIndex, string Text, PdfGlyphRect[] Glyphs);
+
 /// <summary>
 /// Extracts PDF metadata, character count, per-page reading text (via PdfPig),
 /// and page-1 JPEG cover (via WinRT <see cref="PdfDocument"/>) for <see cref="YuyueCore.SetPdfInfo"/>
@@ -15,10 +25,74 @@ namespace Yuyue.Pdf;
 /// </summary>
 public static class PdfInfoReader
 {
+    private static readonly string[] JunkTitlePrefixes =
+    [
+        "microsoft word", "microsoft powerpoint", "microsoft excel",
+        "untitled", "document", "slide ", "presentation", "wps",
+        "acrobat", "pdf document", "scanned", "image", "print",
+    ];
+
+    private static readonly HashSet<string> JunkAuthors = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "administrator", "admin", "user", "owner", "pc", "windows", "author",
+        "unknown", "lenovo", "dell", "hp", "asus", "acer", "microsoft", "adobe", "wps",
+    };
+
+    internal static string? SanitizePdfTitle(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        string t = raw.Trim();
+        if (t.Length < 2 || t.Length > 180) return null;
+        string lower = t.ToLowerInvariant();
+        if (lower.EndsWith(".pdf") || lower.EndsWith(".doc") || lower.EndsWith(".docx")
+            || lower.EndsWith(".ppt") || lower.EndsWith(".pptx") || lower.EndsWith(".wps")
+            || lower.EndsWith(".tex") || lower.EndsWith(".indd"))
+            return null;
+        if (JunkTitlePrefixes.Any(p => lower.StartsWith(p, StringComparison.Ordinal)))
+            return null;
+        if (t.All(c => char.IsDigit(c) || c is '-' or '_' or '.' or ' '))
+            return null;
+        return t;
+    }
+
+    internal static string? SanitizePdfAuthor(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        string a = raw.Trim();
+        if (a.Length < 2 || a.Length > 80) return null;
+        if (JunkAuthors.Contains(a)) return null;
+        if (a.Contains(":\\") || a.StartsWith("/Users/", StringComparison.OrdinalIgnoreCase)) return null;
+        return a;
+    }
+
+    public static string DetectLanguage(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "zh-Hans";
+        int cjk = 0, latin = 0;
+        foreach (char c in text)
+        {
+            if (c >= 0x4E00 && c <= 0x9FFF) cjk++;
+            else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) latin++;
+        }
+        return latin > cjk * 2 ? "en-US" : "zh-Hans";
+    }
+
     public static async Task<PdfInfo> ReadAsync(string filePath)
     {
         var storageFile = await StorageFile.GetFileFromPathAsync(filePath);
-        var winPdf = await PdfDocument.LoadFromFileAsync(storageFile);
+        PdfDocument winPdf;
+        try
+        {
+            winPdf = await PdfDocument.LoadFromFileAsync(storageFile);
+        }
+        catch (Exception ex) when (ex.HResult == unchecked((int)0x80070056) || ex.Message.Contains("password", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("这份 PDF 受密码保护，语阅无法直接打开。请先解除密码后再导入。", ex);
+        }
+
+        if (winPdf.IsPasswordProtected)
+            throw new InvalidOperationException("这份 PDF 受密码保护，语阅无法直接打开。请先解除密码后再导入。");
+
         uint pageCount = winPdf.PageCount;
         if (pageCount == 0) throw new InvalidOperationException("PDF 文件没有页面");
 
@@ -32,10 +106,9 @@ public static class PdfInfoReader
             await Task.Run(() =>
             {
                 using var pig = UglyToad.PdfPig.PdfDocument.Open(filePath);
-                if (!string.IsNullOrWhiteSpace(pig.Information.Title))
-                    title = pig.Information.Title.Trim();
-                if (!string.IsNullOrWhiteSpace(pig.Information.Author))
-                    authors = [pig.Information.Author.Trim()];
+                title = SanitizePdfTitle(pig.Information.Title);
+                if (SanitizePdfAuthor(pig.Information.Author) is string cleanAuthor)
+                    authors = [cleanAuthor];
 
                 int sample = Math.Min(pig.NumberOfPages, 100);
                 long chars = 0;
@@ -94,22 +167,183 @@ public static class PdfInfoReader
     }
 
     /// <summary>
-    /// Extracts reading-order text from a 0-based PDF page index.
+    /// Extracts reading-order text AND exact normalized top-down glyph geometry for a 0-based PDF page,
+    /// so <see cref="YuyueCoreMethods.PageSentences"/>, drag selection, and persistent marks share identical UTF-16 offsets.
     /// </summary>
-    public static string ExtractPageText(string filePath, int pageIndexZeroBased)
+    public static PdfPageLayout ExtractPageLayout(string filePath, int pageIndexZeroBased)
     {
         try
         {
             using var pig = UglyToad.PdfPig.PdfDocument.Open(filePath);
             int p = pageIndexZeroBased + 1;
-            if (p < 1 || p > pig.NumberOfPages) return "";
-            return ContentOrderTextExtractor.GetText(pig.GetPage(p)) ?? "";
+            if (p < 1 || p > pig.NumberOfPages)
+                return new PdfPageLayout(pageIndexZeroBased, "", []);
+
+            var page = pig.GetPage(p);
+            double pw = page.Width > 0 ? page.Width : 612.0;
+            double ph = page.Height > 0 ? page.Height : 792.0;
+
+            var sb = new StringBuilder();
+            var glyphs = new List<PdfGlyphRect>();
+            double prevEndX = double.NaN;
+            double prevBaseY = double.NaN;
+            double prevHeight = 10.0;
+
+            static bool IsCjkOrFullWidth(char ch) =>
+                (ch >= '\u2E80' && ch <= '\u9FFF') ||
+                (ch >= '\uF900' && ch <= '\uFAFF') ||
+                (ch >= '\u3000' && ch <= '\u303F') ||
+                (ch >= '\uFF00' && ch <= '\uFFEF') ||
+                ch is '“' or '”' or '‘' or '’' or '—' or '…';
+
+            foreach (var letter in page.Letters)
+            {
+                string val = letter.Value;
+                if (string.IsNullOrEmpty(val)) continue;
+
+                var rect = letter.GlyphRectangle;
+                double baseY = letter.StartBaseLine.Y;
+                double startX = Math.Min(rect.Left, letter.StartBaseLine.X);
+                double endX = Math.Max(rect.Right, letter.EndBaseLine.X);
+                double h = Math.Max(rect.Height, letter.PointSize > 0 ? letter.PointSize : 10.0);
+                double w = Math.Max(endX - startX, h * 0.25);
+                double top = Math.Max(rect.Top, baseY + h * 0.82);
+
+                if (!double.IsNaN(prevBaseY))
+                {
+                    double dy = Math.Abs(baseY - prevBaseY);
+                    double lineTol = Math.Max(prevHeight, h) * 0.55;
+                    if (dy > lineTol)
+                    {
+                        if (sb.Length > 0 && sb[^1] != '\n')
+                            sb.Append('\n');
+                    }
+                    else
+                    {
+                        double dx = startX - prevEndX;
+                        bool cjk = sb.Length > 0 && (IsCjkOrFullWidth(sb[^1]) || IsCjkOrFullWidth(val[0]));
+                        double spaceTol = Math.Max(prevHeight, h) * (cjk ? 1.15 : 0.22);
+                        if (dx > spaceTol && sb.Length > 0 && !char.IsWhiteSpace(sb[^1]) && !char.IsWhiteSpace(val[0]))
+                            sb.Append(' ');
+                    }
+                }
+
+                int charStart = sb.Length;
+                sb.Append(val);
+                int charEnd = sb.Length;
+
+                double nx = Math.Clamp(startX / pw, 0.0, 1.0);
+                double ny = Math.Clamp((ph - top) / ph, 0.0, 1.0);
+                double nw = Math.Clamp(w / pw, 0.001, 1.0 - nx);
+                double nh = Math.Clamp(h / ph, 0.004, 1.0 - ny);
+                glyphs.Add(new PdfGlyphRect(charStart, charEnd, nx, ny, nw, nh));
+
+                prevEndX = endX;
+                prevBaseY = baseY;
+                prevHeight = h;
+            }
+
+            if (glyphs.Count > 0)
+                return new PdfPageLayout(pageIndexZeroBased, sb.ToString(), glyphs.ToArray());
+
+            string fallback = ContentOrderTextExtractor.GetText(page) ?? "";
+            return new PdfPageLayout(pageIndexZeroBased, fallback, []);
         }
         catch
         {
-            return "";
+            return new PdfPageLayout(pageIndexZeroBased, "", []);
         }
     }
+
+    /// <summary>
+    /// Merges adjacent glyph rects within UTF-16 range [<paramref name="startChar"/>, <paramref name="endChar"/>)
+    /// into clean line-level normalized rectangles for highlights, underlines, and speech tracking.
+    /// </summary>
+    public static List<PdfLineRect> MergeLineRects(PdfPageLayout layout, int startChar, int endChar)
+    {
+        var result = new List<PdfLineRect>();
+        if (layout.Glyphs.Length == 0 || endChar <= startChar) return result;
+
+        double curX0 = 0, curY0 = 0, curX1 = 0, curY1 = 0;
+        bool hasCur = false;
+
+        foreach (var g in layout.Glyphs)
+        {
+            if (g.CharEnd <= startChar) continue;
+            if (g.CharStart >= endChar) break;
+
+            double gx0 = g.X, gy0 = g.Y, gx1 = g.X + g.W, gy1 = g.Y + g.H;
+            if (!hasCur)
+            {
+                curX0 = gx0; curY0 = gy0; curX1 = gx1; curY1 = gy1;
+                hasCur = true;
+                continue;
+            }
+
+            double curH = Math.Max(curY1 - curY0, 0.006);
+            double midCur = (curY0 + curY1) * 0.5;
+            double midNew = (gy0 + gy1) * 0.5;
+            bool sameLine = Math.Abs(midNew - midCur) <= Math.Max(curH, g.H) * 0.75
+                            && gx0 >= curX0 - 0.01
+                            && gx0 - curX1 <= Math.Max(curH * 3.5, 0.08);
+            if (sameLine)
+            {
+                curX0 = Math.Min(curX0, gx0);
+                curY0 = Math.Min(curY0, gy0);
+                curX1 = Math.Max(curX1, gx1);
+                curY1 = Math.Max(curY1, gy1);
+            }
+            else
+            {
+                result.Add(new PdfLineRect(curX0, curY0, Math.Max(0.002, curX1 - curX0), Math.Max(0.005, curY1 - curY0)));
+                curX0 = gx0; curY0 = gy0; curX1 = gx1; curY1 = gy1;
+            }
+        }
+
+        if (hasCur)
+            result.Add(new PdfLineRect(curX0, curY0, Math.Max(0.002, curX1 - curX0), Math.Max(0.005, curY1 - curY0)));
+
+        return result;
+    }
+
+    /// <summary>Hit-tests a normalized (0..1) page point against extracted glyph boxes, returning its glyph index or -1.</summary>
+    public static int HitTestGlyph(PdfPageLayout layout, double normX, double normY)
+    {
+        if (layout.Glyphs.Length == 0) return -1;
+
+        int bestIdx = -1;
+        double bestScore = double.MaxValue;
+
+        for (int i = 0; i < layout.Glyphs.Length; i++)
+        {
+            var g = layout.Glyphs[i];
+            if (normX >= g.X - 0.004 && normX <= g.X + g.W + 0.004 &&
+                normY >= g.Y - 0.006 && normY <= g.Y + g.H + 0.006)
+            {
+                return i;
+            }
+
+            double cx = g.X + g.W * 0.5;
+            double cy = g.Y + g.H * 0.5;
+            double dy = Math.Abs(normY - cy);
+            double dx = Math.Abs(normX - cx);
+            // Weight vertical distance strongly so dragging selects cleanly line-by-line
+            double score = dy * 4.5 + dx;
+            if (score < bestScore)
+            {
+                bestScore = score;
+                bestIdx = i;
+            }
+        }
+
+        return bestScore < 0.25 ? bestIdx : -1;
+    }
+
+    /// <summary>
+    /// Extracts reading-order text from a 0-based PDF page index.
+    /// </summary>
+    public static string ExtractPageText(string filePath, int pageIndexZeroBased) =>
+        ExtractPageLayout(filePath, pageIndexZeroBased).Text;
 
     public static IReadOnlyList<(string Title, int PageZeroBased, int Level)> ExtractOutline(string filePath)
     {
@@ -135,24 +369,27 @@ public static class PdfInfoReader
         return list;
     }
 
-    public static IReadOnlyList<(int PageZeroBased, string Snippet)> SearchText(string filePath, string query)
+    public static IReadOnlyList<(int PageZeroBased, int CharOffset, int MatchLen, string Snippet)> SearchText(string filePath, string query)
     {
-        var hits = new List<(int, string)>();
+        var hits = new List<(int, int, int, string)>();
         if (string.IsNullOrWhiteSpace(query)) return hits;
         string q = query.Trim();
         try
         {
             using var pig = UglyToad.PdfPig.PdfDocument.Open(filePath);
-            for (int i = 1; i <= pig.NumberOfPages && hits.Count < 80; i++)
+            for (int i = 1; i <= pig.NumberOfPages && hits.Count < 350; i++)
             {
                 string text = ContentOrderTextExtractor.GetText(pig.GetPage(i)) ?? "";
-                int idx = text.IndexOf(q, StringComparison.OrdinalIgnoreCase);
-                if (idx >= 0)
+                int pos = 0;
+                while (pos < text.Length && hits.Count < 350)
                 {
+                    int idx = text.IndexOf(q, pos, StringComparison.OrdinalIgnoreCase);
+                    if (idx < 0) break;
                     int start = Math.Max(0, idx - 24);
                     int len = Math.Min(text.Length - start, q.Length + 56);
                     string snippet = text.Substring(start, len).Replace('\r', ' ').Replace('\n', ' ').Trim();
-                    hits.Add((i - 1, snippet));
+                    hits.Add((i - 1, idx, q.Length, snippet));
+                    pos = idx + Math.Max(1, q.Length);
                 }
             }
         }

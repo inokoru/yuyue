@@ -8,6 +8,8 @@ using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Microsoft.UI.Xaml.Shapes;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Data.Pdf;
 using Windows.Graphics.Imaging;
 using Windows.Storage;
@@ -35,6 +37,7 @@ public sealed partial class PdfReaderWindow : Window
     private readonly BookDetail _detail;
     private readonly AudioPlayer _audio;
     private readonly DispatcherTimer _readingTimer;
+    private readonly DispatcherTimer _sleepTimer;
     private readonly DispatcherTimer _searchDebounce;
 
     private PdfDocument? _doc;
@@ -48,16 +51,33 @@ public sealed partial class PdfReaderWindow : Window
     private bool _showOpen;
     private string? _sideMode; // toc | notes | search
     private string _searchQuery = "";
+    private IReadOnlyList<(int PageZeroBased, int CharOffset, int MatchLen, string Snippet)> _searchHits = [];
+    private int _searchHitIndex = -1;
+    private (int Page, int Start, int Len)? _activeSearchHighlight;
     private DateTime _lastWheelTurnUtc = DateTime.MinValue;
 
     private IReadOnlyList<(string Title, int PageIndex, int Level)> _outline = [];
     private readonly List<Image> _continuousImages = [];
+    private readonly List<Canvas> _continuousOverlays = [];
     private readonly HashSet<int> _renderedContinuous = [];
+
+    // Page text geometry, inline mark overlays & drag-selection state (supports cross-page marks)
+    private readonly Dictionary<int, PdfPageLayout> _layoutCache = new();
+    private readonly HashSet<int> _loadingLayouts = [];
+    private int _selPage = -1;
+    private int _selEndPage = -1;
+    private int _selStart = -1;
+    private int _selEnd = -1;
+    private int _selAnchorGlyph = -1;
+    private bool _selDragging;
+    private Mark? _editingMark;
+    private Canvas? _activeDragCanvas;
 
     // TTS state
     private readonly Dictionary<int, PageSentence[]> _sentenceCache = new();
     private PageSentence[] _activeSentences = [];
     private int _activeSentenceIndex = -1;
+    private int _listeningPage = -1;
     private bool _isListening;
     private bool _pendingAutoListen;
     private int _sleepMode; // 0=off, -2=sentence, -1=page, >0=minutes
@@ -79,7 +99,8 @@ public sealed partial class PdfReaderWindow : Window
         else
             _layoutMode = string.IsNullOrEmpty(_library.Prefs.PdfLayout) ? "scroll" : _library.Prefs.PdfLayout;
 
-        _nightPaper = _library.Prefs.PdfNightBooks.Contains(bookId) || _library.Prefs.PdfNight;
+        // Per-book night mode isolation (toggling for one PDF never forces night mode on other PDFs)
+        _nightPaper = _library.Prefs.PdfNightBooks.Contains(bookId);
 
         InitializeComponent();
         Title = _detail.Summary.Title;
@@ -87,14 +108,34 @@ public sealed partial class PdfReaderWindow : Window
         ThemeHelper.ResizeWindow(this, 1080, 760);
         SetTitleBar(TitleDragRegion);
         ThemeHelper.ApplyElevation(PdfSidePanel, PageShadowReceiver, 16f);
+
+        SidePanelResizeHandle.MinWidthLimit = 286.0;
+        SidePanelResizeHandle.DefaultWidth = 334.0;
+        SidePanelResizeHandle.GetCurrentWidth = () => SidePanelColumn.Width.Value;
+        SidePanelResizeHandle.GetMaxWidth = () => Math.Max(286.0, Math.Min(554.0, (RootGrid.ActualWidth > 0 ? RootGrid.ActualWidth : 1080.0) * 0.50));
+        SidePanelResizeHandle.ApplyWidth = w =>
+        {
+            SidePanelColumn.Width = new GridLength(w);
+            if (_layoutMode != "scroll") UpdatePagedFitSize();
+        };
+        SidePanelResizeHandle.CommitWidth = w =>
+        {
+            _library.Prefs.ReaderPanelWidth = Math.Max(272.0, w - 14.0);
+            _library.SavePrefs();
+        };
         ThemeHelper.ApplyElevation(PdfCapsule, PageShadowReceiver, 14f);
+        ThemeHelper.ApplyElevation(PdfSelectionCard, PageShadowReceiver, 16f);
         ThemeHelper.ApplyElevation(ToastBanner, PageShadowReceiver, 12f);
+
+        AttachOverlayEvents(SinglePageOverlay, () => _currentPage);
+        AttachOverlayEvents(SecondPageOverlay, () => _currentPage + 1);
 
         _audio = new AudioPlayer(_library);
         _audio.SetRate(_library.Prefs.SpeechRate);
-        _audio.SetVoice(_library.Prefs.VoiceId);
+        _audio.SetVoice(_library.Prefs.GetVoiceForLanguage(_detail.Summary.Language));
         _audio.SentenceFinished += OnAudioSentenceFinished;
         _audio.PlayStateChanged += OnAudioPlayStateChanged;
+        _audio.MarkHeardRequested += OnAudioMarkHeardRequested;
 
         _readingTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         _readingTimer.Tick += (_, _) =>
@@ -102,16 +143,24 @@ public sealed partial class PdfReaderWindow : Window
             try
             {
                 _library.AddTime(_bookId, 0, _isListening ? 0u : 30u, _isListening ? 30u : 0u);
-                if (_sleepUntilUtc is DateTime until && DateTime.UtcNow >= until)
-                {
-                    _sleepUntilUtc = null;
-                    _sleepMode = 0;
-                    StopListening();
-                }
             }
             catch { }
         };
         _readingTimer.Start();
+
+        _sleepTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _sleepTimer.Tick += (_, _) =>
+        {
+            if (_sleepUntilUtc is DateTime until && DateTime.UtcNow >= until)
+            {
+                _sleepUntilUtc = null;
+                _sleepMode = 0;
+                _sleepTimer.Stop();
+                StopListening();
+                try { _library.AddBookmark(_bookId, 0, (uint)Math.Max(0, _currentPage)); } catch { }
+                ShowBriefToast($"睡眠定时已到，已记下第 {_currentPage + 1} 页");
+            }
+        };
 
         _searchDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         _searchDebounce.Tick += async (_, _) =>
@@ -137,6 +186,15 @@ public sealed partial class PdfReaderWindow : Window
         UpdateCapsuleState();
     }
 
+    public void ReloadAfterSnapshotRestore()
+    {
+        ApplyTintAndChrome();
+        RefreshPageOverlay(_currentPage);
+        if (_layoutMode == "double" && _currentPage + 1 < _pageCount)
+            RefreshPageOverlay(_currentPage + 1);
+        if (!string.IsNullOrEmpty(_sideMode)) RenderSidePanel();
+    }
+
     public void JumpToPage(int pageZeroBased)
     {
         if (_pageCount <= 0) return;
@@ -144,6 +202,10 @@ public sealed partial class PdfReaderWindow : Window
     }
 
     public void TriggerListen() => StartListeningCurrentPage(0);
+
+#if DEBUG
+    public void OpenDebugSidePanel(string panel) => ToggleSidePanel(panel);
+#endif
 
     public void ApplyTintAndChrome()
     {
@@ -188,10 +250,13 @@ public sealed partial class PdfReaderWindow : Window
         CapsulePlayBtn.Content = YYIcons.Make(_isListening && _audio.IsPlaying ? "pause" : "play", 13, new SolidColorBrush(Colors.White), filled: true);
 
         ToastCheckIcon.Content = YYIcons.Make("checkmark", 9.5, new SolidColorBrush(Colors.White));
+        PdfSelDeleteBtn.Content = YYIcons.Make("trash", 12, ThemeHelper.Brush(p.Danger));
+        RefreshVisibleOverlays();
         ToastUndoBtn.Content = YYIcons.Make("arrow-undo", 11.5, t1);
 
         UpdateCapsuleState();
         ThemeHelper.ConfigureTitleBar(this, dark);
+        L10n.ApplyTree(RootGrid);
     }
 
     private void UpdateCapsuleState()
@@ -202,19 +267,19 @@ public sealed partial class PdfReaderWindow : Window
             int cur = Math.Clamp(_activeSentenceIndex + 1, 1, _activeSentences.Length);
             int remSentences = Math.Max(0, _activeSentences.Length - cur);
             int minsLeft = Math.Max(1, (int)Math.Ceiling(remSentences * 3.8 / 60.0 / Math.Max(0.5, _library.Prefs.SpeechRate)));
-            CapsuleTitleText.Text = $"第 {_currentPage + 1} 页 · 第 {cur} / {_activeSentences.Length} 句";
-            CapsuleSubText.Text = $"这一页还剩 {minsLeft} 分钟 · {_library.Prefs.SpeechRate:0.#}×";
+            CapsuleTitleText.Text = L10n.T($"第 {_currentPage + 1} 页 · 第 {cur} / {_activeSentences.Length} 句");
+            CapsuleSubText.Text = L10n.T($"这一页还剩 {minsLeft} 分钟 · {_library.Prefs.SpeechRate:0.#}×");
         }
         else
         {
             string pageRange = (_layoutMode == "double" && _currentPage + 1 < _pageCount)
                 ? $"第 {_currentPage + 1}–{_currentPage + 2} / {_pageCount} 页"
                 : $"第 {_currentPage + 1} / {_pageCount} 页";
-            CapsuleTitleText.Text = pageRange;
-            CapsuleSubText.Text = "点播放从这一页读起";
+            CapsuleTitleText.Text = L10n.T(pageRange);
+            CapsuleSubText.Text = L10n.T("点播放从这一页读起");
         }
-        CapsulePrevBtn.IsEnabled = _isListening ? _activeSentenceIndex > 0 : _currentPage > 0;
-        CapsuleNextBtn.IsEnabled = _isListening ? _activeSentenceIndex + 1 < _activeSentences.Length : _currentPage + 1 < _pageCount;
+        CapsulePrevBtn.IsEnabled = _isListening ? (_activeSentenceIndex > 0 || _currentPage > 0) : _currentPage > 0;
+        CapsuleNextBtn.IsEnabled = _isListening ? (_activeSentenceIndex + 1 < _activeSentences.Length || _currentPage + 1 < _pageCount) : _currentPage + 1 < _pageCount;
     }
 
     private async Task LoadDocumentAsync(uint? startPage)
@@ -359,11 +424,18 @@ public sealed partial class PdfReaderWindow : Window
 
             SinglePageImage.Width = displayW;
             SinglePageImage.Height = displayW * aspect;
+            SinglePageOverlay.Width = displayW;
+            SinglePageOverlay.Height = displayW * aspect;
+            EnsurePageLayoutAsync(_currentPage);
             if (twoUp)
             {
                 SecondPageImage.Width = displayW;
                 SecondPageImage.Height = displayW * aspect;
+                SecondPageOverlay.Width = displayW;
+                SecondPageOverlay.Height = displayW * aspect;
+                EnsurePageLayoutAsync(_currentPage + 1);
             }
+            RefreshVisibleOverlays();
         }
         catch { }
     }
@@ -372,7 +444,9 @@ public sealed partial class PdfReaderWindow : Window
     {
         ContinuousStack.Children.Clear();
         _continuousImages.Clear();
+        _continuousOverlays.Clear();
         _renderedContinuous.Clear();
+        HidePdfSelectionCard();
         if (_doc is null) return;
 
         double baseW = Math.Clamp((CanvasHost.ActualWidth > 0 ? CanvasHost.ActualWidth : 940) - 100, 440, 880) * _zoom;
@@ -387,16 +461,25 @@ public sealed partial class PdfReaderWindow : Window
         Color hairline = _nightPaper ? Color.FromArgb(24, 255, 255, 255) : Color.FromArgb(20, 0, 0, 0);
         for (int i = 0; i < _pageCount; i++)
         {
-            var img = new Image { Width = baseW, Height = baseW * defaultAspect, Stretch = Stretch.Uniform };
+            double pageH = baseW * defaultAspect;
+            var img = new Image { Width = baseW, Height = pageH, Stretch = Stretch.Uniform };
+            var overlay = new Canvas { Width = baseW, Height = pageH, Background = new SolidColorBrush(Colors.Transparent) };
             _continuousImages.Add(img);
+            _continuousOverlays.Add(overlay);
             int pageIdx = i;
+            AttachOverlayEvents(overlay, () => pageIdx);
+
+            var pageGrid = new Grid { Width = baseW, Height = pageH };
+            pageGrid.Children.Add(img);
+            pageGrid.Children.Add(overlay);
+
             var frame = new Border
             {
                 BorderBrush = ThemeHelper.Brush(hairline),
                 BorderThickness = new Thickness(0, 0, 0, i + 1 < _pageCount ? 1 : 0),
                 Padding = new Thickness(0, 0, 0, 12),
                 ContextFlyout = BuildPageContextMenu(pageIdx),
-                Child = img,
+                Child = pageGrid,
             };
             ContinuousStack.Children.Add(frame);
         }
@@ -410,10 +493,14 @@ public sealed partial class PdfReaderWindow : Window
         int to = Math.Min(_pageCount - 1, centerPage + 3);
         for (int i = from; i <= to; i++)
         {
+            EnsurePageLayoutAsync(i);
             if (!_renderedContinuous.Add(i)) continue;
             var bmp = await RenderPageBitmapAsync(i, _zoom);
             if (bmp is not null && i < _continuousImages.Count)
+            {
                 _continuousImages[i].Source = bmp;
+                RefreshPageOverlay(i);
+            }
         }
     }
 
@@ -608,7 +695,6 @@ public sealed partial class PdfReaderWindow : Window
         sw.Toggled += async (_, _) =>
         {
             _nightPaper = sw.IsOn;
-            _library.Prefs.PdfNight = _nightPaper;
             if (_nightPaper) _library.Prefs.PdfNightBooks.Add(_bookId);
             else _library.Prefs.PdfNightBooks.Remove(_bookId);
             _library.SavePrefs();
@@ -749,6 +835,8 @@ public sealed partial class PdfReaderWindow : Window
             {
                 _sleepMode = nextM;
                 _sleepUntilUtc = nextM > 0 ? DateTime.UtcNow.AddMinutes(nextM) : null;
+                if (_sleepUntilUtc is not null) _sleepTimer.Start();
+                else _sleepTimer.Stop();
                 BuildListenCard();
             };
             Grid.SetColumn(b, i);
@@ -766,12 +854,16 @@ public sealed partial class PdfReaderWindow : Window
             _sideMode = null;
             SidePanelColumn.Width = new GridLength(0);
             PdfSidePanel.Visibility = Visibility.Collapsed;
+            SidePanelResizeHandle.Visibility = Visibility.Collapsed;
         }
         else
         {
             _sideMode = mode;
-            SidePanelColumn.Width = new GridLength(314);
+            double maxPanel = Math.Max(272.0, Math.Min(540.0, (RootGrid.ActualWidth > 0 ? RootGrid.ActualWidth : 1080.0) * 0.50));
+            double baseW = _library.Prefs.ReaderPanelWidth > 0 ? _library.Prefs.ReaderPanelWidth : 320.0;
+            SidePanelColumn.Width = new GridLength(Math.Clamp(baseW, 272.0, maxPanel) + 14.0);
             PdfSidePanel.Visibility = Visibility.Visible;
+            SidePanelResizeHandle.Visibility = Visibility.Visible;
             RenderSidePanel();
         }
         ApplyTintAndChrome();
@@ -872,7 +964,7 @@ public sealed partial class PdfReaderWindow : Window
 
                 if (marks.Length == 0)
                 {
-                    AddSideEmpty(p, "还没有划线", "右键书页或点右上角「+」即可摘录句子并写想法");
+                    AddSideEmpty(p, "还没有划线", "直接拖拽正文选字即可划线写想法，或点右上角「+」摘录");
                     return;
                 }
 
@@ -907,16 +999,21 @@ public sealed partial class PdfReaderWindow : Window
                     editNote.Click += async (_, _) => await EditPdfMarkNoteAsync(mk);
 
                     var styleSub = new MenuFlyoutSubItem { Text = "换个样子" };
-                    foreach (var (st, sName) in new[] { (MarkStyle.Yellow, "黄色"), (MarkStyle.Blue, "蓝色"), (MarkStyle.Pink, "粉色"), (MarkStyle.Wave, "波浪线") })
+                    foreach (var (st, sName) in new[] { (MarkStyle.Yellow, "黄色"), (MarkStyle.Blue, "蓝色"), (MarkStyle.Pink, "粉色"), (MarkStyle.Wave, "波浪线"), (MarkStyle.Underline, "实线下划线"), (MarkStyle.Dotted, "点线下划线") })
                     {
                         var ms = st;
                         var si = new MenuFlyoutItem { Text = (mk.Style == ms ? "✓ " : "") + sName };
-                        si.Click += (_, _) => { _library.SetMarkStyle(_bookId, mk.Id, ms); RenderSidePanel(); };
+                        si.Click += (_, _) => { _library.SetMarkStyle(_bookId, mk.Id, ms); RefreshPageOverlay((int)mk.Start.Sentence); RenderSidePanel(); };
                         styleSub.Items.Add(si);
                     }
 
                     var speakFrom = new MenuFlyoutItem { Text = "从这听" };
-                    speakFrom.Click += async (_, _) => { await GoToPageAsync(pg); StartListeningCurrentPage(0); };
+                    speakFrom.Click += async (_, _) =>
+                    {
+                        await GoToPageAsync(pg);
+                        int sentIdx = FindSentenceIndexForOffset(pg, (int)mk.Start.Offset);
+                        StartListeningCurrentPage(sentIdx);
+                    };
 
                     var del = new MenuFlyoutItem { Text = "删除划线", Foreground = ThemeHelper.Brush(p.Danger) };
                     del.Click += (_, _) => DeletePdfMarkWithUndo(mk);
@@ -969,6 +1066,8 @@ public sealed partial class PdfReaderWindow : Window
                 break;
             }
         }
+        L10n.ApplyTree(PdfSideHeaderHost);
+        L10n.ApplyTree(PdfSideList);
     }
 
     private async Task ExecutePdfSearchAsync(string query)
@@ -989,12 +1088,16 @@ public sealed partial class PdfReaderWindow : Window
         string fp = _filePath;
         var hits = await Task.Run(() => PdfInfoReader.SearchText(fp, query));
         if (_sideMode != "search" || _searchQuery != query) return;
+        _searchHits = hits;
+        _searchHitIndex = hits.Count > 0 ? 0 : -1;
 
         if (countTb is not null)
-            countTb.Text = hits.Count == 0 ? "没找到" : (hits.Count >= 300 ? "300 多处" : $"{hits.Count} 处");
+            countTb.Text = L10n.T(hits.Count == 0 ? "没找到" : (hits.Count >= 350 ? "350 多处" : $"{hits.Count} 处"));
 
-        foreach (var (pg, snippet) in hits.Take(300))
+        for (int hi = 0; hi < hits.Count; hi++)
         {
+            int hitIdx = hi;
+            var (pg, charOff, matchLen, snippet) = hits[hi];
             int targetPage = pg;
             var tb = new TextBlock { FontSize = 12, Foreground = ThemeHelper.Brush(p.T2), TextWrapping = TextWrapping.Wrap, MaxLines = 2 };
             int matchIdx = snippet.IndexOf(query, StringComparison.OrdinalIgnoreCase);
@@ -1011,7 +1114,7 @@ public sealed partial class PdfReaderWindow : Window
             }
 
             var sp = new StackPanel { Spacing = 3, Padding = new Thickness(8, 7, 8, 7) };
-            sp.Children.Add(new TextBlock { Text = $"第 {targetPage + 1} 页", FontSize = 10.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T3) });
+            sp.Children.Add(new TextBlock { Text = L10n.T($"第 {targetPage + 1} 页"), FontSize = 10.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T3) });
             sp.Children.Add(tb);
 
             var btn = new Button
@@ -1025,9 +1128,20 @@ public sealed partial class PdfReaderWindow : Window
                 UseSystemFocusVisuals = false,
                 Content = sp,
             };
-            btn.Click += (_, _) => _ = GoToPageAsync(targetPage);
+            btn.Click += (_, _) => _ = JumpToSearchHitAsync(hitIdx);
             PdfSideList.Children.Add(btn);
         }
+    }
+
+    private async Task JumpToSearchHitAsync(int index)
+    {
+        if (_searchHits.Count == 0) return;
+        _searchHitIndex = ((index % _searchHits.Count) + _searchHits.Count) % _searchHits.Count;
+        var (pg, charOff, matchLen, _) = _searchHits[_searchHitIndex];
+        _activeSearchHighlight = (pg, charOff, matchLen);
+        await GoToPageAsync(pg);
+        GetOrLoadPageLayoutSync(pg);
+        RefreshPageOverlay(pg);
     }
 
     private void AddSideEmpty(YYPalette p, string title, string sub)
@@ -1078,9 +1192,728 @@ public sealed partial class PdfReaderWindow : Window
             string q = quoteBox.Text.Trim();
             string? n = string.IsNullOrWhiteSpace(noteBox.Text) ? null : noteBox.Text.Trim();
             _library.AddMark(_bookId, 0, new TextPoint((uint)_currentPage, 0), new TextPoint((uint)_currentPage, (uint)q.Length), q, MarkStyle.Yellow, n);
+            RefreshPageOverlay(_currentPage);
             if (_sideMode == "notes") RenderSidePanel();
             App.CurrentApp.NotifyShelfRefresh();
         }
+    }
+
+    // ---------- PDF In-Page Text Selection, Highlight Overlays & Live Speech Tracking (TECH.md §9) ----------
+
+    private void EnsurePageLayoutAsync(int pageIndex)
+    {
+        if (pageIndex < 0 || pageIndex >= _pageCount || string.IsNullOrEmpty(_filePath)) return;
+        if (_layoutCache.ContainsKey(pageIndex) || !_loadingLayouts.Add(pageIndex)) return;
+        string fp = _filePath;
+        _ = Task.Run(() => PdfInfoReader.ExtractPageLayout(fp, pageIndex)).ContinueWith(t =>
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                _loadingLayouts.Remove(pageIndex);
+                if (t.Status == TaskStatus.RanToCompletion)
+                {
+                    _layoutCache[pageIndex] = t.Result;
+                    RefreshPageOverlay(pageIndex);
+                }
+            });
+        });
+    }
+
+    private PdfPageLayout GetOrLoadPageLayoutSync(int pageIndex)
+    {
+        if (_layoutCache.TryGetValue(pageIndex, out var cached)) return cached;
+        if (string.IsNullOrEmpty(_filePath)) return new PdfPageLayout(pageIndex, "", []);
+        var layout = PdfInfoReader.ExtractPageLayout(_filePath, pageIndex);
+        _layoutCache[pageIndex] = layout;
+        return layout;
+    }
+
+    private Canvas? GetOverlayForPage(int pageIndex)
+    {
+        if (_layoutMode == "scroll")
+            return pageIndex >= 0 && pageIndex < _continuousOverlays.Count ? _continuousOverlays[pageIndex] : null;
+        if (pageIndex == _currentPage) return SinglePageOverlay;
+        if (_layoutMode == "double" && pageIndex == _currentPage + 1) return SecondPageOverlay;
+        return null;
+    }
+
+    private void RefreshVisibleOverlays()
+    {
+        if (_layoutMode == "scroll")
+        {
+            int from = Math.Max(0, _currentPage - 2);
+            int to = Math.Min(_pageCount - 1, _currentPage + 3);
+            for (int i = from; i <= to; i++) RefreshPageOverlay(i);
+        }
+        else
+        {
+            RefreshPageOverlay(_currentPage);
+            if (_layoutMode == "double" && _currentPage + 1 < _pageCount)
+                RefreshPageOverlay(_currentPage + 1);
+        }
+    }
+
+    private void RefreshPageOverlay(int pageIndex)
+    {
+        var canvas = GetOverlayForPage(pageIndex);
+        if (canvas is null) return;
+        canvas.Children.Clear();
+
+        double w = canvas.Width > 0 ? canvas.Width : canvas.ActualWidth;
+        double h = canvas.Height > 0 ? canvas.Height : canvas.ActualHeight;
+        if (w <= 1 || h <= 1) return;
+
+        if (!_layoutCache.TryGetValue(pageIndex, out var layout) || layout.Glyphs.Length == 0)
+            return;
+
+        var palette = ThemeHelper.Palette(_nightPaper);
+        var tint = ThemeHelper.TintColors(_library.Prefs.Tint, _nightPaper);
+
+        // 1. Persistent user marks on this page — supports both single-page AND cross-page marks (Start.Sentence .. End.Sentence)
+        IReadOnlyList<Mark> marks;
+        try { marks = _library.GetMarks(_bookId); }
+        catch { marks = []; }
+
+        foreach (var mk in marks)
+        {
+            if (mk.Section != 0) continue;
+            int pStart = (int)mk.Start.Sentence;
+            int pEnd = Math.Max(pStart, (int)mk.End.Sentence);
+            if (pageIndex < pStart || pageIndex > pEnd) continue;
+
+            var (c0, c1) = ResolveMarkCharRangeOnPage(layout, mk, pageIndex);
+            if (c1 <= c0) continue;
+            var rects = PdfInfoReader.MergeLineRects(layout, c0, c1);
+            DrawMarkRects(canvas, rects, w, h, mk.Style, palette, tint);
+        }
+
+        // 1b. Active search hit highlight on this page
+        if (_activeSearchHighlight is var (hitPg, hitOff, hitLen) && hitPg == pageIndex && !string.IsNullOrEmpty(_searchQuery))
+        {
+            int idx = layout.Text.IndexOf(_searchQuery, Math.Clamp(hitOff - 16, 0, layout.Text.Length), StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) idx = layout.Text.IndexOf(_searchQuery, StringComparison.OrdinalIgnoreCase);
+            if (idx >= 0)
+            {
+                var hitRects = PdfInfoReader.MergeLineRects(layout, idx, Math.Min(layout.Text.Length, idx + _searchQuery.Length));
+                var hitBrush = ThemeHelper.Brush(Color.FromArgb(128, 255, 196, 36));
+                foreach (var r in hitRects)
+                {
+                    var box = new Rectangle
+                    {
+                        Width = Math.Max(3, r.W * w + 3),
+                        Height = Math.Max(5, r.H * h + 2),
+                        RadiusX = 3,
+                        RadiusY = 3,
+                        Fill = hitBrush,
+                        Stroke = ThemeHelper.Brush(tint.Accent),
+                        StrokeThickness = 1,
+                        IsHitTestVisible = false,
+                    };
+                    Canvas.SetLeft(box, Math.Max(0, r.X * w - 1.5));
+                    Canvas.SetTop(box, Math.Max(0, r.Y * h - 1));
+                    canvas.Children.Add(box);
+                }
+            }
+        }
+
+        // 2. Active speech sentence highlight
+        if (_isListening && pageIndex == _currentPage && _activeSentenceIndex >= 0 && _activeSentenceIndex < _activeSentences.Length)
+        {
+            var sent = _activeSentences[_activeSentenceIndex];
+            var rects = PdfInfoReader.MergeLineRects(layout, (int)sent.Start, (int)sent.End);
+            var speechBrush = ThemeHelper.Brush(Color.FromArgb(_nightPaper ? (byte)64 : (byte)46, tint.Accent.R, tint.Accent.G, tint.Accent.B));
+            foreach (var r in rects)
+            {
+                var box = new Rectangle
+                {
+                    Width = Math.Max(2, r.W * w + 2),
+                    Height = Math.Max(4, r.H * h + 2),
+                    RadiusX = 3,
+                    RadiusY = 3,
+                    Fill = speechBrush,
+                    IsHitTestVisible = false,
+                };
+                Canvas.SetLeft(box, Math.Max(0, r.X * w - 1));
+                Canvas.SetTop(box, Math.Max(0, r.Y * h - 1));
+                canvas.Children.Add(box);
+            }
+        }
+
+        // 3. Live selection highlight (supports cross-page Shift+click extension)
+        if (_selPage >= 0 && _selStart >= 0)
+        {
+            int sp = _selPage;
+            int ep = _selEndPage >= sp ? _selEndPage : sp;
+            if (pageIndex >= sp && pageIndex <= ep)
+            {
+                int r0 = pageIndex == sp ? _selStart : 0;
+                int r1 = pageIndex == ep ? _selEnd : layout.Text.Length;
+                if (r1 > r0)
+                {
+                    var rects = PdfInfoReader.MergeLineRects(layout, r0, r1);
+                    var selBrush = ThemeHelper.Brush(Color.FromArgb(_nightPaper ? (byte)84 : (byte)62, tint.Accent.R, tint.Accent.G, tint.Accent.B));
+                    foreach (var r in rects)
+                    {
+                        var box = new Rectangle
+                        {
+                            Width = Math.Max(2, r.W * w),
+                            Height = Math.Max(4, r.H * h + 1),
+                            RadiusX = 2.5,
+                            RadiusY = 2.5,
+                            Fill = selBrush,
+                            IsHitTestVisible = false,
+                        };
+                        Canvas.SetLeft(box, r.X * w);
+                        Canvas.SetTop(box, r.Y * h);
+                        canvas.Children.Add(box);
+                    }
+                }
+            }
+        }
+    }
+
+    private static (int Start, int End) ResolveMarkCharRangeOnPage(PdfPageLayout layout, Mark mk, int pageIndex)
+    {
+        int pStart = (int)mk.Start.Sentence;
+        int pEnd = Math.Max(pStart, (int)mk.End.Sentence);
+        int maxLen = layout.Text.Length;
+        if (pStart != pEnd)
+        {
+            if (pageIndex == pStart) return (Math.Clamp((int)mk.Start.Offset, 0, maxLen), maxLen);
+            if (pageIndex == pEnd) return (0, Math.Clamp((int)mk.End.Offset, 0, maxLen));
+            return (0, maxLen);
+        }
+        return ResolveMarkCharRange(layout, mk);
+    }
+
+    private static (int Start, int End) ResolveMarkCharRange(PdfPageLayout layout, Mark mk)
+    {
+        int s = (int)mk.Start.Offset;
+        int e = (int)mk.End.Offset;
+        int maxLen = layout.Text.Length;
+        if (s >= 0 && e > s && e <= maxLen)
+        {
+            // Verify slice roughly matches mark text; if legacy dialog saved (0..q.Length) on non-prefix text, fall back to substring lookup
+            string slice = layout.Text.Substring(s, e - s);
+            if (string.IsNullOrWhiteSpace(mk.Text) || slice.Trim().Equals(mk.Text.Trim(), StringComparison.OrdinalIgnoreCase))
+                return (s, e);
+        }
+
+        if (!string.IsNullOrWhiteSpace(mk.Text))
+        {
+            int idx = layout.Text.IndexOf(mk.Text.Trim(), StringComparison.OrdinalIgnoreCase);
+            if (idx >= 0) return (idx, Math.Min(maxLen, idx + mk.Text.Trim().Length));
+        }
+
+        return (Math.Clamp(s, 0, maxLen), Math.Clamp(e, 0, maxLen));
+    }
+
+    private void DrawMarkRects(Canvas canvas, List<PdfLineRect> rects, double w, double h, MarkStyle style, YYPalette p, YYTintColors tint)
+    {
+        foreach (var r in rects)
+        {
+            double rx = r.X * w;
+            double ry = r.Y * h;
+            double rw = Math.Max(3, r.W * w);
+            double rh = Math.Max(6, r.H * h);
+
+            if (style is MarkStyle.Yellow or MarkStyle.Blue or MarkStyle.Pink)
+            {
+                Color baseCol = style switch
+                {
+                    MarkStyle.Blue => p.MkB,
+                    MarkStyle.Pink => p.MkP,
+                    _ => p.MkY,
+                };
+                byte alpha = _nightPaper ? (byte)82 : (byte)96;
+                var rect = new Rectangle
+                {
+                    Width = rw + 2,
+                    Height = rh + 2,
+                    RadiusX = 2.5,
+                    RadiusY = 2.5,
+                    Fill = ThemeHelper.Brush(Color.FromArgb(alpha, baseCol.R, baseCol.G, baseCol.B)),
+                    IsHitTestVisible = false,
+                };
+                Canvas.SetLeft(rect, Math.Max(0, rx - 1));
+                Canvas.SetTop(rect, Math.Max(0, ry - 1));
+                canvas.Children.Add(rect);
+            }
+            else if (style == MarkStyle.Wave)
+            {
+                // True quadratic Bezier red sine wave (1:1 ReaderCards.swift WavyLineRenderer)
+                var fig = new PathFigure { StartPoint = new Windows.Foundation.Point(rx, ry + rh + 1.2) };
+                double step = 4.0;
+                double amp = 1.65;
+                double cx = rx;
+                bool up = true;
+                while (cx < rx + rw)
+                {
+                    double nx = Math.Min(cx + step, rx + rw);
+                    double mx = (cx + nx) * 0.5;
+                    double cy = ry + rh + 1.2 + (up ? -amp : amp);
+                    fig.Segments.Add(new QuadraticBezierSegment
+                    {
+                        Point1 = new Windows.Foundation.Point(mx, cy),
+                        Point2 = new Windows.Foundation.Point(nx, ry + rh + 1.2),
+                    });
+                    cx = nx;
+                    up = !up;
+                }
+                var geo = new PathGeometry();
+                geo.Figures.Add(fig);
+                var path = new Microsoft.UI.Xaml.Shapes.Path
+                {
+                    Data = geo,
+                    Stroke = ThemeHelper.Brush(p.HlR),
+                    StrokeThickness = 1.35,
+                    StrokeStartLineCap = PenLineCap.Round,
+                    StrokeEndLineCap = PenLineCap.Round,
+                    IsHitTestVisible = false,
+                };
+                canvas.Children.Add(path);
+            }
+            else if (style == MarkStyle.Underline)
+            {
+                var line = new Microsoft.UI.Xaml.Shapes.Line
+                {
+                    X1 = rx,
+                    Y1 = ry + rh + 1,
+                    X2 = rx + rw,
+                    Y2 = ry + rh + 1,
+                    Stroke = ThemeHelper.Brush(tint.Accent),
+                    StrokeThickness = 1.6,
+                    IsHitTestVisible = false,
+                };
+                canvas.Children.Add(line);
+            }
+            else if (style == MarkStyle.Dotted)
+            {
+                var line = new Microsoft.UI.Xaml.Shapes.Line
+                {
+                    X1 = rx,
+                    Y1 = ry + rh + 1,
+                    X2 = rx + rw,
+                    Y2 = ry + rh + 1,
+                    Stroke = ThemeHelper.Brush(p.T2),
+                    StrokeThickness = 1.5,
+                    StrokeDashArray = [2.2, 2.2],
+                    IsHitTestVisible = false,
+                };
+                canvas.Children.Add(line);
+            }
+        }
+    }
+
+    private void AttachOverlayEvents(Canvas overlay, Func<int> getPageIndex)
+    {
+        overlay.PointerPressed += (s, e) =>
+        {
+            var pt = e.GetCurrentPoint(overlay);
+            if (!pt.Properties.IsLeftButtonPressed) return;
+            int pageIdx = getPageIndex();
+            double w = overlay.Width > 0 ? overlay.Width : overlay.ActualWidth;
+            double h = overlay.Height > 0 ? overlay.Height : overlay.ActualHeight;
+            if (w <= 1 || h <= 1) return;
+
+            var layout = GetOrLoadPageLayoutSync(pageIdx);
+            if (layout.Glyphs.Length == 0)
+            {
+                HidePdfSelectionCard();
+                return;
+            }
+
+            double nx = Math.Clamp(pt.Position.X / w, 0, 1);
+            double ny = Math.Clamp(pt.Position.Y / h, 0, 1);
+
+            int glyphIdx = PdfInfoReader.HitTestGlyph(layout, nx, ny);
+            if (glyphIdx < 0)
+            {
+                HidePdfSelectionCard();
+                return;
+            }
+
+            // Shift+click on a later page extends an existing selection across pages!
+            if (e.KeyModifiers.HasFlag(VirtualKeyModifiers.Shift) && _selPage >= 0 && pageIdx > _selPage)
+            {
+                _editingMark = null;
+                _selEndPage = pageIdx;
+                _selEnd = layout.Glyphs[glyphIdx].CharEnd;
+                for (int pi = _selPage; pi <= _selEndPage; pi++)
+                {
+                    GetOrLoadPageLayoutSync(pi);
+                    RefreshPageOverlay(pi);
+                }
+                ShowPdfSelectionCard(overlay, pageIdx, layout);
+                e.Handled = true;
+                return;
+            }
+
+            _editingMark = null;
+            _selPage = pageIdx;
+            _selEndPage = pageIdx;
+            _selAnchorGlyph = glyphIdx;
+            _selStart = layout.Glyphs[glyphIdx].CharStart;
+            _selEnd = layout.Glyphs[glyphIdx].CharEnd;
+            _selDragging = true;
+            _activeDragCanvas = overlay;
+            overlay.CapturePointer(e.Pointer);
+            PdfSelectionCard.Visibility = Visibility.Collapsed;
+            RefreshPageOverlay(pageIdx);
+            e.Handled = true;
+        };
+
+        overlay.PointerMoved += (s, e) =>
+        {
+            if (!_selDragging || !ReferenceEquals(_activeDragCanvas, overlay)) return;
+            int pageIdx = getPageIndex();
+            if (pageIdx != _selPage || !_layoutCache.TryGetValue(pageIdx, out var layout)) return;
+            double w = overlay.Width > 0 ? overlay.Width : overlay.ActualWidth;
+            double h = overlay.Height > 0 ? overlay.Height : overlay.ActualHeight;
+            if (w <= 1 || h <= 1) return;
+
+            var pt = e.GetCurrentPoint(overlay).Position;
+            int curGlyph = PdfInfoReader.HitTestGlyph(layout, Math.Clamp(pt.X / w, 0, 1), Math.Clamp(pt.Y / h, 0, 1));
+            if (curGlyph < 0 || _selAnchorGlyph < 0) return;
+
+            int g0 = Math.Min(_selAnchorGlyph, curGlyph);
+            int g1 = Math.Max(_selAnchorGlyph, curGlyph);
+            int nextStart = layout.Glyphs[g0].CharStart;
+            int nextEnd = layout.Glyphs[g1].CharEnd;
+            if (nextStart != _selStart || nextEnd != _selEnd)
+            {
+                _selStart = nextStart;
+                _selEnd = nextEnd;
+                RefreshPageOverlay(pageIdx);
+            }
+            e.Handled = true;
+        };
+
+        overlay.PointerReleased += (s, e) =>
+        {
+            if (!_selDragging || !ReferenceEquals(_activeDragCanvas, overlay)) return;
+            _selDragging = false;
+            _activeDragCanvas = null;
+            try { overlay.ReleasePointerCapture(e.Pointer); } catch { }
+
+            int pageIdx = getPageIndex();
+            if (!_layoutCache.TryGetValue(pageIdx, out var layout)) return;
+            double w = overlay.Width > 0 ? overlay.Width : overlay.ActualWidth;
+            double h = overlay.Height > 0 ? overlay.Height : overlay.ActualHeight;
+            var pt = e.GetCurrentPoint(overlay).Position;
+
+            // Single click (1 char): check if user clicked an existing mark on this page -> open edit card!
+            if (_selEnd - _selStart <= 1)
+            {
+                var hitMark = FindMarkAtPoint(pageIdx, layout, pt.X / Math.Max(1, w), pt.Y / Math.Max(1, h));
+                if (hitMark is not null)
+                {
+                    _editingMark = hitMark;
+                    var (c0, c1) = ResolveMarkCharRange(layout, hitMark);
+                    _selPage = pageIdx;
+                    _selStart = c0;
+                    _selEnd = c1;
+                    RefreshPageOverlay(pageIdx);
+                    ShowPdfSelectionCard(overlay, pageIdx, layout);
+                    e.Handled = true;
+                    return;
+                }
+                HidePdfSelectionCard();
+                return;
+            }
+
+            _editingMark = null;
+            RefreshPageOverlay(pageIdx);
+            ShowPdfSelectionCard(overlay, pageIdx, layout);
+            e.Handled = true;
+        };
+
+        overlay.PointerCaptureLost += (s, e) =>
+        {
+            if (ReferenceEquals(_activeDragCanvas, overlay))
+            {
+                _selDragging = false;
+                _activeDragCanvas = null;
+            }
+        };
+    }
+
+    private Mark? FindMarkAtPoint(int pageIndex, PdfPageLayout layout, double normX, double normY)
+    {
+        try
+        {
+            foreach (var mk in _library.GetMarks(_bookId))
+            {
+                if (mk.Section != 0) continue;
+                int pStart = (int)mk.Start.Sentence;
+                int pEnd = Math.Max(pStart, (int)mk.End.Sentence);
+                if (pageIndex < pStart || pageIndex > pEnd) continue;
+                var (c0, c1) = ResolveMarkCharRangeOnPage(layout, mk, pageIndex);
+                foreach (var r in PdfInfoReader.MergeLineRects(layout, c0, c1))
+                {
+                    if (normX >= r.X - 0.008 && normX <= r.X + r.W + 0.008 &&
+                        normY >= r.Y - 0.01 && normY <= r.Y + r.H + 0.012)
+                        return mk;
+                }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private void ShowPdfSelectionCard(Canvas overlay, int pageIndex, PdfPageLayout layout)
+    {
+        int r0 = (_selEndPage > _selPage && pageIndex == _selEndPage) ? 0 : _selStart;
+        var rects = PdfInfoReader.MergeLineRects(layout, r0, _selEnd);
+        if (rects.Count == 0) { HidePdfSelectionCard(); return; }
+
+        double ow = overlay.Width > 0 ? overlay.Width : overlay.ActualWidth;
+        double oh = overlay.Height > 0 ? overlay.Height : overlay.ActualHeight;
+        var first = rects[0];
+        var last = rects[^1];
+
+        try
+        {
+            var xform = overlay.TransformToVisual(CanvasHost);
+            var topPt = xform.TransformPoint(new Windows.Foundation.Point((first.X + first.W * 0.5) * ow, first.Y * oh));
+            var botPt = xform.TransformPoint(new Windows.Foundation.Point((last.X + last.W * 0.5) * ow, (last.Y + last.H) * oh));
+
+            double cardW = 328;
+            double cardH = _editingMark is not null && !string.IsNullOrWhiteSpace(_editingMark.Note) ? 148 : 96;
+            double hostW = CanvasHost.ActualWidth > 0 ? CanvasHost.ActualWidth : 900;
+            double hostH = CanvasHost.ActualHeight > 0 ? CanvasHost.ActualHeight : 640;
+
+            double x = Math.Clamp(topPt.X - cardW * 0.5, 16, Math.Max(16, hostW - cardW - 16));
+            double y = topPt.Y - cardH - 12;
+            if (y < 60) y = Math.Min(hostH - cardH - 72, botPt.Y + 12);
+
+            PdfSelectionCard.Margin = new Thickness(x, Math.Max(60, y), 0, 0);
+        }
+        catch
+        {
+            PdfSelectionCard.Margin = new Thickness(24, 72, 0, 0);
+        }
+
+        bool hasNote = _editingMark is not null && !string.IsNullOrWhiteSpace(_editingMark.Note);
+        PdfSelNotePreviewBox.Visibility = hasNote ? Visibility.Visible : Visibility.Collapsed;
+        PdfSelNotePreviewText.Text = hasNote ? _editingMark!.Note! : "";
+        PdfSelDeleteBtn.Visibility = _editingMark is not null ? Visibility.Visible : Visibility.Collapsed;
+        PdfSelectionCard.Visibility = Visibility.Visible;
+    }
+
+    private void HidePdfSelectionCard()
+    {
+        int p0 = _selPage;
+        int p1 = Math.Max(p0, _selEndPage);
+        _selPage = -1;
+        _selEndPage = -1;
+        _selStart = -1;
+        _selEnd = -1;
+        _selAnchorGlyph = -1;
+        _editingMark = null;
+        PdfSelectionCard.Visibility = Visibility.Collapsed;
+        if (p0 >= 0)
+        {
+            for (int pi = p0; pi <= p1; pi++) RefreshPageOverlay(pi);
+        }
+    }
+
+    private string GetSelectedPdfText()
+    {
+        if (_editingMark is not null) return _editingMark.Text;
+        if (_selPage < 0) return "";
+        int endPg = Math.Max(_selPage, _selEndPage);
+        if (endPg == _selPage)
+        {
+            if (!_layoutCache.TryGetValue(_selPage, out var layout)) return "";
+            int s = Math.Clamp(_selStart, 0, layout.Text.Length);
+            int e = Math.Clamp(_selEnd, s, layout.Text.Length);
+            return layout.Text.Substring(s, e - s).Replace("\r", "").Replace("\n", " ").Trim();
+        }
+        var parts = new List<string>();
+        for (int pi = _selPage; pi <= endPg; pi++)
+        {
+            var lay = GetOrLoadPageLayoutSync(pi);
+            int s = pi == _selPage ? Math.Clamp(_selStart, 0, lay.Text.Length) : 0;
+            int e = pi == endPg ? Math.Clamp(_selEnd, 0, lay.Text.Length) : lay.Text.Length;
+            if (e > s) parts.Add(lay.Text.Substring(s, e - s).Replace("\r", "").Replace("\n", " ").Trim());
+        }
+        return string.Join(" ", parts.Where(x => x.Length > 0));
+    }
+
+    private void ApplyPdfMarkStyle(MarkStyle style)
+    {
+        if (_editingMark is not null)
+        {
+            int p0 = (int)_editingMark.Start.Sentence;
+            int p1 = Math.Max(p0, (int)_editingMark.End.Sentence);
+            _library.SetMarkStyle(_bookId, _editingMark.Id, style);
+            HidePdfSelectionCard();
+            for (int pi = p0; pi <= p1; pi++) RefreshPageOverlay(pi);
+            if (_sideMode == "notes") RenderSidePanel();
+            App.CurrentApp.NotifyShelfRefresh();
+            return;
+        }
+
+        string text = GetSelectedPdfText();
+        if (_selPage < 0 || string.IsNullOrWhiteSpace(text)) { HidePdfSelectionCard(); return; }
+        int pageStart = _selPage;
+        int pageEnd = Math.Max(_selPage, _selEndPage);
+        _library.AddMark(
+            _bookId,
+            0,
+            new TextPoint((uint)pageStart, (uint)Math.Max(0, _selStart)),
+            new TextPoint((uint)pageEnd, (uint)Math.Max(0, _selEnd)),
+            text,
+            style,
+            null);
+        HidePdfSelectionCard();
+        for (int pi = pageStart; pi <= pageEnd; pi++) RefreshPageOverlay(pi);
+        if (_sideMode == "notes") RenderSidePanel();
+        App.CurrentApp.NotifyShelfRefresh();
+    }
+
+    private void PdfMarkStyle_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe || fe.Tag is not string tag) return;
+        var style = tag switch
+        {
+            "blue" => MarkStyle.Blue,
+            "pink" => MarkStyle.Pink,
+            "wave" => MarkStyle.Wave,
+            "underline" => MarkStyle.Underline,
+            "dotted" => MarkStyle.Dotted,
+            _ => MarkStyle.Yellow,
+        };
+        ApplyPdfMarkStyle(style);
+    }
+
+    private void PdfSelDelete_Click(object sender, RoutedEventArgs e)
+    {
+        var mk = _editingMark;
+        if (mk is null) return;
+        HidePdfSelectionCard();
+        DeletePdfMarkWithUndo(mk);
+    }
+
+    private async void PdfSelNote_Click(object sender, RoutedEventArgs e)
+    {
+        if (_editingMark is not null)
+        {
+            var mk = _editingMark;
+            HidePdfSelectionCard();
+            await EditPdfMarkNoteAsync(mk);
+            return;
+        }
+
+        string text = GetSelectedPdfText();
+        int pageStart = _selPage;
+        int pageEnd = Math.Max(_selPage, _selEndPage);
+        int c0 = Math.Max(0, _selStart);
+        int c1 = Math.Max(0, _selEnd);
+        HidePdfSelectionCard();
+        if (pageStart < 0 || string.IsNullOrWhiteSpace(text)) return;
+
+        var noteBox = new TextBox { PlaceholderText = "记下此刻的想法…", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 84, Width = 360 };
+        var dlg = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            Title = "写想法",
+            Content = noteBox,
+            PrimaryButtonText = "保存",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await dlg.ShowAsync() == ContentDialogResult.Primary)
+        {
+            string? note = string.IsNullOrWhiteSpace(noteBox.Text) ? null : noteBox.Text.Trim();
+            _library.AddMark(_bookId, 0, new TextPoint((uint)pageStart, (uint)c0), new TextPoint((uint)pageEnd, (uint)c1), text, MarkStyle.Yellow, note);
+            for (int pi = pageStart; pi <= pageEnd; pi++) RefreshPageOverlay(pi);
+            if (_sideMode == "notes") RenderSidePanel();
+            App.CurrentApp.NotifyShelfRefresh();
+        }
+    }
+
+    private void PdfSelCopy_Click(object sender, RoutedEventArgs e)
+    {
+        string text = GetSelectedPdfText();
+        HidePdfSelectionCard();
+        if (string.IsNullOrWhiteSpace(text)) return;
+        var pkg = new DataPackage();
+        pkg.SetText(text);
+        Clipboard.SetContent(pkg);
+        ShowBriefToast("已复制选中文字");
+    }
+
+    private async void PdfSelSpeak_Click(object sender, RoutedEventArgs e)
+    {
+        int pageIdx = _selPage >= 0 ? _selPage : _currentPage;
+        int charAt = Math.Max(0, _selStart);
+        HidePdfSelectionCard();
+        if (pageIdx != _currentPage) await GoToPageAsync(pageIdx);
+
+        var sents = GetSentencesForPage(pageIdx);
+        int hitIdx = 0;
+        for (int i = 0; i < sents.Length; i++)
+        {
+            if (charAt >= (int)sents[i].Start && charAt < (int)sents[i].End) { hitIdx = i; break; }
+            if (charAt >= (int)sents[i].Start) hitIdx = i;
+        }
+        StartListeningCurrentPage(hitIdx);
+    }
+
+    private async void PdfSelLookup_Click(object sender, RoutedEventArgs e)
+    {
+        int pageIdx = _selPage >= 0 ? _selPage : _currentPage;
+        string text = GetSelectedPdfText();
+        HidePdfSelectionCard();
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        string word = text.Split([' ', '\t', ',', '.', ';', ':', '!', '?', '(', ')', '"', '\''], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? text;
+        var res = _library.LookUpWordRich(word);
+        var sp = new StackPanel { Spacing = 8, Width = 380 };
+        if (res is not null)
+        {
+            string head = string.IsNullOrWhiteSpace(res.Phonetic) ? res.Headword : $"{res.Headword}  /{res.Phonetic}/";
+            sp.Children.Add(new TextBlock { Text = head, FontSize = 15, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+            sp.Children.Add(new TextBlock { Text = res.Summary, FontSize = 13, TextWrapping = TextWrapping.Wrap, LineHeight = 20 });
+            sp.Children.Add(new TextBlock { Text = $"词典来源：{res.Source}", FontSize = 11, Opacity = 0.65 });
+        }
+        else
+        {
+            sp.Children.Add(new TextBlock { Text = $"本地词典未找到 “{word}”", FontSize = 13, TextWrapping = TextWrapping.Wrap });
+        }
+
+        var dlg = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            Title = "查词",
+            Content = sp,
+            PrimaryButtonText = res is not null ? "加入生词本" : "",
+            CloseButtonText = "关闭",
+        };
+        if (await dlg.ShowAsync() == ContentDialogResult.Primary && res is not null)
+        {
+            try
+            {
+                _library.AddWord(res.Headword, res.Phonetic, res.Summary, _bookId, 0, (uint)Math.Max(0, pageIdx), text);
+                ShowBriefToast($"已加入生词本：{res.Headword}");
+                App.CurrentApp.NotifyShelfRefresh();
+            }
+            catch { }
+        }
+    }
+
+    private void ShowBriefToast(string message)
+    {
+        _toastUndo = null;
+        ToastUndoBtn.Visibility = Visibility.Collapsed;
+        ToastText.Text = message;
+        ToastBanner.Visibility = Visibility.Visible;
+        _toastTimer?.Stop();
+        _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.5) };
+        _toastTimer.Tick += (_, _) => { _toastTimer.Stop(); ToastBanner.Visibility = Visibility.Collapsed; ToastUndoBtn.Visibility = Visibility.Visible; };
+        _toastTimer.Start();
     }
 
     private async Task EditPdfMarkNoteAsync(Mark mk)
@@ -1113,16 +1946,26 @@ public sealed partial class PdfReaderWindow : Window
 
     private void DeletePdfMarkWithUndo(Mark mk)
     {
-        _library.DeleteMark(_bookId, mk.Id);
+        string delId = mk.Id;
+        int p0 = (int)mk.Start.Sentence;
+        int p1 = Math.Max(p0, (int)mk.End.Sentence);
+        _library.DeleteMark(_bookId, delId);
+        for (int pi = p0; pi <= p1; pi++) RefreshPageOverlay(pi);
         if (_sideMode == "notes") RenderSidePanel();
         App.CurrentApp.NotifyShelfRefresh();
 
         _toastUndo = () =>
         {
-            _library.AddMark(_bookId, mk.Section, mk.Start, mk.End, mk.Text, mk.Style, mk.Note);
-            if (_sideMode == "notes") RenderSidePanel();
-            App.CurrentApp.NotifyShelfRefresh();
+            try
+            {
+                _library.Core.RestoreMark(_bookId, delId);
+                for (int pi = p0; pi <= p1; pi++) RefreshPageOverlay(pi);
+                if (_sideMode == "notes") RenderSidePanel();
+                App.CurrentApp.NotifyShelfRefresh();
+            }
+            catch { }
         };
+        ToastUndoBtn.Visibility = Visibility.Visible;
         ToastText.Text = "已删除划线";
         ToastBanner.Visibility = Visibility.Visible;
         _toastTimer?.Stop();
@@ -1146,22 +1989,74 @@ public sealed partial class PdfReaderWindow : Window
     {
         if (_sentenceCache.TryGetValue(pageIndex, out var cached)) return cached;
         if (string.IsNullOrEmpty(_filePath)) return [];
-        string raw = PdfInfoReader.ExtractPageText(_filePath, pageIndex);
+        var layout = GetOrLoadPageLayoutSync(pageIndex);
+        string raw = layout.Text;
         var list = string.IsNullOrWhiteSpace(raw) ? [] : YuyueCoreMethods.PageSentences(raw);
         _sentenceCache[pageIndex] = list;
         return list;
     }
 
-    private void StartListeningCurrentPage(int startIndex)
+    private int FindSentenceIndexForOffset(int pageIndex, int charOffset)
     {
-        _activeSentences = GetSentencesForPage(_currentPage);
-        if (_activeSentences.Length == 0)
+        var sents = GetSentencesForPage(pageIndex);
+        int hit = 0;
+        for (int i = 0; i < sents.Length; i++)
+        {
+            if (charOffset >= (int)sents[i].Start && charOffset < (int)sents[i].End) return i;
+            if (charOffset >= (int)sents[i].Start) hit = i;
+        }
+        return hit;
+    }
+
+    private void OnAudioMarkHeardRequested(int _)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_isListening || _activeSentenceIndex < 0 || _activeSentenceIndex >= _activeSentences.Length) return;
+            var s = _activeSentences[_activeSentenceIndex];
+            try
+            {
+                _library.Core.MarkHeard(
+                    _bookId,
+                    0,
+                    new TextPoint((uint)_currentPage, s.Start),
+                    new TextPoint((uint)_currentPage, s.End),
+                    s.Text,
+                    MarkStyle.Yellow);
+                RefreshPageOverlay(_currentPage);
+                if (_sideMode == "notes") RenderSidePanel();
+                ShowBriefToast("已划下正在听的这一句");
+            }
+            catch { }
+        });
+    }
+
+    private async void StartListeningCurrentPage(int startIndex)
+    {
+        int targetPage = _currentPage;
+        var sents = GetSentencesForPage(targetPage);
+        // Skip blank / scanned image pages automatically (up to 8 pages ahead)
+        int scanned = 0;
+        while (sents.Length == 0 && targetPage + 1 < _pageCount && scanned < 8)
+        {
+            targetPage++;
+            scanned++;
+            sents = GetSentencesForPage(targetPage);
+        }
+        if (sents.Length == 0)
         {
             _isListening = false;
-            CapsuleSubText.Text = "这一页没有可提取的正文文字";
+            CapsuleSubText.Text = "附近页面没有可提取的正文文字（可能是扫描版）";
             return;
         }
+        if (targetPage != _currentPage)
+        {
+            await GoToPageAsync(targetPage);
+            startIndex = 0;
+        }
 
+        _activeSentences = sents;
+        _listeningPage = targetPage;
         _isListening = true;
         SpeakSentenceAt(Math.Clamp(startIndex, 0, _activeSentences.Length - 1));
     }
@@ -1170,8 +2065,13 @@ public sealed partial class PdfReaderWindow : Window
     {
         if (!_isListening || index < 0 || index >= _activeSentences.Length) return;
         _activeSentenceIndex = index;
+        _listeningPage = _currentPage;
         var s = _activeSentences[index];
-        _ = _audio.SpeakSentenceAsync(s.Text, _detail.Summary.Title, $"第 {_currentPage + 1} 页", _bookId, _detail.Summary.Language);
+        string lang = (!string.IsNullOrWhiteSpace(_detail.Summary.Language) && !_detail.Summary.Language.Equals("und", StringComparison.OrdinalIgnoreCase))
+            ? _detail.Summary.Language
+            : PdfInfoReader.DetectLanguage(s.Text);
+        _audio.SetVoice(_library.Prefs.GetVoiceForLanguage(lang));
+        _ = _audio.SpeakSentenceAsync(s.Text, _detail.Summary.Title, $"第 {_currentPage + 1} 页", _bookId, lang);
         ApplyTintAndChrome();
     }
 
@@ -1184,6 +2084,7 @@ public sealed partial class PdfReaderWindow : Window
             {
                 _sleepMode = 0;
                 StopListening();
+                ShowBriefToast("本句读完已自动暂停");
                 return;
             }
 
@@ -1195,6 +2096,7 @@ public sealed partial class PdfReaderWindow : Window
             {
                 _sleepMode = 0;
                 StopListening();
+                ShowBriefToast("本页读完已自动暂停");
             }
             else if (_currentPage + 1 < _pageCount)
             {
@@ -1214,6 +2116,7 @@ public sealed partial class PdfReaderWindow : Window
     {
         _isListening = false;
         _activeSentenceIndex = -1;
+        _listeningPage = -1;
         _audio.Stop();
         ApplyTintAndChrome();
     }
@@ -1222,6 +2125,12 @@ public sealed partial class PdfReaderWindow : Window
     {
         if (_isListening)
         {
+            // If paused and user flipped to a different page, start from the new page instead of old page!
+            if (!_audio.IsPlaying && _listeningPage != _currentPage)
+            {
+                StartListeningCurrentPage(0);
+                return;
+            }
             _audio.TogglePause();
             ApplyTintAndChrome();
         }
@@ -1231,29 +2140,58 @@ public sealed partial class PdfReaderWindow : Window
         }
     }
 
-    private void CapsuleStepPrev_Click(object sender, RoutedEventArgs e)
+    private async void CapsuleStepPrev_Click(object sender, RoutedEventArgs e)
     {
         if (_isListening)
         {
-            if (_activeSentenceIndex > 0) SpeakSentenceAt(_activeSentenceIndex - 1);
+            if (_activeSentenceIndex > 0)
+            {
+                SpeakSentenceAt(_activeSentenceIndex - 1);
+            }
+            else if (_currentPage > 0)
+            {
+                // Cross-page backward sentence step (skip blank pages)
+                int prevPg = _currentPage - 1;
+                var prevSents = GetSentencesForPage(prevPg);
+                while (prevSents.Length == 0 && prevPg > 0)
+                {
+                    prevPg--;
+                    prevSents = GetSentencesForPage(prevPg);
+                }
+                if (prevSents.Length > 0)
+                {
+                    await GoToPageAsync(prevPg);
+                    _activeSentences = prevSents;
+                    _listeningPage = prevPg;
+                    SpeakSentenceAt(prevSents.Length - 1);
+                }
+            }
         }
         else
         {
             int step = _layoutMode == "double" ? 2 : 1;
-            if (_currentPage > 0) _ = GoToPageAsync(Math.Max(0, _currentPage - step));
+            if (_currentPage > 0) await GoToPageAsync(Math.Max(0, _currentPage - step));
         }
     }
 
-    private void CapsuleStepNext_Click(object sender, RoutedEventArgs e)
+    private async void CapsuleStepNext_Click(object sender, RoutedEventArgs e)
     {
         if (_isListening)
         {
-            if (_activeSentenceIndex + 1 < _activeSentences.Length) SpeakSentenceAt(_activeSentenceIndex + 1);
+            if (_activeSentenceIndex + 1 < _activeSentences.Length)
+            {
+                SpeakSentenceAt(_activeSentenceIndex + 1);
+            }
+            else if (_currentPage + 1 < _pageCount)
+            {
+                await GoToPageAsync(_currentPage + 1);
+                StartListeningCurrentPage(0);
+            }
         }
         else
         {
             int step = _layoutMode == "double" ? 2 : 1;
-            if (_currentPage + 1 < _pageCount) _ = GoToPageAsync(Math.Min(_pageCount - 1, _currentPage + step));
+            if (_currentPage + 1 < _pageCount) await GoToPageAsync(Math.Min(_pageCount - 1, _currentPage + step));
         }
     }
 
@@ -1332,7 +2270,28 @@ public sealed partial class PdfReaderWindow : Window
 
         bool ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control)
             .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+        bool shift = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+        bool alt = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+
+        if (ctrl && shift && e.Key == VirtualKey.F) { ToggleFullScreen(); e.Handled = true; return; }
         if (ctrl && e.Key == VirtualKey.F) { ToggleSidePanel("search"); e.Handled = true; return; }
+        if (ctrl && e.Key == VirtualKey.K) { _ = QuickSearchDialog.ShowAsync(RootGrid.XamlRoot, _library, _bookId); e.Handled = true; return; }
+        if (ctrl && e.Key == VirtualKey.G && _searchHits.Count > 0) { _ = JumpToSearchHitAsync(_searchHitIndex + (shift ? -1 : 1)); e.Handled = true; return; }
+        if (ctrl && e.Key == (VirtualKey)188) { App.CurrentApp.OpenSettings(); e.Handled = true; return; }
+        if (ctrl && alt && e.Key == VirtualKey.T) { ToggleSidePanel("toc"); e.Handled = true; return; }
+        if (ctrl && alt && e.Key == VirtualKey.N) { ToggleSidePanel("notes"); e.Handled = true; return; }
+        if (ctrl && alt && (e.Key == VirtualKey.Up || e.Key == VirtualKey.Down) && _outline.Count > 0)
+        {
+            int curOut = -1;
+            for (int i = 0; i < _outline.Count; i++) if (_outline[i].PageIndex <= _currentPage) curOut = i;
+            int nextOut = e.Key == VirtualKey.Up ? Math.Max(0, curOut - 1) : Math.Min(_outline.Count - 1, curOut + 1);
+            _ = GoToPageAsync(_outline[nextOut].PageIndex);
+            e.Handled = true;
+            return;
+        }
+        if (ctrl && e.Key == VirtualKey.D) { TogglePageBookmark(); e.Handled = true; return; }
         if (ctrl && e.Key == VirtualKey.Z && ToastBanner.Visibility == Visibility.Visible) { ToastUndo_Click(sender, e); e.Handled = true; return; }
         if (ctrl && (e.Key == (VirtualKey)187 || e.Key == VirtualKey.Add)) { _ = AdjustZoomAsync(0.15); e.Handled = true; return; }
         if (ctrl && (e.Key == (VirtualKey)189 || e.Key == VirtualKey.Subtract)) { _ = AdjustZoomAsync(-0.15); e.Handled = true; return; }
@@ -1347,7 +2306,8 @@ public sealed partial class PdfReaderWindow : Window
             case VirtualKey.F11:
                 ToggleFullScreen(); e.Handled = true; break;
             case VirtualKey.Escape:
-                if (_isFullScreen) ToggleFullScreen();
+                if (PdfSelectionCard.Visibility == Visibility.Visible) HidePdfSelectionCard();
+                else if (_isFullScreen) ToggleFullScreen();
                 else if (_sideMode is not null) ToggleSidePanel(_sideMode);
                 e.Handled = true;
                 break;
@@ -1363,7 +2323,20 @@ public sealed partial class PdfReaderWindow : Window
             case VirtualKey.Number2:
             case VirtualKey.Number3:
             case VirtualKey.Number4:
-                _ = AddCurrentPageNoteDialogAsync();
+                if (PdfSelectionCard.Visibility == Visibility.Visible)
+                {
+                    ApplyPdfMarkStyle(e.Key switch
+                    {
+                        VirtualKey.Number2 => MarkStyle.Blue,
+                        VirtualKey.Number3 => MarkStyle.Pink,
+                        VirtualKey.Number4 => MarkStyle.Wave,
+                        _ => MarkStyle.Yellow,
+                    });
+                }
+                else
+                {
+                    _ = AddCurrentPageNoteDialogAsync();
+                }
                 e.Handled = true;
                 break;
         }
@@ -1379,9 +2352,37 @@ public sealed partial class PdfReaderWindow : Window
         UpdateStatusText();
     }
 
+    private void TogglePageBookmark()
+    {
+        try
+        {
+            var existing = _library.GetBookmarks(_bookId).FirstOrDefault(b => b.Section == 0 && (int)b.Sentence == _currentPage);
+            if (existing is not null)
+            {
+                string delId = existing.Id;
+                _library.DeleteBookmark(_bookId, delId);
+                _toastUndo = () => { try { _library.Core.RestoreBookmark(_bookId, delId); } catch { } };
+                ToastUndoBtn.Visibility = Visibility.Visible;
+                ToastText.Text = $"已移掉第 {_currentPage + 1} 页书签";
+                ToastBanner.Visibility = Visibility.Visible;
+                _toastTimer?.Stop();
+                _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+                _toastTimer.Tick += (_, _) => { _toastTimer.Stop(); ToastBanner.Visibility = Visibility.Collapsed; };
+                _toastTimer.Start();
+            }
+            else
+            {
+                _library.AddBookmark(_bookId, 0, (uint)Math.Max(0, _currentPage));
+                ShowBriefToast($"已给第 {_currentPage + 1} 页加上书签");
+            }
+        }
+        catch { }
+    }
+
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
         _readingTimer.Stop();
+        _sleepTimer.Stop();
         _searchDebounce.Stop();
         SaveCurrentProgress();
         _audio.Dispose();

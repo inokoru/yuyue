@@ -1,15 +1,18 @@
+using System.Text.Json;
 using Yuyue.Audiobook;
 
 namespace Yuyue.Core;
 
 /// <summary>
-/// Watches a user-configured local directory and automatically imports newly added books or audiobooks.
+/// Recursively watches a user-configured local directory and automatically imports newly added
+/// or updated books and audiobooks, persisting seen file fingerprints across restarts.
 /// </summary>
 public sealed class WatchedFolderService : IDisposable
 {
     private readonly LibraryService _library;
+    private readonly string _seenStorePath;
     private FileSystemWatcher? _watcher;
-    private readonly HashSet<string> _seenPaths = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> _seenFingerprints = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public event Action? Imported;
@@ -17,7 +20,44 @@ public sealed class WatchedFolderService : IDisposable
     public WatchedFolderService(LibraryService library)
     {
         _library = library;
+        _seenStorePath = Path.Combine(library.DataDir, "watched-seen.json");
+        _seenFingerprints = LoadFingerprints(_seenStorePath);
         Reload();
+    }
+
+    internal static string ComputeFingerprint(string fullPath, long size, long mtimeUtcTicks) =>
+        $"{Path.GetFullPath(fullPath).ToLowerInvariant()}|{size}|{mtimeUtcTicks}";
+
+    internal static HashSet<string> LoadFingerprints(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                var list = JsonSerializer.Deserialize<List<string>>(File.ReadAllText(path));
+                if (list is not null)
+                    return new HashSet<string>(list, StringComparer.OrdinalIgnoreCase);
+            }
+        }
+        catch { }
+        return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    internal static void SaveFingerprints(string path, HashSet<string> fingerprints)
+    {
+        try
+        {
+            string? dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            // Bound to latest 4000 entries to prevent unbounded growth
+            IEnumerable<string> toSave = fingerprints.Count > 4000
+                ? fingerprints.Skip(fingerprints.Count - 4000)
+                : fingerprints;
+            string tmp = path + ".tmp";
+            File.WriteAllText(tmp, JsonSerializer.Serialize(toSave));
+            File.Move(tmp, path, overwrite: true);
+        }
+        catch { }
     }
 
     public void Reload()
@@ -30,19 +70,26 @@ public sealed class WatchedFolderService : IDisposable
         {
             _watcher = new FileSystemWatcher(folder)
             {
-                IncludeSubdirectories = false,
-                NotifyFilter = NotifyFilters.FileName | NotifyFilters.CreationTime | NotifyFilters.Size,
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.CreationTime | NotifyFilters.LastWrite | NotifyFilters.Size,
                 EnableRaisingEvents = true,
             };
             _watcher.Created += (_, e) => _ = QueueCandidateAsync(e.FullPath);
             _watcher.Renamed += (_, e) => _ = QueueCandidateAsync(e.FullPath);
+            _watcher.Changed += (_, e) => _ = QueueCandidateAsync(e.FullPath);
 
-            // Initial scan for existing files in watched folder
+            // Recursive initial scan for unseen or updated files in watched folder
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    foreach (var f in Directory.GetFiles(folder))
+                    var opts = new EnumerationOptions
+                    {
+                        RecurseSubdirectories = true,
+                        IgnoreInaccessible = true,
+                        AttributesToSkip = FileAttributes.Hidden | FileAttributes.System,
+                    };
+                    foreach (var f in Directory.EnumerateFiles(folder, "*", opts))
                         await QueueCandidateAsync(f, delayMs: 50);
                 }
                 catch { }
@@ -61,10 +108,19 @@ public sealed class WatchedFolderService : IDisposable
         await Task.Delay(delayMs);
         if (!File.Exists(fullPath)) return;
 
+        string fp;
+        try
+        {
+            var fi = new FileInfo(fullPath);
+            if (fi.Length == 0) return;
+            fp = ComputeFingerprint(fullPath, fi.Length, fi.LastWriteTimeUtc.Ticks);
+        }
+        catch { return; }
+
         await _gate.WaitAsync();
         try
         {
-            if (!_seenPaths.Add(fullPath)) return;
+            if (!_seenFingerprints.Add(fp)) return;
 
             // Ensure file isn't still locked by browser/downloader
             await using (var probe = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read)) { }
@@ -74,11 +130,12 @@ public sealed class WatchedFolderService : IDisposable
             else
                 await _library.ImportBookWithExtrasAsync(fullPath);
 
+            SaveFingerprints(_seenStorePath, _seenFingerprints);
             Imported?.Invoke();
         }
         catch
         {
-            _seenPaths.Remove(fullPath);
+            _seenFingerprints.Remove(fp);
         }
         finally
         {

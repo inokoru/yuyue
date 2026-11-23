@@ -357,6 +357,16 @@ public sealed class SyncService
             // 4. Exchange Podcast issues & clips (1:1 Sync.swift:359-422)
             applied += await ExchangePodcastFilesAsync(folder, remoteFiles, curSet, _library.Prefs.SyncFiles);
 
+            // 5. Exchange Companion Q&A + Recap caches (1:1 Sync.swift:359-443)
+            applied += await ExchangeCompanionCachesAsync(folder, remoteFiles, curSet);
+
+            // 6. Exchange Audiobook recordings when SyncRecordings is on (1:1 Sync.swift:525-590)
+            if (_library.Prefs.SyncRecordings)
+            {
+                if (await ExchangeAudiobooksAsync(folder, remoteFiles))
+                    applied++;
+            }
+
             LastSynced = DateTimeOffset.Now;
             _library.Prefs.LastSyncedUnixMs = LastSynced.Value.ToUnixTimeMilliseconds();
             _library.SavePrefs();
@@ -460,6 +470,296 @@ public sealed class SyncService
         }
         catch { }
         return took;
+    }
+
+    /// <summary>
+    /// 1:1 <c>Sync.exchangeCompanionCaches</c>: merges remote <c>&lt;id&gt;.companion.json</c> (local <c>companion/&lt;id&gt;.json</c>)
+    /// and <c>&lt;id&gt;.recap.json</c> by JSON key without clobbering either device, then uploads local updates.
+    /// </summary>
+    private async Task<uint> ExchangeCompanionCachesAsync(
+        ISyncFolder folder, Dictionary<string, string> remoteFiles, HashSet<string> leftOutNames)
+    {
+        if (leftOutNames.Contains("reading")) return 0;
+        uint took = 0;
+        try
+        {
+            string compDir = Path.Combine(_library.DataDir, "companion");
+            Directory.CreateDirectory(compDir);
+            var seen = _library.Prefs.SyncCompanionSeenTags;
+            var sent = _library.Prefs.SyncCompanionSentStamps;
+
+            static string? FileStamp(string path)
+            {
+                if (!File.Exists(path)) return null;
+                var fi = new FileInfo(path);
+                return $"{fi.LastWriteTimeUtc.Ticks}-{fi.Length}";
+            }
+
+            static string? ToRemoteName(string localFile)
+            {
+                if (localFile.EndsWith(".recap.json", StringComparison.Ordinal))
+                {
+                    string id = localFile[..^".recap.json".Length];
+                    return string.IsNullOrEmpty(id) ? null : $"{id}.recap.json";
+                }
+                if (localFile.EndsWith(".json", StringComparison.Ordinal))
+                {
+                    string id = localFile[..^".json".Length];
+                    return string.IsNullOrEmpty(id) ? null : $"{id}.companion.json";
+                }
+                return null;
+            }
+
+            static string? ToLocalName(string remote)
+            {
+                if (remote.EndsWith(".recap.json", StringComparison.Ordinal))
+                {
+                    string id = remote[..^".recap.json".Length];
+                    return string.IsNullOrEmpty(id) || id.Contains('/') || id.Contains('\\') || id.Contains("..") ? null : $"{id}.recap.json";
+                }
+                if (remote.EndsWith(".companion.json", StringComparison.Ordinal))
+                {
+                    string id = remote[..^".companion.json".Length];
+                    return string.IsNullOrEmpty(id) || id.Contains('/') || id.Contains('\\') || id.Contains("..") ? null : $"{id}.json";
+                }
+                return null;
+            }
+
+            // Down: key-merge remote JSON object into local cache
+            foreach (var (remote, tag) in remoteFiles)
+            {
+                if (seen.TryGetValue(remote, out var oldTag) && oldTag == tag) continue;
+                string? local = ToLocalName(remote);
+                if (local is null) continue;
+                try
+                {
+                    byte[] remoteBytes = await folder.ReadAsync(remote);
+                    string dest = Path.Combine(compDir, local);
+                    string? localJson = File.Exists(dest) ? await File.ReadAllTextAsync(dest) : null;
+                    string? mergedJson = MergeJsonObjectKeys(localJson, Encoding.UTF8.GetString(remoteBytes), out bool changed);
+                    if (mergedJson is not null && (changed || !File.Exists(dest)))
+                    {
+                        string tmp = dest + ".part";
+                        await File.WriteAllTextAsync(tmp, mergedJson);
+                        File.Move(tmp, dest, overwrite: true);
+                        took++;
+                    }
+                    seen[remote] = tag;
+                }
+                catch { }
+            }
+
+            // Up: upload local caches created or changed since last sync
+            foreach (var path in Directory.EnumerateFiles(compDir, "*.json"))
+            {
+                string file = Path.GetFileName(path);
+                if (file.StartsWith('.')) continue;
+                string? remote = ToRemoteName(file);
+                if (remote is null) continue;
+                string? st = FileStamp(path);
+                if (st is null) continue;
+                if (sent.TryGetValue(remote, out var oldSt) && oldSt == st && remoteFiles.ContainsKey(remote))
+                    continue;
+                try
+                {
+                    byte[] data = await File.ReadAllBytesAsync(path);
+                    if (data.Length > 0)
+                    {
+                        await folder.WriteAsync(remote, data);
+                        sent[remote] = st;
+                    }
+                }
+                catch { }
+            }
+        }
+        catch { }
+        return took;
+    }
+
+    internal static string? MergeJsonObjectKeys(string? localJson, string remoteJson, out bool added)
+    {
+        added = false;
+        try
+        {
+            using var rDoc = JsonDocument.Parse(remoteJson);
+            if (rDoc.RootElement.ValueKind != JsonValueKind.Object) return null;
+
+            var merged = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            JsonDocument? lDoc = null;
+            if (!string.IsNullOrWhiteSpace(localJson))
+            {
+                try
+                {
+                    lDoc = JsonDocument.Parse(localJson);
+                    if (lDoc.RootElement.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var prop in lDoc.RootElement.EnumerateObject())
+                            merged[prop.Name] = prop.Value.Clone();
+                    }
+                }
+                catch { }
+            }
+            lDoc?.Dispose();
+
+            foreach (var prop in rDoc.RootElement.EnumerateObject())
+            {
+                if (!merged.ContainsKey(prop.Name))
+                {
+                    merged[prop.Name] = prop.Value.Clone();
+                    added = true;
+                }
+            }
+            return JsonSerializer.Serialize(merged);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 1:1 <c>Sync.exchangeAudiobooks</c>: uploads <c>&lt;id&gt;.audio.&lt;part&gt;</c> (audio tracks, <c>cover.jpg</c>,
+    /// <c>timings.json</c>) with <c>info.json</c> last, and downloads peers' completed recordings atomically.
+    /// </summary>
+    private async Task<bool> ExchangeAudiobooksAsync(ISyncFolder folder, Dictionary<string, string> remoteFiles)
+    {
+        bool gotAny = false;
+        try
+        {
+            string audioRoot = Path.Combine(_library.DataDir, "audiobooks");
+            Directory.CreateDirectory(audioRoot);
+            var seen = _library.Prefs.SyncAudioSeenTags;
+            var sent = _library.Prefs.SyncAudioSentStamps;
+
+            static string? FileStamp(string path)
+            {
+                if (!File.Exists(path)) return null;
+                var fi = new FileInfo(path);
+                return $"{fi.LastWriteTimeUtc.Ticks}-{fi.Length}";
+            }
+
+            static List<string> ExtractParts(JsonElement infoObj)
+            {
+                var parts = new List<string>();
+                if (infoObj.TryGetProperty("files", out var filesEl) && filesEl.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var f in filesEl.EnumerateArray())
+                    {
+                        string? name = f.ValueKind == JsonValueKind.String
+                            ? f.GetString()
+                            : (f.TryGetProperty("file", out var fp) ? fp.GetString() : (f.TryGetProperty("name", out var np) ? np.GetString() : null));
+                        if (!string.IsNullOrEmpty(name) && !name.Contains('/') && !name.Contains('\\'))
+                            parts.Add(name);
+                    }
+                }
+                parts.Add("cover.jpg");
+                parts.Add("timings.json");
+                return parts.Distinct(StringComparer.Ordinal).ToList();
+            }
+
+            // Up: local recordings under DataDir/audiobooks/<id>/
+            foreach (var dir in Directory.EnumerateDirectories(audioRoot))
+            {
+                string id = Path.GetFileName(dir);
+                if (string.IsNullOrEmpty(id) || id.StartsWith('.')) continue;
+                string infoPath = Path.Combine(dir, "info.json");
+                if (!File.Exists(infoPath)) continue;
+
+                JsonElement infoRoot;
+                try
+                {
+                    using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(infoPath));
+                    if (doc.RootElement.ValueKind != JsonValueKind.Object) continue;
+                    infoRoot = doc.RootElement.Clone();
+                }
+                catch { continue; }
+
+                bool whole = true;
+                var parts = ExtractParts(infoRoot);
+                parts.Add("info.json"); // always last!
+                foreach (string part in parts)
+                {
+                    if (part == "info.json" && !whole) break;
+                    string localPath = Path.Combine(dir, part);
+                    string? st = FileStamp(localPath);
+                    if (st is null) continue;
+                    string remoteName = $"{id}.audio.{part}";
+                    if (remoteFiles.ContainsKey(remoteName) && sent.TryGetValue(remoteName, out var oldSt) && oldSt == st)
+                        continue;
+                    try
+                    {
+                        await folder.UploadFileAsync(remoteName, localPath);
+                        sent[remoteName] = st;
+                    }
+                    catch { whole = false; }
+                }
+            }
+
+            // Down: peer recordings whose <id>.audio.info.json is present
+            foreach (var (name, tag) in remoteFiles)
+            {
+                if (!name.EndsWith(".audio.info.json", StringComparison.Ordinal)) continue;
+                if (seen.TryGetValue(name, out var oldTag) && oldTag == tag) continue;
+
+                string id = name[..^".audio.info.json".Length];
+                if (string.IsNullOrEmpty(id) || id.Contains('/') || id.Contains('\\') || id.Contains("..")) continue;
+
+                byte[] infoBytes;
+                JsonElement infoRoot;
+                try
+                {
+                    infoBytes = await folder.ReadAsync(name);
+                    using var doc = JsonDocument.Parse(infoBytes);
+                    if (doc.RootElement.ValueKind != JsonValueKind.Object) continue;
+                    infoRoot = doc.RootElement.Clone();
+                }
+                catch { continue; }
+
+                string here = Path.Combine(audioRoot, id);
+                Directory.CreateDirectory(here);
+                bool whole = true;
+                foreach (string part in ExtractParts(infoRoot))
+                {
+                    string remote = $"{id}.audio.{part}";
+                    if (!remoteFiles.TryGetValue(remote, out var remoteTag)) continue;
+                    string dest = Path.Combine(here, part);
+                    bool present = File.Exists(dest);
+                    if (present && (part != "timings.json" || (seen.TryGetValue(remote, out var st) && st == remoteTag)))
+                    {
+                        if (!sent.ContainsKey(remote) && FileStamp(dest) is { } ls) sent[remote] = ls;
+                        continue;
+                    }
+                    string partial = dest + ".download";
+                    try
+                    {
+                        await folder.DownloadFileAsync(remote, partial);
+                        File.Move(partial, dest, overwrite: true);
+                        seen[remote] = remoteTag;
+                        if (FileStamp(dest) is { } ns) sent[remote] = ns;
+                    }
+                    catch
+                    {
+                        try { if (File.Exists(partial)) File.Delete(partial); } catch { }
+                        whole = false;
+                    }
+                }
+                if (!whole) continue;
+
+                string infoDest = Path.Combine(here, "info.json");
+                byte[]? curInfo = File.Exists(infoDest) ? await File.ReadAllBytesAsync(infoDest) : null;
+                if (curInfo is null || !curInfo.SequenceEqual(infoBytes))
+                {
+                    string tmp = infoDest + ".part";
+                    await File.WriteAllBytesAsync(tmp, infoBytes);
+                    File.Move(tmp, infoDest, overwrite: true);
+                    gotAny = true;
+                }
+                if (FileStamp(infoDest) is { } ist) sent[name] = ist;
+                seen[name] = tag;
+            }
+        }
+        catch { }
+        return gotAny;
     }
 
     private SyncPart[] BuildLeftOut()
@@ -584,9 +884,29 @@ public sealed class SyncService
         }
     }
 
+    internal static string BuildWebDavFolderUrl(string rawUrl, string folder)
+    {
+        if (!Uri.TryCreate(rawUrl?.Trim(), UriKind.Absolute, out var uri))
+            throw new SyncDiagnosticException("服务器地址格式不正确（需以 https:// 开头）。");
+
+        var cleanBase = uri.ToString().TrimEnd('/');
+        var segments = (folder ?? "")
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => Uri.EscapeDataString(s.Trim()))
+            .Where(s => s.Length > 0)
+            .ToArray();
+
+        return segments.Length == 0
+            ? cleanBase + "/"
+            : $"{cleanBase}/{string.Join("/", segments)}/";
+    }
+
     private sealed class WebDavClient : ISyncFolder, IDisposable
     {
         private readonly HttpClient _http;
+        private readonly string _rootBaseUrl;
+        private readonly string[] _folderSegments;
         private readonly string _baseDirUrl;
 
         public WebDavClient(string rawUrl, string user, string password, string folder)
@@ -594,11 +914,14 @@ public sealed class SyncService
             if (!Uri.TryCreate(rawUrl?.Trim(), UriKind.Absolute, out var uri))
                 throw new SyncDiagnosticException("服务器地址格式不正确（需以 https:// 开头）。");
 
-            var cleanBase = uri.ToString().TrimEnd('/');
-            var cleanFolder = folder.Trim().Trim('/');
-            _baseDirUrl = string.IsNullOrEmpty(cleanFolder)
-                ? cleanBase + "/"
-                : $"{cleanBase}/{Uri.EscapeDataString(cleanFolder)}/";
+            _rootBaseUrl = uri.ToString().TrimEnd('/');
+            _folderSegments = (folder ?? "")
+                .Replace('\\', '/')
+                .Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => s.Trim())
+                .Where(s => s.Length > 0)
+                .ToArray();
+            _baseDirUrl = BuildWebDavFolderUrl(rawUrl!, folder ?? "");
 
             _http = new HttpClient { Timeout = System.TimeSpan.FromMinutes(4) };
             if (!string.IsNullOrEmpty(user))
@@ -610,16 +933,29 @@ public sealed class SyncService
 
         public async Task PrepareAsync()
         {
-            using var req = new HttpRequestMessage(new HttpMethod("MKCOL"), _baseDirUrl);
-            using var res = await _http.SendAsync(req);
-            if (res.StatusCode == HttpStatusCode.Unauthorized)
-                throw new SyncDiagnosticException("账号或应用密码不正确（401）。坚果云请使用第三方应用密码。");
-            if (res.StatusCode == HttpStatusCode.Forbidden)
-                throw new SyncDiagnosticException("没有此目录的访问权限（403）。");
-            if ((int)res.StatusCode == 429)
-                throw new SyncDiagnosticException("请求过于频繁，被服务器限流（429），请稍后重试。");
-            if (res.StatusCode == HttpStatusCode.NotFound)
-                throw new SyncDiagnosticException("上级路径不存在（404），请检查 WebDAV 地址。");
+            // Create nested WebDAV directories segment-by-segment (fixes "Books/Yuyue" escaping bug!)
+            string cur = _rootBaseUrl;
+            foreach (string seg in _folderSegments)
+            {
+                cur += "/" + Uri.EscapeDataString(seg);
+                using var req = new HttpRequestMessage(new HttpMethod("MKCOL"), cur + "/");
+                using var res = await _http.SendAsync(req);
+                int code = (int)res.StatusCode;
+                if (code == 401)
+                    throw new SyncDiagnosticException("账号或应用密码不正确（401）。坚果云请使用第三方应用密码。");
+                if (code == 403)
+                    throw new SyncDiagnosticException("没有此目录的访问权限（403）。");
+                if (code == 409)
+                    throw new SyncDiagnosticException($"无法创建上级目录（409）：{seg}。请检查路径是否存在。");
+                if (code == 429)
+                    throw new SyncDiagnosticException("请求过于频繁，被服务器限流（429），请稍后重试。");
+                if (code == 404)
+                    throw new SyncDiagnosticException("上级路径不存在（404），请检查 WebDAV 地址。");
+                if (code == 507)
+                    throw new SyncDiagnosticException("网盘剩余空间不足（507）。");
+                if (code >= 500)
+                    throw new SyncDiagnosticException($"WebDAV 服务器内部错误（{code}）。");
+            }
         }
 
         public async Task<Dictionary<string, string>> ListAsync()
@@ -695,7 +1031,9 @@ public sealed class SyncService
                 HttpStatusCode.Unauthorized => new SyncDiagnosticException("账号或应用密码不正确（401）。坚果云请使用第三方应用密码。"),
                 HttpStatusCode.Forbidden => new SyncDiagnosticException("没有权限读写该目录（403）。"),
                 HttpStatusCode.NotFound => new SyncDiagnosticException("同步目录不存在（404）。"),
+                HttpStatusCode.Conflict => new SyncDiagnosticException("目录路径冲突（409），请检查文件夹层级。"),
                 (HttpStatusCode)429 => new SyncDiagnosticException("请求过于频繁（429），坚果云触发限流，请稍后再试。"),
+                (HttpStatusCode)507 => new SyncDiagnosticException("网盘空间不足（507）。"),
                 _ => new SyncDiagnosticException($"WebDAV 返回错误 {(int)res.StatusCode} ({res.ReasonPhrase})。"),
             };
         }

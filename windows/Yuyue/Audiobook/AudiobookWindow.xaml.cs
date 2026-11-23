@@ -14,6 +14,8 @@ using Windows.System;
 using WinRT.Interop;
 using Yuyue.Core;
 using Yuyue.Design;
+using Yuyue.Reader;
+using Yuyue.Speech;
 using TimeSpan = System.TimeSpan;
 
 namespace Yuyue.Audiobook;
@@ -42,17 +44,33 @@ public sealed partial class AudiobookWindow : Window
     private bool _playing;
     private bool _suppressSlider;
     private double _rate = 1.0;
+    private readonly bool _startFromBeginning;
 
-    // Sleep timer: 0 = off, -1 = end of chapter, >0 = remaining minutes
+    // Sleep timer: 0 = off, -1 = end of chapter, -2 = end of sentence, >0 = timed (pause-aware + 20s fade)
     private int _sleepMode;
-    private DateTime? _sleepUntilUtc;
+    private double _sleepRemainingSec;
+    private DateTime _sleepLastTickUtc = DateTime.UtcNow;
+    private bool _isSleepFading;
+    private double _sleepSentenceEndSec = -1;
+    private (uint Chapter, int SecMs)? _sleepArmedSpot;
+
+    // Alignment, VoiceTapDsp, ResumeAt, ExtraSpan notice & exact listening time
+    private DateTime? _pausedUtc;
+    private DateTime? _listenSinceUtc;
+    private double _baseVolume = 1.0;
+    private bool _loadedFileIsClearer;
+    private double _lastMomentSkipTarget = -1;
+    private double _ignoreExtraUntilSec = -1;
+    private SyncMap? _cachedMap;
+    private Action? _toastAction;
 
     private static readonly double[] SpeedOptions = [0.75, 1.0, 1.1, 1.2, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0];
 
-    public AudiobookWindow(LibraryService library, string bookId, bool autoPlay = false)
+    public AudiobookWindow(LibraryService library, string bookId, bool autoPlay = false, bool startFromBeginning = false)
     {
         _library = library;
         _bookId = bookId;
+        _startFromBeginning = startFromBeginning;
         _summary = library.GetKeptBooks().FirstOrDefault(b => b.Id == bookId)
             ?? library.GetBookDetail(bookId).Summary;
         _rate = Math.Clamp(_library.Prefs.SpeechRate, 0.75, 3.0);
@@ -69,6 +87,7 @@ public sealed partial class AudiobookWindow : Window
             AudioCategory = MediaPlayerAudioCategory.Speech,
             AutoPlay = false,
         };
+        _player.CommandManager.IsEnabled = false;
         _player.MediaEnded += OnFileEnded;
 
         var smtc = _player.SystemMediaTransportControls;
@@ -77,27 +96,67 @@ public sealed partial class AudiobookWindow : Window
         smtc.IsPauseEnabled = true;
         smtc.IsNextEnabled = true;
         smtc.IsPreviousEnabled = true;
+        smtc.PlaybackStatus = MediaPlaybackStatus.Stopped;
         smtc.ButtonPressed += OnSmtcButtonPressed;
 
-        _uiTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _uiTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         _uiTimer.Tick += OnUiTick;
         _uiTimer.Start();
 
         _listenTimeTracker = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
-        _listenTimeTracker.Tick += (_, _) =>
-        {
-            if (_playing)
-            {
-                try { _library.AddTime(_bookId, (uint)CurrentChapterIndex(), 0, 30); } catch { }
-            }
-        };
+        _listenTimeTracker.Tick += (_, _) => FlushListeningTime();
         _listenTimeTracker.Start();
 
         BookmarkTicksCanvas.SizeChanged += (_, _) => RenderBookmarkTicks();
+        _library.AudiobookWork.StatusChanged += OnAudiobookWorkStatusChanged;
         Closed += OnWindowClosed;
 
         ApplyAppearance();
         _ = LoadRecordingAsync(autoPlay);
+        TryAutoResumeAlignment();
+    }
+
+    public void JumpToStartAndPlay() => _ = SeekGlobalAsync(0, startPlaying: true);
+
+    public void EnsurePlaying()
+    {
+        if (!_playing) PlayPause_Click(this, new RoutedEventArgs());
+    }
+
+    private void FlushListeningTime()
+    {
+        if (_listenSinceUtc is not DateTime since) return;
+        double sec = (DateTime.UtcNow - since).TotalSeconds;
+        _listenSinceUtc = _playing ? DateTime.UtcNow : null;
+        uint whole = (uint)Math.Max(0, Math.Round(sec));
+        if (whole >= 2)
+        {
+            try { _library.AddTime(_bookId, (uint)CurrentChapterIndex(), 0, whole); } catch { }
+        }
+    }
+
+    private void OnAudiobookWorkStatusChanged(AudiobookWorkStatus status)
+    {
+        if (status.RecordingId != _bookId) return;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            RenderPairCard();
+            if (status.Phase == AudiobookWorkPhase.Done)
+                ShowToast(status.Message);
+            else if (status.Phase == AudiobookWorkPhase.Failed)
+                ShowToast($"对齐出错：{status.Message}");
+        });
+    }
+
+    private void TryAutoResumeAlignment()
+    {
+        try
+        {
+            var prog = _library.Core.AudiobookProgress(_bookId);
+            if (!string.IsNullOrEmpty(prog.PairedWith) && !prog.Done && Aligner.IsInstalled(_library.DataDir))
+                _library.AudiobookWork.Start(_bookId, prog.PairedWith, _globalPosSec, autoDownloadModel: false);
+        }
+        catch { }
     }
 
     public void ApplyAppearance()
@@ -121,6 +180,8 @@ public sealed partial class AudiobookWindow : Window
         ThemeHelper.ConfigureTitleBar(this, dark);
         RenderChaptersAndBookmarks();
         RenderPairCard();
+        L10n.Skip(BookBylineLabel);
+        L10n.ApplyTree(RootGrid);
     }
 
     private async Task LoadRecordingAsync(bool autoPlay)
@@ -158,17 +219,77 @@ public sealed partial class AudiobookWindow : Window
 
         double totalSec = Math.Max(1.0, _recording.Seconds);
         var saved = _library.GetProgress(_bookId);
-        if (saved is not null && _recording.Chapters.Length > 0)
+        if (_startFromBeginning)
+        {
+            _globalPosSec = 0;
+        }
+        else if (saved is not null && _recording.Chapters.Length > 0)
         {
             int ch = Math.Clamp((int)saved.Position.Section, 0, _recording.Chapters.Length - 1);
             _globalPosSec = Math.Clamp(_recording.Chapters[ch].Start + saved.Position.Sentence / 1000.0, 0, totalSec);
         }
+
+        try { _cachedMap = _library.Core.AudiobookMap(_bookId); } catch { _cachedMap = null; }
+        if (_library.Prefs.AudiobookLoudnessGain.TryGetValue(_bookId, out float savedGain))
+            _baseVolume = Math.Clamp(savedGain, 0.35, 1.0);
+        else
+            _ = MeasureBookLoudnessInBackgroundAsync();
 
         await SeekGlobalAsync(_globalPosSec, startPlaying: autoPlay);
         SaveCurrentProgress();
         App.CurrentApp.NotifyShelfRefresh();
         RenderChaptersAndBookmarks();
         RenderPairCard();
+
+        // Offer 回到昨晚 (SleepReturn) or Elsewhere progress if applicable
+        if (ReaderRecapAndSleepHelper.TryGetSleepReturn(_library, _bookId) is { } sleepRet)
+        {
+            int targetCh = Math.Clamp((int)sleepRet.Section, 0, Math.Max(0, _recording.Chapters.Length - 1));
+            double returnSec = _recording.Chapters.Length > 0 ? _recording.Chapters[targetCh].Start + sleepRet.Sentence / 1000.0 : sleepRet.Sentence / 1000.0;
+            ShowToast($"{sleepRet.When}定时暂停过", "回到暂停位置", () =>
+            {
+                ReaderRecapAndSleepHelper.ClearSleepReturn(_library, _bookId);
+                _ = SeekGlobalAsync(returnSec, startPlaying: true);
+            }, autoHideSeconds: 8);
+        }
+        else
+        {
+            try
+            {
+                var latest = _library.Core.LatestProgress(_bookId);
+                if (latest is not null && !latest.ThisDevice && saved is not null && latest.At > saved.At && _recording.Chapters.Length > 0)
+                {
+                    int rCh = Math.Clamp((int)latest.Position.Section, 0, _recording.Chapters.Length - 1);
+                    double remoteSec = _recording.Chapters[rCh].Start + latest.Position.Sentence / 1000.0;
+                    if (Math.Abs(remoteSec - _globalPosSec) > 8.0)
+                    {
+                        ShowToast($"另一台设备听到了 {ChapterTitle(rCh)}", "跳过去", () => _ = SeekGlobalAsync(remoteSec, startPlaying: true), autoHideSeconds: 9);
+                    }
+                }
+            }
+            catch { }
+        }
+    }
+
+    private async Task MeasureBookLoudnessInBackgroundAsync()
+    {
+        if (_recording is null || _recording.Files.Length == 0) return;
+        string firstPath = _recording.Files[0].Path;
+        if (!File.Exists(firstPath)) return;
+        try
+        {
+            string scratch = Path.Combine(_library.DataDir, "audiobooks", _bookId, "pcm-cache");
+            string pcm = await Aligner.EnsurePcm16kWavAsync(firstPath, scratch, 0, CancellationToken.None);
+            float gain = VoiceTapDsp.MeasureLoudnessFromWav(pcm);
+            _library.Prefs.AudiobookLoudnessGain[_bookId] = gain;
+            _library.SavePrefs();
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                _baseVolume = Math.Clamp(gain, 0.35, 1.0);
+                if (!_isSleepFading) _player.Volume = _baseVolume;
+            });
+        }
+        catch { }
     }
 
     private int CurrentChapterIndex()
@@ -186,6 +307,14 @@ public sealed partial class AudiobookWindow : Window
     private string ChapterTitle(int index)
     {
         if (_recording is null || index < 0 || index >= _recording.Chapters.Length) return _summary.Title;
+        // Prefer paired ebook chapter title from SyncMap.Chapters when available (1:1 AudiobookPlayer.swift bookTitles)
+        if (_cachedMap is not null && _cachedMap.Chapters.Length > 0)
+        {
+            double chStart = _recording.Chapters[index].Start;
+            var matched = _cachedMap.Chapters.LastOrDefault(c => c.T0 <= chStart + 5.0);
+            if (matched is not null && !string.IsNullOrWhiteSpace(matched.Title))
+                return matched.Title;
+        }
         var raw = _recording.Chapters[index].Title;
         return string.IsNullOrWhiteSpace(raw) ? $"第 {index + 1} 集" : raw;
     }
@@ -199,7 +328,7 @@ public sealed partial class AudiobookWindow : Window
         return (ch.Start, Math.Max(1.0, ch.Seconds));
     }
 
-    private async Task SeekGlobalAsync(double targetSec, bool startPlaying)
+    private async Task SeekGlobalAsync(double targetSec, bool startPlaying, bool forceReload = false)
     {
         if (_recording is null || _recording.Files.Length == 0) return;
         double clamped = Math.Clamp(targetSec, 0, Math.Max(0, _recording.Seconds - 0.1));
@@ -212,25 +341,70 @@ public sealed partial class AudiobookWindow : Window
             else break;
         }
 
+        bool wantClearer = false;
+        try { wantClearer = _library.Core.AudiobookSkipSettings(_bookId).ClearerVoice; } catch { }
+
         double localSec = Math.Max(0, clamped - _fileStartOffsets[fileIdx]);
-        if (fileIdx != _currentFileIndex)
+        if (fileIdx != _currentFileIndex || forceReload || wantClearer != _loadedFileIsClearer)
         {
             string filePath = _recording.Files[fileIdx].Path;
             if (!File.Exists(filePath)) return;
-            var sf = await StorageFile.GetFileFromPathAsync(filePath);
+
+            string playPath = filePath;
+            bool usedClearer = false;
+            if (wantClearer)
+            {
+                string dspPath = Path.Combine(_library.DataDir, "audiobooks", _bookId, $"clear-{fileIdx}.wav");
+                if (File.Exists(dspPath))
+                {
+                    playPath = dspPath;
+                    usedClearer = true;
+                }
+                else
+                {
+                    ShowToast("正在生成人声增强音轨…");
+                    string srcCap = filePath;
+                    int idxCap = fileIdx;
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            string scratch = Path.Combine(_library.DataDir, "audiobooks", _bookId, "pcm-cache");
+                            string pcm = await Aligner.EnsurePcm16kWavAsync(srcCap, scratch, idxCap, CancellationToken.None);
+                            float gain = _library.Prefs.AudiobookLoudnessGain.TryGetValue(_bookId, out var g) ? g : VoiceTapDsp.MeasureLoudnessFromWav(pcm);
+                            if (VoiceTapDsp.ProcessWavFile(pcm, dspPath, gain, clearer: true))
+                            {
+                                DispatcherQueue.TryEnqueue(() =>
+                                {
+                                    if (_currentFileIndex == idxCap)
+                                        _ = SeekGlobalAsync(_globalPosSec, _playing, forceReload: true);
+                                });
+                            }
+                        }
+                        catch { }
+                    });
+                }
+            }
+
+            var sf = await StorageFile.GetFileFromPathAsync(playPath);
             var ms = MediaSource.CreateFromStorageFile(sf);
             await ms.OpenAsync();
             _player.Source = ms;
             _currentFileIndex = fileIdx;
+            _loadedFileIsClearer = usedClearer;
         }
 
+        _player.Volume = _isSleepFading ? _player.Volume : _baseVolume;
         _player.PlaybackSession.PlaybackRate = _rate;
         _player.PlaybackSession.Position = TimeSpan.FromSeconds(localSec);
 
         if (startPlaying)
         {
+            App.CurrentApp.ClaimAudioPlayback(this, () => DispatcherQueue.TryEnqueue(PausePlayback));
             _player.Play();
             _playing = true;
+            _listenSinceUtc ??= DateTime.UtcNow;
+            _sleepLastTickUtc = DateTime.UtcNow;
         }
 
         SyncChapterUi();
@@ -265,14 +439,54 @@ public sealed partial class AudiobookWindow : Window
         if (_playing && _currentFileIndex >= 0 && _currentFileIndex < _fileStartOffsets.Length)
         {
             _globalPosSec = _fileStartOffsets[_currentFileIndex] + _player.PlaybackSession.Position.TotalSeconds;
+
+            if (_sleepMode == -2 && _sleepSentenceEndSec > 0 && _globalPosSec >= _sleepSentenceEndSec)
+            {
+                FinishSleepStop("已念完这句 · 已自动加书签");
+                return;
+            }
+
             try
             {
                 var moment = _library.Core.AudiobookMoment(_bookId, _globalPosSec);
-                if (moment.SkipTo is double skipTo && skipTo > _globalPosSec + 0.6)
+                if (moment.SkipTo is double skipTo && skipTo > _globalPosSec + 0.35)
                 {
-                    double savedDelta = skipTo - _globalPosSec;
-                    try { _library.Core.AudiobookAddSaved(_bookId, savedDelta); } catch { }
-                    _ = SeekGlobalAsync(skipTo, startPlaying: true);
+                    bool overrideActive = moment.Extra is not null && _globalPosSec < _ignoreExtraUntilSec;
+                    if (!overrideActive && Math.Abs(skipTo - _lastMomentSkipTarget) > 0.35)
+                    {
+                        _lastMomentSkipTarget = skipTo;
+                        double savedDelta = skipTo - _globalPosSec;
+                        // 1:1 AudiobookPlayer.swift: count ONLY pause shortening (Extra == null) into AudiobookAddSaved
+                        if (moment.Extra is null && savedDelta > 0.1 && savedDelta < 30.0)
+                        {
+                            try { _library.Core.AudiobookAddSaved(_bookId, savedDelta); } catch { }
+                        }
+                        else if (moment.Extra is { } ex)
+                        {
+                            if (ex.Place == ExtraPlace.Tail)
+                            {
+                                PausePlayback();
+                                ShowToast("正文已播完，已跳过片尾");
+                                return;
+                            }
+                            if (ex.Place == ExtraPlace.Head)
+                            {
+                                double headStart = ex.T0;
+                                double headEnd = ex.T1;
+                                ShowToast($"跳过了片头（{(int)Math.Round(savedDelta)} 秒）", "点这里听", () =>
+                                {
+                                    _ignoreExtraUntilSec = headEnd;
+                                    _ = SeekGlobalAsync(headStart, startPlaying: true);
+                                }, autoHideSeconds: 6);
+                            }
+                        }
+                        _ = SeekGlobalAsync(skipTo, startPlaying: true);
+                    }
+                }
+                else if (moment.Extra is { } curEx && curEx.Place == ExtraPlace.Middle && _globalPosSec >= _ignoreExtraUntilSec && ToastBanner.Visibility != Visibility.Visible)
+                {
+                    double skipOut = curEx.T1 + 0.05;
+                    ShowToast("不在书里的话", "跳过", () => _ = SeekGlobalAsync(skipOut, startPlaying: true), autoHideSeconds: 5);
                 }
             }
             catch { }
@@ -283,37 +497,66 @@ public sealed partial class AudiobookWindow : Window
         {
             if (_sleepMode == -1)
             {
-                PausePlayback();
-                _sleepMode = 0;
-                SleepCountdownText.Text = "";
-                ApplyAppearance();
-                AddBookmarkAtCurrentPosition(silent: true);
-                ShowToast("本集播完 · 已自动加书签");
+                FinishSleepStop("本集播完 · 已自动加书签");
                 return;
             }
             RenderChaptersAndBookmarks();
         }
 
-        if (_sleepUntilUtc is DateTime until)
+        // Pause-aware sleep countdown + 20s linear volume fade (1:1 AudiobookPlayer.swift:864-925)
+        if (_sleepMode > 0)
         {
-            var rem = until - DateTime.UtcNow;
-            if (rem.TotalSeconds <= 0)
+            var now = DateTime.UtcNow;
+            if (_playing)
             {
-                PausePlayback();
-                _sleepUntilUtc = null;
-                _sleepMode = 0;
-                SleepCountdownText.Text = "";
-                ApplyAppearance();
-                AddBookmarkAtCurrentPosition(silent: true);
-                ShowToast("定时到了 · 已自动加书签");
+                double dt = Math.Clamp((now - _sleepLastTickUtc).TotalSeconds, 0, 2.0);
+                _sleepRemainingSec = Math.Max(0, _sleepRemainingSec - dt);
+                if (_sleepRemainingSec <= 20.0 && _sleepRemainingSec > 0)
+                {
+                    _isSleepFading = true;
+                    _player.Volume = _baseVolume * Math.Clamp(_sleepRemainingSec / 20.0, 0.05, 1.0);
+                }
+                else if (_sleepRemainingSec <= 0)
+                {
+                    FinishSleepStop("定时到了 · 已渐弱暂停并加书签");
+                    return;
+                }
             }
-            else
-            {
-                SleepCountdownText.Text = $"定时还剩 {(int)rem.TotalMinutes:D2}:{rem.Seconds:D2}";
-            }
+            _sleepLastTickUtc = now;
+            var remSpan = TimeSpan.FromSeconds(Math.Ceiling(_sleepRemainingSec));
+            SleepCountdownText.Text = _isSleepFading
+                ? $"即将渐弱暂停 {remSpan.Seconds:D2}s（按空格延 10 分）"
+                : $"定时还剩 {(int)remSpan.TotalMinutes:D2}:{remSpan.Seconds:D2}";
         }
 
         SyncChapterUi();
+    }
+
+    private void FinishSleepStop(string toastMsg)
+    {
+        var armed = _sleepArmedSpot ?? ((uint)CurrentChapterIndex(), (int)Math.Round((_globalPosSec - CurrentChapterBounds().Start) * 1000.0));
+        PausePlayback();
+        _sleepMode = 0;
+        _sleepRemainingSec = 0;
+        _isSleepFading = false;
+        _sleepSentenceEndSec = -1;
+        _sleepArmedSpot = null;
+        _player.Volume = _baseVolume;
+        SleepCountdownText.Text = "";
+        ReaderRecapAndSleepHelper.RememberSleepStop(_library, _bookId, armed.Chapter, armed.SecMs);
+        ApplyAppearance();
+        AddBookmarkAtCurrentPosition(silent: true);
+        ShowToast(toastMsg);
+    }
+
+    private void ExtendSleepTenMin()
+    {
+        _sleepMode = 10;
+        _sleepRemainingSec = Math.Max(0, _sleepRemainingSec) + 600.0;
+        _sleepLastTickUtc = DateTime.UtcNow;
+        _isSleepFading = false;
+        _player.Volume = _baseVolume;
+        ShowToast("已延长睡眠定时 10 分钟");
     }
 
     private void SyncChapterUi()
@@ -332,7 +575,9 @@ public sealed partial class AudiobookWindow : Window
         ChapterElapsedText.Text = FormatTime(inChap);
         ChapterTotalText.Text = FormatTime(chDur);
 
-        double remBookSec = Math.Max(0, _recording.Seconds - _globalPosSec) / Math.Max(0.5, _rate);
+        double pauseSavings = 0;
+        try { pauseSavings = _library.Core.AudiobookPauseSavings(_bookId, _globalPosSec); } catch { }
+        double remBookSec = Math.Max(0, _recording.Seconds - _globalPosSec - pauseSavings) / Math.Max(0.5, _rate);
         if (_recording.Chapters.Length > 1 && remBookSec >= 60)
         {
             int hrs = (int)(remBookSec / 3600);
@@ -343,6 +588,19 @@ public sealed partial class AudiobookWindow : Window
         {
             BookRemainingText.Text = "";
         }
+
+        try
+        {
+            _player.SystemMediaTransportControls.UpdateTimelineProperties(new SystemMediaTransportControlsTimelineProperties
+            {
+                StartTime = TimeSpan.Zero,
+                EndTime = TimeSpan.FromSeconds(chDur),
+                MinSeekTime = TimeSpan.Zero,
+                MaxSeekTime = TimeSpan.FromSeconds(chDur),
+                Position = TimeSpan.FromSeconds(inChap),
+            });
+        }
+        catch { }
 
         RenderBookmarkTicks();
     }
@@ -386,12 +644,30 @@ public sealed partial class AudiobookWindow : Window
         PlayPauseBtn.Background = ThemeHelper.Brush(p.T1);
         PlayPauseBtn.Content = YYIcons.Make(_playing ? "pause" : "play", 20, ThemeHelper.Brush(p.Bg), filled: true);
 
+        _library.SystemIntegration.SetAudioPlaying(this, _playing, _summary.Title, () => DispatcherQueue.TryEnqueue(() => PlayPause_Click(this, new RoutedEventArgs())));
+
         try
         {
-            var u = _player.SystemMediaTransportControls.DisplayUpdater;
+            var smtc = _player.SystemMediaTransportControls;
+            smtc.PlaybackStatus = _playing ? MediaPlaybackStatus.Playing : MediaPlaybackStatus.Paused;
+            var u = smtc.DisplayUpdater;
             u.Type = MediaPlaybackType.Music;
             u.MusicProperties.Title = ChapterTitle(CurrentChapterIndex());
             u.MusicProperties.Artist = _summary.Title;
+            if (!string.IsNullOrEmpty(_summary.CoverPath) && File.Exists(_summary.CoverPath) && u.Thumbnail is null)
+            {
+                string cp = _summary.CoverPath;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var file = await StorageFile.GetFileFromPathAsync(cp);
+                        u.Thumbnail = Windows.Storage.Streams.RandomAccessStreamReference.CreateFromFile(file);
+                        u.Update();
+                    }
+                    catch { }
+                });
+            }
             u.Update();
         }
         catch { }
@@ -399,7 +675,15 @@ public sealed partial class AudiobookWindow : Window
 
     private void PausePlayback()
     {
+        bool wasPlaying = _playing;
         _playing = false;
+        _isSleepFading = false;
+        _player.Volume = _baseVolume;
+        if (wasPlaying)
+        {
+            _pausedUtc = DateTime.UtcNow;
+            FlushListeningTime();
+        }
         try { _player.Pause(); } catch { }
         UpdateTransportUi();
         SaveCurrentProgress();
@@ -581,13 +865,63 @@ public sealed partial class AudiobookWindow : Window
                 cov.Child = new Image { Source = new BitmapImage(new Uri(pairedEbook.CoverPath)), Stretch = Stretch.UniformToFill };
             g.Children.Add(cov);
 
+            AudiobookProgress? alignProg = null;
+            try { alignProg = _library.Core.AudiobookProgress(_bookId); } catch { }
+            var workStatus = _library.AudiobookWork.GetStatus(_bookId);
+            bool workActive = _library.AudiobookWork.IsRunning(_bookId);
+            bool alignDone = alignProg?.Done == true || activePair?.Made == true;
+
+            string subLine;
+            if (workActive && workStatus is not null)
+                subLine = workStatus.Message;
+            else if (alignDone)
+                subLine = alignProg is not null && alignProg.Sentences > 0
+                    ? $"已对齐 {alignProg.Exact}/{alignProg.Sentences} 句 · 可同步跟读"
+                    : "已配对 · 可切到书页同步阅读";
+            else if (workStatus?.Phase == AudiobookWorkPhase.Failed)
+                subLine = $"对齐中断：{workStatus.Message}";
+            else if (Aligner.IsInstalled(_library.DataDir))
+                subLine = "已配对 · 点「自动对齐」生成句级时间轴";
+            else
+                subLine = "已配对 · 可下载本地对齐模型自动对齐";
+
             var mid = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
             mid.Children.Add(new TextBlock { Text = $"《{pairedEbook.Title}》", FontSize = 11.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
-            mid.Children.Add(new TextBlock { Text = activePair?.Made == true ? "已配对 · 可切到书页同步阅读" : "已配对电子书 · 右键可换书或解绑", FontSize = 10, Foreground = ThemeHelper.Brush(tint.Accent), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
+            mid.Children.Add(new TextBlock { Text = subLine, FontSize = 10, Foreground = ThemeHelper.Brush(workStatus?.Phase == AudiobookWorkPhase.Failed ? p.Danger : tint.Accent), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
             Grid.SetColumn(mid, 1);
             g.Children.Add(mid);
 
             string eid = pairedEbook.Id;
+            var rightBtns = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+
+            if (!alignDone)
+            {
+                var alignActionBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+                    Content = workActive ? "暂停" : (Aligner.IsInstalled(_library.DataDir) ? "自动对齐" : "下载对齐"),
+                    Height = 26,
+                    MinHeight = 26,
+                    Padding = new Thickness(9, 0, 9, 0),
+                    FontSize = 10.5,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                alignActionBtn.Click += (_, _) =>
+                {
+                    if (_library.AudiobookWork.IsRunning(_bookId))
+                    {
+                        _library.AudiobookWork.Stop(_bookId);
+                        RenderPairCard();
+                    }
+                    else
+                    {
+                        _library.AudiobookWork.Start(_bookId, eid, _globalPosSec, autoDownloadModel: true);
+                        RenderPairCard();
+                    }
+                };
+                rightBtns.Children.Add(alignActionBtn);
+            }
+
             var openBtn = new Button
             {
                 Content = "切到书页",
@@ -602,15 +936,26 @@ public sealed partial class AudiobookWindow : Window
                 VerticalAlignment = VerticalAlignment.Center,
             };
             openBtn.Click += (_, _) => OpenSyncedPairedEbook(eid);
-            Grid.SetColumn(openBtn, 2);
-            g.Children.Add(openBtn);
+            rightBtns.Children.Add(openBtn);
+
+            Grid.SetColumn(rightBtns, 2);
+            g.Children.Add(rightBtns);
 
             var ctx = new MenuFlyout();
+            var runAlignMi = new MenuFlyoutItem { Text = workActive ? "停止本地强制对齐" : "运行本地强制对齐 (MMS ONNX)" };
+            runAlignMi.Click += (_, _) =>
+            {
+                if (_library.AudiobookWork.IsRunning(_bookId)) _library.AudiobookWork.Stop(_bookId);
+                else _library.AudiobookWork.Start(_bookId, eid, _globalPosSec, autoDownloadModel: true);
+                RenderPairCard();
+            };
+            ctx.Items.Add(runAlignMi);
             var pickOtherMi = new MenuFlyoutItem { Text = "换一本配对电子书…" };
             pickOtherMi.Click += async (_, _) => await ShowEbookPairPickerAsync();
             var unpairMi = new MenuFlyoutItem { Text = "解除配对", Foreground = ThemeHelper.Brush(p.Danger) };
             unpairMi.Click += (_, _) =>
             {
+                _library.AudiobookWork.Stop(_bookId);
                 try { _library.Core.AudiobookPair(_bookId, null); } catch { }
                 RenderPairCard();
                 ShowToast("已解除电子书配对");
@@ -648,6 +993,8 @@ public sealed partial class AudiobookWindow : Window
             pairBtn.Click += (_, _) =>
             {
                 try { _library.Core.AudiobookPair(_bookId, cid); } catch { }
+                if (Aligner.IsInstalled(_library.DataDir))
+                    _library.AudiobookWork.Start(_bookId, cid, _globalPosSec, autoDownloadModel: false);
                 RenderPairCard();
                 ShowToast($"已与《{candidateEbook.Title}》配对");
             };
@@ -664,6 +1011,19 @@ public sealed partial class AudiobookWindow : Window
             Grid.SetColumn(mid, 1);
             g.Children.Add(mid);
 
+            var actionRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+            var transcribeBtn = new Button
+            {
+                Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+                Content = "转文字版",
+                Height = 26,
+                MinHeight = 26,
+                Padding = new Thickness(9, 0, 9, 0),
+                FontSize = 11,
+            };
+            transcribeBtn.Click += async (_, _) => await ShowMakeTextVersionDialogAsync();
+            actionRow.Children.Add(transcribeBtn);
+
             var pickBtn = new Button
             {
                 Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
@@ -678,11 +1038,13 @@ public sealed partial class AudiobookWindow : Window
                 if (shelfEbooks.Length > 0) await ShowEbookPairPickerAsync();
                 else App.CurrentApp.ShowShelf();
             };
-            Grid.SetColumn(pickBtn, 2);
-            g.Children.Add(pickBtn);
+            actionRow.Children.Add(pickBtn);
+            Grid.SetColumn(actionRow, 2);
+            g.Children.Add(actionRow);
         }
 
         PairCardHost.Child = g;
+        L10n.ApplyTree(PairCardHost);
     }
 
     private void OpenSyncedPairedEbook(string ebookId)
@@ -725,24 +1087,37 @@ public sealed partial class AudiobookWindow : Window
         bool dark = ThemeHelper.IsDark(RootGrid.ActualTheme);
         var p = ThemeHelper.Palette(dark);
         var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
-        var ebooks = _library.GetShelfBooks().Where(b => b.Id != _bookId && b.Format != BookFormat.Audio && b.Format != BookFormat.Pdf).ToArray();
+        var ebooks = _library.GetShelfBooks()
+            .Where(b => b.Id != _bookId && b.Format != BookFormat.Audio && b.Format != BookFormat.Pdf && b.Format != BookFormat.Podcast)
+            .ToArray();
 
         ContentDialog? dlgRef = null;
+        var searchBox = new TextBox { PlaceholderText = "搜索书名或作者…" };
         var list = new StackPanel { Spacing = 6, Width = 390 };
 
-        if (ebooks.Length == 0)
+        void Rebuild(string q)
         {
-            list.Children.Add(new TextBlock
+            list.Children.Clear();
+            var filtered = ebooks.Where(b =>
+                string.IsNullOrWhiteSpace(q) ||
+                b.Title.Contains(q.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                b.Authors.Any(a => a.Contains(q.Trim(), StringComparison.OrdinalIgnoreCase))).ToArray();
+
+            if (filtered.Length == 0)
             {
-                Text = "书架上还没有可配对的文字电子书（EPUB / TXT / MOBI / AZW3）。先将电子书拖入书架再来配对即可。",
-                FontSize = 12,
-                Foreground = ThemeHelper.Brush(p.T2),
-                TextWrapping = TextWrapping.Wrap,
-            });
-        }
-        else
-        {
-            foreach (var eb in ebooks)
+                list.Children.Add(new TextBlock
+                {
+                    Text = ebooks.Length == 0
+                        ? "书架上还没有可配对的文字电子书（EPUB / TXT / MOBI / AZW3）。先将电子书拖入书架再来配对即可。"
+                        : "没有匹配的电子书。",
+                    FontSize = 12,
+                    Foreground = ThemeHelper.Brush(p.T2),
+                    TextWrapping = TextWrapping.Wrap,
+                });
+                return;
+            }
+
+            foreach (var eb in filtered)
             {
                 var row = new Grid { ColumnSpacing = 10 };
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -751,7 +1126,7 @@ public sealed partial class AudiobookWindow : Window
                 meta.Children.Add(new TextBlock { Text = eb.Title, FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
                 meta.Children.Add(new TextBlock { Text = eb.Authors.FirstOrDefault() ?? "电子书", FontSize = 11, Foreground = ThemeHelper.Brush(p.T3) });
                 row.Children.Add(meta);
-                var selTag = new TextBlock { Text = "配对 ›", FontSize = 11.5, Foreground = ThemeHelper.Brush(tint.Accent), VerticalAlignment = VerticalAlignment.Center };
+                var selTag = new TextBlock { Text = "配对并对齐 ›", FontSize = 11.5, Foreground = ThemeHelper.Brush(tint.Accent), VerticalAlignment = VerticalAlignment.Center };
                 Grid.SetColumn(selTag, 1);
                 row.Children.Add(selTag);
 
@@ -772,22 +1147,169 @@ public sealed partial class AudiobookWindow : Window
                 btn.Click += (_, _) =>
                 {
                     try { _library.Core.AudiobookPair(_bookId, targetId); } catch { }
+                    _library.AudiobookWork.Start(_bookId, targetId, _globalPosSec, autoDownloadModel: true);
                     dlgRef?.Hide();
                     RenderPairCard();
-                    ShowToast($"已与《{targetTitle}》配对");
+                    ShowToast($"已与《{targetTitle}》配对，正在后台对齐…", "查看进度", () => _ = ShowPairStatusWizardAsync());
                 };
                 list.Children.Add(btn);
             }
         }
 
+        searchBox.TextChanged += (_, _) => Rebuild(searchBox.Text);
+        Rebuild("");
+
         dlgRef = new ContentDialog
         {
             XamlRoot = RootGrid.XamlRoot,
             Title = "选择要配对的电子书",
-            Content = new ScrollViewer { MaxHeight = 360, Content = list },
+            Content = new StackPanel { Width = 400, Spacing = 8, Children = { searchBox, new ScrollViewer { MaxHeight = 320, Content = list } } },
             CloseButtonText = "关闭",
         };
         await dlgRef.ShowAsync();
+    }
+
+    private async Task ShowMakeTextVersionDialogAsync()
+    {
+        bool dark = ThemeHelper.IsDark(RootGrid.ActualTheme);
+        var p = ThemeHelper.Palette(dark);
+        using var cts = new CancellationTokenSource();
+
+        var statusTb = new TextBlock
+        {
+            Text = "没有电子书时，可将录音逐段转写为可划线、可搜索的「文字版」，并自动与这本有声书配对。优先使用本地 Whisper 或已配置的语音转写接口。",
+            FontSize = 12,
+            Foreground = ThemeHelper.Brush(p.T2),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        var bar = new ProgressBar { Minimum = 0, Maximum = 100, Value = 0 };
+        var detailTb = new TextBlock { FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), TextWrapping = TextWrapping.Wrap };
+        var startBtn = new Button
+        {
+            Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"],
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Content = "开始转写生成文字版",
+        };
+        BookSummary? created = null;
+
+        startBtn.Click += async (_, _) =>
+        {
+            startBtn.IsEnabled = false;
+            detailTb.Text = "正在准备转写…";
+            try
+            {
+                created = await Task.Run(async () => await WindowsTranscriber.MakeTextVersionAsync(
+                    _library,
+                    _bookId,
+                    (frac, msg) => DispatcherQueue.TryEnqueue(() =>
+                    {
+                        bar.Value = Math.Clamp(frac * 100, 0, 100);
+                        detailTb.Text = msg;
+                    }),
+                    cts.Token));
+                if (created is not null)
+                {
+                    RenderPairCard();
+                    ShowToast($"已生成文字版《{created.Title}》", "打开阅读", () => OpenSyncedPairedEbook(created.Id));
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                detailTb.Text = "已取消转写";
+            }
+            catch (Exception ex)
+            {
+                detailTb.Text = ex.Message;
+                startBtn.IsEnabled = true;
+            }
+        };
+
+        var dlg = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            Title = "转成文字版",
+            Content = new StackPanel
+            {
+                Width = 390,
+                Spacing = 10,
+                Children = { statusTb, bar, detailTb, startBtn },
+            },
+            CloseButtonText = "关闭",
+        };
+        await dlg.ShowAsync();
+        cts.Cancel();
+    }
+
+    /// <summary>
+    /// 1:1 <c>AudiobookViews.swift</c> (<c>AudiobookPage</c> making/result summary):
+    /// displays alignment progress, extra intro detection (&gt;15s) with preview &amp; skip toggle, and unread sentence count.
+    /// </summary>
+    private async Task ShowPairStatusWizardAsync()
+    {
+        bool dark = ThemeHelper.IsDark(RootGrid.ActualTheme);
+        var p = ThemeHelper.Palette(dark);
+        var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+
+        var prog = _library.Core.AudiobookProgress(_bookId);
+        var map = _library.Core.AudiobookMap(_bookId);
+        _cachedMap = map;
+        var extras = _library.Core.AudiobookExtras(_bookId);
+        var skip = _library.Core.AudiobookSkipSettings(_bookId);
+        var host = new StackPanel { Width = 420, Spacing = 10 };
+
+        double progFrac = prog.Done ? 1.0
+            : (prog.Sentences > 0 ? Math.Clamp((prog.Exact + prog.Spread * 0.5) / prog.Sentences, 0, 1)
+                : (prog.Seconds > 1 ? Math.Clamp(prog.Transcribed / prog.Seconds, 0, 1) : 0));
+        host.Children.Add(new TextBlock
+        {
+            Text = prog.Done ? "✓ 全书听读对齐已完成" : $"正在对齐中（已完成 {Math.Round(progFrac * 100)}%）",
+            FontSize = 13.5,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush(prog.Done ? p.Ok : tint.Accent),
+        });
+
+        if (map is not null)
+        {
+            int unreadCount = map.Rows.Count(r => r.By == SyncBy.Unread);
+            int mappedCount = map.Rows.Count(r => r.By != SyncBy.Unread);
+            host.Children.Add(new TextBlock
+            {
+                Text = $"共对齐 {mappedCount} 句 · 未念/略过 {unreadCount} 句 · 共 {map.Chapters.Length} 章",
+                FontSize = 12,
+                Foreground = ThemeHelper.Brush(p.T2),
+            });
+        }
+
+        // Intro detection (>15s) with audition + skip toggle (1:1 AudiobookViews.swift:747-780)
+        var headExtra = extras.FirstOrDefault(x => x.Place == ExtraPlace.Head && (x.T1 - x.T0) >= 15.0);
+        if (headExtra is not null)
+        {
+            double dur = headExtra.T1 - headExtra.T0;
+            var introStack = new StackPanel { Spacing = 6 };
+            introStack.Children.Add(new TextBlock { Text = $"检测到 {dur:0} 秒开场片头", FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            var tryIntro = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "▶ 试听片头", FontSize = 11.5 };
+            tryIntro.Click += (_, _) => { _ignoreExtraUntilSec = headExtra.T1; _ = SeekGlobalAsync(headExtra.T0, startPlaying: true); };
+            var skipIntroBtn = new Button { Style = (Style)Application.Current.Resources[skip.HeadTail ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"], Content = skip.HeadTail ? "✓ 已自动跳过片头" : "自动跳过这段", FontSize = 11.5 };
+            skipIntroBtn.Click += (_, _) =>
+            {
+                skip = skip with { HeadTail = !skip.HeadTail };
+                try { _library.Core.AudiobookSetSkipSettings(_bookId, skip); } catch { }
+                skipIntroBtn.Content = skip.HeadTail ? "✓ 已自动跳过片头" : "自动跳过这段";
+            };
+            row.Children.Add(tryIntro);
+            row.Children.Add(skipIntroBtn);
+            introStack.Children.Add(row);
+            host.Children.Add(new Border { CornerRadius = new CornerRadius(10), Background = ThemeHelper.Brush(p.Inset), Padding = new Thickness(12, 10, 12, 10), Child = introStack });
+        }
+
+        await new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            Title = "听读书配对与对齐",
+            Content = host,
+            CloseButtonText = "完成",
+        }.ShowAsync();
     }
 
     private void RecordingSettingsFlyout_Opened(object sender, object e) => RebuildRecordingSettings();
@@ -806,6 +1328,9 @@ public sealed partial class AudiobookWindow : Window
         double savedSec = 0;
         try { savedSec = _library.Core.AudiobookSaved(_bookId); } catch { }
 
+        int unreadCount = 0;
+        try { _cachedMap = _library.Core.AudiobookMap(_bookId); unreadCount = _cachedMap?.Rows.Count(r => r.By == SyncBy.Unread) ?? 0; } catch { }
+
         RecordingSettingsHost.Children.Add(new TextBlock
         {
             Text = "这本录音",
@@ -814,10 +1339,11 @@ public sealed partial class AudiobookWindow : Window
             Foreground = ThemeHelper.Brush(p.T1),
         });
 
-        void SaveSkip(SkipSettings next)
+        void SaveSkip(SkipSettings next, bool reloadAudio = false)
         {
             s = next;
             try { _library.Core.AudiobookSetSkipSettings(_bookId, s); } catch { }
+            if (reloadAudio) _ = SeekGlobalAsync(_globalPosSec, _playing, forceReload: true);
             RebuildRecordingSettings();
         }
 
@@ -839,17 +1365,36 @@ public sealed partial class AudiobookWindow : Window
         }
 
         RecordingSettingsHost.Children.Add(MakeToggleRow("跳过片头片尾", "自动跳过每集开场与结尾口播", s.HeadTail, v => SaveSkip(s with { HeadTail = v })));
+        RecordingSettingsHost.Children.Add(MakeToggleRow("跳过中间非正文", "跳过播讲人插入的广告或闲聊", s.Middle, v => SaveSkip(s with { Middle = v })));
         RecordingSettingsHost.Children.Add(MakeToggleRow("压短章间音乐", "章间过场音乐压到 1.5 秒", s.ShortenChapterGaps, v => SaveSkip(s with { ShortenChapterGaps = v })));
-        RecordingSettingsHost.Children.Add(MakeToggleRow("人声清楚一点", "压低底噪，人声提一点", s.ClearerVoice, v => SaveSkip(s with { ClearerVoice = v })));
+        RecordingSettingsHost.Children.Add(MakeToggleRow("人声清楚一点", "80Hz 低切 + 3kHz 人声清晰度 + 3:1 动态压缩", s.ClearerVoice, v => SaveSkip(s with { ClearerVoice = v }, reloadAudio: true)));
         RecordingSettingsHost.Children.Add(MakeToggleRow(
             "缩短停顿",
             savedSec >= 60 ? $"这本已经省了 {Math.Max(1, (int)Math.Round(savedSec / 60.0))} 分钟" : "长停顿自动压短一些",
             s.ShortenPauses,
             v => SaveSkip(s with { ShortenPauses = v })));
-        RecordingSettingsHost.Children.Add(MakeToggleRow("没念的用朗读补上", "与电子书配对时补齐漏读句", s.FillUnread, v => SaveSkip(s with { FillUnread = v })));
+        RecordingSettingsHost.Children.Add(MakeToggleRow(
+            "没念的用朗读补上",
+            unreadCount > 0 ? $"这本有 {unreadCount} 句原声未念，书页跟读时自动用朗读补齐" : "与电子书配对时补齐漏读句",
+            s.FillUnread,
+            v => SaveSkip(s with { FillUnread = v })));
         RecordingSettingsHost.Children.Add(MakeToggleRow("逐词跟读", "在配对书页上按词推进下划线", s.WordFollow, v => SaveSkip(s with { WordFollow = v })));
 
         RecordingSettingsHost.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(0, 2, 0, 2) });
+
+        var pairStatusBtn = new Button
+        {
+            Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Content = "听读书配对与片头状态…",
+            FontSize = 11.5,
+        };
+        pairStatusBtn.Click += async (_, _) =>
+        {
+            RecordingSettingsFlyout.Hide();
+            await ShowPairStatusWizardAsync();
+        };
+        RecordingSettingsHost.Children.Add(pairStatusBtn);
 
         var alignBtn = new Button
         {
@@ -942,20 +1487,64 @@ public sealed partial class AudiobookWindow : Window
 
     private void BackToShelf_Click(object sender, RoutedEventArgs e) => App.CurrentApp.ShowShelf();
 
-    private void PlayPause_Click(object sender, RoutedEventArgs e)
+    private async void PlayPause_Click(object sender, RoutedEventArgs e)
     {
-        if (_playing) PausePlayback();
+        if (_isSleepFading)
+        {
+            ExtendSleepTenMin();
+            return;
+        }
+        if (_playing)
+        {
+            PausePlayback();
+        }
         else
         {
             App.CurrentApp.ClaimAudioPlayback(this, () => DispatcherQueue.TryEnqueue(PausePlayback));
+            if (_pausedUtc is DateTime pausedAt)
+            {
+                double pausedSec = (DateTime.UtcNow - pausedAt).TotalSeconds;
+                _pausedUtc = null;
+                if (pausedSec >= 5.0)
+                {
+                    try
+                    {
+                        double resumeAt = _library.Core.AudiobookResumeAt(_bookId, _globalPosSec, pausedSec);
+                        if (Math.Abs(resumeAt - _globalPosSec) > 0.3)
+                        {
+                            await SeekGlobalAsync(resumeAt, startPlaying: true);
+                            return;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            _player.Volume = _baseVolume;
             _player.Play();
             _playing = true;
+            _listenSinceUtc = DateTime.UtcNow;
+            _sleepLastTickUtc = DateTime.UtcNow;
             UpdateTransportUi();
         }
     }
 
     private async void Rewind15_Click(object sender, RoutedEventArgs e) => await SeekGlobalAsync(_globalPosSec - 15, _playing);
     private async void Forward30_Click(object sender, RoutedEventArgs e) => await SeekGlobalAsync(_globalPosSec + 30, _playing);
+
+    private async Task StepSentenceOrSeekAsync(bool forward, bool forceSeconds)
+    {
+        if (_isSleepFading) { ExtendSleepTenMin(); return; }
+        if (!forceSeconds && _cachedMap is not null)
+        {
+            try
+            {
+                double? stepped = _library.Core.AudiobookStep(_bookId, _globalPosSec, forward);
+                if (stepped is double s) { await SeekGlobalAsync(s, _playing); return; }
+            }
+            catch { }
+        }
+        await SeekGlobalAsync(_globalPosSec + (forward ? 30 : -15), _playing);
+    }
 
     private async void ChapterSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
@@ -998,13 +1587,30 @@ public sealed partial class AudiobookWindow : Window
             item.Click += (_, _) =>
             {
                 _sleepMode = mode;
+                _isSleepFading = false;
+                _player.Volume = _baseVolume;
+                _sleepSentenceEndSec = -1;
+                _sleepArmedSpot = mode != 0 ? ((uint)CurrentChapterIndex(), (int)Math.Round((_globalPosSec - CurrentChapterBounds().Start) * 1000.0)) : null;
+
                 if (mode > 0)
                 {
-                    _sleepUntilUtc = DateTime.UtcNow.AddMinutes(mode);
+                    _sleepRemainingSec = mode * 60.0;
+                    _sleepLastTickUtc = DateTime.UtcNow;
+                }
+                else if (mode == -2)
+                {
+                    _sleepRemainingSec = 0;
+                    try
+                    {
+                        var b = _library.Core.AudiobookSentenceBounds(_bookId, _globalPosSec);
+                        _sleepSentenceEndSec = b is not null ? b.T1 : _globalPosSec + 1.0;
+                    }
+                    catch { _sleepSentenceEndSec = _globalPosSec + 1.0; }
+                    SleepCountdownText.Text = "念完这句自动停止";
                 }
                 else
                 {
-                    _sleepUntilUtc = null;
+                    _sleepRemainingSec = 0;
                     SleepCountdownText.Text = mode == -1 ? "本集播完自动停止" : "";
                 }
                 ApplyAppearance();
@@ -1012,6 +1618,7 @@ public sealed partial class AudiobookWindow : Window
             menu.Items.Add(item);
         }
 
+        if (_cachedMap is not null) AddOpt(-2, "念完这句");
         AddOpt(-1, "本集完");
         menu.Items.Add(new MenuFlyoutSeparator());
         foreach (var m in new[] { 15, 30, 45, 60, 90 }) AddOpt(m, $"{m} 分钟");
@@ -1021,6 +1628,34 @@ public sealed partial class AudiobookWindow : Window
             AddOpt(0, "关闭定时");
         }
         menu.ShowAt(anchor);
+    }
+
+    private void HighlightHeardOrBookmark()
+    {
+        try
+        {
+            var heard = _library.Core.AudiobookHeardSentence(_bookId, _globalPosSec);
+            if (heard is not null)
+            {
+                var sents = _library.GetSentences(heard.Book, heard.Section);
+                if (heard.Sentence < sents.Count)
+                {
+                    string txt = sents[(int)heard.Sentence];
+                    var mk = _library.Core.MarkHeard(
+                        heard.Book,
+                        heard.Section,
+                        new TextPoint(heard.Sentence, 0),
+                        new TextPoint(heard.Sentence, (uint)txt.Length),
+                        txt,
+                        MarkStyle.Yellow);
+                    string bk = heard.Book, mkId = mk.Id;
+                    ShowToast("已划下刚听到的这句", "撤销", () => { try { _library.DeleteMark(bk, mkId); } catch { } });
+                    return;
+                }
+            }
+        }
+        catch { }
+        AddBookmarkAtCurrentPosition();
     }
 
     private void AddBookmarkAtCurrentPosition(bool silent = false)
@@ -1038,23 +1673,50 @@ public sealed partial class AudiobookWindow : Window
         catch { }
     }
 
-    private void ShowToast(string msg)
+    private void ShowToast(string msg, string? actionLabel = null, Action? onAction = null, int autoHideSeconds = 4)
     {
-        ToastText.Text = msg;
+        ToastText.Text = L10n.T(msg);
+        _toastAction = onAction;
+        if (!string.IsNullOrEmpty(actionLabel) && onAction is not null)
+        {
+            ToastActionBtn.Content = L10n.T(actionLabel);
+            ToastActionBtn.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            ToastActionBtn.Visibility = Visibility.Collapsed;
+        }
         ToastBanner.Visibility = Visibility.Visible;
         _toastTimer?.Stop();
-        _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(autoHideSeconds) };
         _toastTimer.Tick += (_, _) => { _toastTimer.Stop(); ToastBanner.Visibility = Visibility.Collapsed; };
         _toastTimer.Start();
+    }
+
+    private void ToastAction_Click(object sender, RoutedEventArgs e)
+    {
+        var act = _toastAction;
+        _toastAction = null;
+        _toastTimer?.Stop();
+        ToastBanner.Visibility = Visibility.Collapsed;
+        try { act?.Invoke(); } catch { }
     }
 
     private void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         bool ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control)
             .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+        bool shift = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
         if (ctrl && e.Key == VirtualKey.D)
         {
             AddBookmarkAtCurrentPosition();
+            e.Handled = true;
+            return;
+        }
+        if (ctrl && e.Key == VirtualKey.H)
+        {
+            HighlightHeardOrBookmark();
             e.Handled = true;
             return;
         }
@@ -1064,9 +1726,9 @@ public sealed partial class AudiobookWindow : Window
             case VirtualKey.Space:
                 PlayPause_Click(sender, e); e.Handled = true; break;
             case VirtualKey.Left:
-                Rewind15_Click(sender, e); e.Handled = true; break;
+                _ = StepSentenceOrSeekAsync(forward: false, forceSeconds: shift); e.Handled = true; break;
             case VirtualKey.Right:
-                Forward30_Click(sender, e); e.Handled = true; break;
+                _ = StepSentenceOrSeekAsync(forward: true, forceSeconds: shift); e.Handled = true; break;
         }
     }
 
@@ -1075,12 +1737,23 @@ public sealed partial class AudiobookWindow : Window
         DispatcherQueue.TryEnqueue(async () =>
         {
             if (_recording is null) return;
+            if (_isSleepFading && args.Button is SystemMediaTransportControlsButton.Play or SystemMediaTransportControlsButton.Next or SystemMediaTransportControlsButton.Previous)
+            {
+                ExtendSleepTenMin();
+                return;
+            }
             switch (args.Button)
             {
-                case SystemMediaTransportControlsButton.Play: _player.Play(); _playing = true; UpdateTransportUi(); break;
+                case SystemMediaTransportControlsButton.Play:
+                    PlayPause_Click(this, new RoutedEventArgs());
+                    break;
                 case SystemMediaTransportControlsButton.Pause: PausePlayback(); break;
                 case SystemMediaTransportControlsButton.Next:
-                    if (_recording.Chapters.Length > 0)
+                    if (_cachedMap is not null)
+                    {
+                        await StepSentenceOrSeekAsync(forward: true, forceSeconds: false);
+                    }
+                    else if (_recording.Chapters.Length > 0)
                     {
                         int next = Math.Min(_recording.Chapters.Length - 1, CurrentChapterIndex() + 1);
                         await SeekGlobalAsync(_recording.Chapters[next].Start, _playing);
@@ -1088,7 +1761,11 @@ public sealed partial class AudiobookWindow : Window
                     }
                     break;
                 case SystemMediaTransportControlsButton.Previous:
-                    if (_recording.Chapters.Length > 0)
+                    if (_cachedMap is not null)
+                    {
+                        await StepSentenceOrSeekAsync(forward: false, forceSeconds: false);
+                    }
+                    else if (_recording.Chapters.Length > 0)
                     {
                         int prev = Math.Max(0, CurrentChapterIndex() - 1);
                         await SeekGlobalAsync(_recording.Chapters[prev].Start, _playing);
@@ -1107,8 +1784,11 @@ public sealed partial class AudiobookWindow : Window
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
+        _library.AudiobookWork.StatusChanged -= OnAudiobookWorkStatusChanged;
         _uiTimer.Stop();
         _listenTimeTracker.Stop();
+        FlushListeningTime();
+        _library.SystemIntegration.SetAudioPlaying(this, false);
         SaveCurrentProgress();
         try { _player.Pause(); _player.Dispose(); } catch { }
     }

@@ -59,6 +59,8 @@ public static class YYIcons
             "server" => ("M3.5,2.8 H12.5 A1.2,1.2 0 0,1 13.7,4 V6.4 A1.2,1.2 0 0,1 12.5,7.6 H3.5 A1.2,1.2 0 0,1 2.3,6.4 V4 A1.2,1.2 0 0,1 3.5,2.8 Z M8,7.6 V11.8 M4.2,11.8 H11.8 M6.8,10.8 H9.2 V12.8 H6.8 Z", 16.0, false),
             "globe" => ("M8,2 A6,6 0 1,1 7.99,2 Z M2.2,8 H13.8 M8,2 C9.8,3.8 9.8,12.2 8,14 M8,2 C6.2,3.8 6.2,12.2 8,14", 16.0, false),
             "laptop" => ("M3.4,3.6 H12.6 A1,1 0 0,1 13.6,4.6 V10.6 H2.4 V4.6 A1,1 0 0,1 3.4,3.6 Z M1.4,12.2 H14.6", 16.0, false),
+            "phone" => ("M5.2,2.2 H10.8 A1.2,1.2 0 0,1 12,3.4 V12.6 A1.2,1.2 0 0,1 10.8,13.8 H5.2 A1.2,1.2 0 0,1 4,12.6 V3.4 A1.2,1.2 0 0,1 5.2,2.2 Z M7.2,11.8 H8.8", 16.0, false),
+            "tablet" => ("M3.6,2.2 H12.4 A1.2,1.2 0 0,1 13.6,3.4 V12.6 A1.2,1.2 0 0,1 12.4,13.8 H3.6 A1.2,1.2 0 0,1 2.4,12.6 V3.4 A1.2,1.2 0 0,1 3.6,2.2 Z M7.2,11.9 H8.8", 16.0, false),
             "lock" => ("M4.4,7.4 H11.6 A1,1 0 0,1 12.6,8.4 V12.8 A1,1 0 0,1 11.6,13.8 H4.4 A1,1 0 0,1 3.4,12.8 V8.4 A1,1 0 0,1 4.4,7.4 Z M5.5,7.4 V5.2 A2.5,2.5 0 0,1 10.5,5.2 V7.4", 16.0, false),
             "clock-history" => ("M3.2,5.2 A5.5,5.5 0 1,1 2.7,8.8 M2.6,2.8 V5.5 H5.3 M8,5.2 V8.2 L10.2,9.5", 16.0, false),
             "checkmark" => ("M3.2,8.4 L6.4,11.6 L12.8,4.6", 16.0, false),
@@ -113,6 +115,27 @@ public static class YYIcons
             "lh-normal" => ("M2.8,3.8 H13.2 M2.8,8 H13.2 M2.8,12.2 H13.2", 16.0, false),
             "lh-loose" => ("M2.8,2.6 H13.2 M2.8,8 H13.2 M2.8,13.4 H13.2", 16.0, false),
             "more" => ("M3.6,8 A1.15,1.15 0 1,1 3.59,8 Z M8,8 A1.15,1.15 0 1,1 7.99,8 Z M12.4,8 A1.15,1.15 0 1,1 12.39,8 Z", 16.0, true),
+
+            // macOS CollectionIcon SF Symbols (Shelf.swift 1:1) & cross-device aliases
+            "books.vertical" => ("M2.8,3.6 H5.4 V13.2 H2.8 Z M6.6,2.8 H9.2 V13.2 H6.6 Z M10.6,4 L12.9,3.4 L14.4,12.8 L12.1,13.4 Z", 16.0, false),
+            "square.stack" => ("M4.5,5.5 H11.5 A1.5,1.5 0 0,1 13,7 V12 A1.5,1.5 0 0,1 11.5,13.5 H4.5 A1.5,1.5 0 0,1 3,12 V7 A1.5,1.5 0 0,1 4.5,5.5 Z M4.5,3.5 H11.5 M6,1.8 H10", 16.0, false),
+            "book.closed" => ("M6.5,3.5 H17 A1,1 0 0,1 18,4.5 V19.5 A1,1 0 0,1 17,20.5 H6.5 A1.5,1.5 0 0,1 5,19 V5 A1.5,1.5 0 0,1 6.5,3.5 Z M5,17.5 H18 M14,3.5 V10.5 L12.25,9.1 L10.5,10.5 V3.5", 24.0, false),
+            "moon.stars" => ("M11.6,10.4 A4.8,4.8 0 0,1 5.6,4.4 A4.9,4.9 0 1,0 11.6,10.4 Z", 16.0, filled),
+            "sparkles" => ("M8,1.8 C8.4,5.4 10.6,7.6 14.2,8 C10.6,8.4 8.4,10.6 8,14.2 C7.6,10.6 5.4,8.4 1.8,8 C5.4,7.6 7.6,5.4 8,1.8 Z", 16.0, false),
+            "sun.max" => ("M8,5.2 A2.8,2.8 0 1,1 7.99,5.2 Z M8,1.5 V2.9 M8,13.1 V14.5 M1.5,8 H2.9 M13.1,8 H14.5 M3.4,3.4 L4.4,4.4 M11.6,11.6 L12.6,12.6 M12.6,3.4 L11.6,4.4 M4.4,11.6 L3.4,12.6", 16.0, false),
+            "arrow.trianglehead.2.clockwise" => ("M12.8,6.2 A5.1,5.1 0 0,0 4.1,4.7 M3.6,2.6 V5.1 H6.1 M3.2,9.8 A5.1,5.1 0 0,0 11.9,11.3 M12.4,13.4 V10.9 H9.9", 16.0, false),
+            "cup.and.saucer" or "coffee" => ("M3,5.2 H11 V9.5 A2.8,2.8 0 0,1 8.2,12.3 H5.8 A2.8,2.8 0 0,1 3,9.5 Z M11,6.2 H12.4 A1.4,1.4 0 0,1 12.4,9 H11 M2.4,13.6 H11.8", 16.0, false),
+            "key" => ("M5.6,8 A2.6,2.6 0 1,1 5.59,8 Z M8.2,8 H14 M11.6,8 V10.2 M13.6,8 V9.8", 16.0, false),
+            "quote.opening" => ("M3.4,9.2 A1.8,1.8 0 1,1 3.39,9.2 Z M3.2,7.6 C3.4,5.4 4.8,4 6.8,3.4 M9.6,9.2 A1.8,1.8 0 1,1 9.59,9.2 Z M9.4,7.6 C9.6,5.4 11,4 13,3.4", 16.0, false),
+            "eye" => ("M2.2,8 C3.8,5.1 5.8,4 8,4 C10.2,4 12.2,5.1 13.8,8 C12.2,10.9 10.2,12 8,12 C5.8,12 3.8,10.9 2.2,8 Z M8,6.3 A1.7,1.7 0 1,1 7.99,6.3 Z", 16.0, false),
+            "leaf" => ("M13.2,2.8 C8,2.8 3.6,6 3.2,12.8 C10,12.4 13.2,8 13.2,2.8 Z M3.2,12.8 L9.2,6.8", 16.0, false),
+            "star" => ("M8,2.2 L9.7,5.8 L13.7,6.3 L10.8,9 L11.5,13 L8,11.1 L4.5,13 L5.2,9 L2.3,6.3 L6.3,5.8 Z", 16.0, filled),
+            "flame" => ("M8.2,2.2 C10.6,4.8 12.4,7.1 12.4,9.5 A4.4,4.4 0 1,1 3.6,9.5 C3.6,7.6 4.7,6.1 5.8,5.2 C5.8,6.6 6.7,7.3 7.3,6.6 C7.9,5.8 7.6,3.8 8.2,2.2 Z", 16.0, false),
+            "tag" => ("M2.8,7.8 L7.8,2.8 H13.2 V8.2 L8.2,13.2 Z M10.4,5.6 A0.7,0.7 0 1,1 10.39,5.6 Z", 16.0, false),
+            "music" or "music.note" => ("M6.4,11.4 V3.8 L13,2.6 V10.2 M6.4,11.4 A1.6,1.3 0 1,1 6.39,11.4 Z M13,10.2 A1.6,1.3 0 1,1 12.99,10.2 Z", 16.0, false),
+            "film" => ("M2.4,3.4 H13.6 V12.6 H2.4 Z M5.2,3.4 V12.6 M10.8,3.4 V12.6 M2.4,6.4 H5.2 M2.4,9.6 H5.2 M10.8,6.4 H13.6 M10.8,9.6 H13.6", 16.0, false),
+            "compass" => ("M8,2 A6,6 0 1,1 7.99,2 Z M10.4,5.6 L8.8,8.8 L5.6,10.4 L7.2,7.2 Z", 16.0, false),
+            "lamp" => ("M4.5,3.2 H11.5 L13,8 H3 Z M8,8 V13.2 M5.2,13.2 H10.8", 16.0, false),
             _ => ("M4,4 H12 V12 H4 Z", 16.0, false),
         };
 
@@ -159,20 +182,47 @@ public static class YYIcons
         (Geometry)XamlBindingHelper.ConvertValue(typeof(Geometry), data);
 
     /// <summary>
+    /// 1:1 <c>Shelf.swift (CollectionIcon.choices)</c> — uses identical SF Symbol identifiers stored in shared SQLite so macOS/iOS/Windows stay synced.
+    /// </summary>
+    public static readonly (string Symbol, string Label)[] CollectionIconChoices =
+    [
+        ("books.vertical", "书"),
+        ("moon", "睡前"),
+        ("headphones", "听"),
+        ("sparkle", "科幻"),
+        ("globe", "外文"),
+        ("cup.and.saucer", "闲读"),
+        ("key", "推理"),
+        ("quote.opening", "诗词"),
+        ("sun.max", "孩子"),
+        ("arrow.trianglehead.2.clockwise", "重读"),
+        ("heart", "最爱"),
+        ("clock", "历史"),
+        ("eye", "科普"),
+        ("pencil", "写作"),
+    ];
+
+    /// <summary>
     /// Ported 1:1 from <c>Shelf.swift (CollectionIcon.symbol)</c>: infers a semantic glyph from collection name.
     /// </summary>
     public static string CollectionIconName(string name, string? customIcon = null)
     {
         if (!string.IsNullOrWhiteSpace(customIcon)) return customIcon;
-        if (name.Contains('睡') || name.Contains('夜') || name.Contains("晚安")) return "moon";
-        if (name.Contains("科幻") || name.Contains('星')) return "sparkle";
-        if (name.Contains('听') || name.Contains("通勤") || name.Contains("有声")) return "headphones";
-        if (name.Contains("英文") || name.Contains("外文") || name.Contains("English", StringComparison.OrdinalIgnoreCase)) return "globe";
-        if (name.Contains("最爱") || name.Contains("喜欢")) return "heart";
-        if (name.Contains("历史")) return "clock";
-        if (name.Contains("重读")) return "sync-arrows";
-        if (name.Contains('写') || name.Contains("随笔")) return "pencil";
-        if (name.Contains("文学") || name.Contains("经典")) return "book";
-        return "stack";
+        string n = name.ToLowerInvariant();
+        if (n.Contains('睡') || n.Contains('夜') || n.Contains('晚') || n.Contains("sleep") || n.Contains("night") || n.Contains("bed")) return "moon";
+        if (n.Contains("科幻") || n.Contains("宇宙") || n.Contains('星') || n.Contains("sci-fi") || n.Contains("space") || n.Contains("star")) return "sparkle";
+        if (n.Contains('听') || n.Contains("通勤") || n.Contains("路上") || n.Contains("有声") || n.Contains("listen") || n.Contains("commute") || n.Contains("audio")) return "headphones";
+        if (n.Contains("英文") || n.Contains("原著") || n.Contains("外文") || n.Contains("日文") || n.Contains("english")) return "globe";
+        if (n.Contains("周末") || n.Contains("咖啡") || n.Contains('闲') || n.Contains("weekend") || n.Contains("coffee")) return "cup.and.saucer";
+        if (n.Contains("推理") || n.Contains("悬疑") || n.Contains("侦探") || n.Contains("mystery") || n.Contains("detective") || n.Contains("crime")) return "key";
+        if (n.Contains('诗') || n.Contains('词') || n.Contains("poem") || n.Contains("poetry")) return "quote.opening";
+        if (n.Contains("孩子") || n.Contains("儿童") || n.Contains('童') || n.Contains("kid") || n.Contains("child")) return "sun.max";
+        if (n.Contains("重读") || n.Contains("再读") || n.Contains("reread")) return "arrow.trianglehead.2.clockwise";
+        if (n.Contains("top") || n.Contains('榜') || n.Contains("最爱") || n.Contains("喜欢") || n.Contains("favorite") || n.Contains("love")) return "heart";
+        if (n.Contains("历史") || n.Contains('史') || n.Contains("history")) return "clock";
+        if (n.Contains("科普") || n.Contains("科学") || n.Contains("science")) return "eye";
+        if (n.Contains('写') || n.Contains("作家") || n.Contains("随笔") || n.Contains("writer") || n.Contains("writing")) return "pencil";
+        if (n.Contains("文学") || n.Contains("经典")) return "book";
+        return "books.vertical";
     }
 }

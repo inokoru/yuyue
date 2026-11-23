@@ -168,7 +168,7 @@
                         Margin="0,10,0,0" />
                 </StackPanel>
 
-                <!-- 顶部书签反馈横幅 -->
+                <!-- 顶部书签/提示/撤销横幅 -->
                 <Border
                     x:Name="ToastBanner"
                     Visibility="Collapsed"
@@ -176,12 +176,28 @@
                     VerticalAlignment="Top"
                     Margin="0,54,0,0"
                     Height="36"
-                    Padding="12,0"
+                    Padding="12,0,10,0"
                     CornerRadius="18"
                     Background="{ThemeResource YYCardBrush}"
                     BorderBrush="{ThemeResource YYLineBrush}"
                     BorderThickness="1">
-                    <TextBlock x:Name="ToastText" FontSize="12.5" FontWeight="Medium" Foreground="{ThemeResource YYText1Brush}" VerticalAlignment="Center" />
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <TextBlock x:Name="ToastText" FontSize="12.5" FontWeight="Medium" Foreground="{ThemeResource YYText1Brush}" VerticalAlignment="Center" />
+                        <Button
+                            x:Name="ToastActionBtn"
+                            Visibility="Collapsed"
+                            Height="24"
+                            MinHeight="24"
+                            Padding="9,0"
+                            CornerRadius="12"
+                            FontSize="11"
+                            FontWeight="SemiBold"
+                            Background="{ThemeResource YYAccentSoftBrush}"
+                            Foreground="{ThemeResource YYAccentBrush}"
+                            BorderThickness="0"
+                            UseSystemFocusVisuals="False"
+                            Click="ToastAction_Click" />
+                    </StackPanel>
                 </Border>
 
                 <!-- 底部快捷键说明（对齐 AudiobookScreen.keys） -->

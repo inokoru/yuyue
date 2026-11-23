@@ -1,5 +1,8 @@
+using System.Diagnostics;
 using System.Net.Http;
+using System.Reflection;
 using System.Runtime.InteropServices.WindowsRuntime;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Windows.ApplicationModel.DataTransfer;
@@ -8,9 +11,12 @@ using Windows.Storage;
 using Windows.Storage.Pickers;
 using Windows.Storage.Streams;
 using Windows.System;
+using Windows.UI.Core;
 using Microsoft.UI;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using WinRT.Interop;
@@ -21,26 +27,95 @@ namespace Yuyue.Core;
 /// <summary>
 /// 1:1 port of <c>Update.swift</c>, <c>MacUpdate.swift</c>, <c>UpdateUI.swift</c>, and <c>Feedback.swift</c>:
 /// - Stable &amp; Beta GitHub Releases update feed check via <see cref="YuyueCoreMethods.ParseUpdate"/> / <see cref="YuyueCoreMethods.CompareVersions"/>
+/// - Optional in-app Windows installer download with SHA-256 verification and progress dialog
 /// - Bundled <c>CHANGELOG.md</c> viewer via <see cref="YuyueCoreMethods.ParseChangelog"/>, Privacy sheet, and Open-Source Licenses sheet
-/// - Full Feedback composer with up to 3 EXIF-stripped JPEG/file attachments, <see cref="YuyueCoreMethods.SealFeedbackFile"/> + <see cref="YuyueCoreMethods.FeedbackMessage"/> ntfy.sh delivery, FIFO offline queue, and floating screenshot helper!
+/// - Full Feedback composer with persisted draft, log attachment, drag-and-drop, Ctrl+V screenshot paste, up to 3 attachments (any file ≤ 1.5 MB), EXIF-stripping JPEG, <see cref="YuyueCoreMethods.SealFeedbackFile"/> + <see cref="YuyueCoreMethods.FeedbackMessage"/> ntfy.sh delivery, FIFO offline queue, and post-send confirmation.
 /// </summary>
 public sealed class UpdateAndFeedbackService
 {
-    public const string CurrentVersion = "0.1.0";
-    public const ulong CurrentBuild = 1;
+    public static string CurrentVersion { get; } = ResolveAppVersion();
+    public static ulong CurrentBuild { get; } = ResolveAppBuild();
     public const string RepoSlug = "inokoru/yuyue";
 
+    private static string ResolveAppVersion()
+    {
+        try
+        {
+            var v = Assembly.GetExecutingAssembly().GetName().Version;
+            if (v is not null && (v.Major > 0 || v.Minor > 0 || v.Build > 0))
+            {
+                int build = Math.Max(0, v.Build);
+                return $"{v.Major}.{v.Minor}.{build}";
+            }
+        }
+        catch { }
+        return "0.1.0";
+    }
+
+    private static ulong ResolveAppBuild()
+    {
+        try
+        {
+            var v = Assembly.GetExecutingAssembly().GetName().Version;
+            if (v is not null && v.Revision > 0) return (ulong)v.Revision;
+        }
+        catch { }
+        return 1;
+    }
+
     private static readonly HttpClient Http = new() { Timeout = System.TimeSpan.FromSeconds(20) };
+    private static readonly HttpClient DownloadHttp = new() { Timeout = System.TimeSpan.FromMinutes(10) };
     private readonly LibraryService _library;
 
     public UpdateInfo? LatestOffer { get; private set; }
+    public string? LatestWinInstallerUrl { get; private set; }
+    public string? LatestWinInstallerSha256 { get; private set; }
     public Release[] OfferNotes { get; private set; } = [];
+    public bool IsOfferSuppressed =>
+        LatestOffer is not null && !HasUnreadBadge;
+    public bool HasUnreadBadge =>
+        LatestOffer is not null &&
+        LatestOffer.Version != _library.Prefs.UpdateSkippedVersion &&
+        !(LatestOffer.Version == _library.Prefs.UpdateRemindVersion &&
+          _library.Prefs.UpdateRemindUntilMs > DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
     public UpdateAndFeedbackService(LibraryService library)
     {
         _library = library;
         if (!Http.DefaultRequestHeaders.UserAgent.Any())
-            Http.DefaultRequestHeaders.UserAgent.ParseAdd("Yuyue/0.1 (Windows)");
+            Http.DefaultRequestHeaders.UserAgent.ParseAdd($"Yuyue/{CurrentVersion} (Windows)");
+        if (!DownloadHttp.DefaultRequestHeaders.UserAgent.Any())
+            DownloadHttp.DefaultRequestHeaders.UserAgent.ParseAdd($"Yuyue/{CurrentVersion} (Windows)");
+    }
+
+    private static (string? Url, string? Sha256) TryParseWinInstaller(string updateJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(updateJson);
+            var root = doc.RootElement;
+            string? url = null, sha = null;
+            if (root.TryGetProperty("windows", out var winObj) && winObj.ValueKind == JsonValueKind.Object)
+            {
+                if (winObj.TryGetProperty("url", out var u)) url = u.GetString();
+                if (winObj.TryGetProperty("sha256", out var s)) sha = s.GetString();
+            }
+            if (string.IsNullOrWhiteSpace(url) && root.TryGetProperty("win", out var winStr))
+            {
+                if (winStr.ValueKind == JsonValueKind.String) url = winStr.GetString();
+                else if (winStr.ValueKind == JsonValueKind.Object)
+                {
+                    if (winStr.TryGetProperty("url", out var u)) url = u.GetString();
+                    if (winStr.TryGetProperty("sha256", out var s)) sha = s.GetString();
+                }
+            }
+            if (string.IsNullOrWhiteSpace(url) && root.TryGetProperty("winUrl", out var wu)) url = wu.GetString();
+            if (string.IsNullOrWhiteSpace(sha) && root.TryGetProperty("winSha256", out var ws)) sha = ws.GetString();
+            if (!string.IsNullOrWhiteSpace(url) && url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                return (url.Trim(), string.IsNullOrWhiteSpace(sha) ? null : sha.Trim().ToLowerInvariant());
+        }
+        catch { }
+        return (null, null);
     }
 
     public async Task<(bool HasUpdate, UpdateInfo? Info, string Message)> CheckForUpdatesAsync(bool manual = false, CancellationToken ct = default)
@@ -70,11 +145,14 @@ public sealed class UpdateAndFeedbackService
             if (!newer)
             {
                 LatestOffer = null;
+                LatestWinInstallerUrl = null;
+                LatestWinInstallerSha256 = null;
                 OfferNotes = [];
                 return (false, info, $"当前已是最新版本（v{CurrentVersion}）");
             }
 
             LatestOffer = info;
+            (LatestWinInstallerUrl, LatestWinInstallerSha256) = TryParseWinInstaller(updateJson);
             if (!string.IsNullOrWhiteSpace(info.Changelog))
             {
                 try
@@ -257,7 +335,7 @@ public sealed class UpdateAndFeedbackService
             XamlRoot = xamlRoot,
             Title = "发现新版本",
             Content = root,
-            PrimaryButtonText = "前往下载安装",
+            PrimaryButtonText = !string.IsNullOrWhiteSpace(LatestWinInstallerUrl) ? "下载并安装" : "前往下载安装",
             SecondaryButtonText = "稍后提醒（3 天后）",
             CloseButtonText = "关闭",
             DefaultButton = ContentDialogButton.Primary,
@@ -266,14 +344,137 @@ public sealed class UpdateAndFeedbackService
         var res = await offerDlg.ShowAsync();
         if (res == ContentDialogResult.Primary)
         {
-            string url = !string.IsNullOrWhiteSpace(info.Page) ? info.Page : $"https://github.com/{RepoSlug}/releases/latest";
-            _ = Launcher.LaunchUriAsync(new Uri(url));
+            if (!string.IsNullOrWhiteSpace(LatestWinInstallerUrl))
+            {
+                await DownloadAndInstallUpdateAsync(xamlRoot, info, LatestWinInstallerUrl!, LatestWinInstallerSha256);
+            }
+            else
+            {
+                string url = !string.IsNullOrWhiteSpace(info.Page) ? info.Page : $"https://github.com/{RepoSlug}/releases/latest";
+                _ = Launcher.LaunchUriAsync(new Uri(url));
+            }
         }
         else if (res == ContentDialogResult.Secondary)
         {
             _library.Prefs.UpdateRemindVersion = info.Version;
             _library.Prefs.UpdateRemindUntilMs = DateTimeOffset.UtcNow.AddDays(3).ToUnixTimeMilliseconds();
             _library.SavePrefs();
+        }
+    }
+
+    private async Task DownloadAndInstallUpdateAsync(XamlRoot xamlRoot, UpdateInfo info, string installerUrl, string? expectedSha256)
+    {
+        var cts = new CancellationTokenSource();
+        var progressBar = new ProgressBar { Minimum = 0, Maximum = 100, Value = 0, IsIndeterminate = true, Width = 340 };
+        var statusText = new TextBlock { Text = $"正在下载语阅 v{info.Version} 安装包…", FontSize = 12, TextWrapping = TextWrapping.Wrap };
+
+        var progDlg = new ContentDialog
+        {
+            XamlRoot = xamlRoot,
+            Title = "下载更新",
+            Content = new StackPanel { Spacing = 10, Width = 360, Children = { statusText, progressBar } },
+            CloseButtonText = "取消",
+        };
+        progDlg.CloseButtonClick += (_, _) => cts.Cancel();
+
+        string? downloadedPath = null;
+        string? errorMsg = null;
+
+        var showTask = progDlg.ShowAsync().AsTask();
+        try
+        {
+            string updateDir = Path.Combine(Path.GetTempPath(), "YuyueUpdate");
+            Directory.CreateDirectory(updateDir);
+            string fileName = Path.GetFileName(new Uri(installerUrl).AbsolutePath);
+            if (string.IsNullOrWhiteSpace(fileName)) fileName = $"Yuyue-{info.Version}-Setup.exe";
+            string destPath = Path.Combine(updateDir, fileName);
+            string partPath = destPath + ".part";
+
+            using var resp = await DownloadHttp.GetAsync(installerUrl, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            resp.EnsureSuccessStatusCode();
+            long? total = resp.Content.Headers.ContentLength;
+
+            using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            await using (var remote = await resp.Content.ReadAsStreamAsync(cts.Token))
+            await using (var local = File.Create(partPath))
+            {
+                byte[] buf = new byte[65536];
+                long got = 0;
+                int read;
+                while ((read = await remote.ReadAsync(buf, cts.Token)) > 0)
+                {
+                    await local.WriteAsync(buf.AsMemory(0, read), cts.Token);
+                    sha.AppendData(buf, 0, read);
+                    got += read;
+                    if (total is > 0)
+                    {
+                        double pct = Math.Clamp(got * 100.0 / total.Value, 0, 100);
+                        progressBar.IsIndeterminate = false;
+                        progressBar.Value = pct;
+                        statusText.Text = $"正在下载 v{info.Version} · {got / 1048576.0:0.1} / {total.Value / 1048576.0:0.1} MB ({pct:0}%)";
+                    }
+                    else
+                    {
+                        statusText.Text = $"正在下载 v{info.Version} · {got / 1048576.0:0.1} MB";
+                    }
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(expectedSha256))
+            {
+                string actualHex = Convert.ToHexString(sha.GetHashAndReset()).ToLowerInvariant();
+                if (!string.Equals(actualHex, expectedSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    try { File.Delete(partPath); } catch { }
+                    throw new InvalidOperationException("安装包 SHA-256 校验未通过，已取消安装以保护安全。");
+                }
+            }
+
+            File.Move(partPath, destPath, overwrite: true);
+            downloadedPath = destPath;
+        }
+        catch (OperationCanceledException)
+        {
+            errorMsg = null;
+        }
+        catch (Exception ex)
+        {
+            errorMsg = ex.Message;
+        }
+        finally
+        {
+            try { progDlg.Hide(); } catch { }
+            try { await showTask; } catch { }
+            cts.Dispose();
+        }
+
+        if (!string.IsNullOrEmpty(downloadedPath) && File.Exists(downloadedPath))
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(downloadedPath) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                errorMsg = $"安装包已下载但启动失败：{ex.Message}";
+            }
+        }
+
+        if (!string.IsNullOrEmpty(errorMsg))
+        {
+            var errDlg = new ContentDialog
+            {
+                XamlRoot = xamlRoot,
+                Title = "更新下载失败",
+                Content = errorMsg,
+                PrimaryButtonText = "改为打开下载页 ↗",
+                CloseButtonText = "好",
+            };
+            if (await errDlg.ShowAsync() == ContentDialogResult.Primary)
+            {
+                string url = !string.IsNullOrWhiteSpace(info.Page) ? info.Page : $"https://github.com/{RepoSlug}/releases/latest";
+                _ = Launcher.LaunchUriAsync(new Uri(url));
+            }
         }
     }
 
@@ -371,7 +572,38 @@ public sealed class UpdateAndFeedbackService
             _ = Launcher.LaunchUriAsync(new Uri($"https://github.com/{RepoSlug}"));
     }
 
-    // ---------- 1:1 Feedback.swift Composer (500px sheet + attachments + EXIF-stripping JPEG + ntfy/GitHub) ----------
+    // ---------- 1:1 Feedback.swift Composer (500px sheet + draft persistence + DnD/Ctrl+V + attachments + EXIF-stripping JPEG + ntfy/GitHub) ----------
+
+    private string? FindLocalLogFile()
+    {
+        string[] candidates =
+        [
+            Path.Combine(_library.DataDir, "yuyue.log"),
+            Path.Combine(_library.DataDir, "logs", "yuyue.log"),
+        ];
+        return candidates.FirstOrDefault(File.Exists);
+    }
+
+    private byte[]? ReadLocalLogTailBytes(int maxBytes = 65536)
+    {
+        string? logPath = FindLocalLogFile();
+        if (logPath is null) return null;
+        try
+        {
+            using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            long len = fs.Length;
+            if (len <= 0) return null;
+            int toRead = (int)Math.Min(len, maxBytes);
+            fs.Seek(len - toRead, SeekOrigin.Begin);
+            byte[] buf = new byte[toRead];
+            int r = fs.Read(buf, 0, toRead);
+            return r > 0 ? buf[..r] : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     public async Task ShowFeedbackComposerAsync(Window ownerWindow, XamlRoot xamlRoot)
     {
@@ -381,10 +613,42 @@ public sealed class UpdateAndFeedbackService
         var p = ThemeHelper.Palette(dark);
         var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
 
-        string category = "bug";
+        string category = _library.Prefs.FeedbackDraftCategory is "idea" or "other" ? _library.Prefs.FeedbackDraftCategory : "bug";
         bool publicShots = true;
-        bool withDeviceInfo = true;
-        var attachments = new List<(string Name, byte[] Data, bool IsImage)>();
+        bool withDeviceInfo = _library.Prefs.FeedbackAttachInfo;
+        bool withLogs = _library.Prefs.FeedbackAttachLogs;
+        var attachments = new List<(string Name, byte[] Data, bool IsImage, string? SourcePath)>();
+
+        // Restore persisted draft attachment files if still present on disk
+        foreach (string savedPath in _library.Prefs.FeedbackDraftFiles.Take(3).ToArray())
+        {
+            if (!File.Exists(savedPath)) continue;
+            try
+            {
+                var fi = new FileInfo(savedPath);
+                if (fi.Length == 0 || fi.Length > 1_500_000) continue;
+                string ext = fi.Extension.ToLowerInvariant();
+                bool isImg = ext is ".png" or ".jpg" or ".jpeg" or ".bmp" or ".webp";
+                byte[] raw = await File.ReadAllBytesAsync(savedPath);
+                if (isImg) raw = await SanitizeImageBytesToJpegAsync(raw, raw);
+                if (raw.Length <= 1_500_000)
+                    attachments.Add((isImg ? Path.ChangeExtension(fi.Name, ".jpg") : fi.Name, raw, isImg, savedPath));
+            }
+            catch { }
+        }
+
+        void SaveDraftState()
+        {
+            _library.Prefs.FeedbackDraftCategory = category;
+            _library.Prefs.FeedbackAttachInfo = withDeviceInfo;
+            _library.Prefs.FeedbackAttachLogs = withLogs;
+            _library.Prefs.FeedbackDraftFiles = attachments
+                .Where(a => !string.IsNullOrEmpty(a.SourcePath))
+                .Select(a => a.SourcePath!)
+                .Take(3)
+                .ToList();
+            _library.SavePrefs();
+        }
 
         var catRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         var catBtns = new List<(string Id, Button Btn)>();
@@ -392,22 +656,34 @@ public sealed class UpdateAndFeedbackService
         var bodyBox = new TextBox
         {
             Text = _library.Prefs.FeedbackDraftText,
-            PlaceholderText = "哪本书、哪一页，做了什么，结果怎样（支持拖拽或选择最多 3 张截图/附件）",
+            PlaceholderText = "哪本书、哪一页，做了什么，结果怎样（支持拖入文件或 Ctrl+V 直接粘贴截图）",
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             MinHeight = 116,
             MaxLength = 800,
         };
-        var counterText = new TextBlock { FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), HorizontalAlignment = HorizontalAlignment.Right };
+        var counterText = new TextBlock
+        {
+            Text = bodyBox.Text.Length >= 500 ? $"{bodyBox.Text.Length} / 800" : "",
+            FontSize = 11,
+            Foreground = ThemeHelper.Brush(p.T3),
+            HorizontalAlignment = HorizontalAlignment.Right,
+        };
         bodyBox.TextChanged += (_, _) =>
         {
             _library.Prefs.FeedbackDraftText = bodyBox.Text;
             counterText.Text = bodyBox.Text.Length >= 500 ? $"{bodyBox.Text.Length} / 800" : "";
         };
 
+        void SyncCatVisuals()
+        {
+            foreach (var (k, btn) in catBtns)
+                btn.Style = (Style)Application.Current.Resources[k == category ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
+        }
+
         foreach (var (id, label, hint) in new[]
         {
-            ("bug", "问题", "哪本书、哪一页，做了什么，结果怎样"),
+            ("bug", "问题", "哪本书、哪一页，做了什么，结果怎样（支持拖入文件或 Ctrl+V 粘贴截图）"),
             ("idea", "建议", "想要什么功能，或者哪里可以更顺手"),
             ("other", "其他", "想说的都可以"),
         })
@@ -418,20 +694,34 @@ public sealed class UpdateAndFeedbackService
             {
                 category = cid;
                 bodyBox.PlaceholderText = ph;
-                foreach (var (k, btn) in catBtns)
-                    btn.Style = (Style)Application.Current.Resources[k == category ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
+                SyncCatVisuals();
+                SaveDraftState();
             };
             catBtns.Add((cid, b));
             catRow.Children.Add(b);
+            if (cid == category) bodyBox.PlaceholderText = ph;
         }
-        foreach (var (k, btn) in catBtns)
-            btn.Style = (Style)Application.Current.Resources[k == category ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
+        SyncCatVisuals();
 
         var attachList = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var attachNotice = new TextBlock { FontSize = 11, Foreground = ThemeHelper.Brush(p.Warn), TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        var attachErrorText = new TextBlock { FontSize = 11, Foreground = ThemeHelper.Brush(p.Danger), Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
         var publicShotToggle = new CheckBox { Content = "截图公开在 GitHub 上（已自动剥离 EXIF；关闭后仅开发者可见）", IsChecked = true, FontSize = 11.5, Visibility = Visibility.Collapsed };
         publicShotToggle.Checked += (_, _) => publicShots = true;
         publicShotToggle.Unchecked += (_, _) => publicShots = false;
+
+        void ShowAttachError(string? err)
+        {
+            if (string.IsNullOrWhiteSpace(err))
+            {
+                attachErrorText.Text = "";
+                attachErrorText.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                attachErrorText.Text = err;
+                attachErrorText.Visibility = Visibility.Visible;
+            }
+        }
 
         void RebuildAttachments()
         {
@@ -442,48 +732,75 @@ public sealed class UpdateAndFeedbackService
                 int idx = i;
                 var att = attachments[i];
                 var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-                chip.Children.Add(new TextBlock { Text = $"{att.Name} ({att.Data.Length / 1024} KB)", FontSize = 11, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center });
+                chip.Children.Add(new TextBlock { Text = $"{att.Name} ({Math.Max(1, att.Data.Length / 1024)} KB)", FontSize = 11, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center });
                 var rm = new Button { Content = "×", Padding = new Thickness(4, 0, 4, 0), FontSize = 11, Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0) };
-                rm.Click += (_, _) => { attachments.RemoveAt(idx); RebuildAttachments(); };
+                rm.Click += (_, _) =>
+                {
+                    attachments.RemoveAt(idx);
+                    ShowAttachError(null);
+                    RebuildAttachments();
+                    SaveDraftState();
+                };
                 chip.Children.Add(rm);
                 attachList.Children.Add(new Border { CornerRadius = new CornerRadius(7), Background = ThemeHelper.Brush(p.Inset), Padding = new Thickness(8, 3, 4, 3), Child = chip });
             }
         }
 
+        async Task TryAttachFileAsync(StorageFile f)
+        {
+            if (attachments.Count >= 3)
+            {
+                ShowAttachError("最多只能添加 3 个附件。");
+                return;
+            }
+            string ext = Path.GetExtension(f.Name).ToLowerInvariant();
+            bool isImg = ext is ".png" or ".jpg" or ".jpeg" or ".bmp" or ".webp";
+            byte[] raw;
+            try { raw = await File.ReadAllBytesAsync(f.Path); }
+            catch (Exception ex) { ShowAttachError($"无法读取「{f.Name}」：{ex.Message}"); return; }
+
+            if (isImg) raw = await SanitizeImageToJpegAsync(f, raw);
+            if (raw.Length == 0)
+            {
+                ShowAttachError($"「{f.Name}」读不出来或为空文件。");
+                return;
+            }
+            if (raw.Length > 1_500_000)
+            {
+                ShowAttachError($"「{f.Name}」太大了，一个附件最多 1.5 MB（当前 {raw.Length / 1048576.0:0.1} MB）。");
+                return;
+            }
+            ShowAttachError(null);
+            attachments.Add((isImg ? Path.ChangeExtension(f.Name, ".jpg") : f.Name, raw, isImg, f.Path));
+            RebuildAttachments();
+            SaveDraftState();
+        }
+
         var addFileBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "＋ 添加截图或文件", Height = 26, FontSize = 11.5 };
         addFileBtn.Click += async (_, _) =>
         {
-            if (attachments.Count >= 3) return;
-            attachNotice.Visibility = Visibility.Collapsed;
+            if (attachments.Count >= 3)
+            {
+                ShowAttachError("最多只能添加 3 个附件。");
+                return;
+            }
             var picker = new FileOpenPicker();
             picker.FileTypeFilter.Add("*");
             InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(ownerWindow));
             var f = await picker.PickSingleFileAsync();
             if (f is null) return;
-            string ext = Path.GetExtension(f.Name).ToLowerInvariant();
-            bool isImg = ext is ".png" or ".jpg" or ".jpeg" or ".webp" or ".bmp";
-            byte[] raw = await File.ReadAllBytesAsync(f.Path);
-            if (isImg) raw = await SanitizeImageToJpegAsync(f, raw);
-            if (raw.Length == 0)
-            {
-                attachNotice.Text = $"「{f.Name}」读不出来。";
-                attachNotice.Visibility = Visibility.Visible;
-                return;
-            }
-            if (raw.Length > 1_500_000)
-            {
-                attachNotice.Text = $"「{f.Name}」太大了，一个附件最多 1.5 MB。";
-                attachNotice.Visibility = Visibility.Visible;
-                return;
-            }
-            attachments.Add((isImg ? Path.ChangeExtension(f.Name, ".jpg") : f.Name, raw, isImg));
-            RebuildAttachments();
+            await TryAttachFileAsync(f);
         };
 
         var snapWindowBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "📷 截取当前窗口", Height = 26, FontSize = 11.5 };
         snapWindowBtn.Click += async (_, _) =>
         {
-            if (attachments.Count >= 3 || ownerWindow.Content is not UIElement rootEl) return;
+            if (attachments.Count >= 3)
+            {
+                ShowAttachError("最多只能添加 3 个附件。");
+                return;
+            }
+            if (ownerWindow.Content is not UIElement rootEl) return;
             try
             {
                 var rtb = new RenderTargetBitmap();
@@ -496,20 +813,39 @@ public sealed class UpdateAndFeedbackService
                 ms.Seek(0);
                 var bytes = new byte[ms.Size];
                 await ms.ReadAsync(bytes.AsBuffer(), (uint)bytes.Length, InputStreamOptions.None);
-                attachments.Add(($"shot-{attachments.Count + 1}.jpg", bytes, true));
+                ShowAttachError(null);
+                attachments.Add(($"shot-{attachments.Count + 1}.jpg", bytes, true, null));
                 RebuildAttachments();
             }
-            catch { }
+            catch (Exception ex) { ShowAttachError($"截屏失败：{ex.Message}"); }
+        };
+
+        var clearDraftBtn = new Button
+        {
+            Style = (Style)Application.Current.Resources["YYIconButtonStyle"],
+            Content = "清空草稿",
+            Height = 26,
+            FontSize = 11.5,
+            Foreground = ThemeHelper.Brush(p.T3),
         };
 
         var infoCheck = new CheckBox
         {
             Content = $"附带基础环境信息（语阅 {CurrentVersion} ({CurrentBuild}) · {OsDisplayVersion()}）",
-            IsChecked = true,
+            IsChecked = withDeviceInfo,
             FontSize = 11.5,
         };
-        infoCheck.Checked += (_, _) => withDeviceInfo = true;
-        infoCheck.Unchecked += (_, _) => withDeviceInfo = false;
+        infoCheck.Checked += (_, _) => { withDeviceInfo = true; SaveDraftState(); };
+        infoCheck.Unchecked += (_, _) => { withDeviceInfo = false; SaveDraftState(); };
+
+        var logsCheck = new CheckBox
+        {
+            Content = FindLocalLogFile() is not null ? "附带最近运行日志（末尾 64 KB）" : "附带最近运行日志（如有）",
+            IsChecked = withLogs,
+            FontSize = 11.5,
+        };
+        logsCheck.Checked += (_, _) => { withLogs = true; SaveDraftState(); };
+        logsCheck.Unchecked += (_, _) => { withLogs = false; SaveDraftState(); };
 
         var mailLink = new HyperlinkButton
         {
@@ -519,11 +855,25 @@ public sealed class UpdateAndFeedbackService
             Padding = new Thickness(0, 2, 0, 2),
         };
 
-        var toolBar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { snapWindowBtn, addFileBtn } };
+        clearDraftBtn.Click += (_, _) =>
+        {
+            category = "bug";
+            SyncCatVisuals();
+            bodyBox.Text = "";
+            attachments.Clear();
+            ShowAttachError(null);
+            RebuildAttachments();
+            _library.Prefs.FeedbackDraftText = "";
+            _library.Prefs.FeedbackDraftFiles.Clear();
+            SaveDraftState();
+        };
+
+        var toolBar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { snapWindowBtn, addFileBtn, clearDraftBtn } };
         var root = new StackPanel
         {
-            Width = 468,
+            Width = 476,
             Spacing = 10,
+            AllowDrop = true,
             Children =
             {
                 catRow,
@@ -531,9 +881,10 @@ public sealed class UpdateAndFeedbackService
                 counterText,
                 toolBar,
                 attachList,
-                attachNotice,
+                attachErrorText,
                 publicShotToggle,
                 infoCheck,
+                logsCheck,
                 mailLink,
                 new TextBlock
                 {
@@ -544,6 +895,66 @@ public sealed class UpdateAndFeedbackService
                 },
             },
         };
+
+        // Drag-and-drop files onto feedback dialog
+        root.DragOver += (_, e) =>
+        {
+            if (e.DataView.Contains(StandardDataFormats.StorageItems))
+            {
+                e.AcceptedOperation = DataPackageOperation.Copy;
+                e.Handled = true;
+            }
+        };
+        root.Drop += async (_, e) =>
+        {
+            if (!e.DataView.Contains(StandardDataFormats.StorageItems)) return;
+            var items = await e.DataView.GetStorageItemsAsync();
+            foreach (var item in items)
+            {
+                if (item is StorageFile sf)
+                    await TryAttachFileAsync(sf);
+            }
+        };
+
+        // Ctrl+V clipboard image paste support
+        async Task HandlePasteKeyDownAsync(KeyRoutedEventArgs e)
+        {
+            if (e.Key != VirtualKey.V) return;
+            bool ctrl = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(CoreVirtualKeyStates.Down);
+            if (!ctrl) return;
+            try
+            {
+                var content = Clipboard.GetContent();
+                if (!content.Contains(StandardDataFormats.Bitmap)) return;
+                e.Handled = true;
+                if (attachments.Count >= 3)
+                {
+                    ShowAttachError("最多只能添加 3 个附件。");
+                    return;
+                }
+                var bmpRef = await content.GetBitmapAsync();
+                using var inStream = await bmpRef.OpenReadAsync();
+                byte[] jpeg = await SanitizeStreamToJpegAsync(inStream);
+                if (jpeg.Length == 0)
+                {
+                    ShowAttachError("无法读取剪贴板中的图片。");
+                    return;
+                }
+                if (jpeg.Length > 1_500_000)
+                {
+                    ShowAttachError("剪贴板图片压缩后仍超过 1.5 MB 上限。");
+                    return;
+                }
+                ShowAttachError(null);
+                attachments.Add(($"paste-{attachments.Count + 1}.jpg", jpeg, true, null));
+                RebuildAttachments();
+            }
+            catch { }
+        }
+        bodyBox.KeyDown += async (_, e) => await HandlePasteKeyDownAsync(e);
+        root.KeyDown += async (_, e) => await HandlePasteKeyDownAsync(e);
+
+        RebuildAttachments();
 
         var dlg = new ContentDialog
         {
@@ -557,17 +968,46 @@ public sealed class UpdateAndFeedbackService
         };
 
         var res = await dlg.ShowAsync();
+        SaveDraftState();
         if (res == ContentDialogResult.None) return;
 
         string text = bodyBox.Text.Trim();
         if (string.IsNullOrEmpty(text)) return;
 
+        var finalAttachments = attachments.Select(a => (a.Name, a.Data, a.IsImage)).ToList();
+        if (withLogs && finalAttachments.Count < 3 && ReadLocalLogTailBytes() is { Length: > 0 } logBytes)
+        {
+            finalAttachments.Add(("yuyue.log", logBytes, false));
+        }
+
         if (res == ContentDialogResult.Primary)
         {
-            bool sentViaRelay = await TrySubmitViaRelayAsync(category, text, withDeviceInfo, publicShots, attachments);
+            var relayStatus = await TrySubmitViaRelayAsync(category, text, withDeviceInfo, publicShots, finalAttachments);
             _library.Prefs.FeedbackDraftText = "";
+            _library.Prefs.FeedbackDraftFiles.Clear();
             _library.SavePrefs();
-            if (!sentViaRelay)
+
+            if (relayStatus == RelaySubmitOutcome.Sent)
+            {
+                await new ContentDialog
+                {
+                    XamlRoot = xamlRoot,
+                    Title = "✓ 反馈已送出，谢谢你",
+                    Content = "你的反馈已安全送达开发者，我们会尽快查看并改进。",
+                    CloseButtonText = "好",
+                }.ShowAsync();
+            }
+            else if (relayStatus == RelaySubmitOutcome.QueuedOffline)
+            {
+                await new ContentDialog
+                {
+                    XamlRoot = xamlRoot,
+                    Title = "已暂存离线队列",
+                    Content = "当前网络暂时无法直达反馈通道，内容已安全保存在本机，联网后将自动补发。",
+                    CloseButtonText = "好",
+                }.ShowAsync();
+            }
+            else
             {
                 OpenGitHubIssue(category, text, withDeviceInfo);
             }
@@ -575,19 +1015,22 @@ public sealed class UpdateAndFeedbackService
         else if (res == ContentDialogResult.Secondary)
         {
             _library.Prefs.FeedbackDraftText = "";
+            _library.Prefs.FeedbackDraftFiles.Clear();
             _library.SavePrefs();
             OpenGitHubIssue(category, text, withDeviceInfo);
         }
     }
 
-    private async Task<bool> TrySubmitViaRelayAsync(
+    private enum RelaySubmitOutcome { Unavailable, Sent, QueuedOffline }
+
+    private async Task<RelaySubmitOutcome> TrySubmitViaRelayAsync(
         string category, string text, bool withInfo, bool publicShots,
         List<(string Name, byte[] Data, bool IsImage)> attachments)
     {
         string? topic = Environment.GetEnvironmentVariable("YuyueFeedbackTopic");
         string? pubKey = Environment.GetEnvironmentVariable("YuyueFeedbackPublicKey");
         if (string.IsNullOrWhiteSpace(topic) || string.IsNullOrWhiteSpace(pubKey))
-            return false;
+            return RelaySubmitOutcome.Unavailable;
 
         try
         {
@@ -629,17 +1072,21 @@ public sealed class UpdateAndFeedbackService
                 postReq.Headers.Add("X-Firebase", "no");
                 using var postResp = await Http.SendAsync(postReq);
                 if ((int)postResp.StatusCode == 429 || !postResp.IsSuccessStatusCode)
+                {
                     EnqueueOfflineFeedback(topic, sealedJson);
+                    return RelaySubmitOutcome.QueuedOffline;
+                }
+                return RelaySubmitOutcome.Sent;
             }
             catch
             {
                 EnqueueOfflineFeedback(topic, sealedJson);
+                return RelaySubmitOutcome.QueuedOffline;
             }
-            return true;
         }
         catch
         {
-            return false;
+            return RelaySubmitOutcome.Unavailable;
         }
     }
 
@@ -698,6 +1145,31 @@ public sealed class UpdateAndFeedbackService
         try
         {
             using var inStream = await file.OpenReadAsync();
+            var bytes = await SanitizeStreamToJpegAsync(inStream);
+            return bytes.Length > 0 ? bytes : fallback;
+        }
+        catch { }
+        return fallback;
+    }
+
+    private static async Task<byte[]> SanitizeImageBytesToJpegAsync(byte[] raw, byte[] fallback)
+    {
+        try
+        {
+            using var ms = new InMemoryRandomAccessStream();
+            await ms.WriteAsync(raw.AsBuffer());
+            ms.Seek(0);
+            var bytes = await SanitizeStreamToJpegAsync(ms);
+            return bytes.Length > 0 ? bytes : fallback;
+        }
+        catch { }
+        return fallback;
+    }
+
+    private static async Task<byte[]> SanitizeStreamToJpegAsync(IRandomAccessStream inStream)
+    {
+        try
+        {
             var decoder = await BitmapDecoder.CreateAsync(inStream);
             uint w = decoder.PixelWidth, h = decoder.PixelHeight;
 
@@ -728,6 +1200,6 @@ public sealed class UpdateAndFeedbackService
             }
         }
         catch { }
-        return fallback;
+        return Array.Empty<byte>();
     }
 }

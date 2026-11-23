@@ -36,6 +36,30 @@ public static class AudiobookImporter
     public static readonly string[] Extensions = [".m4b", ".m4a", ".mp3", ".flac", ".ogg", ".opus", ".aac", ".wav"];
     public static readonly string[] DrmExtensions = [".aa", ".aax", ".m4p"];
 
+    /// <summary>
+    /// Probes an audio file's duration in seconds using Shell Music properties with MediaSource fallback.
+    /// Used by <see cref="Yuyue.Core.RemoteLibraryService"/> when streaming remote WebDAV audiobooks.
+    /// </summary>
+    public static async Task<double> ProbeDurationSecondsAsync(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return 0;
+        double seconds = 0;
+        try
+        {
+            var sf = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(path));
+            var music = await sf.Properties.GetMusicPropertiesAsync();
+            seconds = music.Duration.TotalSeconds;
+            if (seconds <= 0.1)
+            {
+                using var ms = MediaSource.CreateFromStorageFile(sf);
+                await ms.OpenAsync();
+                if (ms.Duration is { } d) seconds = d.TotalSeconds;
+            }
+        }
+        catch { }
+        return seconds;
+    }
+
     public static bool IsAudiobookOrArchivePath(string path)
     {
         if (Directory.Exists(path))

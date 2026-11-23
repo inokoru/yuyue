@@ -14,7 +14,7 @@ public sealed record DailyQuoteEntry(string Text, string Source = "");
 public static class DailyQuote
 {
     private const string HitokotoUrl = "https://v1.hitokoto.cn/?c=d&c=i&c=k&max_length=46";
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(2.5) };
+    private static readonly HttpClient Http = new() { Timeout = System.TimeSpan.FromSeconds(2.5) };
     private static readonly HashSet<string> GenericSources = ["原创", "网络", "一言", "未知", "佚名", "网友", "其他", "自创"];
 
     private static readonly DailyQuoteEntry[] BuiltinZh =

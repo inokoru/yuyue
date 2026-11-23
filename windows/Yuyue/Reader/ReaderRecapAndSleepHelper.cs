@@ -55,6 +55,15 @@ public static class ReaderRecapAndSleepHelper
         catch { }
     }
 
+    public static RecapDto? TryGetCachedRecap(LibraryService library, string bookId, uint section, int sentence, int days)
+    {
+        string key = $"recap|{section}|{Math.Max(0, sentence) / 20}";
+        var cache = LoadRecapCache(library, bookId);
+        if (cache.TryGetValue(key, out var cached) && cached.Lines.Length >= 2)
+            return cached with { Days = Math.Max(1, days) };
+        return null;
+    }
+
     public static async Task<RecapDto?> TryLoadOrGenerateRecapAsync(
         LibraryService library,
         string bookId,
@@ -97,8 +106,7 @@ public static class ReaderRecapAndSleepHelper
         string text = await Task.Run(() => ReadBefore(library.Core, bookId, detail, section, sentence));
         if (text.Length < 200) return null;
 
-        bool uiEn = L10n.IsEnglish;
-        string replyLang = uiEn ? "English" : "简体中文";
+        string replyLang = CompanionClient.ReplyLanguage;
         string system =
             $"你是「语阅」里的书伴。读者隔了 {days} 天又打开《{detail.Summary.Title}》，帮他想起之前读到哪、发生了什么。\n" +
             "规则：\n" +
@@ -108,7 +116,12 @@ public static class ReaderRecapAndSleepHelper
 
         try
         {
-            string reply = await library.Companion.ChatAsync("原文（读者读过的最后一部分）：\n" + text, system);
+            string reply = await library.Companion.ChatAsync(
+                "原文（读者读过的最后一部分）：\n" + text,
+                system,
+                maxTokens: 512,
+                fast: true,
+                source: UsageSource.Recap);
             char[] trimChars = [' ', '\t', '-', '•', '*', '·', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '、', '）', ')'];
             var lines = reply
                 .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
@@ -284,7 +297,7 @@ public static class ReaderRecapAndSleepHelper
             library.SavePrefs();
     }
 
-    public static SleepReturnInfo? TryGetSleepReturn(LibraryService library, string bookId, BookDetail detail)
+    public static SleepReturnInfo? TryGetSleepReturn(LibraryService library, string bookId, BookDetail? detail = null)
     {
         if (!library.Prefs.SleepReturnSpots.TryGetValue(bookId, out var v) || v is null || v.Length < 3)
             return null;
@@ -304,7 +317,7 @@ public static class ReaderRecapAndSleepHelper
         else
             when = $"{dt.Month}月{dt.Day}日";
 
-        string rawChap = sec < detail.Sections.Length ? (detail.Sections[sec].Title ?? "") : "";
+        string rawChap = detail is not null && sec < detail.Sections.Length ? (detail.Sections[sec].Title ?? "") : "";
         string chap = ShortChapterTitle(rawChap);
         string at = $"第 {sent + 1} 句";
         string place = string.IsNullOrWhiteSpace(chap) ? at : $"{chap} {at}";
@@ -495,13 +508,17 @@ public static class ReaderRecapAndSleepHelper
 
         var picker = new FileOpenPicker { ViewMode = PickerViewMode.List };
         foreach (var ext in LibraryService.SupportedExtensions) picker.FileTypeFilter.Add(ext);
+        foreach (var ext in Yuyue.Audiobook.AudiobookImporter.Extensions) picker.FileTypeFilter.Add(ext);
+        picker.FileTypeFilter.Add(".zip");
         InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(ownerWindow));
         var picked = await picker.PickSingleFileAsync();
         if (picked is null) return;
 
         try
         {
-            var imported = await library.ImportBookWithExtrasAsync(picked.Path);
+            var imported = Yuyue.Audiobook.AudiobookImporter.IsAudiobookOrArchivePath(picked.Path)
+                ? await Yuyue.Audiobook.AudiobookImporter.ImportFilesAsync(library, [picked.Path])
+                : await library.ImportBookWithExtrasAsync(picked.Path);
             if (onReimported is not null) await onReimported(imported.Id);
         }
         catch (Exception ex)

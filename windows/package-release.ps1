@@ -11,7 +11,9 @@ param(
     [ValidateSet("x64", "arm64")]
     [string]$Arch = "x64",
     [string]$Version = "0.1.0",
-    [switch]$SkipCoreBuild
+    [switch]$SkipCoreBuild,
+    [switch]$KeepAllLocales,
+    [switch]$BuildInstaller
 )
 
 $ErrorActionPreference = "Stop"
@@ -50,8 +52,45 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 # Strip debug symbols from portable distribution
 Get-ChildItem $StageDir -Filter "*.pdb" -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
 
+# Trim ~80 unused WindowsAppSDK satellite locale folders (keeps zh/en only, saving ~25-35 MB)
+if (-not $KeepAllLocales) {
+    $keepLocales = @("zh-CN", "zh-TW", "zh-Hans", "zh-Hant", "en-US", "en-GB", "en")
+    $localeRegex = '^[a-z]{2,3}(-[A-Za-z0-9]{2,8}){1,2}$'
+    $removed = 0
+    Get-ChildItem $StageDir -Directory | Where-Object {
+        $_.Name -match $localeRegex -and ($keepLocales -notcontains $_.Name)
+    } | ForEach-Object {
+        Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        $removed++
+    }
+    Write-Host "▸ Trimmed $removed unused satellite locale folders (kept zh/en)"
+}
+
 Write-Host "▸ Compressing portable archive -> $ZipPath"
 Compress-Archive -Path $StageDir -DestinationPath $ZipPath -CompressionLevel Optimal
 
 $sizeMb = [Math]::Round((Get-Item $ZipPath).Length / 1MB, 1)
-Write-Host "✓ Release package ready: $ZipPath ($sizeMb MB)"
+Write-Host "✓ Portable release package ready: $ZipPath ($sizeMb MB)"
+
+if ($BuildInstaller) {
+    $issPath = Join-Path $WinDir "installer.iss"
+    $iscc = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
+    if (-not $iscc) {
+        $candidates = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+        )
+        $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if ($found) { $iscc = Get-Item $found }
+    }
+    if (-not $iscc) {
+        Write-Warning "Inno Setup 6 (ISCC.exe) not found; skipped installer build. Install Inno Setup 6 or run without -BuildInstaller."
+    } else {
+        $isccExe = if ($iscc -is [System.Management.Automation.CommandInfo]) { $iscc.Source } else { $iscc.FullName }
+        Write-Host "▸ Building Windows Setup installer via Inno Setup ($issPath)..."
+        & $isccExe "/DMyAppVersion=$Version" "/DMyArch=$Arch" "/DStageDir=$StageDir" "/DOutDir=$DistRoot" $issPath
+        if ($LASTEXITCODE -ne 0) { throw "ISCC.exe failed" }
+        Write-Host "✓ Installer ready in $DistRoot"
+    }
+}

@@ -1,8 +1,10 @@
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using Windows.Media.Core;
 using Windows.Storage;
 using Yuyue.Core;
+using Yuyue.Speech;
 
 namespace Yuyue.Podcast;
 
@@ -15,25 +17,32 @@ public sealed record PodcastSearchHitDto(
     string? Genre);
 
 /// <summary>
-/// 1:1 implementation of macOS <c>PodcastHub.swift</c> network, import &amp; Studio pipeline:
-/// - Rust <see cref="YuyueCoreMethods.ParsePodcastRss"/> + Podcasting 2.0 <c>&lt;podcast:transcript&gt;</c> auto-fetch (<see cref="YuyueCoreMethods.ParsePodcastTranscript"/>)
-/// - Single-episode webpage extraction (<see cref="YuyueCoreMethods.ParseEpisodeWebpage"/> for Xiaoyuzhou / Apple Podcasts / Substack)
-/// - OPML batch import (<see cref="YuyueCoreMethods.ParsePodcastOpml"/>)
-/// - Apple iTunes public Podcast Directory search
-/// - Private Studio generation with spoiler-lock control.
+/// 1:1 implementation of macOS <c>PodcastHub.swift</c> network, import, audio slicing, transcription &amp; Studio pipeline:
+/// - Rust <see cref="YuyueCoreMethods.ParsePodcastRss"/> + Podcasting 2.0 <c>&lt;podcast:transcript&gt;</c> auto-fetch
+/// - Single-episode webpage extraction (Xiaoyuzhou / Apple Podcasts / Substack)
+/// - OPML batch import
+/// - Apple iTunes public Podcast Directory search &amp; live top-charts discovery
+/// - Local micro-clip audio slicing (<c>PodcastClipsDir</c>) and on-device Whisper/SAPI transcription
+/// - Private Studio generation with spoiler-lock, voice style (solo/duo/English), and usage ledger tracking.
 /// </summary>
 public sealed class PodcastService
 {
     private static readonly HttpClient Http = new() { Timeout = System.TimeSpan.FromSeconds(25) };
+    private static readonly HttpClient DownloadHttp = new() { Timeout = System.TimeSpan.FromMinutes(10) };
 
     private readonly LibraryService _library;
+    private IReadOnlyList<PodcastSearchHitDto>? _topChartsCache;
 
     public PodcastService(LibraryService library)
     {
         _library = library;
         if (!Http.DefaultRequestHeaders.UserAgent.Any())
             Http.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Yuyue/0.1");
+        if (!DownloadHttp.DefaultRequestHeaders.UserAgent.Any())
+            DownloadHttp.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Yuyue/0.1");
     }
+
+    public string CacheDir => Path.Combine(_library.DataDir, "podcast-cache");
 
     public IReadOnlyList<PodcastChannel> GetChannels()
     {
@@ -98,6 +107,71 @@ public sealed class PodcastService
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Live Apple Podcasts public top charts (CN + fallback curated picks) so discovery &amp; Add-Podcast sheet stay fresh.
+    /// </summary>
+    public async Task<IReadOnlyList<PodcastSearchHitDto>> FetchItunesTopChartsAsync()
+    {
+        if (_topChartsCache is { Count: > 0 }) return _topChartsCache;
+
+        var fallback = new PodcastSearchHitDto[]
+        {
+            new("storyfm", "故事FM", "爱哲", "https://storyfm.cn/feed/episodes/", null, "社会与文化"),
+            new("leftright", "忽左忽右", "JustPod", "https://feeds.fireside.fm/left-right/rss", null, "历史与文化"),
+            new("lex", "Lex Fridman Podcast", "Lex Fridman", "https://lexfridman.com/feed/podcast/", null, "科技与哲学"),
+            new("huberman", "Huberman Lab", "Andrew Huberman", "https://feeds.megaphone.fm/hubermanlab", null, "健康与科学"),
+            new("dwarkesh", "Dwarkesh Podcast", "Dwarkesh Patel", "https://apple.dwarkesh-patel.com/feed.xml", null, "深度访谈"),
+        };
+
+        try
+        {
+            string chartJson = await Http.GetStringAsync("https://rss.applemarketingtools.com/api/v2/cn/podcasts/top/10/podcasts.json");
+            using var doc = JsonDocument.Parse(chartJson);
+            if (doc.RootElement.TryGetProperty("feed", out var feedEl)
+                && feedEl.TryGetProperty("results", out var resArr)
+                && resArr.ValueKind == JsonValueKind.Array)
+            {
+                var ids = new List<string>();
+                foreach (var item in resArr.EnumerateArray())
+                {
+                    if (item.TryGetProperty("id", out var idEl) && idEl.GetString() is { Length: > 0 } id)
+                        ids.Add(id);
+                }
+
+                if (ids.Count > 0)
+                {
+                    string lookupJson = await Http.GetStringAsync($"https://itunes.apple.com/lookup?id={string.Join(",", ids.Take(10))}&country=CN");
+                    using var ldoc = JsonDocument.Parse(lookupJson);
+                    var resolved = new List<PodcastSearchHitDto>();
+                    var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    if (ldoc.RootElement.TryGetProperty("results", out var larr) && larr.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var el in larr.EnumerateArray())
+                        {
+                            string? feedUrl = el.TryGetProperty("feedUrl", out var fu) ? fu.GetString() : null;
+                            if (string.IsNullOrWhiteSpace(feedUrl) || !seen.Add(feedUrl)) continue;
+                            string id = el.TryGetProperty("collectionId", out var cid) ? cid.ToString() : feedUrl;
+                            string title = (el.TryGetProperty("collectionName", out var cn) ? cn.GetString() : null) ?? "播客节目";
+                            string author = (el.TryGetProperty("artistName", out var an) ? an.GetString() : null) ?? "";
+                            string? art = (el.TryGetProperty("artworkUrl600", out var a6) ? a6.GetString() : null)
+                                ?? (el.TryGetProperty("artworkUrl100", out var a1) ? a1.GetString() : null);
+                            string? genre = el.TryGetProperty("primaryGenreName", out var gn) ? gn.GetString() : null;
+                            resolved.Add(new PodcastSearchHitDto(id, title, author, feedUrl, art, genre));
+                        }
+                    }
+                    if (resolved.Count >= 3)
+                    {
+                        _topChartsCache = resolved;
+                        return resolved;
+                    }
+                }
+            }
+        }
+        catch { }
+
+        return fallback;
     }
 
     /// <summary>
@@ -214,7 +288,6 @@ public sealed class PodcastService
                 if (match is null) continue;
                 if (_library.Core.PodcastTranscript(match.Id).Length > 0) continue;
 
-                // Prefer JSON/SRT/VTT transcript links
                 var link = ep.Transcripts
                     .OrderBy(t => t.MimeType.Contains("json", StringComparison.OrdinalIgnoreCase) ? 0 :
                                   t.MimeType.Contains("srt", StringComparison.OrdinalIgnoreCase) ? 1 :
@@ -285,26 +358,239 @@ public sealed class PodcastService
             title, author, "从本机音频文件直接放入收听台", "", null, filePath, null, durSec, "zh-CN", PodcastSourceKind.LocalAudio));
     }
 
+    /// <summary>
+    /// Ensures a local copy of an issue's audio file exists (either its <see cref="PodcastIssue.LocalAudioPath"/>
+    /// or cached in <see cref="CacheDir"/>) for clip slicing and on-device transcription.
+    /// </summary>
+    public async Task<string?> EnsureLocalAudioPathAsync(PodcastIssue issue, bool downloadIfRemote, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(issue.LocalAudioPath) && File.Exists(issue.LocalAudioPath))
+            return issue.LocalAudioPath;
+
+        Directory.CreateDirectory(CacheDir);
+        string ext = ".mp3";
+        if (!string.IsNullOrWhiteSpace(issue.AudioUrl))
+        {
+            string urlPath = issue.AudioUrl.Split('?')[0];
+            string cand = Path.GetExtension(urlPath).ToLowerInvariant();
+            if (cand is ".mp3" or ".m4a" or ".wav" or ".ogg" or ".opus" or ".flac") ext = cand;
+        }
+        string cachedPath = Path.Combine(CacheDir, $"{issue.Id}{ext}");
+        if (File.Exists(cachedPath) && new FileInfo(cachedPath).Length > 1024)
+            return cachedPath;
+
+        if (!downloadIfRemote || string.IsNullOrWhiteSpace(issue.AudioUrl)) return null;
+
+        string tmp = cachedPath + ".part";
+        using var resp = await DownloadHttp.GetAsync(issue.AudioUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+        resp.EnsureSuccessStatusCode();
+        await using (var src = await resp.Content.ReadAsStreamAsync(ct))
+        await using (var dst = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            await src.CopyToAsync(dst, ct);
+        }
+        if (File.Exists(cachedPath)) File.Delete(cachedPath);
+        File.Move(tmp, cachedPath);
+        return cachedPath;
+    }
+
+    /// <summary>
+    /// Slices <c>[t0, t1]</c> from a local/cached podcast audio file into a standalone WAV inside <c>Core.PodcastClipsDir()</c>
+    /// so saved <see cref="PodcastClip"/> items can replay original audio offline even if the feed disappears.
+    /// </summary>
+    public async Task<string?> SliceLocalAudioClipAsync(PodcastIssue issue, double t0, double t1, CancellationToken ct = default)
+    {
+        try
+        {
+            string? localPath = await EnsureLocalAudioPathAsync(issue, downloadIfRemote: false, ct);
+            if (string.IsNullOrWhiteSpace(localPath) || !File.Exists(localPath)) return null;
+
+            double start = Math.Max(0, t0);
+            double end = Math.Max(start + 1.0, t1);
+            string clipsDir = _library.Core.PodcastClipsDir();
+            Directory.CreateDirectory(clipsDir);
+            string scratchDir = Path.Combine(CacheDir, "pcm-work", issue.Id);
+            Directory.CreateDirectory(scratchDir);
+
+            string wavPath = await Aligner.EnsurePcm16kWavAsync(localPath, scratchDir, 0, ct);
+            if (!Aligner.TryReadWavInfo(wavPath, out var info) || info.SampleCount <= 0)
+                return null;
+
+            string relName = $"clip-{issue.Id[..Math.Min(8, issue.Id.Length)]}-{(int)start}-{Guid.NewGuid().ToString("N")[..6]}.wav";
+            string dstPath = Path.Combine(clipsDir, relName);
+            await Task.Run(() => WindowsTranscriber.WriteWavSlice(wavPath, info, start, end, dstPath), ct);
+            return File.Exists(dstPath) && new FileInfo(dstPath).Length > 64 ? relName : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// On-device transcription for an external/local podcast issue using <see cref="WindowsTranscriber.TranscribeFileAsync"/>
+    /// (local Whisper / configured Whisper API / offline SAPI 5) and stores result via <c>Core.PodcastSetTranscript</c>.
+    /// </summary>
+    public async Task<int> TranscribeIssueOnDeviceAsync(string issueId, Action<string>? onStatus = null, CancellationToken ct = default)
+    {
+        var issue = _library.Core.PodcastIssue(issueId);
+        onStatus?.Invoke("正在准备单集音频…");
+        string? localPath = await EnsureLocalAudioPathAsync(issue, downloadIfRemote: true, ct);
+        if (string.IsNullOrWhiteSpace(localPath))
+            throw new InvalidOperationException("该单集没有可用的音频文件或直链，无法转写。");
+
+        string scratchDir = Path.Combine(CacheDir, "transcribe", issueId);
+        Directory.CreateDirectory(scratchDir);
+        string lang = string.IsNullOrWhiteSpace(issue.Language) ? "zh-CN" : issue.Language;
+
+        onStatus?.Invoke("正在本机识别语音并生成时间轴文稿…");
+        var words = await WindowsTranscriber.TranscribeFileAsync(
+            _library,
+            localPath,
+            scratchDir,
+            fileIndex: 0,
+            globalOffsetSec: 0,
+            durationSec: Math.Max(1.0, issue.DurationSec),
+            lang: lang,
+            onLocalSecondsDone: sec => onStatus?.Invoke($"已转写 {System.TimeSpan.FromSeconds(sec):mm\\:ss}…"),
+            ct: ct);
+
+        if (words.Length == 0)
+            throw new InvalidOperationException("转写未识别出有效文字，请确认本机 Whisper 服务或系统语音识别语言包可用。");
+
+        var sentences = GroupWordsIntoMagazineSentences(words, issue.ShowTitle, lang);
+        await Task.Run(() => _library.Core.PodcastSetTranscript(issueId, sentences, PodcastFidelity.L2Magazine), ct);
+        return sentences.Length;
+    }
+
+    internal static MagazineSentence[] GroupWordsIntoMagazineSentences(HeardWord[] words, string defaultSpeaker, string lang)
+    {
+        bool isCjk = !lang.StartsWith("en", StringComparison.OrdinalIgnoreCase);
+        var list = new List<MagazineSentence>();
+        var sb = new StringBuilder();
+        double segStart = words[0].T0;
+        double segEnd = words[0].T1;
+
+        void Flush()
+        {
+            string text = sb.ToString().Trim();
+            if (!string.IsNullOrEmpty(text))
+            {
+                list.Add(new MagazineSentence(
+                    Id: $"tr-{list.Count}",
+                    Speaker: defaultSpeaker,
+                    TextOrig: text,
+                    TextTrans: null,
+                    CoachNote: null,
+                    T0: segStart,
+                    T1: Math.Max(segStart + 0.5, segEnd),
+                    SkipReason: null,
+                    BookId: null,
+                    BookTitle: null,
+                    BookSection: null,
+                    BookSentence: null,
+                    BookQuote: null));
+            }
+            sb.Clear();
+        }
+
+        for (int i = 0; i < words.Length; i++)
+        {
+            var w = words[i];
+            if (sb.Length == 0) segStart = w.T0;
+            else if (!isCjk) sb.Append(' ');
+            sb.Append(w.Text);
+            segEnd = w.T1;
+
+            bool endsPunct = w.Text.EndsWith('。') || w.Text.EndsWith('？') || w.Text.EndsWith('！')
+                || w.Text.EndsWith('.') || w.Text.EndsWith('?') || w.Text.EndsWith('!');
+            bool longPause = i + 1 < words.Length && (words[i + 1].T0 - w.T1) > 1.4;
+            bool tooLong = (segEnd - segStart) >= 14.0 || sb.Length >= (isCjk ? 72 : 160);
+
+            if (endsPunct || longPause || tooLong)
+                Flush();
+        }
+        Flush();
+        return list.ToArray();
+    }
+
+    public (int AudioFiles, long AudioBytes, int ClipFiles, long ClipBytes) GetStorageStats()
+    {
+        int aFiles = 0;
+        long aBytes = 0;
+        if (Directory.Exists(CacheDir))
+        {
+            foreach (var f in Directory.EnumerateFiles(CacheDir, "*.*", SearchOption.AllDirectories))
+            {
+                try { aFiles++; aBytes += new FileInfo(f).Length; } catch { }
+            }
+        }
+        int cFiles = 0;
+        long cBytes = 0;
+        try
+        {
+            string clipsDir = _library.Core.PodcastClipsDir();
+            if (Directory.Exists(clipsDir))
+            {
+                foreach (var f in Directory.EnumerateFiles(clipsDir, "*.*", SearchOption.TopDirectoryOnly))
+                {
+                    try { cFiles++; cBytes += new FileInfo(f).Length; } catch { }
+                }
+            }
+        }
+        catch { }
+        return (aFiles, aBytes, cFiles, cBytes);
+    }
+
+    public long ClearAudioCache()
+    {
+        long freed = 0;
+        if (!Directory.Exists(CacheDir)) return 0;
+        foreach (var f in Directory.EnumerateFiles(CacheDir, "*.*", SearchOption.AllDirectories))
+        {
+            try
+            {
+                freed += new FileInfo(f).Length;
+                File.Delete(f);
+            }
+            catch { }
+        }
+        return freed;
+    }
+
     public async Task<PodcastIssue> GenerateStudioIssueAsync(
         StudioKind kind,
         string[] bookIds,
         uint minutes = 10,
         string? topic = null,
-        bool noSpoiler = true)
+        bool noSpoiler = true,
+        string? voiceStyle = null)
     {
+        string style = voiceStyle ?? _library.Prefs.PodcastStudioVoiceStyle;
         var brief = await Task.Run(() => _library.Core.BuildStudioBrief(kind, bookIds, minutes, topic));
         string rawReply = "";
         if (_library.Companion.IsConfigured)
         {
-            string sys = brief.SystemPrompt;
+            var sysSb = new StringBuilder(brief.SystemPrompt);
             if (!noSpoiler)
             {
-                sys += "\n（补充说明：用户已主动开启「全书范围」讨论权限，可结合全书脉络深入剖析。）";
+                sysSb.Append("\n（补充说明：用户已主动开启「全书范围」讨论权限，可结合全书脉络深入剖析。）");
             }
-            rawReply = await _library.Companion.ChatAsync(brief.UserPrompt, sys);
+            if (style == "studio-solo-zh")
+            {
+                sysSb.Append("\n（主播形式：请以单一主理人「林深」独白导读的形式撰写逐段讲稿，不要切分第二位主播。）");
+            }
+            else if (style == "studio-duo-en" && kind != StudioKind.VocabRadio)
+            {
+                sysSb.Append("\n(Voice format: Write a natural English two-host podcast conversation between Clara and David.)");
+            }
+            rawReply = await _library.Companion.ChatAsync(
+                brief.UserPrompt,
+                sysSb.ToString(),
+                source: UsageSource.Podcast);
         }
         var draft = await Task.Run(() => _library.Core.FinalizeStudioScript(brief, rawReply));
-        string lang = kind == StudioKind.VocabRadio ? "en" : "zh-Hans";
+        string lang = (kind == StudioKind.VocabRadio || style == "studio-duo-en") ? "en" : "zh-Hans";
         return await Task.Run(() => _library.Core.PodcastSaveStudioIssue(kind, draft, bookIds, lang));
     }
 }

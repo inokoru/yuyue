@@ -36,6 +36,10 @@ if (-not $SkipTokens) {
     Write-Host "▸ Design tokens (design/generate.mjs)"
     node (Join-Path $Root "design\generate.mjs")
     if ($LASTEXITCODE -ne 0) { throw "design/generate.mjs failed" }
+
+    Write-Host "▸ English L10n dictionary (windows/build-l10n.mjs --audit)"
+    node (Join-Path $Root "windows\build-l10n.mjs") --audit
+    if ($LASTEXITCODE -ne 0) { throw "windows/build-l10n.mjs --audit failed" }
 }
 
 if (-not $SkipReader) {

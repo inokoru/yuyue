@@ -91,6 +91,75 @@ public sealed class CardVoiceEngine : IDisposable
         finally { _inferGate.Release(); }
     }
 
+    public static string InferLanguage(string text, string fallback)
+    {
+        int cjk = 0, latin = 0;
+        foreach (char ch in text)
+        {
+            if ((ch >= '\u4E00' && ch <= '\u9FFF') || (ch >= '\u3400' && ch <= '\u4DBF')) cjk++;
+            else if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) latin++;
+        }
+        if (cjk >= 3 && cjk >= latin) return "zh";
+        if (latin >= 6 && cjk == 0) return "en";
+        return fallback;
+    }
+
+    private static ulong DeterministicSeed(string a, string b)
+    {
+        ulong h = 14695981039346656037UL;
+        foreach (byte by in Encoding.UTF8.GetBytes(a)) { h ^= by; h *= 1099511628211UL; }
+        h ^= 0xFF; h *= 1099511628211UL;
+        foreach (byte by in Encoding.UTF8.GetBytes(b)) { h ^= by; h *= 1099511628211UL; }
+        return h | 1UL;
+    }
+
+    /// <summary>
+    /// Pre-save audition of a raw recorded/imported reference audio clip (<c>CardVoice.previewReference</c>).
+    /// </summary>
+    public async Task<byte[]?> PreviewReferenceWavAsync(
+        YuyueCore core,
+        LiveVoiceModel model,
+        float[] refSamples,
+        uint refRate,
+        string refPromptText,
+        string sampleText,
+        string language,
+        CancellationToken ct = default)
+    {
+        if (!model.IsModelInstalled || !SpeaksLanguage(language) || refSamples.Length < 400)
+            return null;
+
+        await _inferGate.WaitAsync(ct);
+        try
+        {
+            return await Task.Run(() =>
+            {
+                var sess = EnsureSessions(core, model);
+                if (sess is null) return null;
+
+                string tmpRef = Path.Combine(Path.GetTempPath(), $"yuyue-clone-prev-{Guid.NewGuid():N}.wav");
+                try
+                {
+                    WritePcm16MonoWav(tmpRef, refSamples, (int)refRate);
+                    var prompt = core.LiveVoicePrompt(tmpRef, refPromptText, language);
+                    var clauses = core.LiveVoiceClauses(sampleText, language);
+                    if (clauses.Length == 0) return null;
+
+                    ulong seed = DeterministicSeed(refPromptText, sampleText);
+                    float[]? pcm = SynthesizeClauses(core, sess, prompt, clauses, language, seed, ct);
+                    return pcm is { Length: > 0 } ? EncodeWav24kMono16(pcm) : null;
+                }
+                finally
+                {
+                    try { File.Delete(tmpRef); } catch { }
+                }
+            }, ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return null; }
+        finally { _inferGate.Release(); }
+    }
+
     /// <summary>
     /// Synthesizes one sentence into a 24 kHz 16-bit mono WAV byte buffer (with disk cache + quality gate).
     /// Returns <c>null</c> if the model isn't ready or both synthesis attempts fail quality gating.
@@ -106,11 +175,12 @@ public sealed class CardVoiceEngine : IDisposable
         CardStyle style = CardStyle.Neutral,
         CancellationToken ct = default)
     {
-        if (!model.IsReady || !SpeaksLanguage(language)) return null;
+        if (!model.IsModelInstalled || !SpeaksLanguage(language)) return null;
         string plain = PlainSpokenText(text);
         if (!plain.Any(char.IsLetterOrDigit)) return null;
+        string effLang = InferLanguage(plain, language);
 
-        string cacheFile = GetCacheFilePath(dataDir, bookId, card.Id, card.Version, style, language, text);
+        string cacheFile = GetCacheFilePath(dataDir, bookId, card.Id, card.Version, style, effLang, text);
         if (File.Exists(cacheFile))
         {
             try
@@ -133,15 +203,15 @@ public sealed class CardVoiceEngine : IDisposable
                 var prompt = ResolvePrompt(core, card, bookId, style);
                 if (prompt is null) return null;
 
-                var clauses = core.LiveVoiceClauses(text, language);
+                var clauses = core.LiveVoiceClauses(text, effLang);
                 if (clauses.Length == 0) return null;
 
-                ulong baseSeed = (ulong)((uint)card.Id.GetHashCode() ^ ((uint)text.GetHashCode() << 13)) | 1UL;
+                ulong baseSeed = DeterministicSeed(card.Id, text);
                 for (int attempt = 0; attempt <= 1; attempt++)
                 {
                     ct.ThrowIfCancellationRequested();
                     float[]? pcm = null;
-                    try { pcm = SynthesizeClauses(core, sess, prompt, clauses, language, baseSeed + (ulong)attempt, ct); }
+                    try { pcm = SynthesizeClauses(core, sess, prompt, clauses, effLang, baseSeed + (ulong)attempt, ct); }
                     catch (OperationCanceledException) { throw; }
                     catch { pcm = null; }
 
@@ -352,6 +422,18 @@ public sealed class CardVoiceEngine : IDisposable
 
         // 4. Vocos ISTFT + -20 LUFS loudness normalization in Rust core
         return core.LiveVoiceIstft(mag, xCos, ySin, (uint)kept);
+    }
+
+    private static void WritePcm16MonoWav(string path, float[] samples, int sampleRate)
+    {
+        byte[] pcm = new byte[samples.Length * 2];
+        for (int i = 0; i < samples.Length; i++)
+        {
+            short s = (short)Math.Clamp(Math.Round(samples[i] * 32767.0), short.MinValue, short.MaxValue);
+            pcm[i * 2] = (byte)(s & 0xFF);
+            pcm[i * 2 + 1] = (byte)((s >> 8) & 0xFF);
+        }
+        File.WriteAllBytes(path, CloudVoiceService.WrapPcm16MonoInWav(pcm, Math.Max(8000, sampleRate)));
     }
 
     private static byte[] EncodeWav24kMono16(float[] samples)

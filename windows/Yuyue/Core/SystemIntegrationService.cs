@@ -139,15 +139,21 @@ public sealed class SystemIntegrationService : IDisposable
 
     private readonly LibraryService _library;
     private readonly HashSet<object> _activeAudioSources = new();
+    private readonly object _trayLock = new();
+    private Microsoft.UI.Dispatching.DispatcherQueue? _uiQueue;
     private WndProcDelegate? _wndProc;
     private IntPtr _msgHwnd;
     private IntPtr _currentIcon;
     private bool _trayAdded;
+    private bool _disposed;
     private System.Threading.Timer? _animTimer;
     private readonly Stopwatch _animClock = Stopwatch.StartNew();
 
     public string? ActivePlaybackTitle { get; private set; }
     public bool IsAudioPlaying { get; private set; }
+    public bool IsPlayingTitle(string? title) =>
+        IsAudioPlaying && !string.IsNullOrWhiteSpace(title)
+        && string.Equals(ActivePlaybackTitle, title, StringComparison.OrdinalIgnoreCase);
     public Action? TogglePlaybackCallback { get; set; }
     public Action? ShowShelfCallback { get; set; }
     public Action? OpenSettingsCallback { get; set; }
@@ -157,6 +163,12 @@ public sealed class SystemIntegrationService : IDisposable
     public SystemIntegrationService(LibraryService library)
     {
         _library = library;
+        try { _uiQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread(); } catch { }
+    }
+
+    public void AttachUiQueue(Microsoft.UI.Dispatching.DispatcherQueue queue)
+    {
+        _uiQueue = queue;
         SyncLoginStartup(_library.Prefs.AutoLaunchOnLogin);
     }
 
@@ -219,32 +231,63 @@ public sealed class SystemIntegrationService : IDisposable
     public void EnsureTrayVisible(bool forceVisible = false)
     {
         bool shouldShow = forceVisible || IsAudioPlaying || !string.IsNullOrEmpty(ActivePlaybackTitle) || _library.Prefs.AutoLaunchOnLogin;
-        if (shouldShow) ShowOrUpdateTray();
-        else RemoveTray();
+        RunOnTrayThread(() =>
+        {
+            if (shouldShow) ShowOrUpdateTrayLocked();
+            else RemoveTrayLocked();
+        });
+    }
+
+    private void RunOnTrayThread(Action action)
+    {
+        if (_disposed) return;
+        var q = _uiQueue;
+        if (q is not null && !q.HasThreadAccess)
+        {
+            q.TryEnqueue(() =>
+            {
+                lock (_trayLock)
+                {
+                    if (!_disposed) action();
+                }
+            });
+            return;
+        }
+        lock (_trayLock)
+        {
+            if (!_disposed) action();
+        }
     }
 
     private void UpdateTrayState()
     {
         EnsureTrayVisible();
-        if (_trayAdded && IsAudioPlaying)
+        lock (_trayLock)
         {
-            _animTimer ??= new System.Threading.Timer(_ => TickTrayAnimation(), null, 80, 85); // ~12 fps per MacMenuBar.swift
-        }
-        else
-        {
-            _animTimer?.Dispose();
-            _animTimer = null;
-            if (_trayAdded) ShowOrUpdateTray(frameTime: null);
+            if (!_disposed && IsAudioPlaying)
+            {
+                _animTimer ??= new System.Threading.Timer(_ => TickTrayAnimation(), null, 80, 85); // ~12 fps per MacMenuBar.swift
+            }
+            else
+            {
+                _animTimer?.Dispose();
+                _animTimer = null;
+                if (_trayAdded) RunOnTrayThread(() => ShowOrUpdateTrayLocked(frameTime: null));
+            }
         }
     }
 
     private void TickTrayAnimation()
     {
-        if (!_trayAdded || !IsAudioPlaying) return;
-        ShowOrUpdateTray(_animClock.Elapsed.TotalSeconds);
+        if (_disposed || !IsAudioPlaying) return;
+        double t = _animClock.Elapsed.TotalSeconds;
+        RunOnTrayThread(() =>
+        {
+            if (_trayAdded && IsAudioPlaying) ShowOrUpdateTrayLocked(t);
+        });
     }
 
-    private void ShowOrUpdateTray(double? frameTime = null)
+    private void ShowOrUpdateTrayLocked(double? frameTime = null)
     {
         try
         {
@@ -282,7 +325,7 @@ public sealed class SystemIntegrationService : IDisposable
         catch { }
     }
 
-    private void RemoveTray()
+    private void RemoveTrayLocked()
     {
         _animTimer?.Dispose();
         _animTimer = null;
@@ -481,9 +524,10 @@ public sealed class SystemIntegrationService : IDisposable
         if (string.IsNullOrEmpty(exe) || !File.Exists(exe)) return;
         try
         {
+            string args = string.IsNullOrWhiteSpace(extraArgs) ? "--relaunch" : $"--relaunch {extraArgs}";
             var psi = new ProcessStartInfo(exe)
             {
-                Arguments = extraArgs ?? "",
+                Arguments = args,
                 UseShellExecute = true,
             };
             Process.Start(psi);
@@ -494,19 +538,14 @@ public sealed class SystemIntegrationService : IDisposable
 
     public void Dispose()
     {
-        try { SetThreadExecutionState(ES_CONTINUOUS); } catch { }
-        RemoveTray();
-        if (_currentIcon != IntPtr.Zero) { DestroyIcon(_currentIcon); _currentIcon = IntPtr.Zero; }
-        if (_msgHwnd != IntPtr.Zero) { DestroyWindow(_msgHwnd); _msgHwnd = IntPtr.Zero; }
+        lock (_trayLock)
+        {
+            _disposed = true;
+            try { SetThreadExecutionState(ES_CONTINUOUS); } catch { }
+            RemoveTrayLocked();
+            if (_currentIcon != IntPtr.Zero) { DestroyIcon(_currentIcon); _currentIcon = IntPtr.Zero; }
+            if (_msgHwnd != IntPtr.Zero) { DestroyWindow(_msgHwnd); _msgHwnd = IntPtr.Zero; }
+        }
     }
 }
 
-/// <summary>
-/// Bilingual UI helper aligned with <c>AppLanguage.swift</c>.
-/// </summary>
-public static class L10n
-{
-    public static bool IsEnglish { get; set; }
-
-    public static string Tr(string zh, string en) => IsEnglish ? en : zh;
-}

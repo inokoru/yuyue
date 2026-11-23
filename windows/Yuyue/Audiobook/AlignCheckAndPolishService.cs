@@ -1,5 +1,7 @@
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Microsoft.UI;
@@ -15,6 +17,7 @@ using Windows.System;
 using Windows.UI;
 using Yuyue.Core;
 using Yuyue.Design;
+using Yuyue.Speech;
 using TimeSpan = System.TimeSpan;
 
 namespace Yuyue.Audiobook;
@@ -590,9 +593,38 @@ public static class AlignCheckAndPolishService
         win.Activate();
     }
 
+    private sealed class PolishJobState
+    {
+        public bool Running;
+        public int Done;
+        public int Total;
+        public int Fixed;
+        public int Failed;
+        public string? Error;
+        public CancellationTokenSource? Cts;
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, PolishJobState> PolishJobs = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> PolishLastFixed = new();
+    public static event Action<string>? PolishStateChanged;
+
+    public static (bool Running, int Done, int Total, int Fixed, string? Error) GetPolishState(string bookId)
+    {
+        if (PolishJobs.TryGetValue(bookId, out var st))
+            return (st.Running, st.Done, st.Total, st.Fixed, st.Error);
+        return (false, 0, 0, PolishLastFixed.TryGetValue(bookId, out var f) ? f : 0, null);
+    }
+
+    public static void StopTextPolish(string bookId)
+    {
+        if (PolishJobs.TryGetValue(bookId, out var st))
+            try { st.Cts?.Cancel(); } catch { }
+    }
+
     /// <summary>
     /// 1:1 <c>TextPolish.swift</c>: polishes homophones and character names in a transcribed book (<c>文字版</c>)
-    /// using the user's configured Companion model, keeping only phonetic-preserving replacements so timestamps stay aligned.
+    /// in the background per book (closing the sheet does NOT cancel an active job), stopping immediately on fatal
+    /// auth/credit/budget errors and keeping only phonetic-preserving replacements so timestamps stay aligned.
     /// </summary>
     public static async Task ShowTextPolishDialogAsync(
         XamlRoot xamlRoot, LibraryService library, string bookId, Action? onFinished = null)
@@ -623,50 +655,124 @@ public static class AlignCheckAndPolishService
             return;
         }
 
-        using var cts = new CancellationTokenSource();
+        var job = PolishJobs.GetOrAdd(bookId, _ => new PolishJobState { Total = asks.Length });
         var statusTb = new TextBlock
         {
-            Text = $"共 {asks.Length} 段（每段约 2,000 字），仅修正同音错字与人名，不会破坏语音对齐。",
+            Text = $"共 {asks.Length} 段（每段约 2,000 字），仅修正同音错字与人名，不会破坏语音对齐。关闭窗口后仍可在后台继续。",
             FontSize = 12,
             Foreground = ThemeHelper.Brush(p.T2),
             TextWrapping = TextWrapping.Wrap,
         };
-        var bar = new ProgressBar { Minimum = 0, Maximum = asks.Length, Value = 0 };
-        var detailTb = new TextBlock { FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3) };
+        var bar = new ProgressBar { Minimum = 0, Maximum = Math.Max(1, asks.Length), Value = job.Done };
+        var detailTb = new TextBlock { FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), TextWrapping = TextWrapping.Wrap };
         var startBtn = new Button
         {
             Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"],
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            Content = "开始整理文字版",
+            Content = job.Running ? "停止后台整理" : "开始整理文字版",
         };
 
-        startBtn.Click += async (_, _) =>
+        void RefreshUi()
         {
-            startBtn.IsEnabled = false;
-            int fixedCount = 0;
-            int failed = 0;
-            for (int i = 0; i < asks.Length; i++)
+            bar.Maximum = Math.Max(1, job.Total > 0 ? job.Total : asks.Length);
+            bar.Value = job.Done;
+            if (job.Running)
             {
-                if (cts.IsCancellationRequested) break;
-                var ask = asks[i];
-                detailTb.Text = $"正在整理第 {i + 1} / {asks.Length} 段 · 已修正 {fixedCount} 处…";
+                startBtn.Content = "停止后台整理";
+                detailTb.Text = $"正在后台整理第 {Math.Min(job.Done + 1, job.Total)} / {job.Total} 段 · 已修正 {job.Fixed} 处…";
+            }
+            else if (!string.IsNullOrEmpty(job.Error))
+            {
+                startBtn.Content = "重试整理文字版";
+                detailTb.Text = $"整理中断：{job.Error}";
+            }
+            else if (job.Done > 0)
+            {
+                startBtn.Content = "再次整理文字版";
+                statusTb.Text = job.Failed > 0
+                    ? $"整理完成：共修正 {job.Fixed} 处同音错字（{job.Failed} 段请求未成功）。"
+                    : $"✓ 整理完成：共修正 {job.Fixed} 处同音错字与人名。";
+                detailTb.Text = $"已完成 {job.Done} / {job.Total} 段 · 共修正 {job.Fixed} 处";
+            }
+            else if (PolishLastFixed.TryGetValue(bookId, out var prevFixed))
+            {
+                detailTb.Text = $"上次整理共修正 {prevFixed} 处同音错字。";
+            }
+        }
+
+        var dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        Action<string> onChanged = id =>
+        {
+            if (id != bookId) return;
+            dispatcher?.TryEnqueue(RefreshUi);
+        };
+        PolishStateChanged += onChanged;
+
+        startBtn.Click += (_, _) =>
+        {
+            if (job.Running)
+            {
+                StopTextPolish(bookId);
+                return;
+            }
+            job.Running = true;
+            job.Done = 0;
+            job.Total = asks.Length;
+            job.Fixed = 0;
+            job.Failed = 0;
+            job.Error = null;
+            job.Cts = new CancellationTokenSource();
+            var ct = job.Cts.Token;
+            RefreshUi();
+
+            _ = Task.Run(async () =>
+            {
                 try
                 {
-                    string reply = await library.Companion.ChatAsync(ask.User, ask.System, maxTokens: 2048);
-                    fixedCount += (int)library.Core.AudiobookPolishApply(bookId, ask.Id, reply);
+                    for (int i = 0; i < asks.Length; i++)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var ask = asks[i];
+                        try
+                        {
+                            string reply = await library.Companion.ChatAsync(
+                                ask.User,
+                                ask.System,
+                                maxTokens: 2048,
+                                fast: true,
+                                source: UsageSource.Polish,
+                                ct: ct);
+                            job.Fixed += (int)library.Core.AudiobookPolishApply(bookId, ask.Id, reply);
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch (Exception ex) when (IsFatalPolishError(ex))
+                        {
+                            job.Error = ex.Message;
+                            break;
+                        }
+                        catch
+                        {
+                            job.Failed++;
+                        }
+                        job.Done = i + 1;
+                        PolishStateChanged?.Invoke(bookId);
+                    }
+                    if (string.IsNullOrEmpty(job.Error))
+                        PolishLastFixed[bookId] = job.Fixed;
                 }
-                catch
+                catch (OperationCanceledException) { }
+                finally
                 {
-                    failed++;
+                    job.Running = false;
+                    job.Cts?.Dispose();
+                    job.Cts = null;
+                    PolishStateChanged?.Invoke(bookId);
+                    dispatcher?.TryEnqueue(() => onFinished?.Invoke());
                 }
-                bar.Value = i + 1;
-                detailTb.Text = $"已完成 {i + 1} / {asks.Length} 段 · 已修正 {fixedCount} 处";
-            }
-            statusTb.Text = failed > 0
-                ? $"整理完成：共修正 {fixedCount} 处同音错字（{failed} 段请求未成功）。"
-                : $"✓ 整理完成：共修正 {fixedCount} 处同音错字与人名。";
-            onFinished?.Invoke();
+            });
         };
+
+        RefreshUi();
 
         var dlg = new ContentDialog
         {
@@ -681,20 +787,36 @@ public static class AlignCheckAndPolishService
             CloseButtonText = "关闭",
         };
         await dlg.ShowAsync();
-        cts.Cancel();
+        PolishStateChanged -= onChanged;
+    }
+
+    private static bool IsFatalPolishError(Exception ex)
+    {
+        string msg = ex.Message ?? "";
+        return msg.Contains("401", StringComparison.Ordinal)
+            || msg.Contains("402", StringComparison.Ordinal)
+            || msg.Contains("403", StringComparison.Ordinal)
+            || msg.Contains("密钥", StringComparison.Ordinal)
+            || msg.Contains("余额", StringComparison.Ordinal)
+            || msg.Contains("额度", StringComparison.Ordinal)
+            || msg.Contains("上限", StringComparison.Ordinal);
     }
 }
 
 /// <summary>
-/// 1:1 <c>RecordingServer</c> in <c>apple/Yuyue/App/RecordingShare.swift</c>:
-/// LAN HTTP server authenticated via <c>x-yuyue-token</c> (<c>Core.LanToken()</c>) so mobile devices on the same network
-/// can pull audiobook recordings (<c>/has</c>, <c>/piece</c>), drama clips (<c>/drama</c>), and voice cards (<c>/card</c>).
+/// 1:1 <c>RecordingServer</c> &amp; <c>RecordingFetch</c> in <c>apple/Yuyue/App/RecordingShare.swift</c>:
+/// LAN HTTP server authenticated via <c>x-yuyue-token</c> (<c>Core.LanToken()</c>) with RFC 6762 mDNS
+/// (<c>_yuyue-rec._tcp.local</c>) multicast announcement so mobile devices &amp; Macs automatically discover it
+/// and pull audiobook recordings (<c>/has</c>, <c>/piece</c>), drama clips (<c>/drama</c>, <c>/clip</c>),
+/// voice cards (<c>/card</c>), and trigger phone pre-render (<c>/want</c>).
 /// </summary>
 public sealed class RecordingShareServer : IDisposable
 {
+    public const string ServiceType = "_yuyue-rec._tcp.local";
     private const int PieceBytes = 8 * 1024 * 1024;
     private readonly LibraryService _library;
     private TcpListener? _listener;
+    private UdpClient? _mdnsUdp;
     private CancellationTokenSource? _cts;
 
     public int Port { get; private set; }
@@ -731,8 +853,160 @@ public sealed class RecordingShareServer : IDisposable
                     catch { }
                 }
             }, ct);
+
+            StartMdnsResponder(ct);
         }
         catch { }
+    }
+
+    private void StartMdnsResponder(CancellationToken ct)
+    {
+        try
+        {
+            var mcast = IPAddress.Parse("224.0.0.251");
+            var udp = new UdpClient();
+            udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            udp.Client.Bind(new IPEndPoint(IPAddress.Any, 5353));
+            udp.JoinMulticastGroup(mcast);
+            _mdnsUdp = udp;
+
+            string instanceName = SanitizeDnsLabel(Environment.MachineName);
+            var localIpv4 = GetPrimaryLanIpv4();
+            byte[] announcePacket = BuildMdnsAnnouncementPacket(instanceName, Port, localIpv4);
+            var target = new IPEndPoint(mcast, 5353);
+
+            // Periodic multicast announcement + query responder for _yuyue-rec._tcp.local
+            _ = Task.Run(async () =>
+            {
+                try { await udp.SendAsync(announcePacket, announcePacket.Length, target); } catch { }
+                while (!ct.IsCancellationRequested)
+                {
+                    try
+                    {
+                        var recvTask = udp.ReceiveAsync(ct).AsTask();
+                        var delayTask = Task.Delay(TimeSpan.FromSeconds(45), ct);
+                        var winner = await Task.WhenAny(recvTask, delayTask);
+                        if (winner == recvTask)
+                        {
+                            var res = await recvTask;
+                            if (ContainsMdnsServiceQuery(res.Buffer, "_yuyue-rec"))
+                                await udp.SendAsync(announcePacket, announcePacket.Length, target);
+                        }
+                        else
+                        {
+                            await udp.SendAsync(announcePacket, announcePacket.Length, target);
+                        }
+                    }
+                    catch (OperationCanceledException) { break; }
+                    catch { }
+                }
+            }, ct);
+        }
+        catch { }
+    }
+
+    internal static byte[] BuildMdnsAnnouncementPacket(string instanceLabel, int port, IPAddress ipv4)
+    {
+        string svc = "_yuyue-rec._tcp.local";
+        string fullInstance = $"{SanitizeDnsLabel(instanceLabel)}.{svc}";
+        string hostName = $"{SanitizeDnsLabel(instanceLabel)}.local";
+
+        using var ms = new MemoryStream();
+        void PutU16(ushort v) { ms.WriteByte((byte)(v >> 8)); ms.WriteByte((byte)(v & 0xFF)); }
+        void PutU32(uint v) { PutU16((ushort)(v >> 16)); PutU16((ushort)(v & 0xFFFF)); }
+        void PutName(string name)
+        {
+            foreach (string lbl in name.Split('.', StringSplitOptions.RemoveEmptyEntries))
+            {
+                byte[] b = Encoding.UTF8.GetBytes(lbl);
+                int len = Math.Min(63, b.Length);
+                ms.WriteByte((byte)len);
+                ms.Write(b, 0, len);
+            }
+            ms.WriteByte(0);
+        }
+
+        // DNS Header: Response + Authoritative (0x8400), 4 answers (PTR, SRV, TXT, A)
+        PutU16(0); PutU16(0x8400); PutU16(0); PutU16(4); PutU16(0); PutU16(0);
+
+        // 1. PTR: _yuyue-rec._tcp.local -> <instance>._yuyue-rec._tcp.local
+        PutName(svc); PutU16(12); PutU16(1); PutU32(120);
+        byte[] ptrData = EncodeDnsName(fullInstance);
+        PutU16((ushort)ptrData.Length); ms.Write(ptrData);
+
+        // 2. SRV: <instance> -> host:port
+        PutName(fullInstance); PutU16(33); PutU16(0x8001); PutU32(120);
+        byte[] hostBytes = EncodeDnsName(hostName);
+        PutU16((ushort)(6 + hostBytes.Length));
+        PutU16(0); PutU16(0); PutU16((ushort)port);
+        ms.Write(hostBytes);
+
+        // 3. TXT: platform=windows
+        PutName(fullInstance); PutU16(16); PutU16(0x8001); PutU32(120);
+        byte[] txt = Encoding.ASCII.GetBytes("platform=windows");
+        PutU16((ushort)(1 + txt.Length));
+        ms.WriteByte((byte)txt.Length);
+        ms.Write(txt);
+
+        // 4. A: <host>.local -> IPv4
+        PutName(hostName); PutU16(1); PutU16(0x8001); PutU32(120);
+        byte[] ipBytes = ipv4.GetAddressBytes();
+        PutU16(4);
+        ms.Write(ipBytes, 0, 4);
+
+        return ms.ToArray();
+    }
+
+    private static byte[] EncodeDnsName(string name)
+    {
+        using var ms = new MemoryStream();
+        foreach (string lbl in name.Split('.', StringSplitOptions.RemoveEmptyEntries))
+        {
+            byte[] b = Encoding.UTF8.GetBytes(lbl);
+            int len = Math.Min(63, b.Length);
+            ms.WriteByte((byte)len);
+            ms.Write(b, 0, len);
+        }
+        ms.WriteByte(0);
+        return ms.ToArray();
+    }
+
+    internal static bool ContainsMdnsServiceQuery(byte[] packet, string token)
+    {
+        if (packet.Length < 12) return false;
+        // QR bit (0x80) == 0 means query
+        if ((packet[2] & 0x80) != 0) return false;
+        string ascii = Encoding.ASCII.GetString(packet);
+        return ascii.Contains(token, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string SanitizeDnsLabel(string raw)
+    {
+        var sb = new StringBuilder();
+        foreach (char c in raw ?? "yuyue-win")
+        {
+            if (char.IsLetterOrDigit(c) || c == '-') sb.Append(c);
+        }
+        return sb.Length > 0 ? sb.ToString()[..Math.Min(32, sb.Length)] : "yuyue-win";
+    }
+
+    private static IPAddress GetPrimaryLanIpv4()
+    {
+        try
+        {
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up || ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                    continue;
+                foreach (var ua in ni.GetIPProperties().UnicastAddresses)
+                {
+                    if (ua.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(ua.Address))
+                        return ua.Address;
+                }
+            }
+        }
+        catch { }
+        return IPAddress.Loopback;
     }
 
     private async Task HandleClientAsync(TcpClient client, string expectedToken, CancellationToken ct)
@@ -797,7 +1071,7 @@ public sealed class RecordingShareServer : IDisposable
         }
     }
 
-    private (int Status, string Type, byte[] Body) Respond(string path, string bookId, Dictionary<string, string> query)
+    internal (int Status, string Type, byte[] Body) Respond(string path, string bookId, Dictionary<string, string> query)
     {
         try
         {
@@ -810,9 +1084,32 @@ public sealed class RecordingShareServer : IDisposable
             {
                 string? manifest = _library.Core.DramaClipManifest(bookId);
                 if (string.IsNullOrEmpty(manifest)) return (404, "application/json", []);
-                var keys = _library.Core.DramaManifestKeys(manifest);
+                // 1:1 RecordingShare.swift:80 — only expose keys whose rendered files actually exist on disk
+                var keys = _library.Core.DramaManifestKeys(manifest)
+                    .Where(k => DramaSynthService.IsClipMade(_library.DataDir, bookId, k))
+                    .ToArray();
                 var payload = JsonSerializer.SerializeToUtf8Bytes(new { manifest, keys });
                 return (200, "application/json", payload);
+            }
+            if (path == "/want")
+            {
+                uint sec = query.TryGetValue("section", out var ss) && uint.TryParse(ss, out var sv) ? sv : 0u;
+                DramaSynthService.EnqueuePhoneWant(_library, bookId, sec);
+                return (200, "application/json", "{\"ok\":true}"u8.ToArray());
+            }
+            if (path == "/clip")
+            {
+                if (!query.TryGetValue("key", out var key) || string.IsNullOrEmpty(key) || !key.All(char.IsLetterOrDigit))
+                    return (404, "application/json", []);
+                string clipPath = DramaSynthService.ClipPath(_library.DataDir, bookId, key);
+                if (!File.Exists(clipPath)) return (404, "application/json", []);
+                byte[] wav = File.ReadAllBytes(clipPath);
+                var (samples, rate) = SpeakerPrintService.DecodeWavToMonoFloat(wav);
+                if (samples.Length == 0) return (404, "application/json", []);
+                // Resample to 48 kHz mono float32 little-endian (1:1 RecordingShare.swift:89-93)
+                float[] out48 = rate == 48_000 ? samples : ResampleFloat(samples, rate, 48_000);
+                byte[] rawFloat = MemoryMarshal.AsBytes(out48.AsSpan()).ToArray();
+                return (200, "application/octet-stream", rawFloat);
             }
 
             var rec = _library.Core.AudioRecording(bookId);
@@ -850,6 +1147,24 @@ public sealed class RecordingShareServer : IDisposable
         return (404, "application/json", []);
     }
 
+    private static float[] ResampleFloat(float[] src, uint fromRate, uint toRate)
+    {
+        if (src.Length == 0 || fromRate == 0 || fromRate == toRate) return src;
+        double ratio = (double)fromRate / toRate;
+        int outLen = Math.Max(1, (int)Math.Round(src.Length / ratio));
+        var dst = new float[outLen];
+        for (int i = 0; i < outLen; i++)
+        {
+            double pos = i * ratio;
+            int idx = (int)pos;
+            double frac = pos - idx;
+            float s0 = src[Math.Min(idx, src.Length - 1)];
+            float s1 = src[Math.Min(idx + 1, src.Length - 1)];
+            dst[i] = (float)(s0 + (s1 - s0) * frac);
+        }
+        return dst;
+    }
+
     private static async Task WriteResponseAsync(NetworkStream stream, int status, string contentType, byte[] body, CancellationToken ct)
     {
         string head = $"HTTP/1.1 {status} {(status == 200 ? "OK" : "No")}\r\nContent-Type: {contentType}\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n";
@@ -862,7 +1177,40 @@ public sealed class RecordingShareServer : IDisposable
     public void Dispose()
     {
         try { _cts?.Cancel(); } catch { }
+        try { _mdnsUdp?.Dispose(); } catch { }
         try { _listener?.Stop(); } catch { }
+        _mdnsUdp = null;
         _listener = null;
+    }
+}
+
+/// <summary>
+/// LAN client companion to <see cref="RecordingShareServer"/> for pulling recordings or drama clips from a peer Mac/PC.
+/// </summary>
+public static class RecordingShareClient
+{
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
+
+    public static async Task<(string Manifest, string[] Keys)?> PullDramaManifestAsync(
+        string baseUrl, string token, string bookId, CancellationToken ct = default)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl.TrimEnd('/')}/drama?id={Uri.EscapeDataString(bookId)}");
+        req.Headers.TryAddWithoutValidation("x-yuyue-token", token);
+        using var resp = await Http.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode) return null;
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+        string manifest = doc.RootElement.TryGetProperty("manifest", out var m) ? m.GetString() ?? "" : "";
+        var keys = doc.RootElement.TryGetProperty("keys", out var k) && k.ValueKind == JsonValueKind.Array
+            ? k.EnumerateArray().Select(e => e.GetString() ?? "").Where(s => s.Length > 0).ToArray()
+            : [];
+        return string.IsNullOrEmpty(manifest) ? null : (manifest, keys);
+    }
+
+    public static async Task<bool> SendWantAsync(string baseUrl, string token, string bookId, uint section, CancellationToken ct = default)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl.TrimEnd('/')}/want?id={Uri.EscapeDataString(bookId)}&section={section}");
+        req.Headers.TryAddWithoutValidation("x-yuyue-token", token);
+        using var resp = await Http.SendAsync(req, ct);
+        return resp.IsSuccessStatusCode;
     }
 }

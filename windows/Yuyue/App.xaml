@@ -48,33 +48,46 @@
                     <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#8A653F" />
                     <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#7A5835" />
                     <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#6B4C2D" />
+                    <SolidColorBrush x:Key="SliderTrackFill" Color="#E4E1DB" />
+                    <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#DDDAD3" />
+                    <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#D5D1C9" />
                     <SolidColorBrush x:Key="SliderTrackValueFill" Color="#8A653F" />
                     <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#7A5835" />
                     <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#6B4C2D" />
-                    <SolidColorBrush x:Key="SliderThumbBackground" Color="#8A653F" />
-                    <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#7A5835" />
-                    <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#6B4C2D" />
+                    <SolidColorBrush x:Key="SliderThumbBackground" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#F7F5F1" />
+                    <SolidColorBrush x:Key="SliderOuterThumbBackground" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="SliderThumbBorderBrush" Color="#CCC8C0" />
+                    <SolidColorBrush x:Key="TextControlBorderBrush" Color="#E2DFDA" />
+                    <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#CFCBC4" />
+                    <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#8A653F" />
+                    <Thickness x:Key="TextControlBorderThemeThickness">1</Thickness>
+                    <Thickness x:Key="TextControlBorderThemeThicknessFocused">1.5</Thickness>
                     <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#8A653F" />
                     <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#7A5835" />
                     <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#6B4C2D" />
+                    <SolidColorBrush x:Key="ToggleSwitchFillOnDisabled" Color="#E3E0DA" />
                     <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="Transparent" />
                     <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="Transparent" />
                     <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="Transparent" />
+                    <SolidColorBrush x:Key="ToggleSwitchStrokeOnDisabled" Color="Transparent" />
+                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOnDisabled" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ToggleSwitchFillOff" Color="#DDDAD4" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOffPointerOver" Color="#D2CEC7" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOffPressed" Color="#C7C2BA" />
+                    <Color x:Key="ToggleSwitchFillOffPointerOver">#D2CEC7</Color>
+                    <Color x:Key="ToggleSwitchFillOffPressed">#C7C2BA</Color>
+                    <Color x:Key="ToggleSwitchFillOffDisabled">#E4E2DC</Color>
                     <SolidColorBrush x:Key="ToggleSwitchStrokeOff" Color="Transparent" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOffPointerOver" Color="Transparent" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOffPressed" Color="Transparent" />
+                    <Color x:Key="ToggleSwitchStrokeOffPointerOver">#00000000</Color>
+                    <Color x:Key="ToggleSwitchStrokeOffPressed">#00000000</Color>
+                    <Color x:Key="ToggleSwitchStrokeOffDisabled">#00000000</Color>
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOff" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPointerOver" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPressed" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOffDisabled" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOffDisabled" Color="#E4E2DC" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOffDisabled" Color="Transparent" />
-                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOffDisabled" Color="#FFFFFF" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Dark">
                     <SolidColorBrush x:Key="YYDeskBrush" Color="#0C0C0D" />
@@ -104,64 +117,107 @@
                     <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#A0754F" />
                     <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#B0845D" />
                     <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#8E6542" />
+                    <SolidColorBrush x:Key="SliderTrackFill" Color="#323337" />
+                    <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#3C3D42" />
+                    <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#45464B" />
                     <SolidColorBrush x:Key="SliderTrackValueFill" Color="#A0754F" />
                     <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#B0845D" />
                     <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#8E6542" />
-                    <SolidColorBrush x:Key="SliderThumbBackground" Color="#A0754F" />
-                    <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#B0845D" />
-                    <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#8E6542" />
+                    <SolidColorBrush x:Key="SliderThumbBackground" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#EDEDEE" />
+                    <SolidColorBrush x:Key="SliderOuterThumbBackground" Color="#F2F2F3" />
+                    <SolidColorBrush x:Key="SliderThumbBorderBrush" Color="#44464C" />
+                    <SolidColorBrush x:Key="TextControlBorderBrush" Color="#333438" />
+                    <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#46474C" />
+                    <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#A0754F" />
+                    <Thickness x:Key="TextControlBorderThemeThickness">1</Thickness>
+                    <Thickness x:Key="TextControlBorderThemeThicknessFocused">1.5</Thickness>
                     <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#A0754F" />
                     <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#B0845D" />
                     <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#8E6542" />
+                    <SolidColorBrush x:Key="ToggleSwitchFillOnDisabled" Color="#2C2D30" />
                     <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="Transparent" />
                     <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="Transparent" />
                     <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="Transparent" />
+                    <SolidColorBrush x:Key="ToggleSwitchStrokeOnDisabled" Color="Transparent" />
+                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOnDisabled" Color="#7E7C79" />
                     <SolidColorBrush x:Key="ToggleSwitchFillOff" Color="#38393D" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOffPointerOver" Color="#434449" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOffPressed" Color="#4D4E54" />
+                    <Color x:Key="ToggleSwitchFillOffPointerOver">#434449</Color>
+                    <Color x:Key="ToggleSwitchFillOffPressed">#4D4E54</Color>
+                    <Color x:Key="ToggleSwitchFillOffDisabled">#2C2D30</Color>
                     <SolidColorBrush x:Key="ToggleSwitchStrokeOff" Color="Transparent" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOffPointerOver" Color="Transparent" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOffPressed" Color="Transparent" />
+                    <Color x:Key="ToggleSwitchStrokeOffPointerOver">#00000000</Color>
+                    <Color x:Key="ToggleSwitchStrokeOffPressed">#00000000</Color>
+                    <Color x:Key="ToggleSwitchStrokeOffDisabled">#00000000</Color>
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOff" Color="#EDEDEE" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPointerOver" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPressed" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOffDisabled" Color="#7E7C79" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="ToggleSwitchFillOffDisabled" Color="#2C2D30" />
-                    <SolidColorBrush x:Key="ToggleSwitchStrokeOffDisabled" Color="Transparent" />
-                    <SolidColorBrush x:Key="ToggleSwitchKnobFillOffDisabled" Color="#8E8C89" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 
-            <!-- 根级默认覆写，确保任何未显式指定 ThemeDictionary 的 WinUI 控件也不落回系统蓝 -->
+            <!-- 根级 WinUI 控件覆写：在 XAML 启动时注册实例，由 ThemeHelper.ApplyControlThemeResources 按浅/深色与主题色原地更新 .Color，
+                 确保 100% 覆写 XamlControlsResources 而不回退系统蓝或默认深灰边框 -->
+            <Color x:Key="SystemAccentColor">#8A653F</Color>
             <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#8A653F" />
             <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#7A5835" />
             <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#6B4C2D" />
+            <SolidColorBrush x:Key="SliderTrackFill" Color="#E4E1DB" />
+            <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#DDDAD3" />
+            <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#D5D1C9" />
             <SolidColorBrush x:Key="SliderTrackValueFill" Color="#8A653F" />
             <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#7A5835" />
             <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#6B4C2D" />
-            <SolidColorBrush x:Key="SliderThumbBackground" Color="#8A653F" />
-            <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#7A5835" />
-            <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#6B4C2D" />
+            <SolidColorBrush x:Key="SliderThumbBackground" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#F7F5F1" />
+            <SolidColorBrush x:Key="SliderOuterThumbBackground" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="SliderThumbBorderBrush" Color="#CCC8C0" />
+            <SolidColorBrush x:Key="TextControlBorderBrush" Color="#E2DFDA" />
+            <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#CFCBC4" />
+            <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#8A653F" />
+            <Thickness x:Key="TextControlBorderThemeThickness">1</Thickness>
+            <Thickness x:Key="TextControlBorderThemeThicknessFocused">1.5</Thickness>
             <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#8A653F" />
             <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#7A5835" />
             <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#6B4C2D" />
+            <SolidColorBrush x:Key="ToggleSwitchFillOnDisabled" Color="#E3E0DA" />
             <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="Transparent" />
             <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="Transparent" />
             <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="Transparent" />
-            <SolidColorBrush x:Key="ToggleSwitchFillOff" Color="#DDDAD4" />
-            <SolidColorBrush x:Key="ToggleSwitchFillOffPointerOver" Color="#D2CEC7" />
-            <SolidColorBrush x:Key="ToggleSwitchFillOffPressed" Color="#C7C2BA" />
-            <SolidColorBrush x:Key="ToggleSwitchStrokeOff" Color="Transparent" />
-            <SolidColorBrush x:Key="ToggleSwitchStrokeOffPointerOver" Color="Transparent" />
-            <SolidColorBrush x:Key="ToggleSwitchStrokeOffPressed" Color="Transparent" />
-            <SolidColorBrush x:Key="ToggleSwitchKnobFillOff" Color="#FFFFFF" />
-            <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPointerOver" Color="#FFFFFF" />
-            <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPressed" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOnDisabled" Color="Transparent" />
             <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="#FFFFFF" />
             <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="#FFFFFF" />
             <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="ToggleSwitchKnobFillOnDisabled" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="ToggleSwitchFillOff" Color="#DDDAD4" />
+            <Color x:Key="ToggleSwitchFillOffPointerOver">#D2CEC7</Color>
+            <Color x:Key="ToggleSwitchFillOffPressed">#C7C2BA</Color>
+            <Color x:Key="ToggleSwitchFillOffDisabled">#E4E2DC</Color>
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOff" Color="Transparent" />
+            <Color x:Key="ToggleSwitchStrokeOffPointerOver">#00000000</Color>
+            <Color x:Key="ToggleSwitchStrokeOffPressed">#00000000</Color>
+            <Color x:Key="ToggleSwitchStrokeOffDisabled">#00000000</Color>
+            <SolidColorBrush x:Key="ToggleSwitchKnobFillOff" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPointerOver" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPressed" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="ToggleSwitchKnobFillOffDisabled" Color="#FFFFFF" />
+
+            <!-- 紧凑齐右 ToggleSwitch：去掉 WinUI 默认右侧空白内容栏，与 macOS 设置页右缘严格对齐 -->
+            <Style TargetType="ToggleSwitch">
+                <Setter Property="MinWidth" Value="40" />
+                <Setter Property="Width" Value="40" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="HorizontalAlignment" Value="Right" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="OnContent" Value="" />
+                <Setter Property="OffContent" Value="" />
+                <Setter Property="UseSystemFocusVisuals" Value="False" />
+            </Style>
 
             <!-- 白胶囊 + 细边按钮（对照 Mac YYPillChrome，高 28） -->
             <Style x:Key="YYPillButtonStyle" TargetType="Button">

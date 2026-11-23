@@ -173,22 +173,38 @@ public static class WebDavCheckService
             return new WebDavCheckReport(false, sw.Elapsed.TotalSeconds, steps);
         }
 
-        // Step 4: MKCOL + PUT + DELETE
-        string folderName = string.IsNullOrWhiteSpace(rawFolder) ? "语阅" : rawFolder.Trim().Trim('/');
-        var folderUri = new Uri(baseUri, Uri.EscapeDataString(folderName) + "/");
+        // Step 4: Nested segment-by-segment MKCOL + PUT + DELETE
+        string folderName = string.IsNullOrWhiteSpace(rawFolder) ? "语阅" : rawFolder.Trim().Replace('\\', '/').Trim('/');
+        string[] segs = folderName.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        string escapedRel = string.Join("/", segs.Select(Uri.EscapeDataString));
+        var folderUri = new Uri(baseUri, escapedRel + "/");
         string probeFile = $".yuyue-check-{Guid.NewGuid().ToString("N")[..8]}";
         var probeUri = new Uri(folderUri, probeFile);
 
         try
         {
-            using (var mkReq = new HttpRequestMessage(new HttpMethod("MKCOL"), folderUri))
+            string acc = "";
+            foreach (string seg in segs)
             {
+                acc = string.IsNullOrEmpty(acc) ? Uri.EscapeDataString(seg) : $"{acc}/{Uri.EscapeDataString(seg)}";
+                var segUri = new Uri(baseUri, acc + "/");
+                using var mkReq = new HttpRequestMessage(new HttpMethod("MKCOL"), segUri);
                 mkReq.Headers.Authorization = new AuthenticationHeaderValue("Basic", authB64);
                 using var mkResp = await client.SendAsync(mkReq, ct);
-                // 201 Created or 405 Already Exists are both valid
-                if ((int)mkResp.StatusCode == 507)
+                int mkCode = (int)mkResp.StatusCode;
+                if (mkCode == 507)
                 {
                     steps[3] = new("文件夹能读写", WebDavStepState.Bad, "网盘满了 (507)", "云盘剩余空间不足，请清理后再开启同步。");
+                    return new WebDavCheckReport(false, sw.Elapsed.TotalSeconds, steps);
+                }
+                if (mkCode == 409)
+                {
+                    steps[3] = new("文件夹能读写", WebDavStepState.Bad, $"上级路径不存在 (409)", $"无法创建目录「/{folderName}/」，请检查文件夹层级。");
+                    return new WebDavCheckReport(false, sw.Elapsed.TotalSeconds, steps);
+                }
+                if (mkCode >= 500)
+                {
+                    steps[3] = new("文件夹能读写", WebDavStepState.Bad, $"服务器异常 ({mkCode})", "WebDAV 服务器返回 5xx 错误，请稍后重试。");
                     return new WebDavCheckReport(false, sw.Elapsed.TotalSeconds, steps);
                 }
             }

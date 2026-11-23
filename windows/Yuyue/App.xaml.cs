@@ -22,8 +22,10 @@ public partial class App : Application
     private readonly Dictionary<string, AudiobookWindow> _audioWindows = new();
     private readonly Dictionary<string, PodcastReaderWindow> _podcastWindows = new();
     private DispatcherTimer? _syncTimer;
+    private Microsoft.UI.Dispatching.DispatcherQueue? _uiQueue;
     private object? _activeAudioClaimant;
     private Action? _pauseActiveAudio;
+    private bool _exitingApp;
 
     /// <summary>
     /// 1:1 <c>NowPlaying.swift</c> (<c>yyAudioClaimed</c>): whenever any reader, PDF, audiobook, or podcast engine
@@ -58,14 +60,27 @@ public partial class App : Application
         bool startBackground = cliArgs.Any(a => a == "--background");
 
         var uiQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        _uiQueue = uiQueue;
+        Library.SystemIntegration.AttachUiQueue(uiQueue);
         Library.SystemIntegration.ShowShelfCallback = () => uiQueue.TryEnqueue(ShowShelf);
         Library.SystemIntegration.OpenSettingsCallback = () => uiQueue.TryEnqueue(() => OpenSettings("general"));
         Library.SystemIntegration.PlayPodcastIssueCallback = id => uiQueue.TryEnqueue(() => OpenPodcastIssue(id));
         Library.SystemIntegration.ExitAppCallback = () => uiQueue.TryEnqueue(() =>
         {
+            _exitingApp = true;
+            try { _shelfWindow?.Close(); } catch { }
             Library.Dispose();
             Environment.Exit(0);
         });
+
+        try
+        {
+            Microsoft.Windows.AppLifecycle.AppInstance.GetCurrent().Activated += OnInstanceActivated;
+        }
+        catch { }
+
+        // Prewarm shared WebView2 environment in the background (TECH.md §3)
+        ReaderWebViewHost.PrewarmAsync(Library.DataDir);
 
         if (startBackground)
             Library.SystemIntegration.EnsureTrayVisible(forceVisible: true);
@@ -135,10 +150,12 @@ public partial class App : Application
                 OpenBook(match.Id, section: debugSection);
                 if (_readerWindows.TryGetValue(match.Id, out var rwin))
                     rwin.ConfigureDebugView(debugPanel, debugListenBar);
+                else if (_pdfWindows.TryGetValue(match.Id, out var pwin) && !string.IsNullOrEmpty(debugPanel))
+                    pwin.OpenDebugSidePanel(debugPanel);
             }
         }
 #endif
-        else if (Library.Prefs.ReopenLast)
+        else if (!startBackground && Library.Prefs.ReopenLast)
         {
             var last = Library.GetShelfBooks()
                 .Where(b => b.OpenedAt is not null)
@@ -189,7 +206,7 @@ public partial class App : Application
         string fixtures = Path.Combine(repoRoot, "fixtures", "books");
         if (!Directory.Exists(fixtures)) return;
 
-        string? hlmId = null, gatsbyId = null, prideId = null, beiyingId = null;
+        string? hlmId = null, gatsbyId = null, prideId = null, beiyingId = null, pdfId = null;
         foreach (var file in new[] { "hongloumeng.epub", "great-gatsby.epub", "pride-and-prejudice.epub", "beiying.epub", "sample.pdf" })
         {
             string full = Path.Combine(fixtures, file);
@@ -201,7 +218,27 @@ public partial class App : Application
                 else if (file.StartsWith("great-gatsby")) gatsbyId = b.Id;
                 else if (file.StartsWith("pride")) prideId = b.Id;
                 else if (file.StartsWith("beiying")) beiyingId = b.Id;
-                else Library.SetStatus(b.Id, ReadingStatus.Finished);
+                else { pdfId = b.Id; Library.SetStatus(b.Id, ReadingStatus.Finished); }
+            }
+            catch { }
+        }
+
+        if (pdfId is not null)
+        {
+            try
+            {
+                string? pdfPath = Library.TryOriginalFile(pdfId);
+                if (!string.IsNullOrEmpty(pdfPath) && File.Exists(pdfPath))
+                {
+                    var layout = PdfInfoReader.ExtractPageLayout(pdfPath, 0);
+                    Library.Core.SetPdfInfo(pdfId, new PdfInfo(5, "sample", [], (ulong)Math.Max(100, layout.Text.Length * 5), null));
+                    var sents = YuyueCoreMethods.PageSentences(layout.Text);
+                    var body = sents.Where(s => s.Text.Trim().Length >= 10).ToArray();
+                    if (body.Length >= 1)
+                        Library.AddMark(pdfId, 0, new TextPoint(0, body[0].Start), new TextPoint(0, body[0].End), body[0].Text.Trim(), MarkStyle.Yellow, null);
+                    if (body.Length >= 5)
+                        Library.AddMark(pdfId, 0, new TextPoint(0, body[4].Start), new TextPoint(0, body[4].End), body[4].Text.Trim(), MarkStyle.Wave, "平淡白描里全是沉重。");
+                }
             }
             catch { }
         }
@@ -288,6 +325,16 @@ public partial class App : Application
         if (_shelfWindow is null)
         {
             _shelfWindow = new ShelfWindow(Library);
+            _shelfWindow.AppWindow.Closing += (_, args) =>
+            {
+                // Keep app resident in system tray when login auto-start or audio playback is active
+                if (!_exitingApp && (Library.Prefs.AutoLaunchOnLogin || Library.SystemIntegration.IsAudioPlaying))
+                {
+                    args.Cancel = true;
+                    Library.SystemIntegration.EnsureTrayVisible(forceVisible: true);
+                    try { _shelfWindow?.AppWindow.Hide(); } catch { }
+                }
+            };
             _shelfWindow.Closed += (_, _) =>
             {
                 _shelfWindow = null;
@@ -296,6 +343,7 @@ public partial class App : Application
                     _settingsWindow?.Close();
             };
         }
+        try { _shelfWindow.AppWindow.Show(); } catch { }
         _shelfWindow.Activate();
     }
 
@@ -305,11 +353,13 @@ public partial class App : Application
         _shelfWindow?.OpenPodcastInline(issueId);
     }
 
-    public void OpenBook(string bookId, bool autoListen = false, uint? section = null, int? sentence = null)
+    public void OpenBook(string bookId, bool autoListen = false, uint? section = null, int? sentence = null, string? askQuestion = null, string? searchQuery = null)
     {
         if (_audioWindows.TryGetValue(bookId, out var existingAudio))
         {
             existingAudio.Activate();
+            if (section == 0 && sentence == 0) existingAudio.JumpToStartAndPlay();
+            else if (autoListen) existingAudio.EnsurePlaying();
             return;
         }
 
@@ -326,6 +376,8 @@ public partial class App : Application
             existing.Activate();
             if (section is uint s) existing.JumpTo(s, sentence ?? 0);
             if (autoListen) existing.TriggerListen();
+            if (!string.IsNullOrWhiteSpace(askQuestion)) existing.AskCompanion(askQuestion);
+            if (!string.IsNullOrWhiteSpace(searchQuery)) existing.HighlightSearch(searchQuery);
             return;
         }
 
@@ -380,7 +432,8 @@ public partial class App : Application
 
         if (fmt == BookFormat.Audio)
         {
-            var audioWin = new AudiobookWindow(Library, bookId, autoPlay: autoListen);
+            bool fromStart = section == 0 && sentence == 0;
+            var audioWin = new AudiobookWindow(Library, bookId, autoPlay: autoListen, startFromBeginning: fromStart);
             _audioWindows[bookId] = audioWin;
             audioWin.Closed += (_, _) =>
             {
@@ -405,7 +458,7 @@ public partial class App : Application
             return;
         }
 
-        var win = new ReaderWindow(Library, bookId, autoListen, section, sentence);
+        var win = new ReaderWindow(Library, bookId, autoListen, section, sentence, askQuestion, searchQuery);
         _readerWindows[bookId] = win;
         win.Closed += (_, _) =>
         {
@@ -459,34 +512,143 @@ public partial class App : Application
     public void ApplyAccentResources()
     {
         var tint = Library.Prefs.Tint;
-        string[] fillKeys =
+        string[] baseKeys =
         [
             "YYAccentBrush",
-            "AccentFillColorDefaultBrush", "AccentFillColorSecondaryBrush", "AccentFillColorTertiaryBrush",
-            "SliderTrackValueFill", "SliderTrackValueFillPointerOver", "SliderTrackValueFillPressed",
-            "SliderThumbBackground", "SliderThumbBackgroundPointerOver", "SliderThumbBackgroundPressed",
-            "ToggleSwitchFillOn", "ToggleSwitchFillOnPointerOver", "ToggleSwitchFillOnPressed",
+            "AccentFillColorDefaultBrush",
+            "SliderTrackValueFill",
+            "ToggleSwitchFillOn",
+            "TextControlBorderBrushFocused",
+        ];
+        string[] hoverKeys =
+        [
+            "AccentFillColorSecondaryBrush",
+            "SliderTrackValueFillPointerOver",
+            "ToggleSwitchFillOnPointerOver",
+        ];
+        string[] pressKeys =
+        [
+            "AccentFillColorTertiaryBrush",
+            "SliderTrackValueFillPressed",
+            "ToggleSwitchFillOnPressed",
         ];
 
-        void UpdateDict(ResourceDictionary dict, Design.YYTintColors c)
+        static Windows.UI.Color ShiftShade(Windows.UI.Color c, int delta) => Windows.UI.Color.FromArgb(
+            c.A,
+            (byte)Math.Clamp(c.R + delta, 0, 255),
+            (byte)Math.Clamp(c.G + delta, 0, 255),
+            (byte)Math.Clamp(c.B + delta, 0, 255));
+
+        void UpdateDict(ResourceDictionary dict, Design.YYTintColors c, bool dark)
         {
-            foreach (var k in fillKeys)
-            {
+            var hover = ShiftShade(c.Fill, dark ? 14 : -12);
+            var press = ShiftShade(c.Fill, dark ? -10 : -24);
+            foreach (var k in baseKeys)
                 if (dict.TryGetValue(k, out var v) && v is Microsoft.UI.Xaml.Media.SolidColorBrush b) b.Color = c.Fill;
-            }
+            foreach (var k in hoverKeys)
+                if (dict.TryGetValue(k, out var v) && v is Microsoft.UI.Xaml.Media.SolidColorBrush b) b.Color = hover;
+            foreach (var k in pressKeys)
+                if (dict.TryGetValue(k, out var v) && v is Microsoft.UI.Xaml.Media.SolidColorBrush b) b.Color = press;
             if (dict.TryGetValue("YYAccentSoftBrush", out var s) && s is Microsoft.UI.Xaml.Media.SolidColorBrush soft) soft.Color = c.Soft;
             if (dict.TryGetValue("YYAccentEdgeBrush", out var e) && e is Microsoft.UI.Xaml.Media.SolidColorBrush edge) edge.Color = c.Edge;
         }
 
-        UpdateDict(Resources, tint.Light);
-        if (Resources.ThemeDictionaries.TryGetValue("Light", out var l) && l is ResourceDictionary ld) UpdateDict(ld, tint.Light);
-        if (Resources.ThemeDictionaries.TryGetValue("Dark", out var d) && d is ResourceDictionary dd) UpdateDict(dd, tint.Dark);
+        bool appDark = Design.ThemeHelper.IsDark(Library.Prefs.ToElementTheme());
+        Design.ThemeHelper.ApplyControlThemeResources(Resources, appDark, tint);
+        if (Resources.ThemeDictionaries.TryGetValue("Light", out var l) && l is ResourceDictionary ld) UpdateDict(ld, tint.Light, dark: false);
+        if (Resources.ThemeDictionaries.TryGetValue("Dark", out var d) && d is ResourceDictionary dd) UpdateDict(dd, tint.Dark, dark: true);
+    }
+
+    private void OnInstanceActivated(object? sender, Microsoft.Windows.AppLifecycle.AppActivationArguments e)
+    {
+        var files = new List<string>();
+        string? settingsPage = null;
+        string? shelfTab = null;
+
+        try
+        {
+            if (e.Data is Windows.ApplicationModel.Activation.IFileActivatedEventArgs fileArgs)
+            {
+                foreach (var item in fileArgs.Files)
+                {
+                    if (item is Windows.Storage.StorageFile sf && File.Exists(sf.Path))
+                        files.Add(sf.Path);
+                }
+            }
+            else if (e.Data is Windows.ApplicationModel.Activation.ILaunchActivatedEventArgs launchArgs
+                     && !string.IsNullOrWhiteSpace(launchArgs.Arguments))
+            {
+                var tokens = SplitCommandLineArgs(launchArgs.Arguments);
+                for (int i = 0; i < tokens.Count; i++)
+                {
+                    string tok = tokens[i];
+                    if (tok == "--library") { i++; continue; }
+                    if (tok == "--background" || tok == "--relaunch") continue;
+                    if (tok == "--tab" && i + 1 < tokens.Count) { shelfTab = tokens[++i]; continue; }
+                    if (tok == "--settings")
+                    {
+                        settingsPage = (i + 1 < tokens.Count && !tokens[i + 1].StartsWith("-") && !File.Exists(tokens[i + 1]))
+                            ? tokens[++i]
+                            : "general";
+                        continue;
+                    }
+                    if (File.Exists(tok)) files.Add(tok);
+                }
+            }
+        }
+        catch { }
+
+        _uiQueue?.TryEnqueue(() =>
+        {
+            ShowShelf();
+            if (shelfTab is not null) _shelfWindow?.SwitchTab(shelfTab);
+            if (settingsPage is not null) OpenSettings(settingsPage);
+            if (files.Count > 0 && _shelfWindow is not null)
+                _ = _shelfWindow.ImportPathsAsync(files, openFirst: true);
+        });
+    }
+
+    private static List<string> SplitCommandLineArgs(string cmdLine)
+    {
+        var result = new List<string>();
+        var cur = new System.Text.StringBuilder();
+        bool inQuotes = false;
+        foreach (char ch in cmdLine)
+        {
+            if (ch == '"') { inQuotes = !inQuotes; continue; }
+            if (char.IsWhiteSpace(ch) && !inQuotes)
+            {
+                if (cur.Length > 0) { result.Add(cur.ToString()); cur.Clear(); }
+                continue;
+            }
+            cur.Append(ch);
+        }
+        if (cur.Length > 0) result.Add(cur.ToString());
+        return result;
     }
 
     public void NotifyShelfRefresh() => _shelfWindow?.RefreshBooks();
 
+    public void ReloadAllAfterRestore()
+    {
+        ApplyAccentResources();
+        _shelfWindow?.ApplyAppearance();
+        _shelfWindow?.RefreshBooks();
+        foreach (var r in _readerWindows.Values) r.ReloadAfterSnapshotRestore();
+        foreach (var p in _pdfWindows.Values) p.ReloadAfterSnapshotRestore();
+        _settingsWindow?.ApplyAppearance();
+    }
+
     private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
         System.Diagnostics.Debug.WriteLine($"[Yuyue Unhandled] {e.Exception}");
+        try
+        {
+            string logDir = Library?.DataDir ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Yuyue");
+            Directory.CreateDirectory(logDir);
+            string logPath = Path.Combine(logDir, "yuyue.log");
+            File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] UNHANDLED: {e.Message}\r\n{e.Exception}\r\n\r\n");
+        }
+        catch { }
     }
 }

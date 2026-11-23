@@ -93,6 +93,17 @@ public sealed class NoteExportService
         return sb.ToString();
     }
 
+    internal static string FormatHttpError(string service, HttpStatusCode status, string? detail = null) => status switch
+    {
+        HttpStatusCode.Unauthorized => $"{service} 令牌无效或已过期（401），请重新生成并粘贴 Token",
+        HttpStatusCode.Forbidden => $"{service} 没有目标页面的访问权限（403），请确认已完成授权",
+        HttpStatusCode.NotFound => $"{service} 目标页面或接口不存在（404），请检查页面链接及授权状态",
+        HttpStatusCode.TooManyRequests => $"{service} 请求过于频繁已被限流（429），请稍等片刻后重试",
+        _ => string.IsNullOrWhiteSpace(detail)
+            ? $"{service} 请求失败（HTTP {(int)status}）"
+            : $"{service} 请求失败（HTTP {(int)status}）：{(detail.Length > 140 ? detail[..140] : detail)}",
+    };
+
     public async Task<(bool Ok, string PageTitle, string Message)> VerifyNotionAsync(string token, string pageUrlOrId, CancellationToken ct = default)
     {
         string tok = token.Trim();
@@ -109,15 +120,15 @@ public sealed class NoteExportService
             using (var meResp = await Http.SendAsync(meReq, ct))
             {
                 if (!meResp.IsSuccessStatusCode)
-                    return (false, "", $"Token 校验未通过 ({(int)meResp.StatusCode})");
+                    return (false, "", FormatHttpError("Notion", meResp.StatusCode));
             }
 
             using var pageReq = MakeNotionRequest(HttpMethod.Get, $"https://api.notion.com/v1/pages/{pageId}", tok);
             using var pageResp = await Http.SendAsync(pageReq, ct);
             if (pageResp.StatusCode == HttpStatusCode.NotFound)
-                return (false, "", "未找到该页面：请在 Notion 页面右上角「··· → Connections」里授权你的 Integration");
+                return (false, "", "未找到该页面（404）：请在 Notion 页面右上角「··· → Connections」里授权你的 Integration");
             if (!pageResp.IsSuccessStatusCode)
-                return (false, "", $"读取页面失败 ({(int)pageResp.StatusCode})");
+                return (false, "", FormatHttpError("Notion", pageResp.StatusCode));
 
             string body = await pageResp.Content.ReadAsStringAsync(ct);
             string title = ParseNotionPageTitle(body) ?? "Notion 笔记页";
@@ -142,7 +153,7 @@ public sealed class NoteExportService
             req.Headers.Add("x-request-source", "xinzhi-cli");
             using var resp = await Http.SendAsync(req, ct);
             if (!resp.IsSuccessStatusCode)
-                return (false, "", $"新枝认证失败 ({(int)resp.StatusCode})");
+                return (false, "", FormatHttpError("新枝", resp.StatusCode));
 
             string json = await resp.Content.ReadAsStringAsync(ct);
             using var doc = JsonDocument.Parse(json);
@@ -278,8 +289,9 @@ public sealed class NoteExportService
                     Content = new StringContent(JsonSerializer.Serialize(new { content = sb.ToString() }), Encoding.UTF8, "application/json"),
                 };
                 using var resp = await Http.SendAsync(req, ct);
-                resp.EnsureSuccessStatusCode();
                 string json = await resp.Content.ReadAsStringAsync(ct);
+                if (!resp.IsSuccessStatusCode)
+                    throw new InvalidOperationException(FormatHttpError("flomo", resp.StatusCode, json));
                 using var doc = JsonDocument.Parse(json);
                 if (doc.RootElement.TryGetProperty("code", out var cp) && cp.GetInt32() != 0)
                     throw new InvalidOperationException("flomo 返回错误：" + json);
@@ -329,7 +341,11 @@ public sealed class NoteExportService
                     Encoding.UTF8,
                     "application/json");
                 using var resp = await Http.SendAsync(req, ct);
-                resp.EnsureSuccessStatusCode();
+                if (!resp.IsSuccessStatusCode)
+                {
+                    string errBody = await resp.Content.ReadAsStringAsync(ct);
+                    throw new InvalidOperationException(FormatHttpError("新枝", resp.StatusCode, errBody));
+                }
 
                 sentMap[m.Id] = ComputeMarkHash(m);
                 marksDone++;
@@ -511,7 +527,7 @@ public sealed class NoteExportService
         using var resp = await Http.SendAsync(req, ct);
         string body = await resp.Content.ReadAsStringAsync(ct);
         if (!resp.IsSuccessStatusCode)
-            throw new InvalidOperationException($"创建 Notion 子页面失败 ({(int)resp.StatusCode})：{(body.Length > 140 ? body[..140] : body)}");
+            throw new InvalidOperationException(FormatHttpError("Notion", resp.StatusCode, body));
         using var doc = JsonDocument.Parse(body);
         return doc.RootElement.GetProperty("id").GetString()!;
     }
@@ -523,7 +539,11 @@ public sealed class NoteExportService
         req.Content = new StringContent(JsonSerializer.Serialize(new { children = batch }), Encoding.UTF8, "application/json");
         using var resp = await Http.SendAsync(req, ct);
         if (resp.StatusCode == HttpStatusCode.NotFound) return false;
-        resp.EnsureSuccessStatusCode();
+        if (!resp.IsSuccessStatusCode)
+        {
+            string errBody = await resp.Content.ReadAsStringAsync(ct);
+            throw new InvalidOperationException(FormatHttpError("Notion", resp.StatusCode, errBody));
+        }
         return true;
     }
 }

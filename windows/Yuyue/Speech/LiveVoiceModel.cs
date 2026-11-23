@@ -88,6 +88,13 @@ public sealed class LiveVoiceModel
         try { return _core.CardsCloned(); } catch { return Array.Empty<VoiceCard>(); }
     }
 
+    public async Task StartIfUnmeteredAsync()
+    {
+        if (IsReady || State == LiveVoiceStateKind.Downloading) return;
+        if (ModelDownload.IsMeteredNetwork()) return;
+        await DownloadAsync();
+    }
+
     public async Task DownloadAsync()
     {
         if (State == LiveVoiceStateKind.Downloading) return;
@@ -109,10 +116,26 @@ public sealed class LiveVoiceModel
 
         try
         {
-            Directory.CreateDirectory(Path.Combine(_dataDir, "models"));
+            string modelsRoot = Path.Combine(_dataDir, "models");
+            Directory.CreateDirectory(modelsRoot);
             bool needModel = !IsModelInstalled;
             bool needPack = !IsPackInstalled;
             long totalBytes = (needModel ? ModelBytes : 0) + (needPack ? PackBytes : 0);
+
+            // 1:1 LiveVoiceModel.swift: require 2× free disk space (archive + unpacked files)
+            try
+            {
+                string? root = Path.GetPathRoot(Path.GetFullPath(modelsRoot));
+                if (!string.IsNullOrEmpty(root))
+                {
+                    var drive = new DriveInfo(root);
+                    if (drive.IsReady && drive.AvailableFreeSpace < totalBytes * 2)
+                        throw new IOException($"磁盘可用空间不足（离线自然人声下载与解压需要约 {Math.Ceiling(totalBytes * 2 / (1024.0 * 1024.0))} MB 可用空间）。");
+                }
+            }
+            catch (IOException) { throw; }
+            catch { }
+
             long doneOffset = 0;
 
             if (needModel)
