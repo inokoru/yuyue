@@ -41,6 +41,8 @@ struct YuyueApp: App {
                     .environment(library)
             }
         }
+        .defaultSize(width: 1020, height: 640)
+        .windowResizability(.automatic)
         #else
         WindowGroup {
             root

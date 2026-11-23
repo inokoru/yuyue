@@ -131,7 +131,27 @@ struct SettingsInspector: View {
     let library: Library
     var windowWidth: CGFloat = 1020
     @State private var reader = ReaderSettings.standard
+    @AppStorage("settings.inspectorWidth") private var preferredWidth = 304.0
     private var log: SettingsLog { SettingsLog.shared }
+
+    private static let minWidth: Double = 252
+    private static let defaultWidth: Double = 304
+    /// SettingsSidebar (184) + minimum usable middle column (420), keeping all three columns inside
+    /// the window (minWidth 860) without crowding or overflow.
+    private static let reservedWidth: Double = 184 + 420
+
+    private var maxAllowedWidth: Double {
+        max(Self.minWidth, min(480, Double(windowWidth) - Self.reservedWidth))
+    }
+
+    private var effectiveWidth: CGFloat {
+        CGFloat(min(max(preferredWidth, Self.minWidth), maxAllowedWidth))
+    }
+
+    private var modelListPinned: Bool {
+        if page == .companion, case .models = CompanionFocus.shared.page { return true }
+        return false
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -183,12 +203,23 @@ struct SettingsInspector: View {
                         }
                     }
                 }
+                .scrollBounceBehavior(.basedOnSize)
             }
         }
         .frame(width: effectiveWidth)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: SettingsSidebar.header))
-        .overlay(alignment: .leading) { Rectangle().fill(YYColor.line).frame(width: 0.5) }
+        .clipped()
+        .overlay(alignment: .leading) {
+            YYResizeHandle(
+                width: $preferredWidth,
+                minWidth: Self.minWidth,
+                maxWidth: maxAllowedWidth,
+                defaultWidth: Self.defaultWidth,
+                chrome: .divider
+            )
+            .offset(x: -4)
+        }
         .onAppear { load() }
         .onReceive(NotificationCenter.default.publisher(for: .readerSettingsChanged)) { _ in load() }
     }
@@ -199,7 +230,6 @@ struct SettingsInspector: View {
     private var sampleNote: String {
         let id = FontShelf.id(of: reader)
         let shelf = FontShelf.shared
-                .scrollBounceBehavior(.basedOnSize)
         if shelf.progress[id] != nil { return String(localized: "正在下载「\(shelf.name(id))」，暂以\(ReadingSample.shownFont(reader))预览") }
         if shelf.failure[id] != nil { return String(localized: "「\(shelf.name(id))」下载未完成，点字体格可重试") }
         return String(localized: "节选自鲁迅《故乡》")

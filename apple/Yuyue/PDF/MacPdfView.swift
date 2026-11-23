@@ -13,6 +13,8 @@ struct MacPdfView: View {
     @State private var panel: Panel?
     @State private var showShown = false
     @State private var listenShown = false
+    @State private var windowWidth: CGFloat = 1040
+    @AppStorage("reader.panelWidth") private var panelWidth = 320.0
     @FocusState private var searchFocused: Bool
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
@@ -22,6 +24,8 @@ struct MacPdfView: View {
     enum Panel { case toc, notes, search }
 
     var body: some View {
+        let maxPanel = max(272.0, min(540.0, Double(windowWidth) * 0.50))
+        let sideWidth = min(max(panelWidth, 272.0), maxPanel)
         HStack(spacing: 0) {
             PdfPages(model: model, accent: tint.accent)
                 .ignoresSafeArea(edges: .bottom)
@@ -38,13 +42,17 @@ struct MacPdfView: View {
                     capsule.padding(.bottom, 18)
                 }
             if let panel {
+                YYResizeHandle(width: $panelWidth, minWidth: 272, maxWidth: maxPanel, defaultWidth: 320, chrome: .floatingCard)
+                    .padding(.top, 6)
+                    .padding(.bottom, 14)
                 side(panel)
-                    .frame(width: 300)
+                    .frame(width: sideWidth)
                     .padding(.trailing, 14)
                     .padding(.bottom, 14)
                     .padding(.top, 6)
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
         .background((model.night ? Color(white: 0.13) : PdfDesk.color).ignoresSafeArea())
         .preferredColorScheme(model.night ? .dark : nil)
         .tint(tint.accent)

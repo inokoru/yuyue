@@ -207,18 +207,17 @@ struct MacProviderForm: View {
             VStack(alignment: .leading, spacing: 12) {
                 SheetTitle(title: String(localized: "选择模型"), logo: provider.isCustom ? nil : provider,
                            back: { choosingModel = false }, close: close)
-                ScrollView {
-                    ModelList(provider: provider, back: { choosingModel = false }, draft: draft, initialModels: listed,
-                              fetched: { models in
-                                  listed = models
-                                  fetchError = nil
-                              }) { id in
-                        model = id
-                        choosingModel = false
-                    }
-                    .padding(.horizontal, -16)
+                ModelList(provider: provider, back: { choosingModel = false }, draft: draft, initialModels: listed,
+                          showsHeader: false,
+                          fetched: { models in
+                              listed = models
+                              fetchError = nil
+                          }) { id in
+                    model = id
+                    choosingModel = false
                 }
-                .scrollBounceBehavior(.basedOnSize)
+                .padding(.horizontal, -16)
+                .frame(maxHeight: .infinity, alignment: .top)
             }
         } else {
             form

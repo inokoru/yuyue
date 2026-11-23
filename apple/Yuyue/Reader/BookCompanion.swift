@@ -7,7 +7,7 @@ import YuyueCore
 /// lifts that. The sentences it gets are numbered, and the answer points back at them: 出处.
 @Observable
 final class BookCompanion {
-    enum Scope: String {
+    nonisolated enum Scope: String, Sendable {
         /// 只用读过的部分.
         case read
         /// 问全书.
@@ -261,5 +261,253 @@ final class BookCompanion {
         all[key] = answer
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? JSONEncoder().encode(all).write(to: url, options: .atomic)
+    }
+}
+
+// MARK: - Slash commands
+
+/// Slash commands (`/recap`, `/clear`, …) shared by Mac and iOS 书伴 composers.
+nonisolated struct CompanionCommand: Identifiable, Hashable, Sendable {
+    enum Category: Hashable, Sendable {
+        /// Sends a reading prompt to 书伴 (respecting current scope and optional quote).
+        case ask
+        /// Controls 书伴 locally without calling the model.
+        case control
+    }
+
+    enum Action: Hashable, Sendable {
+        case recap
+        case chapter
+        case characters
+        case explain
+        case quote
+        case quiz
+        case scope(BookCompanion.Scope)
+        case model
+        case clear
+        case settings
+    }
+
+    struct Parsed: Equatable, Sendable {
+        let command: CompanionCommand
+        let argument: String
+    }
+
+    let id: String
+    /// Command token without the leading `/`, e.g. `"recap"`.
+    let name: String
+    let title: String
+    let subtitle: String
+    let icon: String
+    let category: Category
+    let action: Action
+    /// Whether the command accepts an optional trailing argument (e.g. `/characters 闰土`).
+    let takesArgument: Bool
+    /// Extra keywords matched alongside `name` and `title` (Chinese + English).
+    let keywords: [String]
+
+    var slashName: String { "/\(name)" }
+
+    static var all: [CompanionCommand] {
+        [
+            CompanionCommand(
+                id: "recap",
+                name: "recap",
+                title: String(localized: "回顾前情"),
+                subtitle: String(localized: "梳理目前为止发生了什么"),
+                icon: "arrow.counterclockwise",
+                category: .ask,
+                action: .recap,
+                takesArgument: true,
+                keywords: ["前情", "回顾", "剧情", "摘要", "summary", "previously"]
+            ),
+            CompanionCommand(
+                id: "chapter",
+                name: "chapter",
+                title: String(localized: "总结本章"),
+                subtitle: String(localized: "概括当前章节的主要内容"),
+                icon: "doc.text",
+                category: .ask,
+                action: .chapter,
+                takesArgument: true,
+                keywords: ["本章", "章节", "总结", "这一章", "summary"]
+            ),
+            CompanionCommand(
+                id: "characters",
+                name: "characters",
+                title: String(localized: "人物关系"),
+                subtitle: String(localized: "梳理已出场人物与关系"),
+                icon: "person.2",
+                category: .ask,
+                action: .characters,
+                takesArgument: true,
+                keywords: ["人物", "角色", "关系", "谁", "who", "cast"]
+            ),
+            CompanionCommand(
+                id: "explain",
+                name: "explain",
+                title: String(localized: "解释含义"),
+                subtitle: String(localized: "解读选中句子或当前段落"),
+                icon: "text.magnifyingglass",
+                category: .ask,
+                action: .explain,
+                takesArgument: true,
+                keywords: ["解释", "解析", "意思", "含义", "meaning"]
+            ),
+            CompanionCommand(
+                id: "quote",
+                name: "quote",
+                title: String(localized: "挑出金句"),
+                subtitle: String(localized: "从已读内容里找几句值得回味的话"),
+                icon: "text.quote",
+                category: .ask,
+                action: .quote,
+                takesArgument: true,
+                keywords: ["金句", "摘录", "名句", "句子", "highlight"]
+            ),
+            CompanionCommand(
+                id: "quiz",
+                name: "quiz",
+                title: String(localized: "考考我"),
+                subtitle: String(localized: "根据已读内容出两道思考题"),
+                icon: "questionmark.bubble",
+                category: .ask,
+                action: .quiz,
+                takesArgument: true,
+                keywords: ["考考我", "测验", "提问", "思考", "test"]
+            ),
+            CompanionCommand(
+                id: "read",
+                name: "read",
+                title: String(localized: "仅限已读"),
+                subtitle: String(localized: "切回不剧透模式"),
+                icon: "eye.slash",
+                category: .control,
+                action: .scope(.read),
+                takesArgument: true,
+                keywords: ["已读", "不剧透", "防剧透", "spoiler"]
+            ),
+            CompanionCommand(
+                id: "whole",
+                name: "whole",
+                title: String(localized: "全书范围"),
+                subtitle: String(localized: "检索整本书（可能剧透）"),
+                icon: "book",
+                category: .control,
+                action: .scope(.whole),
+                takesArgument: true,
+                keywords: ["全书", "剧透", "整本", "all"]
+            ),
+            CompanionCommand(
+                id: "model",
+                name: "model",
+                title: String(localized: "切换模型"),
+                subtitle: String(localized: "打开模型与服务商选择"),
+                icon: "sparkles",
+                category: .control,
+                action: .model,
+                takesArgument: false,
+                keywords: ["模型", "服务商", "切换", "provider"]
+            ),
+            CompanionCommand(
+                id: "clear",
+                name: "clear",
+                title: String(localized: "清空对话"),
+                subtitle: String(localized: "清除当前这本书的对话记录"),
+                icon: "trash",
+                category: .control,
+                action: .clear,
+                takesArgument: false,
+                keywords: ["清空", "新对话", "清除", "重置", "reset", "new"]
+            ),
+            CompanionCommand(
+                id: "settings",
+                name: "settings",
+                title: String(localized: "书伴设置"),
+                subtitle: String(localized: "配置服务商与 API Key"),
+                icon: "gearshape",
+                category: .control,
+                action: .settings,
+                takesArgument: false,
+                keywords: ["设置", "配置", "key", "api"]
+            ),
+        ]
+    }
+
+    /// Returns the filter text after a leading `/` (or full-width `／`) while the user is still
+    /// typing the command token (before any whitespace or newline).
+    static func slashQuery(in draft: String) -> String? {
+        guard let first = draft.first, first == "/" || first == "／" else { return nil }
+        let rest = draft.dropFirst()
+        if rest.contains(where: \.isWhitespace) { return nil }
+        return String(rest)
+    }
+
+    /// Filters commands by prefix/substring across English name, localized title, keywords, and subtitle.
+    static func matching(_ query: String) -> [CompanionCommand] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return all }
+        let scored: [(Int, CompanionCommand)] = all.compactMap { cmd in
+            if cmd.name.hasPrefix(q) { return (0, cmd) }
+            if cmd.title.lowercased().hasPrefix(q) { return (1, cmd) }
+            if cmd.keywords.contains(where: { $0.lowercased().hasPrefix(q) }) { return (2, cmd) }
+            if cmd.name.contains(q)
+                || cmd.title.lowercased().contains(q)
+                || cmd.keywords.contains(where: { $0.lowercased().contains(q) })
+                || cmd.subtitle.lowercased().contains(q)
+            {
+                return (3, cmd)
+            }
+            return nil
+        }
+        return scored.sorted { $0.0 < $1.0 }.map(\.1)
+    }
+
+    /// Parses a submitted draft starting with `/` (or `／`) into a known command + optional argument.
+    static func parse(_ draft: String) -> Parsed? {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = trimmed.first, first == "/" || first == "／" else { return nil }
+        let body = trimmed.dropFirst()
+        let splitIndex = body.firstIndex(where: \.isWhitespace) ?? body.endIndex
+        let token = String(body[..<splitIndex]).lowercased()
+        guard !token.isEmpty else { return nil }
+        let arg = String(body[splitIndex...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let cmd = all.first(where: {
+            $0.name == token || $0.title.lowercased() == token
+        }) else {
+            return nil
+        }
+        return Parsed(command: cmd, argument: arg)
+    }
+
+    /// Builds the natural-language question sent to `BookCompanion` for `.ask` commands.
+    func question(argument: String, hasQuote: Bool, chapterTitle: String?) -> String? {
+        let arg = argument.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch action {
+        case .recap:
+            if !arg.isEmpty { return String(localized: "帮我回顾一下目前为止关于「\(arg)」的情节。") }
+            return String(localized: "帮我回顾一下目前为止发生了什么？")
+        case .chapter:
+            if !arg.isEmpty { return String(localized: "结合「\(arg)」，总结一下这一章讲了什么？") }
+            if let chapterTitle, !chapterTitle.isEmpty {
+                return String(localized: "总结一下「\(chapterTitle)」这一章讲了什么？")
+            }
+            return String(localized: "总结一下这一章讲了什么？")
+        case .characters:
+            if !arg.isEmpty { return String(localized: "介绍一下「\(arg)」是谁，以及和其他人物的关系。") }
+            return String(localized: "梳理一下目前出场的主要人物和他们之间的关系。")
+        case .explain:
+            if !arg.isEmpty { return String(localized: "解释一下「\(arg)」在书里的意思和作用。") }
+            if hasQuote { return String(localized: "这句是什么意思？结合上下文解释一下。") }
+            return String(localized: "结合上下文，解释一下当前这一段的意思和用意。")
+        case .quote:
+            if !arg.isEmpty { return String(localized: "从已读内容里挑几句和「\(arg)」相关的精彩句子，并标出出处。") }
+            return String(localized: "从目前读过的内容里，挑两三句值得回味的句子并简短点评。")
+        case .quiz:
+            if !arg.isEmpty { return String(localized: "围绕「\(arg)」，根据我已读的内容出两道思考题考考我。") }
+            return String(localized: "根据我目前读过的内容，出两道有意思的思考题考考我。")
+        case .scope, .model, .clear, .settings:
+            return nil
+        }
     }
 }

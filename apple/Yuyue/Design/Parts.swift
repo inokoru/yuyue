@@ -1469,4 +1469,176 @@ private struct KeyWatch: NSViewRepresentable {
         }
     }
 }
+
+/// Interactive drag handle for resizing right-hand inspector and reader panels on macOS.
+/// Uses global screen coordinates so resizing never oscillates with the moving panel origin,
+/// locks the resize cursor during drag, and resets to `defaultWidth` on double-click.
+struct YYResizeHandle: View {
+    enum Chrome {
+        /// Sits on a full-height 0.5pt column divider (e.g. Settings inspector).
+        case divider
+        /// Sits in the gutter beside a floating card (e.g. Reader / PDF side panel).
+        case floatingCard
+    }
+
+    @Binding var width: Double
+    var minWidth: Double
+    var maxWidth: Double
+    var defaultWidth: Double
+    var chrome: Chrome = .floatingCard
+
+    @State private var hovering = false
+    @State private var dragging = false
+    @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
+    private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
+
+    private var active: Bool { hovering || dragging }
+
+    var body: some View {
+        let clampedMax = max(minWidth, maxWidth)
+        ZStack {
+            switch chrome {
+            case .divider:
+                Rectangle()
+                    .fill(active ? tint.accent.opacity(dragging ? 0.65 : 0.4) : YYColor.line)
+                    .frame(width: active ? 1.5 : 0.5)
+                    .frame(maxHeight: .infinity)
+            case .floatingCard:
+                Capsule()
+                    .fill(dragging ? tint.accent.opacity(0.75) : YYColor.t3.opacity(hovering ? 0.42 : 0))
+                    .frame(width: 3.5, height: dragging ? 44 : 32)
+            }
+        }
+        .frame(width: chrome == .divider ? 9 : 11)
+        .frame(maxHeight: .infinity)
+        .contentShape(.rect)
+        .animation(YYMotion.quick, value: hovering)
+        .animation(YYMotion.quick, value: dragging)
+        .overlay {
+            ResizeStripRepresentable(
+                currentWidth: min(max(width, minWidth), clampedMax),
+                minWidth: minWidth,
+                maxWidth: clampedMax,
+                onHover: { hovering = $0 },
+                onDragState: { dragging = $0 },
+                onResize: { width = $0 },
+                onReset: {
+                    withAnimation(YYMotion.layout) {
+                        width = min(max(defaultWidth, minWidth), clampedMax)
+                    }
+                }
+            )
+        }
+        .help(Text("拖动调整宽度，双击恢复默认"))
+        .accessibilityLabel(Text("调整面板宽度"))
+    }
+}
+
+private struct ResizeStripRepresentable: NSViewRepresentable {
+    var currentWidth: Double
+    var minWidth: Double
+    var maxWidth: Double
+    var onHover: (Bool) -> Void
+    var onDragState: (Bool) -> Void
+    var onResize: (Double) -> Void
+    var onReset: () -> Void
+
+    func makeNSView(context: Context) -> StripView {
+        let v = StripView()
+        update(v)
+        return v
+    }
+
+    func updateNSView(_ nsView: StripView, context: Context) {
+        update(nsView)
+    }
+
+    private func update(_ v: StripView) {
+        v.currentWidth = currentWidth
+        v.minWidth = minWidth
+        v.maxWidth = maxWidth
+        v.onHover = onHover
+        v.onDragState = onDragState
+        v.onResize = onResize
+        v.onReset = onReset
+    }
+
+    final class StripView: NSView {
+        var currentWidth: Double = 300
+        var minWidth: Double = 250
+        var maxWidth: Double = 520
+        var onHover: ((Bool) -> Void)?
+        var onDragState: ((Bool) -> Void)?
+        var onResize: ((Double) -> Void)?
+        var onReset: (() -> Void)?
+
+        private var tracking: NSTrackingArea?
+        private var startScreenX: CGFloat = 0
+        private var startWidth: Double = 300
+        private var isDragging = false
+
+        override var mouseDownCanMoveWindow: Bool { false }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let tracking { removeTrackingArea(tracking) }
+            let area = NSTrackingArea(
+                rect: bounds,
+                options: [.mouseEnteredAndExited, .cursorUpdate, .activeInKeyWindow, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+            addTrackingArea(area)
+            tracking = area
+        }
+
+        override func resetCursorRects() {
+            addCursorRect(bounds, cursor: .resizeLeftRight)
+        }
+
+        override func cursorUpdate(with event: NSEvent) {
+            NSCursor.resizeLeftRight.set()
+        }
+
+        override func mouseEntered(with event: NSEvent) {
+            onHover?(true)
+            NSCursor.resizeLeftRight.set()
+        }
+
+        override func mouseExited(with event: NSEvent) {
+            if !isDragging { onHover?(false) }
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            if event.clickCount == 2 {
+                onReset?()
+                return
+            }
+            isDragging = true
+            startScreenX = NSEvent.mouseLocation.x
+            startWidth = currentWidth
+            onDragState?(true)
+            NSCursor.resizeLeftRight.push()
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard isDragging else { return }
+            let delta = Double(NSEvent.mouseLocation.x - startScreenX)
+            let clamped = min(max(startWidth - delta, minWidth), max(minWidth, maxWidth))
+            onResize?(clamped.rounded())
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            guard isDragging else { return }
+            isDragging = false
+            NSCursor.pop()
+            onDragState?(false)
+            if let winPt = window?.mouseLocationOutsideOfEventStream {
+                let pt = convert(winPt, from: nil)
+                if !bounds.contains(pt) { onHover?(false) }
+            }
+        }
+    }
+}
 #endif

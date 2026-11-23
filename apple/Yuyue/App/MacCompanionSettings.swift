@@ -26,9 +26,10 @@ struct CompanionSettings: View {
                     ServiceTile(mark: .thisMac)
                 } title: {
                     Text("这台 Mac")
+                    SettingsPill(String(localized: "不推荐"), tone: .warn)
                     if apple && choice.current.provider.kind == .apple { InUsePill() }
                 } detail: {
-                    Text("Apple 智能 · 本地运行，免费免联网")
+                    Text("Apple 智能 · 上下文短、中文文学理解弱，仅作离线简单兜底")
                 } trailing: {
                     switch Companion.appleState {
                     case .available: EmptyView()
@@ -204,12 +205,24 @@ struct ServicePanel: View {
                 PanelCard {
                     if !apple {
                         PanelButton {
-                            Text("模型")
+                            Text("模型").fixedSize()
                             Spacer(minLength: 8)
+                            if let badge = ModelNames.routeBadge(config.model) {
+                                Text(badge)
+                                    .font(.yy(size: PanelScale.k * 10, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(YYColor.t3)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 1.5)
+                                    .background(YYColor.inset, in: .rect(cornerRadius: 4))
+                                    .fixedSize()
+                            }
                             Text(config.model.isEmpty ? String(localized: "选择…") : ModelNames.name(config.model))
-                                .foregroundStyle(config.model.isEmpty ? YYColor.t3 : YYColor.t1).lineLimit(1)
+                                .foregroundStyle(config.model.isEmpty ? YYColor.t3 : YYColor.t1)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
                             Image(systemName: "chevron.right").font(.yy(size: PanelScale.k * 9.5, weight: .semibold)).foregroundStyle(YYColor.t3)
                         } action: { if let openModels { openModels() } else { focus.page = .models(provider.id) } }
+                        .help(config.model.isEmpty ? String(localized: "选择或输入模型") : config.model)
                     }
                     PanelRow { Text("设为当前服务") } trailing: {
                         Toggle("设为当前服务", isOn: Binding(get: { inUse }, set: { on in
@@ -230,6 +243,9 @@ struct ServicePanel: View {
                     ServiceKeyCard(provider: provider)
                 }
                 PanelCard { check(config) }
+                if apple {
+                    PanelHint(String(localized: "不推荐作为主力模型：Apple 智能上下文窗口短（约 4K），中文长章节问答与播客撰稿质量有限。建议添加 DeepSeek、通义千问、OpenRouter 或连接本机 Ollama。"))
+                }
                 #else
                 if !apple {
                     ServiceKeyCard(provider: provider) { check(config) }
@@ -291,9 +307,9 @@ struct ServicePanel: View {
     }
 }
 
-/// A service's models in the right column: a search line; then 在用, 最近用过, 推荐 and all of
-/// them (grouped by maker when the service resells others'). Typing narrows the list; return
-/// takes the first; a name not in it can still be used.
+/// A service's models: pinned search & maker filter chips on top, then a smooth lazy list of
+/// 在用, 最近用过, 推荐, and all fetched models underneath. Typing narrows the list or lets the
+/// user submit any custom model ID directly.
 struct ModelList: View {
     let provider: CompanionProvider
     /// Back to the service; nil: the right column's own page.
@@ -302,11 +318,15 @@ struct ModelList: View {
     var draft: CompanionConfig?
     /// Already fetched models from the form, so opening the list shows them immediately.
     var initialModels: [String] = []
+    /// False when embedded inside a sheet or iOS NavigationStack that already renders a title bar.
+    var showsHeader = true
     /// Called whenever models are successfully fetched from the server.
     var fetched: (([String]) -> Void)?
     /// Adding it: the model chosen goes back to the form instead of being saved.
     var picked: ((String) -> Void)?
+
     @State private var query = ""
+    @State private var selectedMaker: String?
     @State private var models: [String] = []
     @State private var loading = false
     @State private var loaded = false
@@ -317,56 +337,130 @@ struct ModelList: View {
     var body: some View {
         let _ = focus.tick
         let current = draft?.model ?? CompanionConfig.saved(provider).model
-        VStack(alignment: .leading, spacing: 10) {
-            // iPhone: the navigation bar has ‹ and the title.
-            #if os(macOS)
-            HStack(spacing: 8) {
-                Button { goBack() } label: {
-                    Image(systemName: "chevron.left").font(.yy(size: PanelScale.k * 11, weight: .semibold)).foregroundStyle(YYColor.t2)
-                        .frame(width: 24, height: 24).contentShape(.circle)
-                }
-                .buttonStyle(HoverCircleStyle())
-                .help(Text("回到 \(provider.title)"))
-                ServiceTile(mark: .provider(provider), size: 26)
-                Text("选择模型").font(.yy(size: PanelScale.k * 13.5, weight: .semibold)).foregroundStyle(YYColor.t1)
-                Spacer(minLength: 0)
-                refreshButton
-            }
-            .padding(.leading, -4)
-            #endif
-
-            HStack(spacing: 7) {
-                Image(systemName: "magnifyingglass").font(.yy(size: PanelScale.k * 11.5)).foregroundStyle(YYColor.t3)
-                TextField("", text: $query, prompt: Text(models.isEmpty ? String(localized: "搜模型名或直接输入模型 ID") : String(localized: "搜 \(models.count) 个模型：名字或 id")))
-                    .textFieldStyle(.plain).font(.yy(size: PanelScale.k * 12.5))
-                    .focused($searching)
-                    .onSubmit { if let first = hits.first { choose(first) } else if !trimmed.isEmpty { choose(trimmed) } }
-                    .onKeyPress(.escape) {
-                        if query.isEmpty { goBack() } else { query = "" }
-                        return .handled
+        let groups = ModelNames.groups(models)
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
+                #if os(macOS)
+                if showsHeader {
+                    HStack(spacing: 8) {
+                        Button { goBack() } label: {
+                            Image(systemName: "chevron.left").font(.yy(size: PanelScale.k * 11, weight: .semibold)).foregroundStyle(YYColor.t2)
+                                .frame(width: 24, height: 24).contentShape(.circle)
+                        }
+                        .buttonStyle(HoverCircleStyle())
+                        .help(Text("回到 \(provider.title)"))
+                        ServiceTile(mark: .provider(provider), size: 24)
+                        Text("选择模型").font(.yy(size: PanelScale.k * 13.5, weight: .semibold)).foregroundStyle(YYColor.t1)
+                        Spacer(minLength: 0)
+                        refreshButton
                     }
-                #if os(iOS)
-                refreshButton
+                    .padding(.leading, -4)
+                }
                 #endif
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 30)
-            .background(YYColor.inset, in: .rect(cornerRadius: 8))
 
-            if trimmed.isEmpty { sections(current: current) } else { results(current: current) }
+                HStack(spacing: 7) {
+                    Image(systemName: "magnifyingglass").font(.yy(size: PanelScale.k * 11.5)).foregroundStyle(YYColor.t3)
+                    TextField("", text: $query, prompt: Text(models.isEmpty ? String(localized: "搜模型名或直接输入模型 ID") : String(localized: "搜 \(models.count) 个模型，或输入新 ID")))
+                        .textFieldStyle(.plain)
+                        .font(.yy(size: PanelScale.k * 12.5))
+                        .autocorrectionDisabled()
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                        .focused($searching)
+                        .onSubmit {
+                            if let first = hits.first { choose(first) }
+                            else if !trimmed.isEmpty { choose(trimmed) }
+                        }
+                        .onKeyPress(.escape) {
+                            if query.isEmpty { goBack() } else { query = "" }
+                            return .handled
+                        }
+                    if !query.isEmpty {
+                        Button { query = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.yy(size: PanelScale.k * 11.5))
+                                .foregroundStyle(YYColor.t3)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if !showsHeader {
+                        refreshButton
+                    }
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 32)
+                .background(YYColor.inset, in: .rect(cornerRadius: 8))
+
+                if trimmed.isEmpty, groups.count > 1 {
+                    makerFilterBar(groups: groups, total: models.count)
+                }
+            }
+            .padding(.horizontal, 16)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if trimmed.isEmpty {
+                        sections(current: current, groups: groups)
+                    } else {
+                        results(current: current)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 2)
+                .padding(.bottom, 16)
+            }
+            .scrollBounceBehavior(.basedOnSize)
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 14)
+        .frame(maxHeight: .infinity, alignment: .top)
         .task {
             #if os(macOS)
             searching = true
             #endif
-            if models.isEmpty, !initialModels.isEmpty {
-                models = initialModels
-                loaded = true
+            if models.isEmpty {
+                let seed = !initialModels.isEmpty ? initialModels : ModelNames.cached(provider.id)
+                if !seed.isEmpty {
+                    models = seed
+                    loaded = true
+                }
             }
             await refresh()
         }
+    }
+
+    private func makerFilterBar(groups: [(maker: String, models: [String])], total: Int) -> some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 5) {
+                makerChip(title: String(localized: "全部"), count: total, active: selectedMaker == nil) {
+                    selectedMaker = nil
+                }
+                ForEach(groups, id: \.maker) { g in
+                    makerChip(title: ModelNames.makerTitle(g.maker), count: g.models.count, active: selectedMaker == g.maker) {
+                        selectedMaker = selectedMaker == g.maker ? nil : g.maker
+                    }
+                }
+            }
+            .padding(.vertical, 1)
+        }
+        .scrollIndicators(.never)
+    }
+
+    private func makerChip(title: String, count: Int, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(.yy(size: PanelScale.k * 11, weight: active ? .semibold : .regular))
+                Text("\(count)")
+                    .font(.yy(size: PanelScale.k * 10).monospacedDigit())
+                    .opacity(0.7)
+            }
+            .foregroundStyle(active ? YYColor.card : YYColor.t2)
+            .padding(.horizontal, 8)
+            .frame(height: 23)
+            .background(active ? YYColor.t1 : YYColor.inset, in: .capsule)
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
     }
 
     private var refreshButton: some View {
@@ -383,8 +477,8 @@ struct ModelList: View {
         }
         .buttonStyle(HoverCircleStyle())
         .disabled(loading)
-        .help(Text("获取模型列表"))
-        .accessibilityLabel(Text("获取模型列表"))
+        .help(Text("刷新模型列表"))
+        .accessibilityLabel(Text("刷新模型列表"))
     }
 
     private func refresh() async {
@@ -395,7 +489,7 @@ struct ModelList: View {
                 loading = false
                 loaded = true
                 errorMessage = provider.needsKey && config.key.isEmpty
-                    ? String(localized: "先填好 API Key 再获取模型列表")
+                    ? String(localized: "先填好 API Key 可获取完整模型列表，也可直接点选下方常用模型")
                     : String(localized: "先填好接口地址再获取模型列表")
             }
             return
@@ -407,10 +501,13 @@ struct ModelList: View {
         do {
             let list = try await Companion.models(config).sorted()
             withAnimation(YYMotion.standard) {
-                models = list
+                if !list.isEmpty { models = list }
                 loaded = true
                 loading = false
                 errorMessage = nil
+                if let selectedMaker, !ModelNames.groups(models).contains(where: { $0.maker == selectedMaker }) {
+                    self.selectedMaker = nil
+                }
             }
             fetched?(list)
         } catch {
@@ -424,80 +521,96 @@ struct ModelList: View {
 
     private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
 
-    private var hits: [String] {
-        let q = trimmed.lowercased()
-        return models.filter { $0.lowercased().contains(q) || ModelNames.name($0).lowercased().contains(q) }
+    private var searchablePool: [String] {
+        var seen = Set<String>()
+        let presets = ModelNames.resolvedRecommendations(for: provider.id, available: models).map(\.id)
+        return (models + presets).filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 
-    @ViewBuilder private func sections(current: String) -> some View {
-        let recs = ModelNames.recommended[provider.id, default: []].filter { r in models.contains(r.id) }
-        let recent = ModelNames.recent(provider.id).filter { $0 != current && (models.isEmpty || models.contains($0)) }
-        if !current.isEmpty && !recs.contains(where: { $0.id == current }) {
-            PanelLabel(String(localized: "在用"))
-            PanelCard { item(current, current: current) }
+    private var hits: [String] {
+        let tokens = trimmed.lowercased().split(separator: " ").map(String.init)
+        guard !tokens.isEmpty else { return [] }
+        return searchablePool.filter { id in
+            let hay = (id + " " + ModelNames.name(id)).lowercased()
+            return tokens.allSatisfy { hay.contains($0) }
         }
-        if !recent.isEmpty {
-            PanelLabel(String(localized: "最近用过"))
-            PanelCard { ForEach(recent, id: \.self) { item($0, current: current) } }
-        }
-        if !recs.isEmpty {
-            PanelLabel(String(localized: "推荐"))
-            PanelCard { ForEach(recs, id: \.id) { item($0.id, why: $0.why, current: current) } }
-        }
-        if loading && models.isEmpty {
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.mini)
-                Text("正在获取模型列表…").font(.yy(size: PanelScale.k * 11)).foregroundStyle(YYColor.t3)
+    }
+
+    @ViewBuilder private func sections(current: String, groups: [(maker: String, models: [String])]) -> some View {
+        if let selectedMaker, let group = groups.first(where: { $0.maker == selectedMaker }) {
+            PanelLabel(String(localized: "\(ModelNames.makerTitle(group.maker)) · \(group.models.count) 个"))
+            PanelCard { ForEach(group.models, id: \.self) { item($0, current: current) } }
+        } else {
+            let recs = ModelNames.resolvedRecommendations(for: provider.id, available: models)
+            let recent = ModelNames.recent(provider.id).filter { $0 != current && (models.isEmpty || models.contains($0)) }
+            if !current.isEmpty && !recs.contains(where: { $0.id == current }) {
+                PanelLabel(String(localized: "在用"))
+                PanelCard { item(current, current: current) }
             }
-            .padding(.leading, 12)
-        } else if let errorMessage {
-            PanelCard {
-                PanelButton(systemImage: "arrow.clockwise", tint: YYColor.t1) {
-                    Text("重新获取模型列表")
-                    Spacer(minLength: 6)
-                } action: { Task { await refresh() } }
+            if !recent.isEmpty {
+                PanelLabel(String(localized: "最近用过"))
+                PanelCard { ForEach(recent, id: \.self) { item($0, current: current) } }
             }
-            PanelHint(String(localized: "未能获取模型列表：\(errorMessage)。也可直接在上方输入模型 ID 后按回车使用。"))
-        } else if models.isEmpty && loaded {
-            PanelCard {
-                PanelButton(systemImage: "arrow.clockwise", tint: YYColor.t1) {
-                    Text("重新获取模型列表")
-                    Spacer(minLength: 6)
-                } action: { Task { await refresh() } }
+            if !recs.isEmpty {
+                PanelLabel(String(localized: "推荐"))
+                PanelCard { ForEach(recs, id: \.id) { item($0.id, why: $0.why, current: current) } }
             }
-            PanelHint(String(localized: "服务商返回了空的模型列表；也可直接在上方输入模型 ID 后按回车使用。"))
-        } else if !models.isEmpty {
-            PanelLabel(String(localized: "全部 \(models.count) 个"))
-            let groups = ModelNames.groups(models)
-            if groups.count > 1 {
-                ForEach(groups, id: \.maker) { g in
-                    HStack(spacing: 6) {
-                        Text(g.maker).font(.yy(size: PanelScale.k * 11, weight: .semibold)).foregroundStyle(YYColor.t3)
-                        Spacer()
-                        Text("\(g.models.count)").font(.yy(size: PanelScale.k * 11)).foregroundStyle(YYColor.t3).monospacedDigit()
-                    }
-                    .padding(.horizontal, 12).padding(.bottom, -4)
-                    PanelCard { ForEach(g.models, id: \.self) { item($0, current: current) } }
+            if loading && models.isEmpty {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text("正在获取模型列表…").font(.yy(size: PanelScale.k * 11)).foregroundStyle(YYColor.t3)
                 }
-            } else {
-                PanelCard { ForEach(models, id: \.self) { item($0, current: current) } }
+                .padding(.leading, 12)
+                .padding(.vertical, 4)
+            } else if let errorMessage, models.isEmpty {
+                PanelCard {
+                    PanelButton(systemImage: "arrow.clockwise", tint: YYColor.t1) {
+                        Text("重新获取模型列表")
+                        Spacer(minLength: 6)
+                    } action: { Task { await refresh() } }
+                }
+                PanelHint(String(localized: "\(errorMessage)。也可直接在上方输入框填入模型 ID 按回车。"))
+            } else if models.isEmpty && loaded {
+                PanelCard {
+                    PanelButton(systemImage: "arrow.clockwise", tint: YYColor.t1) {
+                        Text("重新获取模型列表")
+                        Spacer(minLength: 6)
+                    } action: { Task { await refresh() } }
+                }
+                PanelHint(String(localized: "未返回在线模型列表；可直接点选推荐模型，或在上方输入任意模型 ID 按回车。"))
+            }
+            if !models.isEmpty {
+                if groups.count > 1 {
+                    ForEach(groups, id: \.maker) { g in
+                        HStack(spacing: 6) {
+                            Text(ModelNames.makerTitle(g.maker)).font(.yy(size: PanelScale.k * 11, weight: .semibold)).foregroundStyle(YYColor.t3)
+                            Spacer()
+                            Text("\(g.models.count)").font(.yy(size: PanelScale.k * 11)).foregroundStyle(YYColor.t3).monospacedDigit()
+                        }
+                        .padding(.horizontal, 12).padding(.bottom, -4)
+                        PanelCard { ForEach(g.models, id: \.self) { item($0, current: current) } }
+                    }
+                } else {
+                    PanelLabel(String(localized: "全部 \(models.count) 个"))
+                    PanelCard { ForEach(models, id: \.self) { item($0, current: current) } }
+                }
             }
         }
     }
 
     @ViewBuilder private func results(current: String) -> some View {
         let found = hits
-        Text(found.isEmpty ? String(localized: "没有叫这个的") : String(localized: "找到 \(found.count) 个 · 回车选第一个"))
+        Text(found.isEmpty ? String(localized: "列表里未找到，按回车直接使用输入的 ID") : String(localized: "找到 \(found.count) 个 · 回车选第一个"))
             .font(.yy(size: PanelScale.k * 11)).foregroundStyle(YYColor.t3).padding(.leading, 12)
         PanelCard {
-            ForEach(Array(found.prefix(40).enumerated()), id: \.element) { i, m in
+            ForEach(Array(found.prefix(60).enumerated()), id: \.element) { i, m in
                 item(m, current: current, first: i == 0, highlight: trimmed)
             }
-            if !models.contains(trimmed) {
-                PanelButton {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("用“\(trimmed)”这个名字").foregroundStyle(YYColor.t1)
-                        Text("列表里没有的新模型，照这个名字去问").font(.yy(size: PanelScale.k * 10.5)).foregroundStyle(YYColor.t3)
+            if !searchablePool.contains(trimmed) {
+                PanelButton(outlined: found.isEmpty) {
+                    VStack(alignment: .leading, spacing: 1.5) {
+                        Text("使用「\(trimmed)」").font(.yy(size: PanelScale.k * 12.5, weight: .medium)).foregroundStyle(YYColor.t1)
+                        Text("自定义模型 ID · 直接按此名称请求接口").font(.yy(size: PanelScale.k * 10.5)).foregroundStyle(YYColor.t3)
                     }
                     Spacer(minLength: 0)
                 } action: { choose(trimmed) }
@@ -507,18 +620,36 @@ struct ModelList: View {
 
     private func item(_ id: String, why: String? = nil, current: String, first: Bool = false, highlight: String = "") -> some View {
         let on = id == current
+        let friendly = ModelNames.name(id)
+        let badge = ModelNames.routeBadge(id)
         return PanelButton(selected: on, outlined: first) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(ModelNames.name(id)).font(.yy(size: PanelScale.k * 12.5, weight: on ? .semibold : .regular)).foregroundStyle(YYColor.t1).lineLimit(1)
+            VStack(alignment: .leading, spacing: 1.5) {
+                HStack(spacing: 6) {
+                    Text(friendly)
+                        .font(.yy(size: PanelScale.k * 12.5, weight: on ? .semibold : .regular))
+                        .foregroundStyle(YYColor.t1)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let badge {
+                        Text(badge)
+                            .font(.yy(size: PanelScale.k * 9.5, weight: .medium, design: .monospaced))
+                            .foregroundStyle(YYColor.t3)
+                            .padding(.horizontal, 4.5)
+                            .padding(.vertical, 1)
+                            .background(YYColor.inset, in: .rect(cornerRadius: 4))
+                            .fixedSize()
+                    }
+                }
                 if let why {
-                    Text(why).font(.yy(size: PanelScale.k * 10.5)).foregroundStyle(YYColor.t2)
-                } else if ModelNames.name(id) != id {
+                    Text(why).font(.yy(size: PanelScale.k * 10.5)).foregroundStyle(YYColor.t2).lineLimit(1)
+                } else if friendly != id {
                     Text(id).font(.yy(size: PanelScale.k * 10, design: .monospaced)).foregroundStyle(YYColor.t3).lineLimit(1).truncationMode(.middle)
                 }
             }
             Spacer(minLength: 6)
             if on { Image(systemName: "checkmark").font(.yy(size: PanelScale.k * 11, weight: .bold)).foregroundStyle(YYColor.t1) }
         } action: { choose(id) }
+        .help(id)
     }
 
     private func choose(_ id: String) {
@@ -534,6 +665,11 @@ struct ModelList: View {
                                       undo: .defaults(key: "companion.model.\(provider.id)", old: .string(old)))
             #endif
         }
+        // If the currently selected provider isn't ready (e.g. missing Key) while this one is ready,
+        // promote this service automatically so 书伴 works right away.
+        if !CompanionConfig.current.isReady && config.isReady {
+            CompanionConfig.current = config
+        }
         goBack()
         focus.reload()
     }
@@ -545,36 +681,222 @@ struct ModelList: View {
 
 // MARK: - Model names
 
-/// Model ids as people say them, the few worth suggesting per service, and the ones used lately.
+/// Model ids as people say them, curated presets per service, cached server lists, and recent picks.
 enum ModelNames {
     struct Pick { let id: String; let name: String; let why: String }
 
     static let recommended: [String: [Pick]] = [
-        "claude": [.init(id: "claude-opus-4-5", name: "Claude Opus 4.5", why: String(localized: "最聪明，读懂难书")),
-                   .init(id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", why: String(localized: "聪明又快，平时就用它")),
-                   .init(id: "claude-haiku-4-5", name: "Claude Haiku 4.5", why: String(localized: "最快最便宜，查词够用"))],
-        "openai": [.init(id: "gpt-5", name: "GPT-5", why: String(localized: "最聪明")),
-                   .init(id: "gpt-5-mini", name: "GPT-5 mini", why: String(localized: "快又便宜"))],
-        "deepseek": [.init(id: "deepseek-chat", name: "DeepSeek Chat", why: String(localized: "中文好，平时就用它")),
-                     .init(id: "deepseek-reasoner", name: "DeepSeek Reasoner", why: String(localized: "想得深，慢一点"))],
-        "gemini": [.init(id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", why: String(localized: "最聪明")),
-                   .init(id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", why: String(localized: "快又便宜"))],
+        "claude": [.init(id: "claude-opus-4-6", name: "Claude Opus 4.6", why: String(localized: "最聪明，读懂难书")),
+                   .init(id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", why: String(localized: "聪明又快，平时首选")),
+                   .init(id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", why: String(localized: "均衡稳定，文笔自然")),
+                   .init(id: "claude-haiku-4-5", name: "Claude Haiku 4.5", why: String(localized: "最快最省，速查够用"))],
+        "openai": [.init(id: "gpt-5", name: "GPT-5", why: String(localized: "旗舰推理，适合深读")),
+                   .init(id: "gpt-5-mini", name: "GPT-5 mini", why: String(localized: "快又省，日常问答首选")),
+                   .init(id: "gpt-4.1", name: "GPT-4.1", why: String(localized: "长文与指令遵循稳")),
+                   .init(id: "o4-mini", name: "o4-mini", why: String(localized: "擅长逻辑分析"))],
+        "deepseek": [.init(id: "deepseek-chat", name: "DeepSeek V3", why: String(localized: "中文自然，快又便宜")),
+                     .init(id: "deepseek-reasoner", name: "DeepSeek R1", why: String(localized: "深度思考，适合难书拆解"))],
+        "gemini": [.init(id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", why: String(localized: "超长上下文，整本书吃透")),
+                   .init(id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", why: String(localized: "极速响应，性价比高"))],
         "openrouter": [.init(id: "anthropic/claude-sonnet-4-5", name: "Claude Sonnet 4.5", why: String(localized: "读书最稳")),
+                       .init(id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro", why: String(localized: "超长上下文，问全书稳")),
                        .init(id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash", why: String(localized: "快又便宜")),
-                       .init(id: "deepseek/deepseek-chat", name: "DeepSeek Chat", why: String(localized: "中文好，很便宜"))],
-        "moonshot": [.init(id: "kimi-k2-turbo-preview", name: "Kimi K2 Turbo", why: String(localized: "长书一口气读完"))],
-        "dashscope": [.init(id: "qwen-max", name: String(localized: "通义 Max"), why: String(localized: "最聪明")),
-                      .init(id: "qwen-plus", name: String(localized: "通义 Plus"), why: String(localized: "快又便宜"))],
-        "zhipu": [.init(id: "glm-4.6", name: "GLM-4.6", why: String(localized: "中文好"))],
+                       .init(id: "deepseek/deepseek-chat", name: "DeepSeek V3", why: String(localized: "中文好，很省"))],
+        "moonshot": [.init(id: "kimi-k2-turbo-preview", name: "Kimi K2 Turbo", why: String(localized: "长书一口气读完")),
+                     .init(id: "kimi-latest", name: "Kimi Latest", why: String(localized: "自动跟进最新主力模型")),
+                     .init(id: "moonshot-v1-128k", name: "Moonshot 128K", why: String(localized: "长章节检索稳定"))],
+        "dashscope": [.init(id: "qwen-max", name: String(localized: "通义千问 Max"), why: String(localized: "中文旗舰")),
+                      .init(id: "qwen-plus", name: String(localized: "通义千问 Plus"), why: String(localized: "均衡好用，平时首选")),
+                      .init(id: "qwq-plus", name: "QwQ Plus", why: String(localized: "深度推理"))],
+        "zhipu": [.init(id: "glm-4.6", name: "GLM-4.6", why: String(localized: "中文旗舰，理解细腻")),
+                  .init(id: "glm-4-plus", name: "GLM-4 Plus", why: String(localized: "均衡稳定")),
+                  .init(id: "glm-4-flash", name: "GLM-4 Flash", why: String(localized: "极速免费层常用"))],
+        "volcengine": [.init(id: "doubao-seed-1-6-250615", name: String(localized: "豆包 Seed 1.6"), why: String(localized: "主力综合模型")),
+                       .init(id: "doubao-seed-1-6-thinking-250615", name: String(localized: "豆包 Seed 1.6 思考"), why: String(localized: "深度思考")),
+                       .init(id: "doubao-seed-1-6-flash-250615", name: String(localized: "豆包 Seed 1.6 Flash"), why: String(localized: "轻量极速"))],
+        "siliconflow": [.init(id: "deepseek-ai/DeepSeek-V3", name: "DeepSeek V3", why: String(localized: "日常首选")),
+                        .init(id: "deepseek-ai/DeepSeek-R1", name: "DeepSeek R1", why: String(localized: "深度推理")),
+                        .init(id: "Qwen/Qwen3-235B-A22B", name: "Qwen3 235B", why: String(localized: "通义开源旗舰"))],
+        "minimax": [.init(id: "MiniMax-M2", name: "MiniMax M2", why: String(localized: "长文本与文学语感好")),
+                    .init(id: "MiniMax-Text-01", name: "MiniMax Text 01", why: String(localized: "超长上下文"))],
+        "xai": [.init(id: "grok-4", name: "Grok 4", why: String(localized: "旗舰推理")),
+                .init(id: "grok-3-mini", name: "Grok 3 mini", why: String(localized: "轻量快速"))],
+        "mistral": [.init(id: "mistral-large-latest", name: "Mistral Large", why: String(localized: "西文理解细腻")),
+                    .init(id: "mistral-small-latest", name: "Mistral Small", why: String(localized: "快速轻量"))],
+        "groq": [.init(id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B", why: String(localized: "极速响应")),
+                 .init(id: "llama-3.1-8b-instant", name: "Llama 3.1 8B", why: String(localized: "毫秒级返回"))],
     ]
 
     private static let names: [String: String] = Dictionary(
         recommended.values.flatMap { $0 }.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
 
-    /// "Claude Sonnet 5.5" for the ones known; otherwise the id.
-    static func name(_ id: String) -> String { names[id] ?? id }
+    /// Resolves recommended models against live fetched `available` IDs when present,
+    /// or returns curated presets when the endpoint doesn't expose `GET /models`.
+    /// For multi-provider gateways (`magpie`, custom relays), surfaces smart top picks from `available`.
+    static func resolvedRecommendations(for providerID: String, available: [String]) -> [Pick] {
+        let presets = recommended[providerID, default: []]
+        if available.isEmpty {
+            return presets
+        }
+        if !presets.isEmpty {
+            var matched: [Pick] = []
+            var seen = Set<String>()
+            for p in presets {
+                if available.contains(p.id), seen.insert(p.id).inserted {
+                    matched.append(p)
+                } else if let variant = available.first(where: {
+                    $0.hasPrefix(p.id + "-") || $0.hasSuffix("/" + p.id) || $0.contains("/" + p.id + "-")
+                }), seen.insert(variant).inserted {
+                    matched.append(Pick(id: variant, name: name(variant), why: p.why))
+                }
+            }
+            if !matched.isEmpty { return matched }
+        }
+        // Gateway / local relay heuristics (e.g. magpie, OneAPI, LiteLLM): pick up to 4 standout models.
+        let patterns: [(needle: String, why: String)] = [
+            ("claude-sonnet-4", String(localized: "读书最稳，兼顾速度与理解")),
+            ("claude-opus-4", String(localized: "最聪明，适合啃难书")),
+            ("gemini-2.5-pro", String(localized: "超长上下文，适合全书检索")),
+            ("gemini-2.5-flash", String(localized: "快又省，日常随手问")),
+            ("gpt-5", String(localized: "综合推理强")),
+            ("deepseek-r1", String(localized: "深度思考")),
+            ("deepseek-chat", String(localized: "中文自然流畅")),
+            ("deepseek-v3", String(localized: "中文自然流畅")),
+        ]
+        var picks: [Pick] = []
+        var used = Set<String>()
+        for pat in patterns where picks.count < 4 {
+            if let hit = available.first(where: { $0.lowercased().contains(pat.needle) && !used.contains($0) }) {
+                used.insert(hit)
+                picks.append(Pick(id: hit, name: name(hit), why: pat.why))
+            }
+        }
+        return picks
+    }
 
-    // The last three used, newest first.
+    /// Optional routing prefix before `/` (e.g. `"auto"` in `"auto/claude-opus-4-6"`), shown as a subtle badge.
+    static func routeBadge(_ id: String) -> String? {
+        guard let slash = id.firstIndex(of: "/") else { return nil }
+        let prefix = String(id[..<slash]).trimmingCharacters(in: .whitespaces)
+        guard !prefix.isEmpty, prefix.count <= 14 else { return nil }
+        return prefix
+    }
+
+    /// Friendly maker title for filter chips (`"anthropic"` → `"Anthropic"`, `"auto"` → `"Auto"`).
+    static func makerTitle(_ raw: String) -> String {
+        switch raw.lowercased() {
+        case "auto": "Auto"
+        case "anthropic": "Anthropic"
+        case "openai": "OpenAI"
+        case "google": "Google"
+        case "deepseek", "deepseek-ai": "DeepSeek"
+        case "qwen": "Qwen"
+        case "meta-llama", "meta": "Llama"
+        case "x-ai", "xai": "xAI"
+        case "mistralai", "mistral": "Mistral"
+        case "moonshotai", "moonshot": "Kimi"
+        case "z-ai", "zhipu": "GLM"
+        default: raw
+        }
+    }
+
+    /// Human-readable model name (`"auto/claude-opus-4-6-20260205"` → `"Claude Opus 4.6"`),
+    /// keeping the distinguishing model family & version front and center instead of truncating after a prefix.
+    static func name(_ id: String) -> String {
+        if let exact = names[id] { return exact }
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return id }
+
+        // Strip leading maker/route prefix ("auto/", "anthropic/", etc.)
+        let coreRaw: String
+        if let slash = trimmed.lastIndex(of: "/"), slash < trimmed.index(before: trimmed.endIndex) {
+            coreRaw = String(trimmed[trimmed.index(after: slash)...])
+        } else {
+            coreRaw = trimmed
+        }
+        if let exactCore = names[coreRaw] { return exactCore }
+
+        // Strip trailing 8-digit release date (-20250929, -20241022) while preserving suffixes like :thinking or :free
+        var tagSuffix = ""
+        var base = coreRaw
+        if let colon = base.firstIndex(of: ":") {
+            let tag = String(base[base.index(after: colon)...])
+            base = String(base[..<colon])
+            if tag.lowercased() == "thinking" { tagSuffix = " Thinking" }
+            else if tag.lowercased() == "free" { tagSuffix = " (Free)" }
+            else if !tag.isEmpty { tagSuffix = " · \(tag)" }
+        }
+        if let m = base.wholeMatch(of: /(.+?)-20\d{6}/) {
+            base = String(m.1)
+        }
+        if let exactBase = names[base] { return exactBase + tagSuffix }
+
+        let lower = base.lowercased()
+        if lower.hasPrefix("claude-") {
+            return formatClaude(String(base.dropFirst(7))) + tagSuffix
+        }
+        if lower.hasPrefix("gpt-") {
+            return "GPT-" + String(base.dropFirst(4)) + tagSuffix
+        }
+        if lower.hasPrefix("gemini-") {
+            return "Gemini " + formatHyphenated(String(base.dropFirst(7))) + tagSuffix
+        }
+        if lower.hasPrefix("deepseek-") {
+            let rest = String(base.dropFirst(9))
+            if rest.lowercased() == "chat" { return "DeepSeek V3" + tagSuffix }
+            if rest.lowercased() == "reasoner" { return "DeepSeek R1" + tagSuffix }
+            return "DeepSeek " + formatHyphenated(rest) + tagSuffix
+        }
+        if lower.hasPrefix("qwen") {
+            return formatHyphenated(base, capitalizeFirst: true) + tagSuffix
+        }
+        return coreRaw
+    }
+
+    private static func formatClaude(_ rest: String) -> String {
+        // e.g. "opus-4-6" -> "Claude Opus 4.6", "3-7-sonnet" -> "Claude 3.7 Sonnet", "opus-4-5-thinking" -> "Claude Opus 4.5 Thinking"
+        let parts = rest.split(separator: "-").map(String.init)
+        var tokens: [String] = []
+        var i = 0
+        while i < parts.count {
+            let p = parts[i]
+            if let _ = Int(p), i + 1 < parts.count, let next = Int(parts[i + 1]), next < 20 {
+                tokens.append("\(p).\(next)")
+                i += 2
+            } else {
+                tokens.append(p.prefix(1).uppercased() + p.dropFirst())
+                i += 1
+            }
+        }
+        return "Claude " + tokens.joined(separator: " ")
+    }
+
+    private static func formatHyphenated(_ s: String, capitalizeFirst: Bool = false) -> String {
+        let parts = s.split(separator: "-").map(String.init)
+        return parts.enumerated().map { idx, p in
+            let low = p.lowercased()
+            if ["pro", "flash", "lite", "mini", "nano", "max", "plus", "turbo", "preview", "thinking", "v3", "r1"].contains(low) {
+                return low.count <= 2 ? low.uppercased() : low.prefix(1).uppercased() + low.dropFirst()
+            }
+            if idx == 0 && capitalizeFirst {
+                return p.prefix(1).uppercased() + p.dropFirst()
+            }
+            return p
+        }.joined(separator: " ")
+    }
+
+    // MARK: Cached server models & recents
+
+    static func cached(_ provider: String) -> [String] {
+        UserDefaults.standard.stringArray(forKey: "companion.models.\(provider)") ?? []
+    }
+
+    static func saveCached(_ list: [String], provider: String) {
+        guard !provider.isEmpty, !list.isEmpty else { return }
+        UserDefaults.standard.set(Array(list.sorted().prefix(500)), forKey: "companion.models.\(provider)")
+    }
+
+    // The last four used on a single provider, newest first.
     static func recent(_ provider: String) -> [String] {
         UserDefaults.standard.stringArray(forKey: "companion.recent.\(provider)") ?? []
     }
@@ -582,14 +904,177 @@ enum ModelNames {
     static func used(_ id: String, provider: String) {
         guard !id.isEmpty else { return }
         let list = [id] + recent(provider).filter { $0 != id }
-        UserDefaults.standard.set(Array(list.prefix(3)), forKey: "companion.recent.\(provider)")
+        UserDefaults.standard.set(Array(list.prefix(4)), forKey: "companion.recent.\(provider)")
+        recordGlobalRecent(provider: provider, model: id)
     }
 
-    /// "anthropic/claude-…" by the part before the slash, when enough of them have one.
+    // MARK: Cross-provider favorites, global recents & fuzzy search
+
+    struct Entry: Identifiable, Hashable {
+        let provider: CompanionProvider
+        let model: String
+        var id: String { "\(provider.id)::\(model)" }
+    }
+
+    private static let appleModelID = "apple-on-device"
+
+    static func entryKey(provider: String, model: String) -> String {
+        "\(provider)::\(model)"
+    }
+
+    private static func resolveEntry(_ key: String, validProviders: [String: CompanionProvider]) -> Entry? {
+        guard let sep = key.range(of: "::") else { return nil }
+        let pid = String(key[..<sep.lowerBound])
+        let mid = String(key[sep.upperBound...])
+        guard !mid.isEmpty, let p = validProviders[pid] else { return nil }
+        return Entry(provider: p, model: mid)
+    }
+
+    static func starredEntries(among providers: [CompanionProvider]) -> [Entry] {
+        let map = Dictionary(uniqueKeysWithValues: providers.map { ($0.id, $0) })
+        let raw = UserDefaults.standard.stringArray(forKey: "companion.starred") ?? []
+        return raw.compactMap { resolveEntry($0, validProviders: map) }
+    }
+
+    static func isStarred(provider: String, model: String) -> Bool {
+        let key = entryKey(provider: provider, model: model)
+        return (UserDefaults.standard.stringArray(forKey: "companion.starred") ?? []).contains(key)
+    }
+
+    static func toggleStar(provider: String, model: String) {
+        let key = entryKey(provider: provider, model: model)
+        var list = UserDefaults.standard.stringArray(forKey: "companion.starred") ?? []
+        if let idx = list.firstIndex(of: key) {
+            list.remove(at: idx)
+        } else {
+            list.insert(key, at: 0)
+        }
+        UserDefaults.standard.set(Array(list.prefix(30)), forKey: "companion.starred")
+    }
+
+    static func globalRecents(among providers: [CompanionProvider]) -> [Entry] {
+        let map = Dictionary(uniqueKeysWithValues: providers.map { ($0.id, $0) })
+        let raw = UserDefaults.standard.stringArray(forKey: "companion.recentGlobal") ?? []
+        return raw.compactMap { resolveEntry($0, validProviders: map) }
+    }
+
+    static func recordGlobalRecent(provider: String, model: String) {
+        guard !provider.isEmpty, !model.isEmpty else { return }
+        let key = entryKey(provider: provider, model: model)
+        let existing = UserDefaults.standard.stringArray(forKey: "companion.recentGlobal") ?? []
+        let updated = [key] + existing.filter { $0 != key }
+        UserDefaults.standard.set(Array(updated.prefix(8)), forKey: "companion.recentGlobal")
+    }
+
+    /// Immediate 0ms model pool for a provider: cached live server list, or curated presets + saved model.
+    static func availablePool(for provider: CompanionProvider) -> [String] {
+        if provider.kind == .apple { return [appleModelID] }
+        let saved = CompanionConfig.saved(provider).model
+        var out: [String] = []
+        var seen = Set<String>()
+        func add(_ m: String) {
+            let t = m.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty, seen.insert(t).inserted { out.append(t) }
+        }
+        let serverList = cached(provider.id)
+        if !serverList.isEmpty {
+            add(saved)
+            for m in recent(provider.id) where serverList.contains(m) { add(m) }
+            for r in resolvedRecommendations(for: provider.id, available: serverList) { add(r.id) }
+            for m in serverList { add(m) }
+        } else {
+            add(saved)
+            for m in recent(provider.id) { add(m) }
+            for r in recommended[provider.id, default: []] { add(r.id) }
+            add(provider.defaultModel)
+        }
+        return out
+    }
+
+    /// Model family chip label regardless of gateway routing prefix (`"auto/claude-opus-4-6"` → `"Claude"`).
+    static func family(of id: String) -> String {
+        let low = id.lowercased()
+        if low == appleModelID { return "Apple" }
+        if low.contains("claude") { return "Claude" }
+        if low.contains("gpt-") || low.contains("/o1") || low.contains("/o3") || low.contains("/o4")
+            || low.hasPrefix("o1") || low.hasPrefix("o3") || low.hasPrefix("o4") || low.contains("chatgpt") { return "GPT" }
+        if low.contains("gemini") || low.contains("gemma") { return "Gemini" }
+        if low.contains("deepseek") { return "DeepSeek" }
+        if low.contains("qwen") || low.contains("qwq") { return "Qwen" }
+        if low.contains("glm") || low.contains("chatglm") { return "GLM" }
+        if low.contains("kimi") || low.contains("moonshot") { return "Kimi" }
+        if low.contains("llama") { return "Llama" }
+        if low.contains("grok") { return "Grok" }
+        if low.contains("mistral") || low.contains("codestral") || low.contains("pixtral") { return "Mistral" }
+        if low.contains("doubao") { return String(localized: "豆包") }
+        if low.contains("minimax") { return "MiniMax" }
+        return String(localized: "其他")
+    }
+
+    /// Substring + compact initials/version subsequence match (e.g. `"co46"` matches `"Claude Opus 4.6"`).
+    static func matches(query: String, id: String, providerTitle: String = "") -> Bool {
+        let q = query.lowercased().filter { !$0.isWhitespace }
+        if q.isEmpty { return true }
+        let display = id == appleModelID ? String(localized: "Apple 智能 本机") : name(id)
+        let full = "\(display) \(id) \(providerTitle)".lowercased()
+        let stripped = full.filter { !$0.isWhitespace }
+        if stripped.contains(q) { return true }
+
+        // Build compact abbreviation from word initials + digits ("Claude Opus 4.6" -> "co46")
+        var abbr = ""
+        var prevBoundary = true
+        for ch in display.lowercased() {
+            if ch.isNumber {
+                abbr.append(ch)
+                prevBoundary = false
+            } else if ch.isLetter {
+                if prevBoundary { abbr.append(ch) }
+                prevBoundary = false
+            } else {
+                prevBoundary = true
+            }
+        }
+        if abbr.contains(q) { return true }
+
+        // Ordered subsequence match across display name + raw id for fast shorthand queries
+        let compactTarget = (display + id).lowercased().filter { $0.isLetter || $0.isNumber }
+        var qi = q.startIndex
+        for ch in compactTarget where qi < q.endIndex {
+            if ch == q[qi] { qi = q.index(after: qi) }
+        }
+        return qi == q.endIndex
+    }
+
+    /// Short recommendation tag if this model matches a curated pick.
+    static func blurb(for id: String, providerID: String) -> String? {
+        if id == appleModelID { return String(localized: "在这台 Mac 上，不联网") }
+        if let hit = recommended[providerID]?.first(where: { $0.id == id || id.hasSuffix("/" + $0.id) || id.hasPrefix($0.id + "-") }) {
+            return hit.why
+        }
+        let low = id.lowercased()
+        if low.contains("opus-4") { return String(localized: "深度精读") }
+        if low.contains("sonnet-4") { return String(localized: "均衡主力") }
+        if low.contains("haiku") { return String(localized: "极速轻量") }
+        if low.contains("gemini-2.5-pro") { return String(localized: "超长全书检索") }
+        if low.contains("deepseek-r1") || low.contains("reasoner") || low.contains("thinking") || low.contains("qwq") { return String(localized: "深度思考") }
+        return nil
+    }
+
+    /// "anthropic/claude-…" by the part before the slash, when at least 2 groups exist.
     static func groups(_ ids: [String]) -> [(maker: String, models: [String])] {
-        guard ids.count > 12, ids.filter({ $0.contains("/") }).count * 2 > ids.count else { return [("", ids)] }
-        let grouped = Dictionary(grouping: ids) { $0.split(separator: "/").first.map(String.init) ?? "" }
-        return grouped.keys.sorted().map { ($0.isEmpty ? String(localized: "其他") : $0, grouped[$0]!) }
+        guard ids.count > 8, ids.contains(where: { $0.contains("/") }) else { return [("", ids)] }
+        let grouped = Dictionary(grouping: ids) { id -> String in
+            guard let slash = id.firstIndex(of: "/") else { return "" }
+            return String(id[..<slash])
+        }
+        guard grouped.keys.count > 1 else { return [("", ids)] }
+        return grouped.keys.sorted { a, b in
+            if a == "auto" { return true }
+            if b == "auto" { return false }
+            if a.isEmpty { return false }
+            if b.isEmpty { return true }
+            return a.localizedStandardCompare(b) == .orderedAscending
+        }.map { ($0.isEmpty ? String(localized: "其他") : $0, grouped[$0]!) }
     }
 }
 
@@ -598,7 +1083,7 @@ enum ModelNames {
 /// A service's logo on a white tile, as System Settings shows apps; this Mac's own is Apple 智能's
 /// many-coloured mark.
 struct ServiceTile: View {
-    enum Mark { case provider(CompanionProvider), cloud(CloudVoice.Provider), thisMac, laptop, phone, add }
+    enum Mark { case provider(CompanionProvider), cloud(CloudVoice.Provider), kokoro, thisMac, laptop, phone, add }
     let mark: Mark
     var size: CGFloat = 30
 
@@ -606,6 +1091,12 @@ struct ServiceTile: View {
         let r = size * 0.25
         Group {
             switch mark {
+            case .kokoro:
+                Image(systemName: "waveform")
+                    .font(.system(size: size * 0.46, weight: .semibold))
+                    .foregroundStyle(YYTint.standard.accent)
+                    .frame(width: size, height: size)
+                    .background(tile(r))
             case .add:
                 Image(systemName: "plus").font(.yy(size: PanelScale.k * size * 0.4, weight: .medium)).foregroundStyle(YYColor.t2)
                     .frame(width: size, height: size)
@@ -641,6 +1132,14 @@ struct ServiceTile: View {
                         Image("brand-\(p.id)").resizable().scaledToFit()
                     } else if ServiceTile.hasImage("provider-\(p.id)") {
                         Image("provider-\(p.id)").resizable().scaledToFit().foregroundStyle(Color(yy: YYRGBA(42, 43, 46, 1)))
+                    } else if p == .free {
+                        Image(systemName: "globe.asia.australia.fill")
+                            .font(.system(size: size * 0.44, weight: .medium))
+                            .foregroundStyle(YYColor.ok)
+                    } else if p == .fish {
+                        Image(systemName: "fish.fill")
+                            .font(.system(size: size * 0.42, weight: .medium))
+                            .foregroundStyle(Color(red: 0.14, green: 0.52, blue: 0.94))
                     } else if p == .xiaomi {
                         Text("mi")
                             .font(.system(size: PanelScale.k * size * 0.36, weight: .bold, design: .rounded))
@@ -1359,3 +1858,668 @@ struct CompanionUsageAndCostSection: View {
         return String(localized: "认人、错字整理、提要优先用同厂轻量模型，并自动启用提示词缓存")
     }
 }
+
+#if os(macOS)
+// MARK: - Reader Companion Model Picker (Scheme A: Split Provider Rail + Model List)
+
+/// Compact model trigger pill inside 书伴's input box: shows provider tile, clean model name,
+/// provider tag, and opens the Scheme A split multi-provider model popover.
+struct CompanionModelPill: View {
+    @Binding var open: Bool
+    let openSettings: () -> Void
+
+    @AppStorage("companion.provider") private var activeProviderID = ""
+    @State private var hover = false
+    private var focus: CompanionFocus { .shared }
+
+    var body: some View {
+        let _ = focus.tick
+        let _ = activeProviderID
+        let config = CompanionConfig.current
+        let isApple = config.provider.kind == .apple
+        let title: String = if isApple {
+            String(localized: "Apple 智能")
+        } else if config.model.isEmpty {
+            String(localized: "选择模型…")
+        } else {
+            ModelNames.name(config.model)
+        }
+
+        Button { open.toggle() } label: {
+            HStack(spacing: 5) {
+                ServiceTile(mark: isApple ? .thisMac : .provider(config.provider), size: 16)
+                Text(title)
+                    .font(.yy(size: 11, weight: .semibold))
+                    .foregroundStyle(config.isReady ? YYColor.t1 : YYColor.t2)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if !isApple {
+                    Text(config.provider.title)
+                        .font(.yy(size: 9.5, weight: .medium))
+                        .foregroundStyle(YYColor.t2)
+                        .lineLimit(1)
+                        .padding(.horizontal, 4.5)
+                        .padding(.vertical, 1.5)
+                        .background(YYColor.inset, in: .rect(cornerRadius: 4))
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.yy(size: 8.5, weight: .semibold))
+                    .foregroundStyle(YYColor.t3)
+            }
+            .padding(.leading, 5)
+            .padding(.trailing, 7)
+            .frame(height: 26)
+            .background(hover || open ? YYColor.inset : YYColor.card, in: .capsule)
+            .overlay(Capsule().strokeBorder(YYColor.line, lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.03), radius: 1, y: 1)
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help(config.isReady ? config.label : String(localized: "切换服务商与模型"))
+        .accessibilityLabel(Text("选择模型"))
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            CompanionModelPicker(
+                openSettings: {
+                    open = false
+                    openSettings()
+                },
+                close: { open = false }
+            )
+            .presentationBackground(YYColor.card)
+        }
+    }
+}
+
+/// Scheme A Split Master-Detail Popover:
+/// Left vertical rail holds ★ 常用收藏, 🕘 最近用过, and all added providers with real brand tiles;
+/// Right pane provides family filter chips, subsequence abbreviation search (`co46`, `dsr1`),
+/// hover-to-star favorites, and instant custom model ID submission.
+private struct CompanionModelPicker: View {
+    enum Nav: Hashable {
+        case starred
+        case recent
+        case provider(String)
+    }
+
+    let openSettings: () -> Void
+    let close: () -> Void
+
+    @State private var nav: Nav = .starred
+    @State private var query = ""
+    @State private var selectedFamily: String?
+    @State private var livePools: [String: [String]] = [:]
+    @State private var loadingProvider: String?
+    @State private var starTick = 0
+    @FocusState private var searchFocused: Bool
+    @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
+    private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
+    private var focus: CompanionFocus { .shared }
+
+    private var allProviders: [CompanionProvider] {
+        var out: [CompanionProvider] = [.apple]
+        var seen: Set<String> = [CompanionProvider.apple.id]
+        for p in CompanionProvider.added where seen.insert(p.id).inserted {
+            out.append(p)
+        }
+        return out
+    }
+
+    private var readyProviders: [CompanionProvider] {
+        allProviders.filter { CompanionConfig.saved($0).isConnected }
+    }
+
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        let _ = focus.tick
+        let _ = starTick
+        let current = CompanionConfig.current
+        let starred = ModelNames.starredEntries(among: readyProviders)
+        let recents = ModelNames.globalRecents(among: readyProviders)
+
+        VStack(spacing: 0) {
+            searchHeader
+            Rectangle().fill(YYColor.line).frame(height: 0.5)
+            HStack(spacing: 0) {
+                leftRail(starredCount: starred.count, recentCount: recents.count)
+                Rectangle().fill(YYColor.line).frame(width: 0.5)
+                rightPane(current: current, starred: starred, recents: recents)
+            }
+        }
+        .frame(width: 460, height: 368)
+        .background(YYColor.card)
+        .onAppear {
+            let initialStarred = ModelNames.starredEntries(among: readyProviders)
+            if !initialStarred.isEmpty && current.isReady {
+                nav = .starred
+            } else {
+                nav = .provider(current.provider.id)
+            }
+            searchFocused = true
+            Task { await warmPools() }
+        }
+        .onChange(of: nav) { _, next in
+            selectedFamily = nil
+            if case .provider(let pid) = next,
+               let p = allProviders.first(where: { $0.id == pid }),
+               p.kind != .apple,
+               CompanionConfig.saved(p).isConnected {
+                Task { await fetchModels(for: p, force: false) }
+            }
+        }
+    }
+
+    // MARK: Search Header
+
+    private var searchHeader: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.yy(size: 11.5, weight: .medium))
+                .foregroundStyle(YYColor.t3)
+            TextField("", text: $query, prompt: Text("搜全量模型、ID 或缩写（如 co46 / dsr1）…"))
+                .textFieldStyle(.plain)
+                .font(.yy(size: 12))
+                .foregroundStyle(YYColor.t1)
+                .focused($searchFocused)
+                .onSubmit { submitSearch() }
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.yy(size: 12))
+                        .foregroundStyle(YYColor.t3)
+                }
+                .buttonStyle(.plain)
+                .help(Text("清除搜索"))
+            } else {
+                Button(action: openSettings) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.yy(size: 11.5, weight: .medium))
+                        .foregroundStyle(YYColor.t2)
+                        .frame(width: 24, height: 24)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(HoverCircleStyle())
+                .help(Text("书伴设置…"))
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 40)
+    }
+
+    // MARK: Left Provider Rail
+
+    private func leftRail(starredCount: Int, recentCount: Int) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                railRow(target: .starred, title: String(localized: "常用收藏"), badge: "\(starredCount)") {
+                    Image(systemName: "star.fill")
+                        .font(.yy(size: 10.5))
+                        .foregroundStyle(Color(red: 0.85, green: 0.57, blue: 0.15))
+                        .frame(width: 17, height: 17)
+                }
+                railRow(target: .recent, title: String(localized: "最近用过"), badge: "\(recentCount)") {
+                    Image(systemName: "clock")
+                        .font(.yy(size: 10.5, weight: .medium))
+                        .foregroundStyle(YYColor.t2)
+                        .frame(width: 17, height: 17)
+                }
+
+                Rectangle().fill(YYColor.line).frame(height: 0.5)
+                    .padding(.horizontal, 6).padding(.vertical, 5)
+
+                Text(String(localized: "服务商 (\(readyProviders.count))"))
+                    .font(.yy(size: 10, weight: .semibold))
+                    .foregroundStyle(YYColor.t3)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 2)
+
+                ForEach(allProviders) { p in
+                    let cfg = CompanionConfig.saved(p)
+                    let countText: String = if p.kind == .apple {
+                        cfg.isConnected ? "1" : String(localized: "未开启")
+                    } else if !cfg.isConnected {
+                        String(localized: "未填")
+                    } else {
+                        "\(pool(for: p).count)"
+                    }
+                    railRow(target: .provider(p.id), title: p.title, badge: countText, dimmed: !cfg.isConnected) {
+                        ServiceTile(mark: p.kind == .apple ? .thisMac : .provider(p), size: 17)
+                    }
+                }
+            }
+            .padding(6)
+        }
+        .scrollIndicators(.never)
+        .frame(width: 148)
+        .background(YYColor.bg)
+    }
+
+    private func railRow<Icon: View>(
+        target: Nav,
+        title: String,
+        badge: String,
+        dimmed: Bool = false,
+        @ViewBuilder icon: () -> Icon
+    ) -> some View {
+        let selected = trimmedQuery.isEmpty && nav == target
+        return Button {
+            query = ""
+            nav = target
+        } label: {
+            HStack(spacing: 7) {
+                icon()
+                Text(title)
+                    .font(.yy(size: 11.5, weight: selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? YYColor.t1 : YYColor.t2)
+                    .lineLimit(1)
+                Spacer(minLength: 2)
+                Text(badge)
+                    .font(.yy(size: 10).monospacedDigit())
+                    .foregroundStyle(YYColor.t3)
+                    .lineLimit(1)
+            }
+            .opacity(dimmed ? 0.55 : 1)
+            .padding(.horizontal, 7)
+            .frame(height: 29)
+            .background {
+                if selected {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(YYColor.card)
+                        .shadow(color: .black.opacity(0.05), radius: 1.5, y: 1)
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(YYColor.line, lineWidth: 0.5))
+                }
+            }
+            .contentShape(.rect(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Right Model List Pane
+
+    @ViewBuilder
+    private func rightPane(
+        current: CompanionConfig,
+        starred: [ModelNames.Entry],
+        recents: [ModelNames.Entry]
+    ) -> some View {
+        if trimmedQuery.isEmpty, case .provider(let pid) = nav,
+           let p = allProviders.first(where: { $0.id == pid }),
+           !CompanionConfig.saved(p).isConnected {
+            unconfiguredState(for: p)
+        } else {
+            let state = resolvedEntries(starred: starred, recents: recents)
+            VStack(spacing: 0) {
+                if state.families.count > 1 || state.refreshTarget != nil {
+                    HStack(spacing: 6) {
+                        if state.families.count > 1 {
+                            ScrollView(.horizontal) {
+                                HStack(spacing: 4) {
+                                    familyChip(label: String(localized: "全部"), value: nil)
+                                    ForEach(state.families, id: \.self) { fam in
+                                        familyChip(label: fam, value: fam)
+                                    }
+                                }
+                            }
+                            .scrollIndicators(.never)
+                        } else {
+                            Text(state.refreshTarget?.title ?? "")
+                                .font(.yy(size: 11, weight: .semibold))
+                                .foregroundStyle(YYColor.t2)
+                            Spacer(minLength: 0)
+                        }
+                        if let p = state.refreshTarget, p.kind != .apple {
+                            Button { Task { await fetchModels(for: p, force: true) } } label: {
+                                Group {
+                                    if loadingProvider == p.id {
+                                        ProgressView().controlSize(.mini)
+                                    } else {
+                                        Image(systemName: "arrow.clockwise")
+                                            .font(.yy(size: 10.5, weight: .medium))
+                                            .foregroundStyle(YYColor.t2)
+                                    }
+                                }
+                                .frame(width: 22, height: 22)
+                                .contentShape(.circle)
+                            }
+                            .buttonStyle(HoverCircleStyle())
+                            .disabled(loadingProvider == p.id)
+                            .help(Text("从服务商刷新模型列表"))
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .overlay(alignment: .bottom) { Rectangle().fill(YYColor.line).frame(height: 0.5) }
+                }
+
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(state.entries) { entry in
+                            CompanionModelRow(
+                                entry: entry,
+                                showProvider: state.showProvider,
+                                isActive: isEntryActive(entry, current: current),
+                                isStarred: ModelNames.isStarred(provider: entry.provider.id, model: entry.model),
+                                accent: tint.accent,
+                                selectedFill: tint.accentSoft.opacity(0.65),
+                                onPick: { select(entry) },
+                                onToggleStar: {
+                                    ModelNames.toggleStar(provider: entry.provider.id, model: entry.model)
+                                    starTick &+= 1
+                                }
+                            )
+                        }
+
+                        if let customTarget = customIDTargetProvider,
+                           !trimmedQuery.isEmpty,
+                           !state.entries.contains(where: { $0.provider.id == customTarget.id && $0.model == trimmedQuery }) {
+                            Button {
+                                select(ModelNames.Entry(provider: customTarget, model: trimmedQuery))
+                            } label: {
+                                HStack(spacing: 6) {
+                                    ServiceTile(mark: .provider(customTarget), size: 15)
+                                    (Text(String(localized: "在 \(customTarget.title) 使用 ID："))
+                                        .foregroundStyle(YYColor.t2)
+                                     + Text(trimmedQuery)
+                                        .font(.yy(size: 11.5, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(tint.accent))
+                                        .font(.yy(size: 11.5))
+                                        .lineLimit(1)
+                                    Spacer(minLength: 4)
+                                    Text("↵").font(.yy(size: 11)).foregroundStyle(tint.accent)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .strokeBorder(YYColor.line, style: StrokeStyle(lineWidth: 0.8, dash: [4, 3]))
+                                )
+                                .contentShape(.rect(cornerRadius: 8))
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.top, 4)
+                        }
+
+                        if state.entries.isEmpty && trimmedQuery.isEmpty {
+                            emptyHint
+                        }
+                    }
+                    .padding(6)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func familyChip(label: String, value: String?) -> some View {
+        let on = selectedFamily == value
+        return Button { selectedFamily = value } label: {
+            Text(label)
+                .font(.yy(size: 10.5, weight: on ? .semibold : .regular))
+                .foregroundStyle(on ? tint.accent : YYColor.t2)
+                .padding(.horizontal, 8)
+                .frame(height: 21)
+                .background(on ? tint.accentSoft : YYColor.inset, in: .capsule)
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func unconfiguredState(for provider: CompanionProvider) -> some View {
+        VStack(spacing: 10) {
+            ServiceTile(mark: provider.kind == .apple ? .thisMac : .provider(provider), size: 32)
+            Text(provider.kind == .apple
+                 ? (Companion.appleAvailability ?? String(localized: "Apple 智能暂不可用"))
+                 : String(localized: "还没填好 \(provider.title) 的 Key"))
+                .font(.yy(size: 12))
+                .foregroundStyle(YYColor.t2)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 20)
+            Button("去设置 · 书伴") { openSettings() }
+                .buttonStyle(YYButtonStyle(kind: .main, size: .small))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var emptyHint: some View {
+        VStack(spacing: 6) {
+            Image(systemName: nav == .starred ? "star" : "clock")
+                .font(.yy(size: 20, weight: .light))
+                .foregroundStyle(YYColor.t3)
+            Text(nav == .starred
+                 ? String(localized: "点模型右侧的 ★ 把常用模型收进这里")
+                 : String(localized: "切换过的模型会出现在这里"))
+                .font(.yy(size: 11.5))
+                .foregroundStyle(YYColor.t3)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 72)
+    }
+
+    // MARK: Data & Selection
+
+    private func pool(for provider: CompanionProvider) -> [String] {
+        if let live = livePools[provider.id], !live.isEmpty {
+            let saved = CompanionConfig.saved(provider).model
+            if !saved.isEmpty && !live.contains(saved) {
+                return [saved] + live
+            }
+            return live
+        }
+        return ModelNames.availablePool(for: provider)
+    }
+
+    private var customIDTargetProvider: CompanionProvider? {
+        if case .provider(let pid) = nav,
+           let p = readyProviders.first(where: { $0.id == pid && $0.kind != .apple }) {
+            return p
+        }
+        let cur = CompanionConfig.current.provider
+        if cur.kind != .apple, CompanionConfig.saved(cur).isConnected { return cur }
+        return readyProviders.first(where: { $0.kind != .apple })
+    }
+
+    private func resolvedEntries(
+        starred: [ModelNames.Entry],
+        recents: [ModelNames.Entry]
+    ) -> (entries: [ModelNames.Entry], families: [String], showProvider: Bool, refreshTarget: CompanionProvider?) {
+        if !trimmedQuery.isEmpty {
+            var hits: [ModelNames.Entry] = []
+            for p in readyProviders {
+                for m in pool(for: p) where ModelNames.matches(query: trimmedQuery, id: m, providerTitle: p.title) {
+                    hits.append(ModelNames.Entry(provider: p, model: m))
+                }
+            }
+            return (hits, [], true, nil)
+        }
+        switch nav {
+        case .starred:
+            return (starred, [], true, nil)
+        case .recent:
+            return (recents, [], true, nil)
+        case .provider(let pid):
+            guard let p = readyProviders.first(where: { $0.id == pid }) else {
+                return ([], [], false, nil)
+            }
+            let models = pool(for: p)
+            var seenFam = Set<String>()
+            var fams: [String] = []
+            for m in models {
+                let f = ModelNames.family(of: m)
+                if seenFam.insert(f).inserted { fams.append(f) }
+            }
+            let filtered = models.filter { selectedFamily == nil || ModelNames.family(of: $0) == selectedFamily }
+            return (filtered.map { ModelNames.Entry(provider: p, model: $0) },
+                    fams.count > 1 ? fams : [],
+                    false,
+                    p.kind == .apple ? nil : p)
+        }
+    }
+
+    private func isEntryActive(_ entry: ModelNames.Entry, current: CompanionConfig) -> Bool {
+        guard current.provider.id == entry.provider.id else { return false }
+        if entry.provider.kind == .apple { return true }
+        return current.model == entry.model
+    }
+
+    private func submitSearch() {
+        guard !trimmedQuery.isEmpty else { return }
+        let starred = ModelNames.starredEntries(among: readyProviders)
+        let recents = ModelNames.globalRecents(among: readyProviders)
+        let hits = resolvedEntries(starred: starred, recents: recents).entries
+        if let first = hits.first {
+            select(first)
+        } else if let target = customIDTargetProvider {
+            select(ModelNames.Entry(provider: target, model: trimmedQuery))
+        }
+    }
+
+    private func select(_ entry: ModelNames.Entry) {
+        let prev = CompanionConfig.current
+        if prev.isReady {
+            let prevModel = prev.provider.kind == .apple ? "apple-on-device" : prev.model
+            ModelNames.recordGlobalRecent(provider: prev.provider.id, model: prevModel)
+        }
+
+        if entry.provider.kind == .apple {
+            UserDefaults.standard.set(CompanionProvider.apple.id, forKey: "companion.provider")
+            ModelNames.recordGlobalRecent(provider: CompanionProvider.apple.id, model: entry.model)
+        } else {
+            var next = CompanionConfig.saved(entry.provider)
+            if !next.model.isEmpty && next.model != entry.model {
+                ModelNames.used(next.model, provider: entry.provider.id)
+            }
+            next.model = entry.model
+            CompanionConfig.current = next
+            ModelNames.recordGlobalRecent(provider: entry.provider.id, model: entry.model)
+        }
+        focus.reload()
+        close()
+    }
+
+    private func warmPools() async {
+        for p in readyProviders where p.kind != .apple && ModelNames.cached(p.id).isEmpty {
+            await fetchModels(for: p, force: false)
+        }
+    }
+
+    private func fetchModels(for provider: CompanionProvider, force: Bool) async {
+        guard provider.kind != .apple else { return }
+        if !force, livePools[provider.id] != nil { return }
+        let cfg = CompanionConfig.saved(provider)
+        guard cfg.isConnected else { return }
+        loadingProvider = provider.id
+        defer { if loadingProvider == provider.id { loadingProvider = nil } }
+        if let fetched = try? await Companion.models(cfg), !fetched.isEmpty {
+            var ordered: [String] = []
+            var seen = Set<String>()
+            for r in ModelNames.resolvedRecommendations(for: provider.id, available: fetched) where seen.insert(r.id).inserted {
+                ordered.append(r.id)
+            }
+            for m in fetched.sorted() where seen.insert(m).inserted {
+                ordered.append(m)
+            }
+            livePools[provider.id] = ordered
+        }
+    }
+}
+
+private struct CompanionModelRow: View {
+    let entry: ModelNames.Entry
+    let showProvider: Bool
+    let isActive: Bool
+    let isStarred: Bool
+    let accent: Color
+    let selectedFill: Color
+    let onPick: () -> Void
+    let onToggleStar: () -> Void
+
+    @State private var hover = false
+
+    var body: some View {
+        let isApple = entry.provider.kind == .apple
+        let displayName = isApple ? String(localized: "Apple 智能（本机）") : ModelNames.name(entry.model)
+        let route = isApple ? nil : ModelNames.routeBadge(entry.model)
+        let blurb = ModelNames.blurb(for: entry.model, providerID: entry.provider.id)
+        let subtitle: String = {
+            var parts: [String] = []
+            if showProvider { parts.append(entry.provider.title) }
+            if let blurb {
+                parts.append(blurb)
+            } else if !isApple, entry.model != displayName {
+                parts.append(entry.model)
+            }
+            return parts.joined(separator: " · ")
+        }()
+
+        HStack(spacing: 4) {
+            Button(action: onPick) {
+                HStack(spacing: 8) {
+                    if showProvider {
+                        ServiceTile(mark: isApple ? .thisMac : .provider(entry.provider), size: 17)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 5) {
+                            Text(displayName)
+                                .font(.yy(size: 12, weight: .semibold))
+                                .foregroundStyle(YYColor.t1)
+                                .lineLimit(1)
+                            if let route {
+                                Text(route)
+                                    .font(.yy(size: 9.5, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(YYColor.t2)
+                                    .padding(.horizontal, 4.5)
+                                    .padding(.vertical, 1)
+                                    .background(YYColor.inset, in: .rect(cornerRadius: 4))
+                                    .fixedSize()
+                            }
+                        }
+                        if !subtitle.isEmpty {
+                            Text(subtitle)
+                                .font(.yy(size: 10))
+                                .foregroundStyle(YYColor.t3)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+
+            Button(action: onToggleStar) {
+                Image(systemName: isStarred ? "star.fill" : "star")
+                    .font(.yy(size: 11, weight: .medium))
+                    .foregroundStyle(isStarred ? Color(red: 0.85, green: 0.57, blue: 0.15) : YYColor.t3)
+                    .frame(width: 24, height: 24)
+                    .opacity(isStarred ? 1 : (hover ? 0.85 : 0))
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help(isStarred ? Text("移出常用收藏") : Text("加入常用收藏"))
+
+            Button(action: onPick) {
+                Image(systemName: "checkmark")
+                    .font(.yy(size: 10.5, weight: .bold))
+                    .foregroundStyle(accent)
+                    .frame(width: 14, height: 24)
+                    .opacity(isActive ? 1 : 0)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6.5)
+        .background(
+            RoundedRectangle(cornerRadius: 8.5)
+                .fill(isActive ? selectedFill : (hover ? YYColor.inset.opacity(0.75) : .clear))
+        )
+        .onHover { hover = $0 }
+    }
+}
+#endif

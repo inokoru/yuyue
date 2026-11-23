@@ -859,14 +859,20 @@ enum Companion {
         } else if let array = raw as? [[String: Any]] {
             list = array
         } else if let strings = raw as? [String] {
-            return Array(Set(strings.map { $0.hasPrefix("models/") ? String($0.dropFirst(7)) : $0 }.filter { !$0.isEmpty })).sorted()
+            let cleaned = Array(Set(strings.map { $0.hasPrefix("models/") ? String($0.dropFirst(7)) : $0 }.filter { !$0.isEmpty })).sorted()
+            if !cleaned.isEmpty { ModelNames.saveCached(cleaned, provider: config.provider.id) }
+            return cleaned
         } else {
             list = []
         }
         var seen = Set<String>()
-        return list.compactMap { ($0["id"] ?? $0["name"]) as? String }
+        let result = list.compactMap { ($0["id"] ?? $0["name"]) as? String }
             .map { $0.hasPrefix("models/") ? String($0.dropFirst(7)) : $0 }
             .filter { !$0.isEmpty && seen.insert($0).inserted }
+        if !result.isEmpty {
+            ModelNames.saveCached(result, provider: config.provider.id)
+        }
+        return result
     }
 
     /// A streamed answer (server-sent events), joined: `text` takes what each event adds.

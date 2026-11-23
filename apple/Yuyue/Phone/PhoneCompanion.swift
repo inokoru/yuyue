@@ -8,11 +8,19 @@ struct PhoneCompanion: View {
     @Bindable var model: ReaderModel
     @State private var draft = ""
     @State private var settings = false
+    @State private var slashDismissedForDraft: String?
     @FocusState private var typing: Bool
     @Environment(\.colorScheme) private var scheme
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
     private var companion: BookCompanion { model.companion }
+
+    private var slashMatches: [CompanionCommand] {
+        guard let q = CompanionCommand.slashQuery(in: draft),
+              slashDismissedForDraft != draft
+        else { return [] }
+        return CompanionCommand.matching(q)
+    }
 
     var body: some View {
         NavigationStack {
@@ -20,11 +28,16 @@ struct PhoneCompanion: View {
                 mode.padding(.horizontal, 16).padding(.top, 4)
                 chat
                 VStack(alignment: .leading, spacing: 8) {
-                    if let quote = model.companionQuote { quoted(quote).transition(.opacity) }
-                    suggestions
+                    if !slashMatches.isEmpty {
+                        slashCard.transition(.opacity)
+                    } else {
+                        if let quote = model.companionQuote { quoted(quote).transition(.opacity) }
+                        suggestions
+                    }
                     input
                 }
                 .animation(YYMotion.layout, value: model.companionQuote != nil)
+                .animation(YYMotion.quick, value: slashMatches.isEmpty)
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
                 .padding(.bottom, 4)
@@ -52,6 +65,9 @@ struct PhoneCompanion: View {
                         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { settings = false } } }
                 }
             }
+        }
+        .onChange(of: draft) { _, new in
+            if slashDismissedForDraft != new { slashDismissedForDraft = nil }
         }
         .onDisappear { model.pager.setSource(nil) }
     }
@@ -130,6 +146,7 @@ struct PhoneCompanion: View {
             Text(text)
                 .font(.yy(size: 15))
                 .lineSpacing(3)
+                .multilineTextAlignment(.leading)
                 .foregroundStyle(YYColor.t1)
                 .padding(.horizontal, 14).padding(.vertical, 9)
                 .background {
@@ -274,18 +291,90 @@ struct PhoneCompanion: View {
         .scrollIndicators(.never)
     }
 
+    private var slashCard: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 2) {
+                ForEach(slashMatches) { cmd in
+                    let disabled = companion.busy && cmd.category == .ask
+                    let isCurrentScope: Bool = {
+                        if case .scope(let s) = cmd.action { return s == companion.scope }
+                        return false
+                    }()
+                    Button {
+                        if !disabled { executeCommand(cmd, argument: "") }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: cmd.icon)
+                                .font(.yy(size: 14, weight: .medium))
+                                .foregroundStyle(YYColor.t2)
+                                .frame(width: 28, height: 28)
+                                .background(YYColor.inset, in: .rect(cornerRadius: 8))
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack(spacing: 6) {
+                                    Text(cmd.slashName)
+                                        .font(.system(size: YYUI.s(13.5), weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(YYColor.t1)
+                                    Text(cmd.title)
+                                        .font(.yy(size: 13.5, weight: .medium))
+                                        .foregroundStyle(YYColor.t1)
+                                        .lineLimit(1)
+                                }
+                                Text(cmd.subtitle)
+                                    .font(.yy(size: 12))
+                                    .foregroundStyle(YYColor.t3)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 4)
+                            if isCurrentScope {
+                                Text("当前")
+                                    .font(.yy(size: 11, weight: .medium))
+                                    .foregroundStyle(tint.accent)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(tint.accentSoft, in: .capsule)
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .frame(minHeight: 44)
+                        .contentShape(.rect)
+                        .opacity(disabled ? 0.42 : 1)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(6)
+        }
+        .scrollIndicators(.never)
+        .frame(maxHeight: 220)
+        .background(YYColor.card, in: .rect(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(YYColor.line, lineWidth: 0.5))
+    }
+
+    private var canSubmitDraft: Bool {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if let parsed = CompanionCommand.parse(draft), parsed.command.category == .control, parsed.argument.isEmpty {
+            return true
+        }
+        return !companion.busy
+    }
+
     private var input: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField("", text: $draft, prompt: Text(companion.turns.isEmpty ? String(localized: "问这本书…") : String(localized: "继续问…")), axis: .vertical)
-                .font(.yy(size: 16))
-                .lineLimit(1 ... 4)
-                .focused($typing)
-                .submitLabel(.send)
-                .onSubmit { send(draft) }
-                .padding(.vertical, 10)
+            TextField(
+                "",
+                text: $draft,
+                prompt: Text(companion.turns.isEmpty ? String(localized: "问这本书，或输入 / …") : String(localized: "继续问，或输入 / …")),
+                axis: .vertical
+            )
+            .font(.yy(size: 16))
+            .lineLimit(1 ... 5)
+            .focused($typing)
+            .padding(.vertical, 10)
             // As the Mac's: a rounded square. Nothing to send: grey, not a faded wash of the colour.
-            let empty = draft.trimmingCharacters(in: .whitespaces).isEmpty || companion.busy
-            Button { send(draft) } label: {
+            let empty = !canSubmitDraft
+            Button { submitDraft() } label: {
                 Image(systemName: "arrow.up").font(.yy(size: 14, weight: .bold))
                     .foregroundStyle(empty ? YYColor.t3 : tint.onBlack)
                     .frame(width: 34, height: 34)
@@ -302,11 +391,48 @@ struct PhoneCompanion: View {
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(YYColor.line, lineWidth: 0.5))
     }
 
+    private func submitDraft() {
+        if let parsed = CompanionCommand.parse(draft) {
+            executeCommand(parsed.command, argument: parsed.argument)
+            return
+        }
+        send(draft)
+    }
+
+    private func executeCommand(_ command: CompanionCommand, argument: String) {
+        let arg = argument.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch command.action {
+        case .recap, .chapter, .characters, .explain, .quote, .quiz:
+            guard !companion.busy else { return }
+            if let q = command.question(argument: arg, hasQuote: model.companionQuote != nil, chapterTitle: model.chapterTitle) {
+                slashDismissedForDraft = nil
+                send(q)
+            }
+        case .scope(let target):
+            slashDismissedForDraft = nil
+            companion.scope = target
+            draft = ""
+            if !arg.isEmpty, !companion.busy {
+                companion.ask(arg, quote: model.companionQuote, scope: target)
+                model.companionQuote = nil
+            }
+        case .model, .settings:
+            slashDismissedForDraft = nil
+            draft = ""
+            settings = true
+        case .clear:
+            slashDismissedForDraft = nil
+            draft = ""
+            companion.clear()
+        }
+    }
+
     private func send(_ text: String) {
         let q = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !companion.busy else { return }
         companion.ask(q, quote: model.companionQuote)
         draft = ""
+        slashDismissedForDraft = nil
         model.companionQuote = nil
     }
 }

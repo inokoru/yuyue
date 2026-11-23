@@ -42,13 +42,16 @@ final class CompanionChoice {
     /// The models the service lists; the first is taken when none was chosen yet.
     func list() async {
         let config = current
-        guard config.provider.kind != .apple, config.isConnected else { models = []; return }
+        guard config.provider.kind != .apple else { models = []; return }
+        let cached = ModelNames.cached(config.provider.id)
+        if !cached.isEmpty { models = cached }
+        guard config.isConnected else { return }
         listing = true
         let found = (try? await Companion.models(config)) ?? []
         guard config.provider == current.provider else { return }
-        models = found.sorted()
+        if !found.isEmpty { models = found.sorted() }
         listing = false
-        if current.model.isEmpty, let first = found.first { model = first }
+        if current.model.isEmpty, let first = models.first { model = first }
     }
 
     func test() {

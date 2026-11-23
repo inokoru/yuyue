@@ -624,10 +624,52 @@ private struct FieldRow: View {
     var secure = false
     var bad = false
     @FocusState private var focused: Bool
+    #if os(macOS)
+    @State private var secretFocused = false
+    @Environment(\.colorScheme) private var scheme
+    @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
+    private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
+    #endif
+
+    private var isFocused: Bool {
+        #if os(macOS)
+        secure ? secretFocused : focused
+        #else
+        focused
+        #endif
+    }
 
     var body: some View {
         HStack(spacing: 10) {
             Text(label).font(.yy(size: PanelScale.k * 12.5)).foregroundStyle(bad ? YYColor.danger : YYColor.t1).fixedSize()
+            #if os(macOS)
+            if secure {
+                ZStack(alignment: .trailing) {
+                    if text.isEmpty {
+                        Text(verbatim: prompt)
+                            .foregroundStyle(YYColor.t3)
+                            .lineLimit(1)
+                            .allowsHitTesting(false)
+                    }
+                    MacSecretField(
+                        text: $text,
+                        focused: $secretFocused,
+                        mono: true,
+                        accentColor: tint.accent,
+                        scheme: scheme
+                    )
+                    .frame(height: ceil(YYUI.s(12) * 1.45) + 4)
+                }
+                .font(.yy(size: PanelScale.k * 12, design: .monospaced))
+            } else {
+                TextField("", text: $text, prompt: Text(verbatim: prompt))
+                    .textFieldStyle(.plain)
+                    .multilineTextAlignment(.trailing)
+                    .font(.yy(size: PanelScale.k * 12, design: .monospaced))
+                    .autocorrectionDisabled()
+                    .focused($focused)
+            }
+            #else
             Group {
                 if secure {
                     SecureField("", text: $text, prompt: Text(verbatim: prompt))
@@ -639,16 +681,21 @@ private struct FieldRow: View {
             .multilineTextAlignment(.trailing)
             .font(.yy(size: PanelScale.k * 12, design: .monospaced))
             .autocorrectionDisabled()
-            #if os(iOS)
             .textInputAutocapitalization(.never)
-            #endif
             .focused($focused)
+            #endif
         }
         .padding(.horizontal, 10)
         .frame(minHeight: 38 * PanelScale.k)
-        .background(focused ? YYColor.t1.opacity(0.06) : .clear, in: .rect(cornerRadius: 8))
+        .background(isFocused ? YYColor.t1.opacity(0.06) : .clear, in: .rect(cornerRadius: 8))
         .contentShape(.rect)
-        .onTapGesture { focused = true }
+        .onTapGesture {
+            #if os(macOS)
+            if secure { secretFocused = true } else { focused = true }
+            #else
+            focused = true
+            #endif
+        }
     }
 }
 
