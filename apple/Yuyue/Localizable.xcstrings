@@ -43036,6 +43036,2296 @@
           }
         }
       }
+    },
+    "0 MB 免下载、免注册免 Key，已读句子缓存在本机" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "0 MB download, no sign-up or key needed; read sentences are cached locally"
+          }
+        }
+      }
+    },
+    "0 MB 免下载、免注册免填 Key，直连公共语音接口，已朗读句子自动缓存在本机。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "0 MB download, no sign-up or API key required. Connects directly to the public speech endpoint; spoken sentences are cached locally."
+          }
+        }
+      }
+    },
+    "16 个中英自然旁白 · 低内存秒出声 · 完全离线" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 natural Chinese & English narrators · Low memory, instant playback · Fully offline"
+          }
+        }
+      }
+    },
+    "AppID|AccessToken（如 12345678|token…）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AppID|AccessToken (e.g. 12345678|token…)"
+          }
+        }
+      }
+    },
+    "Apple 智能 · 上下文短、中文文学理解弱，仅作离线简单兜底" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple Intelligence · Short context and limited Chinese literary depth; offline fallback only"
+          }
+        }
+      }
+    },
+    "Apple 智能 · 能力与上下文受限，仅本地兜底" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple Intelligence · Limited capability and context; local fallback only"
+          }
+        }
+      }
+    },
+    "Apple 智能 本机" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple Intelligence (On-Device)"
+          }
+        }
+      }
+    },
+    "Apple 智能暂不可用" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple Intelligence unavailable"
+          }
+        }
+      }
+    },
+    "Apple 智能（本机）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple Intelligence (On-Device)"
+          }
+        }
+      }
+    },
+    "Kokoro 引擎" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kokoro Engine"
+          }
+        }
+      }
+    },
+    "Kokoro 离线" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kokoro Offline"
+          }
+        }
+      }
+    },
+    "Kokoro 语音包未完成下载（支持断点续传）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kokoro voice pack download incomplete (resumable)"
+          }
+        }
+      }
+    },
+    "Kokoro 轻量离线 · 推荐" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kokoro Lightweight Offline · Recommended"
+          }
+        }
+      }
+    },
+    "Kokoro-82M v1.1 Int8 跨端统一使用 ONNX Runtime 离线合成，无需联网即可自然朗读中英文书籍。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kokoro-82M v1.1 Int8 synthesizes speech offline via ONNX Runtime across platforms for natural Chinese and English reading without internet."
+          }
+        }
+      }
+    },
+    "Kokoro-82M v1.1 跨端统一离线合成，下载一次即可在断网环境下自然朗读中英文书籍。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kokoro-82M v1.1 synthesizes offline across platforms. Download once for natural Chinese and English reading without internet."
+          }
+        }
+      }
+    },
+    "OpenAudio S1 高表现力中英音色与社区声音库" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenAudio S1 expressive Chinese & English voices and community library"
+          }
+        }
+      }
+    },
+    "Shift+Return 换行 · Return 发送" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shift+Return for newline · Return to send"
+          }
+        }
+      }
+    },
+    "console.volcengine.com › 豆包语音 › 语音合成大模型，复制 AppID 与 Access Token" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "console.volcengine.com › Doubao Speech › TTS LLM; copy your AppID and Access Token"
+          }
+        }
+      }
+    },
+    "fish.audio › API Keys 新建密钥，基于 OpenAudio S1 引擎，自动拉取热门中英社区旁白与自建音色。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create a key at fish.audio › API Keys. Powered by OpenAudio S1; automatically fetches popular Chinese & English community voices and your own."
+          }
+        }
+      }
+    },
+    "fish.audio › API › API Keys › 新建密钥，支持 OpenAudio S1 与社区音色" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "fish.audio › API › API Keys › Create key; supports OpenAudio S1 and community voices"
+          }
+        }
+      }
+    },
+    "iOS 暂不支持自动开启，请在系统「设置 › 专注模式」中添加「阅读」后从控制中心开启" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iOS does not support toggling Focus automatically. Add Reading in Settings › Focus and enable it from Control Center."
+          }
+        }
+      }
+    },
+    "· 非公开附件仅开发者可见" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· Private attachments are visible only to the developer"
+          }
+        }
+      }
+    },
+    "↑↓ · ↩ 执行" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "↑↓ · ↩ Run"
+          }
+        }
+      }
+    },
+    "↑↓ 选择 · Tab 补全 · ↩ 执行" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "↑↓ Select · Tab Complete · ↩ Run"
+          }
+        }
+      }
+    },
+    "⇧↩ 换行" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "⇧↩ Newline"
+          }
+        }
+      }
+    },
+    "⇧↩ 换行 · ↩ 发送" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "⇧↩ Newline · ↩ Send"
+          }
+        }
+      }
+    },
+    "一键下载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download"
+          }
+        }
+      }
+    },
+    "上一处 ⇧⌘G" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Previous ⇧⌘G"
+          }
+        }
+      }
+    },
+    "下一处 ⌘G" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next ⌘G"
+          }
+        }
+      }
+    },
+    "下载中断 · 点此继续下载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download paused · Tap to resume"
+          }
+        }
+      }
+    },
+    "下载中断 · 点进去继续下载（支持断点续传）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download paused · Open to resume"
+          }
+        }
+      }
+    },
+    "下载完成后永久免联网朗读 · 期间可先听在线自然语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read offline forever once downloaded · Listen with Free Online Voices meanwhile"
+          }
+        }
+      }
+    },
+    "下载期间可先选下方「在线自然语音」立刻听" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Free Online Voices below to listen right away while downloading"
+          }
+        }
+      }
+    },
+    "不推荐" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not recommended"
+          }
+        }
+      }
+    },
+    "不推荐 · 仅断网兜底" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not recommended · Offline fallback only"
+          }
+        }
+      }
+    },
+    "不推荐作为主力模型：Apple 智能上下文窗口短（约 4K），中文长章节问答与播客撰稿质量有限。建议添加 DeepSeek、通义千问、OpenRouter 或连接本机 Ollama。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not recommended as your primary model: Apple Intelligence has a short context window (~4K) with limited quality on long Chinese chapters and podcast scripts. Try DeepSeek, Qwen, OpenRouter, or local Ollama instead."
+          }
+        }
+      }
+    },
+    "中文好，很省" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Strong Chinese, very affordable"
+          }
+        }
+      }
+    },
+    "中文旗舰" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chinese flagship"
+          }
+        }
+      }
+    },
+    "中文旗舰，理解细腻" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chinese flagship, nuanced reading"
+          }
+        }
+      }
+    },
+    "中文自然流畅" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Natural, fluent Chinese"
+          }
+        }
+      }
+    },
+    "中文自然，快又便宜" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Natural Chinese, fast and affordable"
+          }
+        }
+      }
+    },
+    "主力综合模型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All-around flagship"
+          }
+        }
+      }
+    },
+    "了解在线自然语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About Free Online Voices"
+          }
+        }
+      }
+    },
+    "人物关系" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Characters"
+          }
+        }
+      }
+    },
+    "从已读内容里找几句值得回味的话" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick a few memorable lines from what you have read"
+          }
+        }
+      }
+    },
+    "从服务商刷新模型列表" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh models from provider"
+          }
+        }
+      }
+    },
+    "从目前读过的内容里，挑两三句值得回味的句子并简短点评。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick two or three memorable sentences from what I have read so far and add a brief note on each."
+          }
+        }
+      }
+    },
+    "从这句读" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read from here"
+          }
+        }
+      }
+    },
+    "从这听" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Listen from here"
+          }
+        }
+      }
+    },
+    "保存线路" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save endpoint"
+          }
+        }
+      }
+    },
+    "先填好 API Key 可获取完整模型列表，也可直接点选下方常用模型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter your API key to fetch the full model list, or pick a popular model below"
+          }
+        }
+      }
+    },
+    "先用「在线自然语音（免 Key）」同样好听" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try Free Online Voices (no key) — sounds great right away"
+          }
+        }
+      }
+    },
+    "免 Key" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No key"
+          }
+        }
+      }
+    },
+    "免 Key · 即点即听" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No key · Instant playback"
+          }
+        }
+      }
+    },
+    "免 Key · 零配置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No key · Zero setup"
+          }
+        }
+      }
+    },
+    "免 Key · 零配置在线语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No key · Zero-setup online voice"
+          }
+        }
+      }
+    },
+    "免 Key 免费 · 语阅在线自然语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Free, no key · Yuyue Online Voices"
+          }
+        }
+      }
+    },
+    "免 Key 在线合成正常" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Free online speech is working"
+          }
+        }
+      }
+    },
+    "免填 Key" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No key needed"
+          }
+        }
+      }
+    },
+    "免费 · 仅作兜底" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Free · Fallback only"
+          }
+        }
+      }
+    },
+    "免费 · 仅兜底" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Free · Fallback only"
+          }
+        }
+      }
+    },
+    "免费在线语音会把当前要读的句子发给在线语音服务；自行配置的云端声音和笔记导出（Notion、flomo、新枝）只在你选用并填了 Key 或链接时联网，要读的句子或要发的笔记直接发给你选的服务。读过的声音存在这台设备上。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Free online voices send the sentence being read to the online speech service. Cloud voices you configure and note exports (Notion, flomo, Xinzhi) go online only when you enable them with your own key or webhook, sending sentences or notes directly to that service. Received audio stays on this device."
+          }
+        }
+      }
+    },
+    "内置免 Key 公共直连语音线路，无需注册或填写 Key，已朗读句子缓存在本机" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Built-in keyless public speech endpoint—no sign-up or key required; spoken sentences are cached locally"
+          }
+        }
+      }
+    },
+    "切回不剧透模式" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Back to spoiler-free mode"
+          }
+        }
+      }
+    },
+    "切换全部声音来源" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Browse all voice sources"
+          }
+        }
+      }
+    },
+    "切换服务商与模型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switch provider & model"
+          }
+        }
+      }
+    },
+    "切换模型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switch model"
+          }
+        }
+      }
+    },
+    "切换过的模型会出现在这里" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recently used models will appear here"
+          }
+        }
+      }
+    },
+    "列表里未找到，按回车直接使用输入的 ID" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not in list — press Return to use this ID directly"
+          }
+        }
+      }
+    },
+    "刷新模型列表" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh model list"
+          }
+        }
+      }
+    },
+    "前进 15 秒" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Forward 15 seconds"
+          }
+        }
+      }
+    },
+    "加入常用收藏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add to favorites"
+          }
+        }
+      }
+    },
+    "发送 ↩" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send ↩"
+          }
+        }
+      }
+    },
+    "只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；不收集邮箱，非图片附件和未公开的截图会在发送前用开发者公钥在本机加密。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Goes online only when you submit feedback, relayed via ntfy.sh to a public GitHub Issue. No email is collected; non-image attachments and private screenshots are encrypted on device with the developer's public key before sending."
+          }
+        }
+      }
+    },
+    "可附截图或文件，无需注册账号" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Attach screenshots or files, no account needed"
+          }
+        }
+      }
+    },
+    "回顾前情" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recap so far"
+          }
+        }
+      }
+    },
+    "在线自然语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Free Online Voices"
+          }
+        }
+      }
+    },
+    "在线语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Online Voices"
+          }
+        }
+      }
+    },
+    "在这台 Mac 上，不联网" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On this Mac, offline"
+          }
+        }
+      }
+    },
+    "均衡主力" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Balanced all-rounder"
+          }
+        }
+      }
+    },
+    "均衡好用，平时首选" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Balanced daily pick"
+          }
+        }
+      }
+    },
+    "均衡稳定" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Balanced & reliable"
+          }
+        }
+      }
+    },
+    "均衡稳定，文笔自然" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Balanced, reliable, natural prose"
+          }
+        }
+      }
+    },
+    "外文查词与翻译使用系统离线翻译；按需从 GitHub Releases、魔搭（ModelScope）或 Hugging Face 下载的对齐模型、声音包、开源字体与本地语音模型都在设备上离线运行（字体预览样字按需从 Google Fonts 加载），原文与录音不出本机。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Foreign lookups and translations use the system offline translator. Alignment models, voice packs, open-source fonts, and local voice models downloaded on demand from GitHub Releases, ModelScope, or Hugging Face run offline on this device (font preview samples load on demand from Google Fonts); your books and recordings never leave the device."
+          }
+        }
+      }
+    },
+    "已就绪" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ready"
+          }
+        }
+      }
+    },
+    "已就绪 · 16 音色" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ready · 16 voices"
+          }
+        }
+      }
+    },
+    "帮我回顾一下目前为止发生了什么？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can you recap what has happened so far?"
+          }
+        }
+      }
+    },
+    "常用收藏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Favorites"
+          }
+        }
+      }
+    },
+    "广播剧角色声音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drama character voices"
+          }
+        }
+      }
+    },
+    "应用 AppID" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App ID"
+          }
+        }
+      }
+    },
+    "开启免 Key 在线自然语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable Free Online Voices"
+          }
+        }
+      }
+    },
+    "当前" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Current"
+          }
+        }
+      }
+    },
+    "快又省，日常问答首选" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fast & affordable, great for daily Q&A"
+          }
+        }
+      }
+    },
+    "快又省，日常随手问" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fast & affordable, great for quick questions"
+          }
+        }
+      }
+    },
+    "快捷指令" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quick prompts"
+          }
+        }
+      }
+    },
+    "快捷指令 (/)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quick prompts (/)"
+          }
+        }
+      }
+    },
+    "快速轻量" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fast & light"
+          }
+        }
+      }
+    },
+    "总结一下这一章讲了什么？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Summarize what this chapter is about."
+          }
+        }
+      }
+    },
+    "总结本章" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Summarize chapter"
+          }
+        }
+      }
+    },
+    "我的克隆" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "My Clones"
+          }
+        }
+      }
+    },
+    "截图或文件，最多 3 个。也可以拖进来，或者 ⌘V 粘贴" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Up to 3 screenshots or files. Drag them in or press ⌘V to paste"
+          }
+        }
+      }
+    },
+    "打开模型与服务商选择" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open model & provider picker"
+          }
+        }
+      }
+    },
+    "拖动调整宽度，双击恢复默认" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drag to resize, double-click to reset"
+          }
+        }
+      }
+    },
+    "指令" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prompts"
+          }
+        }
+      }
+    },
+    "按列表顺序优先查词，点右侧菜单或长按可调整顺序与移除。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dictionaries are queried from top to bottom. Use the menu or long-press to reorder or remove."
+          }
+        }
+      }
+    },
+    "按字符计费 · 走你的 Fish Audio" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Billed per character · Your Fish Audio account"
+          }
+        }
+      }
+    },
+    "按字符计费 · 走你的火山引擎" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Billed per character · Your Volcengine account"
+          }
+        }
+      }
+    },
+    "按需下载的本地中英离线旁白语音模型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On-demand local Chinese & English offline narrator model"
+          }
+        }
+      }
+    },
+    "按需准备" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ready on demand"
+          }
+        }
+      }
+    },
+    "挑出金句" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Memorable lines"
+          }
+        }
+      }
+    },
+    "换离线语音 ›" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switch to offline voice ›"
+          }
+        }
+      }
+    },
+    "推荐下载「语阅离线语音（Kokoro）」断网畅听，或直接使用免 Key 的「在线自然语音」。系统自带语音机械感较重（不推荐），仅作断网兜底。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download Yuyue Offline Voice (Kokoro) for offline listening, or use Free Online Voices with no key. System voices sound robotic (not recommended) and are best kept as an offline fallback."
+          }
+        }
+      }
+    },
+    "推荐下载「语阅离线语音（Kokoro）」跨端断网畅听，或直接使用免 Key 的「在线自然语音」。系统自带合成音机械感较重（不推荐），仅作断网兜底。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download Yuyue Offline Voice (Kokoro) for offline listening across devices, or use Free Online Voices with no key. System voices sound robotic (not recommended) and are best kept as an offline fallback."
+          }
+        }
+      }
+    },
+    "搜全量模型、ID 或缩写（如 co46 / dsr1）…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search all models, IDs, or shortcuts (e.g. co46 / dsr1)…"
+          }
+        }
+      }
+    },
+    "搜索语音来源，比如 火山豆包、Fish Audio、小米、VoiceStudio" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search voice sources, e.g. Volcengine, Fish Audio, Xiaomi, VoiceStudio"
+          }
+        }
+      }
+    },
+    "擅长逻辑分析" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Strong analytical reasoning"
+          }
+        }
+      }
+    },
+    "旗舰推理" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flagship reasoning"
+          }
+        }
+      }
+    },
+    "旗舰推理，适合深读" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flagship reasoning for deep reading"
+          }
+        }
+      }
+    },
+    "日常首选" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Daily favorite"
+          }
+        }
+      }
+    },
+    "最快最省，速查够用" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fastest & cheapest for quick lookups"
+          }
+        }
+      }
+    },
+    "最聪明，适合啃难书" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Smartest, great for tough books"
+          }
+        }
+      }
+    },
+    "未填" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not set"
+          }
+        }
+      }
+    },
+    "未返回在线模型列表；可直接点选推荐模型，或在上方输入任意模型 ID 按回车。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No model list returned. Pick a recommended model below or type any model ID above and press Return."
+          }
+        }
+      }
+    },
+    "本机声音卡模型尚未准备好，请先下载完成或改用系统声音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local voice card model is not ready yet. Finish downloading it or switch to a system voice."
+          }
+        }
+      }
+    },
+    "本机声音卡这一句合成失败，请重试或换一个声音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local voice card failed to synthesize this sentence. Try again or switch voices."
+          }
+        }
+      }
+    },
+    "极速免费层常用" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ultra-fast, popular free tier"
+          }
+        }
+      }
+    },
+    "极速响应" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ultra-fast response"
+          }
+        }
+      }
+    },
+    "极速响应，性价比高" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ultra-fast, great value"
+          }
+        }
+      }
+    },
+    "极速轻量" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ultra-fast & light"
+          }
+        }
+      }
+    },
+    "根据已读内容出两道思考题" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create two reflection questions from what you have read"
+          }
+        }
+      }
+    },
+    "根据我目前读过的内容，出两道有意思的思考题考考我。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Based on what I have read so far, give me two thoughtful questions to test my understanding."
+          }
+        }
+      }
+    },
+    "梳理一下目前出场的主要人物和他们之间的关系。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "List the main characters who have appeared so far and how they relate to one another."
+          }
+        }
+      }
+    },
+    "梳理已出场人物与关系" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Map characters and relationships so far"
+          }
+        }
+      }
+    },
+    "梳理目前为止发生了什么" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recap what has happened so far"
+          }
+        }
+      }
+    },
+    "检查更新：从 GitHub 下载安装的版本每天从 GitHub 取一个小文件，看有没有新版本，不带任何关于你和设备的信息；在我的 › 关于 › 检查更新里能关掉。App Store 和 Google Play 的版本不查，由商店更新。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update checks: builds downloaded from GitHub fetch a small version file once a day without sending any personal or device info (can be turned off in Me › About › Check for Updates). App Store and Google Play builds are updated by the store."
+          }
+        }
+      }
+    },
+    "检索整本书（可能剧透）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search whole book (may spoil)"
+          }
+        }
+      }
+    },
+    "概括当前章节的主要内容" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Summarize the current chapter"
+          }
+        }
+      }
+    },
+    "模式" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mode"
+          }
+        }
+      }
+    },
+    "正在下载 Kokoro 轻量离线语音 " : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloading Kokoro offline voice "
+          }
+        }
+      }
+    },
+    "正在检查在线语音线路…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking online speech endpoint…"
+          }
+        }
+      }
+    },
+    "正在验证在线线路…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verifying online endpoint…"
+          }
+        }
+      }
+    },
+    "毫秒级返回" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Millisecond latency"
+          }
+        }
+      }
+    },
+    "深度思考" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deep thinking"
+          }
+        }
+      }
+    },
+    "深度思考，适合难书拆解" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deep thinking for complex books"
+          }
+        }
+      }
+    },
+    "深度推理" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deep reasoning"
+          }
+        }
+      }
+    },
+    "深度精读" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Close reading"
+          }
+        }
+      }
+    },
+    "添加声音来源…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add voice source…"
+          }
+        }
+      }
+    },
+    "清除当前这本书的对话记录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear chat history for this book"
+          }
+        }
+      }
+    },
+    "清除搜索" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear search"
+          }
+        }
+      }
+    },
+    "火山引擎语音技术控制台创建应用后，按「AppID|AccessToken」填入（竖线分隔），支持豆包灿灿 2.0 等自然声线。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create an app in the Volcengine Speech Console and enter AppID|AccessToken (separated by |) for natural Doubao voices."
+          }
+        }
+      }
+    },
+    "火山引擎豆包语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Volcengine Doubao Speech"
+          }
+        }
+      }
+    },
+    "火山引擎（豆包）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Volcengine (Doubao)"
+          }
+        }
+      }
+    },
+    "火山豆包" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Volcengine Doubao"
+          }
+        }
+      }
+    },
+    "火山豆包、Fish Audio、小米 MiMo（限时免费）、硅基流动、局域网语音…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Volcengine, Fish Audio, Xiaomi MiMo (limited free), SiliconFlow, LAN speech…"
+          }
+        }
+      }
+    },
+    "火山豆包、Fish Audio、小米 MiMo（限时免费）、硅基流动、本机 VoiceStudio…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Volcengine, Fish Audio, Xiaomi MiMo (limited free), SiliconFlow, local VoiceStudio…"
+          }
+        }
+      }
+    },
+    "点模型右侧的 ★ 把常用模型收进这里" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap ★ beside a model to pin it here"
+          }
+        }
+      }
+    },
+    "点此下载 · 跨端自然朗读，断网可用" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to download · Natural offline reading across devices"
+          }
+        }
+      }
+    },
+    "留空用官方开源线路，或填 /v1 地址" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leave blank for the default endpoint, or enter a /v1 URL"
+          }
+        }
+      }
+    },
+    "离线翻译与本地模型：翻译用系统的离线翻译；按需从 GitHub Releases、魔搭（ModelScope）或 Hugging Face 下载的对齐模型、声音包、开源字体与离线语音模型都在本机运行（字体预览样字按需从 Google Fonts 加载），原文与录音不出这台设备。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline translation & local models: translations use the system offline translator. Alignment models, voice packs, open-source fonts, and offline voice models downloaded on demand from GitHub Releases, ModelScope, or Hugging Face run locally on this device (font preview samples load on demand from Google Fonts); your books and recordings never leave the device."
+          }
+        }
+      }
+    },
+    "离线语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline Voices"
+          }
+        }
+      }
+    },
+    "离线语音包还在下载中，下好后即可离线朗读" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline voice pack is still downloading; offline playback will be ready once finished"
+          }
+        }
+      }
+    },
+    "离线语音没下下来" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline voice download failed"
+          }
+        }
+      }
+    },
+    "移出常用收藏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove from favorites"
+          }
+        }
+      }
+    },
+    "稍后会出现在 GitHub 问题板上。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It will appear on GitHub Issues shortly."
+          }
+        }
+      }
+    },
+    "系统合成机械感较重，仅作断网兜底" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System synthesis sounds robotic; offline fallback only"
+          }
+        }
+      }
+    },
+    "系统合成音 · 不推荐" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System voice · Not recommended"
+          }
+        }
+      }
+    },
+    "系统自带 · 不推荐" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System voice · Not recommended"
+          }
+        }
+      }
+    },
+    "系统自带 · 女声（不推荐）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System · Female (not recommended)"
+          }
+        }
+      }
+    },
+    "系统自带 · 男声（不推荐）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System · Male (not recommended)"
+          }
+        }
+      }
+    },
+    "系统自带合成机械音 · 体验较差，仅作断网未下载时的兜底" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Robotic system synthesis · Poor quality, offline fallback only"
+          }
+        }
+      }
+    },
+    "系统自带合成音机械感明显，仅建议在未下载离线语音且完全断网时兜底使用。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System voices sound noticeably robotic; recommended only as an offline fallback when no voice pack is downloaded."
+          }
+        }
+      }
+    },
+    "系统自带合成音机械感较重，建议改用「语阅离线语音（Kokoro）」或「在线自然语音（免 Key）」。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System voices sound robotic. Try Yuyue Offline Voice (Kokoro) or Free Online Voices (no key) instead."
+          }
+        }
+      }
+    },
+    "系统自带（不推荐）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System (not recommended)"
+          }
+        }
+      }
+    },
+    "线路" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Endpoint"
+          }
+        }
+      }
+    },
+    "结合上下文，解释一下当前这一段的意思和用意。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Explain the meaning and intent of this passage in context."
+          }
+        }
+      }
+    },
+    "继续下载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resume download"
+          }
+        }
+      }
+    },
+    "继续问，或输入 / …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask a follow-up, or type / …"
+          }
+        }
+      }
+    },
+    "综合推理强" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Strong general reasoning"
+          }
+        }
+      }
+    },
+    "考考我" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quiz me"
+          }
+        }
+      }
+    },
+    "聪明又快，平时首选" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Smart and fast, everyday pick"
+          }
+        }
+      }
+    },
+    "自动跟进最新主力模型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tracks the latest flagship model automatically"
+          }
+        }
+      }
+    },
+    "自定义" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom"
+          }
+        }
+      }
+    },
+    "自定义模型 ID · 直接按此名称请求接口" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom model ID · Sent directly to the API"
+          }
+        }
+      }
+    },
+    "获取 Fish Audio Key" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Get Fish Audio Key"
+          }
+        }
+      }
+    },
+    "获取火山引擎 AppID 与 Token" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Get Volcengine AppID & Token"
+          }
+        }
+      }
+    },
+    "西文理解细腻" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nuanced Western-language reading"
+          }
+        }
+      }
+    },
+    "角色与克隆" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Characters & Clones"
+          }
+        }
+      }
+    },
+    "角色旁白" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Character Narration"
+          }
+        }
+      }
+    },
+    "解读选中句子或当前段落" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Explain the selected sentence or current passage"
+          }
+        }
+      }
+    },
+    "解释含义" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Explain passage"
+          }
+        }
+      }
+    },
+    "评级" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rating"
+          }
+        }
+      }
+    },
+    "试听暂不可用，请检查网络或稍后再试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preview unavailable; check your network or try again later"
+          }
+        }
+      }
+    },
+    "语阅离线语音（Kokoro）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yuyue Offline Voice (Kokoro)"
+          }
+        }
+      }
+    },
+    "读书最稳，兼顾速度与理解" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Steadiest for reading—fast and insightful"
+          }
+        }
+      }
+    },
+    "调整面板宽度" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resize panel width"
+          }
+        }
+      }
+    },
+    "豆包 Seed 1.6" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doubao Seed 1.6"
+          }
+        }
+      }
+    },
+    "豆包 Seed 1.6 Flash" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doubao Seed 1.6 Flash"
+          }
+        }
+      }
+    },
+    "豆包 Seed 1.6 思考" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doubao Seed 1.6 Thinking"
+          }
+        }
+      }
+    },
+    "豆包大模型语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doubao LLM Speech"
+          }
+        }
+      }
+    },
+    "豆包大模型语音，中文播客与小说自然度高" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doubao LLM Speech, highly natural for Chinese podcasts and fiction"
+          }
+        }
+      }
+    },
+    "超长上下文" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ultra-long context"
+          }
+        }
+      }
+    },
+    "超长上下文，整本书吃透" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ultra-long context for whole-book reading"
+          }
+        }
+      }
+    },
+    "超长上下文，适合全书检索" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ultra-long context for full-book lookup"
+          }
+        }
+      }
+    },
+    "超长上下文，问全书稳" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ultra-long context, reliable across the whole book"
+          }
+        }
+      }
+    },
+    "超长全书检索" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ultra-long full-book search"
+          }
+        }
+      }
+    },
+    "跨端离线好声音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Great offline voices across devices"
+          }
+        }
+      }
+    },
+    "跨端轻量离线模型 · Apache-2.0" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lightweight cross-platform offline model · Apache-2.0"
+          }
+        }
+      }
+    },
+    "跨端轻量离线语音 · 推荐" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lightweight offline voice · Recommended"
+          }
+        }
+      }
+    },
+    "轻量快速" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Light & fast"
+          }
+        }
+      }
+    },
+    "轻量极速" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Light & ultra-fast"
+          }
+        }
+      }
+    },
+    "这个版本发不出反馈。可以发邮件到" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This build cannot send feedback. You can email"
+          }
+        }
+      }
+    },
+    "这句是什么意思？结合上下文解释一下。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What does this sentence mean in context?"
+          }
+        }
+      }
+    },
+    "这台设备带不动离线语音，可使用云端「在线自然语音（免 Key）」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This device cannot run offline voices; use Free Online Voices (no key) instead"
+          }
+        }
+      }
+    },
+    "这台设备带不动离线语音，可使用在线自然语音（免 Key）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This device cannot run offline voices; use Free Online Voices (no key) instead"
+          }
+        }
+      }
+    },
+    "选择或输入模型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose or enter model"
+          }
+        }
+      }
+    },
+    "选择模型…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose model…"
+          }
+        }
+      }
+    },
+    "通义千问 Max" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Qwen Max"
+          }
+        }
+      }
+    },
+    "通义千问 Plus" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Qwen Plus"
+          }
+        }
+      }
+    },
+    "通义开源旗舰" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Qwen open-source flagship"
+          }
+        }
+      }
+    },
+    "配置服务商与 API Key" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Configure provider & API key"
+          }
+        }
+      }
+    },
+    "长文与指令遵循稳" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Strong long-context & instruction following"
+          }
+        }
+      }
+    },
+    "长文本与文学语感好" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Great long-context & literary feel"
+          }
+        }
+      }
+    },
+    "长章节检索稳定" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reliable across long chapters"
+          }
+        }
+      }
+    },
+    "问这本书，或输入 / …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask about this book, or type / …"
+          }
+        }
+      }
+    },
+    "问题反馈：只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；不收集邮箱，非图片附件和未公开的截图会在发送前用开发者公钥在本机加密。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Feedback: goes online only when you submit feedback, relayed via ntfy.sh to a public GitHub Issue. No email is collected; non-image attachments and private screenshots are encrypted on device with the developer's public key before sending."
+          }
+        }
+      }
+    },
+    "阿里百炼" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alibaba DashScope"
+          }
+        }
+      }
+    },
+    "隐藏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide"
+          }
+        }
+      }
+    },
+    "隐藏后可在「添加声音来源」随时重新开启；正在使用该来源的书籍将切回本地语音。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can re-enable it anytime in Add Voice Source. Books using this source will switch back to a local voice."
+          }
+        }
+      }
+    },
+    "需先下载离线语音包 · 点此下载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline voice pack required · Tap to download"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
