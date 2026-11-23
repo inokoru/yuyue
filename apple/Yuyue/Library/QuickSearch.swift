@@ -6,6 +6,29 @@ import YuyueCore
 /// words to 书伴 instead.
 @Observable
 final class QuickSearch {
+    /// The words typed, bold and underlined in the accent wherever they appear.
+    static func highlight(_ s: String, query: String, accent: Color) -> AttributedString {
+        var text = AttributedString(s)
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return text }
+        var from = text.startIndex
+        while let r = text[from...].range(of: q, options: .caseInsensitive) {
+            text[r].foregroundColor = accent
+            text[r].inlinePresentationIntent = .stronglyEmphasized
+            text[r].underlineStyle = .single
+            from = r.upperBound
+        }
+        return text
+    }
+
+    static func mark(_ s: String, accent: Color) -> AttributedString {
+        var a = AttributedString(s)
+        a.foregroundColor = accent
+        a.inlinePresentationIntent = .stronglyEmphasized
+        a.underlineStyle = .single
+        return a
+    }
+
     struct TitleHit: Identifiable {
         let book: BookSummary
         /// A chapter whose name matched, rather than the book's.
@@ -436,27 +459,12 @@ struct QuickSearchPanel: View {
         }
     }
 
-    /// The words typed, bold and underlined in the accent wherever they appear.
     private func hit(_ s: String) -> AttributedString {
-        var text = AttributedString(s)
-        let q = search.query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return text }
-        var from = text.startIndex
-        while let r = text[from...].range(of: q, options: .caseInsensitive) {
-            text[r].foregroundColor = tint.accent
-            text[r].inlinePresentationIntent = .stronglyEmphasized
-            text[r].underlineStyle = .single
-            from = r.upperBound
-        }
-        return text
+        QuickSearch.highlight(s, query: search.query, accent: tint.accent)
     }
 
     private func mark(_ s: String) -> AttributedString {
-        var a = AttributedString(s)
-        a.foregroundColor = tint.accent
-        a.inlinePresentationIntent = .stronglyEmphasized
-        a.underlineStyle = .single
-        return a
+        QuickSearch.mark(s, accent: tint.accent)
     }
 
     private var footer: some View {

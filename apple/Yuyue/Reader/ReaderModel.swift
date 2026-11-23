@@ -565,13 +565,6 @@ final class ReaderModel {
         player?.state == .playing || player?.state == .loading
     }
 
-    /// 几句一起循环 can reach this sentence: something is being read, in the same chapter, and
-    /// it's another sentence.
-    func canLoop(to section: UInt32, _ sentence: Int) -> Bool {
-        guard isPlaying, let here = player?.spot else { return false }
-        return here.section == section && here.sentence != sentence
-    }
-
     /// 从正在念的这句循环到这里.
     func loop(to section: UInt32, _ sentence: Int) {
         player?.loopTo(section: section, sentence: sentence)

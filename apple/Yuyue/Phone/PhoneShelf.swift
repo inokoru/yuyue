@@ -318,10 +318,6 @@ struct PhoneShelf: View {
         }
     }
 
-    private var kindsShown: [Kind] {
-        Kind.allCases
-    }
-
     private var shown: [BookSummary] {
         var books = library.shelfBooks
         switch filter {

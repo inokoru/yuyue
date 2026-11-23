@@ -19,7 +19,7 @@ struct ElsewhereCard: View {
                 Text(listened ? "\(elsewhere.progress.deviceName ?? String(localized: "另一台设备")) 上听到了更后面" : "\(elsewhere.progress.deviceName ?? String(localized: "另一台设备")) 上读到了更后面")
                     .font(.yy(size: 12, weight: .semibold))
                 Spacer()
-                Text(Self.ago(Date(timeIntervalSince1970: Double(elsewhere.progress.at) / 1000)))
+                Text(Sync.ago(Date(timeIntervalSince1970: Double(elsewhere.progress.at) / 1000)))
                     .font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
             }
             if let text = elsewhere.text {
@@ -59,15 +59,6 @@ struct ElsewhereCard: View {
         .padding(.top, 14)
         .padding(.bottom, 12)
         .yyFloatCard(.rect(cornerRadius: 16), shadow: scheme == .dark ? YYShadow.floatDark : YYShadow.floatLight)
-    }
-
-    static func ago(_ date: Date) -> String {
-        let s = Date().timeIntervalSince(date)
-        if s < 60 { return String(localized: "刚刚") }
-        if s < 3600 { return String(localized: "\(Int(s / 60)) 分钟前") }
-        if Calendar.current.isDateInToday(date) { return String(localized: "今天 ") + date.formatted(.dateTime.hour().minute()) }
-        if Calendar.current.isDateInYesterday(date) { return String(localized: "昨天 ") + date.formatted(.dateTime.hour().minute()) }
-        return date.formatted(.dateTime.month().day())
     }
 
     private static func percent(_ f: Double) -> String { "\(Int((f * 100).rounded()))%" }

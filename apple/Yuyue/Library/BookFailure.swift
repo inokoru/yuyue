@@ -1,13 +1,5 @@
 import SwiftUI
 
-#if os(macOS)
-/// Opens a book's window, or the paper card on this one when the book cannot be opened.
-@MainActor func openReader(_ bookID: String, library: Library, _ openWindow: OpenWindowAction) {
-    guard let book = library.books.first(where: { $0.id == bookID }), library.open(book, nil) else { return }
-    openWindow(id: "reader", value: bookID)
-}
-#endif
-
 /// A window that learned, only after opening, that the book will not open. It says so on the
 /// window the reader was already using, and this one goes away — a system title bar with nothing
 /// but “这本书打不开” under it is not a place to read.

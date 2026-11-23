@@ -498,22 +498,6 @@ struct CloneVoiceView: View {
         }
     }
 
-    private func actionChip(_ title: String, icon: String, wide: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: YYUI.s(7)) {
-                Image(systemName: icon).font(YYUI.font(12)).foregroundStyle(YYColor.t2)
-                Text(title).font(YYUI.font(12, .semibold)).foregroundStyle(YYColor.t1)
-            }
-            .padding(.horizontal, YYUI.s(14))
-            .frame(maxWidth: wide ? .infinity : nil)
-            .frame(height: YYUI.s(38))
-            .background(YYColor.card, in: .rect(cornerRadius: YYUI.s(11)))
-            .overlay(RoundedRectangle(cornerRadius: YYUI.s(11)).strokeBorder(YYColor.line, lineWidth: 0.5))
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-    }
-
     // MARK: - Actions
 
     private func startRecording() {

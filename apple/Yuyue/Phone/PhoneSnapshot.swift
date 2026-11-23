@@ -70,11 +70,6 @@ struct PhoneSnapshot: View {
         .yyConfirm($confirming)
     }
 
-    private func groupLabel(_ text: String) -> some View {
-        Text(text).font(YYUI.font(10)).foregroundStyle(YYColor.t3)
-            .padding(.horizontal, YYUI.s(4)).padding(.bottom, YYUI.s(6))
-    }
-
     /// A switch for each kind with how many there are, then the size and 生成快照.
     private var makeCard: some View {
         let c = snapshots.counts

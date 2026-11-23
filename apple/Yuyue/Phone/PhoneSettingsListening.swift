@@ -210,7 +210,7 @@ private struct PhoneSourceSettings: View {
                     PanelHeader(title: source.title, detail: String(localized: "跨端轻量离线语音 · 推荐")) { ServiceTile(mark: source.mark, size: 30) }
                     PanelCard {
                         PanelRow { Text("Kokoro 引擎") } trailing: {
-                            SettingsPill(KokoroModel.isInstalled ? String(localized: "已就绪 · 53 音色") : String(localized: "待下载 · \(KokoroModel.totalMegabytes) MB"),
+                            SettingsPill(KokoroModel.isInstalled ? String(localized: "已就绪 · 16 音色") : String(localized: "待下载 · \(KokoroModel.totalMegabytes) MB"),
                                          tone: KokoroModel.isInstalled ? .ok : .warn)
                         }
                         PanelRow { Text("费用") } trailing: {

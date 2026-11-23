@@ -322,7 +322,7 @@ struct PhoneReading: View {
                 detailRow(String(localized: "隐藏进度、页码和剩余时间"), nil) {
                     YYSwitch(isOn: $immersiveProgress, label: String(localized: "隐藏进度、页码和剩余时间"))
                 }
-                detailRow(String(localized: "专注模式联动"), String(localized: "在系统「设置 › 专注模式」中添加「阅读」以自动开启免打扰")) { EmptyView() }
+                detailRow(String(localized: "专注模式联动"), String(localized: "iOS 暂不支持自动开启，请在系统「设置 › 专注模式」中添加「阅读」后从控制中心开启")) { EmptyView() }
             }
             YYGroup {
                 NavigationLink { PhoneEInk(library: library) } label: {

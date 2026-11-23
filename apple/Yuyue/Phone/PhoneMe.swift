@@ -10,8 +10,6 @@ struct PhoneMe: View {
     @State private var marks = 0
     @State private var used: Int64?
     @State private var lastSnapshot: Int64?
-    @AppStorage(ImmersivePrefs.alwaysKey) private var immersiveAlways = false
-    @AppStorage(EInk.key) private var einkOn = false
     @State private var words = 0
     @State private var feedbackShown = false
     #if DEBUG
@@ -329,7 +327,7 @@ struct PhoneMe: View {
         default: "iCloud"
         }
         if case .failed = sync.state { return String(localized: "\(place) · 同步未成功") }
-        return [place, sync.lastSynced.map(PhoneSync.ago)].compactMap { $0 }.joined(separator: " · ")
+        return [place, sync.lastSynced.map(Sync.ago)].compactMap { $0 }.joined(separator: " · ")
     }
 
     // MARK: 这周

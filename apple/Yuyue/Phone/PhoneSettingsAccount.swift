@@ -122,7 +122,7 @@ struct PhoneSync: View {
                     ForEach(sync.devices, id: \.id) { d in
                         Rectangle().fill(YYColor.line).frame(height: 0.5)
                         HStack(spacing: YYUI.s(9)) {
-                            Image(systemName: Self.symbol(d.platform)).font(YYUI.font(12)).foregroundStyle(YYColor.t2).frame(width: YYUI.s(14))
+                            Image(systemName: Sync.deviceSymbol(d.platform)).font(YYUI.font(12)).foregroundStyle(YYColor.t2).frame(width: YYUI.s(14))
                             let name = d.name.isEmpty ? String(localized: "设备") : d.name
                             let label = d.thisDevice ? (d.name.isEmpty || d.name == Library.platformWord ? String(localized: "这台 \(Library.platformWord)") : String(localized: "\(d.name) · 本机")) : name
                             Text(label)
@@ -256,31 +256,13 @@ struct PhoneSync: View {
         case .googleDrive: "Google Drive"
         default: "iCloud"
         }
-        return [sync.lastSynced.map(Self.ago), place].compactMap { $0 }.joined(separator: " · ")
+        return [sync.lastSynced.map(Sync.ago), place].compactMap { $0 }.joined(separator: " · ")
     }
 
     private func detail(of d: DeviceInfo) -> String {
         if d.thisDevice { return String(localized: "刚刚") }
         guard let at = d.lastAt else { return String(localized: "还没同步过") }
-        return Self.ago(Date(timeIntervalSince1970: Double(at) / 1000))
-    }
-
-    static func ago(_ date: Date) -> String {
-        let s = Date().timeIntervalSince(date)
-        if s < 60 { return String(localized: "刚刚") }
-        if s < 3600 { return String(localized: "\(Int(s / 60)) 分钟前") }
-        if Calendar.current.isDateInToday(date) { return String(localized: "今天 ") + date.formatted(.dateTime.hour().minute()) }
-        if Calendar.current.isDateInYesterday(date) { return String(localized: "昨天 ") + date.formatted(.dateTime.hour().minute()) }
-        return date.formatted(.dateTime.month().day())
-    }
-
-    private static func symbol(_ platform: String) -> String {
-        switch platform {
-        case "ios": "iphone"
-        case "ipados": "ipad"
-        case "android": "smartphone"
-        default: "laptopcomputer"
-        }
+        return Sync.ago(Date(timeIntervalSince1970: Double(at) / 1000))
     }
 }
 
@@ -642,8 +624,7 @@ struct PhoneStorage: View {
 
 // MARK: - 关于
 
-/// 关于: free, no server, nothing collected; the licences, privacy, and feedback
-/// by mail, as there is no server to send it to.
+/// 关于: free, no server, nothing collected; the licences, privacy, and links.
 struct PhoneAbout: View {
     private var version: String {
         let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
@@ -722,7 +703,7 @@ struct PhoneAbout: View {
 
     static var licences: String {
         String(localized: "语阅用到了这些开源项目，感谢它们的作者：") + "\n\n"
-            + "UniFFI (MPL-2.0) · rusqlite / SQLite (MIT / Public Domain) · serde, serde_json, regex, encoding_rs, chardetng, zip, html5ever, roxmltree, ICU4X, blake3, percent-encoding, thiserror, aho-corasick, base64, crypto_box, flate2, getrandom, lewton, markup5ever_rcdom, ripemd (MIT / Apache-2.0) · rars, rust-lzo1x (MIT) · foliate-js (MIT) · zhconv (GPL-2.0-or-later) · OpenCC dictionaries (Apache-2.0) · ECDICT (MIT) · pinyin, pypinyin (MIT) · ONNX Runtime (MIT) · OkHttp, JNA (Apache-2.0) · AndroidX, Jetpack Compose, Media3, kotlinx.coroutines, Haze (Apache-2.0) · Sparkle (MIT) · PdfPig (Apache-2.0) · Simple Icons (CC0 1.0) · ZipVoice weights (CC-BY-NC 4.0) · Vocos (MIT) · voices-1, sounds-1 (CC0 1.0) · Meta MMS (CC-BY-NC 4.0) · 3D-Speaker CAM++ (Apache-2.0) · SenseVoice (FunASR Model License)"
+            + "UniFFI (MPL-2.0) · rusqlite / SQLite (MIT / Public Domain) · serde, serde_json, regex, encoding_rs, chardetng, zip, html5ever, roxmltree, ICU4X, blake3, percent-encoding, thiserror, aho-corasick, base64, crypto_box, flate2, getrandom, lewton, markup5ever_rcdom, ripemd (MIT / Apache-2.0) · rars, rust-lzo1x (MIT) · foliate-js (MIT) · zhconv (GPL-2.0-or-later) · OpenCC dictionaries (Apache-2.0) · ECDICT (MIT) · pinyin, pypinyin (MIT) · ONNX Runtime (MIT) · OkHttp, JNA (Apache-2.0) · AndroidX, Jetpack Compose, Media3, kotlinx.coroutines, Haze (Apache-2.0) · Sparkle (MIT) · PdfPig (Apache-2.0) · Simple Icons (CC0 1.0) · Kokoro-82M-v1.1-zh (Apache-2.0) · ZipVoice weights (CC-BY-NC 4.0) · Vocos (MIT) · voices-1, sounds-1 (CC0 1.0) · Meta MMS (CC-BY-NC 4.0) · 3D-Speaker CAM++ (Apache-2.0) · SenseVoice (FunASR Model License)"
             + "\n\n" + String(localized: "完整的许可文本随源代码一起发布。")
     }
 
@@ -730,10 +711,10 @@ struct PhoneAbout: View {
         [String(localized: "语阅没有服务器，也不收集任何数据：没有账号、没有统计、没有广告。"),
          String(localized: "书、进度、笔记和生词都存在这台设备上。打开同步时，它们只在你的设备和你自己选的网盘（iCloud 云盘、WebDAV，Google Drive 即将支持）之间传，语阅看不到。"),
          String(localized: "书伴默认用设备自带的模型，不联网。你填了自己的 Key 时，提问和书里相关的几段原文会直接发给你选的服务商，费用和隐私条款按你和它的约定；Key 只存在这台设备的钥匙串里。"),
-         String(localized: "云端声音和笔记导出（Notion、flomo、新枝）也只在你填了 Key 或链接时联网：要读的句子、要发的笔记直接发给你选的服务。读过的声音存在这台设备上。"),
-         String(localized: "离线翻译与本地模型：翻译用系统的离线翻译；按需从 GitHub Releases 下载的对齐模型、声音包与离线语音模型都在本机运行，原文与录音不出这台设备。"),
-         String(localized: "问题反馈：只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；不收集邮箱，你选择附带的日志或私密文件会在发送前用开发者公钥在本机加密。"),
-         String(localized: "检查更新：从 GitHub 下载安装的版本每天从 GitHub 取一个小文件，看有没有新版本，不带任何关于你和设备的信息；在设置 › 关于 › 检查更新里能关掉。App Store 和 Google Play 的版本不查，由商店更新。")].joined(separator: "\n\n")
+         String(localized: "免费在线语音会把当前要读的句子发给在线语音服务；自行配置的云端声音和笔记导出（Notion、flomo、新枝）只在你选用并填了 Key 或链接时联网，要读的句子或要发的笔记直接发给你选的服务。读过的声音存在这台设备上。"),
+         String(localized: "离线翻译与本地模型：翻译用系统的离线翻译；按需从 GitHub Releases、魔搭（ModelScope）或 Hugging Face 下载的对齐模型、声音包、开源字体与离线语音模型都在本机运行（字体预览样字按需从 Google Fonts 加载），原文与录音不出这台设备。"),
+         String(localized: "问题反馈：只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；不收集邮箱，非图片附件和未公开的截图会在发送前用开发者公钥在本机加密。"),
+         String(localized: "检查更新：从 GitHub 下载安装的版本每天从 GitHub 取一个小文件，看有没有新版本，不带任何关于你和设备的信息；在我的 › 关于 › 检查更新里能关掉。App Store 和 Google Play 的版本不查，由商店更新。")].joined(separator: "\n\n")
     }
 }
 

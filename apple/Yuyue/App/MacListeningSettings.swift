@@ -755,7 +755,7 @@ struct VoiceProviderSheet: View {
                     Spacer(minLength: 0)
                 }
             }
-            .buttonStyle(VoicePickRowStyle())
+            .buttonStyle(PickRow())
             .padding(.top, YYUI.s(8))
         }
     }
@@ -791,27 +791,8 @@ struct VoiceProviderSheet: View {
                 Spacer(minLength: 0)
             }
         }
-        .buttonStyle(VoicePickRowStyle())
+        .buttonStyle(PickRow())
         .help(Text("\(p.title) · \(p.blurb)"))
-    }
-}
-
-/// A row to pick: no box, the inset grey under it on hover and press (matches `PickRow`).
-private struct VoicePickRowStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View { Row(configuration: configuration) }
-
-    private struct Row: View {
-        let configuration: Configuration
-        @State private var hovering = false
-
-        var body: some View {
-            configuration.label
-                .padding(.horizontal, YYUI.s(8))
-                .frame(height: YYUI.s(32))
-                .background(hovering || configuration.isPressed ? YYColor.inset : .clear, in: .rect(cornerRadius: YYUI.s(7)))
-                .contentShape(.rect)
-                .onHover { hovering = $0 }
-        }
     }
 }
 
@@ -857,7 +838,7 @@ struct MacVoicePanel: View {
                 }
                 PanelCard {
                     PanelRow { Text("Kokoro 引擎") } trailing: {
-                        SettingsPill(KokoroModel.isInstalled ? String(localized: "已就绪 · 53 音色") : String(localized: "待下载 · \(KokoroModel.totalMegabytes) MB"),
+                        SettingsPill(KokoroModel.isInstalled ? String(localized: "已就绪 · 16 音色") : String(localized: "待下载 · \(KokoroModel.totalMegabytes) MB"),
                                      tone: KokoroModel.isInstalled ? .ok : .warn)
                     }
                     PanelRow { Text("角色与克隆") } trailing: {

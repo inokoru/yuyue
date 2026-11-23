@@ -370,8 +370,8 @@ private struct NotionSetup: View {
                 ClipRow(text: String(localized: "用剪贴板里的页面链接")) { page = clip }
             }
             PanelCard {
-                FieldRow(label: String(localized: "令牌"), prompt: "ntn_…", text: $token, secure: true, bad: tokenBad != nil)
-                FieldRow(label: String(localized: "放书的页"), prompt: "notion.so/…", text: $page, bad: pageBad != nil)
+                PanelField(label: String(localized: "令牌"), text: $token, prompt: "ntn_…", secure: true, bad: tokenBad != nil)
+                PanelField(label: String(localized: "放书的页"), text: $page, prompt: "notion.so/…", bad: pageBad != nil)
             }
             if let why = tokenBad ?? pageBad { FieldError(text: why) }
             checks.view
@@ -430,7 +430,7 @@ private struct FlomoSetup: View {
                 ClipRow(text: String(localized: "用剪贴板里的 flomoapp.com/iwh/••••")) { link = clip }
             }
             PanelCard {
-                FieldRow(label: String(localized: "API 链接"), prompt: "https://flomoapp.com/iwh/…", text: $link, secure: true, bad: bad != nil)
+                PanelField(label: String(localized: "API 链接"), text: $link, prompt: "https://flomoapp.com/iwh/…", secure: true, bad: bad != nil)
             }
             if let bad { FieldError(text: bad) }
             checks.view
@@ -473,7 +473,7 @@ private struct XinzhiSetup: View {
                 ClipRow(text: String(localized: "用剪贴板里的令牌 ••••\(clip.suffix(4))")) { token = clip }
             }
             PanelCard {
-                FieldRow(label: String(localized: "令牌"), prompt: "CLI AccessToken", text: $token, secure: true, bad: bad != nil)
+                PanelField(label: String(localized: "令牌"), text: $token, prompt: "CLI AccessToken", secure: true, bad: bad != nil)
             }
             if let bad { FieldError(text: bad) }
             checks.view
@@ -612,89 +612,6 @@ private struct StepRow: View {
             .onHover { hovering = $0 }
         } else {
             row
-        }
-    }
-}
-
-/// A row to type in: what it is on the left, the words right in the row; tinted while typing.
-private struct FieldRow: View {
-    let label: String
-    let prompt: String
-    @Binding var text: String
-    var secure = false
-    var bad = false
-    @FocusState private var focused: Bool
-    #if os(macOS)
-    @State private var secretFocused = false
-    @Environment(\.colorScheme) private var scheme
-    @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
-    private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
-    #endif
-
-    private var isFocused: Bool {
-        #if os(macOS)
-        secure ? secretFocused : focused
-        #else
-        focused
-        #endif
-    }
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Text(label).font(.yy(size: PanelScale.k * 12.5)).foregroundStyle(bad ? YYColor.danger : YYColor.t1).fixedSize()
-            #if os(macOS)
-            if secure {
-                ZStack(alignment: .trailing) {
-                    if text.isEmpty {
-                        Text(verbatim: prompt)
-                            .foregroundStyle(YYColor.t3)
-                            .lineLimit(1)
-                            .allowsHitTesting(false)
-                    }
-                    MacSecretField(
-                        text: $text,
-                        focused: $secretFocused,
-                        mono: true,
-                        accentColor: tint.accent,
-                        scheme: scheme
-                    )
-                    .frame(height: ceil(YYUI.s(12) * 1.45) + 4)
-                }
-                .font(.yy(size: PanelScale.k * 12, design: .monospaced))
-            } else {
-                TextField("", text: $text, prompt: Text(verbatim: prompt))
-                    .textFieldStyle(.plain)
-                    .multilineTextAlignment(.trailing)
-                    .font(.yy(size: PanelScale.k * 12, design: .monospaced))
-                    .autocorrectionDisabled()
-                    .focused($focused)
-            }
-            #else
-            Group {
-                if secure {
-                    SecureField("", text: $text, prompt: Text(verbatim: prompt))
-                } else {
-                    TextField("", text: $text, prompt: Text(verbatim: prompt))
-                }
-            }
-            .textFieldStyle(.plain)
-            .multilineTextAlignment(.trailing)
-            .font(.yy(size: PanelScale.k * 12, design: .monospaced))
-            .autocorrectionDisabled()
-            .textInputAutocapitalization(.never)
-            .focused($focused)
-            #endif
-        }
-        .padding(.horizontal, 10)
-        .frame(minHeight: 38 * PanelScale.k)
-        .background(isFocused ? YYColor.t1.opacity(0.06) : .clear, in: .rect(cornerRadius: 8))
-        .contentShape(.rect)
-        .onTapGesture {
-            #if os(macOS)
-            if secure { secretFocused = true } else { focused = true }
-            #else
-            focused = true
-            #endif
         }
     }
 }

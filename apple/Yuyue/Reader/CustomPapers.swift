@@ -174,7 +174,6 @@ struct PaperEditor: View {
     @State private var doneHover = false
     @State private var failure: String?
     @State private var previewTask: Task<Void, Never>?
-    private let tint = YYTint.standard
 
     init(model: ReaderModel, draft: CustomPaper, finish: @escaping (CustomPaper?) -> Void) {
         self.init(draft: draft, backTitle: String(localized: "排版"), onPreview: { model.previewPaper($0) }, finish: finish)

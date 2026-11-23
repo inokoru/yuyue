@@ -29,7 +29,6 @@ struct PhonePodcasts: View {
     @State private var adding = false
     @State private var addInitialQuery = ""
     @State private var studioKind: StudioKind?
-    @State private var preferredTrack: PodcastTrack = .dub
     @State private var drawerPresented = false
     @State private var drawerTab: PodcastDrawerTab = .clips
     @State private var hasNewClipDot = false

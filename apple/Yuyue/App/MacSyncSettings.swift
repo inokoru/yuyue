@@ -159,7 +159,7 @@ struct SyncSettings: View {
         case .idle:
             guard sync.isOn else { return String(localized: "尚未开启同步") }
             guard let last = sync.lastSynced else { return String(localized: "已连上") }
-            return String(localized: "已同步 · ") + Self.ago(last)
+            return String(localized: "已同步 · ") + Sync.ago(last)
         }
     }
 
@@ -176,7 +176,7 @@ struct SyncSettings: View {
 
     private func device(_ d: DeviceInfo) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: Self.symbol(d.platform))
+            Image(systemName: Sync.deviceSymbol(d.platform))
                 .font(.yy(size: 14))
                 .foregroundStyle(YYColor.t2)
                 .frame(width: 16)
@@ -197,28 +197,10 @@ struct SyncSettings: View {
     private func detail(of d: DeviceInfo) -> String {
         if d.thisDevice { return String(localized: "刚刚") }
         guard let at = d.lastAt else { return String(localized: "暂无阅读记录") }
-        let when = Self.ago(Date(timeIntervalSince1970: Double(at) / 1000))
+        let when = Sync.ago(Date(timeIntervalSince1970: Double(at) / 1000))
         guard let book = library.books.first(where: { $0.id == d.lastBook }) else { return when }
         let percent = d.lastFraction.map { " \(Int(($0 * 100).rounded()))%" } ?? ""
         return "\(when) · \(book.title)\(percent)"
-    }
-
-    static func ago(_ date: Date) -> String {
-        let s = Date().timeIntervalSince(date)
-        if s < 60 { return String(localized: "刚刚") }
-        if s < 3600 { return String(localized: "\(Int(s / 60)) 分钟前") }
-        if Calendar.current.isDateInToday(date) { return String(localized: "今天 ") + date.formatted(.dateTime.hour().minute()) }
-        if Calendar.current.isDateInYesterday(date) { return String(localized: "昨天 ") + date.formatted(.dateTime.hour().minute()) }
-        return date.formatted(.dateTime.month().day())
-    }
-
-    private static func symbol(_ platform: String) -> String {
-        switch platform {
-        case "ios": "iphone"
-        case "ipados": "ipad"
-        case "android": "smartphone"
-        default: "laptopcomputer"
-        }
     }
 
     // MARK: Ways

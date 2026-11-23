@@ -298,34 +298,6 @@ enum ClonedVoices {
         NotificationCenter.default.post(name: changed, object: nil)
     }
 
-    /// 兼容旧调用点。
-    static func save(recording: URL, name: String, text: String?, seconds: Double) async throws -> ClonedVoice {
-        let id = "cloned." + UUID().uuidString.lowercased()
-        try FileManager.default.createDirectory(at: folder(id), withIntermediateDirectories: true)
-        try FileManager.default.copyItem(at: recording, to: sample(id))
-        var meta = ClonedVoice.Meta(id: id, name: name, created: Date(), text: text, seconds: seconds)
-        if let ctx = LiveVoiceModel.context,
-           let (pcm, rate) = decodeAudioFile(recording),
-           let transcript = text, !transcript.isEmpty {
-            _ = try? await saveLocalCard(
-                core: ctx.core,
-                dataDir: ctx.dataDir,
-                existingID: id,
-                samples: pcm,
-                rate: rate,
-                text: transcript,
-                lang: CardVoice.inferLanguage(from: transcript, fallback: "zh"),
-                name: name
-            )
-        } else if CloneEngine.available {
-            meta.remote = try await CloneEngine.make(name: name, sample: sample(id))
-            meta.engine = CloneEngine.name
-        }
-        try write(meta)
-        NotificationCenter.default.post(name: changed, object: nil)
-        return ClonedVoice(meta: meta)
-    }
-
     static func rename(_ voice: ClonedVoice, to name: String) throws {
         if let ctx = LiveVoiceModel.context {
             try renameCard(id: voice.id, to: name, core: ctx.core)

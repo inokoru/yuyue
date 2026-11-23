@@ -441,26 +441,12 @@ struct PhoneSearch: View {
         }
     }
 
-    /// The words typed, in the accent wherever they appear.
     private func hit(_ s: String) -> AttributedString {
-        var text = AttributedString(s)
-        guard !q.isEmpty else { return text }
-        var from = text.startIndex
-        while let r = text[from...].range(of: q, options: .caseInsensitive) {
-            text[r].foregroundColor = tint.accent
-            text[r].inlinePresentationIntent = .stronglyEmphasized
-            text[r].underlineStyle = .single
-            from = r.upperBound
-        }
-        return text
+        QuickSearch.highlight(s, query: q, accent: tint.accent)
     }
 
     private func mark(_ s: String) -> AttributedString {
-        var a = AttributedString(s)
-        a.foregroundColor = tint.accent
-        a.inlinePresentationIntent = .stronglyEmphasized
-        a.underlineStyle = .single
-        return a
+        QuickSearch.mark(s, accent: tint.accent)
     }
 }
 #endif

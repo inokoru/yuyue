@@ -269,7 +269,7 @@ struct CompanionProviderSheet: View {
 }
 
 /// A row to pick: no box, the inset grey under it on hover and press.
-private struct PickRow: ButtonStyle {
+struct PickRow: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View { Row(configuration: configuration) }
 
     private struct Row: View {

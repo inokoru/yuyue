@@ -769,7 +769,6 @@ nonisolated final class LiveCastCache: Sendable {
         var plans: [String: CastingPlan] = [:]
         var sections: [String: (section: UInt32, value: DramaSection)] = [:]
         var casts: [String: [DramaCharacter]] = [:]
-        var roles: [String: [String: String]] = [:]
     }
 
     private let lock = Mutex(State())
@@ -790,7 +789,6 @@ nonisolated final class LiveCastCache: Sendable {
     func store(book: String, plan: CastingPlan) {
         lock.withLock {
             $0.plans[book] = plan
-            $0.roles[book] = nil
         }
     }
 
@@ -799,7 +797,6 @@ nonisolated final class LiveCastCache: Sendable {
             $0.plans[book] = nil
             $0.sections[book] = nil
             $0.casts[book] = nil
-            $0.roles[book] = nil
         }
     }
 
@@ -808,7 +805,6 @@ nonisolated final class LiveCastCache: Sendable {
             $0.plans.removeAll()
             $0.sections.removeAll()
             $0.casts.removeAll()
-            $0.roles.removeAll()
         }
     }
 
@@ -845,15 +841,5 @@ nonisolated final class LiveCastCache: Sendable {
         let loaded = (try? core.dramaCast(bookId: book, uptoSection: UInt32.max)) ?? []
         lock.withLock { $0.casts[book] = loaded }
         return loaded
-    }
-
-    func roleOverrides(core: YuyueCore, book: String) -> [String: String] {
-        if let hit = lock.withLock({ $0.roles[book] }) { return hit }
-        var map: [String: String] = [:]
-        for r in (try? core.bookRoles(bookId: book)) ?? [] {
-            if let v = r.voice.voice { map[r.name] = v }
-        }
-        lock.withLock { $0.roles[book] = map }
-        return map
     }
 }

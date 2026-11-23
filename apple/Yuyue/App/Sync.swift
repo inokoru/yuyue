@@ -14,6 +14,24 @@ final class Sync {
         case none, icloud, webdav, googleDrive
     }
 
+    static func ago(_ date: Date) -> String {
+        let s = Date().timeIntervalSince(date)
+        if s < 60 { return String(localized: "刚刚") }
+        if s < 3600 { return String(localized: "\(Int(s / 60)) 分钟前") }
+        if Calendar.current.isDateInToday(date) { return String(localized: "今天 ") + date.formatted(.dateTime.hour().minute()) }
+        if Calendar.current.isDateInYesterday(date) { return String(localized: "昨天 ") + date.formatted(.dateTime.hour().minute()) }
+        return date.formatted(.dateTime.month().day())
+    }
+
+    static func deviceSymbol(_ platform: String) -> String {
+        switch platform {
+        case "ios": "iphone"
+        case "ipados": "ipad"
+        case "android": "smartphone"
+        default: "laptopcomputer"
+        }
+    }
+
     enum State: Equatable {
         case idle
         case syncing

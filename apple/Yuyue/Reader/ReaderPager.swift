@@ -658,12 +658,6 @@ final class ReaderPager: PlatformView {
         slots.forEach(sendFlag)
     }
 
-    func clearFlag() {
-        guard flag != nil else { return }
-        flag = nil
-        slots.forEach(sendFlag)
-    }
-
     /// 有声书: by section, the sentences the recording doesn't read, shown a shade lighter.
     private var unread: [UInt32: [Int]] = [:]
 
