@@ -10110,7 +10110,6 @@
       }
     },
     "删除这 %lld 本书？" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "variations" : {
@@ -42678,6 +42677,262 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No books yet. Drag files into the window, or right-click a book on the shelf and choose “Add to Collection…”"
+          }
+        }
+      }
+    },
+    "%lld+ 处" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld+ places"
+          }
+        }
+      }
+    },
+    "%lld+ 处 · %lld 本书" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld+ places · %#@b@"
+          },
+          "substitutions" : {
+            "b" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg book"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg books"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "“%@” · %lld+ 处" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%1$@” · %2$lld+ places"
+          }
+        }
+      }
+    },
+    "仅显示前 %lld 处，输入更长的词可缩小范围" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Showing first %lld places; type a longer phrase to narrow down"
+          }
+        }
+      }
+    },
+    "已删除 %lld 本书" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Deleted %lld book"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Deleted %lld books"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "朗读模型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voice model"
+          }
+        }
+      }
+    },
+    "朗读模型与声音包" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voice model & packs"
+          }
+        }
+      }
+    },
+    "朗读模型与声音包 · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voice model & packs · %@"
+          }
+        }
+      }
+    },
+    "本章 %lld%% · 还剩 %lld 分钟" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chapter %1$lld%% · %2$lld min left"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "本章 %1$lld%% · 还剩 %2$lld 分钟"
+          }
+        }
+      }
+    },
+    "本集 %lld%% · 还剩 %lld 分钟" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Episode %1$lld%% · %2$lld min left"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "本集 %1$lld%% · 还剩 %2$lld 分钟"
+          }
+        }
+      }
+    },
+    "版权" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "License"
+          }
+        }
+      }
+    },
+    "离线朗读模型、自带声音与音效包；移除后可在听书设置里重新下载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline voice model, built-in voices and sound effects; re-download anytime in Listening settings"
+          }
+        }
+      }
+    },
+    "移除后将改用系统声音朗读，随时可以在听书设置里重新下载。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reading aloud will fall back to system voices. You can download them again anytime in Listening settings."
+          }
+        }
+      }
+    },
+    "移除朗读模型与声音包？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove voice model & packs?"
+          }
+        }
+      }
+    },
+    "第 %lld / %lld+ 处" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld of %2$lld+"
+          }
+        }
+      }
+    },
+    "管理合集“%@”" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manage collection “%@”"
+          }
+        }
+      }
+    },
+    "附录与版权" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Appendix & License"
+          }
+        }
+      }
+    },
+    "封面与插图转为灰度" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Grayscale Covers & Illustrations"
+          }
+        }
+      }
+    },
+    "彩墨屏可关闭以保留原色" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn off on color e-ink screens to keep artwork in color"
+          }
+        }
+      }
+    },
+    "墨水屏模式已接管纸色，关闭后恢复原纸色" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paper colors are managed by E-Ink Mode. Turn it off to restore your previous paper."
+          }
+        }
+      }
+    },
+    "仅在本机生效：阅读页切换为纯白底与纯黑字（无颗粒噪点），划线转为黑线，并关闭翻页动画、阴影与毛玻璃效果；不改动跨设备同步的纸色，关闭后恢复原纸色。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Applies to this device only: switches reading pages to pure white with black ink (no grain), draws marks as black lines, and disables animations, shadows, and blur. Your synced paper setting stays untouched and returns when turned off."
           }
         }
       }
