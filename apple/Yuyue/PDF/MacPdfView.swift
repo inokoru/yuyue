@@ -450,12 +450,15 @@ private struct PdfSearch: View {
             .padding(.horizontal, 12).frame(height: 34)
             .background(YYColor.inset, in: .rect(cornerRadius: 9))
             .padding(12)
-            .onChange(of: model.query) {
-                Task {
-                    let q = model.query
-                    try? await Task.sleep(for: .milliseconds(300))
-                    if q == model.query { model.search() }
+            .task(id: model.query) {
+                if model.query.isEmpty {
+                    model.search()
+                    return
                 }
+                do {
+                    try await Task.sleep(for: .milliseconds(300))
+                    model.search()
+                } catch {}
             }
 
             if model.searching {
@@ -504,6 +507,9 @@ private struct PdfPages: NSViewRepresentable {
         var night: Bool?
         var reading: PdfModel.Reading?
         var observer: NSObjectProtocol?
+        #if DEBUG
+        var debugObserver: NSObjectProtocol?
+        #endif
 
         init(model: PdfModel) { self.model = model }
     }
@@ -513,6 +519,10 @@ private struct PdfPages: NSViewRepresentable {
     static func dismantleNSView(_ view: MarkingPDFView, coordinator: Coordinator) {
         coordinator.observer.map(NotificationCenter.default.removeObserver)
         coordinator.observer = nil
+        #if DEBUG
+        coordinator.debugObserver.map(NotificationCenter.default.removeObserver)
+        coordinator.debugObserver = nil
+        #endif
         MarkedPage.setNight(false, for: view.document)
     }
 
@@ -540,7 +550,7 @@ private struct PdfPages: NSViewRepresentable {
         view.wantsLayer = true
         view.layerUsesCoreImageFilters = true
         #if DEBUG
-        NotificationCenter.default.addObserver(forName: .init("debugPdfMenu"), object: nil, queue: .main) { [weak view] _ in
+        context.coordinator.debugObserver = NotificationCenter.default.addObserver(forName: .init("debugPdfMenu"), object: nil, queue: .main) { [weak view] _ in
             MainActor.assumeIsolated { view?.debugMenus() }
         }
         #endif

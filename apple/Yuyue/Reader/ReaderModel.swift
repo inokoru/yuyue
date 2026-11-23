@@ -79,8 +79,8 @@ final class ReaderModel {
     /// Whether the book has enough dialogue for 气泡 and 人物: books without (essays, papers)
     /// don't offer them.
     private(set) var hasDialogue = false
-    @ObservationIgnored private var castObserver: NSObjectProtocol?
-    @ObservationIgnored private var dramaObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var castObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var dramaObserver: NSObjectProtocol?
     /// 编码和目录, for a TXT.
     var txtShown = false
     /// Why the TXT may have been read wrong, for the hint that leads to 编码和目录.
@@ -170,15 +170,15 @@ final class ReaderModel {
     /// Opening a book only shows where it was; the position is written once the reader moves,
     /// so a glance on one device doesn't bury further reading on another.
     @ObservationIgnored private var opened = false
-    @ObservationIgnored private var saving: Task<Void, Never>?
+    @ObservationIgnored nonisolated(unsafe) private var saving: Task<Void, Never>?
     @ObservationIgnored var clock = TimeClock()
-    @ObservationIgnored var searching: Task<Void, Never>?
-    @ObservationIgnored private var watching: [Task<Void, Never>] = []
+    @ObservationIgnored nonisolated(unsafe) var searching: Task<Void, Never>?
+    @ObservationIgnored nonisolated(unsafe) private var watching: [Task<Void, Never>] = []
     /// The book is being built again; this model is about to be replaced and writes nothing more.
     @ObservationIgnored private var retired = false
     /// Heard at once, not later on a task: the core builds the book right after it's posted.
-    @ObservationIgnored private var rebuildObserver: NSObjectProtocol?
-    @ObservationIgnored private var terminationObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var rebuildObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var terminationObserver: NSObjectProtocol?
 
     init(library: Library, bookID: String) {
         let core = library.core
@@ -392,12 +392,17 @@ final class ReaderModel {
         flush()
         player?.close()
         setListening(false)
+        searching?.cancel()
+        searching = nil
         watching.forEach { $0.cancel() }
+        watching.removeAll()
         rebuildObserver.map(NotificationCenter.default.removeObserver)
         castObserver.map(NotificationCenter.default.removeObserver)
         dramaObserver.map(NotificationCenter.default.removeObserver)
         terminationObserver.map(NotificationCenter.default.removeObserver)
         rebuildObserver = nil
+        castObserver = nil
+        dramaObserver = nil
         terminationObserver = nil
     }
 
@@ -408,15 +413,30 @@ final class ReaderModel {
         saving?.cancel()
         saving = nil
         saved = nil
+        searching?.cancel()
+        searching = nil
         player?.close()
         setListening(false)
         watching.forEach { $0.cancel() }
+        watching.removeAll()
         rebuildObserver.map(NotificationCenter.default.removeObserver)
         castObserver.map(NotificationCenter.default.removeObserver)
         dramaObserver.map(NotificationCenter.default.removeObserver)
         terminationObserver.map(NotificationCenter.default.removeObserver)
         rebuildObserver = nil
+        castObserver = nil
+        dramaObserver = nil
         terminationObserver = nil
+    }
+
+    deinit {
+        saving?.cancel()
+        searching?.cancel()
+        watching.forEach { $0.cancel() }
+        rebuildObserver.map(NotificationCenter.default.removeObserver)
+        castObserver.map(NotificationCenter.default.removeObserver)
+        dramaObserver.map(NotificationCenter.default.removeObserver)
+        terminationObserver.map(NotificationCenter.default.removeObserver)
     }
 
     private static func doubtKey(_ bookID: String) -> String { "txtDoubtDismissed.\(bookID)" }

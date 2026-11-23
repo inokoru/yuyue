@@ -248,8 +248,10 @@ final class SectionPage {
         scrolledTo = nil
         webView.alphaValue = 0
         // The query is for telling documents apart only; the scheme handler serves by path.
-        let url = "\(SchemeHandler.origin)/book/\(bookID)/s/\(section).html?g=\(generation)"
-        webView.load(URLRequest(url: URL(string: url)!))
+        let raw = "\(SchemeHandler.origin)/book/\(bookID)/s/\(section).html?g=\(generation)"
+        if let url = URL(string: raw) {
+            webView.load(URLRequest(url: url))
+        }
     }
 
     /// Forget the section, so the view can be reused.

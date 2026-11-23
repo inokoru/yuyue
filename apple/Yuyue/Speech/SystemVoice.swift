@@ -3,7 +3,7 @@ import Synchronization
 
 /// A voice that comes with the system. AVSpeechSynthesizer renders it into buffers instead of
 /// playing it, so it plays through the same player as every other voice.
-nonisolated final class SystemVoice: Voice, @unchecked Sendable {
+nonisolated final class SystemVoice: Voice, Sendable {
     let id: String
     let name: String
     /// The voice's own language tag, such as zh-CN.
@@ -13,7 +13,7 @@ nonisolated final class SystemVoice: Voice, @unchecked Sendable {
 
     /// One synthesizer renders for every system voice, one sentence at a time (the player
     /// waits for each sentence before asking for the next).
-    nonisolated(unsafe) private static let synthesizer = AVSpeechSynthesizer()
+    private static let synthesizer = SynthesizerGate()
 
     init(_ voice: AVSpeechSynthesisVoice) {
         id = voice.identifier
@@ -32,21 +32,31 @@ nonisolated final class SystemVoice: Voice, @unchecked Sendable {
     func render(_ text: String, language: String) async throws -> Speech? {
         // Text with nothing to pronounce never produces audio, or even the closing callback.
         guard text.unicodeScalars.contains(where: { CharacterSet.alphanumerics.contains($0) }) else { return nil }
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(identifier: id)
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
-        utterance.prefersAssistiveTechnologySettings = false
         let collector = Collector()
+        let timeout = 20 + Double(text.count) * 0.3
+        // A sentence that never finishes must not stall the book.
+        let watchdog = Task {
+            try? await Task.sleep(for: .seconds(timeout))
+            guard !Task.isCancelled else { return }
+            await Self.synthesizer.stopSpeaking()
+            collector.finish()
+        }
+        defer { watchdog.cancel() }
+        let voiceID = id
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
-                collector.start(continuation)
-                Self.synthesizer.write(utterance) { buffer in collector.add(buffer) }
-                // A sentence that never finishes must not stall the book.
-                DispatchQueue.global().asyncAfter(deadline: .now() + 20 + Double(text.count) * 0.3) { collector.finish() }
+                guard collector.start(continuation) else { return }
+                Task {
+                    guard !Task.isCancelled else {
+                        collector.finish()
+                        return
+                    }
+                    await Self.synthesizer.write(text: text, voiceID: voiceID, collector: collector)
+                }
             }
         } onCancel: {
-            Self.synthesizer.stopSpeaking(at: .immediate)
             collector.finish()
+            Task { await Self.synthesizer.stopSpeaking() }
         }
     }
 
@@ -105,8 +115,8 @@ nonisolated final class SystemVoice: Voice, @unchecked Sendable {
         previewer.stopSpeaking(at: .immediate)
     }
 
-    nonisolated(unsafe) private static let previewer = AVSpeechSynthesizer()
-    private static let previewWatcher = PreviewWatcher()
+    @MainActor private static let previewer = AVSpeechSynthesizer()
+    @MainActor private static let previewWatcher = PreviewWatcher()
 
     /// "增强" · "高级": how good the voice sounds, when it is better than the default.
     var qualityName: String? {
@@ -141,25 +151,66 @@ private nonisolated final class PreviewWatcher: NSObject, AVSpeechSynthesizerDel
     }
 }
 
+/// Serializes `AVSpeechSynthesizer.write` and `stopSpeaking` off the main actor.
+private actor SynthesizerGate {
+    private let synthesizer = AVSpeechSynthesizer()
+
+    func write(text: String, voiceID: String, collector: Collector) {
+        guard !collector.isFinished else { return }
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = AVSpeechSynthesisVoice(identifier: voiceID)
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        utterance.prefersAssistiveTechnologySettings = false
+        synthesizer.write(utterance, toBufferCallback: Self.makeCallback(collector))
+    }
+
+    func stopSpeaking() {
+        synthesizer.stopSpeaking(at: .immediate)
+    }
+
+    private nonisolated static func makeCallback(_ collector: Collector) -> AVSpeechSynthesizer.BufferCallback {
+        { buffer in collector.add(buffer) }
+    }
+}
+
 /// Collects one sentence's buffers from the synthesizer's queue and hands them over once.
 private nonisolated final class Collector: @unchecked Sendable {
     private let lock = NSLock()
     private var buffers: [AVAudioPCMBuffer] = []
     private var continuation: CheckedContinuation<Speech?, Never>?
+    private var finished = false
 
-    func start(_ continuation: CheckedContinuation<Speech?, Never>) {
-        lock.withLock { self.continuation = continuation }
+    var isFinished: Bool {
+        lock.withLock { finished }
+    }
+
+    func start(_ continuation: CheckedContinuation<Speech?, Never>) -> Bool {
+        let alreadyFinished = lock.withLock { () -> Bool in
+            if finished { return true }
+            self.continuation = continuation
+            return false
+        }
+        if alreadyFinished {
+            continuation.resume(returning: nil)
+            return false
+        }
+        return true
     }
 
     func add(_ buffer: AVAudioBuffer) {
         guard let pcm = buffer as? AVAudioPCMBuffer else { return }
         // The last callback of an utterance carries an empty buffer.
         if pcm.frameLength == 0 { return finish() }
-        lock.withLock { buffers.append(pcm) }
+        lock.withLock {
+            guard !finished else { return }
+            buffers.append(pcm)
+        }
     }
 
     func finish() {
-        let (continuation, buffers) = lock.withLock {
+        let (continuation, buffers) = lock.withLock { () -> (CheckedContinuation<Speech?, Never>?, [AVAudioPCMBuffer]) in
+            guard !finished else { return (nil, []) }
+            finished = true
             defer { self.continuation = nil; self.buffers = [] }
             return (self.continuation, self.buffers)
         }
