@@ -923,7 +923,9 @@ private struct ChapterJumpRow: View {
                     .font(.yy(size: 11, weight: current ? .semibold : .regular))
                     .monospacedDigit()
                     .foregroundStyle(current ? tint.accent : past ? YYColor.t3 : YYColor.t2)
-                    .frame(width: 52, alignment: .leading)
+                    .lineLimit(1)
+                    .frame(minWidth: 52, alignment: .leading)
+                    .fixedSize(horizontal: true, vertical: false)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(t.name.isEmpty ? (t.number ?? String(localized: "第 \(row.number) 章")) : t.name)
                         .font(.yy(size: current ? 12.5 : 12, weight: current ? .semibold : .regular))

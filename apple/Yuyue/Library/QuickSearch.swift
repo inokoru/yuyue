@@ -46,9 +46,13 @@ final class QuickSearch {
     var query = "" {
         didSet { if query != oldValue { find() } }
     }
+    /// Matches `core/yuyue-core/src/notes.rs` (`MAX_HITS`).
+    static let hitLimit = 500
+
     private(set) var titles: [TitleHit] = []
     private(set) var lines: [LineHit] = []
     private(set) var lineCount = 0
+    private(set) var lineCapped = false
     private(set) var lineBooks = 0
     private(set) var notes: [NoteHit] = []
     private(set) var noteCount = 0
@@ -123,7 +127,7 @@ final class QuickSearch {
             // Nothing typed: the books last read.
             titles = books.filter { $0.openedAt != nil }.sorted { ($0.openedAt ?? 0) > ($1.openedAt ?? 0) }
                 .prefix(5).map { TitleHit(book: $0, chapter: nil) }
-            lines = []; lineCount = 0; lineBooks = 0
+            lines = []; lineCount = 0; lineCapped = false; lineBooks = 0
             notes = []; noteCount = 0
             words = []
             return
@@ -156,6 +160,7 @@ final class QuickSearch {
             let found = await Self.search(core: core, books: ids, query: q)
             guard !Task.isCancelled else { return }
             lineCount = found.reduce(0) { $0 + $1.1.count }
+            lineCapped = found.contains { $0.1.count >= Self.hitLimit }
             lineBooks = found.count { !$0.1.isEmpty }
             // The first sentence from each book, then the second…
             var picked: [LineHit] = []
@@ -284,7 +289,9 @@ struct QuickSearchPanel: View {
                         }
                     }
                     if !search.lines.isEmpty {
-                        group(String(localized: "全文"), String(localized: "\(search.lineCount) 处 · \(search.lineBooks) 本书"))
+                        group(String(localized: "全文"), search.lineCapped
+                              ? String(localized: "\(search.lineCount)+ 处 · \(search.lineBooks) 本书")
+                              : String(localized: "\(search.lineCount) 处 · \(search.lineBooks) 本书"))
                         ForEach(Array(search.lines.enumerated()), id: \.element.id) { i, l in
                             row(1 + search.titles.count + i) { lineRow(l) }
                         }

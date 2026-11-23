@@ -948,8 +948,17 @@ struct PhoneShelf: View {
                 stopSelecting()
             }
             barButton(String(localized: "删除"), "trash", danger: true) {
-                for book in books { library.delete(book) }
-                stopSelecting()
+                let title = books.count == 1
+                    ? String(localized: "删除《\(books[0].title)》？")
+                    : String(localized: "删除这 \(books.count) 本书？")
+                confirming = YYConfirm(
+                    title: title,
+                    message: String(localized: "书会移到已删除，30 天内可以在存储里撤销。"),
+                    button: String(localized: "删除")
+                ) {
+                    library.delete(books)
+                    stopSelecting()
+                }
             }
         }
         .disabled(books.isEmpty)

@@ -200,6 +200,17 @@ class Library(private val context: Context) {
         show(Toast(Toast.Icon.Delete, t("已删除《%@》", book.title), t("笔记和进度都留着"), danger = true) { run { core.restoreBook(book.id) } })
     }
 
+    /** Deletes a selection in one batch; Undo restores every deleted book. */
+    fun deleteAll(books: List<BookSummary>) {
+        if (books.isEmpty()) return
+        if (books.size == 1) { delete(books[0]); return }
+        val ids = books.map { it.id }
+        run { for (id in ids) core.deleteBook(id) }
+        show(Toast(Toast.Icon.Delete, t("已删除 %lld 本书", books.size), t("笔记和进度都留着"), danger = true) {
+            run { for (id in ids) core.restoreBook(id) }
+        })
+    }
+
     /** Deletes highlights outside the book (笔记), with 撤销. Each is (book, mark). */
     fun deleteMarks(marks: List<Pair<String, Mark>>) {
         if (marks.isEmpty()) return
@@ -477,34 +488,48 @@ class Library(private val context: Context) {
     /** A file already on disk (Wi‑Fi 传书, 远程书库, a watched folder): into the library, or why not. */
     fun importPath(path: String, title: String? = null, author: String? = null, cover: ByteArray? = null): BookSummary {
         val file = File(path)
+        val stem = file.nameWithoutExtension
+        val cleanTitle = title?.trim()?.takeIf { it.isNotEmpty() }
+        val cleanAuthors = author?.split('、', ',', '，', ';', '；', '/')
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            .orEmpty()
         if (AudioImporter.isAudio(file.name)) {
             var audio = AudioImporter.read(core, listOf(file), null)
-            val stem = file.nameWithoutExtension
-            val cleanTitle = title?.trim()?.takeIf { it.isNotEmpty() }
             if (cleanTitle != null && (audio.title.isBlank() || audio.title == stem)) {
                 audio = audio.copy(title = cleanTitle)
             }
-            if (audio.authors.isEmpty()) {
-                val authors = author?.split('、', ',', '，', ';', '；', '/')
-                    ?.map { it.trim() }
-                    ?.filter { it.isNotEmpty() }
-                    .orEmpty()
-                if (authors.isNotEmpty()) audio = audio.copy(authors = authors)
+            if (audio.authors.isEmpty() && cleanAuthors.isNotEmpty()) {
+                audio = audio.copy(authors = cleanAuthors)
             }
             if (audio.cover == null && cover != null) {
                 audio = audio.copy(cover = cover)
             }
             return core.importAudiobook(audio)
         }
-        val book = core.importBook(path)
-        if (book.format != BookFormat.PDF || book.readMinutes != 0u) return book
-        // The core keeps a PDF as it is; the system's renderer says what is in it.
-        return try {
-            core.setPdfInfo(book.id, PdfInfoReader.read(file))
-        } catch (e: Exception) {
-            runCatching { core.deleteBook(book.id) }
-            throw e
+        var book = core.importBook(path)
+        if (book.format == BookFormat.PDF) {
+            if (book.readMinutes != 0u) return book
+            // The core keeps a PDF as it is; the system's renderer says what is in it.
+            return try {
+                var info = PdfInfoReader.read(file)
+                if (info.title.isNullOrBlank() && cleanTitle != null) info = info.copy(title = cleanTitle)
+                if (info.authors.isEmpty() && cleanAuthors.isNotEmpty()) info = info.copy(authors = cleanAuthors)
+                if (info.cover == null && cover != null) info = info.copy(cover = cover)
+                core.setPdfInfo(book.id, info)
+            } catch (e: Exception) {
+                runCatching { core.deleteBook(book.id) }
+                throw e
+            }
         }
+        val needsTitle = cleanTitle != null && (book.title.isBlank() || book.title == stem)
+        val needsAuthors = cleanAuthors.isNotEmpty() && book.authors.isEmpty()
+        if (needsTitle || needsAuthors) {
+            val nextTitle = if (needsTitle) cleanTitle else book.title
+            val nextAuthors = if (needsAuthors) cleanAuthors else book.authors
+            runCatching { core.editBookInfo(book.id, nextTitle, nextAuthors) }.getOrNull()?.let { book = it }
+        }
+        return book
     }
 
     private fun displayName(uri: Uri): String {

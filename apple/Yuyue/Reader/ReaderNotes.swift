@@ -231,6 +231,9 @@ extension ReaderModel {
 
     // MARK: Search
 
+    /// True when the core stopped at `MAX_HITS` (500) and more matches may exist.
+    var hitsCapped: Bool { hits.count >= QuickSearch.hitLimit }
+
     /// Searches the book for `query`, a moment after the typing stops.
     func search() {
         searching?.cancel()
@@ -354,18 +357,32 @@ extension ReaderModel {
         return max(1, Int((Double(minutes(of: Int(section))) * Double(n - sentence) / Double(n)).rounded()))
     }
 
-    /// The capsule's second line: `42% · 本章还剩 6 分钟`, or `原声 · 本章还剩 38 分钟` in the
-    /// narrator's voice, timed from the recording.
+    /// 0–1 through the current chapter, matching the progress line on the reading capsule.
+    var chapterProgress: Double {
+        let n = sentenceCount
+        return n > 0 ? min(1, Double(sentence + 1) / Double(n)) : 0
+    }
+
+    nonisolated static func capsuleProgressText(chapterProgress: Double, minutesLeft: Int, isPodcast: Bool) -> String {
+        let pct = Int((min(1, max(0, chapterProgress)) * 100).rounded())
+        if isPodcast {
+            return String(localized: "本集 \(pct)% · 还剩 \(minutesLeft) 分钟")
+        }
+        return String(localized: "本章 \(pct)% · 还剩 \(minutesLeft) 分钟")
+    }
+
+    /// The capsule's second line: `本章 57% · 还剩 3 分钟` (matching the chapter progress bar),
+    /// or `原声 · 本章还剩 38 分钟` in the narrator's voice, timed from the recording.
     var capsuleNote: String {
         if let player, player.narrated, let section,
            let left = player.recording?.secondsLeft(section: section, sentence: sentence) {
             return String(localized: "原声 · 本章还剩 \(max(1, Int((left / 60 / Double(rate)).rounded()))) 分钟")
         }
-        // An episode is one 集, not a chapter of a book.
-        if detail?.summary.format == .podcast {
-            return String(localized: "\(Int((bookFraction * 100).rounded()))% · 本集还剩 \(chapterMinutesLeft) 分钟")
-        }
-        return String(localized: "\(Int((bookFraction * 100).rounded()))% · 本章还剩 \(chapterMinutesLeft) 分钟")
+        return Self.capsuleProgressText(
+            chapterProgress: chapterProgress,
+            minutesLeft: chapterMinutesLeft,
+            isPodcast: detail?.summary.format == .podcast
+        )
     }
 
     /// The page in the whole book, guessed from how much text the current section puts on a page.

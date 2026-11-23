@@ -2322,7 +2322,7 @@ public sealed partial class ReaderWindow : Window
                 }
             }
             _hitIndex = firstAfter >= 0 ? firstAfter : 0;
-            SearchHitCountText.Text = $"第 {_hitIndex + 1} / {_searchHits.Count} 处";
+            SearchHitCountText.Text = $"第 {_hitIndex + 1} / {_searchHits.Count}{(_searchHits.Count >= 500 ? "+" : "")} 处";
         }
 
         _ = _host.SetHitsAsync(q);
@@ -2342,7 +2342,7 @@ public sealed partial class ReaderWindow : Window
 
     private void JumpToHit(SearchHit hit)
     {
-        SearchHitCountText.Text = $"第 {_hitIndex + 1} / {_searchHits.Count} 处";
+        SearchHitCountText.Text = $"第 {_hitIndex + 1} / {_searchHits.Count}{(_searchHits.Count >= 500 ? "+" : "")} 处";
         var q = BookSearchBox.Text.Trim();
         if (hit.Section == _currentSection)
         {
@@ -2682,23 +2682,47 @@ public sealed partial class ReaderWindow : Window
         }
     }
 
-    // 1:1 MacReaderView.swift:1079-1317：目录面板（2 分段 目录/书签 + 状态行 + 44px 章节号分栏 + 各章阅读时长）
+    // 1:1 MacReaderView.swift:1079-1317：目录面板（2 分段 目录/书签 + 状态行 + 自适应章节号分栏 + 各章阅读时长）
     private void RenderTocSidePanel(YYPalette p, YYTintColors tint)
     {
-        var items = new List<TocEntry>();
+        var rawItems = new List<(string Title, uint Section, string? Anchor, ushort Depth)>();
         if (_detail.Toc.Length > 0)
-            foreach (var t in _detail.Toc) items.Add(new TocEntry(t.Title, t.Section, t.Anchor, t.Depth));
+            foreach (var t in _detail.Toc) rawItems.Add((t.Title, t.Section, t.Anchor, t.Depth));
         else
             for (uint i = 0; i < _detail.Sections.Length; i++)
                 if (!string.IsNullOrWhiteSpace(_detail.Sections[i].Title))
-                    items.Add(new TocEntry(_detail.Sections[i].Title!, i, null, 0));
+                    rawItems.Add((_detail.Sections[i].Title!, i, null, 0));
+
+        var items = new List<TocEntry>(rawItems.Count);
+        for (int i = 0; i < rawItems.Count; i++)
+        {
+            var r = rawItems[i];
+            int start = (int)r.Section;
+            int end = _detail.Sections.Length;
+            for (int j = i + 1; j < rawItems.Count; j++)
+            {
+                if ((int)rawItems[j].Section > start) { end = (int)rawItems[j].Section; break; }
+            }
+            int rangeEnd = Math.Max(start + 1, end);
+            bool saw = false, allBoilerplate = true;
+            for (int s = start; s < rangeEnd && s < _detail.Sections.Length; s++)
+            {
+                saw = true;
+                if (_detail.Sections[s].Kind != SectionKind.Boilerplate) { allBoilerplate = false; break; }
+            }
+            items.Add(new TocEntry(r.Title, r.Section, r.Anchor, r.Depth, saw && allBoilerplate));
+        }
+
+        var mainItems = items.Where(it => !it.IsBoilerplate).ToList();
+        var boilerplateItems = items.Where(it => it.IsBoilerplate).ToList();
+        int displayCount = mainItems.Count > 0 ? mainItems.Count : items.Count;
 
         var bookmarks = _library.GetBookmarks(_bookId);
         if (_tocTab is not ("toc" or "bookmarks")) _tocTab = "toc";
 
         SideHeaderHost.Children.Add(BuildPanelTabs(
             [
-                ("toc", $"目录 {items.Count}"),
+                ("toc", $"目录 {displayCount}"),
                 ("bookmarks", $"书签 {bookmarks.Count}"),
             ],
             _tocTab,
@@ -2818,15 +2842,27 @@ public sealed partial class ReaderWindow : Window
             return;
         }
 
+        double numColWidth = 46;
+        foreach (var entry in (mainItems.Count > 0 ? mainItems : items))
+        {
+            var (cn, _) = SplitChapterTitle(entry.Title);
+            if (cn is null) continue;
+            double units = 0;
+            foreach (char ch in cn) units += ch < 128 ? 0.65 : 1.0;
+            numColWidth = Math.Max(numColWidth, Math.Min(84, Math.Ceiling(units * 11.5 + 6)));
+        }
+
+        int lastMainIdx = items.FindLastIndex(it => !it.IsBoilerplate);
         for (int i = 0; i < items.Count; i++)
         {
             var entry = items[i];
+            if (entry.IsBoilerplate) continue;
             bool cur = i == currentIdx;
             bool past = currentIdx > i;
             var (chapNum, chapRest) = SplitChapterTitle(entry.Title);
 
             var rowGrid = new Grid { ColumnSpacing = 8, Padding = new Thickness(6 + entry.Depth * 10, cur ? 9 : 8, 6, cur ? 9 : 8) };
-            rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(chapNum is not null ? 46 : 0) });
+            rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(chapNum is not null ? numColWidth : 0) });
             rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
             if (chapNum is not null)
@@ -2906,8 +2942,76 @@ public sealed partial class ReaderWindow : Window
                 LoadSection(targetEntry.Section);
             };
             SideBodyStack.Children.Add(btn);
-            if (!cur && i + 1 != currentIdx && i < items.Count - 1)
+            if (!cur && i + 1 != currentIdx && i < lastMainIdx)
                 SideBodyStack.Children.Add(new Border { Height = 1, Background = ThemeHelper.Brush(p.Line) });
+        }
+
+        if (boilerplateItems.Count > 0)
+        {
+            SideBodyStack.Children.Add(new TextBlock
+            {
+                Text = "附录与版权",
+                FontSize = 10.5,
+                Foreground = ThemeHelper.Brush(p.T3),
+                Margin = new Thickness(6, mainItems.Count > 0 ? 14 : 4, 6, 6),
+            });
+            for (int bi = 0; bi < items.Count; bi++)
+            {
+                var entry = items[bi];
+                if (!entry.IsBoilerplate) continue;
+                bool cur = bi == currentIdx;
+                var row = new Grid { ColumnSpacing = 8, Padding = new Thickness(6, 8, 6, 8) };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var ico = YYIcons.Make("note-card", 12, ThemeHelper.Brush(cur ? tint.Accent : p.T3));
+                row.Children.Add(ico);
+
+                var titleTb = new TextBlock
+                {
+                    Text = entry.Title,
+                    FontSize = 11,
+                    FontWeight = cur ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
+                    Foreground = ThemeHelper.Brush(cur ? tint.Accent : p.T2),
+                    MaxLines = 1,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                Grid.SetColumn(titleTb, 1);
+                row.Children.Add(titleTb);
+
+                var tag = new Border
+                {
+                    CornerRadius = new CornerRadius(5),
+                    Background = ThemeHelper.Brush(cur ? tint.AccentSoft : p.Inset),
+                    Padding = new Thickness(6, 2, 6, 2),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Child = new TextBlock
+                    {
+                        Text = "版权",
+                        FontSize = 9.5,
+                        Foreground = ThemeHelper.Brush(cur ? tint.Accent : p.T3),
+                    },
+                };
+                Grid.SetColumn(tag, 2);
+                row.Children.Add(tag);
+
+                var bpBtn = MakeSideItemButton(row);
+                if (cur)
+                {
+                    bpBtn.Background = ThemeHelper.Brush(tint.AccentSoft);
+                    bpBtn.CornerRadius = new CornerRadius(9);
+                }
+                var targetEntry = entry;
+                bpBtn.Click += (_, _) =>
+                {
+                    _pendingAnchor = targetEntry.Anchor;
+                    _pendingSentence = targetEntry.Anchor is null ? 0 : null;
+                    LoadSection(targetEntry.Section);
+                };
+                SideBodyStack.Children.Add(bpBtn);
+            }
         }
     }
 
@@ -2919,7 +3023,7 @@ public sealed partial class ReaderWindow : Window
         var headLeft = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         headLeft.Children.Add(new TextBlock { Text = "搜索结果", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = ThemeHelper.Brush(p.T1) });
         if (!string.IsNullOrEmpty(q))
-            headLeft.Children.Add(new TextBlock { Text = $"{_searchHits.Count} 处", FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Bottom });
+            headLeft.Children.Add(new TextBlock { Text = $"{_searchHits.Count}{(_searchHits.Count >= 500 ? "+" : "")} 处", FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Bottom });
         head.Children.Add(headLeft);
         SideHeaderHost.Children.Add(head);
 
@@ -2969,6 +3073,17 @@ public sealed partial class ReaderWindow : Window
                 btn.Click += (_, _) => { _hitIndex = idx; JumpToHit(hit); RenderSidePanel(); };
                 SideBodyStack.Children.Add(btn);
             }
+        }
+        if (_searchHits.Count >= 500)
+        {
+            SideBodyStack.Children.Add(new TextBlock
+            {
+                Text = "仅显示前 500 处，输入更长的词可缩小范围",
+                FontSize = 10.5,
+                Foreground = ThemeHelper.Brush(p.T3),
+                Margin = new Thickness(6, 12, 6, 8),
+                TextWrapping = TextWrapping.Wrap,
+            });
         }
     }
 
@@ -3602,12 +3717,14 @@ public sealed partial class ReaderWindow : Window
     {
         int total = Math.Max(1, _sectionSentenceCount);
         int cur = Math.Clamp(sentenceIndex + 1, 1, total);
-        double ratio = Math.Clamp((double)cur / total, 0.02, 1.0);
-        int bookPct = EstimateBookPercent(_currentSection, sentenceIndex);
+        double chapterProgress = Math.Clamp((double)cur / total, 0.0, 1.0);
+        double ratio = Math.Clamp(chapterProgress, 0.02, 1.0);
+        int chapterPct = (int)Math.Round(chapterProgress * 100.0);
         int remMin = Math.Max(1, (int)Math.Ceiling(Math.Max(0, total - cur) * 3.8 / 60.0 / Math.Max(0.5, _speechRate)));
+        string unit = _detail.Summary.Format == BookFormat.Podcast ? "本集" : "本章";
 
         CapsuleSentenceText.Text = $"第 {cur} / {total} 句";
-        CapsuleNoteText.Text = $"{bookPct}% · 本章还剩 {remMin} 分钟";
+        CapsuleNoteText.Text = $"{unit} {chapterPct}% · 还剩 {remMin} 分钟";
         CapsuleProgDoneCol.Width = new GridLength(ratio, GridUnitType.Star);
         CapsuleProgRestCol.Width = new GridLength(Math.Max(0, 1.0 - ratio), GridUnitType.Star);
     }
@@ -4101,5 +4218,5 @@ public sealed partial class ReaderWindow : Window
         };
     }
 
-    private sealed record TocEntry(string Title, uint Section, string? Anchor, ushort Depth);
+    private sealed record TocEntry(string Title, uint Section, string? Anchor, ushort Depth, bool IsBoilerplate);
 }

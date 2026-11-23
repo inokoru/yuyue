@@ -109,7 +109,8 @@ class RemoteSources {
             val client = RemoteClient(s)
             val file = client.download(e, File(context.cacheDir, "remote-${UUID.randomUUID()}")) { f -> downloading[k] = f }
             try {
-                val cover = if (AudioImporter.isAudio(file.name)) e.cover?.let { runCatching { client.data(it) }.getOrNull() } else null
+                val needsCover = AudioImporter.isAudio(file.name) || file.extension.equals("pdf", ignoreCase = true)
+                val cover = if (needsCover) e.cover?.let { runCatching { client.data(it) }.getOrNull() } else null
                 withContext(Dispatchers.IO) { library.importPath(file.path, title = e.title, author = e.author, cover = cover) }
                 library.reload()
             } finally {

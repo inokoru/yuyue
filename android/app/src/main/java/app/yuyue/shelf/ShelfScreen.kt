@@ -346,8 +346,9 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
                     },
                     delete = {
                         val picked = library.books.filter { it.id in selected }
-                        asking = app.yuyue.me.Confirm(t("删除这 %lld 本书？", picked.size), t("书会移到已删除，30 天内可以在存储里撤销。"), t("删除")) {
-                            picked.forEach { library.delete(it) }
+                        val title = if (picked.size == 1) t("删除《%@》？", picked[0].title) else t("删除这 %lld 本书？", picked.size)
+                        asking = app.yuyue.me.Confirm(title, t("书会移到已删除，30 天内可以在存储里撤销。"), t("删除")) {
+                            library.deleteAll(picked)
                             selecting = false; selected = emptySet()
                         }
                     },

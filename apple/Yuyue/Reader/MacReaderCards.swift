@@ -1077,15 +1077,36 @@ struct CompanionPanel: View {
     @Bindable var model: ReaderModel
     @State private var draft = ""
     @State private var linesOpen = false
-    /// The quote and the box: the ready lines float just above them.
-    @State private var askHeight: CGFloat = 44
-    @FocusState private var typing: Bool
+    @State private var modelPickerOpen = false
+    @State private var slashManualOpen = false
+    @State private var slashDismissedForDraft: String?
+    @State private var slashIndex = 0
+    @State private var composerHeight: CGFloat = 20
+    @State private var focusRequest = 0
+    /// The quote and the box: the ready lines and slash menu float just above them.
+    @State private var askHeight: CGFloat = 76
+    @State private var typing = false
     @Environment(\.openSettings) private var openSettings
     @Environment(\.colorScheme) private var scheme
     @Environment(\.yyButtonOnPaper) private var onPaper
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
     private var companion: BookCompanion { model.companion }
+    private var focus: CompanionFocus { .shared }
+
+    private var slashQuery: String? {
+        if let q = CompanionCommand.slashQuery(in: draft) {
+            return slashDismissedForDraft == draft ? nil : q
+        }
+        return slashManualOpen ? "" : nil
+    }
+
+    private var slashMatches: [CompanionCommand] {
+        guard let q = slashQuery else { return [] }
+        return CompanionCommand.matching(q)
+    }
+
+    private var slashMenuOpen: Bool { !slashMatches.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1104,7 +1125,22 @@ struct CompanionPanel: View {
         .padding(.top, 16)
         .padding(.bottom, 14)
         .overlay {
-            if linesOpen, !readyQuestions.isEmpty {
+            if slashMenuOpen {
+                Color.clear.contentShape(.rect).onTapGesture { dismissSlashMenu() }
+                CompanionSlashCard(
+                    commands: slashMatches,
+                    selectedIndex: min(slashIndex, max(0, slashMatches.count - 1)),
+                    currentScope: companion.scope,
+                    busy: companion.busy,
+                    accent: tint.accent,
+                    accentSoft: tint.accentSoft,
+                    onHover: { slashIndex = $0 },
+                    onSelect: { executeCommand($0, argument: "") }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 14 + askHeight + 8)
+            } else if linesOpen, !readyQuestions.isEmpty {
                 Color.clear.contentShape(.rect).onTapGesture { linesOpen = false }
                 ReadyLinesCard {
                     ForEach(readyQuestions, id: \.self) { q in
@@ -1115,6 +1151,32 @@ struct CompanionPanel: View {
                 .padding(.horizontal, 14)
                 .padding(.bottom, 14 + askHeight + 8)
             }
+        }
+        .onChange(of: modelPickerOpen) { _, on in
+            if on {
+                linesOpen = false
+                dismissSlashMenu()
+            }
+        }
+        .onChange(of: linesOpen) { _, on in
+            if on {
+                modelPickerOpen = false
+                dismissSlashMenu()
+            }
+        }
+        .onChange(of: typing) { _, on in if on { linesOpen = false } }
+        .onChange(of: draft) { _, new in
+            if slashDismissedForDraft != new { slashDismissedForDraft = nil }
+            if CompanionCommand.slashQuery(in: new) != nil {
+                slashManualOpen = false
+                linesOpen = false
+                modelPickerOpen = false
+            } else if !new.isEmpty {
+                slashManualOpen = false
+            }
+        }
+        .onChange(of: slashMatches.map(\.id)) { _, _ in
+            slashIndex = 0
         }
         .onDisappear { model.pager.setSource(nil) }
         #if DEBUG
@@ -1194,6 +1256,7 @@ struct CompanionPanel: View {
     }
 
     @ViewBuilder private var welcome: some View {
+        let _ = focus.tick
         let config = CompanionConfig.current
         VStack(alignment: .leading, spacing: 8) {
             Text("读到哪儿问到哪儿").font(.yy(size: 13, weight: .semibold)).foregroundStyle(YYColor.t1)
@@ -1217,6 +1280,7 @@ struct CompanionPanel: View {
             Text(text)
                 .font(.yy(size: 12))
                 .lineSpacing(3)
+                .multilineTextAlignment(.leading)
                 .foregroundStyle(YYColor.t1)
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background {
@@ -1328,31 +1392,191 @@ struct CompanionPanel: View {
             : companion.turns.last?.answer?.next ?? [String(localized: "前面发生了什么？"), String(localized: "这一章讲了什么？")]
     }
 
-    private var input: some View {
-        HStack(spacing: 6) {
-            if !readyQuestions.isEmpty {
-                ReadyLinesToggle(open: $linesOpen, help: Text("挑一句现成的")).disabled(companion.busy)
-            }
-            TextField("", text: $draft, prompt: Text(companion.turns.isEmpty ? String(localized: "问这本书…") : String(localized: "继续问…")), axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.yy(size: 12))
-                .lineLimit(1 ... 4)
-                .focused($typing)
-                .onSubmit { send(draft) }
-            Text("↩").font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
-            Button { send(draft) } label: {
-                Image(systemName: "arrow.up").font(.yy(size: 12, weight: .bold))
-                    .foregroundStyle(tint.onBlack)
-                    .frame(width: 30, height: 30)
-                    .background(tint.black, in: .rect(cornerRadius: 10))
-            }
-            .buttonStyle(.plain)
-            .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty || companion.busy)
+    private var parsedDraft: CompanionCommand.Parsed? { CompanionCommand.parse(draft) }
+
+    private var canSubmitDraft: Bool {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if let parsed = parsedDraft, parsed.command.category == .control, parsed.argument.isEmpty {
+            return true
         }
-        .padding(.leading, readyQuestions.isEmpty ? 14 : 8).padding(.trailing, 6).padding(.vertical, 6)
-        .frame(minHeight: 44)
+        return !companion.busy
+    }
+
+    private var input: some View {
+        let placeholder = companion.turns.isEmpty
+            ? String(localized: "问这本书，或输入 / …")
+            : String(localized: "继续问，或输入 / …")
+        return VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .topLeading) {
+                if draft.isEmpty {
+                    Text(placeholder)
+                        .font(.yy(size: 12))
+                        .foregroundStyle(YYColor.t3)
+                        .padding(.horizontal, 4)
+                        .padding(.top, 2)
+                        .allowsHitTesting(false)
+                }
+                CompanionComposerField(
+                    text: $draft,
+                    height: $composerHeight,
+                    typing: $typing,
+                    focusRequest: focusRequest,
+                    accentColor: tint.accent,
+                    scheme: scheme,
+                    onReturn: { handleReturnKey() },
+                    onArrow: { delta in handleSlashArrow(delta) },
+                    onTab: { handleSlashTab() },
+                    onEscape: { handleSlashEscape() }
+                )
+                .frame(height: composerHeight)
+            }
+
+            HStack(spacing: 4) {
+                if !readyQuestions.isEmpty {
+                    ReadyLinesToggle(open: $linesOpen, help: Text("挑一句现成的"))
+                        .disabled(companion.busy)
+                }
+                SlashCommandToggle(open: slashMenuOpen, action: toggleSlashMenu)
+                CompanionModelPill(open: $modelPickerOpen, openSettings: openCompanionSettings)
+                    .layoutPriority(1)
+                Spacer(minLength: 4)
+                ViewThatFits(in: .horizontal) {
+                    Text("⇧↩ 换行 · ↩ 发送")
+                        .font(.yy(size: 10))
+                        .foregroundStyle(YYColor.t3)
+                        .fixedSize()
+                    Text("⇧↩ 换行")
+                        .font(.yy(size: 10))
+                        .foregroundStyle(YYColor.t3)
+                        .fixedSize()
+                    Text("⇧↩")
+                        .font(.yy(size: 10))
+                        .foregroundStyle(YYColor.t3)
+                        .fixedSize()
+                }
+                .help(String(localized: "Shift+Return 换行 · Return 发送"))
+                Button { submitDraft() } label: {
+                    Image(systemName: "arrow.up").font(.yy(size: 11.5, weight: .bold))
+                        .foregroundStyle(tint.onBlack)
+                        .frame(width: 28, height: 28)
+                        .background(tint.black, in: .rect(cornerRadius: 9))
+                }
+                .buttonStyle(.plain)
+                .opacity(canSubmitDraft ? 1 : 0.32)
+                .disabled(!canSubmitDraft)
+                .help(String(localized: "发送 ↩"))
+                .accessibilityLabel(Text("发送"))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 9)
+        .padding(.bottom, 6)
         .background(model.paperTokens.bg, in: .rect(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(YYColor.line, lineWidth: 0.5))
+    }
+
+    private func toggleSlashMenu() {
+        linesOpen = false
+        modelPickerOpen = false
+        if slashMenuOpen {
+            if draft == "/" || draft == "／" { draft = "" }
+            dismissSlashMenu()
+            return
+        }
+        slashDismissedForDraft = nil
+        if draft.isEmpty {
+            draft = "/"
+            focusRequest += 1
+        } else {
+            slashManualOpen = true
+            focusRequest += 1
+        }
+    }
+
+    private func dismissSlashMenu() {
+        slashManualOpen = false
+        if CompanionCommand.slashQuery(in: draft) != nil {
+            slashDismissedForDraft = draft
+        }
+    }
+
+    private func handleReturnKey() {
+        if slashMenuOpen {
+            let index = min(max(0, slashIndex), slashMatches.count - 1)
+            executeCommand(slashMatches[index], argument: "")
+            return
+        }
+        submitDraft()
+    }
+
+    private func handleSlashArrow(_ delta: Int) -> Bool {
+        guard slashMenuOpen else { return false }
+        let count = slashMatches.count
+        slashIndex = (slashIndex + delta + count) % count
+        return true
+    }
+
+    private func handleSlashTab() -> Bool {
+        guard slashMenuOpen else { return false }
+        let index = min(max(0, slashIndex), slashMatches.count - 1)
+        let cmd = slashMatches[index]
+        slashManualOpen = false
+        slashDismissedForDraft = nil
+        draft = cmd.takesArgument ? cmd.slashName + " " : cmd.slashName
+        focusRequest += 1
+        return true
+    }
+
+    private func handleSlashEscape() -> Bool {
+        guard slashMenuOpen else { return false }
+        dismissSlashMenu()
+        return true
+    }
+
+    private func submitDraft() {
+        if let parsed = CompanionCommand.parse(draft) {
+            executeCommand(parsed.command, argument: parsed.argument)
+            return
+        }
+        send(draft)
+    }
+
+    private func executeCommand(_ command: CompanionCommand, argument: String) {
+        let arg = argument.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch command.action {
+        case .recap, .chapter, .characters, .explain, .quote, .quiz:
+            guard !companion.busy else { return }
+            if let q = command.question(argument: arg, hasQuote: model.companionQuote != nil, chapterTitle: model.chapterTitle) {
+                slashManualOpen = false
+                slashDismissedForDraft = nil
+                send(q)
+            }
+        case .scope(let target):
+            slashManualOpen = false
+            slashDismissedForDraft = nil
+            companion.scope = target
+            draft = ""
+            if !arg.isEmpty, !companion.busy {
+                companion.ask(arg, quote: model.companionQuote, scope: target)
+                model.companionQuote = nil
+            }
+        case .model:
+            slashManualOpen = false
+            slashDismissedForDraft = nil
+            draft = ""
+            modelPickerOpen = true
+        case .clear:
+            slashManualOpen = false
+            slashDismissedForDraft = nil
+            draft = ""
+            companion.clear()
+        case .settings:
+            slashManualOpen = false
+            slashDismissedForDraft = nil
+            draft = ""
+            openCompanionSettings()
+        }
     }
 
     private func send(_ text: String) {
@@ -1360,12 +1584,421 @@ struct CompanionPanel: View {
         guard !q.isEmpty, !companion.busy else { return }
         companion.ask(q, quote: model.companionQuote)
         draft = ""
+        slashManualOpen = false
+        slashDismissedForDraft = nil
         model.companionQuote = nil
     }
 
     private func openCompanionSettings() {
         UserDefaults.standard.set(SettingsPage.companion.rawValue, forKey: "settings.page")
         openSettings()
+    }
+}
+
+/// `/` trigger button beside `“` in 书伴's input bar.
+private struct SlashCommandToggle: View {
+    let open: Bool
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            Text("/")
+                .font(.system(size: YYUI.s(12.5), weight: .semibold, design: .monospaced))
+                .foregroundStyle(open ? YYColor.t1 : YYColor.t2)
+                .frame(width: 28, height: 28)
+                .background(open || hover ? YYColor.inset : .clear, in: .circle)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help(String(localized: "快捷指令 (/)"))
+        .accessibilityLabel(Text("快捷指令"))
+    }
+}
+
+/// Floating `/` command palette above 书伴's composer.
+private struct CompanionSlashCard: View {
+    let commands: [CompanionCommand]
+    let selectedIndex: Int
+    let currentScope: BookCompanion.Scope
+    let busy: Bool
+    let accent: Color
+    let accentSoft: Color
+    let onHover: (Int) -> Void
+    let onSelect: (CompanionCommand) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Text("指令")
+                    .font(.yy(size: 10.5, weight: .semibold))
+                    .foregroundStyle(YYColor.t3)
+                Spacer(minLength: 4)
+                ViewThatFits(in: .horizontal) {
+                    Text("↑↓ 选择 · Tab 补全 · ↩ 执行")
+                        .font(.yy(size: 10))
+                        .foregroundStyle(YYColor.t3)
+                        .fixedSize()
+                    Text("↑↓ · ↩ 执行")
+                        .font(.yy(size: 10))
+                        .foregroundStyle(YYColor.t3)
+                        .fixedSize()
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 7)
+            .padding(.bottom, 5)
+
+            Rectangle().fill(YYColor.line).frame(height: 0.5)
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(commands.enumerated()), id: \.element.id) { index, cmd in
+                            let selected = index == selectedIndex
+                            let disabled = busy && cmd.category == .ask
+                            let isCurrentScope: Bool = {
+                                if case .scope(let s) = cmd.action { return s == currentScope }
+                                return false
+                            }()
+                            Button {
+                                if !disabled { onSelect(cmd) }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: cmd.icon)
+                                        .font(.yy(size: 11.5, weight: .medium))
+                                        .foregroundStyle(selected ? accent : YYColor.t2)
+                                        .frame(width: 24, height: 24)
+                                        .background(selected ? accentSoft : YYColor.inset, in: .rect(cornerRadius: 6))
+
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        HStack(spacing: 5) {
+                                            Text(cmd.slashName)
+                                                .font(.system(size: YYUI.s(11.5), weight: .semibold, design: .monospaced))
+                                                .foregroundStyle(selected ? accent : YYColor.t1)
+                                            Text(cmd.title)
+                                                .font(.yy(size: 11.5, weight: .medium))
+                                                .foregroundStyle(YYColor.t1)
+                                                .lineLimit(1)
+                                        }
+                                        Text(cmd.subtitle)
+                                            .font(.yy(size: 10.5))
+                                            .foregroundStyle(YYColor.t3)
+                                            .lineLimit(1)
+                                    }
+
+                                    Spacer(minLength: 4)
+
+                                    if isCurrentScope {
+                                        Text("当前")
+                                            .font(.yy(size: 9.5, weight: .medium))
+                                            .foregroundStyle(accent)
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 2)
+                                            .background(accentSoft, in: .capsule)
+                                    } else if selected && !disabled {
+                                        Text("↩")
+                                            .font(.yy(size: 10.5, weight: .medium))
+                                            .foregroundStyle(YYColor.t3)
+                                    }
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(selected ? YYColor.t1.opacity(0.06) : .clear, in: .rect(cornerRadius: 8))
+                                .opacity(disabled ? 0.42 : 1)
+                                .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            .onHover { hovering in if hovering { onHover(index) } }
+                            .id(cmd.id)
+                        }
+                    }
+                    .padding(5)
+                }
+                .scrollIndicators(.never)
+                .frame(maxHeight: 248)
+                .onChange(of: selectedIndex) { _, new in
+                    if commands.indices.contains(new) {
+                        proxy.scrollTo(commands[new].id)
+                    }
+                }
+            }
+        }
+        .background(YYColor.card, in: .rect(cornerRadius: 12))
+        .ring(YYColor.line, radius: 12)
+        .shadow(color: Color(yy: YYRGBA(40, 36, 32, 0.16)), radius: 16, y: 12)
+    }
+}
+
+/// Multiline auto-growing NSTextView for Mac 书伴:
+/// - `Return` (or `⌘↩`) sends or runs the highlighted `/` command.
+/// - `Shift+Return` / `Option+Return` / `Control+Return` inserts a newline.
+/// - `↑`/`↓`/`Tab`/`Esc` drive the `/` palette without interfering with Chinese IME composition.
+private struct CompanionComposerField: NSViewRepresentable {
+    @Binding var text: String
+    @Binding var height: CGFloat
+    @Binding var typing: Bool
+    let focusRequest: Int
+    let accentColor: Color
+    let scheme: ColorScheme
+    let onReturn: () -> Void
+    let onArrow: (Int) -> Bool
+    let onTab: () -> Bool
+    let onEscape: () -> Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            text: $text,
+            height: $height,
+            typing: $typing,
+            onReturn: onReturn,
+            onArrow: onArrow,
+            onTab: onTab,
+            onEscape: onEscape
+        )
+    }
+
+    func makeNSView(context: Context) -> CompanionComposerScrollView {
+        let scroll = CompanionComposerScrollView()
+        scroll.hasVerticalScroller = false
+        scroll.hasHorizontalScroller = false
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.contentInsets = NSEdgeInsets()
+
+        let storage = NSTextStorage()
+        let layoutManager = NSLayoutManager()
+        storage.addLayoutManager(layoutManager)
+        let container = NSTextContainer(containerSize: NSSize(width: 200, height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        container.lineFragmentPadding = 4
+        layoutManager.addTextContainer(container)
+
+        let tv = CompanionNSTextView(frame: .zero, textContainer: container)
+        tv.minSize = NSSize(width: 0, height: 0)
+        tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        tv.isHorizontallyResizable = false
+        tv.isVerticallyResizable = true
+        tv.autoresizingMask = [.width]
+        tv.allowsUndo = true
+        tv.isRichText = false
+        tv.importsGraphics = false
+        tv.drawsBackground = false
+        tv.isAutomaticQuoteSubstitutionEnabled = false
+        tv.isAutomaticDashSubstitutionEnabled = false
+        tv.textContainerInset = NSSize(width: 0, height: 2)
+        tv.delegate = context.coordinator
+
+        let font = NSFont.systemFont(ofSize: YYUI.s(12))
+        let ink = NSColor(YYColor.t1)
+        tv.font = font
+        tv.textColor = ink
+        tv.typingAttributes = [.font: font, .foregroundColor: ink]
+        tv.insertionPointColor = NSColor(accentColor)
+        tv.string = text
+
+        tv.onFocusChange = { [weak coordinator = context.coordinator] focused in
+            DispatchQueue.main.async {
+                guard let coordinator, coordinator.typing.wrappedValue != focused else { return }
+                coordinator.typing.wrappedValue = focused
+            }
+        }
+        tv.onCommandReturn = { [weak coordinator = context.coordinator] in
+            coordinator?.onReturn()
+        }
+
+        scroll.documentView = tv
+        scroll.onLayout = { [weak coordinator = context.coordinator, weak tv] in
+            guard let tv else { return }
+            coordinator?.recalculateHeight(tv)
+        }
+        context.coordinator.recalculateHeight(tv)
+        return scroll
+    }
+
+    func updateNSView(_ scroll: CompanionComposerScrollView, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.text = $text
+        coordinator.height = $height
+        coordinator.typing = $typing
+        coordinator.onReturn = onReturn
+        coordinator.onArrow = onArrow
+        coordinator.onTab = onTab
+        coordinator.onEscape = onEscape
+
+        guard let tv = scroll.documentView as? CompanionNSTextView else { return }
+        let font = NSFont.systemFont(ofSize: YYUI.s(12))
+        let ink = NSColor(YYColor.t1)
+        if tv.font != font { tv.font = font }
+        tv.textColor = ink
+        tv.typingAttributes = [.font: font, .foregroundColor: ink]
+        tv.insertionPointColor = NSColor(accentColor)
+
+        if tv.string != text, !tv.hasMarkedText() {
+            tv.string = text
+            let end = (text as NSString).length
+            tv.setSelectedRange(NSRange(location: end, length: 0))
+            coordinator.recalculateHeight(tv)
+            tv.scrollRangeToVisible(NSRange(location: end, length: 0))
+        }
+
+        if focusRequest != coordinator.lastFocusRequest {
+            coordinator.lastFocusRequest = focusRequest
+            DispatchQueue.main.async {
+                guard let window = scroll.window else { return }
+                if window.firstResponder !== tv {
+                    window.makeFirstResponder(tv)
+                }
+                let end = (tv.string as NSString).length
+                tv.setSelectedRange(NSRange(location: end, length: 0))
+            }
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var text: Binding<String>
+        var height: Binding<CGFloat>
+        var typing: Binding<Bool>
+        var onReturn: () -> Void
+        var onArrow: (Int) -> Bool
+        var onTab: () -> Bool
+        var onEscape: () -> Bool
+        var lastFocusRequest = 0
+        private var lastReportedHeight: CGFloat = 0
+
+        init(
+            text: Binding<String>,
+            height: Binding<CGFloat>,
+            typing: Binding<Bool>,
+            onReturn: @escaping () -> Void,
+            onArrow: @escaping (Int) -> Bool,
+            onTab: @escaping () -> Bool,
+            onEscape: @escaping () -> Bool
+        ) {
+            self.text = text
+            self.height = height
+            self.typing = typing
+            self.onReturn = onReturn
+            self.onArrow = onArrow
+            self.onTab = onTab
+            self.onEscape = onEscape
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView else { return }
+            if text.wrappedValue != tv.string {
+                text.wrappedValue = tv.string
+            }
+            recalculateHeight(tv)
+            tv.scrollRangeToVisible(tv.selectedRange())
+        }
+
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if textView.hasMarkedText() { return false }
+
+            switch commandSelector {
+            case #selector(NSResponder.insertNewline(_:)):
+                let flags = NSApp.currentEvent?.modifierFlags.intersection(.deviceIndependentFlagsMask) ?? []
+                if flags.contains(.shift) || flags.contains(.option) || flags.contains(.control) {
+                    textView.insertNewlineIgnoringFieldEditor(nil)
+                    return true
+                }
+                onReturn()
+                return true
+
+            case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+                return false
+
+            case #selector(NSResponder.moveUp(_:)):
+                return onArrow(-1)
+
+            case #selector(NSResponder.moveDown(_:)):
+                return onArrow(1)
+
+            case #selector(NSResponder.insertTab(_:)):
+                return onTab()
+
+            case #selector(NSResponder.cancelOperation(_:)):
+                return onEscape()
+
+            default:
+                return false
+            }
+        }
+
+        func recalculateHeight(_ tv: NSTextView) {
+            guard let layoutManager = tv.layoutManager,
+                  let textContainer = tv.textContainer
+            else { return }
+            let font = tv.font ?? NSFont.systemFont(ofSize: YYUI.s(12))
+            let lineHeight = ceil(font.ascender - font.descender + font.leading)
+            let insetY = tv.textContainerInset.height
+            let minH = lineHeight + insetY * 2
+            let maxH = lineHeight * 5 + insetY * 2
+
+            layoutManager.ensureLayout(for: textContainer)
+            let used = layoutManager.usedRect(for: textContainer)
+            let extra = layoutManager.extraLineFragmentRect
+            let contentH = max(used.maxY, extra.maxY)
+            let clamped = min(max(ceil(contentH + insetY * 2), minH), maxH)
+
+            guard abs(clamped - lastReportedHeight) > 0.5 else { return }
+            lastReportedHeight = clamped
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if abs(self.height.wrappedValue - clamped) > 0.5 {
+                    self.height.wrappedValue = clamped
+                }
+            }
+        }
+    }
+}
+
+private final class CompanionComposerScrollView: NSScrollView {
+    var onLayout: (() -> Void)?
+    private var lastWidth: CGFloat = 0
+
+    override func layout() {
+        super.layout()
+        let targetWidth = contentSize.width
+        if let tv = documentView as? NSTextView, targetWidth > 0, abs(tv.frame.width - targetWidth) > 0.5 {
+            tv.frame.size.width = targetWidth
+            tv.textContainer?.containerSize.width = targetWidth
+        }
+        if abs(bounds.width - lastWidth) > 0.5 {
+            lastWidth = bounds.width
+            onLayout?()
+        }
+    }
+}
+
+private final class CompanionNSTextView: NSTextView {
+    var onFocusChange: ((Bool) -> Void)?
+    var onCommandReturn: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok { onFocusChange?(true) }
+        return ok
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let ok = super.resignFirstResponder()
+        if ok { onFocusChange?(false) }
+        return ok
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if !hasMarkedText(),
+           event.keyCode == 36 || event.keyCode == 76,
+           event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
+        {
+            onCommandReturn?()
+            return
+        }
+        super.keyDown(with: event)
     }
 }
 

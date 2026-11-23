@@ -400,6 +400,7 @@ struct PhoneStorage: View {
     @State private var usage: StorageUsage?
     @State private var companionCache: Int64 = 0
     @State private var cleaning = false
+    @State private var confirming: YYConfirm?
     private let tint = YYTint.standard
 
     @State private var info: BookSummary?
@@ -416,11 +417,61 @@ struct PhoneStorage: View {
                         Text("保留 30 天以便恢复，到期自动清理").font(YYUI.font(10)).foregroundStyle(YYColor.t3)
                     }
                     Spacer(minLength: 0)
-                    Button("立即清空") { purge() }
+                    Button("立即清空") {
+                        let n = usage?.deleted.count ?? 0
+                        confirming = YYConfirm(title: String(localized: "清空最近删除的 \(n) 本书？"),
+                                               message: String(localized: "清空后文件将彻底删除，无法恢复。"),
+                                               button: String(localized: "立即清空")) { purge() }
+                    }
                         .buttonStyle(YYButtonStyle(kind: .danger, size: .small))
                         .disabled((usage?.deleted.isEmpty ?? true) || cleaning)
                 }
                 .padding(.vertical, YYUI.s(9))
+                if let usage, usage.voiceModelBytes > 0 {
+                    HStack(spacing: YYUI.s(10)) {
+                        VStack(alignment: .leading, spacing: YYUI.s(1)) {
+                            Text("朗读模型与声音包 · \(Self.size(usage.voiceModelBytes))")
+                                .font(YYUI.font(11.5, .medium).monospacedDigit()).foregroundStyle(YYColor.t1)
+                            Text("离线朗读模型、自带声音与音效包；移除后可在听书设置里重新下载").font(YYUI.font(10)).foregroundStyle(YYColor.t3)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
+                        Button("移除") {
+                            confirming = YYConfirm(title: String(localized: "移除朗读模型与声音包？"),
+                                                   message: String(localized: "移除后将改用系统声音朗读，随时可以在听书设置里重新下载。"),
+                                                   button: String(localized: "移除")) {
+                                StorageUsage.removeVoiceModels(in: library.dataDir)
+                                LiveVoiceDownload.shared.refresh()
+                                Task { await measure() }
+                            }
+                        }
+                        .buttonStyle(YYButtonStyle(kind: .danger, size: .small))
+                        .disabled({ if case .downloading = LiveVoiceDownload.shared.phase { true } else { false } }())
+                    }
+                    .padding(.vertical, YYUI.s(9))
+                }
+                if let usage, usage.alignerBytes > 0 {
+                    HStack(spacing: YYUI.s(10)) {
+                        VStack(alignment: .leading, spacing: YYUI.s(1)) {
+                            Text("语音对齐模型 · \(Self.size(usage.alignerBytes))")
+                                .font(YYUI.font(11.5, .medium).monospacedDigit()).foregroundStyle(YYColor.t1)
+                            Text("用于有声书句级对齐；移除后下次合成时重新下载（约 270 MB）").font(YYUI.font(10)).foregroundStyle(YYColor.t3)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
+                        Button("移除") {
+                            confirming = YYConfirm(title: String(localized: "移除语音对齐模型？"),
+                                                   message: String(localized: "已合成的有声书不受影响；下次合成时将重新下载（约 270 MB）。"),
+                                                   button: String(localized: "移除")) {
+                                StorageUsage.removeAligner(in: library.dataDir)
+                                Task { await measure() }
+                            }
+                        }
+                        .buttonStyle(YYButtonStyle(kind: .danger, size: .small))
+                        .disabled(library.audiobooks.job != nil)
+                    }
+                    .padding(.vertical, YYUI.s(9))
+                }
                 HStack(spacing: YYUI.s(10)) {
                     VStack(alignment: .leading, spacing: YYUI.s(1)) {
                         Text("书伴问答缓存 · \(Self.size(companionCache))")
@@ -430,8 +481,13 @@ struct PhoneStorage: View {
                     }
                     Spacer(minLength: 0)
                     Button("清理") {
-                        try? FileManager.default.removeItem(at: companionDir)
-                        measureCompanion()
+                        confirming = YYConfirm(title: String(localized: "清理书伴问答缓存？"),
+                                               message: String(localized: "清理后，相同问题或前情回顾将重新请求模型。"),
+                                               button: String(localized: "清理")) {
+                            try? FileManager.default.removeItem(at: companionDir)
+                            measureCompanion()
+                            Task { await measure() }
+                        }
                     }
                     .buttonStyle(YYButtonStyle(kind: .danger, size: .small))
                     .disabled(companionCache == 0)
@@ -450,6 +506,7 @@ struct PhoneStorage: View {
         .task { await measure() }
         .onAppear(perform: measureCompanion)
         .sheet(item: $info) { PhoneBookInfo(library: library, book: $0) }
+        .yyConfirm($confirming)
     }
 
     private var companionDir: URL { library.dataDir.appending(path: "companion", directoryHint: .isDirectory) }
@@ -462,6 +519,7 @@ struct PhoneStorage: View {
     /// The total, what is left on the device, one bar split by kind and its legend.
     private var useCard: some View {
         let parts = parts
+        let visible = parts.filter { $0.1 > 0 }
         let total = max(1, parts.reduce(0) { $0 + $1.1 })
         return VStack(alignment: .leading, spacing: 0) {
             Text("已用空间").font(YYUI.font(10.5)).foregroundStyle(YYColor.t3)
@@ -477,21 +535,23 @@ struct PhoneStorage: View {
             }
             .padding(.top, 1)
             GeometryReader { g in
+                let gap = CGFloat(max(0, visible.count - 1)) * 2
                 HStack(spacing: 2) {
-                    ForEach(Array(parts.enumerated()).filter { $0.element.1 > 0 }, id: \.offset) { i, p in
-                        Rectangle().fill(shade(i)).frame(width: max(3, (g.size.width - 6) * Double(p.1) / Double(total)))
+                    ForEach(Array(visible.enumerated()), id: \.element.0) { _, p in
+                        Rectangle().fill(p.2).frame(width: max(3, max(0, g.size.width - gap) * Double(p.1) / Double(total)))
                     }
                     Spacer(minLength: 0)
                 }
             }
             .frame(height: YYUI.s(10))
+            .background(YYColor.inset)
             .clipShape(.rect(cornerRadius: YYUI.s(5)))
             .padding(.top, YYUI.s(10))
             LazyVGrid(columns: [GridItem(.flexible(), spacing: YYUI.s(16)), GridItem(.flexible())], alignment: .leading, spacing: YYUI.s(7)) {
-                ForEach(Array(parts.enumerated()), id: \.offset) { i, p in
+                ForEach(parts, id: \.0) { p in
                     HStack(spacing: YYUI.s(6)) {
-                        RoundedRectangle(cornerRadius: 2).fill(shade(i)).frame(width: YYUI.s(8), height: YYUI.s(8))
-                        Text(p.0).foregroundStyle(YYColor.t2)
+                        RoundedRectangle(cornerRadius: 2).fill(p.2).frame(width: YYUI.s(8), height: YYUI.s(8))
+                        Text(p.0).foregroundStyle(YYColor.t2).lineLimit(1)
                         Spacer(minLength: 0)
                         Text(Self.size(p.1)).fontWeight(.medium).monospacedDigit().foregroundStyle(YYColor.t1)
                     }
@@ -505,16 +565,21 @@ struct PhoneStorage: View {
         .yyCard()
     }
 
-    /// 书文件, the books deleted, and everything else (the library, notes, covers).
-    private var parts: [(String, Int64)] {
-        guard let u = usage else { return [(String(localized: "书文件"), 0), (String(localized: "已删除"), 0), (String(localized: "其他"), 0)] }
-        return [(String(localized: "书文件"), u.bookBytes), (String(localized: "已删除"), u.deletedBytes),
-                (String(localized: "其他"), max(0, u.total - u.bookBytes - u.deletedBytes))]
-    }
-
-    /// The four greys, from the ink down.
-    private func shade(_ i: Int) -> Color {
-        [YYColor.t1, YYColor.t1.opacity(0.62), YYColor.t1.opacity(0.36), YYColor.t1.opacity(0.21)][min(i, 3)]
+    /// 书文件, 有声书录音, 朗读模型, 对齐模型, 字体, 已删除, and everything else (the library db, caches).
+    private var parts: [(String, Int64, Color)] {
+        guard let u = usage else {
+            return [(String(localized: "书文件"), 0, tint.fill),
+                    (String(localized: "已删除"), 0, YYColor.danger.opacity(0.7)),
+                    (String(localized: "其他"), 0, YYColor.tint)]
+        }
+        return [(String(localized: "书文件"), u.bookBytes, tint.fill),
+                (String(localized: "有声书录音"), u.audioBytes, tint.fill.opacity(0.6)),
+                (String(localized: "朗读模型"), u.voiceModelBytes, YYColor.t2),
+                (String(localized: "对齐模型"), u.alignerBytes, YYColor.t3),
+                (String(localized: "字体"), u.fontBytes, tint.fill.opacity(0.35)),
+                (String(localized: "已删除"), u.deletedBytes, YYColor.danger.opacity(0.7)),
+                (String(localized: "其他"), u.otherBytes, YYColor.tint)]
+            .filter { $0.1 > 0 || $0.0 == String(localized: "书文件") }
     }
 
     /// Cover, title and kind, the size in ink.

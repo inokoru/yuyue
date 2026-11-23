@@ -23,15 +23,18 @@ struct MacSettings: View {
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
 
-    /// One height for every page, so switching pages doesn't move the window; less on a small screen.
+    /// Default height for Settings, while allowing the user to resize freely.
     private var height: CGFloat {
-        min(640, (NSScreen.main?.visibleFrame.height ?? 800) - 140)
+        min(650, (NSScreen.main?.visibleFrame.height ?? 800) - 130)
     }
+
+    @State private var windowWidth: CGFloat = 1020
 
     var body: some View {
         HStack(spacing: 0) {
             SettingsSidebar(page: $page, tint: tint)
                 .ignoresSafeArea(.container, edges: .top)
+                .zIndex(1)
             VStack(spacing: 0) {
                 if page == .listening, ListeningFocus.shared.source != nil {
                     // One source's voices: no page title, and it scrolls only its own list.
@@ -40,6 +43,7 @@ struct MacSettings: View {
                         .padding(.trailing, 24)
                         .padding(.top, 24)
                         .padding(.bottom, 12)
+                        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
                         .ignoresSafeArea(.container, edges: .top)
                 } else if page == .update {
                     ScrollView {
@@ -77,11 +81,12 @@ struct MacSettings: View {
                 }
             }
             .animation(YYMotion.standard, value: page)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
             .background(YYColor.bg.ignoresSafeArea())
             if page.hasInspector {
-                SettingsInspector(page: page, library: library)
+                SettingsInspector(page: page, library: library, windowWidth: windowWidth)
                     .ignoresSafeArea(.container, edges: .top)
+                    .zIndex(1)
             }
         }
         .onKeyPress(.upArrow) { stepPage(-1) }
@@ -98,7 +103,8 @@ struct MacSettings: View {
         // The title bar is see-through over the three columns; no toolbar, no title in it.
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .toolbar(removing: .title)
-        .frame(width: 980, height: height)
+        .frame(minWidth: 860, idealWidth: 1020, maxWidth: .infinity, minHeight: 540, idealHeight: height, maxHeight: .infinity)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
         .tint(tint.accent)
         .navigationTitle(page.title)
         .background(SettingsTitlebar { windowBox.window = $0 })
@@ -384,6 +390,9 @@ private struct SettingsTitlebar: NSViewRepresentable {
             if window.titleVisibility != .hidden { window.titleVisibility = .hidden }
             if !window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = true }
             if !window.styleMask.contains(.fullSizeContentView) { window.styleMask.insert(.fullSizeContentView) }
+            if !window.styleMask.contains(.resizable) { window.styleMask.insert(.resizable) }
+            window.standardWindowButton(.zoomButton)?.isEnabled = true
+            window.minSize = NSSize(width: 860, height: 540)
             if window.titlebarSeparatorStyle != .none { window.titlebarSeparatorStyle = .none }
             window.backgroundColor = SettingsSidebar.header
         }
@@ -1293,16 +1302,34 @@ private struct StorageSettings: View {
                         .disabled((usage?.deleted.isEmpty ?? true) || cleaning)
                 }
                 .monospacedDigit()
-                if modelBytes > 0 {
+                if let usage, usage.voiceModelBytes > 0 {
+                    SettingsRow(String(localized: "朗读模型与声音包"), detail: String(localized: "离线朗读模型、自带声音与音效包；移除后可在听书设置里重新下载")) {
+                        HStack(spacing: 10) {
+                            Text(Self.size(usage.voiceModelBytes))
+                                .font(.yy(size: 12)).monospacedDigit().foregroundStyle(YYColor.t2)
+                            Button("移除", role: .destructive) {
+                                confirming = YYConfirm(title: String(localized: "移除朗读模型与声音包？"),
+                                                       message: String(localized: "移除后将改用系统声音朗读，随时可以在听书设置里重新下载。"),
+                                                       button: String(localized: "移除")) {
+                                    StorageUsage.removeVoiceModels(in: library.dataDir)
+                                    LiveVoiceDownload.shared.refresh()
+                                    Task { await measure() }
+                                }
+                            }
+                            .disabled({ if case .downloading = LiveVoiceDownload.shared.phase { true } else { false } }())
+                        }
+                    }
+                }
+                if let usage, usage.alignerBytes > 0 {
                     SettingsRow(String(localized: "语音对齐模型"), detail: String(localized: "用于有声书句级对齐；移除后下次合成时重新下载（约 270 MB）")) {
                         HStack(spacing: 10) {
-                            Text(Self.size(modelBytes))
+                            Text(Self.size(usage.alignerBytes))
                                 .font(.yy(size: 12)).monospacedDigit().foregroundStyle(YYColor.t2)
                             Button("移除", role: .destructive) {
                                 confirming = YYConfirm(title: String(localized: "移除语音对齐模型？"),
                                                        message: String(localized: "已合成的有声书不受影响；下次合成时将重新下载（约 270 MB）。"),
                                                        button: String(localized: "移除")) {
-                                    try? FileManager.default.removeItem(at: Aligner.folder(library.dataDir))
+                                    StorageUsage.removeAligner(in: library.dataDir)
                                     Task { await measure() }
                                 }
                             }
@@ -1344,20 +1371,6 @@ private struct StorageSettings: View {
     }
 
     @State private var companionBytes: Int64 = 0
-    /// The alignment model and the 有声书 recordings, told apart from 其他.
-    @State private var modelBytes: Int64 = 0
-    @State private var audioBytes: Int64 = 0
-
-    /// Everything under `dir`, folders and all.
-    nonisolated private static func tree(_ dir: URL) -> Int64 {
-        guard let e = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey]) else { return 0 }
-        var total: Int64 = 0
-        for case let url as URL in e {
-            let v = try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey])
-            if v?.isRegularFile == true { total += Int64(v?.totalFileAllocatedSize ?? 0) }
-        }
-        return total
-    }
     private var companionDir: URL { library.dataDir.appending(path: "companion", directoryHint: .isDirectory) }
 
     private static func bytes(in dir: URL) -> Int64 {
@@ -1367,28 +1380,32 @@ private struct StorageSettings: View {
 
     private func bar(_ u: StorageUsage) -> some View {
         let parts: [(String, Int64, Color)] = [(String(localized: "书文件"), u.bookBytes, YYTint.standard.fill),
-                                               (String(localized: "有声书录音"), audioBytes, YYTint.standard.fill.opacity(0.55)),
-                                               (String(localized: "对齐模型"), modelBytes, YYColor.t3),
+                                               (String(localized: "有声书录音"), u.audioBytes, YYTint.standard.fill.opacity(0.6)),
+                                               (String(localized: "朗读模型"), u.voiceModelBytes, YYColor.t2),
+                                               (String(localized: "对齐模型"), u.alignerBytes, YYColor.t3),
+                                               (String(localized: "字体"), u.fontBytes, YYTint.standard.fill.opacity(0.35)),
                                                (String(localized: "已删除"), u.deletedBytes, YYColor.danger.opacity(0.7)),
-                                               (String(localized: "其他"), max(0, u.total - u.bookBytes - u.deletedBytes - audioBytes - modelBytes), YYColor.tint)]
+                                               (String(localized: "其他"), u.otherBytes, YYColor.tint)]
             .filter { $0.1 > 0 || $0.0 == String(localized: "书文件") }
+        let visible = parts.filter { $0.1 > 0 }
         return VStack(alignment: .leading, spacing: 8) {
             GeometryReader { g in
+                let gap = CGFloat(max(0, visible.count - 1)) * 2
                 HStack(spacing: 2) {
-                    ForEach(parts.filter { $0.1 > 0 }, id: \.0) { p in
+                    ForEach(visible, id: \.0) { p in
                         Rectangle().fill(p.2)
-                            .frame(width: max(3, g.size.width * Double(p.1) / Double(max(1, u.total))))
+                            .frame(width: max(3, max(0, g.size.width - gap) * Double(p.1) / Double(max(1, u.total))))
                     }
                     Spacer(minLength: 0)
                 }
             }
             .frame(height: 8)
             .clipShape(.capsule)
-            HStack(spacing: 16) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 12)], alignment: .leading, spacing: 6) {
                 ForEach(parts, id: \.0) { p in
                     HStack(spacing: 5) {
                         Circle().fill(p.2).frame(width: 7, height: 7)
-                        Text("\(p.0) \(Self.size(p.1))").font(.yy(size: 11)).foregroundStyle(YYColor.t2)
+                        Text("\(p.0) \(Self.size(p.1))").font(.yy(size: 11)).monospacedDigit().foregroundStyle(YYColor.t2).lineLimit(1)
                     }
                 }
             }
@@ -1399,13 +1416,6 @@ private struct StorageSettings: View {
         let dir = library.dataDir
         let active = Dictionary(library.books.map { ($0.id, $0.title) }, uniquingKeysWith: { a, _ in a })
         usage = await StorageUsage.measure(dir: dir, active: active)
-        let (model, audio) = await Self.extraBytes(dir: dir)
-        modelBytes = model
-        audioBytes = audio
-    }
-
-    @concurrent nonisolated private static func extraBytes(dir: URL) async -> (Int64, Int64) {
-        (tree(Aligner.folder(dir)), tree(dir.appending(path: "audiobooks", directoryHint: .isDirectory)))
     }
 
     private func purge() {
@@ -1467,7 +1477,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
 
 
 /// Where the library's space goes.
-struct StorageUsage: Sendable {
+nonisolated struct StorageUsage: Sendable {
     struct Book: Sendable {
         let id: String
         let title: String
@@ -1479,7 +1489,12 @@ struct StorageUsage: Sendable {
     var books: [Book] = []
     var deleted: [String] = []
     var deletedBytes: Int64 = 0
+    var audioBytes: Int64 = 0
+    var alignerBytes: Int64 = 0
+    var voiceModelBytes: Int64 = 0
+    var fontBytes: Int64 = 0
     var bookBytes: Int64 { books.reduce(0) { $0 + $1.bytes } }
+    var otherBytes: Int64 { max(0, total - bookBytes - deletedBytes - audioBytes - alignerBytes - voiceModelBytes - fontBytes) }
 
     @concurrent nonisolated static func measure(dir: URL, active: [String: String]) async -> StorageUsage {
         var u = StorageUsage()
@@ -1496,16 +1511,55 @@ struct StorageUsage: Sendable {
             }
         }
         u.books.sort { $0.bytes > $1.bytes }
+        u.audioBytes = bytes(in: dir.appending(path: "audiobooks", directoryHint: .isDirectory))
+        let modelsDir = Aligner.folder(dir)
+        u.alignerBytes = bytes(in: modelsDir.appending(path: Aligner.file))
+            + bytes(in: modelsDir.appending(path: ".\(Aligner.file).zip.part"))
+        u.voiceModelBytes = max(0, bytes(in: modelsDir) - u.alignerBytes)
+        u.fontBytes = bytes(in: dir.appending(path: "fonts", directoryHint: .isDirectory))
         u.free = (try? dir.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
             .volumeAvailableCapacityForImportantUsage
         return u
     }
 
-    nonisolated private static func bytes(in dir: URL) -> Int64 {
-        guard let e = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey]) else { return 0 }
+    /// Removes only the forced-alignment model (`MMSAligner.mlmodelc`), leaving voice models untouched.
+    nonisolated static func removeAligner(in dir: URL) {
+        let modelsDir = Aligner.folder(dir)
+        try? FileManager.default.removeItem(at: modelsDir.appending(path: Aligner.file))
+        try? FileManager.default.removeItem(at: modelsDir.appending(path: ".\(Aligner.file).zip.part"))
+    }
+
+    /// Removes local TTS models, voice packs, sound effects and speaker print, leaving the aligner untouched.
+    nonisolated static func removeVoiceModels(in dir: URL) {
+        Task { await KokoroEngine.shared.close() }
+        let modelsDir = Aligner.folder(dir)
+        let targets = [
+            KokoroModel.folder(dir),
+            modelsDir.appending(path: ".\(KokoroModel.folderName).zip.part"),
+            modelsDir.appending(path: ".kokoro-stage"),
+            LiveVoiceModel.modelFolder(dir),
+            modelsDir.appending(path: ".\(LiveVoiceModel.modelFolderName).zip.part"),
+            LiveVoiceModel.packFolder(dir),
+            modelsDir.appending(path: ".\(LiveVoiceModel.packFolderName).zip.part"),
+            SoundLibrary.folder(dir),
+            modelsDir.appending(path: ".\(SoundLibrary.folderName).zip.part"),
+            SpeakerPrint.url(dir),
+            modelsDir.appending(path: ".\(SpeakerPrint.file).zip.part"),
+        ]
+        for url in targets {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    nonisolated private static func bytes(in url: URL) -> Int64 {
+        if let v = try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey]),
+           v.isRegularFile == true {
+            return Int64(v.totalFileAllocatedSize ?? 0)
+        }
+        guard let e = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey]) else { return 0 }
         var sum: Int64 = 0
-        for case let url as URL in e {
-            let v = try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey])
+        for case let item as URL in e {
+            let v = try? item.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey])
             if v?.isRegularFile == true { sum += Int64(v?.totalFileAllocatedSize ?? 0) }
         }
         return sum

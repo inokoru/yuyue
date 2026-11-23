@@ -294,7 +294,7 @@
                                 </Button.Flyout>
                                 <StackPanel Spacing="1" VerticalAlignment="Center">
                                     <TextBlock x:Name="CapsuleSentenceText" Text="第 1 / 1 句" FontSize="12.5" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock x:Name="CapsuleNoteText" Text="1% · 本章还剩 1 分钟" FontSize="11" Opacity="0.76" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock x:Name="CapsuleNoteText" Text="本章 1% · 还剩 1 分钟" FontSize="11" Opacity="0.76" TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
                             </Button>
 

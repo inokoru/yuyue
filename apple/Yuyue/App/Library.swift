@@ -869,22 +869,30 @@ final class Library {
         imports.removeAll(where: \.settled)
     }
 
+    /// Splits a catalogue author line ("曹雪芹、高鹗" / "A, B") into trimmed names.
+    nonisolated static func splitAuthors(_ raw: String?) -> [String] {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return [] }
+        return raw.split(whereSeparator: { "、,，;/".contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
     /// One file that came over Wi‑Fi 传书 or 远程书库: into the library, or why not.
     func importReceived(_ url: URL, title: String? = nil, author: String? = nil, cover: Data? = nil) async throws -> BookSummary {
         importing += 1
         defer { importing -= 1 }
         let ext = url.pathExtension.lowercased()
+        let cleanTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackTitle = (cleanTitle?.isEmpty == false) ? cleanTitle : nil
+        let fallbackAuthors = Self.splitAuthors(author)
         if RemoteFormats.audio.contains(ext) || Audiobooks.extensions.contains(ext) || Audiobooks.locked.contains(ext) {
             var audio = try await AudioImporter.read(core, files: [url], folderName: nil)
             let stem = url.deletingPathExtension().lastPathComponent
-            if let title = title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty,
-               audio.title.isEmpty || audio.title == stem {
-                audio.title = title
+            if let fallbackTitle, audio.title.isEmpty || audio.title == stem {
+                audio.title = fallbackTitle
             }
-            if audio.authors.isEmpty, let author = author?.trimmingCharacters(in: .whitespacesAndNewlines), !author.isEmpty {
-                audio.authors = author.split(whereSeparator: { "、,，;/".contains($0) })
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty }
+            if audio.authors.isEmpty, !fallbackAuthors.isEmpty {
+                audio.authors = fallbackAuthors
             }
             if audio.cover == nil, let cover {
                 audio.cover = Self.coverJPEG(cover) ?? cover
@@ -893,7 +901,13 @@ final class Library {
             reload()
             return book
         }
-        let book = try await Self.importBook(core, path: url.path(percentEncoded: false))
+        let book = try await Self.importBook(
+            core,
+            path: url.path(percentEncoded: false),
+            fallbackTitle: fallbackTitle,
+            fallbackAuthors: fallbackAuthors,
+            fallbackCover: cover
+        )
         reload()
         return book
     }
@@ -911,20 +925,69 @@ final class Library {
         })
     }
 
+    /// Deletes a selection in one batch; Undo restores every deleted book.
+    func delete(_ books: [BookSummary]) {
+        guard !books.isEmpty else { return }
+        if books.count == 1 {
+            delete(books[0])
+            return
+        }
+        for book in books { closeOpenBook(book.id) }
+        let ids = books.map(\.id)
+        run {
+            for id in ids { try core.deleteBook(id: id) }
+        }
+        show(Toast(icon: "trash", danger: true, title: String(localized: "已删除 \(books.count) 本书"), detail: String(localized: "笔记和进度都留着")) { [weak self] in
+            self?.run {
+                for id in ids { _ = try self?.core.restoreBook(id: id) }
+            }
+        })
+    }
+
     /// Big books take a moment to import; keep it off the main thread.
-    @concurrent nonisolated static func importBook(_ core: YuyueCore, path: String) async throws -> BookSummary {
+    @concurrent nonisolated static func importBook(
+        _ core: YuyueCore,
+        path: String,
+        fallbackTitle: String? = nil,
+        fallbackAuthors: [String] = [],
+        fallbackCover: Data? = nil
+    ) async throws -> BookSummary {
         if let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.int64Value, size == 0 {
             throw CoreError.BadBook(detail: "empty")
         }
-        let book = try core.importBook(path: path)
-        guard book.format == .pdf, book.readMinutes == 0 else { return book }
-        // The core keeps a PDF as it is; the system's viewer says what is in it.
-        do {
-            return try core.setPdfInfo(bookId: book.id, info: PdfInfoReader.read(URL(filePath: path)))
-        } catch {
-            try? core.deleteBook(id: book.id)
-            throw error
+        let url = URL(filePath: path)
+        let stem = url.deletingPathExtension().lastPathComponent
+        var book = try core.importBook(path: path)
+        if book.format == .pdf {
+            guard book.readMinutes == 0 else { return book }
+            // The core keeps a PDF as it is; the system's viewer says what is in it.
+            do {
+                var info = try PdfInfoReader.read(url)
+                if info.title == nil, let fallbackTitle {
+                    info.title = fallbackTitle
+                }
+                if info.authors.isEmpty, !fallbackAuthors.isEmpty {
+                    info.authors = fallbackAuthors
+                }
+                if info.cover == nil, let fallbackCover {
+                    info.cover = Self.coverJPEG(fallbackCover) ?? fallbackCover
+                }
+                return try core.setPdfInfo(bookId: book.id, info: info)
+            } catch {
+                try? core.deleteBook(id: book.id)
+                throw error
+            }
         }
+        let needsTitle = fallbackTitle != nil && (book.title.isEmpty || book.title == stem)
+        let needsAuthors = !fallbackAuthors.isEmpty && book.authors.isEmpty
+        if needsTitle || needsAuthors {
+            let nextTitle = needsTitle ? (fallbackTitle ?? book.title) : book.title
+            let nextAuthors = needsAuthors ? fallbackAuthors : book.authors
+            if let edited = try? core.editBookInfo(book: book.id, title: nextTitle, authors: nextAuthors) {
+                book = edited
+            }
+        }
+        return book
     }
 
     @concurrent nonisolated private static func unzipAudiobook(_ core: YuyueCore, zip: String, into: String) async -> [String] {

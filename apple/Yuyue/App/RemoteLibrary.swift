@@ -127,8 +127,9 @@ final class RemoteSources {
             Task { @MainActor in if self.downloading[key] != nil { self.downloading[key] = fraction } }
         }
         defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
-        let isAudio = RemoteFormats.audio.contains(file.pathExtension.lowercased()) || Audiobooks.extensions.contains(file.pathExtension.lowercased())
-        let cover = isAudio ? await entry.cover.asyncFlatMap { try? await client.data($0) } : nil
+        let ext = file.pathExtension.lowercased()
+        let isAudio = RemoteFormats.audio.contains(ext) || Audiobooks.extensions.contains(ext)
+        let cover = (isAudio || ext == "pdf") ? await entry.cover.asyncFlatMap { try? await client.data($0) } : nil
         _ = try await library.importReceived(file, title: entry.title, author: entry.author, cover: cover)
         got.insert(key)
         UserDefaults.standard.set(Array(got), forKey: Self.gotKey)

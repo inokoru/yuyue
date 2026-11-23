@@ -794,14 +794,39 @@ final class ReaderPager: PlatformView {
     static let spreadBottom = 90.0
     #endif
 
+    /// Decides whether the reader lays out one column or two for the given viewport size.
+    /// On iOS, two columns require landscape (`width > height`) unless iPhone Duo's `spread` is active,
+    /// so portrait iPads (e.g. 13" at 1032 pt wide) stay one centred column.
+    nonisolated static func columnCount(
+        width: Double,
+        height: Double,
+        spread: Bool,
+        prefersTwoColumns: Bool,
+        chat: Bool,
+        mode: LayoutMode,
+        requireLandscape: Bool
+    ) -> UInt8 {
+        let book = spread && !chat && mode == .paginated
+        let wideEnough = width >= 880 && (!requireLandscape || width > height)
+        return book || (prefersTwoColumns && !chat && wideEnough && mode == .paginated) ? 2 : 1
+    }
+
     func geometry() -> PageGeometry {
         let width = Double(bounds.width)
+        let height = Double(bounds.height)
         #if os(iOS)
         let book = spread && !chat && mode == .paginated
+        let columns = Self.columnCount(
+            width: width, height: height, spread: spread,
+            prefersTwoColumns: prefersTwoColumns, chat: chat, mode: mode, requireLandscape: true
+        )
         #else
         let book = false
+        let columns = Self.columnCount(
+            width: width, height: height, spread: false,
+            prefersTwoColumns: prefersTwoColumns, chat: chat, mode: mode, requireLandscape: false
+        )
         #endif
-        let columns: UInt8 = book || (prefersTwoColumns && !chat && width >= 880 && mode == .paginated) ? 2 : 1
         // About 30 characters to a line at most (460 wide at 15); wider pages get
         // wider margins instead.
         let measure = fontSize * 31

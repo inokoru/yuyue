@@ -18,6 +18,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import uniffi.yuyue_core.BookDetail
+import uniffi.yuyue_core.BookFormat
 import uniffi.yuyue_core.Bookmark
 import uniffi.yuyue_core.Font
 import uniffi.yuyue_core.LayoutMode
@@ -718,8 +719,20 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
             return maxOf(1, (minutes(section).toDouble() * (n - sentence) / n).roundToInt())
         }
 
-    /** The capsule's second line: `42% · 本章还剩 6 分钟`. */
-    val capsuleNote: String get() = t("%lld%% · 本章还剩 %lld 分钟", (bookFraction * 100).roundToInt(), chapterMinutesLeft)
+    /** 0–1 through the current chapter, matching the progress bar on the reading capsule. */
+    val chapterProgress: Double
+        get() = if (sentenceCount > 0) minOf(1.0, (sentence + 1).toDouble() / sentenceCount) else 0.0
+
+    /** The capsule's second line: `本章 57% · 还剩 3 分钟`, matching the chapter progress bar. */
+    val capsuleNote: String
+        get() {
+            val pct = (chapterProgress * 100).roundToInt()
+            return if (detail?.summary?.format == BookFormat.PODCAST) {
+                t("本集 %lld%% · 还剩 %lld 分钟", pct, chapterMinutesLeft)
+            } else {
+                t("本章 %lld%% · 还剩 %lld 分钟", pct, chapterMinutesLeft)
+            }
+        }
 
     /** The page in the whole book, guessed from how much text the current section puts on a page. */
     fun estimatedPage(section: Int, sentence: Int): Int? {

@@ -173,7 +173,7 @@ struct PhoneSearch: View {
             HStack(spacing: YYUI.s(6)) {
                 chip(.all, String(localized: "全部"), nil)
                 chip(.books, String(localized: "书"), s.titles.count)
-                chip(.lines, String(localized: "全文"), s.lineCount)
+                chip(.lines, String(localized: "全文"), s.lineCount, capped: s.lineCapped)
                 chip(.notes, String(localized: "笔记"), s.noteCount)
                 chip(.words, String(localized: "生词"), s.words.count)
             }
@@ -184,13 +184,13 @@ struct PhoneSearch: View {
         .scrollIndicators(.never)
     }
 
-    private func chip(_ value: Scope, _ title: String, _ count: Int?) -> some View {
+    private func chip(_ value: Scope, _ title: String, _ count: Int?, capped: Bool = false) -> some View {
         let on = scope == value
         return Button { scope = value } label: {
             HStack(spacing: YYUI.s(4)) {
                 Text(title)
                 if let count, count > 0 {
-                    Text(count.formatted()).monospacedDigit().foregroundStyle(on ? tint.onBlack.opacity(0.55) : YYColor.t3)
+                    Text(capped ? "\(count.formatted())+" : count.formatted()).monospacedDigit().foregroundStyle(on ? tint.onBlack.opacity(0.55) : YYColor.t3)
                 }
             }
             .font(YYUI.font(10.5, on ? .semibold : .regular))
@@ -223,7 +223,9 @@ struct PhoneSearch: View {
                         card { ForEach(s.titles) { titleRow($0) } }
                     }
                     if (scope == .all || scope == .lines), !s.lines.isEmpty {
-                        label(String(localized: "全文"), String(localized: "\(s.lineCount) 处 · \(s.lineBooks) 本书"))
+                        label(String(localized: "全文"), s.lineCapped
+                              ? String(localized: "\(s.lineCount)+ 处 · \(s.lineBooks) 本书")
+                              : String(localized: "\(s.lineCount) 处 · \(s.lineBooks) 本书"))
                         card { ForEach(scope == .all ? Array(s.lines.prefix(4)) : s.lines) { lineRow($0) } }
                     }
                     if (scope == .all || scope == .notes), !s.notes.isEmpty {

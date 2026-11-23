@@ -24,7 +24,8 @@ public sealed record RemoteEntryItem(
     string Url,
     bool IsFolder,
     string? FormatExt,
-    long? SizeBytes);
+    long? SizeBytes,
+    string? Author = null);
 
 /// <summary>
 /// 1:1 port of <c>apple/Yuyue/App/RemoteLibrary.swift</c>:
@@ -203,7 +204,7 @@ public sealed class RemoteLibraryService
                 if (bestAcq is var (acqUrl, acqExt))
                 {
                     string sub = string.IsNullOrEmpty(author) ? acqExt.ToUpperInvariant() : $"{author} · {acqExt.ToUpperInvariant()}";
-                    items.Add(new RemoteEntryItem(title, sub, acqUrl, false, acqExt, null));
+                    items.Add(new RemoteEntryItem(title, sub, acqUrl, false, acqExt, null, string.IsNullOrEmpty(author) ? null : author));
                 }
                 else if (subFeedUrl is not null)
                 {
@@ -232,7 +233,7 @@ public sealed class RemoteLibraryService
             await File.WriteAllBytesAsync(dest, bytes, ct);
             if (AudiobookImporter.Extensions.Contains(ext.ToLowerInvariant()))
                 return await AudiobookImporter.ImportFilesAsync(_library, [dest]);
-            return await Task.Run(() => _library.ImportBook(dest), ct);
+            return await _library.ImportBookWithExtrasAsync(dest, fallbackTitle: item.Title, fallbackAuthor: item.Author);
         }
         finally
         {

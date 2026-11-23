@@ -123,14 +123,16 @@ fun SearchScreen(library: Library) {
     // 全文 can take a moment over a big library: wait for the typing to stop.
     var lines by remember { mutableStateOf<List<LineHit>>(emptyList()) }
     var lineCount by remember { mutableIntStateOf(0) }
+    var lineCapped by remember { mutableStateOf(false) }
     var lineBooks by remember { mutableIntStateOf(0) }
     /// The query the full text was last searched for.
     var searched by remember { mutableStateOf("") }
     LaunchedEffect(q) {
-        if (q.isEmpty()) { lines = emptyList(); lineCount = 0; lineBooks = 0; scope = Scope.All; return@LaunchedEffect }
+        if (q.isEmpty()) { lines = emptyList(); lineCount = 0; lineCapped = false; lineBooks = 0; scope = Scope.All; return@LaunchedEffect }
         delay(140)
         val found = withContext(Dispatchers.IO) { books.map { it to runCatching { library.core.searchBook(it.id, q) }.getOrDefault(emptyList()) } }
         lineCount = found.sumOf { it.second.size }
+        lineCapped = found.any { it.second.size >= SEARCH_HIT_LIMIT }
         lineBooks = found.count { it.second.isNotEmpty() }
         // The first sentence from each book, then the second…
         val picked = mutableListOf<LineHit>()
@@ -170,7 +172,7 @@ fun SearchScreen(library: Library) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Chip(t("全部"), null, scope == Scope.All) { scope = Scope.All }
                 Chip(t("书"), titles.size, scope == Scope.Books) { scope = Scope.Books }
-                Chip(t("全文"), lineCount, scope == Scope.Lines) { scope = Scope.Lines }
+                Chip(t("全文"), lineCount, scope == Scope.Lines, capped = lineCapped) { scope = Scope.Lines }
                 Chip(t("笔记"), notes.size, scope == Scope.Notes) { scope = Scope.Notes }
                 Chip(t("生词"), words.size, scope == Scope.Words) { scope = Scope.Words }
             }
@@ -201,7 +203,13 @@ fun SearchScreen(library: Library) {
                     item { YYGroup { for (h in chapters) row { TitleRow(h) { dismissKeyboard(); open(library, h) } } } }
                 }
                 if ((scope == Scope.All || scope == Scope.Lines) && lines.isNotEmpty()) {
-                    item { YYLabel(t("全文"), t("%lld 处 · %lld 本书", lineCount, lineBooks)) }
+                    item {
+                        YYLabel(
+                            t("全文"),
+                            if (lineCapped) t("%lld+ 处 · %lld 本书", lineCount, lineBooks)
+                            else t("%lld 处 · %lld 本书", lineCount, lineBooks),
+                        )
+                    }
                     item {
                         YYGroup {
                             for (l in if (scope == Scope.All) lines.take(4) else lines) row {
@@ -272,8 +280,11 @@ private fun askBook(library: Library, titles: List<TitleHit>, lines: List<LineHi
     return library.books.filter { it.available && can(it) }.maxByOrNull { it.addedAt }
 }
 
+/** Matches `core/yuyue-core/src/notes.rs` (`MAX_HITS`). */
+internal const val SEARCH_HIT_LIMIT = 500
+
 @Composable
-private fun Chip(title: String, count: Int?, on: Boolean, onClick: () -> Unit) {
+private fun Chip(title: String, count: Int?, on: Boolean, capped: Boolean = false, onClick: () -> Unit) {
     val tint = YY.tint
     val has = count == null || count > 0
     val ground by androidx.compose.animation.animateColorAsState(if (on) tint.black else YY.c.card, app.yuyue.design.YYMotion.quick(), label = "chip")
@@ -289,7 +300,7 @@ private fun Chip(title: String, count: Int?, on: Boolean, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(title, fontSize = 13.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, color = if (on) tint.onBlack else if (has) YY.c.t2 else YY.c.t3)
-            if (count != null && count > 0) Text("$count", fontSize = 13.sp, color = if (on) tint.onBlack.copy(alpha = 0.55f) else YY.c.t3, style = YY.tnum)
+            if (count != null && count > 0) Text(if (capped) "$count+" else "$count", fontSize = 13.sp, color = if (on) tint.onBlack.copy(alpha = 0.55f) else YY.c.t3, style = YY.tnum)
         }
     }
 }

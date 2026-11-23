@@ -169,7 +169,13 @@ fun PlaceTitle(info: PlaceInfo, modifier: Modifier = Modifier, open: () -> Unit)
         horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
         PlaceMark(info.icon, 40.dp, bare = true)
-        Text(info.name, fontFamily = YY.serif, fontWeight = FontWeight.Medium, fontSize = 30.sp, letterSpacing = if (info.name.any { it.code < 128 }) 0.sp else 1.sp, color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        val titleSize = when {
+            info.name.length >= 8 -> 20.sp
+            info.name.length >= 6 -> 23.sp
+            info.name.length >= 5 -> 26.sp
+            else -> 30.sp
+        }
+        Text(info.name, fontFamily = YY.serif, fontWeight = FontWeight.Medium, fontSize = titleSize, letterSpacing = if (info.name.any { it.code < 128 } || info.name.length > 4) 0.sp else 1.sp, color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Icon(Icons.chevronDown, null, tint = YY.c.t3, modifier = Modifier.padding(top = 3.dp).size(20.dp))
     }
 }
@@ -191,7 +197,13 @@ fun PlacePanel(
     ) {
         Row(Modifier.padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp)) {
             PlaceMark(current.icon)
-            Text(current.name, fontFamily = YY.serif, fontWeight = FontWeight.Medium, fontSize = 31.sp, letterSpacing = 1.sp, color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            val panelTitleSize = when {
+                current.name.length >= 8 -> 21.sp
+                current.name.length >= 6 -> 24.sp
+                current.name.length >= 5 -> 27.sp
+                else -> 31.sp
+            }
+            Text(current.name, fontFamily = YY.serif, fontWeight = FontWeight.Medium, fontSize = panelTitleSize, letterSpacing = if (current.name.any { it.code < 128 } || current.name.length > 4) 0.sp else 1.sp, color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             Column(Modifier.padding(end = 4.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 for (m in current.meta) Text(m, fontSize = 13.5.sp, color = YY.c.t3, style = YY.tnum)
             }
@@ -201,15 +213,35 @@ fun PlacePanel(
             for (k in kinds) PlaceRow(k, k.place == current.place, 36.dp, 52.dp, check = true) { go(k.place) }
             Text(t("合集"), fontSize = 12.sp, color = YY.c.t3, modifier = Modifier.padding(start = 8.dp, top = 12.dp, bottom = 4.dp))
             for (c in collections) {
-                var menu by remember { mutableStateOf(false) }
-                Box {
-                    PlaceRow(c, c.place == current.place, 36.dp, 52.dp, check = true, onLong = { menu = true }) { go(c.place) }
-                    val col = c.collection
-                    if (col != null) DropdownMenu(menu, { menu = false }, containerColor = YY.c.card) {
-                        PanelItem(t("重命名"), Icons.edit) { menu = false; rename(col) }
-                        PanelItem(t("换图标"), c.icon) { menu = false; icon(col) }
-                        PanelItem(t("删除"), Icons.delete, danger = true) { menu = false; delete(col) }
-                    }
+                val col = c.collection
+                if (col != null) {
+                    var menu by remember { mutableStateOf(false) }
+                    val manageLabel = t("管理合集“%@”", col.name)
+                    PlaceRow(
+                        info = c,
+                        on = c.place == current.place,
+                        mark = 36.dp,
+                        height = 52.dp,
+                        check = true,
+                        onLong = { menu = true },
+                        trailing = {
+                            Box {
+                                Box(
+                                    Modifier.size(36.dp).clip(CircleShape).clickable(onClickLabel = manageLabel) { menu = true },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(Icons.more, manageLabel, tint = YY.c.t3, modifier = Modifier.size(18.dp))
+                                }
+                                DropdownMenu(menu, { menu = false }, containerColor = YY.c.card) {
+                                    PanelItem(t("重命名"), Icons.edit) { menu = false; rename(col) }
+                                    PanelItem(t("换图标"), c.icon) { menu = false; icon(col) }
+                                    PanelItem(t("删除"), Icons.delete, danger = true) { menu = false; delete(col) }
+                                }
+                            }
+                        },
+                    ) { go(c.place) }
+                } else {
+                    PlaceRow(c, c.place == current.place, 36.dp, 52.dp, check = true) { go(c.place) }
                 }
             }
             val press = remember { MutableInteractionSource() }
@@ -231,7 +263,16 @@ fun PlacePanel(
 /** A row in the panel or the stack: a light grey ground on the place you're in, and while pressed. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PlaceRow(info: PlaceInfo, on: Boolean, mark: Dp, height: Dp, check: Boolean, onLong: (() -> Unit)? = null, go: () -> Unit) {
+private fun PlaceRow(
+    info: PlaceInfo,
+    on: Boolean,
+    mark: Dp,
+    height: Dp,
+    check: Boolean,
+    onLong: (() -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    go: () -> Unit,
+) {
     val press = remember { MutableInteractionSource() }
     val pressed by press.collectIsPressedAsState()
     val ground = when {
@@ -241,7 +282,8 @@ private fun PlaceRow(info: PlaceInfo, on: Boolean, mark: Dp, height: Dp, check: 
     }
     Row(
         Modifier.fillMaxWidth().heightIn(min = height).clip(RoundedCornerShape(14.dp)).background(ground)
-            .combinedClickable(press, null, onLongClick = onLong, onClick = go).padding(start = 6.dp, end = if (check) 12.dp else 10.dp, top = 6.dp, bottom = 6.dp),
+            .combinedClickable(press, null, onLongClick = onLong, onClick = go)
+            .padding(start = 6.dp, end = if (trailing != null) 4.dp else if (check) 12.dp else 10.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         PlaceMark(info.icon, mark)
@@ -249,6 +291,7 @@ private fun PlaceRow(info: PlaceInfo, on: Boolean, mark: Dp, height: Dp, check: 
         if (info.fresh) Box(Modifier.size(5.dp).clip(CircleShape).background(YY.tint.accent))
         Text(info.short, fontSize = 13.sp, color = YY.c.t3, style = YY.tnum)
         if (check) Icon(Icons.check, null, tint = YY.c.t1, modifier = Modifier.size(16.dp).alpha(if (on) 1f else 0f))
+        trailing?.invoke()
     }
 }
 

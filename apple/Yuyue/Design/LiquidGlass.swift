@@ -167,7 +167,7 @@ struct GlassTool: View {
                         .resizable()
                         .renderingMode(.template)
                         .scaledToFit()
-                        .frame(width: 15, height: 15)
+                        .frame(width: 16.5, height: 16.5)
                 } else if let symbol {
                     // A label, not a bare image: in the window's toolbar the capsule becomes one
                     // item, and only a button's own title survives as what VoiceOver reads.

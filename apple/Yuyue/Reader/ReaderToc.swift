@@ -1,8 +1,9 @@
+import CoreGraphics
 import Foundation
 import YuyueCore
 
 /// "第五回 游幻境指迷十二钗": the number and the name, when the title has both.
-struct ChapterTitle {
+nonisolated struct ChapterTitle {
     let number: String?
     let name: String
 
@@ -16,15 +17,39 @@ struct ChapterTitle {
             name = t
         }
     }
+
+    /// Column width (in base design points) wide enough for the longest chapter number in `titles`
+    /// so five- and six-character numbers like `第一二零回` or `第一百二十回` never truncate.
+    static func columnWidth(for titles: [String], minWidth: CGFloat = 46, maxWidth: CGFloat = 84, charWidth: CGFloat = 11.5) -> CGFloat {
+        let widest = titles.reduce(CGFloat(0)) { best, raw in
+            guard let num = ChapterTitle(raw).number else { return best }
+            let units = num.reduce(CGFloat(0)) { $0 + ($1.isASCII ? 0.65 : 1.0) }
+            return max(best, units)
+        }
+        guard widest > 0 else { return minWidth }
+        return min(maxWidth, max(minWidth, (widest * charWidth + 6).rounded(.up)))
+    }
 }
 
 /// One line of 目录: an entry and the sections it covers, up to the next entry's.
-struct TocChapter: Identifiable {
+nonisolated struct TocChapter: Identifiable {
     let id: Int
     let title: String
     let depth: Int
     let item: TocItem
     let sections: Range<Int>
+    let isBoilerplate: Bool
+
+    /// True when every valid section covered by this TOC entry is marked `boilerplate`
+    /// (e.g. a Project Gutenberg license page) rather than main reading text.
+    static func isBoilerplateRange(_ range: Range<Int>, in kinds: [SectionKind]) -> Bool {
+        var sawSection = false
+        for index in range where kinds.indices.contains(index) {
+            sawSection = true
+            if kinds[index] != .boilerplate { return false }
+        }
+        return sawSection
+    }
 }
 
 extension ReaderModel {
@@ -41,10 +66,19 @@ extension ReaderModel {
                 return TocItem(title: s.title ?? String(localized: "第 \(n) 节"), depth: 0, section: UInt32(i), anchor: nil)
             }
         }
+        let kinds = detail.sections.map(\.kind)
         return items.enumerated().map { i, item in
             let start = Int(item.section)
             let end = items[(i + 1)...].first { Int($0.section) > start }.map { Int($0.section) } ?? detail.sections.count
-            return TocChapter(id: i, title: item.title, depth: Int(item.depth), item: item, sections: start ..< max(start + 1, end))
+            let range = start ..< max(start + 1, end)
+            return TocChapter(
+                id: i,
+                title: item.title,
+                depth: Int(item.depth),
+                item: item,
+                sections: range,
+                isBoilerplate: TocChapter.isBoilerplateRange(range, in: kinds)
+            )
         }
     }
 

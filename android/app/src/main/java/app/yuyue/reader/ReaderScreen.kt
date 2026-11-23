@@ -445,7 +445,7 @@ private fun Capsule(model: ReaderModel, paper: YYPaper, haze: HazeState) {
         note = if (alert != null) alert.note else model.capsuleNote,
         noteAccent = alert != null,
         playing = model.isPlaying,
-        progress = if (n > 0) minOf(1f, (model.sentence + 1f) / n).coerceIn(0f, 1f) else 0f,
+        progress = model.chapterProgress.toFloat().coerceIn(0f, 1f),
         playEnabled = model.player != null,
         sentenceStep = reading,
         onToc = { model.tocShown = true },
@@ -565,6 +565,7 @@ private fun SearchCapsule(model: ReaderModel, paper: YYPaper, haze: HazeState) {
                 when {
                     q.isEmpty() -> t("输入要找的字")
                     model.hits.isEmpty() -> t("没找到“%@”", q)
+                    model.hits.size >= app.yuyue.search.SEARCH_HIT_LIMIT -> t("第 %lld / %lld+ 处", (model.hitIndex ?: 0) + 1, model.hits.size)
                     else -> t("第 %lld / %lld 处", (model.hitIndex ?: 0) + 1, model.hits.size)
                 },
                 fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = paper.ink, style = YY.tnum, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -583,17 +584,17 @@ private data class CardSnapshot(
     val text: String,
     val top: Float,
     val bottom: Float,
-)
     val midX: Float?,
+)
 
 /** 选中文字, or a highlight tapped: the same card as on iPhone, over the words — three colours
  *  and the wave, the two underlines (and 删除 for a highlight), then 想法 · 从这读 · 翻译 · 复制 · 分享. */
 @Composable
 private fun Cards(model: ReaderModel, paper: YYPaper, thought: (Mark) -> Unit, translate: (String) -> Unit) {
     val context = LocalContext.current
-    val sel = model.selection
     val density = LocalDensity.current
     val reduce = YYMotion.isReduceMotion()
+    val sel = model.selection
     val open = model.openMark
     val active = if (sel != null || open != null) {
         val txt = open?.mark?.text ?: sel?.text
@@ -603,8 +604,8 @@ private fun Cards(model: ReaderModel, paper: YYPaper, thought: (Mark) -> Unit, t
             text = txt,
             top = (sel?.rect?.y ?: open?.y ?: 200.0).toFloat(),
             bottom = (sel?.rect?.let { it.y + it.height } ?: ((open?.y ?: 200.0) + 24)).toFloat(),
-        ) else null
             midX = (sel?.rect?.let { it.x + it.width / 2.0 } ?: open?.x)?.toFloat(),
+        ) else null
     } else null
     var last by remember { mutableStateOf<CardSnapshot?>(null) }
     if (active != null) last = active
@@ -617,9 +618,9 @@ private fun Cards(model: ReaderModel, paper: YYPaper, thought: (Mark) -> Unit, t
         if (current != null) { model.setStyle(style, current); model.dismissCards() } else model.mark(style)
     }
     val hasNote = !current?.note.isNullOrBlank()
-    BoxWithConstraints(Modifier.fillMaxSize()) {
     var cardHeightPx by remember { mutableIntStateOf(0) }
     var cardWidthPx by remember { mutableIntStateOf(0) }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
         val cardHeight = if (cardHeightPx > 0) with(density) { cardHeightPx.toDp() } else if (hasNote) 168.dp else 116.dp
         val cardWidth = if (cardWidthPx > 0) with(density) { cardWidthPx.toDp() } else minOf(maxWidth - 32.dp, 340.dp)
         // Above the words when there is room, under them otherwise.
@@ -640,11 +641,11 @@ private fun Cards(model: ReaderModel, paper: YYPaper, thought: (Mark) -> Unit, t
             val eink = Prefs.isReady && Prefs.bool("eink.on", false)
             Column(
                 Modifier.padding(horizontal = 16.dp).widthIn(max = 340.dp).fillMaxWidth()
-                    .shadow(if (eink) 0.dp else 16.dp, RoundedCornerShape(14.dp), ambientColor = Color.Black.copy(alpha = 0.14f), spotColor = Color.Black.copy(alpha = 0.2f))
                     .onSizeChanged {
                         cardHeightPx = it.height
                         cardWidthPx = it.width
                     }
+                    .shadow(if (eink) 0.dp else 16.dp, RoundedCornerShape(14.dp), ambientColor = Color.Black.copy(alpha = 0.14f), spotColor = Color.Black.copy(alpha = 0.2f))
                     .clip(RoundedCornerShape(14.dp)).background(YY.c.card)
                     .border(0.5.dp, YY.c.line, RoundedCornerShape(14.dp)),
             ) {

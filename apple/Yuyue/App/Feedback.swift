@@ -1237,12 +1237,13 @@ struct FeedbackForm: View {
                 .foregroundStyle(YYColor.t2)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 260)
-            Link(destination: Feedback.issuesURL) {
-                Text(verbatim: "去 GitHub Issues 查看 ↗")
-                    .font(YYUI.font(12))
-                    .foregroundStyle(tint.accent)
-            }
-            .buttonStyle(.plain)
+            // 非实时中转，提交后立刻点过去看不到，先注释掉。
+            // Link(destination: Feedback.issuesURL) {
+            //     Text(verbatim: "去 GitHub Issues 查看 ↗")
+            //         .font(YYUI.font(12))
+            //         .foregroundStyle(tint.accent)
+            // }
+            // .buttonStyle(.plain)
             HStack(spacing: YYUI.s(10)) {
                 Button("再写一条") {
                     text = ""

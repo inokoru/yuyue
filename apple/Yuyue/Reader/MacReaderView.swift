@@ -28,6 +28,8 @@ struct MacReaderView: View {
     private var barAway: Bool { !(listening || listenShown) || (model.immersive && !peek && !listenShown) }
     @State private var unpeek: Task<Void, Never>?
     @State private var pageHeight = 0.0
+    @State private var windowWidth: CGFloat = 1040
+    @AppStorage("reader.panelWidth") private var panelWidth = 320.0
     /// The window 沉浸阅读 put into full screen, to take it out again.
     @State private var fullScreened: NSWindow?
     @FocusState private var searchFocused: Bool
@@ -40,16 +42,22 @@ struct MacReaderView: View {
     private var paper: YYPaper { model.paperTokens }
 
     var body: some View {
+        let maxPanel = max(272.0, min(540.0, Double(windowWidth) * 0.50))
+        let sideWidth = min(max(panelWidth, 272.0), maxPanel)
         HStack(spacing: 0) {
             page
             if let panel {
+                YYResizeHandle(width: $panelWidth, minWidth: 272, maxWidth: maxPanel, defaultWidth: 320, chrome: .floatingCard)
+                    .padding(.top, 6)
+                    .padding(.bottom, 14)
                 side(panel)
-                    .frame(width: 288)
+                    .frame(width: sideWidth)
                     .padding(.trailing, 14)
                     .padding(.bottom, 14)
                     .padding(.top, 6)
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
         .sheet(isPresented: $model.askingFinished) {
             if let library = model.library {
                 FinishedSheet(library: library, bookID: model.bookID) { model.askingFinished = false }
@@ -547,7 +555,7 @@ struct MacReaderView: View {
                     return .handled
                 }
             if !model.query.isEmpty {
-                Text(model.hits.isEmpty ? String(localized: "没找到") : String(localized: "第 \((model.hitIndex ?? 0) + 1) / \(model.hits.count) 处"))
+                Text(model.hits.isEmpty ? String(localized: "没找到") : (model.hitsCapped ? String(localized: "第 \((model.hitIndex ?? 0) + 1) / \(model.hits.count)+ 处") : String(localized: "第 \((model.hitIndex ?? 0) + 1) / \(model.hits.count) 处")))
                     .font(.yy(size: 11.5, weight: .semibold))
                     .foregroundStyle(model.hits.isEmpty ? paper.ink2 : paper.ink)
                     .monospacedDigit()
@@ -683,19 +691,14 @@ struct MacReaderView: View {
             // How far into this chapter.
             GeometryReader { g in
                 Capsule().fill(paper.line)
-                Capsule().fill(paper.ink).frame(width: g.size.width * chapterProgress)
-                    .animation(YYMotion.standard, value: chapterProgress)
+                Capsule().fill(paper.ink).frame(width: g.size.width * model.chapterProgress)
+                    .animation(YYMotion.standard, value: model.chapterProgress)
             }
             .frame(height: 2)
             .padding(.horizontal, 22)
             .padding(.bottom, 1)
         }
         .overlay(Capsule().strokeBorder(paper.line, lineWidth: 0.5))
-    }
-
-    private var chapterProgress: Double {
-        let n = model.sentenceCount
-        return n > 0 ? min(1, Double(model.sentence + 1) / Double(n)) : 0
     }
 
     private func step(forward: Bool) {
@@ -1107,7 +1110,9 @@ private struct TocPanel: View {
         let book = model.detail?.summary
         let read = model.times.values.reduce(0) { $0 + Int($1.readSeconds) }
         let listen = model.times.values.reduce(0) { $0 + Int($1.listenSeconds) }
-        let chapterCount = chapters.count
+        let mainChapters = chapters.filter { !$0.isBoilerplate }
+        let countedChapters = mainChapters.isEmpty ? chapters : mainChapters
+        let chapterCount = countedChapters.count
         // A book without a table of contents is listed by 节 (第 1 节…), and counted the same way.
         let unit = model.detail?.toc.isEmpty == true ? "节"
             : countedChapters.lazy.compactMap { ChapterTitle($0.title).number?.last }.first.map(String.init).flatMap { ["回", "节", "卷", "篇", "话"].contains($0) ? $0 : nil } ?? "章"
@@ -1166,14 +1171,31 @@ private struct TocPanel: View {
     }
 
     private var chapterList: some View {
-        ScrollViewReader { proxy in
+        let list = chapters
+        let main = list.filter { !$0.isBoilerplate }
+        let appendix = list.filter(\.isBoilerplate)
+        let numberWidth = ChapterTitle.columnWidth(for: (main.isEmpty ? list : main).map(\.title), minWidth: 44, maxWidth: 82, charWidth: 11.5)
+        return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(chapters) { c in
-                        row(c)
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(main.enumerated()), id: \.element.id) { index, c in
+                        row(c, numberWidth: numberWidth)
                             .id(c.id)
                         if c.id != currentID, index < main.count - 1, main[index + 1].id != currentID {
                             Rectangle().fill(YYColor.line).frame(height: 0.5)
+                        }
+                    }
+                    if !appendix.isEmpty {
+                        Text("附录与版权")
+                            .font(.yy(size: 10.5))
+                            .foregroundStyle(YYColor.t3)
+                            .padding(.horizontal, 8)
+                            .padding(.top, main.isEmpty ? 4 : 14)
+                            .padding(.bottom, 6)
+                        ForEach(Array(appendix.enumerated()), id: \.element.id) { index, c in
+                            if index > 0 { Rectangle().fill(YYColor.line).frame(height: 0.5).padding(.horizontal, 8) }
+                            boilerplateRow(c)
+                                .id(c.id)
                         }
                     }
                 }
@@ -1188,7 +1210,34 @@ private struct TocPanel: View {
         }
     }
 
-    private func row(_ c: Chapter) -> some View {
+    private func boilerplateRow(_ c: Chapter) -> some View {
+        let current = c.id == currentID
+        return Button { model.go(to: c.item) } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "doc.text")
+                    .font(.yy(size: 10.5))
+                    .foregroundStyle(current ? tint.accent : YYColor.t3)
+                Text(c.title)
+                    .font(.yy(size: 11, weight: current ? .semibold : .regular))
+                    .foregroundStyle(current ? tint.accent : YYColor.t2)
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                Text("版权")
+                    .font(.yy(size: 9.5))
+                    .foregroundStyle(current ? tint.accent : YYColor.t3)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(current ? tint.accentSoft : YYColor.inset, in: .rect(cornerRadius: 5))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+            .background(current ? tint.accentSoft : .clear, in: .rect(cornerRadius: 9))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func row(_ c: Chapter, numberWidth: CGFloat) -> some View {
         let current = c.id == currentID
         let past = (currentID ?? -1) > c.id
         let t = ChapterTitle(c.title)
@@ -1200,7 +1249,8 @@ private struct TocPanel: View {
                         .font(.yy(size: 11, weight: current ? .semibold : .regular))
                         .monospacedDigit()
                         .foregroundStyle(current ? tint.accent : past ? YYColor.t3 : YYColor.t2)
-                        .frame(width: 44, alignment: .leading)
+                        .lineLimit(1)
+                        .frame(width: numberWidth, alignment: .leading)
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(t.name)
@@ -1575,7 +1625,8 @@ private struct SearchPanel: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("搜索结果").font(.yy(size: 14, weight: .bold)).foregroundStyle(YYColor.t1)
                 if !model.query.isEmpty {
-                    Text("“\(model.query)” · \(model.hits.count) 处").font(.yy(size: 10.5)).monospacedDigit().foregroundStyle(YYColor.t3)
+                    Text(model.hitsCapped ? String(localized: "“\(model.query)” · \(model.hits.count)+ 处") : String(localized: "“\(model.query)” · \(model.hits.count) 处"))
+                        .font(.yy(size: 10.5)).monospacedDigit().foregroundStyle(YYColor.t3)
                 }
             }
             .padding(.horizontal, 2)
@@ -1609,6 +1660,13 @@ private struct SearchPanel: View {
                                     Rectangle().fill(quiet ? .clear : YYColor.line).frame(height: 0.5)
                                     row(pair.0, pair.1, first: k == 0).id(Self.rowID(pair.0))
                                 }
+                            }
+                            if model.hitsCapped {
+                                Text("仅显示前 \(QuickSearch.hitLimit) 处，输入更长的词可缩小范围")
+                                    .font(.yy(size: 10.5))
+                                    .foregroundStyle(YYColor.t3)
+                                    .padding(.horizontal, 8)
+                                    .padding(.top, 12)
                             }
                         }
                         .padding(.bottom, 12)

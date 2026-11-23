@@ -70,7 +70,14 @@ class ChapterTitle(title: String) {
 }
 
 /** One line of 目录: an entry and the sections it covers, up to the next entry's. */
-data class TocChapter(val id: Int, val title: String, val depth: Int, val item: TocItem, val sections: IntRange)
+data class TocChapter(
+    val id: Int,
+    val title: String,
+    val depth: Int,
+    val item: TocItem,
+    val sections: IntRange,
+    val isBoilerplate: Boolean = false,
+)
 
 /** The book's own table of contents; with none, the sections that have something to read. */
 val ReaderModel.tocChapters: List<TocChapter>
@@ -86,7 +93,10 @@ val ReaderModel.tocChapters: List<TocChapter>
         return items.mapIndexed { i, item ->
             val start = item.section.toInt()
             val end = items.drop(i + 1).firstOrNull { it.section.toInt() > start }?.section?.toInt() ?: d.sections.size
-            TocChapter(i, item.title, item.depth.toInt(), item, start until maxOf(start + 1, end))
+            val range = start until maxOf(start + 1, end)
+            val coveredKinds = range.mapNotNull { d.sections.getOrNull(it)?.kind }
+            val boilerplate = coveredKinds.isNotEmpty() && coveredKinds.all { it == SectionKind.BOILERPLATE }
+            TocChapter(i, item.title, item.depth.toInt(), item, range, boilerplate)
         }
     }
 
@@ -177,23 +187,105 @@ private fun Header(model: ReaderModel, chapters: List<TocChapter>, current: Int?
 @Composable
 private fun Chapters(model: ReaderModel, chapters: List<TocChapter>, current: Int?, dismiss: () -> Unit) {
     if (chapters.isEmpty()) return Empty(t("这本书没有目录"), t("书里没写章节，往后翻就行"))
+    val main = remember(chapters) { chapters.filterNot { it.isBoilerplate } }
+    val appendix = remember(chapters) { chapters.filter { it.isBoilerplate } }
+    val numberWidth = remember(chapters) {
+        val sample = main.ifEmpty { chapters }
+        val widest = sample.maxOfOrNull { c ->
+            val num = ChapterTitle(c.title).number ?: return@maxOfOrNull 0f
+            num.fold(0f) { acc, ch -> acc + if (ch.code < 128) 0.65f else 1f }
+        } ?: 0f
+        if (widest <= 0f) 46f else (widest * 11.5f + 6f).coerceIn(46f, 84f)
+    }
     val state = rememberLazyListState()
-    LaunchedEffect(current) { current?.let { state.scrollToItem(maxOf(0, it - 3)) } }
+    LaunchedEffect(current, main, appendix) {
+        if (current != null) {
+            val mainPos = main.indexOfFirst { it.id == current }
+            val target = if (mainPos >= 0) {
+                mainPos
+            } else {
+                val appPos = appendix.indexOfFirst { it.id == current }
+                if (appPos >= 0) main.size + 1 + appPos else -1
+            }
+            if (target >= 0) state.scrollToItem(maxOf(0, target - 3))
+        }
+    }
+    val cardRadius = YY.s(14)
+    val appendixRadius = YY.s(12)
     LazyColumn(
         state = state,
-        modifier = Modifier.padding(horizontal = YY.s(14)).padding(bottom = YY.s(20)).fillMaxWidth()
-            .background(YY.c.card, RoundedCornerShape(YY.s(14))).border(0.5.dp, YY.c.line, RoundedCornerShape(YY.s(14))),
+        modifier = Modifier.padding(horizontal = YY.s(14)).fillMaxWidth(),
     ) {
-        itemsIndexed(chapters, key = { _, c -> c.id }) { i, c ->
-            if (i > 0) Box(Modifier.padding(horizontal = YY.s(12)).fillMaxWidth().height(0.5.dp).background(YY.c.line))
-            ChapterRow(model, c, current) { model.go(c.item); dismiss() }
+        if (main.isNotEmpty()) {
+            itemsIndexed(main, key = { _, c -> c.id }) { i, c ->
+                val shape = RoundedCornerShape(
+                    topStart = if (i == 0) cardRadius else 0.dp,
+                    topEnd = if (i == 0) cardRadius else 0.dp,
+                    bottomStart = if (i == main.lastIndex) cardRadius else 0.dp,
+                    bottomEnd = if (i == main.lastIndex) cardRadius else 0.dp,
+                )
+                Column(Modifier.fillMaxWidth().clip(shape).background(YY.c.card, shape)) {
+                    if (i > 0) Box(Modifier.padding(horizontal = YY.s(12)).fillMaxWidth().height(0.5.dp).background(YY.c.line))
+                    ChapterRow(model, c, current, numberWidth) { model.go(c.item); dismiss() }
+                }
+            }
+        }
+        if (appendix.isNotEmpty()) {
+            item(key = "appendix-header") {
+                Text(
+                    t("附录与版权"),
+                    style = YY.font(10.5f),
+                    color = YY.c.t3,
+                    modifier = Modifier.padding(start = YY.s(6), top = if (main.isEmpty()) 0.dp else YY.s(14), bottom = YY.s(6)),
+                )
+            }
+            itemsIndexed(appendix, key = { _, c -> c.id }) { i, c ->
+                val shape = RoundedCornerShape(
+                    topStart = if (i == 0) appendixRadius else 0.dp,
+                    topEnd = if (i == 0) appendixRadius else 0.dp,
+                    bottomStart = if (i == appendix.lastIndex) appendixRadius else 0.dp,
+                    bottomEnd = if (i == appendix.lastIndex) appendixRadius else 0.dp,
+                )
+                Column(Modifier.fillMaxWidth().clip(shape).background(YY.c.card, shape)) {
+                    if (i > 0) Box(Modifier.padding(horizontal = YY.s(12)).fillMaxWidth().height(0.5.dp).background(YY.c.line))
+                    BoilerplateRow(c, current) { model.go(c.item); dismiss() }
+                }
+            }
+        }
+        item(key = "toc-bottom-spacer") { Spacer(Modifier.height(YY.s(20))) }
+    }
+}
+
+@Composable
+private fun BoilerplateRow(c: TocChapter, current: Int?, go: () -> Unit) {
+    val now = c.id == current
+    val accent = YY.tint.accent
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = go).padding(horizontal = YY.s(12), vertical = YY.s(9)),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(YY.s(8)),
+    ) {
+        Icon(Icons.docText, null, tint = if (now) accent else YY.c.t3, modifier = Modifier.size(YY.s(13)))
+        Text(
+            c.title,
+            style = YY.font(11f, if (now) FontWeight.SemiBold else FontWeight.Normal),
+            color = if (now) accent else YY.c.t2,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Box(
+            Modifier.background(if (now) YY.tint.accentSoft else YY.c.inset, RoundedCornerShape(YY.s(5)))
+                .padding(horizontal = YY.s(6), vertical = YY.s(2)),
+        ) {
+            Text(t("版权"), style = YY.font(9.5f), color = if (now) accent else YY.c.t3, maxLines = 1)
         }
     }
 }
 
 /** 第几回, the name, the minutes; this one in the accent, its name whole, a line under. */
 @Composable
-private fun ChapterRow(model: ReaderModel, c: TocChapter, current: Int?, go: () -> Unit) {
+private fun ChapterRow(model: ReaderModel, c: TocChapter, current: Int?, numberWidth: Float, go: () -> Unit) {
     val now = c.id == current
     val done = (current ?: -1) > c.id
     val title = ChapterTitle(c.title)
@@ -202,7 +294,7 @@ private fun ChapterRow(model: ReaderModel, c: TocChapter, current: Int?, go: () 
     val note = if (now) t("还剩 %lld 分钟", maxOf(1, (minutes * (1 - model.within(c))).roundToInt())) else t("%lld 分钟", minutes)
     Row(Modifier.fillMaxWidth().clickable(onClick = go).padding(horizontal = YY.s(12), vertical = YY.s(11)), horizontalArrangement = Arrangement.spacedBy(YY.s(6))) {
         if (title.number != null) {
-            Text(title.number, style = YY.font(10.5f, if (now) FontWeight.SemiBold else FontWeight.Normal, tnum = true), color = if (now) accent else YY.c.t3, maxLines = 1, modifier = Modifier.width(YY.s(46)))
+            Text(title.number, style = YY.font(10.5f, if (now) FontWeight.SemiBold else FontWeight.Normal, tnum = true), color = if (now) accent else YY.c.t3, maxLines = 1, modifier = Modifier.width(YY.s(numberWidth)))
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(YY.s(8))) {
             Row(horizontalArrangement = Arrangement.spacedBy(YY.s(6))) {

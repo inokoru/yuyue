@@ -670,13 +670,41 @@ private struct TocList: View {
     }
 
     private func tocList(_ chapters: [TocChapter], _ current: Int?) -> some View {
-        ScrollViewReader { proxy in
+        let main = chapters.filter { !$0.isBoilerplate }
+        let appendix = chapters.filter(\.isBoilerplate)
+        let numberWidth = ChapterTitle.columnWidth(for: (main.isEmpty ? chapters : main).map(\.title), minWidth: 46)
+        return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(chapters) { c in
-                        if c.id > 0 { Rectangle().fill(YYColor.line).frame(height: 0.5) }
-                        chapterRow(c, current: current)
-                            .id(c.id)
+                VStack(alignment: .leading, spacing: YYUI.s(14)) {
+                    if !main.isEmpty {
+                        LazyVStack(spacing: 0) {
+                            ForEach(Array(main.enumerated()), id: \.element.id) { index, c in
+                                if index > 0 { Rectangle().fill(YYColor.line).frame(height: 0.5) }
+                                chapterRow(c, current: current, numberWidth: numberWidth)
+                                    .id(c.id)
+                            }
+                        }
+                        .padding(.horizontal, YYUI.s(12))
+                        .background(YYColor.card, in: .rect(cornerRadius: YYUI.s(14)))
+                        .overlay(RoundedRectangle(cornerRadius: YYUI.s(14)).strokeBorder(YYColor.line, lineWidth: 0.5))
+                    }
+                    if !appendix.isEmpty {
+                        VStack(alignment: .leading, spacing: YYUI.s(6)) {
+                            Text("附录与版权")
+                                .font(YYUI.font(10.5))
+                                .foregroundStyle(YYColor.t3)
+                                .padding(.horizontal, YYUI.s(6))
+                            LazyVStack(spacing: 0) {
+                                ForEach(Array(appendix.enumerated()), id: \.element.id) { index, c in
+                                    if index > 0 { Rectangle().fill(YYColor.line).frame(height: 0.5) }
+                                    boilerplateRow(c, current: current)
+                                        .id(c.id)
+                                }
+                            }
+                            .padding(.horizontal, YYUI.s(12))
+                            .background(YYColor.card, in: .rect(cornerRadius: YYUI.s(12)))
+                            .overlay(RoundedRectangle(cornerRadius: YYUI.s(12)).strokeBorder(YYColor.line, lineWidth: 0.5))
+                        }
                     }
                 }
                 .padding(.horizontal, YYUI.s(14))
@@ -689,8 +717,36 @@ private struct TocList: View {
         }
     }
 
+    private func boilerplateRow(_ c: TocChapter, current: Int?) -> some View {
+        let now = c.id == current
+        return Button {
+            model.go(to: c.item)
+            dismiss()
+        } label: {
+            HStack(spacing: YYUI.s(8)) {
+                Image(systemName: "doc.text")
+                    .font(YYUI.font(10.5))
+                    .foregroundStyle(now ? tint.accent : YYColor.t3)
+                Text(c.title)
+                    .font(YYUI.font(11, now ? .semibold : .regular))
+                    .foregroundStyle(now ? tint.accent : YYColor.t2)
+                    .lineLimit(1)
+                Spacer(minLength: YYUI.s(6))
+                Text("版权")
+                    .font(YYUI.font(9.5))
+                    .foregroundStyle(now ? tint.accent : YYColor.t3)
+                    .padding(.horizontal, YYUI.s(6))
+                    .padding(.vertical, YYUI.s(2))
+                    .background(now ? tint.accentSoft : YYColor.inset, in: .rect(cornerRadius: YYUI.s(5)))
+            }
+            .padding(.vertical, YYUI.s(9))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
     /// 第几回, the name, the minutes; this one in the accent, its name whole, a line under.
-    private func chapterRow(_ c: TocChapter, current: Int?) -> some View {
+    private func chapterRow(_ c: TocChapter, current: Int?, numberWidth: CGFloat) -> some View {
         let now = c.id == current
         let done = (current ?? -1) > c.id
         let t = ChapterTitle(c.title)
@@ -707,7 +763,7 @@ private struct TocList: View {
                         .font(YYUI.font(10.5, now ? .semibold : .regular))
                         .foregroundStyle(now ? tint.accent : YYColor.t3)
                         .lineLimit(1)
-                        .frame(width: YYUI.s(46), alignment: .leading)
+                        .frame(width: YYUI.s(numberWidth), alignment: .leading)
                 }
                 VStack(alignment: .leading, spacing: YYUI.s(8)) {
                     HStack(alignment: .firstTextBaseline, spacing: YYUI.s(6)) {
@@ -899,7 +955,6 @@ private struct PageTapHint: View {
         .containerRelativeFrame(.horizontal) { w, _ in w * share }
     }
 }
-#endif
 
 /// 1:1 downward finger tracking with upward rubber-band for bottom lookup/sentence cards.
 private struct SwipeDownDismiss: ViewModifier {
@@ -933,3 +988,4 @@ private struct SwipeDownDismiss: ViewModifier {
             )
     }
 }
+#endif

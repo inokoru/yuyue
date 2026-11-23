@@ -3528,6 +3528,7 @@ public sealed partial class ShelfWindow : Window
         var fullTextHits = new List<(BookSummary Book, SearchHit Hit)>();
         int hitBookCount = 0;
         int totalLineCount = 0;
+        bool lineCapped = false;
         foreach (var b in _shelfBooks.Where(b => !b.Record && b.Available && b.Format != BookFormat.Audio).Take(8))
         {
             try
@@ -3537,6 +3538,7 @@ public sealed partial class ShelfWindow : Window
                 {
                     hitBookCount++;
                     totalLineCount += hits.Length;
+                    if (hits.Length >= 500) lineCapped = true;
                     foreach (var h in hits.Take(2))
                         if (fullTextHits.Count < 4) fullTextHits.Add((b, h));
                 }
@@ -3546,7 +3548,7 @@ public sealed partial class ShelfWindow : Window
 
         if (fullTextHits.Count > 0)
         {
-            QuickSearchResults.Children.Add(GroupHeader("全文", $"{totalLineCount} 处 · {hitBookCount} 本书"));
+            QuickSearchResults.Children.Add(GroupHeader("全文", $"{totalLineCount}{(lineCapped ? "+" : "")} 处 · {hitBookCount} 本书"));
             foreach (var (b, hit) in fullTextHits)
             {
                 var r = new Grid { ColumnSpacing = 10 };

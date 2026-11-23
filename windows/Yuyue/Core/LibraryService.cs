@@ -276,16 +276,40 @@ public sealed class LibraryService : IDisposable
     public Dictionary<string, uint> GetMarkCounts() => Core.MarkCounts();
     public BookSummary ImportBook(string filePath) => Core.ImportBook(filePath);
 
-    public async Task<BookSummary> ImportBookWithExtrasAsync(string filePath)
+    public async Task<BookSummary> ImportBookWithExtrasAsync(string filePath, string? fallbackTitle = null, string? fallbackAuthor = null)
     {
+        string stem = Path.GetFileNameWithoutExtension(filePath);
+        string? cleanTitle = string.IsNullOrWhiteSpace(fallbackTitle) ? null : fallbackTitle.Trim();
+        string[] cleanAuthors = string.IsNullOrWhiteSpace(fallbackAuthor)
+            ? []
+            : fallbackAuthor.Split(['、', ',', '，', ';', '；', '/'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
         var summary = await Task.Run(() => Core.ImportBook(filePath));
         if (summary.Format == BookFormat.Pdf)
         {
+            if (summary.ReadMinutes != 0) return summary;
             try
             {
                 string orig = TryOriginalFile(summary.Id) ?? filePath;
                 var info = await PdfInfoReader.ReadAsync(orig);
-                summary = await Task.Run(() => Core.SetPdfInfo(summary.Id, info));
+                string? title = string.IsNullOrWhiteSpace(info.Title) ? cleanTitle : info.Title;
+                string[] authors = info.Authors.Length == 0 && cleanAuthors.Length > 0 ? cleanAuthors : info.Authors;
+                var merged = new PdfInfo(info.Pages, title, authors, info.Characters, info.Cover);
+                summary = await Task.Run(() => Core.SetPdfInfo(summary.Id, merged));
+            }
+            catch { }
+            return summary;
+        }
+        bool needsTitle = cleanTitle is not null && (string.IsNullOrWhiteSpace(summary.Title) || summary.Title == stem);
+        bool needsAuthors = cleanAuthors.Length > 0 && summary.Authors.Length == 0;
+        if (needsTitle || needsAuthors)
+        {
+            try
+            {
+                summary = await Task.Run(() => Core.EditBookInfo(
+                    summary.Id,
+                    needsTitle ? cleanTitle! : summary.Title,
+                    needsAuthors ? cleanAuthors : summary.Authors));
             }
             catch { }
         }

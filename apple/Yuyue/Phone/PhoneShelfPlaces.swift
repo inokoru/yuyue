@@ -69,9 +69,11 @@ struct ShelfPlaceTitle: View {
             HStack(spacing: 6) {
                 Text(name)
                     .font(YYUI.serif(30, .medium))
-                    .tracking(name.contains { $0.isASCII } ? 0 : 1)
+                    .tracking(name.contains { $0.isASCII } || name.count > 4 ? 0 : 1)
                     .foregroundStyle(YYColor.t1)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+                    .allowsTightening(true)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(YYColor.t3)
@@ -201,9 +203,11 @@ struct PlacePanel: View {
                 PlaceMark(symbol: current.symbol)
                 Text(current.name)
                     .font(YYUI.serif(31, .medium))
-                    .tracking(1)
+                    .tracking(current.name.contains { $0.isASCII } || current.name.count > 4 ? 0 : 1)
                     .foregroundStyle(YYColor.t1)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+                    .allowsTightening(true)
                 Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 2) {
                     ForEach(current.meta, id: \.self) { Text($0) }
@@ -227,14 +231,7 @@ struct PlacePanel: View {
                         .padding(.top, 12)
                         .padding(.bottom, 4)
                     ForEach(collections) { info in
-                        row(info)
-                            .contextMenu {
-                                if let c = info.collection {
-                                    Button("重命名", systemImage: "pencil") { rename(c) }
-                                    CollectionIconMenu(collection: c, library: library)
-                                    Button("删除…", systemImage: "trash", role: .destructive) { confirming = YYConfirm(title: String(localized: "删除合集“\(c.name)”？"), message: String(localized: "这个合集删掉，里面的书还在书架上。"), button: String(localized: "删除")) { delete(c) } }
-                                }
-                            }
+                        collectionRow(info)
                     }
                     Button(action: newCollection) {
                         HStack(spacing: 12) {
@@ -270,35 +267,83 @@ struct PlacePanel: View {
         .yyConfirm($confirming)
     }
 
+    @ViewBuilder private func collectionMenuItems(_ c: BookCollection) -> some View {
+        Button("重命名", systemImage: "pencil") { rename(c) }
+        CollectionIconMenu(collection: c, library: library)
+        Button("删除…", systemImage: "trash", role: .destructive) {
+            confirming = YYConfirm(
+                title: String(localized: "删除合集“\(c.name)”？"),
+                message: String(localized: "这个合集删掉，里面的书还在书架上。"),
+                button: String(localized: "删除")
+            ) { delete(c) }
+        }
+    }
+
+    @ViewBuilder private func collectionRow(_ info: PlaceInfo) -> some View {
+        if let c = info.collection {
+            let on = info.place == current.place
+            HStack(spacing: 0) {
+                Button { go(info.place) } label: {
+                    rowContent(info, on: on, trailing: 4)
+                }
+                .buttonStyle(PlaceRowStyle(on: false))
+                .accessibilityAddTraits(on ? .isSelected : [])
+                Menu {
+                    collectionMenuItems(c)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(YYColor.t3)
+                        .frame(width: 36, height: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 4)
+                .accessibilityLabel(String(localized: "管理合集“\(c.name)”"))
+            }
+            .background {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(YYColor.inset.opacity(on ? 0.75 : 0))
+            }
+            .contextMenu { collectionMenuItems(c) }
+        } else {
+            row(info)
+        }
+    }
+
     private func row(_ info: PlaceInfo) -> some View {
         let on = info.place == current.place
         return Button { go(info.place) } label: {
-            HStack(spacing: 12) {
-                PlaceMark(symbol: info.symbol, size: 36)
-                Text(info.name)
-                    .font(.yy(size: 16, weight: on ? .semibold : .medium))
-                    .foregroundStyle(YYColor.t1)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                HStack(spacing: 6) {
-                    if info.fresh { Circle().fill(YYColor.danger).frame(width: 6, height: 6) }
-                    Text(info.short).monospacedDigit()
-                }
-                .font(.yy(size: 13))
-                .foregroundStyle(info.fresh ? YYColor.t2 : YYColor.t3)
-                Image(systemName: "checkmark")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(YYColor.t1)
-                    .opacity(on ? 1 : 0)
-                    .frame(width: 16)
-            }
-            .padding(.leading, 6)
-            .padding(.trailing, 12)
-            .frame(minHeight: 52)
-            .contentShape(.rect)
+            rowContent(info, on: on, trailing: 12)
         }
         .buttonStyle(PlaceRowStyle(on: on))
         .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    private func rowContent(_ info: PlaceInfo, on: Bool, trailing: CGFloat) -> some View {
+        HStack(spacing: 12) {
+            PlaceMark(symbol: info.symbol, size: 36)
+            Text(info.name)
+                .font(.yy(size: 16, weight: on ? .semibold : .medium))
+                .foregroundStyle(YYColor.t1)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            HStack(spacing: 6) {
+                if info.fresh { Circle().fill(YYColor.danger).frame(width: 6, height: 6) }
+                Text(info.short).monospacedDigit()
+            }
+            .font(.yy(size: 13))
+            .foregroundStyle(info.fresh ? YYColor.t2 : YYColor.t3)
+            Image(systemName: "checkmark")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(YYColor.t1)
+                .opacity(on ? 1 : 0)
+                .frame(width: 16)
+        }
+        .padding(.leading, 6)
+        .padding(.trailing, trailing)
+        .frame(minHeight: 52)
+        .contentShape(.rect)
     }
 }
 

@@ -170,7 +170,7 @@ internal val GLOSS_LEVELS = listOf(2 to "四级", 3 to "六级", 4 to "考研", 
 
 private class Usage(
     val total: Long, val free: Long, val books: List<Pair<String, Long>>, val deleted: Int, val deletedBytes: Long,
-    val audio: Long, val model: Long, val companion: Long,
+    val audio: Long, val voiceModel: Long, val aligner: Long, val fonts: Long, val companion: Long,
 )
 
 private fun bytes(f: File): Long = if (f.isFile) f.length() else f.listFiles()?.sumOf(::bytes) ?: 0
@@ -180,9 +180,13 @@ private fun measure(library: Library): Usage {
     val dirs = File(library.dataDir, "books").listFiles()?.filter { !it.name.startsWith(".") } ?: emptyList()
     val sizes = dirs.map { it.name to bytes(it) }
     val (kept, gone) = sizes.partition { it.first in active }
+    val alignerFile = app.yuyue.speech.Aligner.file(library.dataDir)
+    val aligner = bytes(alignerFile) + bytes(File(alignerFile.parentFile, ".${alignerFile.name}.part"))
+    val voiceModel = maxOf(0L, bytes(File(library.dataDir, "models")) - aligner)
     return Usage(
         bytes(library.dataDir), StatFs(library.dataDir.path).availableBytes, kept.sortedByDescending { it.second }, gone.size, gone.sumOf { it.second },
-        audio = bytes(File(library.dataDir, "audiobooks")), model = bytes(app.yuyue.speech.Aligner.file(library.dataDir)),
+        audio = bytes(File(library.dataDir, "audiobooks")), voiceModel = voiceModel, aligner = aligner,
+        fonts = bytes(File(library.dataDir, "fonts")),
         companion = bytes(File(library.dataDir, "companion")),
     )
 }
@@ -199,14 +203,30 @@ fun StoragePage(library: Library) {
     val u = usage
     val bookBytes = u?.books?.sumOf { it.second } ?: 0
     val audio = u?.audio ?: 0
-    val model = u?.model ?: 0
-    // As the Mac's bar: books, recordings, the model, what's deleted, the rest; the empty ones left out.
-    val parts = listOf(t("书文件") to bookBytes, t("有声书录音") to audio, t("对齐模型") to model, t("已删除") to (u?.deletedBytes ?: 0),
-        t("其他") to maxOf(0, (u?.total ?: 0) - bookBytes - audio - model - (u?.deletedBytes ?: 0)))
-        .filterIndexed { i, p -> i == 0 || p.second > 0 }
+    val voiceModel = u?.voiceModel ?: 0
+    val aligner = u?.aligner ?: 0
+    val fonts = u?.fonts ?: 0
+    val deletedBytes = u?.deletedBytes ?: 0
+    // As the Mac's bar: books, recordings, voice models, aligner, fonts, what's deleted, the rest; the empty ones left out.
+    val parts = listOf(
+        t("书文件") to bookBytes,
+        t("有声书录音") to audio,
+        t("朗读模型") to voiceModel,
+        t("对齐模型") to aligner,
+        t("字体") to fonts,
+        t("已删除") to deletedBytes,
+        t("其他") to maxOf(0L, (u?.total ?: 0L) - bookBytes - audio - voiceModel - aligner - fonts - deletedBytes),
+    ).filterIndexed { i, p -> i == 0 || p.second > 0 }
     val fill = YY.tint.fill
-    val colors = mapOf(t("书文件") to fill, t("有声书录音") to fill.copy(alpha = 0.55f), t("对齐模型") to YY.c.t3,
-        t("已删除") to YY.c.danger.copy(alpha = 0.7f), t("其他") to YY.c.tint)
+    val colors = mapOf(
+        t("书文件") to fill,
+        t("有声书录音") to fill.copy(alpha = 0.6f),
+        t("朗读模型") to YY.c.t2,
+        t("对齐模型") to YY.c.t3,
+        t("字体") to fill.copy(alpha = 0.35f),
+        t("已删除") to YY.c.danger.copy(alpha = 0.7f),
+        t("其他") to YY.c.tint,
+    )
     YYPage {
         SettingsLead(t("书库、有声书与本地缓存占用的空间"))
         Column(Modifier.padding(top = YY.s(10), bottom = YY.s(14)).fillMaxWidth().background(YY.c.card, RoundedCornerShape(YY.s(16))).padding(horizontal = YY.s(14), vertical = YY.s(13))) {
@@ -242,10 +262,17 @@ fun StoragePage(library: Library) {
             row { DetailRow(t("最近删除 · %lld 本（%@）", u?.deleted ?: 0, size(u?.deletedBytes ?: 0)), t("保留 30 天以便恢复，到期自动清理")) }
             row { DestructiveRow(t("立即清空"), enabled = (u?.deleted ?: 0) > 0) { asking = "deleted" } }
         }
-        if (model > 0) {
+        if (voiceModel > 0) {
             Spacer(Modifier.height(YY.s(12)))
             YYGroup {
-                row { DetailRow(t("语音对齐模型 · %@", size(model)), t("用于有声书句级对齐；移除后下次合成时重新下载（约 300 MB）")) }
+                row { DetailRow(t("朗读模型与声音包 · %@", size(voiceModel)), t("离线朗读模型、自带声音与音效包；移除后可在听书设置里重新下载")) }
+                row { DestructiveRow(t("移除"), enabled = app.yuyue.speech.LiveVoiceModel.state !is app.yuyue.speech.LiveVoiceModel.State.Downloading) { asking = "voiceModel" } }
+            }
+        }
+        if (aligner > 0) {
+            Spacer(Modifier.height(YY.s(12)))
+            YYGroup {
+                row { DetailRow(t("语音对齐模型 · %@", size(aligner)), t("用于有声书句级对齐；移除后下次合成时重新下载（约 300 MB）")) }
                 row { DestructiveRow(t("移除")) { asking = "model" } }
             }
         }
@@ -257,8 +284,23 @@ fun StoragePage(library: Library) {
         when (asking) {
             "deleted" -> ConfirmDialog(t("清空最近删除的 %lld 本书？", u?.deleted ?: 0), t("清空后文件将彻底删除，无法恢复。"), t("立即清空"),
                 { runCatching { library.core.purgeDeleted(0) }; version++ }) { asking = null }
-            "model" -> ConfirmDialog(t("移除语音对齐模型？"), t("已合成的有声书不受影响；下次合成时将重新下载（约 300 MB）。"), t("移除"),
-                { app.yuyue.speech.Aligner.file(library.dataDir).delete(); version++ }) { asking = null }
+            "voiceModel" -> ConfirmDialog(t("移除朗读模型与声音包？"), t("移除后将改用在线或系统声音朗读，随时可以在听书设置里重新下载。"), t("移除"), {
+                app.yuyue.speech.KokoroVoice.Engine.close()
+                val modelsDir = File(library.dataDir, "models")
+                val alignerName = app.yuyue.speech.Aligner.file(library.dataDir).name
+                modelsDir.listFiles()?.forEach { f ->
+                    if (f.name != alignerName && f.name != ".$alignerName.part") f.deleteRecursively()
+                }
+                app.yuyue.speech.KokoroModel.refresh(library.dataDir)
+                app.yuyue.speech.LiveVoiceModel.refresh(library.dataDir)
+                version++
+            }) { asking = null }
+            "model" -> ConfirmDialog(t("移除语音对齐模型？"), t("已合成的有声书不受影响；下次合成时将重新下载（约 300 MB）。"), t("移除"), {
+                val f = app.yuyue.speech.Aligner.file(library.dataDir)
+                f.delete()
+                File(f.parentFile, ".${f.name}.part").delete()
+                version++
+            }) { asking = null }
             "companion" -> ConfirmDialog(t("清理书伴问答缓存？"), t("清理后，相同问题或前情回顾将重新请求模型。"), t("清理"),
                 { File(library.dataDir, "companion").deleteRecursively(); version++ }) { asking = null }
         }
