@@ -1,0 +1,22 @@
+name = "yuyue-feedback-cron"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+
+# 纯后台 Cron Worker，不暴露 *.workers.dev 公网地址，也不需要绑定任何域名
+workers_dev = false
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+NTFY_SERVER = "https://ntfy.sh"
+ISSUE_REPO = "inokoru/yuyue"
+RELAY_REPO = "inokoru/yuyue-feedback"
+WORKFLOW_FILE = "relay.yml"
+REF = "main"
+LABEL = "反馈"
+MIN_INTERVAL_MINUTES = "25"
+
+# 另外两个敏感项用 Secret 写入，不进仓库：
+#   npx wrangler secret put NTFY_TOPIC
+#   npx wrangler secret put DISPATCH_TOKEN

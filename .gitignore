@@ -5,6 +5,8 @@ core/target
 
 # Node
 node_modules/
+.wrangler/
+.dev.vars
 reader/dist/
 reader/test-results/
 reader/playwright-report/
