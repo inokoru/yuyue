@@ -83,26 +83,6 @@ public sealed class SyncService
         return $"{place} · {ago}";
     }
 
-    public long GetBookFilesSizeBytes()
-    {
-        long total = 0;
-        try
-        {
-            foreach (var b in _library.Core.Books())
-            {
-                if (!b.Available || b.Record) continue;
-                try
-                {
-                    string orig = _library.Core.OriginalFile(b.Id);
-                    if (File.Exists(orig)) total += new FileInfo(orig).Length;
-                }
-                catch { }
-            }
-        }
-        catch { }
-        return total;
-    }
-
     public void StartKeepUpLoop()
     {
         if (_keepUpCts is not null) return;

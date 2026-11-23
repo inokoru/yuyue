@@ -23,15 +23,6 @@ public sealed class BuiltInEcdict
         FilePath = Path.Combine(AppContext.BaseDirectory, "Assets", "Dict", "ecdict.tsv");
     }
 
-    public int EntryCount
-    {
-        get
-        {
-            EnsureLoaded();
-            return (_entries?.Count ?? 0) + (_lemmas?.Count ?? 0);
-        }
-    }
-
     private void EnsureLoaded()
     {
         if (_loaded) return;

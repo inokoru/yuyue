@@ -26,8 +26,6 @@ public sealed class LiveVoiceModel
     public const string PackDigest = "2d35635523d08b1b2d9d5cbfb49695a1eb424bbe7d4eafe51e1c255414d44f2c";
     public const long PackBytes = 14_002_684L;
 
-    public const int TotalMb = 160;
-
     private readonly YuyueCore _core;
     private readonly string _dataDir;
     private CancellationTokenSource? _downloadCts;

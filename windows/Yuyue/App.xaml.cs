@@ -187,7 +187,6 @@ public partial class App : Application
         if (Library.GetShelfBooks().Count > 0) return;
         string? repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", ".."));
         string fixtures = Path.Combine(repoRoot, "fixtures", "books");
-        if (!Directory.Exists(fixtures)) fixtures = @"c:\Users\PC\Desktop\yuyue\fixtures\books";
         if (!Directory.Exists(fixtures)) return;
 
         string? hlmId = null, gatsbyId = null, prideId = null, beiyingId = null;

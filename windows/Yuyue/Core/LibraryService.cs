@@ -359,7 +359,6 @@ public sealed class LibraryService : IDisposable
     public void SetDictionaryEnabled(string id, bool enabled) => Core.SetDictionary(id, enabled);
     public void OrderDictionaries(string[] ids) => Core.OrderDictionaries(ids);
     public void RemoveDictionary(string id) => Core.RemoveDictionary(id);
-    public DictEntry? LookUpWord(string word) => Core.LookUp(word);
 
     public WordLookupResult? LookUpWordRich(string word)
     {
@@ -385,7 +384,6 @@ public sealed class LibraryService : IDisposable
     }
 
     // Sections & Serving
-    public IReadOnlyList<string> GetSentences(string bookId, uint section) => Core.Sentences(bookId, section);
     public IReadOnlyList<string> GetSpokenSentences(string bookId, uint section)
     {
         try { return Core.SpokenSentences(bookId, section); }

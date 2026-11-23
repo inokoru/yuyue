@@ -6,8 +6,6 @@ using System.Text.RegularExpressions;
 
 namespace Yuyue.Core;
 
-public sealed record NoteExportLastRecord(DateTimeOffset Date, string? Book, int Books, int Count);
-
 /// <summary>
 /// 1:1 port of <c>apple/Yuyue/App/NoteExport.swift</c> + <c>NoteExportMenu.swift</c>:
 /// Incremental highlight/thought export to Obsidian (YAML + <c>^yy-id8</c> block IDs),

@@ -19,23 +19,6 @@ namespace Yuyue.Core;
 /// </summary>
 public static class SnapshotAndConflictDialogs
 {
-    public static string GetSnapshotsFolder()
-    {
-        string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        if (string.IsNullOrEmpty(docs)) docs = App.CurrentApp.Library.DataDir;
-        return docs;
-    }
-
-    public static async Task<string> CreateSnapshotNowAsync(LibraryService library, SnapshotParts parts)
-    {
-        string dir = Path.Combine(library.DataDir, "snapshots");
-        Directory.CreateDirectory(dir);
-        string fileName = $"语阅快照-{DateTime.Now:yyyyMMdd-HHmmss}.yuyue";
-        string fullPath = Path.Combine(dir, fileName);
-        await Task.Run(() => library.Core.MakeSnapshot(fullPath, parts));
-        return fullPath;
-    }
-
     public static async Task<bool> ShowSnapshotImportDialogAsync(Window ownerWindow, XamlRoot xamlRoot, LibraryService library, string? presetPath = null)
     {
         string? snapPath = presetPath;

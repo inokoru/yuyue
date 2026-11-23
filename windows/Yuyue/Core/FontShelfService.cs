@@ -34,21 +34,6 @@ public sealed class FontShelfService
     public bool IsDownloading(string packId) => _downloading.ContainsKey(packId);
     public double GetProgress(string packId) => _downloading.TryGetValue(packId, out var p) ? p : 0.0;
 
-    public IReadOnlyList<string> GetCustomFontFiles()
-    {
-        if (!Directory.Exists(_fontsDir)) return Array.Empty<string>();
-        var catalogFiles = new HashSet<string>(Catalog.SelectMany(c => c.Files.Select(f => f.File)), StringComparer.OrdinalIgnoreCase);
-        return Directory.GetFiles(_fontsDir)
-            .Select(Path.GetFileName)
-            .Where(n => n is not null && !catalogFiles.Contains(n) &&
-                        (n.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase) ||
-                         n.EndsWith(".otf", StringComparison.OrdinalIgnoreCase) ||
-                         n.EndsWith(".woff2", StringComparison.OrdinalIgnoreCase)))
-            .Cast<string>()
-            .OrderBy(n => n)
-            .ToArray();
-    }
-
     public string ImportFontFile(string sourcePath)
     {
         Directory.CreateDirectory(_fontsDir);

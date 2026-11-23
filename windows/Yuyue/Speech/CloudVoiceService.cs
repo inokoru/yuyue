@@ -384,43 +384,6 @@ public sealed class CloudVoiceService
         }
     }
 
-    public CloudVoiceActing MapDramaActing(DramaAct? act, bool chinese)
-    {
-        if (act is null) return new CloudVoiceActing();
-        string instruction = "";
-        string head = "", tail = "";
-        try
-        {
-            instruction = _library.Core.DramaActInstruction(act, chinese);
-            var tags = _library.Core.DramaActTags(act);
-            head = tags.Head;
-            tail = tags.Tail;
-        }
-        catch { }
-
-        string? azureStyle = act.Volume switch
-        {
-            ActVolume.Whisper => "whispering",
-            ActVolume.Shout => "shouting",
-            _ when act.Level > 0 => act.Emotion switch
-            {
-                ActEmotion.Joy => "cheerful",
-                ActEmotion.Anger => "angry",
-                ActEmotion.Sadness => "sad",
-                ActEmotion.Fear or ActEmotion.Anxious => "fearful",
-                ActEmotion.Disgust => "disgruntled",
-                ActEmotion.Tender => "gentle",
-                ActEmotion.Mocking => "unfriendly",
-                ActEmotion.Surprise => "excited",
-                _ => null,
-            },
-            _ => null,
-        };
-        double[] degrees = [0.8, 0.8, 1.2, 1.6];
-        double degree = degrees[Math.Min((int)act.Level, 3)];
-        return new CloudVoiceActing(instruction, head, tail, azureStyle, degree);
-    }
-
     public async Task<byte[]?> SynthesizeWavAsync(
         string fullVoiceId,
         string rawText,

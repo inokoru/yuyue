@@ -869,11 +869,12 @@ public sealed partial class SettingsWindow : Window
         var tint = CurrentTint;
 
         string curLang = _library.Prefs.UiLanguage;
+        string sysLangName = L10n.IsEnglish ? "English" : "中文";
         (string seal, string langLabel, string subText) = curLang switch
         {
             "zh-Hans" => ("文", "中文", "当前：中文 · 切换需确认重开，并回到当前页"),
             "en" => ("Aa", "English", "当前：English · 切换需确认重开，并回到当前页"),
-            _ => ("系", "跟随系统", "跟随系统（当前：中文）· 切换需确认重开，并回到当前页"),
+            _ => ("系", "跟随系统", $"跟随系统（当前：{sysLangName}）· 切换需确认重开，并回到当前页"),
         };
 
         var langMenu = new MenuFlyout();
@@ -3714,129 +3715,6 @@ public sealed partial class SettingsWindow : Window
         DynamicPageHost.Children.Add(MakeNote("快照为单个 .yuyue 文件，在 Mac、iPhone、Android 与 Windows 上打开即可恢复书库。"));
     }
 
-    private async Task ShowSnapshotImportSheetAsync(string path)
-    {
-        try
-        {
-            var about = _library.PeekSnapshot(path);
-            var dialog = new ContentDialog
-            {
-                Title = "导入快照",
-                Content = $"文件：{Path.GetFileName(path)}\n来自设备：{about.DeviceName}（{about.Platform}）\n包含：{about.Counts.Books} 本书 · {about.Counts.Notes} 条划线 · {about.Counts.Words} 个生词\n\n• 合并（推荐）：保留本机已有书籍与笔记，把快照增量汇入\n• 覆盖：先自动备份一份当前快照，再用该快照完全替换",
-                PrimaryButtonText = "合并导入",
-                SecondaryButtonText = "覆盖本机",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = RootGrid.XamlRoot,
-            };
-            var res = await dialog.ShowAsync();
-            if (res is ContentDialogResult.Primary or ContentDialogResult.Secondary)
-            {
-                bool replace = res == ContentDialogResult.Secondary;
-                if (replace)
-                {
-                    try
-                    {
-                        string autoBackup = Path.Combine(_library.DataDir, "snapshots", $"覆盖前自动备份-{DateTime.Now:yyyyMMdd-HHmmss}.yuyue");
-                        _library.MakeSnapshot(autoBackup, new SnapshotParts(true, true, true, true, false));
-                    }
-                    catch { }
-                }
-                uint changed = _library.RestoreSnapshot(path, replace);
-                App.CurrentApp.NotifyShelfRefresh();
-                RenderDynamicPage("data");
-                RenderInspector("data");
-                await ShowInfoDialogAsync("导入完成", $"已应用 {changed} 条记录。");
-            }
-        }
-        catch (Exception ex) { await ShowInfoDialogAsync("无法读取快照", ex.Message); }
-    }
-
-    private async Task ShowReadingExportSheetAsync()
-    {
-        var p = CurrentPalette;
-        var kept = _library.GetKeptBooks();
-        string format = "goodreads";
-        ContentDialog? dlgRef = null;
-
-        int wantCnt = kept.Count(b => b.Status == ReadingStatus.Want);
-        int readCnt = kept.Count(b => b.Status == ReadingStatus.Reading);
-        int doneCnt = kept.Count(b => b.Status == ReadingStatus.Finished);
-
-        var previewTb = new TextBlock
-        {
-            FontFamily = new FontFamily(YYFontFamily.Mono.WindowsFamily()),
-            FontSize = 10.5,
-            Foreground = ThemeHelper.Brush(p.T2),
-            TextWrapping = TextWrapping.NoWrap,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-        };
-
-        List<string> BuildCsvLines()
-        {
-            var lines = new List<string>();
-            if (format == "storygraph")
-            {
-                lines.Add("Title,Authors,Read Status,Star Rating");
-                foreach (var b in kept)
-                {
-                    string st = b.Status switch { ReadingStatus.Finished => "read", ReadingStatus.Reading => "currently-reading", _ => "to-read" };
-                    lines.Add($"\"{b.Title.Replace("\"", "\"\"")}\",\"{(b.Authors.FirstOrDefault() ?? "").Replace("\"", "\"\"")}\",{st},{b.Rating?.ToString() ?? ""}");
-                }
-            }
-            else
-            {
-                lines.Add("Title,Author,Exclusive Shelf,My Rating");
-                foreach (var b in kept)
-                {
-                    string st = b.Status switch { ReadingStatus.Finished => "read", ReadingStatus.Reading => "currently-reading", _ => "to-read" };
-                    lines.Add($"\"{b.Title.Replace("\"", "\"\"")}\",\"{(b.Authors.FirstOrDefault() ?? "").Replace("\"", "\"\"")}\",{st},{b.Rating?.ToString() ?? ""}");
-                }
-            }
-            return lines;
-        }
-
-        void RefreshPreview() => previewTb.Text = string.Join("\n", BuildCsvLines().Take(4));
-        RefreshPreview();
-
-        var segHost = new ContentControl();
-        void RebuildSeg()
-        {
-            segHost.Content = MakeSegments(
-                [("goodreads", "Goodreads"), ("storygraph", "StoryGraph")],
-                format,
-                f => { format = f; RebuildSeg(); RefreshPreview(); });
-        }
-        RebuildSeg();
-
-        var stack = new StackPanel { Spacing = 10, Width = 380 };
-        stack.Children.Add(segHost);
-        stack.Children.Add(MakeCard(
-            MakeRow("想读", null, new TextBlock { Text = $"{wantCnt} 本", FontSize = 12, Foreground = ThemeHelper.Brush(p.T2) }, compact: true),
-            MakeRow("在读", null, new TextBlock { Text = $"{readCnt} 本", FontSize = 12, Foreground = ThemeHelper.Brush(p.T2) }, compact: true),
-            MakeRow("读过", null, new TextBlock { Text = $"{doneCnt} 本", FontSize = 12, Foreground = ThemeHelper.Brush(p.T2) }, compact: true)));
-        stack.Children.Add(new Border { CornerRadius = new CornerRadius(9), Background = ThemeHelper.Brush(p.Inset), Padding = new Thickness(10, 8, 10, 8), Child = previewTb });
-
-        dlgRef = new ContentDialog
-        {
-            Title = "导出阅读记录",
-            Content = stack,
-            PrimaryButtonText = $"导出 {kept.Count} 本 · CSV",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = RootGrid.XamlRoot,
-        };
-        if (await dlgRef.ShowAsync() == ContentDialogResult.Primary)
-        {
-            var picker = new FileSavePicker { SuggestedFileName = $"语阅-{format}-{DateTime.Now:yyyyMMdd}" };
-            picker.FileTypeChoices.Add("CSV", [".csv"]);
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-            var f = await picker.PickSaveFileAsync();
-            if (f is not null)
-                await File.WriteAllLinesAsync(f.Path, BuildCsvLines(), new System.Text.UTF8Encoding(true));
-        }
-    }
-
     // ---------- 10. 关于（1:1 MacUpdate.swift & UpdateUI.swift：68x68 YuyueMark + 语阅 + PencilSignature + 更新渠道） ----------
 
     private void BuildAboutPage()
@@ -3975,8 +3853,8 @@ public sealed partial class SettingsWindow : Window
         var verRow = new Grid { Padding = new Thickness(16, 14, 16, 14) };
         var verLeft = new StackPanel { Spacing = 3 };
         var verHead = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        verHead.Children.Add(new TextBlock { Text = "第 0.1.0 版", FontFamily = serif, FontSize = 17, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
-        verHead.Children.Add(new TextBlock { Text = "build 1", FontFamily = new FontFamily(YYFontFamily.Mono.WindowsFamily()), FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 2) });
+        verHead.Children.Add(new TextBlock { Text = $"第 {UpdateAndFeedbackService.CurrentVersion} 版", FontFamily = serif, FontSize = 17, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
+        verHead.Children.Add(new TextBlock { Text = $"build {UpdateAndFeedbackService.CurrentBuild}", FontFamily = new FontFamily(YYFontFamily.Mono.WindowsFamily()), FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 2) });
         verLeft.Children.Add(verHead);
         verLeft.Children.Add(statusLine);
         verRow.Children.Add(verLeft);
@@ -4055,7 +3933,7 @@ public sealed partial class SettingsWindow : Window
         srcBtn.Click += (_, _) => _ = Launcher.LaunchUriAsync(new Uri("https://github.com/inokoru/yuyue"));
 
         rightStack.Children.Add(MakeCard(
-            MakeRow("问题与建议", "可附截图或日志直达开发者，无需注册账号", feedbackRight),
+            MakeRow("问题与建议", "可附截图或文件，无需注册账号", feedbackRight),
             MakeAboutNavRow("隐私说明", "仅存本机 · 无统计", async () => await UpdateAndFeedbackService.ShowPrivacySheetAsync(RootGrid.XamlRoot)),
             MakeAboutNavRow("开源许可与致谢", "GPL-3.0 与组件清单", async () => await UpdateAndFeedbackService.ShowLicensesSheetAsync(RootGrid.XamlRoot)),
             MakeRow("源代码", null, srcBtn, compact: true)));
