@@ -411,7 +411,15 @@ let pressing = false;
 
 export function initSelection(): void {
   // While the mouse is down the selection is still being dragged out: report it once released.
-  document.addEventListener('pointerdown', () => (pressing = true), true);
+  // Touch long-press selection is managed natively and may not deliver pointerup/pointercancel
+  // to the DOM on WebKit, so do not block selectionchange for touch pointers.
+  document.addEventListener(
+    'pointerdown',
+    (e: PointerEvent) => {
+      if (e.pointerType === 'mouse') pressing = true;
+    },
+    true,
+  );
   const released = (): void => {
     pressing = false;
     schedule(30);
@@ -419,6 +427,7 @@ export function initSelection(): void {
   document.addEventListener('pointerup', released, true);
   // Android ends a long press that starts a selection with pointercancel, not pointerup.
   document.addEventListener('pointercancel', released, true);
+  window.addEventListener('blur', () => (pressing = false));
   document.addEventListener('selectionchange', () => {
     if (!pressing) schedule(250);
   });

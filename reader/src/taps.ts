@@ -94,6 +94,18 @@ function sentenceAt(target: Element | null, x: number, y: number): number | null
 }
 
 function onDown(e: PointerEvent): void {
+  if (!e.isPrimary) {
+    // A second finger: a pinch or two-finger gesture, not a tap.
+    down = null;
+    if (pending != null) {
+      clearTimeout(pending);
+      pending = null;
+    }
+    return;
+  }
+  // A fresh primary press replaces any stale `down` whose pointerup/pointercancel was
+  // swallowed by the host scroll view or native gesture, instead of dropping this tap.
+  down = null;
   if (pending != null) {
     // Second press of a double click: drop the first tap. In a book read in another language
     // a double click translates the sentence (双击一句只翻这一句).
@@ -101,12 +113,9 @@ function onDown(e: PointerEvent): void {
     pending = null;
     const target = e.target as Element | null;
     post({ type: 'doubleTap', sentence: sentenceAt(target, e.clientX, e.clientY), x: Math.round(e.clientX), y: Math.round(e.clientY) });
-  }
-  if (down) {
-    down = null; // a second finger: a pinch or two-finger gesture, not a tap
     return;
   }
-  if (!e.isPrimary || e.button > 0 || hasSelection()) return;
+  if (e.button > 0 || hasSelection()) return;
   down = {
     id: e.pointerId,
     x: e.clientX,
@@ -200,5 +209,9 @@ export function initTaps(c: HTMLElement, animating: () => boolean): void {
   document.addEventListener('auxclick', stopLink, true);
   // A drag (of a link, a picture or selected text) is never a tap.
   document.addEventListener('dragstart', () => (down = null), true);
+  window.addEventListener('blur', () => (down = null));
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) down = null;
+  });
   document.addEventListener('contextmenu', onContext, true);
 }

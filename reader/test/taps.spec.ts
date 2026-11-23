@@ -128,3 +128,46 @@ test('a swipe that moved the page is not a tap', async ({ page }) => {
   await page.mouse.up();
   expect(await tapsAfter(page)).toEqual([]);
 });
+
+test('a stale pointerdown without pointerup does not swallow the next primary tap', async ({ page }) => {
+  await open(page, 'beiying/s/0.html');
+  const p = await pointOfSentence(page, 2);
+  await clearMessages(page);
+  // Simulate WebKit swallowing pointerup/pointercancel for touch #1, followed by touch #2.
+  await page.evaluate(({ x, y }) => {
+    const el = document.elementFromPoint(x, y) || document.body;
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, isPrimary: true, pointerId: 10, pointerType: 'touch', clientX: x, clientY: y }));
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, isPrimary: true, pointerId: 11, pointerType: 'touch', clientX: x, clientY: y }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, isPrimary: true, pointerId: 11, pointerType: 'touch', clientX: x, clientY: y }));
+  }, p);
+  const [tap] = await waitMessages(page, 'tap');
+  expect(tap).toMatchObject({ type: 'tap', sentence: 2 });
+});
+
+test('a non-primary second finger still cancels the active tap', async ({ page }) => {
+  await open(page, 'beiying/s/0.html');
+  const p = await pointOfSentence(page, 2);
+  await clearMessages(page);
+  await page.evaluate(({ x, y }) => {
+    const el = document.elementFromPoint(x, y) || document.body;
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, isPrimary: true, pointerId: 20, pointerType: 'touch', clientX: x, clientY: y }));
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, isPrimary: false, pointerId: 21, pointerType: 'touch', clientX: x + 30, clientY: y }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, isPrimary: true, pointerId: 20, pointerType: 'touch', clientX: x, clientY: y }));
+  }, p);
+  expect(await tapsAfter(page, 150)).toEqual([]);
+});
+
+test('touch selectionchange reports selection even if pointerup is suppressed by WebKit', async ({ page }) => {
+  await open(page, 'beiying/s/0.html');
+  const p = await pointOfSentence(page, 1);
+  await clearMessages(page);
+  await page.evaluate(({ x, y }) => {
+    const el = document.elementFromPoint(x, y) || document.body;
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, isPrimary: true, pointerId: 30, pointerType: 'touch', clientX: x, clientY: y }));
+    const t = document.querySelector('.s[data-s="1"]')!.firstChild as Text;
+    getSelection()!.setBaseAndExtent(t, 0, t, 4);
+    document.dispatchEvent(new Event('selectionchange'));
+  }, p);
+  const [sel] = await waitMessages(page, 'selection');
+  expect(sel.text.length).toBe(4);
+});
