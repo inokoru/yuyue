@@ -39,6 +39,12 @@ The Meta MMS alignment model is not part of this repository or covered by the
 GPL. The apps download it separately when it is first needed. It is licensed
 under CC-BY-NC 4.0, which does not allow commercial use.
 
+The Kokoro-82M-v1.1-zh lightweight neural speech synthesis model
+(hexgrad/Kokoro-82M-v1.1-zh, exported as csukuangfj/kokoro-int8-multi-lang-v1_1
+with Misaki Mandarin/English pronunciation lexicons) is downloaded separately for
+cross-platform offline reading. Its model weights, speaker embeddings and lexicons
+are licensed under Apache-2.0 / MIT.
+
 The ZipVoice-Distill speech synthesis model (k2-fsa/ZipVoice) and Vocos 24 kHz
 vocoder (charactr/vocos-mel-24khz) are likewise downloaded separately for on-device
 reading and zero-shot voice cloning. ZipVoice's code is Apache-2.0 and its

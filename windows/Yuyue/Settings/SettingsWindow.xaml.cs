@@ -30,7 +30,7 @@ public sealed partial class SettingsWindow : Window
     private bool _editingWebDav;
     private bool _editingGDrive;
     // 朗读页状态 ("local" | "openai" | "azure" | "elevenlabs")
-    private string _focusedVoiceSource = "local";
+    private string _focusedVoiceSource = "neural";
     // 书伴页状态
     private string _focusedCompanionId;
     private bool _companionPickingModel;
@@ -1557,12 +1557,32 @@ public sealed partial class SettingsWindow : Window
         var srcStack = new StackPanel { Spacing = 2, Padding = new Thickness(4) };
         var curVoice = AudioPlayer.GetAllVoiceOptions(_library).FirstOrDefault(o => o.Id == _library.Prefs.VoiceId || o.Id == "sys:" + _library.Prefs.VoiceId);
 
-        (string Key, string Badge, string Title, string Sub, string Status)[] sources =
+        (string Key, string Badge, string Title, string? Tag, bool TagWarn, string Sub, string Status)[] sources =
         [
-            ("local", "PC", "这台电脑", $"推荐离线自然人声 · 系统自带语音", $"📌 {curVoice?.Label ?? "系统默认"}"),
-            ("openai", "OA", "OpenAI TTS", "10 个音色，支持中英双语", !string.IsNullOrEmpty(_library.Secrets.Get("tts.openai.key")) ? "已连接" : "未连接"),
-            ("azure", "AZ", "Microsoft Azure", "中文音色丰富，含免费额度", !string.IsNullOrEmpty(_library.Secrets.Get("tts.azure.key")) ? "已连接" : "未连接"),
-            ("elevenlabs", "11", "ElevenLabs", "自然度高，适合英文朗读", !string.IsNullOrEmpty(_library.Secrets.Get("tts.elevenlabs.key")) ? "已连接" : "未连接"),
+            ("neural", "语", "语阅离线语音", "推荐", false,
+                lv.IsReady ? $"跨端离线自然人声 · 内置 {lv.GetBuiltinCards().Count} 个中英音色与声音克隆" : "一键下载（160 MB）· 本地 ONNX 离线自然人声，断网畅听",
+                lv.IsReady ? "已就绪" : "一键下载"),
+            ("free", "免", "在线自然语音", "免 Key", false,
+                "0 MB 免下载、免注册免 Key，已读句子缓存在本机",
+                _library.CloudVoices.IsConfigured(CloudTtsProvider.Free) ? "已开启" : "已隐藏"),
+            ("volcengine", "豆", "火山引擎（豆包）", null, false,
+                "豆包大模型语音，中文播客与小说自然度高",
+                _library.CloudVoices.IsConfigured(CloudTtsProvider.Volcengine) ? "已连接" : "未连接"),
+            ("fish", "FA", "Fish Audio", null, false,
+                "OpenAudio S1 高表现力中英音色与社区声音库",
+                _library.CloudVoices.IsConfigured(CloudTtsProvider.Fish) ? "已连接" : "未连接"),
+            ("openai", "OA", "OpenAI TTS", null, false,
+                "10 个音色，支持中英双语",
+                !string.IsNullOrEmpty(_library.Secrets.Get("tts.openai.key")) ? "已连接" : "未连接"),
+            ("azure", "AZ", "Microsoft Azure", null, false,
+                "中文音色丰富，含免费额度",
+                !string.IsNullOrEmpty(_library.Secrets.Get("tts.azure.key")) ? "已连接" : "未连接"),
+            ("elevenlabs", "11", "ElevenLabs", null, false,
+                "自然度高，适合英文朗读",
+                !string.IsNullOrEmpty(_library.Secrets.Get("tts.elevenlabs.key")) ? "已连接" : "未连接"),
+            ("system", "PC", "这台电脑 · 系统语音", "不推荐", true,
+                "Windows 内置合成音机械感明显，仅建议在未下载离线语音且断网时兜底",
+                curVoice is { IsNeural: false } ? $"📌 {curVoice.Label}" : "仅作兜底"),
         ];
 
         for (int i = 0; i < sources.Length; i++)
@@ -1571,19 +1591,34 @@ public sealed partial class SettingsWindow : Window
             var s = sources[i];
             bool sel = _focusedVoiceSource == s.Key;
 
-            var g = new Grid { ColumnSpacing = 12, MinHeight = 46, Padding = new Thickness(12, 8, 12, 8) };
+            var g = new Grid { ColumnSpacing = 12, MinHeight = 48, Padding = new Thickness(12, 8, 12, 8) };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.Children.Add(MakeServiceLogoTile(s.Key, 30, s.Badge));
 
             var mid = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-            mid.Children.Add(new TextBlock { Text = s.Title, FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) });
+            var titleRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            titleRow.Children.Add(new TextBlock
+            {
+                Text = s.Title,
+                FontSize = 13,
+                FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+                Foreground = ThemeHelper.Brush(s.TagWarn ? p.T2 : p.T1),
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            if (!string.IsNullOrEmpty(s.Tag))
+            {
+                Color pillColor = s.TagWarn ? Color.FromArgb(255, 217, 119, 6) : p.Ok;
+                titleRow.Children.Add(MakeStatusPill(s.Tag, pillColor));
+            }
+            mid.Children.Add(titleRow);
             mid.Children.Add(new TextBlock { Text = s.Sub, FontSize = 11, Foreground = ThemeHelper.Brush(p.T3) });
             Grid.SetColumn(mid, 1);
             g.Children.Add(mid);
 
-            var stTb = new TextBlock { Text = s.Status, FontSize = 11, Foreground = ThemeHelper.Brush(s.Status == "未连接" ? p.T3 : tint.Accent), MaxWidth = 140, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+            bool dimStatus = s.Status is "未连接" or "已隐藏" or "仅作兜底";
+            var stTb = new TextBlock { Text = s.Status, FontSize = 11, Foreground = ThemeHelper.Brush(dimStatus ? p.T3 : tint.Accent), MaxWidth = 140, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(stTb, 2);
             g.Children.Add(stTb);
 
@@ -1616,7 +1651,7 @@ public sealed partial class SettingsWindow : Window
             BorderThickness = new Thickness(1),
             Child = srcStack,
         });
-        DynamicPageHost.Children.Add(MakeNote("云端语音使用你自己的 API Key，费用由服务商直接结算；已合成的句子缓存在本机，重听不重复计费。"));
+        DynamicPageHost.Children.Add(MakeNote("推荐下载「语阅离线语音」断网畅听，或直接使用免 Key 的「在线自然语音」。Windows 系统自带合成音机械感较重（不推荐），仅作断网兜底。"));
 
         // 广播剧工坊（1:1 MacVoicePicker.swift:72-84）
         DynamicPageHost.Children.Add(MakeHeading("广播剧工坊", "只在这台电脑上跑，不传云端"));
@@ -1727,10 +1762,42 @@ public sealed partial class SettingsWindow : Window
 
     private void BuildListeningInspector(YYPalette p, YYTintColors tint)
     {
-        if (_focusedVoiceSource == "local")
+        if (_focusedVoiceSource is "neural" or "system" or "local")
         {
-            var options = AudioPlayer.GetAllVoiceOptions(_library);
-            InspectorHost.Children.Add(new TextBlock { Text = "在念你的书", FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
+            bool isSys = _focusedVoiceSource == "system";
+            var options = AudioPlayer.GetAllVoiceOptions(_library)
+                .Where(o => isSys ? o.Id.StartsWith("sys:", StringComparison.Ordinal) : o.Id.StartsWith("card:", StringComparison.Ordinal))
+                .ToList();
+            if (options.Count == 0)
+                options = AudioPlayer.GetAllVoiceOptions(_library).ToList();
+
+            InspectorHost.Children.Add(new TextBlock
+            {
+                Text = isSys ? "这台电脑 · 系统语音（不推荐）" : "语阅离线语音（推荐）",
+                FontSize = 12.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = ThemeHelper.Brush(p.T1),
+            });
+
+            if (isSys)
+            {
+                InspectorHost.Children.Add(MakeNote("不推荐日常听书使用：系统内置合成音机械感较重，建议改用「语阅离线语音」或「在线自然语音（免 Key）」。"));
+            }
+            else if (!_library.LiveVoice.IsReady)
+            {
+                var dlBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"],
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    Content = _library.LiveVoice.State == LiveVoiceStateKind.Downloading ? _library.LiveVoice.StatusMessage : "⬇ 一键下载语阅离线语音模型",
+                };
+                dlBtn.Click += (_, _) =>
+                {
+                    if (_library.LiveVoice.State != LiveVoiceStateKind.Downloading)
+                        _ = _library.LiveVoice.DownloadAsync();
+                };
+                InspectorHost.Children.Add(dlBtn);
+            }
 
             var combo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, FontSize = 12 };
             int selIdx = 0;
@@ -1779,7 +1846,11 @@ public sealed partial class SettingsWindow : Window
             playCircle.Click += async (_, _) =>
             {
                 playCircle.IsEnabled = false;
-                try { await AudioPlayer.PreviewVoiceAsync(_library, _library.Prefs.VoiceId, _library.Prefs.SpeechRate, sampleBox.Text); }
+                try
+                {
+                    string previewId = (combo.SelectedItem as ComboBoxItem)?.Tag as string ?? _library.Prefs.VoiceId;
+                    await AudioPlayer.PreviewVoiceAsync(_library, previewId, _library.Prefs.SpeechRate, sampleBox.Text);
+                }
                 finally { playCircle.IsEnabled = true; }
             };
             playRow.Children.Add(playCircle);
@@ -1798,30 +1869,75 @@ public sealed partial class SettingsWindow : Window
 
             InspectorHost.Children.Add(new Border { CornerRadius = new CornerRadius(11), Background = ThemeHelper.Brush(p.Card), BorderBrush = ThemeHelper.Brush(p.Line), BorderThickness = new Thickness(1), Padding = new Thickness(12), Child = cardStack });
             InspectorHost.Children.Add(MakeCard(
-                MakeRow("来自", null, new TextBlock { Text = "这台电脑", FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T2) }, compact: true),
-                MakeRow("费用", null, new TextBlock { Text = "免费 · 不联网", FontSize = 11.5, Foreground = ThemeHelper.Brush(p.Ok) }, compact: true)));
+                MakeRow("来自", null, new TextBlock { Text = isSys ? "Windows 系统自带（不推荐）" : "语阅离线引擎（推荐）", FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T2) }, compact: true),
+                MakeRow("费用", null, new TextBlock { Text = isSys ? "免费 · 仅兜底" : "免费 · 不联网", FontSize = 11.5, Foreground = ThemeHelper.Brush(p.Ok) }, compact: true)));
             return;
         }
 
-        // 云端语音面板 (OpenAI / Azure / ElevenLabs — 1:1 CloudVoice.swift 实时拉取音色 + 选声试听)
+        // 云端语音面板 (Free / Volcengine / Fish / OpenAI / Azure / ElevenLabs)
         CloudTtsProvider cloudProv = _focusedVoiceSource switch
         {
+            "free" => CloudTtsProvider.Free,
+            "volcengine" => CloudTtsProvider.Volcengine,
+            "fish" => CloudTtsProvider.Fish,
             "azure" => CloudTtsProvider.Azure,
             "elevenlabs" => CloudTtsProvider.ElevenLabs,
             _ => CloudTtsProvider.OpenAi,
         };
-        string title = _focusedVoiceSource switch { "azure" => "Microsoft Azure", "elevenlabs" => "ElevenLabs", _ => "OpenAI TTS" };
+        string title = _focusedVoiceSource switch
+        {
+            "free" => "在线自然语音（免 Key）",
+            "volcengine" => "火山引擎（豆包）",
+            "fish" => "Fish Audio",
+            "azure" => "Microsoft Azure",
+            "elevenlabs" => "ElevenLabs",
+            _ => "OpenAI TTS",
+        };
         string secretKey = $"tts.{_focusedVoiceSource}.key";
         InspectorHost.Children.Add(new TextBlock { Text = title, FontSize = 13.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
 
         var stack = new StackPanel { Spacing = 10 };
-        var kb = new PasswordBox { Header = "API Key（本机加密存储）", Password = _library.Secrets.Get(secretKey), PlaceholderText = "粘贴密钥…" };
-        kb.PasswordChanged += (_, _) =>
+        if (cloudProv == CloudTtsProvider.Free)
         {
-            _library.Secrets.Set(secretKey, kb.Password.Trim());
-            RenderDynamicPage("listening");
-        };
-        stack.Children.Add(kb);
+            stack.Children.Add(new TextBlock
+            {
+                Text = "零配置免 Key 即用，自动调用魔搭 / Hugging Face 开源 Kokoro 在线推理服务；已合成的句子缓存在本机。",
+                FontSize = 11.5,
+                Foreground = ThemeHelper.Brush(p.T2),
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+        else
+        {
+            if (cloudProv == CloudTtsProvider.Volcengine)
+            {
+                var appBox = new TextBox
+                {
+                    Header = "火山引擎 AppID",
+                    Text = _library.Secrets.Get("tts.volcengine.appid"),
+                    PlaceholderText = "填写应用 AppID…",
+                };
+                appBox.TextChanged += (_, _) =>
+                {
+                    _library.Secrets.Set("tts.volcengine.appid", appBox.Text.Trim());
+                    RenderDynamicPage("listening");
+                };
+                stack.Children.Add(appBox);
+            }
+
+            var kb = new PasswordBox
+            {
+                Header = cloudProv == CloudTtsProvider.Volcengine ? "Access Token（本机加密存储）" : "API Key（本机加密存储）",
+                Password = _library.Secrets.Get(secretKey),
+                PlaceholderText = "粘贴密钥…",
+            };
+            kb.PasswordChanged += (_, _) =>
+            {
+                _library.Secrets.Set(secretKey, kb.Password.Trim());
+                RenderDynamicPage("listening");
+            };
+            stack.Children.Add(kb);
+        }
 
         if (_focusedVoiceSource == "azure")
         {
@@ -1906,12 +2022,25 @@ public sealed partial class SettingsWindow : Window
 
         InspectorHost.Children.Add(new Border { CornerRadius = new CornerRadius(11), Background = ThemeHelper.Brush(p.Card), BorderBrush = ThemeHelper.Brush(p.Line), BorderThickness = new Thickness(1), Padding = new Thickness(12), Child = stack });
 
-        if (!string.IsNullOrEmpty(_library.Secrets.Get(secretKey)))
+        if (cloudProv == CloudTtsProvider.Free && _library.CloudVoices.IsConfigured(CloudTtsProvider.Free))
+        {
+            var hideBtn = new Button { HorizontalAlignment = HorizontalAlignment.Stretch, Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Foreground = ThemeHelper.Brush(p.Danger), Content = "隐藏 在线自然语音" };
+            hideBtn.Click += (_, _) =>
+            {
+                _library.Secrets.Set("tts.free.dismissed", "1");
+                App.CurrentApp.BroadcastVoiceChanged();
+                RenderDynamicPage("listening");
+                RenderInspector("listening");
+            };
+            InspectorHost.Children.Add(hideBtn);
+        }
+        else if (!string.IsNullOrEmpty(_library.Secrets.Get(secretKey)))
         {
             var discBtn = new Button { HorizontalAlignment = HorizontalAlignment.Stretch, Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Foreground = ThemeHelper.Brush(p.Danger), Content = $"断开 {title}" };
             discBtn.Click += (_, _) =>
             {
                 _library.Secrets.Set(secretKey, "");
+                if (cloudProv == CloudTtsProvider.Volcengine) _library.Secrets.Set("tts.volcengine.appid", "");
                 App.CurrentApp.BroadcastVoiceChanged();
                 RenderDynamicPage("listening");
                 RenderInspector("listening");
@@ -3297,10 +3426,23 @@ public sealed partial class SettingsWindow : Window
         var p = CurrentPalette;
         var tint = CurrentTint;
 
-        long booksBytes = DirSize(Path.Combine(_library.DataDir, "books"));
-        long audioBytes = DirSize(Path.Combine(_library.DataDir, "recordings"));
+        var activeIds = _library.GetBooks().Select(b => b.Id).ToHashSet(StringComparer.Ordinal);
+        long booksBytes = 0;
+        long deletedBytes = 0;
+        string booksRoot = Path.Combine(_library.DataDir, "books");
+        if (Directory.Exists(booksRoot))
+        {
+            foreach (var dir in Directory.EnumerateDirectories(booksRoot))
+            {
+                string id = Path.GetFileName(dir);
+                if (string.IsNullOrEmpty(id) || id.StartsWith('.')) continue;
+                long sz = DirSize(dir);
+                if (activeIds.Contains(id)) booksBytes += sz;
+                else deletedBytes += sz;
+            }
+        }
+        long audioBytes = DirSize(Path.Combine(_library.DataDir, "audiobooks"));
         long voiceBytes = DirSize(Path.Combine(_library.DataDir, "models"));
-        long deletedBytes = DirSize(Path.Combine(_library.DataDir, "trash"));
         long totalBytes = DirSize(_library.DataDir);
         long otherBytes = Math.Max(0, totalBytes - booksBytes - audioBytes - voiceBytes - deletedBytes);
 

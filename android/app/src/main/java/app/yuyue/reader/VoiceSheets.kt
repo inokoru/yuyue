@@ -55,6 +55,8 @@ import app.yuyue.speech.CardVoice
 import app.yuyue.speech.ClonedVoice
 import app.yuyue.speech.ClonedVoices
 import app.yuyue.speech.CloudVoice
+import app.yuyue.speech.KokoroModel
+import app.yuyue.speech.KokoroVoice
 import app.yuyue.speech.LiveVoiceModel
 import app.yuyue.speech.SystemVoice
 import app.yuyue.speech.Voices
@@ -78,10 +80,10 @@ import kotlin.math.roundToInt
  */
 @Composable
 fun PrepareBetterVoiceRow(core: YuyueCore, dataDir: File, language: String) {
-    if (!CardVoice.speaksLanguage(language) || LiveVoiceModel.deviceUnsupported) return
-    val st = LiveVoiceModel.state
-    if (st is LiveVoiceModel.State.Ready || LiveVoiceModel.ready(dataDir)) return
-    if (st is LiveVoiceModel.State.Unsupported) return
+    if (!CardVoice.speaksLanguage(language) || KokoroModel.deviceUnsupported) return
+    val st = KokoroModel.state
+    if (st is KokoroModel.State.Ready || KokoroModel.installed(dataDir)) return
+    if (st is KokoroModel.State.Unsupported) return
 
     Row(
         Modifier
@@ -94,10 +96,10 @@ fun PrepareBetterVoiceRow(core: YuyueCore, dataDir: File, language: String) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         when (st) {
-            is LiveVoiceModel.State.Downloading -> {
+            is KokoroModel.State.Downloading -> {
                 val pct = (st.progress * 100).roundToInt().coerceIn(0, 99)
                 Text(
-                    t("正在准备更好的声音 %lld%%", pct.toLong()),
+                    t("正在准备离线语音 %lld%%", pct.toLong()),
                     fontSize = 11.5.sp,
                     color = YY.c.t2,
                     style = YY.tnum,
@@ -118,8 +120,8 @@ fun PrepareBetterVoiceRow(core: YuyueCore, dataDir: File, language: String) {
                     )
                 }
             }
-            LiveVoiceModel.State.Failed -> {
-                Text(t("没下下来"), fontSize = 11.5.sp, color = YY.c.t2, modifier = Modifier.weight(1f))
+            KokoroModel.State.Failed -> {
+                Text(t("离线语音没下下来"), fontSize = 11.5.sp, color = YY.c.t2, modifier = Modifier.weight(1f))
                 Text(
                     t("再试"),
                     fontSize = 11.5.sp,
@@ -127,12 +129,12 @@ fun PrepareBetterVoiceRow(core: YuyueCore, dataDir: File, language: String) {
                     color = YY.c.danger,
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
-                        .clickable { LiveVoiceModel.startDownload(core, dataDir) }
+                        .clickable { KokoroModel.startDownload(core, dataDir) }
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
             else -> {
-                Text(t("更好的声音 · 160 MB"), fontSize = 11.5.sp, color = YY.c.t2, modifier = Modifier.weight(1f))
+                Text(t("语阅离线语音（Kokoro） · 125 MB"), fontSize = 11.5.sp, color = YY.c.t2, modifier = Modifier.weight(1f))
                 Text(
                     t("下载"),
                     fontSize = 11.5.sp,
@@ -140,7 +142,7 @@ fun PrepareBetterVoiceRow(core: YuyueCore, dataDir: File, language: String) {
                     color = YY.tint.accent,
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
-                        .clickable { LiveVoiceModel.startDownload(core, dataDir) }
+                        .clickable { KokoroModel.startDownload(core, dataDir) }
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
@@ -318,7 +320,9 @@ fun VoiceGroupsContent(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val kokoroState = KokoroModel.state
     val liveState = LiveVoiceModel.state
+    var kokoroVoices by remember { mutableStateOf<List<KokoroVoice>>(emptyList()) }
     var recommended by remember { mutableStateOf<List<VoiceCard>>(emptyList()) }
     var clonedCards by remember { mutableStateOf<List<VoiceCard>>(emptyList()) }
     var designedCards by remember { mutableStateOf<List<VoiceCard>>(emptyList()) }
@@ -326,11 +330,13 @@ fun VoiceGroupsContent(
     var systemVoices by remember { mutableStateOf<List<SystemVoice>>(emptyList()) }
     var previewingId by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(language, bookID, refreshKey, liveState) {
+    LaunchedEffect(language, bookID, refreshKey, kokoroState, liveState) {
         SystemVoice.Engine.init(context)
         ClonedVoices.init(context)
         withContext(Dispatchers.IO) {
+            KokoroModel.register(core, dataDir)
             LiveVoiceModel.register(core, dataDir)
+            val kok = KokoroModel.voices(core, dataDir, language)
             val rec = if (LiveVoiceModel.canRun(dataDir)) Voices.recommendedCards(core, dataDir, language) else emptyList()
             val cCards = core.cardsCloned()
             val des = if (bookID != null) {
@@ -339,6 +345,7 @@ fun VoiceGroupsContent(
             } else emptyList()
             val cld = CloudVoice.all().filter { it.speaks(language) }
             val sys = SystemVoice.Engine.voices().filter { it.speaks(language) }.sortedByDescending { it.isOffline }
+            kokoroVoices = kok
             recommended = rec
             clonedCards = cCards
             designedCards = des
@@ -391,52 +398,53 @@ fun VoiceGroupsContent(
 
     // 1. 推荐
     if (CardVoice.speaksLanguage(language)) {
-        val primaryNarratorId = if (language.lowercase().startsWith("en")) "card.b.33" else "card.b.01"
-        YYLabel(t("推荐"), if (recommended.isNotEmpty()) t("自带声音 · 七档语气") else null)
+        val defaultKokoroId = if (language.lowercase().startsWith("en")) "kokoro.af_heart" else "kokoro.zf_001"
+        val primaryNarratorId = if (kokoroVoices.isNotEmpty()) defaultKokoroId else if (language.lowercase().startsWith("en")) "card.b.33" else "card.b.01"
+        YYLabel(t("推荐"), if (kokoroVoices.isNotEmpty() || recommended.isNotEmpty()) t("跨端离线好声音") else null)
         YYGroup {
             when {
-                LiveVoiceModel.deviceUnsupported -> {
+                KokoroModel.deviceUnsupported && LiveVoiceModel.deviceUnsupported -> {
                     row {
                         Row(
                             Modifier.fillMaxWidth().padding(vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(t("这台手机带不动"), fontSize = 12.sp, color = YY.c.t3)
+                            Text(t("这台设备带不动离线语音，可使用云端「在线自然语音（免 Key）」"), fontSize = 12.sp, color = YY.c.t3)
                         }
                     }
                 }
-                recommended.isEmpty() -> {
+                kokoroVoices.isEmpty() && recommended.isEmpty() -> {
                     row {
                         Row(
                             Modifier.fillMaxWidth().padding(vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            when (liveState) {
-                                is LiveVoiceModel.State.Downloading -> {
-                                    val pct = (liveState.progress * 100).roundToInt().coerceIn(0, 99)
+                            when (kokoroState) {
+                                is KokoroModel.State.Downloading -> {
+                                    val pct = (kokoroState.progress * 100).roundToInt().coerceIn(0, 99)
                                     Column(Modifier.weight(1f)) {
-                                        Text(t("正在准备更好的声音 %lld%%", pct.toLong()), fontSize = 12.5.sp, fontWeight = FontWeight.Medium, color = YY.c.t1, style = YY.tnum)
-                                        Text(t("不联网 · 分角色带语气"), fontSize = 10.5.sp, color = YY.c.t3)
+                                        Text(t("正在准备离线语音 %lld%%", pct.toLong()), fontSize = 12.5.sp, fontWeight = FontWeight.Medium, color = YY.c.t1, style = YY.tnum)
+                                        Text(t("跨端自然朗读 · 断网可用"), fontSize = 10.5.sp, color = YY.c.t3)
                                     }
                                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = YY.tint.accent)
                                 }
-                                LiveVoiceModel.State.Failed -> {
+                                KokoroModel.State.Failed -> {
                                     Column(Modifier.weight(1f)) {
-                                        Text(t("没下下来"), fontSize = 12.5.sp, fontWeight = FontWeight.Medium, color = YY.c.t1)
+                                        Text(t("离线语音没下下来"), fontSize = 12.5.sp, fontWeight = FontWeight.Medium, color = YY.c.t1)
                                         Text(t("连上网再试一次"), fontSize = 10.5.sp, color = YY.c.t3)
                                     }
                                     YYButton(t("再试"), kind = ButtonKind.Main, size = ButtonSize.Small) {
-                                        LiveVoiceModel.startDownload(core, dataDir)
+                                        KokoroModel.startDownload(core, dataDir)
                                     }
                                 }
                                 else -> {
                                     Column(Modifier.weight(1f)) {
-                                        Text(t("更好的声音 · 160 MB"), fontSize = 12.5.sp, fontWeight = FontWeight.Medium, color = YY.c.t1)
-                                        Text(t("不联网 · 分角色带语气"), fontSize = 10.5.sp, color = YY.c.t3)
+                                        Text(t("语阅离线语音（Kokoro） · 125 MB"), fontSize = 12.5.sp, fontWeight = FontWeight.Medium, color = YY.c.t1)
+                                        Text(t("跨端自然朗读 · 断网可用"), fontSize = 10.5.sp, color = YY.c.t3)
                                     }
                                     YYButton(t("下载"), kind = ButtonKind.Main, size = ButtonSize.Small) {
-                                        LiveVoiceModel.startDownload(core, dataDir)
+                                        KokoroModel.startDownload(core, dataDir)
                                     }
                                 }
                             }
@@ -444,12 +452,40 @@ fun VoiceGroupsContent(
                     }
                 }
                 else -> {
+                    for (kv in kokoroVoices) {
+                        val used = roles.filter { it.voice.voice == kv.id && it.name != roleName }.map { it.name }
+                        val isDef = kv.id == primaryNarratorId
+                        val badge = when {
+                            isDef -> t("默认旁白")
+                            kv.speaker.narrator -> t("推荐旁白")
+                            else -> null
+                        }
+                        val sub = if (used.isNotEmpty()) {
+                            t("%@在用", used.joinToString(t("、"))) + " · " + kv.summaryLine
+                        } else {
+                            kv.summaryLine
+                        }
+                        row {
+                            VoiceChoiceRow(
+                                avatar = kv.name.take(1).ifEmpty { "语" },
+                                title = kv.name,
+                                badge = badge,
+                                badgeAccent = isDef,
+                                subtitle = sub,
+                                selected = selectedId == kv.id,
+                                previewing = previewingId == kv.id,
+                                onPreview = { playPreview(kv) },
+                                onMore = null,
+                                onClick = { onPickVoice(kv) },
+                            )
+                        }
+                    }
                     for (card in recommended) {
                         val v = CardVoice(card)
                         val used = roles.filter { it.voice.voice == card.id && it.name != roleName }.map { it.name }
                         val badge = when {
                             card.id == primaryNarratorId -> t("默认旁白")
-                            card.narrator -> t("推荐旁白")
+                            card.narrator -> t("角色旁白")
                             else -> null
                         }
                         val sub = if (used.isNotEmpty()) {
@@ -579,8 +615,8 @@ fun VoiceGroupsContent(
         }
     }
 
-    // 4. 系统自带
-    YYLabel(t("系统自带"))
+    // 4. 系统自带（不推荐）
+    YYLabel(t("系统自带 · 不推荐"), t("机械音仅断网兜底"))
     YYGroup {
         if (systemVoices.isEmpty()) {
             row {
@@ -591,7 +627,7 @@ fun VoiceGroupsContent(
                         .padding(vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(t("下载更自然的声音"), fontSize = 12.sp, color = YY.tint.accent, modifier = Modifier.weight(1f))
+                    Text(t("下载系统文字转语音数据"), fontSize = 12.sp, color = YY.tint.accent, modifier = Modifier.weight(1f))
                     Icon(Icons.chevronRight, null, tint = YY.c.t3, modifier = Modifier.size(12.dp))
                 }
             }
@@ -608,7 +644,7 @@ fun VoiceGroupsContent(
                     VoiceChoiceRow(
                         avatar = v.name.substringAfterLast(' ').take(1).ifEmpty { "A" },
                         title = v.name,
-                        badge = null,
+                        badge = v.qualityName ?: t("不推荐"),
                         badgeAccent = false,
                         subtitle = sub,
                         selected = selectedId == v.id,

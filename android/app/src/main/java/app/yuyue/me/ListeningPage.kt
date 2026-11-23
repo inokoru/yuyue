@@ -103,15 +103,47 @@ import kotlin.math.sin
 // and each cloud; one opened, its voices as voice messages that each say the line you sent. Tapping
 // one plays it; 选择 beside it makes it read that kind of book. The one reading is pinned on top.
 
-/** This phone, or one of the clouds. */
+/** Neural local Kokoro/Cloned voices, system voices, or one of the clouds. */
+private const val NEURAL = "neural"
 private const val SYSTEM = "system"
 
 private fun cloud(id: String) = CloudVoice.Provider.entries.firstOrNull { it.key == id }
 
-internal fun voiceSourceTitle(id: String) = cloud(id)?.title ?: t("这台手机")
+internal fun voiceSourceTitle(id: String) = when (id) {
+    NEURAL -> t("语阅离线语音（Kokoro）")
+    SYSTEM -> t("这台手机 · 系统语音")
+    else -> cloud(id)?.title ?: t("这台手机 · 系统语音")
+}
+
+@Composable
+private fun SourceBadgePill(text: String, tone: Int) {
+    // tone: 0 = ok, 1 = warn, 2 = neutral
+    val fg = when (tone) {
+        0 -> YY.c.ok
+        1 -> Color(0xFFD97706)
+        else -> YY.c.t2
+    }
+    val bg = when (tone) {
+        0 -> YY.c.ok.copy(alpha = 0.12f)
+        1 -> Color(0xFFD97706).copy(alpha = 0.14f)
+        else -> YY.c.inset
+    }
+    Text(
+        text,
+        style = YY.font(9.5f, FontWeight.SemiBold),
+        color = fg,
+        maxLines = 1,
+        modifier = Modifier
+            .background(bg, RoundedCornerShape(YY.s(4)))
+            .padding(horizontal = YY.s(5), vertical = YY.s(1)),
+    )
+}
 
 private val CloudVoice.Provider.blurb: String
     get() = when (this) {
+        CloudVoice.Provider.Free -> t("0 MB 免下载、免注册免 Key，已读句子缓存在本机")
+        CloudVoice.Provider.Volcengine -> t("豆包大模型语音，中文播客与小说自然度高")
+        CloudVoice.Provider.Fish -> t("OpenAudio S1 高表现力中英音色与社区声音库")
         CloudVoice.Provider.Xiaomi -> t("中英 8 个精品音色，支持语气指令")
         CloudVoice.Provider.SiliconFlow -> t("CosyVoice2 音色与克隆，可复用书伴 Key")
         CloudVoice.Provider.DashScope -> t("千问3-TTS，约 0.1 元/千字，可复用书伴 Key")
@@ -129,6 +161,9 @@ private val CloudVoice.Provider.blurb: String
 
 private val CloudVoice.Provider.keyPage: String
     get() = when (this) {
+        CloudVoice.Provider.Free -> "https://modelscope.cn/studios/k2-fsa/text-to-speech"
+        CloudVoice.Provider.Volcengine -> "https://console.volcengine.com/speech/app"
+        CloudVoice.Provider.Fish -> "https://fish.audio/app/api-keys/"
         CloudVoice.Provider.Xiaomi -> "https://platform.xiaomimimo.com"
         CloudVoice.Provider.SiliconFlow -> "https://cloud.siliconflow.cn/account/ak"
         CloudVoice.Provider.DashScope -> "https://bailian.console.aliyun.com/?apiKey=1"
@@ -144,7 +179,11 @@ private val CloudVoice.Provider.keyPage: String
         CloudVoice.Provider.Local -> "https://github.com/moeru-ai/unspeech"
     }
 
-private fun sourceOf(v: BookVoice): String = (v as? CloudVoice)?.provider?.key ?: SYSTEM
+private fun sourceOf(v: BookVoice): String = when (v) {
+    is CloudVoice -> v.provider.key
+    is SystemVoice -> SYSTEM
+    else -> NEURAL
+}
 
 /** The two kinds of book a voice is chosen for. */
 private enum class VoiceBook(val tag: String) {
@@ -227,8 +266,35 @@ private object ListeningFocus {
 @Composable
 private fun SourceTile(id: String, size: Float = 26f) {
     ServiceTile(size) {
+        if (id == NEURAL) {
+            Box(
+                Modifier.size(YY.s(size * 0.64f)).background(Color(0xFF0F766E), RoundedCornerShape(YY.s(size * 0.16f))),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.waveform, null, tint = Color.White, modifier = Modifier.size(YY.s(size * 0.42f)))
+            }
+            return@ServiceTile
+        }
         when (val p = cloud(id)) {
-            null -> Icon(Icons.phone, null, tint = YY.c.t1, modifier = Modifier.size(YY.s(size * 0.58f)))
+            null -> Icon(Icons.phone, null, tint = YY.c.t2, modifier = Modifier.size(YY.s(size * 0.58f)))
+            CloudVoice.Provider.Free -> Box(
+                Modifier.size(YY.s(size * 0.64f)).background(Color(0xFF16A34A), RoundedCornerShape(YY.s(size * 0.16f))),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("免", style = YY.font(size * 0.34f, FontWeight.Bold), color = Color.White)
+            }
+            CloudVoice.Provider.Volcengine -> Box(
+                Modifier.size(YY.s(size * 0.64f)).background(Color(0xFF1D4ED8), RoundedCornerShape(YY.s(size * 0.16f))),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("豆", style = YY.font(size * 0.34f, FontWeight.Bold), color = Color.White)
+            }
+            CloudVoice.Provider.Fish -> Box(
+                Modifier.size(YY.s(size * 0.64f)).background(Color(0xFF0891B2), RoundedCornerShape(YY.s(size * 0.16f))),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("F", style = YY.font(size * 0.36f, FontWeight.Bold), color = Color.White)
+            }
             CloudVoice.Provider.Xiaomi -> Box(
                 Modifier.size(YY.s(size * 0.64f)).background(Color(0xFFFF6900), RoundedCornerShape(YY.s(size * 0.16f))),
                 contentAlignment = Alignment.Center,
@@ -253,21 +319,26 @@ private fun SourceTile(id: String, size: Float = 26f) {
 fun ListeningPage(open: (String) -> Unit) {
     val context = LocalContext.current
     val lib = app.yuyue.YuyueApp.instance.library
+    val kokoroState = app.yuyue.speech.KokoroModel.state
     val liveState = app.yuyue.speech.LiveVoiceModel.state
     var rate by rememberPref(Player.RATE_KEY, 1f)
     val zh by rememberPref(VoiceBook.ZH.key, "")
     val en by rememberPref(VoiceBook.EN.key, "")
     var adding by remember { mutableStateOf(false) }
-    var localCount by remember { mutableIntStateOf(0) }
+    var neuralCount by remember { mutableIntStateOf(0) }
+    var systemCount by remember { mutableIntStateOf(0) }
     var reading by remember { mutableStateOf<Map<VoiceBook, BookVoice>>(emptyMap()) }
-    LaunchedEffect(zh, en, liveState) {
+    LaunchedEffect(zh, en, kokoroState, liveState) {
         SystemVoice.Engine.init(context)
         val system = SystemVoice.Engine.voices()
+        val kokoro = app.yuyue.speech.KokoroModel.voices(lib.core, lib.dataDir)
         val cards = if (app.yuyue.speech.LiveVoiceModel.ready(lib.dataDir)) {
             runCatching { lib.core.cardsBuiltin() }.getOrDefault(emptyList())
         } else emptyList()
         val cloned = runCatching { lib.core.cardsCloned() }.getOrDefault(emptyList())
-        localCount = system.size + cards.size + cloned.size
+        neuralCount = kokoro.size + cards.size + cloned.size
+        systemCount = system.size
+        SettingsLog.voiceNames += kokoro.associate { it.id to it.name }
         SettingsLog.voiceNames += system.associate { it.id to it.name }
         SettingsLog.voiceNames += cards.associate { it.id to it.name }
         SettingsLog.voiceNames += cloned.associate { it.id to it.name }
@@ -277,7 +348,7 @@ fun ListeningPage(open: (String) -> Unit) {
             v?.let { b to it }
         }.toMap()
     }
-    val activeIds = listOf(SYSTEM) + CloudVoice.Provider.entries.filter { it.isSetUp }.map { it.key }
+    val activeIds = listOf(NEURAL) + CloudVoice.Provider.entries.filter { it.isSetUp }.map { it.key } + listOf(SYSTEM)
     YYPage {
         SettingsLead(t("朗读、查词发音与播客音色"))
         YYLabel(t("声音来源"))
@@ -287,12 +358,26 @@ fun ListeningPage(open: (String) -> Unit) {
                 Row(Modifier.fillMaxWidth().clickable { open(id) }.padding(vertical = YY.s(9)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(10))) {
                     SourceTile(id, 30f)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(YY.s(1))) {
-                        Text(voiceSourceTitle(id), style = YY.font(11.5f, FontWeight.Medium), color = YY.c.t1)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(6))) {
+                            Text(voiceSourceTitle(id), style = YY.font(11.5f, FontWeight.Medium), color = if (id == SYSTEM) YY.c.t2 else YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            when {
+                                id == NEURAL -> SourceBadgePill(t("推荐"), 0)
+                                id == SYSTEM -> SourceBadgePill(t("不推荐"), 1)
+                                p?.badge != null -> SourceBadgePill(p.badge!!, if (p == CloudVoice.Provider.Free || p == CloudVoice.Provider.Xiaomi) 0 else 2)
+                            }
+                        }
                         Text(
                             when {
-                                p == null -> t("%lld 个音色 · 本地免费，无需联网", localCount)
-                                p.isLocal -> t("%lld 个音色 · 局域网语音", CloudVoice.all().count { it.provider == p })
-                                else -> t("%lld 个音色 · 已连接", CloudVoice.all().count { it.provider == p })
+                                id == NEURAL -> if (app.yuyue.speech.KokoroModel.installed(lib.dataDir)) {
+                                    t("%lld 个音色 · 跨端轻量离线，断网可用", neuralCount)
+                                } else {
+                                    t("一键下载（125 MB）· 跨端离线自然语音")
+                                }
+                                id == SYSTEM -> t("%lld 个音色 · 机械音明显，仅作断网兜底", systemCount)
+                                p != null && p == CloudVoice.Provider.Free -> t("%lld 个音色 · 零配置免 Key 即点即听", CloudVoice.all().count { it.provider == p })
+                                p != null && p.isLocal -> t("%lld 个音色 · 局域网语音", CloudVoice.all().count { it.provider == p })
+                                p != null -> t("%lld 个音色 · 已连接", CloudVoice.all().count { it.provider == p })
+                                else -> ""
                             },
                             style = YY.font(10f), color = YY.c.t3, maxLines = 1,
                         )
@@ -311,13 +396,13 @@ fun ListeningPage(open: (String) -> Unit) {
                     ServiceTile(30f) { Icon(Icons.add, null, tint = YY.c.t2, modifier = Modifier.size(YY.s(16))) }
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(YY.s(1))) {
                         Text(t("添加声音来源"), style = YY.font(11.5f, FontWeight.Medium), color = YY.c.t2)
-                        Text(t("小米 MiMo（限时免费）、硅基流动、百炼、局域网 VoiceStudio…"), style = YY.font(10f), color = YY.c.t3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(t("火山豆包、Fish Audio、小米 MiMo（限时免费）、硅基流动、VoiceStudio…"), style = YY.font(10f), color = YY.c.t3, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Icon(Icons.chevronRight, null, tint = YY.c.t3, modifier = Modifier.size(YY.s(11)))
                 }
             }
         }
-        YYNote(t("云端语音使用你自己的 API Key，也可连接局域网电脑上的 VoiceStudio。已合成句子缓存在本机，重听不重复计费。"))
+        YYNote(t("推荐下载「语阅离线语音（Kokoro）」断网畅听，或直接使用免 Key 的「在线自然语音」。系统自带语音机械感较重（不推荐），仅作断网兜底。"))
         YYLabel(t("语速"))
         YYGroup {
             row {
@@ -336,6 +421,7 @@ fun ListeningPage(open: (String) -> Unit) {
         VoiceProviderSheet(
             close = { adding = false },
             pick = { picked ->
+                if (picked == CloudVoice.Provider.Free) Prefs.set(picked.dismissedName, false)
                 adding = false
                 open(picked.key)
             },
@@ -423,6 +509,7 @@ private fun VoiceProviderSheet(close: () -> Unit, pick: (CloudVoice.Provider) ->
 fun VoiceSourcePage(id: String, openSettings: () -> Unit) {
     val context = LocalContext.current
     val lib = app.yuyue.YuyueApp.instance.library
+    val kokoroState = app.yuyue.speech.KokoroModel.state
     val liveState = app.yuyue.speech.LiveVoiceModel.state
     val p = cloud(id)
     var version by remember { mutableIntStateOf(0) }
@@ -440,7 +527,7 @@ fun VoiceSourcePage(id: String, openSettings: () -> Unit) {
     var draft by remember { mutableStateOf("") }
     var linesOpen by remember { mutableStateOf(false) }
     var pickerOpen by remember { mutableStateOf(false) }
-    LaunchedEffect(book, chosenID, version, liveState) {
+    LaunchedEffect(book, chosenID, version, kokoroState, liveState) {
         SystemVoice.Engine.init(context)
         val all = Voices.all(book.tag)
         voices = all.filter { sourceOf(it) == id }
@@ -460,7 +547,7 @@ fun VoiceSourcePage(id: String, openSettings: () -> Unit) {
             Row(Modifier.padding(top = YY.s(4), bottom = YY.s(8)), verticalAlignment = Alignment.CenterVertically) {
                 BookSegments(book) { focus.book = it; focus.listening = null; focus.stop() }
                 Spacer(Modifier.weight(1f))
-                if (p == null) {
+                if (id == NEURAL) {
                     Text(
                         t("克隆声音"),
                         style = YY.font(10.5f, FontWeight.Medium),
@@ -474,13 +561,22 @@ fun VoiceSourcePage(id: String, openSettings: () -> Unit) {
                     Text(t("点一下听，再点“选择”"), style = YY.font(10f), color = YY.c.t3, maxLines = 1)
                 }
             }
-            if (p == null) {
-                if (app.yuyue.speech.LiveVoiceModel.deviceUnsupported) {
-                    Text(t("这台手机带不动"), style = YY.font(10.5f), color = YY.c.t3, modifier = Modifier.padding(bottom = YY.s(6)))
-                } else if (!app.yuyue.speech.LiveVoiceModel.ready(lib.dataDir)) {
+            if (id == NEURAL) {
+                if (app.yuyue.speech.KokoroModel.deviceUnsupported) {
+                    Text(t("这台设备内存不足，可使用「在线自然语音（免 Key）」"), style = YY.font(10.5f), color = YY.c.t3, modifier = Modifier.padding(bottom = YY.s(6)))
+                } else if (!app.yuyue.speech.KokoroModel.installed(lib.dataDir)) {
                     Box(Modifier.padding(bottom = YY.s(8))) {
                         app.yuyue.reader.PrepareBetterVoiceRow(lib.core, lib.dataDir, book.tag)
                     }
+                }
+            } else if (id == SYSTEM) {
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = YY.s(6)),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(YY.s(6)),
+                ) {
+                    SourceBadgePill(t("不推荐"), 1)
+                    Text(t("系统自带合成音机械感较重，建议改用「语阅离线语音」或「在线自然语音」"), style = YY.font(10f), color = YY.c.t3, maxLines = 2)
                 }
             }
             val others = voices.orEmpty().filter { it.id != current?.id }
@@ -669,8 +765,11 @@ private fun VoiceMessage(v: BookVoice, book: VoiceBook, scope: kotlinx.coroutine
         Column(verticalArrangement = Arrangement.spacedBy(YY.s(4))) {
             Row(horizontalArrangement = Arrangement.spacedBy(YY.s(6)), verticalAlignment = Alignment.CenterVertically) {
                 Text(v.name, style = YY.font(11.5f, FontWeight.Medium), color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                if (v is SystemVoice) listOfNotNull(v.qualityName, if (v.isOffline) null else t("联网")).takeIf { it.isNotEmpty() }?.let {
-                    Text(it.joinToString(" · "), style = YY.font(10f), color = YY.c.t3, maxLines = 1)
+                if (v is SystemVoice) {
+                    val sysTag = listOfNotNull(v.qualityName ?: t("不推荐"), if (v.isOffline) null else t("联网")).joinToString(" · ")
+                    Text(sysTag, style = YY.font(10f), color = if (v.qualityName == null) Color(0xFFD97706) else YY.c.t3, maxLines = 1)
+                } else if (v is app.yuyue.speech.KokoroVoice) {
+                    Text(v.summaryLine, style = YY.font(10f), color = YY.c.t3, maxLines = 1)
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(8))) {
@@ -771,37 +870,57 @@ private fun CloudKeyPanel(p: CloudVoice.Provider, connected: () -> Unit) {
 @Composable
 fun VoiceSourceSettings(id: String, back: () -> Unit) {
     val context = LocalContext.current
+    val lib = app.yuyue.YuyueApp.instance.library
     val p = cloud(id)
     var count by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) { SystemVoice.Engine.init(context); count = SystemVoice.Engine.voices().size }
+    LaunchedEffect(id) {
+        if (id == SYSTEM) {
+            SystemVoice.Engine.init(context)
+            count = SystemVoice.Engine.voices().size
+        } else if (id == NEURAL) {
+            count = app.yuyue.speech.KokoroModel.voices(lib.core, lib.dataDir).size
+        }
+    }
     YYPage {
-        if (p == null) {
-            PanelHeader(t("这台手机"), t("系统自带")) { SourceTile(SYSTEM, 34f) }
+        if (id == NEURAL) {
+            PanelHeader(voiceSourceTitle(NEURAL), t("跨端轻量离线模型 · 推荐"), YY.c.ok) { SourceTile(NEURAL, 34f) }
             YYGroup {
+                row { YYRow(t("状态"), value = if (app.yuyue.speech.KokoroModel.installed(lib.dataDir)) t("已就绪 · 53 音色") else t("待下载 · 125 MB")) }
+                row { YYRow(t("费用"), value = t("免费 · 不联网")) }
+            }
+            if (!app.yuyue.speech.KokoroModel.installed(lib.dataDir)) {
+                Spacer(Modifier.height(YY.s(10)))
+                app.yuyue.reader.PrepareBetterVoiceRow(lib.core, lib.dataDir, "zh")
+            }
+            YYNote(t("Kokoro-82M v1.1 Int8 跨端统一使用 ONNX Runtime 离线合成，无需联网即可自然朗读中英文书籍。"))
+        } else if (p == null) {
+            PanelHeader(voiceSourceTitle(SYSTEM), t("系统自带 · 不推荐"), Color(0xFFD97706)) { SourceTile(SYSTEM, 34f) }
+            YYGroup {
+                row { YYRow(t("评级"), value = t("不推荐 · 仅断网兜底")) }
                 row { YYRow(t("声音"), value = t("%lld 个声音", count)) }
                 row { YYRow(t("费用"), value = t("免费 · 不联网")) }
             }
             Spacer(Modifier.height(YY.s(10)))
             YYGroup {
                 row {
-                    LinkRow(t("下载更自然的声音")) {
+                    LinkRow(t("下载系统文字转语音数据")) {
                         SystemVoice.Engine.openSettings(context)
                     }
                 }
             }
-            YYNote(t("系统设置 › 无障碍 › 文字转语音，下载语音数据，回来就在这里。"))
+            YYNote(t("系统自带合成音机械感明显，仅建议在未下载离线语音且完全断网时兜底使用。"))
         } else {
             var removing by remember { mutableStateOf(false) }
             val inUse = listOf("zh", "en").any { Prefs.string("player.voice.$it").startsWith("cloud.${p.key}.") }
             PanelHeader(p.title, if (inUse) t("当前使用") else p.blurb, if (inUse) YY.c.ok else YY.c.t3) { SourceTile(p.key, 34f) }
             KeyCard(p, connected = true) {}
-            if (!p.isLocal) YYNote(t("粘贴后自动验证，有效才会替换。"))
-            DestructiveCard(t("断开 %@", p.title)) { removing = true }
+            if (!p.isLocal && p != CloudVoice.Provider.Free) YYNote(t("粘贴后自动验证，有效才会替换。"))
+            DestructiveCard(if (p == CloudVoice.Provider.Free) t("隐藏 %@", p.title) else t("断开 %@", p.title)) { removing = true }
             if (removing) AlertDialog(
                 onDismissRequest = { removing = false },
                 containerColor = YY.c.card,
-                title = { Text(t("断开 %@？", p.title), color = YY.c.t1) },
-                text = { Text(t("断开后将移除配置；使用该服务音色的书籍将切回本地音色。"), color = YY.c.t2) },
+                title = { Text(if (p == CloudVoice.Provider.Free) t("隐藏 %@？", p.title) else t("断开 %@？", p.title), color = YY.c.t1) },
+                text = { Text(if (p == CloudVoice.Provider.Free) t("隐藏后可在「添加声音来源」重新开启。") else t("断开后将移除配置；使用该服务音色的书籍将切回本地音色。"), color = YY.c.t2) },
                 confirmButton = {
                     TextButton({
                         Keys.delete(p.keyName)
@@ -809,12 +928,14 @@ fun VoiceSourceSettings(id: String, back: () -> Unit) {
                         Prefs.set(p.urlName, null)
                         Prefs.set(p.modelName, null)
                         Prefs.set(p.enabledName, false)
+                        if (p == CloudVoice.Provider.Free) Prefs.set(p.dismissedName, true)
+                        if (p == CloudVoice.Provider.Volcengine) Prefs.set(CloudVoice.Provider.VOLC_APP_ID, null)
                         if (p == CloudVoice.Provider.Local) Prefs.set("tts.local.title", null)
                         for (lang in listOf("zh", "en")) if (Prefs.string("player.voice.$lang").startsWith("cloud.${p.key}.")) Prefs.set("player.voice.$lang", "")
                         removing = false
                         back()
                         back()
-                    }) { Text(t("断开"), color = YY.c.danger) }
+                    }) { Text(if (p == CloudVoice.Provider.Free) t("隐藏") else t("断开"), color = YY.c.danger) }
                 },
                 dismissButton = { TextButton({ removing = false }) { Text(t("取消"), color = YY.c.t2) } },
             )
@@ -825,6 +946,7 @@ fun VoiceSourceSettings(id: String, back: () -> Unit) {
 @Composable
 private fun KeyCard(p: CloudVoice.Provider, connected: Boolean, changed: () -> Unit) {
     var key by remember { mutableStateOf("") }
+    var appId by remember { mutableStateOf(Prefs.string(CloudVoice.Provider.VOLC_APP_ID)) }
     var url by remember { mutableStateOf(p.savedURL) }
     var model by remember { mutableStateOf(Prefs.string(p.modelName).ifEmpty { p.defaultModel }) }
     var customTitle by remember { mutableStateOf(Prefs.string("tts.local.title")) }
@@ -833,6 +955,40 @@ private fun KeyCard(p: CloudVoice.Provider, connected: Boolean, changed: () -> U
     var checking by remember { mutableStateOf(false) }
     var outcome by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
     val scope = rememberCoroutineScope()
+
+    if (p == CloudVoice.Provider.Free) {
+        YYGroup {
+            row { YYRow(t("模式"), value = t("免 Key · 零配置即用")) }
+            row {
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = YY.s(38)).clickable(enabled = !checking) {
+                        checking = true
+                        outcome = null
+                        Prefs.set(p.dismissedName, false)
+                        scope.launch {
+                            outcome = try {
+                                val n = withContext(Dispatchers.IO) { CloudVoice.refresh(p) }
+                                true to t("正常 · %lld 个音色", n)
+                            } catch (e: Exception) {
+                                false to (e.message ?: t("当前繁忙"))
+                            }
+                            checking = false
+                            if (outcome?.first == true) { delay(500); changed() }
+                        }
+                    },
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(8)),
+                ) {
+                    Icon(Icons.waveformEcg, null, tint = YY.c.ok, modifier = Modifier.size(YY.s(14)))
+                    Text(if (connected) t("检查在线线路") else t("开启免 Key 在线语音"), style = YY.font(11.5f), color = YY.c.ok, modifier = Modifier.weight(1f))
+                    when {
+                        checking -> CircularProgressIndicator(Modifier.size(12.dp), color = YY.c.t3, strokeWidth = 1.5.dp)
+                        outcome != null -> Text(outcome!!.second, style = YY.font(10.5f), color = if (outcome!!.first) YY.c.ok else YY.c.danger, maxLines = 2, textAlign = TextAlign.End)
+                    }
+                }
+            }
+        }
+        return
+    }
 
     fun checkLocal() {
         checking = true
@@ -868,8 +1024,10 @@ private fun KeyCard(p: CloudVoice.Provider, connected: Boolean, changed: () -> U
         scope.launch {
             val old = Keys.read(p.keyName)
             val oldRegion = Prefs.string(CloudVoice.Provider.REGION)
+            val oldAppId = Prefs.string(CloudVoice.Provider.VOLC_APP_ID)
             if (newKey != null) Keys.write(p.keyName, newKey)
             if (p == CloudVoice.Provider.Azure) Prefs.set(CloudVoice.Provider.REGION, region.trim().lowercase())
+            if (p == CloudVoice.Provider.Volcengine) Prefs.set(CloudVoice.Provider.VOLC_APP_ID, appId.trim())
             outcome = try {
                 val n = withContext(Dispatchers.IO) { CloudVoice.refresh(p) }
                 if (newKey != null && connected) { editing = false; key = "" }
@@ -877,6 +1035,7 @@ private fun KeyCard(p: CloudVoice.Provider, connected: Boolean, changed: () -> U
             } catch (e: Exception) {
                 if (newKey != null) { if (old != null) Keys.write(p.keyName, old) else Keys.delete(p.keyName) }
                 Prefs.set(CloudVoice.Provider.REGION, oldRegion)
+                if (p == CloudVoice.Provider.Volcengine) Prefs.set(CloudVoice.Provider.VOLC_APP_ID, oldAppId)
                 false to (e.message ?: t("没连上"))
             }
             checking = false
@@ -946,8 +1105,9 @@ private fun KeyCard(p: CloudVoice.Provider, connected: Boolean, changed: () -> U
             }
         } else {
             if (p == CloudVoice.Provider.Azure) row { YYField(t("区域"), 44f) { Field(region, "eastasia") { region = it } } }
+            if (p == CloudVoice.Provider.Volcengine) row { YYField("AppID", 44f) { Field(appId, t("应用 AppID")) { appId = it } } }
             row {
-                YYField("Key", 44f) {
+                YYField(if (p == CloudVoice.Provider.Volcengine) "Token" else "Key", 44f) {
                     if (editing) Secret(key, if (connected) t("贴上新的 Key") else p.keyHint) { key = it }
                     else Row(verticalAlignment = Alignment.CenterVertically) {
                         val saved = Keys.read(p.keyName).orEmpty()

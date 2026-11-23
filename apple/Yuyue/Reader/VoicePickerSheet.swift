@@ -102,18 +102,19 @@ struct VoiceCatalogSections: View {
 
     var body: some View {
         let _ = refreshTick
+        let _ = KokoroDownload.shared.phase
         let _ = LiveVoiceDownload.shared.phase
         let catalog = Voices.catalog(for: language, bookID: bookID)
-        let defaultID = VoicePack.defaultNarrator(for: language)?.id
+        let defaultID = KokoroModel.defaultNarrator(for: language)?.id ?? VoicePack.defaultNarrator(for: language)?.id
 
         Group {
-            // 1. 推荐（该语言无自带卡时不显示整组；低内存手机显示“这台手机带不动”）
+            // 1. 推荐（Kokoro 轻量离线旁白 + 本机角色卡）
             if let recommended = catalog.recommended {
                 YYLabel(String(localized: "推荐"))
                 switch recommended {
                 case .unsupported:
                     YYGroup {
-                        Text("这台手机带不动（内存不足 6 GB，已使用系统声音）")
+                        Text("这台设备带不动离线语音，可使用云端「在线自然语音（免 Key）」")
                             .font(YYUI.font(10.5))
                             .foregroundStyle(YYColor.t3)
                             .padding(.vertical, YYUI.s(10))
@@ -128,13 +129,19 @@ struct VoiceCatalogSections: View {
                 case .ready(let cards):
                     if !cards.isEmpty {
                         YYGroup {
-                            ForEach(cards, id: \.id) { cardVoice in
+                            ForEach(Array(cards.enumerated()), id: \.element.id) { _, cardVoice in
                                 let isDefault = cardVoice.id == defaultID
+                                let isNarrator = (cardVoice as? CardVoice)?.card.narrator == true
+                                    || (cardVoice as? KokoroVoice)?.speaker.narrator == true
+                                let summary = (cardVoice as? CardVoice)?.summaryLine
+                                    ?? (cardVoice as? KokoroVoice)?.summaryLine
+                                    ?? cardVoice.qualityName
+                                    ?? ""
                                 row(
                                     voice: cardVoice,
-                                    badge: isDefault ? String(localized: "默认旁白") : (cardVoice.card.narrator ? String(localized: "推荐旁白") : nil),
+                                    badge: isDefault ? String(localized: "默认旁白") : (isNarrator ? String(localized: "推荐旁白") : nil),
                                     green: isDefault,
-                                    detail: usedByLabel?(cardVoice.id) ?? cardVoice.summaryLine
+                                    detail: usedByLabel?(cardVoice.id) ?? summary
                                 )
                             }
                         }
@@ -194,14 +201,14 @@ struct VoiceCatalogSections: View {
                 }
             }
 
-            // 4. 系统自带
+            // 4. 系统自带（不推荐）
             if !catalog.system.isEmpty {
-                YYLabel(String(localized: "系统自带"))
+                YYLabel(String(localized: "系统自带 · 不推荐"))
                 YYGroup {
                     ForEach(catalog.system, id: \.id) { sysVoice in
                         row(
                             voice: sysVoice,
-                            badge: sysVoice.qualityName,
+                            badge: sysVoice.qualityName ?? String(localized: "不推荐"),
                             detail: usedByLabel?(sysVoice.id) ?? sysVoice.listLine
                         )
                     }
@@ -209,6 +216,9 @@ struct VoiceCatalogSections: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: ClonedVoices.changed)) { _ in
+            refreshTick &+= 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: KokoroModel.ready)) { _ in
             refreshTick &+= 1
         }
         .onReceive(NotificationCenter.default.publisher(for: LiveVoiceModel.ready)) { _ in
@@ -225,31 +235,31 @@ struct VoiceCatalogSections: View {
         return parts.isEmpty ? v.summaryLine : parts.joined(separator: " · ")
     }
 
-    /// 更好的声音 · 120 MB / 不联网 · 分角色带语气 · 下载; while it comes, its percent.
+    /// 语阅离线语音（Kokoro） · 125 MB / 跨端自然朗读 · 断网可用 · 下载; while it comes, its percent.
     @ViewBuilder private var downloadRow: some View {
-        let phase = LiveVoiceDownload.shared.phase
+        let phase = KokoroDownload.shared.phase
         HStack(spacing: YYUI.s(10)) {
             VStack(alignment: .leading, spacing: 1) {
                 switch phase {
                 case .downloading(let frac):
-                    Text("正在准备更好的声音 \(Int((frac * 100).rounded()))%")
+                    Text("正在准备离线语音 \(Int((frac * 100).rounded()))%")
                         .monospacedDigit()
                         .font(YYUI.font(12.5, .semibold)).foregroundStyle(YYColor.t1)
                 case .failed:
-                    Text("没下下来").font(YYUI.font(12.5, .semibold)).foregroundStyle(YYColor.t1)
+                    Text("离线语音没下下来").font(YYUI.font(12.5, .semibold)).foregroundStyle(YYColor.t1)
                 default:
-                    Text("更好的声音 · \(LiveVoiceModel.totalMegabytes) MB").font(YYUI.font(12.5, .semibold)).foregroundStyle(YYColor.t1)
+                    Text("语阅离线语音（Kokoro） · \(KokoroModel.totalMegabytes) MB").font(YYUI.font(12.5, .semibold)).foregroundStyle(YYColor.t1)
                 }
-                Text("不联网 · 分角色带语气").font(YYUI.font(10.5)).foregroundStyle(YYColor.t3)
+                Text("跨端自然朗读 · 断网可用").font(YYUI.font(10.5)).foregroundStyle(YYColor.t3)
             }
             Spacer()
             switch phase {
             case .downloading: ProgressView().controlSize(.small)
             case .failed:
-                Button(String(localized: "再试")) { LiveVoiceDownload.shared.start() }
+                Button(String(localized: "再试")) { KokoroDownload.shared.start() }
                     .buttonStyle(YYButtonStyle(kind: .danger, size: .small, height: 25))
             default:
-                Button(String(localized: "下载")) { LiveVoiceDownload.shared.start() }
+                Button(String(localized: "下载")) { KokoroDownload.shared.start() }
                     .buttonStyle(YYButtonStyle(kind: .soft, size: .small, height: 25))
             }
         }

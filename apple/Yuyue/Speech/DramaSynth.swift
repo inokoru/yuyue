@@ -101,8 +101,12 @@ import UIKit
     /// 旁白回退升级：当即时层与声音包就绪且用户未手选非系统声音时，优先使用该语言默认旁白声音卡。
     static func effectiveNarrator(for language: String, chosen: String?) -> String? {
         if let chosen,
-           chosen.hasPrefix("card.") || chosen.hasPrefix("cloned.") || chosen.hasPrefix("cloud.") || chosen.hasPrefix("actor.") {
+           chosen.hasPrefix("kokoro.") || chosen.hasPrefix("card.") || chosen.hasPrefix("cloned.") || chosen.hasPrefix("cloud.") || chosen.hasPrefix("actor.") {
             return chosen
+        }
+        if KokoroModel.isInstalled, CardVoice.supportsLanguage(language),
+           let def = KokoroModel.defaultNarrator(for: language) {
+            return def.id
         }
         if LiveVoiceModel.isInstalled, CardVoice.supportsLanguage(language),
            let def = VoicePack.defaultNarrator(for: language) {

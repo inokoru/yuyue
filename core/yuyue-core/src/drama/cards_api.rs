@@ -422,4 +422,31 @@ impl YuyueCore {
     pub fn live_voice_check(&self, samples: Vec<f32>, rate: u32, text: String, lang: String, expected_rate: f32) -> bool {
         super::zipvoice::light_check(&samples, rate, &text, &lang, expected_rate)
     }
+
+    // ── 跨端轻量离线神经旁白 (`Kokoro-82M-v1.1-zh Int8`, Apache-2.0) ──
+
+    /// Registers the `kokoro-v1_1-1/` directory (`tokens.txt` + `lexicon-*.txt`).
+    pub fn kokoro_set_dir(&self, dir: String) -> u32 {
+        super::kokoro::set_model_dir(std::path::Path::new(&dir)) as u32
+    }
+
+    /// Curated Mandarin & English narrator catalog for `Kokoro-82M-v1.1-zh`.
+    pub fn kokoro_voices(&self) -> Vec<super::kokoro::KokoroSpeaker> {
+        super::kokoro::builtin_speakers()
+    }
+
+    /// Splits a sentence into natural breath clauses within Kokoro's 510-token style window.
+    pub fn kokoro_clauses(&self, text: String, lang: String) -> Vec<String> {
+        super::kokoro::split_clauses(&text, &lang)
+    }
+
+    /// Tokenizes a clause into Kokoro inner phoneme IDs (caller wraps `[0, .., 0]`).
+    pub fn kokoro_tokens(&self, text: String, lang: String) -> Vec<i64> {
+        super::kokoro::tokenize(&text, &lang)
+    }
+
+    /// Trims leading/trailing silence and normalizes Kokoro PCM to −20 LUFS.
+    pub fn kokoro_postprocess(&self, samples: Vec<f32>, rate: u32) -> Vec<f32> {
+        super::kokoro::postprocess_pcm(&samples, rate)
+    }
 }

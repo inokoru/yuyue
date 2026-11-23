@@ -82,6 +82,9 @@ public sealed class AudioPlayer : IDisposable
         {
             string pLabel = cv.Provider switch
             {
+                CloudTtsProvider.Free => "免 Key 在线",
+                CloudTtsProvider.Volcengine => "火山豆包",
+                CloudTtsProvider.Fish => "Fish Audio",
                 CloudTtsProvider.OpenAi => "OpenAI",
                 CloudTtsProvider.Azure => "Azure",
                 _ => "ElevenLabs",
@@ -91,7 +94,7 @@ public sealed class AudioPlayer : IDisposable
 
         foreach (var v in AvailableVoices)
         {
-            list.Add(new SpeechVoiceOption($"sys:{v.Id}", $"{v.DisplayName} ({v.Language})", false));
+            list.Add(new SpeechVoiceOption($"sys:{v.Id}", $"{v.DisplayName} ({v.Language}) · 系统自带（不推荐）", false));
         }
         return list;
     }
@@ -165,6 +168,13 @@ public sealed class AudioPlayer : IDisposable
                 _selectedCardId = narrator.Id;
                 _voiceDisplayName = $"{narrator.Name} · 离线人声";
             }
+        }
+        else if (string.IsNullOrWhiteSpace(raw) && _library?.CloudVoices.IsConfigured(CloudTtsProvider.Free) == true)
+        {
+            bool isEn = _language.StartsWith("en", StringComparison.OrdinalIgnoreCase);
+            string freeId = isEn ? "af_heart" : "zf_001";
+            _selectedCloudId = $"cloud.free.{freeId}";
+            _voiceDisplayName = isEn ? "Heart · 免 Key 在线" : "晓语 · 免 Key 在线";
         }
 
         string sysId = raw.StartsWith("sys:", StringComparison.Ordinal) ? raw[4..] : raw;

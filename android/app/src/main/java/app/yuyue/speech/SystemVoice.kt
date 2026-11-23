@@ -295,9 +295,10 @@ object Voices {
         return sortBuiltinCards(core.cardsBuiltin(), tag)
     }
 
-    /** Default narrator card when the on-device live voice bundle is ready (`card.b.01` zh, `card.b.33` en). */
-    fun defaultNarrator(tag: String): CardVoice? {
+    /** Default narrator voice when Kokoro or LiveVoice bundle is ready. */
+    fun defaultNarrator(tag: String): BookVoice? {
         if (!CardVoice.speaksLanguage(tag)) return null
+        KokoroModel.defaultNarrator(tag)?.let { return it }
         val app = runCatching { app.yuyue.YuyueApp.instance }.getOrNull() ?: return null
         val dataDir = app.library.dataDir
         val core = app.library.core
@@ -308,6 +309,9 @@ object Voices {
 
     suspend fun all(tag: String, bookID: String? = null): List<BookVoice> {
         val app = runCatching { app.yuyue.YuyueApp.instance }.getOrNull()
+        val kokoro = if (app != null && KokoroModel.canRun(app.library.dataDir)) {
+            KokoroModel.voices(app.library.core, app.library.dataDir, tag)
+        } else emptyList()
         val cards = if (app != null && LiveVoiceModel.canRun(app.library.dataDir)) {
             val core = app.library.core
             val dataDir = app.library.dataDir
@@ -325,12 +329,16 @@ object Voices {
         } else emptyList()
         val sys = SystemVoice.Engine.voices().filter { it.speaks(tag) }.sortedByDescending { it.isOffline }
         val cloud = CloudVoice.all().filter { it.speaks(tag) }
-        return cards + cloud + sys
+        return kokoro + cards + cloud + sys
     }
 
     suspend fun find(id: String, bookID: String? = null): BookVoice? {
         val app = runCatching { app.yuyue.YuyueApp.instance }.getOrNull()
         return when {
+            id.startsWith("kokoro.") -> {
+                if (app == null || !KokoroModel.canRun(app.library.dataDir)) null
+                else KokoroModel.voices(app.library.core, app.library.dataDir).firstOrNull { it.id == id }
+            }
             id.startsWith("card.") -> {
                 if (app == null || !LiveVoiceModel.canRun(app.library.dataDir)) null
                 else {
@@ -359,8 +367,16 @@ object Voices {
         return voices.firstOrNull { it.speaks(tag) }
     }
 
-    /** The best voice for text in `tag`: default narrator card when installed, else offline system voice. */
-    suspend fun best(tag: String): BookVoice? = defaultNarrator(tag) ?: systemBest(tag)
+    /** The best voice for text in `tag`: Kokoro / LiveVoice narrator -> keyless Free online -> system fallback. */
+    suspend fun best(tag: String): BookVoice? {
+        defaultNarrator(tag)?.let { return it }
+        val freeList = CloudVoice.all().filter { it.provider == CloudVoice.Provider.Free && it.speaks(tag) }
+        if (freeList.isNotEmpty()) {
+            val preferred = if (tag.lowercase().startsWith("en")) "cloud.free.af_heart" else "cloud.free.zf_001"
+            return freeList.firstOrNull { it.id == preferred } ?: freeList.first()
+        }
+        return systemBest(tag)
+    }
 
     fun title(v: BookVoice) = listOfNotNull(v.name, v.qualityName).joinToString(" · ")
 }

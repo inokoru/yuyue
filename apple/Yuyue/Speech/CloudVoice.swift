@@ -24,10 +24,13 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
     }
 
     enum Provider: String, CaseIterable, Identifiable, Sendable {
+        case free
+        case volcengine
         case xiaomi
         case siliconflow
         case dashscope
         case minimax
+        case fish
         case azure
         case openai
         case elevenlabs
@@ -42,22 +45,26 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
 
         var group: Group {
             switch self {
-            case .xiaomi, .siliconflow, .dashscope, .minimax: .domestic
-            case .azure, .openai, .elevenlabs, .deepgram: .global
+            case .free, .volcengine, .xiaomi, .siliconflow, .dashscope, .minimax: .domestic
+            case .fish, .azure, .openai, .elevenlabs, .deepgram: .global
             case .voicestudio, .voicebox, .mlxaudio, .speaches, .local: .local
             }
         }
 
         var isLocal: Bool { group == .local }
-        var isPaidCloud: Bool { !isLocal }
-        var needsKey: Bool { !isLocal }
+        var isFreeOnline: Bool { self == .free }
+        var isPaidCloud: Bool { !isLocal && !isFreeOnline }
+        var needsKey: Bool { !isLocal && !isFreeOnline }
 
         var title: String {
             switch self {
+            case .free: String(localized: "在线自然语音")
+            case .volcengine: String(localized: "火山引擎（豆包）")
             case .xiaomi: String(localized: "小米 MiMo")
             case .siliconflow: String(localized: "硅基流动")
             case .dashscope: String(localized: "阿里云百炼")
             case .minimax: "MiniMax"
+            case .fish: "Fish Audio"
             case .azure: String(localized: "微软 Azure")
             case .openai: "OpenAI"
             case .elevenlabs: "ElevenLabs"
@@ -73,13 +80,42 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
             }
         }
 
+        /// 顶部紧凑切换栏使用的短标题（避免在窄栏里被截断）。
+        var tabTitle: String {
+            switch self {
+            case .free: String(localized: "在线语音")
+            case .volcengine: String(localized: "火山豆包")
+            case .xiaomi: String(localized: "小米 MiMo")
+            case .siliconflow: String(localized: "硅基流动")
+            case .dashscope: String(localized: "阿里百炼")
+            case .minimax: "MiniMax"
+            case .fish: "Fish"
+            case .azure: "Azure"
+            case .openai: "OpenAI"
+            case .elevenlabs: "ElevenLabs"
+            case .deepgram: "Deepgram"
+            case .voicestudio: "VoiceStudio"
+            case .voicebox: "Voicebox"
+            case .mlxaudio: "mlx-audio"
+            case .speaches: "Speaches"
+            case .local: {
+                let custom = (UserDefaults.standard.string(forKey: "tts.local.title") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if custom.isEmpty { return String(localized: "自定义") }
+                return custom.count > 6 ? String(custom.prefix(6)) + "…" : custom
+            }()
+            }
+        }
+
         /// 搜索别名（中文名、开源项目名、模型名）。
         var aliases: String {
             switch self {
+            case .free: "free keyless sherpa kokoro melotts 免key 免费 在线"
+            case .volcengine: "volcengine doubao bytedance 火山 豆包 字节 灿灿"
             case .xiaomi: "xiaomi mimo 小米 小爱 冰糖 茉莉"
             case .siliconflow: "siliconflow 硅基 cosyvoice indextts fish"
             case .dashscope: "dashscope aliyun qwen 阿里 百炼 通义 千问"
             case .minimax: "minimax 海螺 稀宇 speech"
+            case .fish: "fish audio openaudio s1 鱼 社区克隆"
             case .azure: "microsoft azure 微软 晓晓 云希"
             case .openai: "openai gpt chatgpt alloy nova"
             case .elevenlabs: "elevenlabs 11labs"
@@ -95,8 +131,9 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
         /// 推荐角标（如免费额度提示），保持克制。
         var badge: String? {
             switch self {
+            case .free: String(localized: "免 Key")
             case .xiaomi: String(localized: "限时免费")
-            case .azure, .deepgram: String(localized: "含免费额度")
+            case .volcengine, .fish, .azure, .deepgram: String(localized: "含免费额度")
             case .voicestudio, .voicebox, .mlxaudio, .speaches: String(localized: "本机开源")
             default: nil
             }
@@ -104,6 +141,7 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
 
         var keyName: String { "tts.\(rawValue).key" }
         static let regionName = "tts.azure.region"
+        static let volcAppIDName = "tts.volcengine.appid"
         var voicesName: String { "tts.\(rawValue).voices" }
         var urlName: String { "tts.\(rawValue).url" }
         var modelName: String { "tts.\(rawValue).model" }
@@ -178,16 +216,27 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
         }
 
         var isSetUp: Bool {
+            if isFreeOnline {
+                return !UserDefaults.standard.bool(forKey: dismissedName)
+            }
             if isLocal {
                 let explicit = UserDefaults.standard.bool(forKey: enabledName) && !savedURL.isEmpty
                 return explicit || isAutoDiscovered
+            }
+            if self == .volcengine {
+                guard let k = key, !k.isEmpty else { return false }
+                let appID = (UserDefaults.standard.string(forKey: Self.volcAppIDName) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                return !appID.isEmpty || k.contains("|")
             }
             return key != nil && (self != .azure || !(UserDefaults.standard.string(forKey: Self.regionName) ?? "").isEmpty)
         }
 
         var keyHint: String {
             switch self {
+            case .free: String(localized: "免填 Key")
+            case .volcengine: String(localized: "AppID|AccessToken（如 12345678|token…）")
             case .xiaomi, .siliconflow, .dashscope, .openai: "sk-…"
+            case .fish: "fish_… / Bearer Key"
             case .minimax: "eyJ…"
             case .azure: String(localized: "资源的密钥 1")
             case .elevenlabs: "sk_…"
@@ -198,10 +247,13 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
 
         var help: String {
             switch self {
+            case .free: String(localized: "基于开源社区公共语音服务（Next-gen Kaldi Kokoro / MeloTTS），免注册、免填 Key，合成后的句子自动缓存在本机。")
+            case .volcengine: String(localized: "火山引擎语音技术控制台创建应用后，按「AppID|AccessToken」填入（竖线分隔），支持豆包灿灿 2.0 等自然声线。")
             case .xiaomi: String(localized: "platform.xiaomimimo.com 控制台新建 API Key，当前限时免费，支持自然语言语气控制。")
             case .siliconflow: String(localized: "cloud.siliconflow.cn › API 密钥新建。内置 CosyVoice2 音色并支持你在控制台克隆的声音。")
             case .dashscope: String(localized: "阿里云百炼控制台获取 API-KEY，千问3-TTS 按字计费（约 0.1 元/千字），新开通含免费体验包。")
             case .minimax: String(localized: "platform.minimaxi.com › 接口密钥新建。支持高拟真呼吸感与情绪朗读。")
+            case .fish: String(localized: "fish.audio › API Keys 新建密钥，基于 OpenAudio S1 引擎，自动拉取热门中英社区旁白与自建音色。")
             case .openai: String(localized: "platform.openai.com › API keys 里建一个。费用按字数算，走你的账号。")
             case .azure: String(localized: "Azure 门户里建一个“语音”资源，拷它的密钥和区域（比如 eastasia）。有免费额度。")
             case .elevenlabs: String(localized: "elevenlabs.io › 个人资料 › API Keys。额度按字数算。")
@@ -430,6 +482,66 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
 
     private func fetch(_ text: String, language: String, parts: [SpokenPart]? = nil, acting: Acting? = nil) async throws -> (Data, String) {
         switch provider {
+        case .free:
+            return try await Self.fetchFreeOnline(text: text, voiceID: voiceID, language: language)
+
+        case .volcengine:
+            guard let (appID, token) = Self.volcengineCredentials() else { throw Failure.noKey(provider) }
+            var request = URLRequest(url: URL(string: "https://openspeech.bytedance.com/api/v1/tts")!)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 35
+            request.setValue("Bearer;\(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body: [String: Any] = [
+                "app": ["appid": appID, "token": token, "cluster": "volcano_tts"],
+                "user": ["uid": "yuyue"],
+                "audio": ["voice_type": voiceID, "encoding": "mp3", "speed_ratio": 1.0],
+                "request": ["reqid": UUID().uuidString, "text": text, "operation": "query"],
+            ]
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200 ..< 300).contains(code) else { throw Self.failure(provider, code, data) }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw Failure.unreadable
+            }
+            let apiCode = (json["code"] as? Int) ?? 0
+            if apiCode != 3000 {
+                let msg = json["message"] as? String
+                if apiCode == 3001 || apiCode == 3003 || code == 401 || code == 403 {
+                    throw Failure.badKey(provider)
+                }
+                throw Failure.server(provider, apiCode, msg)
+            }
+            guard let b64 = json["data"] as? String,
+                  let audioData = Data(base64Encoded: b64, options: .ignoreUnknownCharacters),
+                  !audioData.isEmpty else {
+                throw Failure.unreadable
+            }
+            return (audioData, Self.sniffExt(audioData, fallback: "mp3"))
+
+        case .fish:
+            guard let key = provider.key else { throw Failure.noKey(provider) }
+            var request = URLRequest(url: URL(string: "https://api.fish.audio/v1/tts")!)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 35
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("s1", forHTTPHeaderField: "model")
+            var body: [String: Any] = [
+                "text": text,
+                "format": "mp3",
+                "mp3_bitrate": 64,
+            ]
+            if !voiceID.isEmpty && voiceID != "default" {
+                body["reference_id"] = voiceID
+            }
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200 ..< 300).contains(code) else { throw Self.failure(provider, code, data) }
+            return (data, Self.sniffExt(data, fallback: "mp3"))
+
         case .xiaomi:
             guard let key = provider.key else { throw Failure.noKey(provider) }
             var request = URLRequest(url: URL(string: "https://api.xiaomimimo.com/v1/chat/completions")!)
@@ -791,6 +903,31 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
 
     // MARK: Built-in preset voice tables
 
+    static let freeOnlineVoices: [(id: String, name: String, lang: String, gender: String, age: String)] = [
+        ("3", "清禾 · 温润自然", "zh-CN", "female", "young"),
+        ("59", "沉舟 · 醇厚稳重", "zh-CN", "male", "middle_aged"),
+        ("4", "知夏 · 柔和舒缓", "zh-CN", "female", "young"),
+        ("58", "松风 · 清朗平和", "zh-CN", "male", "young"),
+        ("6", "云舒 · 沉静端庄", "zh-CN", "female", "middle_aged"),
+        ("67", "怀瑾 · 明快男声", "zh-CN", "male", "young"),
+        ("0", "Maple · Warm US", "en-US", "female", "young"),
+        ("2", "Vale · Crisp UK", "en-GB", "female", "young"),
+        ("1", "Sol · Bright US", "en-US", "female", "young"),
+    ]
+
+    static let volcengineVoices: [(id: String, name: String, lang: String, gender: String, age: String)] = [
+        ("BV700_V2_streaming", "灿灿 2.0 · 自然温暖女声", "zh-CN", "female", "young"),
+        ("BV705_streaming", "炀炀 · 阳光自然男声", "zh-CN", "male", "young"),
+        ("BV406_V2_streaming", "梓梓 2.0 · 灵动清亮女声", "zh-CN", "female", "young"),
+        ("BV001_V2_streaming", "通用女声 2.0 · 沉稳旁白", "zh-CN", "female", "middle_aged"),
+        ("BV002_V2_streaming", "通用男声 2.0 · 醇厚旁白", "zh-CN", "male", "middle_aged"),
+        ("BV102_streaming", "儒雅青年 · 温和男声", "zh-CN", "male", "young"),
+    ]
+
+    static let fishPresets: [(id: String, name: String, gender: String, age: String)] = [
+        ("default", "OpenAudio S1 · 默认自然旁白", "female", "young"),
+    ]
+
     static let openAIVoices = ["alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"]
     static let openAIGender: [String: String] = [
         "alloy": "female", "ash": "male", "ballad": "male", "coral": "female", "echo": "male",
@@ -872,6 +1009,14 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
     static func all() -> [CloudVoice] {
         Provider.allCases.filter(\.isSetUp).flatMap { p -> [CloudVoice] in
             switch p {
+            case .free:
+                return freeOnlineVoices.map { CloudVoice(provider: p, voiceID: $0.id, name: $0.name, language: $0.lang, gender: $0.gender, age: $0.age) }
+            case .volcengine:
+                return volcengineVoices.map { CloudVoice(provider: p, voiceID: $0.id, name: $0.name, language: $0.lang, gender: $0.gender, age: $0.age) }
+            case .fish:
+                let custom = savedTuples(for: p)
+                let presets = fishPresets.map { CloudVoice(provider: p, voiceID: $0.id, name: $0.name, language: nil, gender: $0.gender, age: $0.age) }
+                return custom.isEmpty ? presets : (presets + custom)
             case .openai:
                 return openAIVoices.map { CloudVoice(provider: p, voiceID: $0, name: $0.capitalized, language: nil) }
             case .xiaomi:
@@ -914,6 +1059,52 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
     /// Checks credentials / connectivity, fetches dynamic voices where supported, and caches them.
     static func refresh(_ p: Provider) async throws -> Int {
         switch p {
+        case .free:
+            _ = try await fetchFreeOnline(text: "你好。", voiceID: "3", language: "zh-CN")
+            return freeOnlineVoices.count
+
+        case .volcengine:
+            guard let (appID, token) = volcengineCredentials() else { throw Failure.noKey(p) }
+            var request = URLRequest(url: URL(string: "https://openspeech.bytedance.com/api/v1/tts")!)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 15
+            request.setValue("Bearer;\(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body: [String: Any] = [
+                "app": ["appid": appID, "token": token, "cluster": "volcano_tts"],
+                "user": ["uid": "yuyue"],
+                "audio": ["voice_type": "BV700_V2_streaming", "encoding": "mp3", "speed_ratio": 1.0],
+                "request": ["reqid": UUID().uuidString, "text": "好", "operation": "query"],
+            ]
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200 ..< 300).contains(code) else { throw failure(p, code, data) }
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let apiCode = (json?["code"] as? Int) ?? 0
+            guard apiCode == 3000 else {
+                if apiCode == 3001 || apiCode == 3003 { throw Failure.badKey(p) }
+                throw Failure.server(p, apiCode, json?["message"] as? String)
+            }
+            return volcengineVoices.count
+
+        case .fish:
+            guard let key = p.key else { throw Failure.noKey(p) }
+            var request = URLRequest(url: URL(string: "https://api.fish.audio/model?page_size=24&sort_by=task_count")!)
+            request.timeoutInterval = 15
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200 ..< 300).contains(code) else { throw failure(p, code, data) }
+            let items = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["items"] as? [[String: Any]] ?? []
+            let fetched: [[String]] = items.compactMap { item in
+                guard let id = (item["_id"] as? String) ?? (item["id"] as? String), !id.isEmpty,
+                      let title = item["title"] as? String, !title.isEmpty else { return nil }
+                return [id, title, "", "", ""]
+            }
+            UserDefaults.standard.set(fetched, forKey: p.voicesName)
+            return fishPresets.count + fetched.count
+
         case .openai:
             guard let key = p.key else { throw Failure.noKey(p) }
             var request = URLRequest(url: URL(string: "https://api.openai.com/v1/models/gpt-4o-mini-tts")!)
@@ -1048,6 +1239,180 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
             LocalVoiceProbe.shared.recordManualSuccess(p, baseV1: base, info: info)
             return max(rows.count, defaultLocalVoices.count)
         }
+    }
+
+    static func volcengineCredentials() -> (appID: String, token: String)? {
+        guard let rawKey = Provider.volcengine.key?.trimmingCharacters(in: .whitespacesAndNewlines), !rawKey.isEmpty else {
+            return nil
+        }
+        if let pipe = rawKey.firstIndex(of: "|") {
+            let app = String(rawKey[..<pipe]).trimmingCharacters(in: .whitespaces)
+            let tok = String(rawKey[rawKey.index(after: pipe)...]).trimmingCharacters(in: .whitespaces)
+            if !app.isEmpty, !tok.isEmpty { return (app, tok) }
+        }
+        let savedApp = (UserDefaults.standard.string(forKey: Provider.volcAppIDName) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !savedApp.isEmpty else { return nil }
+        return (savedApp, rawKey)
+    }
+
+    /// 免 Key 在线自然语音：支持自定免密兼容网关，默认直连 Next-gen Kaldi (`k2-fsa/text-to-speech`) 与
+    /// `MeloTTS` 官方公开 Gradio 语音接口（魔搭与 Hugging Face 双源自动回退）。
+    static func fetchFreeOnline(text: String, voiceID: String, language: String) async throws -> (Data, String) {
+        let customBase = (UserDefaults.standard.string(forKey: Provider.free.urlName) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !customBase.isEmpty, let endpoint = speechEndpoint(from: customBase) {
+            var req = URLRequest(url: endpoint, timeoutInterval: 25)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let model = (UserDefaults.standard.string(forKey: Provider.free.modelName) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let payload: [String: Any] = [
+                "model": model.isEmpty ? "kokoro" : model,
+                "voice": voiceID,
+                "input": text,
+                "response_format": "mp3",
+            ]
+            req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200 ..< 300).contains(code), !data.isEmpty else { throw failure(.free, code, data) }
+            return (data, sniffExt(data, fallback: "mp3"))
+        }
+
+        let isEnglish = language.lowercased().hasPrefix("en") && !text.unicodeScalars.contains { (0x4E00 ... 0x9FFF).contains($0.value) }
+        let k2Data: [Any] = [
+            "Chinese+English",
+            "csukuangfj/kokoro-multi-lang-v1_1|103 speakers",
+            text,
+            Int(voiceID) != nil ? voiceID : (isEnglish ? "0" : "3"),
+            1.0,
+        ]
+        let meloData: [Any] = [
+            text,
+            isEnglish ? "EN-Default" : "ZH",
+            1.0,
+            isEnglish ? "EN" : "ZH",
+        ]
+
+        let cnFirst = ModelDownload.prefersChinaMirror
+        let routes: [(base: String, fn: String, args: [Any])] = cnFirst
+            ? [
+                ("https://k2-fsa-text-to-speech.ms.show", "process", k2Data),
+                ("https://k2-fsa-text-to-speech.hf.space", "process", k2Data),
+                ("https://mrfakename-melotts.hf.space", "synthesize", meloData),
+            ]
+            : [
+                ("https://k2-fsa-text-to-speech.hf.space", "process", k2Data),
+                ("https://mrfakename-melotts.hf.space", "synthesize", meloData),
+                ("https://k2-fsa-text-to-speech.ms.show", "process", k2Data),
+            ]
+
+        var lastError: Error = Failure.unreachable(.free)
+        for route in routes {
+            try Task.checkCancellation()
+            do {
+                let (audioData, ext) = try await callGradioAudio(baseURL: route.base, fnName: route.fn, args: route.args)
+                if !audioData.isEmpty { return (audioData, ext) }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                lastError = error
+            }
+        }
+
+        // 若已装好本机 Kokoro 轻量包且外网偶发离线，自动本机无感接管同音色朗读。
+        if let sid = UInt32(voiceID), let ctx = LiveVoiceModel.context, KokoroModel.installed(ctx.dataDir) {
+            let sp = KokoroModel.allSpeakers().first { $0.sid == sid } ?? KokoroSpeaker(
+                id: "kokoro.sid\(sid)", voiceId: "sid\(sid)", sid: sid, name: "Kokoro",
+                lang: isEnglish ? "en" : "zh", gender: .f, narrator: false, summary: ""
+            )
+            if let samples = try? await KokoroEngine.shared.synthesize(
+                core: ctx.core, dataDir: ctx.dataDir, speaker: sp, text: text, language: isEnglish ? "en" : "zh"
+            ), !samples.isEmpty {
+                var pcm16 = Data(capacity: samples.count * 2)
+                for s in samples {
+                    let v = Int16(max(-32767, min(32767, (s * 32767.0).rounded()))).littleEndian
+                    withUnsafeBytes(of: v) { pcm16.append(contentsOf: $0) }
+                }
+                return (wav(pcm: pcm16, rate: 24_000), "wav")
+            }
+        }
+        throw lastError
+    }
+
+    private static func callGradioAudio(baseURL: String, fnName: String, args: [Any]) async throws -> (Data, String) {
+        for apiPrefix in ["/gradio_api", ""] {
+            guard let postURL = URL(string: "\(baseURL)\(apiPrefix)/call/\(fnName)") else { continue }
+            var postReq = URLRequest(url: postURL, timeoutInterval: 14)
+            postReq.httpMethod = "POST"
+            postReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            postReq.httpBody = try JSONSerialization.data(withJSONObject: ["data": args])
+
+            let (postData, postResp): (Data, URLResponse)
+            do {
+                (postData, postResp) = try await URLSession.shared.data(for: postReq)
+            } catch {
+                continue
+            }
+            let pCode = (postResp as? HTTPURLResponse)?.statusCode ?? 0
+            if pCode == 404 { continue }
+            guard (200 ..< 300).contains(pCode),
+                  let postJSON = try? JSONSerialization.jsonObject(with: postData) as? [String: Any],
+                  let eventID = postJSON["event_id"] as? String, !eventID.isEmpty,
+                  let streamURL = URL(string: "\(baseURL)\(apiPrefix)/call/\(fnName)/\(eventID)") else {
+                throw Failure.server(.free, pCode, nil)
+            }
+
+            var getReq = URLRequest(url: streamURL, timeoutInterval: 28)
+            getReq.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+            let (sseData, sseResp) = try await URLSession.shared.data(for: getReq)
+            let sCode = (sseResp as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200 ..< 300).contains(sCode),
+                  let text = String(data: sseData, encoding: .utf8) else {
+                throw Failure.server(.free, sCode, nil)
+            }
+
+            if let fileURL = extractGradioAudioURL(from: text, baseURL: baseURL, apiPrefix: apiPrefix) {
+                var dlReq = URLRequest(url: fileURL, timeoutInterval: 20)
+                dlReq.httpMethod = "GET"
+                let (audioData, dlResp) = try await URLSession.shared.data(for: dlReq)
+                let dCode = (dlResp as? HTTPURLResponse)?.statusCode ?? 0
+                guard (200 ..< 300).contains(dCode), audioData.count > 64 else {
+                    throw Failure.unreadable
+                }
+                return (audioData, sniffExt(audioData, fallback: "wav"))
+            }
+        }
+        throw Failure.unreachable(.free)
+    }
+
+    private static func extractGradioAudioURL(from sseText: String, baseURL: String, apiPrefix: String) -> URL? {
+        var sawComplete = false
+        for rawLine in sseText.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if line.hasPrefix("event:") {
+                let ev = line.dropFirst("event:".count).trimmingCharacters(in: .whitespaces)
+                sawComplete = (ev == "complete")
+                if ev == "error" { return nil }
+            } else if line.hasPrefix("data:"), sawComplete {
+                let payload = String(line.dropFirst("data:".count)).trimmingCharacters(in: .whitespaces)
+                guard let data = payload.data(using: .utf8),
+                      let arr = try? JSONSerialization.jsonObject(with: data) as? [Any],
+                      let first = arr.first else { continue }
+                if let dict = first as? [String: Any] {
+                    if let urlStr = dict["url"] as? String, !urlStr.isEmpty {
+                        if urlStr.hasPrefix("http") { return URL(string: urlStr) }
+                        return URL(string: baseURL + (urlStr.hasPrefix("/") ? urlStr : "/" + urlStr))
+                    }
+                    if let path = dict["path"] as? String, !path.isEmpty {
+                        let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
+                        return URL(string: "\(baseURL)\(apiPrefix)/file=\(encoded)")
+                    }
+                } else if let str = first as? String, !str.isEmpty {
+                    if str.hasPrefix("http") { return URL(string: str) }
+                    return URL(string: "\(baseURL)\(apiPrefix)/file=\(str)")
+                }
+            }
+        }
+        return nil
     }
 }
 

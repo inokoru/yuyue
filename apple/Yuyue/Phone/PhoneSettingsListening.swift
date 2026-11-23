@@ -13,6 +13,7 @@ struct PhoneListening: View {
 
     var body: some View {
         let _ = tick
+        let _ = KokoroDownload.shared.phase
         let sources = VoiceSource.active()
         YYPage {
             PhoneSettingsLead(String(localized: "朗读、查词发音与播客音色"))
@@ -27,7 +28,7 @@ struct PhoneListening: View {
                         ServiceTile(mark: .add, size: YYUI.s(26))
                         VStack(alignment: .leading, spacing: YYUI.s(1)) {
                             Text("添加声音来源").font(YYUI.font(11.5, .medium)).foregroundStyle(YYColor.t2)
-                            Text("小米 MiMo（限时免费）、硅基流动、百炼、局域网语音…")
+                            Text("火山豆包、Fish Audio、小米 MiMo（限时免费）、硅基流动、局域网语音…")
                                 .font(YYUI.font(10)).foregroundStyle(YYColor.t3).lineLimit(1)
                         }
                         Spacer(minLength: YYUI.s(6))
@@ -38,7 +39,7 @@ struct PhoneListening: View {
                 }
                 .buttonStyle(.plain)
             }
-            YYNote(String(localized: "云端语音使用你自己的 API Key，也可填局域网地址连接电脑上的 VoiceStudio。已合成句子缓存在本机，重听不重复计费。"))
+            YYNote(String(localized: "推荐下载「语阅离线语音（Kokoro）」断网畅听，或直接使用免 Key 的「在线自然语音」。系统自带语音机械感较重（不推荐），仅作断网兜底。"))
             PhoneSettingsHeading(String(localized: "语速"))
             YYGroup {
                 HStack(spacing: YYUI.s(8)) {
@@ -73,6 +74,10 @@ struct PhoneListening: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $addingSheet) {
             VoiceProviderSheet { picked in
+                if picked == .free {
+                    UserDefaults.standard.set(false, forKey: picked.dismissedName)
+                    ListeningFocus.shared.reload()
+                }
                 pickedProvider = picked
             }
         }
@@ -83,14 +88,27 @@ struct PhoneListening: View {
             ListeningFocus.shared.reload()
             tick &+= 1
         }
+        .onReceive(NotificationCenter.default.publisher(for: KokoroModel.ready)) { _ in tick &+= 1 }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in tick &+= 1 }
     }
 
     private func row(_ source: VoiceSource) -> some View {
         HStack(spacing: YYUI.s(10)) {
-            ServiceTile(mark: source.mark, size: YYUI.s(26))
+            ServiceTile(mark: source.mark, size: YYUI.s(26)).opacity(source == .mac ? 0.65 : 1)
             VStack(alignment: .leading, spacing: YYUI.s(1)) {
-                Text(source.title).font(YYUI.font(11.5, .medium)).foregroundStyle(YYColor.t1)
+                HStack(spacing: YYUI.s(5)) {
+                    Text(source.title)
+                        .font(YYUI.font(11.5, .medium))
+                        .foregroundStyle(source == .mac ? YYColor.t2 : YYColor.t1)
+                        .lineLimit(1)
+                    if source == .neural {
+                        SettingsPill(String(localized: "推荐"), tone: .ok)
+                    } else if source == .mac {
+                        SettingsPill(String(localized: "不推荐"), tone: .warn)
+                    } else if case .cloud(let p) = source, let badge = p.badge {
+                        SettingsPill(badge, tone: p == .free || p == .xiaomi ? .ok : .quiet)
+                    }
+                }
                 Text(detail(source)).font(YYUI.font(10)).foregroundStyle(YYColor.t3).lineLimit(1)
             }
             Spacer(minLength: YYUI.s(6))
@@ -113,8 +131,14 @@ struct PhoneListening: View {
 
     private func detail(_ source: VoiceSource) -> String {
         switch source {
-        case .mac: String(localized: "\(source.voiceCount) 个音色 · 本地免费，无需联网")
-        case .cloud(let p): p.isSetUp ? String(localized: "\(p.voiceCount) 个音色 · \(p.blurb)") : p.blurb
+        case .neural:
+            KokoroModel.isInstalled
+                ? String(localized: "\(source.voiceCount) 个音色 · 跨端轻量离线，无需联网")
+                : String(localized: "一键下载（\(KokoroModel.totalMegabytes) MB）· 跨端离线自然语音")
+        case .mac:
+            String(localized: "\(source.voiceCount) 个音色 · 机械音明显，仅作断网兜底")
+        case .cloud(let p):
+            p.isSetUp ? String(localized: "\(p.voiceCount) 个音色 · \(p.blurb)") : p.blurb
         }
     }
 }
@@ -170,31 +194,55 @@ private struct PhoneSourceSettings: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        let _ = KokoroDownload.shared.phase
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 switch source {
-                case .mac:
-                    PanelHeader(title: source.title, detail: String(localized: "系统自带")) { ServiceTile(mark: source.mark, size: 30) }
+                case .neural:
+                    PanelHeader(title: source.title, detail: String(localized: "跨端轻量离线语音 · 推荐")) { ServiceTile(mark: source.mark, size: 30) }
                     PanelCard {
-                        PanelRow { Text("声音") } trailing: {
-                            Text("\(source.voiceCount) 个").font(.yy(size: PanelScale.k * 12)).foregroundStyle(YYColor.t2)
+                        PanelRow { Text("Kokoro 引擎") } trailing: {
+                            SettingsPill(KokoroModel.isInstalled ? String(localized: "已就绪 · 53 音色") : String(localized: "待下载 · \(KokoroModel.totalMegabytes) MB"),
+                                         tone: KokoroModel.isInstalled ? .ok : .warn)
                         }
                         PanelRow { Text("费用") } trailing: {
                             Text("免费 · 不联网").font(.yy(size: PanelScale.k * 12)).foregroundStyle(YYColor.t2)
                         }
                     }
-                    PanelHint(String(localized: "前往「设置 › 辅助功能 › 朗读内容 › 声音」，下载增强或自然音色即可使用。"))
+                    if !KokoroModel.isInstalled {
+                        PanelCard {
+                            PanelButton(systemImage: "arrow.down.circle", tint: YYColor.ok) {
+                                Text("下载 Kokoro 离线语音（\(KokoroModel.totalMegabytes) MB）").foregroundStyle(YYColor.ok)
+                                Spacer(minLength: 0)
+                            } action: { KokoroDownload.shared.start() }
+                        }
+                    }
+                    PanelHint(String(localized: "Kokoro-82M v1.1 跨端统一离线合成，下载一次即可在断网环境下自然朗读中英文书籍。"))
+                case .mac:
+                    PanelHeader(title: source.title, detail: String(localized: "系统自带 · 不推荐")) { ServiceTile(mark: source.mark, size: 30) }
+                    PanelCard {
+                        PanelRow { Text("评级") } trailing: {
+                            SettingsPill(String(localized: "不推荐"), tone: .warn)
+                        }
+                        PanelRow { Text("声音") } trailing: {
+                            Text("\(source.voiceCount) 个").font(.yy(size: PanelScale.k * 12)).foregroundStyle(YYColor.t2)
+                        }
+                        PanelRow { Text("费用") } trailing: {
+                            Text("免费 · 仅兜底").font(.yy(size: PanelScale.k * 12)).foregroundStyle(YYColor.t2)
+                        }
+                    }
+                    PanelHint(String(localized: "系统自带合成音机械感较重，建议改用「语阅离线语音（Kokoro）」或「在线自然语音（免 Key）」。"))
                 case .cloud(let p):
                     PhoneCloudConnected(provider: p, changed: changed).padding(.horizontal, -16)
-                    PanelDestructive(String(localized: "断开 \(p.title)")) { removing = true }
-                        .confirmationDialog(String(localized: "断开 \(p.title)？"), isPresented: $removing) {
-                            Button("断开", role: .destructive) {
+                    PanelDestructive(p == .free ? String(localized: "隐藏 \(p.title)") : String(localized: "断开 \(p.title)")) { removing = true }
+                        .confirmationDialog(p == .free ? String(localized: "隐藏 \(p.title)？") : String(localized: "断开 \(p.title)？"), isPresented: $removing) {
+                            Button(p == .free ? "隐藏" : "断开", role: .destructive) {
                                 p.remove()
                                 changed()
                                 dismiss()
                             }
                         } message: {
-                            Text("将同时移除 API Key；使用该服务音色的书籍将切回本地音色。")
+                            Text(p == .free ? "隐藏后可在「添加声音来源」重新开启。" : "将同时移除 API Key；使用该服务音色的书籍将切回本地音色。")
                         }
                 }
             }
@@ -212,6 +260,7 @@ private struct PhoneCloudKey: View {
     let provider: CloudVoice.Provider
     let connected: () -> Void
     @State private var key = ""
+    @State private var appID = UserDefaults.standard.string(forKey: CloudVoice.Provider.volcAppIDName) ?? ""
     @State private var url = ""
     @State private var model = ""
     @State private var customName = ""
@@ -223,7 +272,20 @@ private struct PhoneCloudKey: View {
         let step = provider.keyStep
         VStack(alignment: .leading, spacing: 10) {
             PanelHeader(title: provider.title, detail: provider.blurb) { ServiceTile(mark: .cloud(provider), size: 30) }
-            if provider.isLocal {
+            if provider == .free {
+                PanelCard {
+                    PanelButton(systemImage: "waveform.path.ecg", tint: YYColor.ok) {
+                        Text("开启免 Key 在线自然语音").foregroundStyle(YYColor.ok)
+                        Spacer(minLength: 8)
+                        if connect.busy { ProgressView().controlSize(.mini) }
+                    } action: {
+                        let p = provider
+                        connect.start(String(localized: "正在检查在线语音线路…"), delay: .zero) {
+                            try await p.tryFree()
+                        } done: { connected() }
+                    }
+                }
+            } else if provider.isLocal {
                 PanelCard {
                     if provider == .local {
                         PanelField(label: String(localized: "名称"), text: $customName, prompt: String(localized: "比如 家里电脑"), mono: false)
@@ -255,7 +317,12 @@ private struct PhoneCloudKey: View {
                 }
                 PanelCard {
                     if provider == .azure { PhoneRegionRow(region: $region) }
-                    PanelField(label: "Key", text: $key, prompt: provider == .azure ? String(localized: "密钥 1") : provider.keyHint,
+                    if provider == .volcengine {
+                        PanelField(label: "AppID", text: $appID, prompt: String(localized: "应用 AppID"), submit: { attempt(now: true) })
+                    }
+                    PanelField(label: provider == .volcengine ? "Token" : "Key",
+                               text: $key,
+                               prompt: provider == .azure ? String(localized: "密钥 1") : (provider == .volcengine ? String(localized: "Access Token") : provider.keyHint),
                                secure: true, bad: connect.failed, submit: { attempt(now: true) })
                     PanelButton(systemImage: "waveform.path.ecg", tint: YYColor.ok) {
                         Text("检查连接").foregroundStyle(YYColor.ok)
@@ -273,7 +340,7 @@ private struct PhoneCloudKey: View {
                     Spacer(minLength: 0)
                 } action: { openURL(step.url) }
             }
-            PanelHint(step.detail + (provider.isLocal ? "" : String(localized: "。API Key 仅保存在本机钥匙串，调用费用由服务商直接结算。")))
+            PanelHint(step.detail + (provider.isLocal || provider == .free ? "" : String(localized: "。API Key 仅保存在本机钥匙串，调用费用由服务商直接结算。")))
         }
         .padding(.horizontal, 16)
         .onAppear {
@@ -283,16 +350,21 @@ private struct PhoneCloudKey: View {
                 if provider == .local { customName = UserDefaults.standard.string(forKey: "tts.local.title") ?? "" }
             }
         }
-        .onChange(of: key) { if !provider.isLocal { attempt(now: false) } }
-        .onChange(of: region) { if !provider.isLocal && !key.isEmpty { attempt(now: true) } }
+        .onChange(of: key) { if !provider.isLocal && provider != .free { attempt(now: false) } }
+        .onChange(of: region) { if !provider.isLocal && provider != .free && !key.isEmpty { attempt(now: true) } }
     }
 
     private func attempt(now: Bool) {
         let k = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard now ? !k.isEmpty : AutoConnect.looksLikeKey(k) else { connect.reset(); return }
-        let p = provider, r: String? = provider == .azure ? region : nil
+        if provider == .volcengine, !k.contains("|"), appID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !now {
+            return
+        }
+        let p = provider
+        let r: String? = provider == .azure ? region : nil
+        let a: String? = provider == .volcengine ? appID : nil
         connect.start(String(localized: "正在连 \(p.title)…"), delay: now ? .zero : .milliseconds(600)) {
-            try await p.tryKey(k, region: r)
+            try await p.tryKey(k, region: r, appID: a)
         } done: { connected() }
     }
 
@@ -324,7 +396,14 @@ private struct PhoneCloudConnected: View {
                 ServiceTile(mark: .cloud(provider), size: 30)
             }
             PanelCard {
-                if provider.isLocal {
+                if provider == .free {
+                    PanelRow { Text("模式") } trailing: {
+                        SettingsPill(String(localized: "免 Key · 零配置"), tone: .ok)
+                    }
+                    PanelRow { Text("线路") } trailing: {
+                        Text(provider.endpointHost).font(.yy(size: PanelScale.k * 11.5, design: .monospaced)).foregroundStyle(YYColor.t2)
+                    }
+                } else if provider.isLocal {
                     if editing {
                         PanelField(label: String(localized: "地址"), text: $url, prompt: provider.urlHint, autofocus: true, submit: saveLocal, cancel: stop)
                         PanelField(label: String(localized: "模型"), text: $model, prompt: provider.defaultModel, submit: saveLocal, cancel: stop)
@@ -374,13 +453,18 @@ private struct PhoneCloudConnected: View {
                 } action: {
                     guard !check.busy else { return }
                     let p = provider
-                    if p.isLocal {
+                    if p == .free {
+                        check.start("", delay: .zero) {
+                            try await p.tryFree()
+                        } done: { changed() }
+                    } else if p.isLocal {
                         check.start("", delay: .zero) {
                             try await p.tryLocal(url: p.savedURL, model: p.savedModel, key: p.key ?? "")
                         } done: { changed() }
                     } else if let k = p.key {
                         let r: String? = p == .azure ? region : nil
-                        check.start("", delay: .zero) { try await p.tryKey(k, region: r) } done: { changed() }
+                        let a: String? = p == .volcengine ? UserDefaults.standard.string(forKey: CloudVoice.Provider.volcAppIDName) : nil
+                        check.start("", delay: .zero) { try await p.tryKey(k, region: r, appID: a) } done: { changed() }
                     }
                 }
             }
@@ -471,9 +555,10 @@ struct PhoneCompanionSettings: View {
                 NavigationLink { PhoneCompanionService(provider: .apple) } label: {
                     row(.thisMac, dim: !apple) {
                         Text(SettingsDevice.name)
+                        SettingsPill(String(localized: "不推荐"), tone: .warn)
                         if apple && choice.current.provider.kind == .apple { SettingsPill(String(localized: "当前使用"), tone: .ok) }
                     } detail: {
-                        Text("Apple 智能 · 本地运行，免费免联网")
+                        Text("Apple 智能 · 能力与上下文受限，仅本地兜底")
                     } trailing: {
                         switch Companion.appleState {
                         case .available: EmptyView()
@@ -568,14 +653,11 @@ struct PhoneCompanionService: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { CompanionFocus.shared.reload() }
         .navigationDestination(isPresented: $models) {
-            ScrollView {
-                ModelList(provider: provider, back: { models = false })
-                    .padding(.top, YYUI.s(10))
-            }
-            .scrollBounceBehavior(.basedOnSize)
-            .background(YYColor.bg)
-            .navigationTitle("选择模型")
-            .navigationBarTitleDisplayMode(.inline)
+            ModelList(provider: provider, back: { models = false }, showsHeader: false)
+                .padding(.top, YYUI.s(8))
+                .background(YYColor.bg)
+                .navigationTitle("选择模型")
+                .navigationBarTitleDisplayMode(.inline)
         }
     }
 }

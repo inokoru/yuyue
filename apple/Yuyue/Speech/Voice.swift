@@ -82,11 +82,11 @@ enum Voices {
     enum RecommendedState {
         case unsupported
         case needsDownload
-        case ready([CardVoice])
+        case ready([any Voice])
     }
 
     struct Catalog {
-        /// nil when the language has no built-in voice cards (e.g. Japanese).
+        /// nil when the language has no built-in neural voices (e.g. Japanese).
         var recommended: RecommendedState?
         var clones: [ClonedEntry]
         var bookCards: [CardVoice]
@@ -95,14 +95,22 @@ enum Voices {
     }
 
     static func catalog(for tag: String, bookID: String? = nil) -> Catalog {
-        let recommended: RecommendedState? = if !CardVoice.supportsLanguage(tag) {
-            nil
-        } else if LiveVoiceModel.deviceUnsupported {
-            .unsupported
-        } else if !LiveVoiceModel.isInstalled {
-            .needsDownload
+        let recommended: RecommendedState?
+        if !CardVoice.supportsLanguage(tag) {
+            recommended = nil
+        } else if KokoroModel.isInstalled || LiveVoiceModel.isInstalled {
+            var list: [any Voice] = []
+            if KokoroModel.isInstalled {
+                list += KokoroModel.builtinVoices(for: tag)
+            }
+            if LiveVoiceModel.isInstalled {
+                list += VoicePack.builtinCards(for: tag).map { CardVoice(card: $0, bookID: nil) }
+            }
+            recommended = list.isEmpty ? .needsDownload : .ready(list)
+        } else if KokoroModel.deviceUnsupported && LiveVoiceModel.deviceUnsupported {
+            recommended = .unsupported
         } else {
-            .ready(VoicePack.builtinCards(for: tag).map { CardVoice(card: $0, bookID: nil) })
+            recommended = .needsDownload
         }
 
         let clones = ClonedVoices.entries()
@@ -147,6 +155,9 @@ enum Voices {
     }
 
     static func find(_ id: String, bookID: String?) -> (any Voice)? {
+        if id.hasPrefix("kokoro.") {
+            return KokoroModel.find(id)
+        }
         if id.hasPrefix("card.") {
             guard let ctx = LiveVoiceModel.context else { return nil }
             LiveVoiceModel.register(ctx.core, ctx.dataDir)

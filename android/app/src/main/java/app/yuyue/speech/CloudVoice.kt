@@ -48,10 +48,13 @@ class CloudVoice(
     }
 
     enum class Provider(val key: String, val group: Group) {
+        Free("free", Group.Domestic),
+        Volcengine("volcengine", Group.Domestic),
         Xiaomi("xiaomi", Group.Domestic),
         SiliconFlow("siliconflow", Group.Domestic),
         DashScope("dashscope", Group.Domestic),
         MiniMax("minimax", Group.Domestic),
+        Fish("fish", Group.Global),
         Azure("azure", Group.Global),
         OpenAI("openai", Group.Global),
         ElevenLabs("elevenlabs", Group.Global),
@@ -63,10 +66,13 @@ class CloudVoice(
         Local("local", Group.Local);
 
         val isLocal: Boolean get() = group == Group.Local
-        val isPaidCloud: Boolean get() = !isLocal
+        val isPaidCloud: Boolean get() = !isLocal && this != Free
 
         val title: String
             get() = when (this) {
+                Free -> t("在线自然语音")
+                Volcengine -> t("火山引擎（豆包）")
+                Fish -> "Fish Audio"
                 Xiaomi -> t("小米 MiMo")
                 SiliconFlow -> t("硅基流动")
                 DashScope -> t("阿里云百炼")
@@ -84,6 +90,9 @@ class CloudVoice(
 
         val aliases: String
             get() = when (this) {
+                Free -> "free online 免key 免费 在线 自然 语音 kokoro melotts"
+                Volcengine -> "volcengine 火山 豆包 字节 doubao seedtts"
+                Fish -> "fish audio fishspeech openaudio s1 克隆"
                 Xiaomi -> "xiaomi mimo 小米 小爱 冰糖 茉莉"
                 SiliconFlow -> "siliconflow 硅基 cosyvoice indextts fish"
                 DashScope -> "dashscope aliyun qwen 阿里 百炼 通义 千问"
@@ -101,6 +110,9 @@ class CloudVoice(
 
         val badge: String?
             get() = when (this) {
+                Free -> t("免 Key")
+                Volcengine -> t("豆包语音")
+                Fish -> "OpenAudio S1"
                 Xiaomi -> t("限时免费")
                 Azure, Deepgram -> t("含免费额度")
                 VoiceStudio, Voicebox, MlxAudio, Speaches -> t("局域网开源")
@@ -112,6 +124,7 @@ class CloudVoice(
         val urlName: String get() = "tts.$key.url"
         val modelName: String get() = "tts.$key.model"
         val enabledName: String get() = "tts.$key.enabled"
+        val dismissedName: String get() = "tts.$key.dismissed"
 
         val urlHint: String
             get() = when (this) {
@@ -148,14 +161,21 @@ class CloudVoice(
             }
 
         val isSetUp: Boolean
-            get() = if (isLocal) {
-                Prefs.bool(enabledName, false) && savedURL.isNotEmpty()
-            } else {
-                apiKey != null && (this != Azure || Prefs.string(REGION).isNotEmpty())
+            get() = when {
+                this == Free -> !Prefs.bool(dismissedName, false)
+                isLocal -> Prefs.bool(enabledName, false) && savedURL.isNotEmpty()
+                this == Volcengine -> {
+                    val k = apiKey
+                    k != null && ('|' in k || Prefs.string(VOLC_APP_ID).isNotEmpty())
+                }
+                else -> apiKey != null && (this != Azure || Prefs.string(REGION).isNotEmpty())
             }
 
         val keyHint: String
             get() = when (this) {
+                Free -> t("无需填写 Key")
+                Volcengine -> "Access Token…"
+                Fish -> "API Key…"
                 Xiaomi, SiliconFlow, DashScope, OpenAI -> "sk-…"
                 MiniMax -> "eyJ…"
                 Azure -> t("资源的密钥 1")
@@ -166,6 +186,9 @@ class CloudVoice(
 
         val help: String
             get() = when (this) {
+                Free -> t("零配置免 Key 在线自然语音，自动调用魔搭 / Hugging Face 开源 Kokoro 在线推理服务；若已下载本机 Kokoro 则直接走离线极速合成。")
+                Volcengine -> t("火山引擎控制台 › 豆包语音 › 语音合成大模型，获取 AppID 与 Access Token。")
+                Fish -> t("fish.audio › API Keys 新建密钥，支持 OpenAudio S1 高表现力中英音色与社区声音库。")
                 Xiaomi -> t("platform.xiaomimimo.com 控制台新建 API Key，当前限时免费，支持自然语言语气控制。")
                 SiliconFlow -> t("cloud.siliconflow.cn › API 密钥新建。内置 CosyVoice2 音色并支持你在控制台克隆的声音。")
                 DashScope -> t("阿里云百炼控制台获取 API-KEY，千问3-TTS 按字计费（约 0.1 元/千字），新开通含免费体验包。")
@@ -183,11 +206,12 @@ class CloudVoice(
 
         companion object {
             const val REGION = "tts.azure.region"
+            const val VOLC_APP_ID = "tts.volcengine.appid"
         }
     }
 
     override val id = "cloud.${provider.key}.$voiceID"
-    override val qualityName: String get() = provider.title
+    override val qualityName: String get() = if (provider == Provider.Free) t("免 Key 在线") else provider.title
     override val isOffline: Boolean get() = provider.isLocal
     override fun speaks(tag: String) = language?.let { SpokenLanguage.matches(it, tag) } ?: true
 
@@ -201,8 +225,19 @@ class CloudVoice(
             if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.recordTts(text.length, cached = true)
             return@withContext it
         }
+        if (provider == Provider.Free) {
+            renderLocalKokoroTakeover(text, language)?.let { return@withContext it }
+        }
         if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.checkTtsBudget(text.length)
-        val (data, ext) = fetch(text, language, parts, acted)
+        val fetched = try {
+            fetch(text, language, parts, acted)
+        } catch (e: Exception) {
+            if (provider == Provider.Free) {
+                return@withContext Voices.systemBest(language)?.render(text, language)
+            }
+            throw e
+        }
+        val (data, ext) = fetched
         if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.recordTts(text.length, cached = false)
         val file = writeCached(data, cacheKey, ext)
         decodeFile(file, ext) ?: throw Failure(t("声音数据读不出来"))
@@ -214,11 +249,31 @@ class CloudVoice(
             if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.recordTts(text.length, cached = true)
             return@withContext it
         }
+        if (provider == Provider.Free) {
+            renderLocalKokoroTakeover(text, language)?.let { return@withContext it }
+        }
         if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.checkTtsBudget(text.length)
-        val (data, ext) = fetch(text, language)
+        val fetched = try {
+            fetch(text, language)
+        } catch (e: Exception) {
+            if (provider == Provider.Free) {
+                return@withContext Voices.systemBest(language)?.render(text, language)
+            }
+            throw e
+        }
+        val (data, ext) = fetched
         if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.recordTts(text.length, cached = false)
         val file = writeCached(data, text, ext)
         decodeFile(file, ext) ?: throw Failure(t("声音数据读不出来"))
+    }
+
+    private suspend fun renderLocalKokoroTakeover(text: String, language: String): Speech? {
+        val app = runCatching { YuyueApp.instance }.getOrNull() ?: return null
+        if (!KokoroModel.canRun(app.library.dataDir)) return null
+        val targetId = "kokoro.$voiceID"
+        val kv = KokoroModel.voices(app.library.core, app.library.dataDir).firstOrNull { it.id == targetId }
+            ?: KokoroModel.defaultNarrator(language)
+        return kv?.render(text, language)
     }
 
     suspend fun prefetch(texts: List<String>, language: String) = coroutineScope {
@@ -276,6 +331,45 @@ class CloudVoice(
 
     private fun fetch(text: String, language: String, parts: List<uniffi.yuyue_core.SpokenPart>? = null, acting: Acting? = null): Pair<ByteArray, String> {
         return when (provider) {
+            Provider.Free -> fetchFreeOnline(voiceID, text, language)
+
+            Provider.Volcengine -> {
+                val (appId, token) = volcengineCredentials()
+                val reqObj = JSONObject()
+                    .put("reqid", java.util.UUID.randomUUID().toString())
+                    .put("text", text)
+                    .put("text_type", "plain")
+                    .put("operation", "query")
+                val payload = JSONObject()
+                    .put("app", JSONObject().put("appid", appId).put("token", token).put("cluster", "volcano_tts"))
+                    .put("user", JSONObject().put("uid", "yuyue-reader"))
+                    .put("audio", JSONObject().put("voice_type", voiceID).put("encoding", "mp3").put("speed_ratio", 1.0))
+                    .put("request", reqObj)
+                val resp = postJSON(provider, "https://openspeech.bytedance.com/api/v1/tts", payload.toString().toByteArray(), "Authorization" to "Bearer;$token")
+                val json = JSONObject(String(resp))
+                val code = json.optInt("code", 3000)
+                if (code != 3000) {
+                    val msg = json.optString("message")
+                    throw Failure("${provider.title} ($code)" + (if (msg.isNotEmpty()) ": $msg" else ""))
+                }
+                val b64 = json.optString("data")
+                if (b64.isEmpty()) throw Failure(t("声音数据读不出来"))
+                val audio = Base64.decode(b64, Base64.DEFAULT)
+                audio to sniffExt(audio, "mp3")
+            }
+
+            Provider.Fish -> {
+                val key = provider.apiKey ?: throw Failure(t("还没填 %@ 的 Key", provider.title))
+                val payload = JSONObject()
+                    .put("text", text)
+                    .put("format", "mp3")
+                    .put("mp3_bitrate", 128)
+                    .put("latency", "normal")
+                if (voiceID != "default") payload.put("reference_id", voiceID)
+                val audio = postJSON(provider, "https://api.fish.audio/v1/tts", payload.toString().toByteArray(), "Authorization" to "Bearer $key", "model" to "s1")
+                audio to sniffExt(audio, "mp3")
+            }
+
             Provider.Xiaomi -> {
                 val key = provider.apiKey ?: throw Failure(t("还没填 %@ 的 Key", provider.title))
                 val msgs = JSONArray()
@@ -615,6 +709,126 @@ class CloudVoice(
 
         data class PresetVoice(val id: String, val name: String, val lang: String?, val gender: String?, val age: String?)
 
+        val freeOnlineVoices = listOf(
+            PresetVoice("zf_001", "晓语 · 温和女声", "zh-CN", "female", "young"),
+            PresetVoice("zf_002", "清禾 · 清润女声", "zh-CN", "female", "young"),
+            PresetVoice("zm_010", "云泽 · 沉稳男声", "zh-CN", "male", "middle_aged"),
+            PresetVoice("zm_009", "知行 · 明朗男声", "zh-CN", "male", "young"),
+            PresetVoice("af_heart", "Heart · Warm Narrator", "en-US", "female", "young"),
+            PresetVoice("af_bella", "Bella · Clear Female", "en-US", "female", "young"),
+            PresetVoice("am_michael", "Michael · Steady Male", "en-US", "male", "middle_aged"),
+            PresetVoice("bf_emma", "Emma · British Narrator", "en-GB", "female", "young"),
+        )
+
+        val volcengineVoices = listOf(
+            PresetVoice("zh_female_cancan_mars_bigtts", "灿灿 · 温暖女声", "zh-CN", "female", "young"),
+            PresetVoice("zh_female_shuangkuaisisi_moon_bigtts", "思思 · 爽快自然", "zh-CN", "female", "young"),
+            PresetVoice("zh_male_wennuanahu_moon_bigtts", "阿虎 · 温暖男声", "zh-CN", "male", "young"),
+            PresetVoice("zh_male_shaonianzixin_moon_bigtts", "梓新 · 少年男声", "zh-CN", "male", "young"),
+            PresetVoice("zh_female_wanwanxiaohe_moon_bigtts", "小荷 · 温婉旁白", "zh-CN", "female", "young"),
+            PresetVoice("en_female_anna_mars_bigtts", "Anna · English Narrator", "en-US", "female", "young"),
+        )
+
+        val fishPresets = listOf(
+            PresetVoice("default", "OpenAudio S1 · 默认自然旁白", null, "female", "young"),
+            PresetVoice("7f92f8afb8ec43bf81429cc1c9199cb1", "丁真 · 社区热榜示例", "zh-CN", "male", "young"),
+            PresetVoice("54a5170264694bfc8e9ad98df7bd89c3", "温柔电台女声", "zh-CN", "female", "young"),
+        )
+
+        fun volcengineCredentials(): Pair<String, String> {
+            val raw = Provider.Volcengine.apiKey?.trim().orEmpty()
+            if (raw.isEmpty()) throw Failure(t("还没填 %@ 的 Key", Provider.Volcengine.title))
+            if ('|' in raw) {
+                val idx = raw.indexOf('|')
+                val a = raw.substring(0, idx).trim()
+                val k = raw.substring(idx + 1).trim()
+                if (a.isNotEmpty() && k.isNotEmpty()) return a to k
+            }
+            val appId = Prefs.string(Provider.VOLC_APP_ID).trim()
+            if (appId.isEmpty()) throw Failure(t("请先填写火山引擎 AppID"))
+            return appId to raw
+        }
+
+        private val freeSidMap = mapOf(
+            "af_heart" to 3, "af_bella" to 2, "am_michael" to 16, "bf_emma" to 21,
+            "zf_001" to 55, "zf_002" to 56, "zm_009" to 99, "zm_010" to 100,
+        )
+
+        private fun fetchFreeOnline(voiceID: String, text: String, language: String): Pair<ByteArray, String> {
+            val customBase = Provider.Free.savedURL
+            if (customBase.isNotEmpty()) {
+                val ep = speechEndpoint(customBase)
+                if (ep != null) {
+                    val payload = JSONObject()
+                        .put("model", Provider.Free.savedModel.ifEmpty { "kokoro" })
+                        .put("voice", voiceID)
+                        .put("input", text)
+                        .put("response_format", "mp3")
+                    val audio = postJSON(Provider.Free, ep, payload.toString().toByteArray(), readTimeoutMs = 30_000)
+                    return audio to sniffExt(audio, "mp3")
+                }
+            }
+
+            val isZh = language.lowercase().startsWith("zh") || text.any { it.code in 0x4E00..0x9FFF }
+            val sid = freeSidMap[voiceID] ?: if (isZh) 55 else 3
+            val sherpaBases = if (ModelDownload.prefersChinaMirror()) {
+                listOf("https://www.modelscope.cn/api/v1/studio/k2-fsa/text-to-speech/gradio", "https://k2-fsa-text-to-speech.hf.space")
+            } else {
+                listOf("https://k2-fsa-text-to-speech.hf.space", "https://www.modelscope.cn/api/v1/studio/k2-fsa/text-to-speech/gradio")
+            }
+            for (base in sherpaBases) {
+                val langLabel = if (isZh) "Chinese+English (kokoro-v1.1-zh)" else "English (kokoro-v1.0)"
+                val modelLabel = if (isZh) "csukuangfj/kokoro-int8-multi-lang-v1_1|103" else "csukuangfj/kokoro-int8-en-v0_19|11"
+                val args = JSONArray().put(langLabel).put(modelLabel).put(text).put(sid).put(1.0)
+                callGradioAudio(base, "process", args)?.let { return it }
+            }
+            val meloArgs = JSONArray().put(text).put(if (isZh) "ZH" else "EN-US").put(1.0).put(if (isZh) "ZH" else "EN")
+            callGradioAudio("https://mrfakename-melotts.hf.space", "synthesize", meloArgs)?.let { return it }
+            throw Failure(t("在线自然语音当前繁忙，建议点击下载「语阅离线语音（Kokoro）」"))
+        }
+
+        private fun callGradioAudio(baseUrl: String, fnName: String, dataArgs: JSONArray): Pair<ByteArray, String>? = runCatching {
+            val base = baseUrl.trimEnd('/')
+            val joinUrl = "$base/gradio_api/call/$fnName"
+            val body = JSONObject().put("data", dataArgs).toString().toByteArray()
+            val c = URL(joinUrl).openConnection() as HttpURLConnection
+            c.requestMethod = "POST"
+            c.doOutput = true
+            c.connectTimeout = 12_000
+            c.readTimeout = 20_000
+            c.setRequestProperty("Content-Type", "application/json")
+            c.outputStream.use { it.write(body) }
+            if (c.responseCode !in 200..299) return null
+            val eventId = JSONObject(String(c.inputStream.use { it.readBytes() })).optString("event_id")
+            if (eventId.isEmpty()) return null
+
+            val sseConn = URL("$joinUrl/$eventId").openConnection() as HttpURLConnection
+            sseConn.connectTimeout = 12_000
+            sseConn.readTimeout = 25_000
+            if (sseConn.responseCode !in 200..299) return null
+            val sseText = sseConn.inputStream.use { String(it.readBytes()) }
+            var audioUrl: String? = null
+            var lastEvent = ""
+            for (line in sseText.lineSequence()) {
+                if (line.startsWith("event:")) {
+                    lastEvent = line.removePrefix("event:").trim()
+                } else if (line.startsWith("data:") && lastEvent == "complete") {
+                    val arr = JSONArray(line.removePrefix("data:").trim())
+                    for (i in 0 until arr.length()) {
+                        val el = arr.optJSONObject(i) ?: continue
+                        val u = el.optString("url")
+                        val p = el.optString("path")
+                        if (u.startsWith("http")) { audioUrl = u; break }
+                        if (p.isNotEmpty()) { audioUrl = "$base/gradio_api/file=$p"; break }
+                    }
+                }
+            }
+            val finalUrl = audioUrl ?: return null
+            val bytes = getBytes(Provider.Free, finalUrl)
+            if (bytes.size < 128) return null
+            bytes to sniffExt(bytes, "wav")
+        }.getOrNull()
+
         val xiaomiVoices = listOf(
             PresetVoice("冰糖", "冰糖 · 清甜活泼", "zh-CN", "female", "young"),
             PresetVoice("茉莉", "茉莉 · 温柔细腻", "zh-CN", "female", "young"),
@@ -710,6 +924,9 @@ class CloudVoice(
 
         fun all(): List<CloudVoice> = Provider.entries.filter { it.isSetUp }.flatMap { p ->
             when (p) {
+                Provider.Free -> freeOnlineVoices.map { CloudVoice(p, it.id, it.name, it.lang, it.gender, it.age) }
+                Provider.Volcengine -> volcengineVoices.map { CloudVoice(p, it.id, it.name, it.lang, it.gender, it.age) }
+                Provider.Fish -> savedTuples(p).ifEmpty { fishPresets.map { CloudVoice(p, it.id, it.name, it.lang, it.gender, it.age) } }
                 Provider.OpenAI -> openAIVoices.map { CloudVoice(p, it, it.replaceFirstChar(Char::uppercase), null) }
                 Provider.Xiaomi -> xiaomiVoices.map { CloudVoice(p, it.id, it.name, it.lang, it.gender, it.age) }
                 Provider.DashScope -> dashScopeVoices.map { CloudVoice(p, it.id, it.name, it.lang, it.gender, it.age) }
@@ -735,6 +952,39 @@ class CloudVoice(
                 return c.inputStream.use { String(it.readBytes()) }
             }
             when (p) {
+                Provider.Free -> {
+                    fetchFreeOnline("zf_001", "你好", "zh-CN")
+                    freeOnlineVoices.size
+                }
+                Provider.Volcengine -> {
+                    val (appId, token) = volcengineCredentials()
+                    val probe = JSONObject()
+                        .put("app", JSONObject().put("appid", appId).put("token", token).put("cluster", "volcano_tts"))
+                        .put("user", JSONObject().put("uid", "yuyue-probe"))
+                        .put("audio", JSONObject().put("voice_type", "zh_female_cancan_mars_bigtts").put("encoding", "mp3"))
+                        .put("request", JSONObject().put("reqid", java.util.UUID.randomUUID().toString()).put("text", "好").put("text_type", "plain").put("operation", "query"))
+                    val resp = postJSON(p, "https://openspeech.bytedance.com/api/v1/tts", probe.toString().toByteArray(), "Authorization" to "Bearer;$token")
+                    val code = JSONObject(String(resp)).optInt("code", 0)
+                    if (code != 3000) throw Failure(t("%@ 的 AppID 或 Token 不对", p.title))
+                    volcengineVoices.size
+                }
+                Provider.Fish -> {
+                    val key = p.apiKey ?: throw Failure(t("还没填 %@ 的 Key", p.title))
+                    val raw = get("https://api.fish.audio/model?page_size=20&page_number=1&sort_by=score", "Authorization" to "Bearer $key")
+                    val items = JSONObject(raw).optJSONArray("items") ?: JSONArray()
+                    val keep = JSONArray()
+                    keep.put(JSONArray().put("default").put("OpenAudio S1 · 默认自然旁白").put("").put("female").put("young"))
+                    for (i in 0 until items.length()) {
+                        val item = items.optJSONObject(i) ?: continue
+                        val id = item.optString("_id")
+                        val title = item.optString("title")
+                        if (id.isNotEmpty() && title.isNotEmpty()) {
+                            keep.put(JSONArray().put(id).put(title).put("").put("").put(""))
+                        }
+                    }
+                    Prefs.set(p.voicesName, keep.toString())
+                    keep.length()
+                }
                 Provider.OpenAI -> {
                     val key = p.apiKey ?: throw Failure(t("还没填 %@ 的 Key", p.title))
                     get("https://api.openai.com/v1/models/gpt-4o-mini-tts", "Authorization" to "Bearer $key")

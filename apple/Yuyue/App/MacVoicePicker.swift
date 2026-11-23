@@ -12,6 +12,8 @@ struct ListeningPage: View {
 
     var body: some View {
         let _ = focus.tick
+        let _ = KokoroDownload.shared.phase
+        let _ = LiveVoiceDownload.shared.phase
         Group {
             if let source = focus.source {
                 VoiceSourcePage(source: source)
@@ -19,26 +21,42 @@ struct ListeningPage: View {
                 sources
             }
         }
-        .sheet(isPresented: Binding(get: { focus.addingSheet }, set: { focus.addingSheet = $0 })) {
-            VoiceProviderSheet { picked in
+        .sheet(
+            isPresented: Binding(get: { focus.addingSheet }, set: { focus.addingSheet = $0 }),
+            onDismiss: { focus.addingProvider = nil }
+        ) {
+            VoiceProviderSheet(initial: focus.addingProvider) { added in
+                focus.reload()
+                focus.page = nil
                 withAnimation(YYMotion.standard) {
-                    focus.page = picked
+                    focus.open(.cloud(added))
                 }
             }
             .buttonStyle(.automatic)
         }
+        .onReceive(NotificationCenter.default.publisher(for: KokoroModel.ready)) { _ in focus.tick &+= 1 }
+        .onReceive(NotificationCenter.default.publisher(for: LiveVoiceModel.ready)) { _ in focus.tick &+= 1 }
         .onAppear {
             SystemVoice.watch()
             focus.reload()
             #if DEBUG
-            // `-debugCloudVoice openai|azure|elevenlabs|xiaomi|…` opens that one in the right column;
-            // `-debugVoiceSource mac|openai|…` opens its voices; `-debugVoiceMacPanel 1` this Mac's
-            // panel. Once, or ‹ could never leave.
+            // `-debugCloudVoice openai|azure|elevenlabs|xiaomi|…` opens that one (right column if set up,
+            // or in the add sheet if not); `-debugVoiceSource mac|openai|…` opens its voices;
+            // `-debugVoiceMacPanel 1` this Mac's panel. Once, or ‹ could never leave.
             if !focus.debugApplied {
                 focus.debugApplied = true
                 if let d = UserDefaults.standard.string(forKey: "debugCloudVoice") {
-                    if d == "add" { focus.addingSheet = true }
-                    else { focus.page = CloudVoice.Provider(rawValue: d) }
+                    if d == "add" {
+                        focus.addingProvider = nil
+                        focus.addingSheet = true
+                    } else if let p = CloudVoice.Provider(rawValue: d) {
+                        if p.isSetUp {
+                            focus.page = p
+                        } else {
+                            focus.addingProvider = p
+                            focus.addingSheet = true
+                        }
+                    }
                 }
                 if let d = UserDefaults.standard.string(forKey: "debugVoiceSource") { focus.source = VoiceSource(rawValue: d) }
                 if UserDefaults.standard.bool(forKey: "debugVoiceMacPanel") { focus.macPanel = true }
@@ -48,7 +66,7 @@ struct ListeningPage: View {
     }
 
     private var sources: some View {
-        let shown = VoiceSource.active(including: focus.page)
+        let shown = VoiceSource.active()
         return VStack(alignment: .leading, spacing: 12) {
             SettingsHeading(String(localized: "声音来源"), note: String(localized: "点一个，进去听它的声音"))
                 .padding(.bottom, -2)
@@ -58,9 +76,12 @@ struct ListeningPage: View {
                     SourceRow(source: s)
                 }
                 Rectangle().fill(YYColor.line).frame(height: 0.5).padding(.leading, 53).padding(.trailing, 9)
-                AddVoiceSourceRow { focus.addingSheet = true }
+                AddVoiceSourceRow {
+                    focus.addingProvider = nil
+                    focus.addingSheet = true
+                }
             }
-            SettingsNote(String(localized: "本机若启动了 VoiceStudio 或 Voicebox 会自动出现在列表中。云端语音使用你自己的 API Key，已合成的句子缓存在本机，重听不重复计费。"))
+            SettingsNote(String(localized: "推荐下载「语阅离线语音（Kokoro）」跨端断网畅听，或直接使用免 Key 的「在线自然语音」。系统自带合成音机械感较重（不推荐），仅作断网兜底。"))
             SettingsHeading(String(localized: "语速"), note: String(localized: "读书窗口里调的也是这一个"))
             FlatCard {
                 HStack(spacing: 8) {
@@ -240,37 +261,65 @@ extension View {
 /// This Mac, or one of the clouds.
 
 enum VoiceSource: Hashable {
+    case neural
     case mac
     case cloud(CloudVoice.Provider)
 
-    static var all: [VoiceSource] { [.mac] + CloudVoice.Provider.allCases.map { .cloud($0) } }
+    static var all: [VoiceSource] { [.neural] + CloudVoice.Provider.allCases.map { .cloud($0) } + [.mac] }
 
-    static func active(including pending: CloudVoice.Provider? = nil) -> [VoiceSource] {
-        [.mac] + CloudVoice.Provider.allCases
-            .filter { $0.isSetUp || $0 == pending }
-            .map { .cloud($0) }
+    static func active() -> [VoiceSource] {
+        [.neural]
+            + CloudVoice.Provider.allCases
+                .filter(\.isSetUp)
+                .map { .cloud($0) }
+            + [.mac]
     }
 
     init?(rawValue: String) {
-        if rawValue == "mac" { self = .mac } else if let p = CloudVoice.Provider(rawValue: rawValue) { self = .cloud(p) } else { return nil }
+        switch rawValue {
+        case "neural", "kokoro": self = .neural
+        case "mac", "system": self = .mac
+        default:
+            if let p = CloudVoice.Provider(rawValue: rawValue) { self = .cloud(p) } else { return nil }
+        }
     }
 
     var title: String {
         switch self {
-        case .mac: SettingsDevice.name
+        case .neural: String(localized: "语阅离线语音（Kokoro）")
+        case .mac: String(localized: "\(SettingsDevice.name) · 系统语音")
         case .cloud(let p): p.title
+        }
+    }
+
+    /// 顶部紧凑标签页短名，避免在中间栏挤压截断；悬停 tooltip 仍展示完整 `title`。
+    var tabTitle: String {
+        switch self {
+        case .neural: String(localized: "离线语音")
+        case .mac: String(localized: "系统语音")
+        case .cloud(let p): p.tabTitle
+        }
+    }
+
+    var tabHelp: String {
+        switch self {
+        case .neural: String(localized: "\(title) · 推荐")
+        case .mac: String(localized: "\(title)（不推荐 · 仅断网兜底）")
+        case .cloud(let p):
+            if let badge = p.badge { "\(p.title) · \(badge)" } else { p.title }
         }
     }
 
     var isSetUp: Bool {
         switch self {
-        case .mac: true
+        case .neural, .mac: true
         case .cloud(let p): p.isSetUp
         }
     }
 
     var mark: ServiceTile.Mark {
         switch self {
+        case .neural: .kokoro
         #if os(macOS)
         case .mac: .laptop
         #else
@@ -283,8 +332,11 @@ enum VoiceSource: Hashable {
     /// Its voices that read `tag`.
     func voices(for tag: String) -> [any Voice] {
         switch self {
-        case .mac:
+        case .neural:
             var out: [any Voice] = []
+            if KokoroModel.isInstalled, CardVoice.supportsLanguage(tag) {
+                out += KokoroModel.builtinVoices(for: tag)
+            }
             if LiveVoiceModel.isInstalled, CardVoice.supportsLanguage(tag) {
                 out += VoicePack.builtinCards(for: tag).map { CardVoice(card: $0, bookID: nil) }
             }
@@ -293,8 +345,9 @@ enum VoiceSource: Hashable {
                     out.append(v)
                 }
             }
-            out += SystemVoice.all(for: tag)
             return out
+        case .mac:
+            return SystemVoice.all(for: tag)
         case .cloud(let p):
             return CloudVoice.all().filter { $0.provider == p && $0.speaks(tag) }
         }
@@ -302,13 +355,22 @@ enum VoiceSource: Hashable {
 
     var voiceCount: Int {
         switch self {
-        case .mac:
-            var ids = Set(SystemVoice.all(for: "zh").map(\.id) + SystemVoice.all(for: "en").map(\.id))
+        case .neural:
+            var ids = Set<String>()
+            if KokoroModel.isInstalled {
+                ids.formUnion(KokoroModel.builtinVoices(for: "zh").map(\.id))
+                ids.formUnion(KokoroModel.builtinVoices(for: "en").map(\.id))
+            } else {
+                ids.formUnion(KokoroModel.fallbackSpeakers.map(\.id))
+            }
             if LiveVoiceModel.isInstalled {
                 ids.formUnion(VoicePack.builtinCards(for: "zh").map(\.id))
                 ids.formUnion(VoicePack.builtinCards(for: "en").map(\.id))
             }
             ids.formUnion(ClonedVoices.entries().filter(\.isPlayable).map(\.id))
+            return ids.count
+        case .mac:
+            let ids = Set(SystemVoice.all(for: "zh").map(\.id) + SystemVoice.all(for: "en").map(\.id))
             return ids.count
         case .cloud(let p):
             return p.voiceCount
@@ -318,7 +380,8 @@ enum VoiceSource: Hashable {
     static func of(_ voice: any Voice) -> VoiceSource {
         if let c = voice as? CloudVoice { return .cloud(c.provider) }
         if let cl = voice as? ClonedVoice, cl.isReady { return .cloud(.elevenlabs) }
-        return .mac
+        if voice is SystemVoice { return .mac }
+        return .neural
     }
 }
 
@@ -332,11 +395,16 @@ enum VoiceBook: String, CaseIterable, Identifiable {
         self == .zh ? "我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。" : "It was the best of times, it was the worst of times."
     }
 
-    /// The voice reading it: the one chosen, or the default narrator card, or the best system voice.
+    /// The voice reading it: the one chosen, or Kokoro/Live narrator, or keyless online voice, or system fallback.
     var current: (any Voice)? {
         let id = UserDefaults.standard.string(forKey: key) ?? ""
         if !id.isEmpty, let v = Voices.find(id), v.speaks(rawValue) { return v }
+        if KokoroModel.isInstalled, let def = KokoroModel.defaultNarrator(for: rawValue) { return def }
         if LiveVoiceModel.isInstalled, let def = VoicePack.defaultNarrator(for: rawValue) { return def }
+        if CloudVoice.Provider.free.isSetUp,
+           let free = CloudVoice.all().first(where: { $0.provider == .free && $0.speaks(rawValue) }) {
+            return free
+        }
         return SystemVoice.best(for: rawValue)
     }
 
@@ -379,6 +447,8 @@ private struct SourceRow: View {
 
     var body: some View {
         let _ = SettingsLog.shared.entries
+        let _ = KokoroDownload.shared.phase
+        let _ = LiveVoiceDownload.shared.phase
         let on = source.isSetUp
         let localOffline: Bool = {
             if case .cloud(let p) = source, p.isLocal, on {
@@ -401,7 +471,29 @@ private struct SourceRow: View {
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 6) {
                         Text(source.title).font(.yy(size: 13, weight: .medium)).foregroundStyle(YYColor.t1)
-                        if case .cloud(let p) = source, p.isLocal, on {
+                        switch source {
+                        case .neural:
+                            Text("推荐")
+                                .font(.yy(size: 10, weight: .semibold))
+                                .foregroundStyle(YYColor.ok)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1.5)
+                                .background(YYColor.ok.opacity(0.11), in: .capsule)
+                        case .mac:
+                            Text("不推荐")
+                                .font(.yy(size: 10, weight: .semibold))
+                                .foregroundStyle(YYColor.warn)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1.5)
+                                .background(YYColor.warn.opacity(0.13), in: .capsule)
+                        case .cloud(let p) where p == .free:
+                            Text("免 Key")
+                                .font(.yy(size: 10, weight: .semibold))
+                                .foregroundStyle(YYColor.ok)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1.5)
+                                .background(YYColor.ok.opacity(0.11), in: .capsule)
+                        case .cloud(let p) where p.isLocal && on:
                             HStack(spacing: 4) {
                                 Circle()
                                     .fill(localOffline ? YYTint.standard.accent : YYColor.ok)
@@ -413,20 +505,32 @@ private struct SourceRow: View {
                             .padding(.horizontal, 6)
                             .padding(.vertical, 1.5)
                             .background((localOffline ? YYTint.standard.accent : YYColor.ok).opacity(0.1), in: .capsule)
+                        default:
+                            EmptyView()
                         }
                     }
                     Group {
                         switch source {
-                        case .mac:
-                            let clones = ClonedVoices.entries().count
-                            if clones > 0 {
-                                Text("自带 \(VoicePack.totalCards) 个离线人声 · 克隆 \(clones) 个 · 系统语音")
+                        case .neural:
+                            if KokoroModel.isInstalled || LiveVoiceModel.isInstalled {
+                                let clones = ClonedVoices.entries().count
+                                if clones > 0 {
+                                    Text("\(source.voiceCount) 个中英自然音色 · 克隆 \(clones) 个 · 免费免联网")
+                                } else {
+                                    Text("\(source.voiceCount) 个中英自然音色 · 跨端轻量离线")
+                                }
+                            } else if case .downloading(let frac) = KokoroDownload.shared.phase {
+                                Text("正在下载轻量离线语音 \(Int((frac * 100).rounded()))% · 免费免联网")
                             } else {
-                                Text("自带 \(VoicePack.totalCards) 个离线人声 · 系统语音")
+                                Text("跨端轻量中英自然人声 · 点进去一键下载（约 \(KokoroModel.totalMegabytes) MB）")
                             }
+                        case .mac:
+                            Text("系统自带合成机械音 · 体验较差，仅作断网未下载时的兜底")
                         case .cloud(let p):
                             if !on {
                                 Text(p.blurb)
+                            } else if p == .free {
+                                Text("\(source.voiceCount) 个中英音色 · 免注册开箱即听，已读缓存在本机")
                             } else if p.isLocal {
                                 Text(localOffline ? String(localized: "打开 \(p.title) 后即可使用 · \(p.savedURL)") : String(localized: "\(source.voiceCount) 个音色 · 本地免费免联网"))
                             } else {
@@ -475,7 +579,7 @@ private struct AddVoiceSourceRow: View {
                 ServiceTile(mark: .add, size: 32)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("添加声音来源").font(.yy(size: 13, weight: .medium)).foregroundStyle(YYColor.t2)
-                    Text("小米 MiMo（限时免费）、硅基流动、百炼、MiniMax、本机 VoiceStudio…")
+                    Text("火山豆包、Fish Audio、小米 MiMo（限时免费）、硅基流动、本机 VoiceStudio…")
                         .font(.yy(size: 11)).foregroundStyle(YYColor.t3).lineLimit(1)
                 }
                 Spacer(minLength: 8)
@@ -524,6 +628,7 @@ struct VoiceSourcePage: View {
     var body: some View {
         let _ = focus.tick
         let _ = cloneRefresh
+        let _ = KokoroDownload.shared.phase
         let _ = LiveVoiceDownload.shared.phase
         // ⌘Z or 最近改过 can change who's reading from outside this page.
         let _ = SettingsLog.shared.entries
@@ -545,29 +650,42 @@ struct VoiceSourcePage: View {
                 BookSegments(selection: book) { focus.book = $0; focus.listening = nil; Voices.stopPreview() }
                 Spacer(minLength: 8)
                 #if os(macOS)
-                Text("点语音听，指着点“选择”").font(.yy(size: 11)).foregroundStyle(YYColor.t3)
+                Text("点语音听，指着点“选择”").font(.yy(size: 11)).foregroundStyle(YYColor.t3).lineLimit(1)
                 #else
                 Text("点一下听，再点“选择”").font(.yy(size: 11)).foregroundStyle(YYColor.t3).lineLimit(1).minimumScaleFactor(0.8)
                 #endif
             }
             .padding(.top, 12).padding(.bottom, 8)
             if let current { PinnedVoice(voice: current, book: book, elsewhere: VoiceSource.of(current) != source).padding(.bottom, 6) }
-            if source == .mac {
-                if LiveVoiceModel.deviceUnsupported {
-                    Text("这台手机带不动更好的离线声音，继续用下面的系统或云端声音")
-                        .font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
-                        .padding(.horizontal, 10).padding(.bottom, 4)
-                } else if !LiveVoiceModel.isInstalled {
-                    LiveVoicePrepBanner(language: book.rawValue, alwaysShowIdle: true)
+            if source == .neural {
+                if !KokoroModel.isInstalled {
+                    KokoroPrepBanner(language: book.rawValue, alwaysShowIdle: true)
                         .padding(.bottom, 6)
                 }
+            } else if source == .mac {
+                HStack(spacing: 6) {
+                    SettingsPill(String(localized: "不推荐"), tone: .warn)
+                    Text("系统合成机械感较重，仅作断网兜底")
+                        .font(.yy(size: 11)).foregroundStyle(YYColor.t3).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Button {
+                        focus.open(.neural)
+                    } label: {
+                        Text("换离线语音 ›")
+                            .font(.yy(size: 11, weight: .medium))
+                            .foregroundStyle(YYTint.standard.accent)
+                            .fixedSize()
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 10).padding(.bottom, 6)
             }
             // What they're all saying stays in sight; only the voices under it scroll.
             YourLine(text: focus.line(book)).padding(.top, 4).padding(.bottom, 4)
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        if source == .mac {
+                        if source == .neural {
                             HStack {
                                 Button {
                                     showingCloneSheet = true
@@ -659,6 +777,7 @@ struct VoiceSourcePage: View {
         }
         .onDisappear { Voices.stopPreview() }
         .onReceive(NotificationCenter.default.publisher(for: ClonedVoices.changed)) { _ in cloneRefresh &+= 1 }
+        .onReceive(NotificationCenter.default.publisher(for: KokoroModel.ready)) { _ in cloneRefresh &+= 1 }
         .onReceive(NotificationCenter.default.publisher(for: LiveVoiceModel.ready)) { _ in cloneRefresh &+= 1 }
         .sheet(isPresented: $showingCloneSheet) {
             if let ctx = LiveVoiceModel.context {
@@ -977,43 +1096,179 @@ private struct VoiceKeys: NSViewRepresentable {
 }
 #endif
 
-/// The connected sources side by side, scrolling horizontally when many providers are connected.
+/// 顶部声音来源切换栏：
+/// 1. 常规 2–4 个来源时使用精简短名整排完整展示，绝不半字截断；
+/// 2. 连接更多云端来源超出宽度时，自动折叠为「常驻项 + 当前项 + ▾ 更多来源菜单」，保证选中项始终完整可见；
+/// 3. 极窄分栏下自动退化为紧凑下拉胶囊。
 private struct SourceTabs: View {
     let selection: VoiceSource
+    @Namespace private var tabSpace
+    @State private var hovered: VoiceSource?
     private var focus: ListeningFocus { .shared }
 
     var body: some View {
+        let sources = VoiceSource.all.filter(\.isSetUp)
         ViewThatFits(in: .horizontal) {
-            tabsRow
-            ScrollView(.horizontal, showsIndicators: false) {
-                tabsRow
+            track {
+                ForEach(sources, id: \.self) { s in
+                    tabButton(s, group: "full")
+                }
             }
+            if sources.count > 2 {
+                compactBar(sources)
+            }
+            singleMenu(sources)
         }
-        .background(YYColor.inset, in: .rect(cornerRadius: 10))
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    private var tabsRow: some View {
+    private func compactBar(_ sources: [VoiceSource]) -> some View {
+        let visible = Self.pinnedSources(sources, selection: selection, limit: min(3, sources.count))
+        let hiddenCount = max(0, sources.count - visible.count)
+        return track {
+            ForEach(visible, id: \.self) { s in
+                tabButton(s, group: "compact")
+            }
+            overflowMenu(sources, hiddenCount: hiddenCount)
+        }
+    }
+
+    private static func pinnedSources(_ sources: [VoiceSource], selection: VoiceSource, limit: Int) -> [VoiceSource] {
+        guard sources.count > limit else { return sources }
+        var kept = Array(sources.prefix(max(1, limit - 1)))
+        if !kept.contains(selection) {
+            kept.append(selection)
+        } else if let next = sources.first(where: { !kept.contains($0) }) {
+            kept.append(next)
+        }
+        return kept
+    }
+
+    private func track<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: 2) {
-            ForEach(VoiceSource.all.filter(\.isSetUp), id: \.self) { s in
-                let on = s == selection
-                Button { focus.open(s) } label: {
-                    HStack(spacing: 6) {
-                        ServiceTile(mark: s.mark, size: 20)
-                        Text(s.title).font(.yy(size: 12, weight: on ? .semibold : .regular)).foregroundStyle(on ? YYColor.t1 : YYColor.t2)
-                            .lineLimit(1).fixedSize()
-                    }
-                    .padding(.leading, 4).padding(.trailing, 10)
-                    .frame(height: 28)
-                    .background {
-                        if on { RoundedRectangle(cornerRadius: 8).fill(YYColor.card).shadow(color: .black.opacity(0.08), radius: 1, y: 1) }
-                    }
-                    .contentShape(.rect)
+            content()
+        }
+        .padding(2.5)
+        .background(YYColor.inset, in: .rect(cornerRadius: 9.5))
+    }
+
+    private func tabButton(_ s: VoiceSource, group: String) -> some View {
+        let on = s == selection
+        let isHover = hovered == s
+        let muted = s == .mac && !on
+        return Button {
+            withAnimation(.easeOut(duration: YYMotion.reduce ? 0 : 0.16)) {
+                focus.open(s)
+            }
+        } label: {
+            HStack(spacing: 5.5) {
+                ServiceTile(mark: s.mark, size: 18)
+                    .opacity(muted ? 0.68 : 1)
+                Text(s.tabTitle)
+                    .font(.yy(size: 11.5, weight: on ? .semibold : .regular))
+                    .foregroundStyle(on ? YYColor.t1 : (muted ? YYColor.t3 : YYColor.t2))
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            .padding(.leading, 5)
+            .padding(.trailing, 8.5)
+            .frame(height: 26)
+            .background {
+                if on {
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(YYColor.card)
+                        .shadow(color: .black.opacity(0.08), radius: 1.5, y: 1)
+                        .matchedGeometryEffect(id: "activeSourceTab.\(group)", in: tabSpace)
+                } else if isHover {
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(YYColor.t1.opacity(0.04))
                 }
-                .buttonStyle(.plain)
+            }
+            .contentShape(.rect(cornerRadius: 7))
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in
+            if inside { hovered = s }
+            else if hovered == s { hovered = nil }
+        }
+        .help(Text(s.tabHelp))
+    }
+
+    private func overflowMenu(_ sources: [VoiceSource], hiddenCount: Int) -> some View {
+        Menu {
+            sourceMenuItems(sources)
+        } label: {
+            HStack(spacing: 3) {
+                if hiddenCount > 0 {
+                    Text("+\(hiddenCount)")
+                        .font(.yy(size: 10.5, weight: .medium).monospacedDigit())
+                }
+                Image(systemName: "chevron.down")
+                    .font(.yy(size: 8.5, weight: .semibold))
+            }
+            .foregroundStyle(YYColor.t2)
+            .padding(.horizontal, 7)
+            .frame(height: 26)
+            .contentShape(.rect(cornerRadius: 7))
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(Text("切换全部声音来源"))
+    }
+
+    private func singleMenu(_ sources: [VoiceSource]) -> some View {
+        Menu {
+            sourceMenuItems(sources)
+        } label: {
+            HStack(spacing: 6) {
+                ServiceTile(mark: selection.mark, size: 18)
+                Text(selection.tabTitle)
+                    .font(.yy(size: 12, weight: .semibold))
+                    .foregroundStyle(YYColor.t1)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.yy(size: 8.5, weight: .semibold))
+                    .foregroundStyle(YYColor.t3)
+            }
+            .padding(.leading, 6)
+            .padding(.trailing, 9)
+            .frame(height: 28)
+            .background(YYColor.card, in: .rect(cornerRadius: 8))
+            .ring(YYColor.line, radius: 8)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    @ViewBuilder
+    private func sourceMenuItems(_ sources: [VoiceSource]) -> some View {
+        ForEach(sources, id: \.self) { s in
+            Button {
+                focus.open(s)
+            } label: {
+                let label: String = switch s {
+                case .neural: "\(s.title)（推荐）"
+                case .mac: "\(s.title)（不推荐）"
+                case .cloud(let p): p == .free ? "\(p.title)（免 Key）" : p.title
+                }
+                if s == selection {
+                    Label(label, systemImage: "checkmark")
+                } else {
+                    Text(label)
+                }
             }
         }
-        .padding(2)
+        Divider()
+        Button {
+            focus.addingProvider = nil
+            focus.addingSheet = true
+        } label: {
+            Label(String(localized: "添加声音来源…"), systemImage: "plus")
+        }
     }
 }
 
@@ -1023,23 +1278,30 @@ private struct VoiceGroup {
     let title: String
     let voices: [any Voice]
 
-    static func groups(_ voices: [any Voice], source: VoiceSource = .mac) -> [VoiceGroup] {
+    static func groups(_ voices: [any Voice], source: VoiceSource = .neural) -> [VoiceGroup] {
         if case .cloud = source {
             return voices.isEmpty ? [] : [VoiceGroup(title: String(localized: "\(voices.count) 位"), voices: voices)]
         }
         var out: [VoiceGroup] = []
-        let recommended = voices.filter { $0.id.hasPrefix("card.b.") }
-        if !recommended.isEmpty {
-            out.append(VoiceGroup(title: String(localized: "推荐"), voices: recommended))
-        }
-        let mine = voices.filter { $0.id.hasPrefix("cloned.") || $0.id.hasPrefix("card.d.") }
-        if !mine.isEmpty {
-            out.append(VoiceGroup(title: String(localized: "我的"), voices: mine))
+        if source == .neural {
+            let kokoro = voices.filter { $0.id.hasPrefix("kokoro.") }
+            if !kokoro.isEmpty {
+                out.append(VoiceGroup(title: String(localized: "Kokoro 轻量离线 · 推荐"), voices: kokoro))
+            }
+            let recommended = voices.filter { $0.id.hasPrefix("card.b.") }
+            if !recommended.isEmpty {
+                out.append(VoiceGroup(title: String(localized: "广播剧角色声音"), voices: recommended))
+            }
+            let mine = voices.filter { $0.id.hasPrefix("cloned.") || $0.id.hasPrefix("card.d.") }
+            if !mine.isEmpty {
+                out.append(VoiceGroup(title: String(localized: "我的克隆"), voices: mine))
+            }
+            return out
         }
         let sys = voices.compactMap { $0 as? SystemVoice }
-        for (g, t) in [(AVSpeechSynthesisVoiceGender.female, String(localized: "系统自带 · 女声")),
-                       (.male, String(localized: "系统自带 · 男声")),
-                       (.unspecified, String(localized: "系统自带"))] {
+        for (g, t) in [(AVSpeechSynthesisVoiceGender.female, String(localized: "系统自带 · 女声（不推荐）")),
+                       (.male, String(localized: "系统自带 · 男声（不推荐）")),
+                       (.unspecified, String(localized: "系统自带（不推荐）"))] {
             let vs = sys.filter { $0.gender == g }
             if !vs.isEmpty { out.append(VoiceGroup(title: t, voices: vs)) }
         }
@@ -1066,7 +1328,7 @@ private struct YourLine: View {
     let text: String
     var body: some View {
         #if os(macOS)
-        let widest: CGFloat = 272, room: CGFloat = 60
+        let widest: CGFloat = 272, room: CGFloat = 24
         #else
         // A phone's column: the bubble may take what's left beside 我.
         let widest: CGFloat = 230, room: CGFloat = 20
@@ -1075,7 +1337,7 @@ private struct YourLine: View {
             Spacer(minLength: room)
             ViewThatFits(in: .horizontal) {
                 Text(text).fixedSize()
-                Text(text).fixedSize(horizontal: false, vertical: true).frame(width: widest, alignment: .leading)
+                Text(text).fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: widest, alignment: .trailing)
             .font(.custom("Songti SC", size: 13)).lineSpacing(3.7)
@@ -1301,13 +1563,24 @@ private struct VoiceMessage: View {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Text(voice.name).font(.yy(size: 12.5, weight: .medium)).foregroundStyle(YYColor.t1)
-                    if let cardVoice = voice as? CardVoice, cardVoice.card.narrator {
-                        Text("默认旁白").font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
+                    if let kokoro = voice as? KokoroVoice {
+                        if kokoro.isDefaultNarrator {
+                            Text("默认旁白").font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
+                        }
+                        Text("· " + kokoro.summaryLine).font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
+                    } else if let cardVoice = voice as? CardVoice {
+                        if cardVoice.card.narrator {
+                            Text("推荐旁白").font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
+                        }
+                        if !cardVoice.summaryLine.isEmpty {
+                            Text("· " + cardVoice.summaryLine).font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
+                        }
+                    } else if let sys = voice as? SystemVoice {
+                        Text(sys.qualityName ?? String(localized: "不推荐"))
+                            .font(.yy(size: 10.5))
+                            .foregroundStyle(sys.qualityName == nil ? YYColor.warn : YYColor.t3)
                     } else if let q = voice.qualityName, !(voice is CloudVoice) {
                         Text(q).font(.yy(size: 11)).foregroundStyle(YYColor.t3)
-                    }
-                    if let cardVoice = voice as? CardVoice, !cardVoice.summaryLine.isEmpty {
-                        Text("· " + cardVoice.summaryLine).font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
                     }
                 }
                 .lineLimit(1)
@@ -1472,7 +1745,14 @@ struct ListeningVoiceCard: View {
                 PanelCard { VoicePlayer(voice: voice, text: focus.line(book), whole: chosen || focus.heard.contains(voice.id)) }
                 PanelCard {
                     PanelRow { Text("来自") } trailing: {
-                        Text([VoiceSource.of(voice).title, voice is CloudVoice ? nil : voice.qualityName].compactMap { $0 }.joined(separator: " · "))
+                        let extra: String? = if voice is CloudVoice {
+                            nil
+                        } else if let sys = voice as? SystemVoice {
+                            sys.qualityName ?? String(localized: "不推荐")
+                        } else {
+                            voice.qualityName
+                        }
+                        Text([VoiceSource.of(voice).title, extra].compactMap { $0 }.joined(separator: " · "))
                             .font(.yy(size: 12)).foregroundStyle(YYColor.t2)
                     }
                     PanelRow { Text("费用") } trailing: {
@@ -1490,6 +1770,9 @@ struct ListeningVoiceCard: View {
     private static func cost(_ v: any Voice) -> String {
         guard let c = v as? CloudVoice else { return String(localized: "免费 · 不联网") }
         switch c.provider {
+        case .free: return String(localized: "免 Key 免费 · 语阅在线自然语音")
+        case .volcengine: return String(localized: "按字符计费 · 走你的火山引擎")
+        case .fish: return String(localized: "按字符计费 · 走你的 Fish Audio")
         case .xiaomi: return String(localized: "限时免费 · 小米开放平台")
         case .siliconflow: return String(localized: "按量计费 · 走你的硅基流动")
         case .dashscope: return String(localized: "约 0.1 元/千字 · 走你的百炼")

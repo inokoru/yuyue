@@ -77,6 +77,7 @@ class Library(private val context: Context) {
 
     init {
         app.yuyue.speech.ClonedVoices.init(context)
+        app.yuyue.speech.KokoroModel.init(context, core, dataDir)
         app.yuyue.speech.LiveVoiceModel.init(context, core, dataDir)
         reload()
         // Deleted books can be put back for 30 days; after that their files go off the critical startup path.

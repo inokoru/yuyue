@@ -253,7 +253,7 @@ struct PhoneMe: View {
         case "listening": PhoneListening()
         case "reading": PhoneReading(library: library)
         case "general": PhoneGeneral(library: library)
-        case "voices": PhoneVoiceSourcePage(source: parts.count > 1 ? VoiceSource(rawValue: parts[1]) ?? .mac : .mac)
+        case "voices": PhoneVoiceSourcePage(source: parts.count > 1 ? VoiceSource(rawValue: parts[1]) ?? .neural : .neural)
         case "history": PhoneSettingsHistory(library: library)
         case "foreign": PhoneForeign(library: library)
         case "sync": PhoneSync(library: library)

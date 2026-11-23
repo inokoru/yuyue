@@ -12,6 +12,8 @@ final class ListeningFocus {
     var page: CloudVoice.Provider?
     /// Adding a new voice source from the catalog sheet.
     var addingSheet = false
+    /// Optional provider to jump straight to inside the add sheet (e.g. debug launch arg).
+    var addingProvider: CloudVoice.Provider?
     /// The source whose voices the middle shows; nil: the list of sources.
     var source: VoiceSource?
     /// Which kind of book the voices are being chosen for.
@@ -79,6 +81,7 @@ final class ListeningFocus {
 
     func reload() {
         added = CloudVoice.Provider.allCases.filter(\.isSetUp)
+        if let p = page, !p.isSetUp { page = nil }
         tick &+= 1
         probeLocalIfNeeded()
     }
@@ -117,6 +120,9 @@ extension CloudVoice.Provider {
 
     var account: String {
         switch self {
+        case .free: String(localized: "免 Key · 零配置在线语音")
+        case .volcengine: String(localized: "火山引擎豆包语音")
+        case .fish: "Fish Audio"
         case .xiaomi: String(localized: "小米开放平台")
         case .siliconflow: String(localized: "硅基流动")
         case .dashscope: String(localized: "阿里云百炼")
@@ -132,6 +138,9 @@ extension CloudVoice.Provider {
 
     var blurb: String {
         switch self {
+        case .free: String(localized: "0 MB 免下载、免注册免 Key，已读句子缓存在本机")
+        case .volcengine: String(localized: "豆包大模型语音，中文播客与小说自然度高")
+        case .fish: String(localized: "OpenAudio S1 高表现力中英音色与社区声音库")
         case .xiaomi: String(localized: "中英 8 个精品音色，支持语气指令")
         case .siliconflow: String(localized: "CosyVoice2 音色与克隆，可复用书伴 Key")
         case .dashscope: String(localized: "千问3-TTS，约 0.1 元/千字，可复用书伴 Key")
@@ -153,6 +162,9 @@ extension CloudVoice.Provider {
             return String(localized: "可复用书伴 Key")
         }
         return switch self {
+        case .free: String(localized: "免 Key · 即点即听")
+        case .volcengine: String(localized: "豆包大模型语音")
+        case .fish: String(localized: "OpenAudio S1")
         case .xiaomi: String(localized: "限时免费 · 8 音色")
         case .siliconflow: String(localized: "CosyVoice2 与克隆")
         case .dashscope: String(localized: "千问3 · 按字低价")
@@ -171,6 +183,18 @@ extension CloudVoice.Provider {
 
     var keyStep: (title: String, detail: String, url: URL) {
         switch self {
+        case .free:
+            (String(localized: "了解开源语音模型"),
+             String(localized: "默认连接魔搭 / Hugging Face 开源 Kokoro 在线推理服务，无需注册或填写 Key"),
+             URL(string: "https://modelscope.cn/studios/k2-fsa/text-to-speech")!)
+        case .volcengine:
+            (String(localized: "获取火山引擎 AppID 与 Token"),
+             String(localized: "console.volcengine.com › 豆包语音 › 语音合成大模型，复制 AppID 与 Access Token"),
+             URL(string: "https://console.volcengine.com/speech/app")!)
+        case .fish:
+            (String(localized: "获取 Fish Audio Key"),
+             String(localized: "fish.audio › API › API Keys › 新建密钥，支持 OpenAudio S1 与社区音色"),
+             URL(string: "https://fish.audio/app/api-keys/")!)
         case .xiaomi:
             (String(localized: "获取小米 MiMo Key"),
              String(localized: "platform.xiaomimimo.com › API Keys › 新建密钥，当前限时免费"),
@@ -248,6 +272,11 @@ extension CloudVoice.Provider {
 
     var endpointHost: String {
         switch self {
+        case .free:
+            (UserDefaults.standard.string(forKey: urlName)?.trimmingCharacters(in: .whitespacesAndNewlines))
+                .flatMap { $0.isEmpty ? nil : (URL(string: $0)?.host() ?? $0) } ?? "modelscope.cn / hf.space"
+        case .volcengine: "openspeech.bytedance.com"
+        case .fish: "api.fish.audio"
         case .xiaomi: "api.xiaomimimo.com"
         case .siliconflow: "api.siliconflow.cn"
         case .dashscope: "dashscope.aliyuncs.com"
@@ -268,21 +297,32 @@ extension CloudVoice.Provider {
         d.removeObject(forKey: urlName)
         d.removeObject(forKey: modelName)
         d.set(false, forKey: enabledName)
+        if self == .free {
+            d.set(true, forKey: dismissedName)
+        }
         if isLocal {
             d.set(true, forKey: dismissedName)
             LocalVoiceProbe.shared.clear(self)
         }
         if self == .local { d.removeObject(forKey: "tts.local.title") }
         if self == .azure { d.removeObject(forKey: Self.regionName) }
+        if self == .volcengine { d.removeObject(forKey: Self.volcAppIDName) }
         for tag in ["zh", "en"] where d.string(forKey: "player.voice.\(tag)")?.hasPrefix("cloud.\(rawValue).") == true {
             d.removeObject(forKey: "player.voice.\(tag)")
         }
     }
 
-    @MainActor func tryKey(_ key: String, region: String?) async throws -> AutoConnect.Outcome {
-        let oldKey = self.key, oldRegion = UserDefaults.standard.string(forKey: Self.regionName)
+    @MainActor func tryKey(_ key: String, region: String?, appID: String? = nil) async throws -> AutoConnect.Outcome {
+        let oldKey = self.key
+        let oldRegion = UserDefaults.standard.string(forKey: Self.regionName)
+        let oldAppID = UserDefaults.standard.string(forKey: Self.volcAppIDName)
         Keychain.write(keyName, key)
         if let region { Self.region = region }
+        if self == .volcengine, let appID {
+            let clean = appID.trimmingCharacters(in: .whitespacesAndNewlines)
+            if clean.isEmpty { UserDefaults.standard.removeObject(forKey: Self.volcAppIDName) }
+            else { UserDefaults.standard.set(clean, forKey: Self.volcAppIDName) }
+        }
         do {
             let n = try await CloudVoice.refresh(self)
             return .init(
@@ -296,8 +336,28 @@ extension CloudVoice.Provider {
         } catch {
             if let oldKey { Keychain.write(keyName, oldKey) } else { Keychain.delete(keyName) }
             if self == .azure { UserDefaults.standard.set(oldRegion, forKey: Self.regionName) }
+            if self == .volcengine { UserDefaults.standard.set(oldAppID, forKey: Self.volcAppIDName) }
             throw error
         }
+    }
+
+    @MainActor func tryFree(customURL: String? = nil) async throws -> AutoConnect.Outcome {
+        let d = UserDefaults.standard
+        if let customURL {
+            let clean = CloudVoice.normalizedBaseV1(customURL)
+            if clean.isEmpty { d.removeObject(forKey: urlName) }
+            else { d.set(clean, forKey: urlName) }
+        }
+        d.set(false, forKey: dismissedName)
+        let n = try await CloudVoice.refresh(.free)
+        return .init(
+            ticks: [
+                .init(title: String(localized: "连得上 \(endpointHost)")),
+                .init(title: String(localized: "免 Key 在线合成正常")),
+                .init(title: String(localized: "可用 \(n) 个音色"), detail: Self.pickWhere),
+            ],
+            banner: String(localized: "\(title) · 已就绪")
+        )
     }
 
     @MainActor func tryLocal(url: String, model: String, key: String, customTitle: String? = nil) async throws -> AutoConnect.Outcome {
@@ -356,20 +416,66 @@ extension CloudVoice.Provider {
 // MARK: - 添加声音来源 Sheet (macOS & iOS)
 
 struct VoiceProviderSheet: View {
+    let initial: CloudVoice.Provider?
     let pick: (CloudVoice.Provider) -> Void
+    @State private var picked: CloudVoice.Provider?
     @State private var query = ""
     @State private var hovered: CloudVoice.Provider?
     @Environment(\.dismiss) private var dismiss
 
     private static let columns = 4
 
+    init(initial: CloudVoice.Provider? = nil, pick: @escaping (CloudVoice.Provider) -> Void) {
+        self.initial = initial
+        self.pick = pick
+        _picked = State(initialValue: initial)
+    }
+
     var body: some View {
+        #if os(macOS)
+        Group {
+            if let picked {
+                MacVoiceProviderForm(
+                    provider: picked,
+                    back: initial == nil ? { self.picked = nil } : nil,
+                    close: { dismiss() },
+                    done: {
+                        dismiss()
+                        pick(picked)
+                    }
+                )
+                .id(picked.id)
+                .transition(YYMotion.swap)
+            } else {
+                picker.transition(YYMotion.swap)
+            }
+        }
+        .animation(YYMotion.standard, value: picked?.id)
+        .padding(.horizontal, 18)
+        .padding(.bottom, 14)
+        .padding(.top, YYUI.sheetGrabberTop)
+        .frame(width: picked == nil ? 656 : 480, height: picked == nil ? 476 : 468)
+        .background(YYColor.bg)
+        #else
+        picker
+            .padding(.horizontal, 18)
+            .padding(.bottom, 12)
+            .padding(.top, YYUI.sheetGrabberTop)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(YYColor.bg)
+            .background(YYColor.bg)
+        #endif
+    }
+
+    private var picker: some View {
         let matches = CloudVoice.Provider.available(matching: query).filter { $0 != .local }
-        VStack(alignment: .leading, spacing: 0) {
+        return VStack(alignment: .leading, spacing: 0) {
             YYSheetHeader(title: String(localized: "添加声音来源"), subtitle: String(localized: "朗读"), close: { dismiss() })
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").font(.yy(size: 11.5, weight: .medium)).foregroundStyle(YYColor.t3)
-                TextField("", text: $query, prompt: Text("搜索语音来源，比如 小米、硅基流动、VoiceStudio"))
+                TextField("", text: $query, prompt: Text("搜索语音来源，比如 火山豆包、Fish Audio、小米、VoiceStudio"))
                     .textFieldStyle(.plain)
                     .font(.yy(size: 12.5))
                     .autocorrectionDisabled()
@@ -448,23 +554,22 @@ struct VoiceProviderSheet: View {
             .buttonStyle(VoicePickRowStyle())
             .padding(.top, 6)
         }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 12)
-        .padding(.top, YYUI.sheetGrabberTop)
-        #if os(macOS)
-        .frame(width: 656, height: 476)
-        #else
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
-        .presentationBackground(YYColor.bg)
-        #endif
-        .background(YYColor.bg)
     }
 
     private func choose(_ p: CloudVoice.Provider) {
+        #if os(macOS)
+        if p == .free {
+            UserDefaults.standard.set(false, forKey: p.dismissedName)
+            dismiss()
+            pick(p)
+        } else {
+            hovered = nil
+            picked = p
+        }
+        #else
         dismiss()
         pick(p)
+        #endif
     }
 
     private func providerTile(_ p: CloudVoice.Provider) -> some View {
@@ -483,7 +588,7 @@ struct VoiceProviderSheet: View {
                             Image(systemName: "key.fill")
                                 .font(.system(size: 8, weight: .semibold))
                                 .foregroundStyle(YYColor.ok)
-                        } else if p == .xiaomi || p == .azure || p == .deepgram {
+                        } else if p == .free || p == .xiaomi || p == .azure || p == .deepgram {
                             Circle()
                                 .fill(YYColor.ok)
                                 .frame(width: 5, height: 5)
@@ -491,7 +596,7 @@ struct VoiceProviderSheet: View {
                     }
                     Text(p.shortTag)
                         .font(.yy(size: 10))
-                        .foregroundStyle(p == .xiaomi || p.companionSharedKey != nil ? YYColor.ok : YYColor.t3)
+                        .foregroundStyle(p == .free || p == .xiaomi || p.companionSharedKey != nil ? YYColor.ok : YYColor.t3)
                         .lineLimit(1)
                 }
             }
@@ -499,7 +604,7 @@ struct VoiceProviderSheet: View {
             VStack(spacing: 5) {
                 ZStack(alignment: .topTrailing) {
                     ServiceTile(mark: .cloud(p), size: 28)
-                    if p.companionSharedKey != nil || p == .xiaomi || p == .azure || p == .deepgram {
+                    if p.companionSharedKey != nil || p == .free || p == .xiaomi || p == .azure || p == .deepgram {
                         Circle()
                             .fill(YYColor.ok)
                             .frame(width: 6, height: 6)
@@ -584,11 +689,11 @@ struct ListeningInspector: View {
     var body: some View {
         let _ = focus.tick
         Group {
-            if let p = focus.page {
-                if p.isSetUp { CloudVoicePanel(provider: p) } else { CloudVoiceKeyPanel(provider: p) }
+            if let p = focus.page, p.isSetUp {
+                CloudVoicePanel(provider: p)
             }
         }
-        .id(focus.page.map { $0.id + ($0.isSetUp ? ".on" : "") })
+        .id(focus.page?.id)
         .transition(.opacity.combined(with: .offset(y: 3)))
     }
 }
@@ -602,104 +707,222 @@ private struct OutLinkGlyph: View {
 }
 
 struct MacVoicePanel: View {
-    private let source = VoiceSource.mac
+    private var source: VoiceSource {
+        if let s = ListeningFocus.shared.source, s == .neural || s == .mac { return s }
+        return .neural
+    }
 
     var body: some View {
+        let _ = KokoroDownload.shared.phase
+        let _ = LiveVoiceDownload.shared.phase
         VStack(alignment: .leading, spacing: 10) {
-            PanelHeader(title: source.title, detail: String(localized: "本机离线声音")) {
-                ServiceTile(mark: source.mark, size: 34)
-            }
-            PanelCard {
-                PanelRow { Text("声音") } trailing: {
-                    Text("共 \(source.voiceCount) 个").font(.yy(size: 12)).foregroundStyle(YYColor.t2)
+            if source == .neural {
+                PanelHeader(title: source.title, detail: String(localized: "跨端轻量离线模型 · Apache-2.0")) {
+                    ServiceTile(mark: source.mark, size: 34)
                 }
-                PanelRow { Text("费用") } trailing: {
-                    Text("免费 · 不联网").font(.yy(size: 12)).foregroundStyle(YYColor.t2)
+                PanelCard {
+                    PanelRow { Text("Kokoro 引擎") } trailing: {
+                        SettingsPill(KokoroModel.isInstalled ? String(localized: "已就绪 · 53 音色") : String(localized: "待下载 · \(KokoroModel.totalMegabytes) MB"),
+                                     tone: KokoroModel.isInstalled ? .ok : .warn)
+                    }
+                    PanelRow { Text("角色与克隆") } trailing: {
+                        Text(LiveVoiceModel.isInstalled ? String(localized: "已就绪") : String(localized: "按需准备"))
+                            .font(.yy(size: 12)).foregroundStyle(YYColor.t2)
+                    }
+                    PanelRow { Text("费用") } trailing: {
+                        Text("免费 · 不联网").font(.yy(size: 12)).foregroundStyle(YYColor.t2)
+                    }
                 }
-            }
-            PanelCard {
-                PanelButton {
-                    OutLinkGlyph()
-                    Text("下载更多系统声音").foregroundStyle(YYColor.t1)
-                    Spacer(minLength: 0)
-                } action: {
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Accessibility-Settings.extension?SpokenContent")!)
+                if !KokoroModel.isInstalled {
+                    PanelCard {
+                        PanelButton(systemImage: "arrow.down.circle", tint: YYColor.ok) {
+                            switch KokoroDownload.shared.phase {
+                            case .downloading(let frac):
+                                Text("正在下载离线语音 \(Int((frac * 100).rounded()))%").foregroundStyle(YYColor.ok)
+                                Spacer(minLength: 8)
+                                ProgressView().controlSize(.mini)
+                            default:
+                                Text("一键下载 Kokoro 离线语音（\(KokoroModel.totalMegabytes) MB）").foregroundStyle(YYColor.ok)
+                                Spacer(minLength: 0)
+                            }
+                        } action: { KokoroDownload.shared.start() }
+                    }
                 }
+                PanelHint(String(localized: "Kokoro-82M v1.1 Int8 跨端统一使用 ONNX Runtime 离线合成，无需联网即可自然朗读中英文书籍。"))
+            } else {
+                PanelHeader(title: source.title, detail: String(localized: "系统合成音 · 不推荐")) {
+                    ServiceTile(mark: source.mark, size: 34)
+                }
+                PanelCard {
+                    PanelRow { Text("评级") } trailing: {
+                        SettingsPill(String(localized: "不推荐"), tone: .warn)
+                    }
+                    PanelRow { Text("声音") } trailing: {
+                        Text("共 \(source.voiceCount) 个").font(.yy(size: 12)).foregroundStyle(YYColor.t2)
+                    }
+                    PanelRow { Text("费用") } trailing: {
+                        Text("免费 · 仅作兜底").font(.yy(size: 12)).foregroundStyle(YYColor.t2)
+                    }
+                }
+                PanelCard {
+                    PanelButton {
+                        OutLinkGlyph()
+                        Text("下载更多系统声音").foregroundStyle(YYColor.t1)
+                        Spacer(minLength: 0)
+                    } action: {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Accessibility-Settings.extension?SpokenContent")!)
+                    }
+                }
+                PanelHint(String(localized: "系统自带合成音机械感明显，仅建议在未下载离线语音且完全断网时兜底使用。"))
             }
-            PanelHint(String(localized: "自带 48 个离线人声与声音克隆开箱即用；也可前往系统设置下载更多 Apple 自然音色。"))
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 14)
     }
 }
 
-/// One not set up yet: cloud Key (with 1-tap reuse from 书伴) OR local endpoint URL + Model.
-private struct CloudVoiceKeyPanel: View {
+/// Sheet form to configure and connect a new voice source (matches 书伴's `MacProviderForm`).
+/// Only enters the main 声音来源 list once connection succeeds; ‹ returns to the catalog, × cancels cleanly.
+private struct MacVoiceProviderForm: View {
     let provider: CloudVoice.Provider
+    let back: (() -> Void)?
+    let close: () -> Void
+    let done: () -> Void
     @State private var key = ""
+    @State private var appID = UserDefaults.standard.string(forKey: CloudVoice.Provider.volcAppIDName) ?? ""
     @State private var region = CloudVoice.Provider.region
     @State private var url = ""
     @State private var model = ""
     @State private var customName = ""
     @State private var connect = AutoConnect()
-    private var focus: ListeningFocus { .shared }
 
     var body: some View {
         let step = provider.keyStep
-        VStack(alignment: .leading, spacing: 10) {
-            PanelHeader(title: provider.title, detail: provider.blurb) {
-                ServiceTile(mark: .cloud(provider), size: 34)
-            }
-
-            if provider.isLocal {
-                PanelCard {
-                    if provider == .local {
-                        PanelField(label: String(localized: "名称"), text: $customName, prompt: String(localized: "比如 本机 Kokoro"), mono: false)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: YYUI.s(6)) {
+                if let back {
+                    Button(action: back) {
+                        Image(systemName: "chevron.left").font(YYUI.font(11, .semibold)).foregroundStyle(YYColor.t2)
+                            .frame(width: YYUI.s(20), height: YYUI.s(26))
+                            .contentShape(Rectangle().inset(by: -8))
                     }
-                    PanelField(label: String(localized: "地址"), text: $url, prompt: provider.urlHint, bad: connect.failed, autofocus: true, submit: { attemptLocal(now: true) })
-                    PanelField(label: String(localized: "模型"), text: $model, prompt: provider.defaultModel, submit: { attemptLocal(now: true) })
-                    PanelField(label: "Key", text: $key, prompt: provider.keyHint, secure: true, submit: { attemptLocal(now: true) })
-                    PanelButton(systemImage: "waveform.path.ecg", tint: YYColor.ok) {
-                        Text("连接并获取音色").foregroundStyle(YYColor.ok)
-                        Spacer(minLength: 8)
-                        if connect.busy { ProgressView().controlSize(.mini) }
-                    } action: { attemptLocal(now: true) }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text("返回"))
                 }
-            } else {
-                if let shared = provider.companionSharedKey {
-                    PanelCard {
-                        PanelButton(systemImage: "key.fill", tint: YYColor.ok) {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("复用「书伴」的 Key").font(.yy(size: 12.5, weight: .medium)).foregroundStyle(YYColor.ok).lineLimit(1)
-                                Text(CloudVoice.Provider.mask(shared)).font(.yy(size: 10.5, design: .monospaced)).foregroundStyle(YYColor.t3)
+                ServiceTile(mark: .cloud(provider), size: 22)
+                YYSheetHeader(
+                    title: provider == .local ? String(localized: "自定义语音接口") : provider.title,
+                    subtitle: String(localized: "朗读"),
+                    close: close
+                )
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(provider.blurb)
+                        .font(.yy(size: 12))
+                        .foregroundStyle(YYColor.t3)
+                        .padding(.horizontal, 2)
+
+                    if provider == .free {
+                        PanelCard {
+                            PanelButton(systemImage: "waveform.path.ecg", tint: YYColor.ok) {
+                                Text("开启免 Key 在线自然语音").foregroundStyle(YYColor.ok)
+                                Spacer(minLength: 8)
+                                if connect.busy { ProgressView().controlSize(.mini) }
+                            } action: {
+                                let p = provider
+                                connect.start(String(localized: "正在检查在线语音线路…"), delay: .zero) {
+                                    try await p.tryFree()
+                                } done: {
+                                    done()
+                                }
                             }
-                            Spacer(minLength: 6)
-                            if connect.busy { ProgressView().controlSize(.mini) }
-                        } action: {
-                            key = shared
-                            attemptCloud(now: true)
+                        }
+                    } else if provider.isLocal {
+                        PanelCard {
+                            if provider == .local {
+                                PanelField(label: String(localized: "名称"), text: $customName, prompt: String(localized: "比如 本机 Kokoro"), mono: false)
+                            }
+                            PanelField(label: String(localized: "地址"), text: $url, prompt: provider.urlHint, bad: connect.failed, autofocus: true, submit: { attemptLocal(now: true) })
+                            PanelField(label: String(localized: "模型"), text: $model, prompt: provider.defaultModel, submit: { attemptLocal(now: true) })
+                            PanelField(label: "Key", text: $key, prompt: provider.keyHint, secure: true, submit: { attemptLocal(now: true) })
+                            PanelButton(systemImage: "waveform.path.ecg", tint: YYColor.ok) {
+                                Text("连接并获取音色").foregroundStyle(YYColor.ok)
+                                Spacer(minLength: 8)
+                                if connect.busy {
+                                    ProgressView().controlSize(.mini)
+                                } else if !localFilled {
+                                    Text("还没填好").font(.yy(size: 11)).foregroundStyle(YYColor.t3)
+                                }
+                            } action: {
+                                guard localFilled, !connect.busy else { return }
+                                attemptLocal(now: true)
+                            }
+                            .opacity(localFilled || connect.busy ? 1 : 0.6)
+                        }
+                    } else {
+                        if let shared = provider.companionSharedKey {
+                            PanelCard {
+                                PanelButton(systemImage: "key.fill", tint: YYColor.ok) {
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text("复用「书伴」的 Key").font(.yy(size: 12.5, weight: .medium)).foregroundStyle(YYColor.ok).lineLimit(1)
+                                        Text(CloudVoice.Provider.mask(shared)).font(.yy(size: 10.5, design: .monospaced)).foregroundStyle(YYColor.t3)
+                                    }
+                                    Spacer(minLength: 6)
+                                    if connect.busy { ProgressView().controlSize(.mini) }
+                                } action: {
+                                    key = shared
+                                    attemptCloud(now: true)
+                                }
+                            }
+                            PanelLabel(String(localized: "或者贴一个已有的 Key"))
+                        }
+                        PanelCard {
+                            if provider == .azure { RegionRow(region: $region) }
+                            if provider == .volcengine {
+                                PanelField(label: "AppID", text: $appID, prompt: String(localized: "应用 AppID"),
+                                           autofocus: true, submit: { attemptCloud(now: true) })
+                            }
+                            PanelField(label: provider == .volcengine ? "Token" : "Key",
+                                       text: $key,
+                                       prompt: provider == .azure ? String(localized: "密钥 1") : (provider == .volcengine ? String(localized: "Access Token") : provider.keyHint),
+                                       secure: true, bad: connect.failed,
+                                       autofocus: provider.companionSharedKey == nil && provider != .volcengine,
+                                       submit: { attemptCloud(now: true) })
+                            PanelButton(systemImage: "waveform.path.ecg", tint: YYColor.ok) {
+                                Text("检查并添加").foregroundStyle(YYColor.ok)
+                                Spacer(minLength: 8)
+                                if connect.busy {
+                                    ProgressView().controlSize(.mini)
+                                } else if !cloudFilled {
+                                    Text(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                         ? String(localized: "先填 Key")
+                                         : String(localized: "还没填好"))
+                                        .font(.yy(size: 11)).foregroundStyle(YYColor.t3)
+                                }
+                            } action: {
+                                guard cloudFilled, !connect.busy else { return }
+                                attemptCloud(now: true)
+                            }
+                            .opacity(cloudFilled || connect.busy ? 1 : 0.6)
                         }
                     }
-                }
-                PanelCard {
-                    if provider == .azure { RegionRow(region: $region) }
-                    PanelField(label: "Key", text: $key, prompt: provider == .azure ? String(localized: "密钥 1") : provider.keyHint,
-                               secure: true, bad: connect.failed, autofocus: provider.companionSharedKey == nil, submit: { attemptCloud(now: true) })
-                }
-            }
 
-            AutoConnectStatus(connect: connect)
-            PanelCard {
-                PanelButton {
-                    OutLinkGlyph()
-                    Text(step.title).foregroundStyle(YYColor.t1)
-                    Spacer(minLength: 0)
-                } action: { NSWorkspace.shared.open(step.url) }
+                    AutoConnectStatus(connect: connect)
+                    PanelCard {
+                        PanelButton {
+                            OutLinkGlyph()
+                            Text(step.title).foregroundStyle(YYColor.t1)
+                            Spacer(minLength: 0)
+                        } action: { NSWorkspace.shared.open(step.url) }
+                    }
+                    PanelHint(step.detail + (provider.isLocal || provider == .free ? "" : String(localized: "。API Key 仅保存在本机，调用费用由服务商直接结算。")))
+                }
+                .padding(.horizontal, 1)
+                .padding(.top, 2)
             }
-            PanelHint(step.detail + (provider.isLocal ? "" : String(localized: "。API Key 仅保存在本机，调用费用由服务商直接结算。")))
+            .scrollBounceBehavior(.basedOnSize)
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 14)
         .onAppear {
             if provider.isLocal {
                 url = provider.savedURL
@@ -707,20 +930,37 @@ private struct CloudVoiceKeyPanel: View {
                 if provider == .local { customName = UserDefaults.standard.string(forKey: "tts.local.title") ?? "" }
             }
         }
-        .onChange(of: key) { if !provider.isLocal { attemptCloud(now: false) } }
-        .onChange(of: region) { if !provider.isLocal && !key.isEmpty { attemptCloud(now: true) } }
+        .onDisappear { connect.reset() }
+        .onChange(of: key) { if !provider.isLocal && provider != .free { attemptCloud(now: false) } }
+        .onChange(of: region) { if !provider.isLocal && provider != .free && !key.isEmpty { attemptCloud(now: true) } }
+    }
+
+    private var cloudFilled: Bool {
+        let k = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !k.isEmpty else { return false }
+        if provider == .volcengine, !k.contains("|") {
+            return !appID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return true
+    }
+
+    private var localFilled: Bool {
+        !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func attemptCloud(now: Bool) {
         let k = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard now ? !k.isEmpty : AutoConnect.looksLikeKey(k) else { connect.reset(); return }
-        let p = provider, r: String? = provider == .azure ? region : nil
+        if provider == .volcengine, !k.contains("|"), appID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if !now { return }
+        }
+        let p = provider
+        let r: String? = provider == .azure ? region : nil
+        let a: String? = provider == .volcengine ? appID : nil
         connect.start(String(localized: "正在连 \(p.title)…"), delay: now ? .zero : .milliseconds(600)) {
-            try await p.tryKey(k, region: r)
+            try await p.tryKey(k, region: r, appID: a)
         } done: {
-            focus.reload()
-            focus.page = nil
-            focus.open(.cloud(p))
+            done()
         }
     }
 
@@ -731,9 +971,7 @@ private struct CloudVoiceKeyPanel: View {
         connect.start(String(localized: "正在探测 \(p.title)…"), delay: now ? .zero : .milliseconds(600)) {
             try await p.tryLocal(url: u, model: m, key: k, customTitle: n)
         } done: {
-            focus.reload()
-            focus.page = nil
-            focus.open(.cloud(p))
+            done()
         }
     }
 }
@@ -769,6 +1007,7 @@ struct CloudVoicePanel: View {
     let provider: CloudVoice.Provider
     @State private var editing = false
     @State private var key = ""
+    @State private var appID = UserDefaults.standard.string(forKey: CloudVoice.Provider.volcAppIDName) ?? ""
     @State private var url = ""
     @State private var model = ""
     @State private var region = CloudVoice.Provider.region
@@ -785,7 +1024,29 @@ struct CloudVoicePanel: View {
                 ServiceTile(mark: .cloud(provider), size: 34)
             }
             PanelCard {
-                if provider.isLocal {
+                if provider == .free {
+                    PanelRow { Text("模式") } trailing: {
+                        SettingsPill(String(localized: "免 Key · 零配置"), tone: .ok)
+                    }
+                    if editing {
+                        PanelField(label: String(localized: "线路"), text: $url, prompt: String(localized: "留空用官方开源线路，或填 /v1 地址"), autofocus: true, submit: saveFree, cancel: stopEditing)
+                        PanelButton(systemImage: "checkmark", tint: YYColor.ok) {
+                            Text("保存线路").foregroundStyle(YYColor.ok)
+                            Spacer(minLength: 0)
+                        } action: { saveFree() }
+                    } else {
+                        PanelButton {
+                            Text("线路").fixedSize()
+                            Spacer(minLength: 8)
+                            Text(provider.endpointHost)
+                                .font(.yy(size: 11, design: .monospaced)).foregroundStyle(YYColor.t2).lineLimit(1).truncationMode(.middle)
+                            Image(systemName: "chevron.right").font(.yy(size: 9.5, weight: .semibold)).foregroundStyle(YYColor.t3)
+                        } action: {
+                            url = UserDefaults.standard.string(forKey: provider.urlName) ?? ""
+                            editing = true
+                        }
+                    }
+                } else if provider.isLocal {
                     if editing {
                         PanelField(label: String(localized: "地址"), text: $url, prompt: provider.urlHint, autofocus: true, submit: saveLocal, cancel: stopEditing)
                         PanelField(label: String(localized: "模型"), text: $model, prompt: provider.defaultModel, submit: saveLocal, cancel: stopEditing)
@@ -814,12 +1075,21 @@ struct CloudVoicePanel: View {
                     }
                 } else {
                     if editing {
-                        PanelField(label: "Key", text: $key, prompt: String(localized: "贴上新的 Key"), secure: true, bad: connect.failed,
+                        if provider == .volcengine {
+                            PanelField(label: "AppID", text: $appID, prompt: String(localized: "应用 AppID"), submit: { attempt(now: true) }, cancel: stopEditing)
+                        }
+                        PanelField(label: provider == .volcengine ? "Token" : "Key",
+                                   text: $key, prompt: String(localized: "贴上新的 Key"), secure: true, bad: connect.failed,
                                    autofocus: true, submit: { attempt(now: true) }, cancel: stopEditing,
                                    blur: { if key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { stopEditing() } })
                     } else {
+                        if provider == .volcengine, let savedApp = UserDefaults.standard.string(forKey: CloudVoice.Provider.volcAppIDName), !savedApp.isEmpty {
+                            PanelRow { Text(verbatim: "AppID") } trailing: {
+                                Text(savedApp).font(.yy(size: 11.5, design: .monospaced)).foregroundStyle(YYColor.t2)
+                            }
+                        }
                         PanelButton {
-                            Text(verbatim: "Key")
+                            Text(verbatim: provider == .volcengine ? "Token" : "Key")
                             Spacer(minLength: 8)
                             Text(provider.maskedKey)
                                 .font(.yy(size: 12, design: .monospaced)).foregroundStyle(YYColor.t2).lineLimit(1)
@@ -835,21 +1105,23 @@ struct CloudVoicePanel: View {
             }
             if editing {
                 AutoConnectStatus(connect: connect)
-                if case .idle = connect.phase, !provider.isLocal {
+                if case .idle = connect.phase, !provider.isLocal, provider != .free {
                     PanelHint(String(localized: "粘贴后自动验证，有效才会替换；按 Esc 取消"))
                 }
             }
             PanelCard { checkRow }
             PanelCard {
                 PanelButton(tint: YYColor.danger, destructive: true) {
-                    Text("断开 \(provider.title)")
+                    Text(provider == .free ? String(localized: "隐藏 \(provider.title)") : String(localized: "断开 \(provider.title)"))
                 } action: {
                     confirming = YYConfirm(
-                        title: String(localized: "断开 \(provider.title)？"),
-                        message: provider.isLocal
-                            ? String(localized: "断开后将不再显示在列表中；使用该服务音色的书籍将切回本地自带音色。")
-                            : String(localized: "将同时移除 API Key；使用该服务音色的书籍将切回本地音色。"),
-                        button: String(localized: "断开")
+                        title: provider == .free ? String(localized: "隐藏 \(provider.title)？") : String(localized: "断开 \(provider.title)？"),
+                        message: provider == .free
+                            ? String(localized: "隐藏后可在「添加声音来源」随时重新开启；正在使用该来源的书籍将切回本地语音。")
+                            : (provider.isLocal
+                                ? String(localized: "断开后将不再显示在列表中；使用该服务音色的书籍将切回本地自带音色。")
+                                : String(localized: "将同时移除 API Key；使用该服务音色的书籍将切回本地音色。")),
+                        button: provider == .free ? String(localized: "隐藏") : String(localized: "断开")
                     ) {
                         provider.remove()
                         focus.page = nil
@@ -862,9 +1134,9 @@ struct CloudVoicePanel: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 14)
-        .onChange(of: key) { if !provider.isLocal { attempt(now: false) } }
+        .onChange(of: key) { if !provider.isLocal && provider != .free { attempt(now: false) } }
         .onChange(of: region) {
-            guard !provider.isLocal, let k = provider.key else { return }
+            guard !provider.isLocal, provider != .free, let k = provider.key else { return }
             let p = provider, r = region
             check.start("", delay: .zero) { try await p.tryKey(k, region: r) } done: { focus.reload() }
         }
@@ -874,6 +1146,16 @@ struct CloudVoicePanel: View {
         editing = false
         key = ""
         connect.reset()
+    }
+
+    private func saveFree() {
+        let p = provider, u = url
+        connect.start(String(localized: "正在验证在线线路…"), delay: .zero) {
+            try await p.tryFree(customURL: u)
+        } done: {
+            stopEditing()
+            focus.reload()
+        }
     }
 
     private func saveLocal() {
@@ -889,9 +1171,14 @@ struct CloudVoicePanel: View {
     private func attempt(now: Bool) {
         let k = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard now ? !k.isEmpty : AutoConnect.looksLikeKey(k) else { connect.reset(); return }
-        let p = provider, r: String? = provider == .azure ? region : nil
+        if provider == .volcengine, !k.contains("|"), appID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !now {
+            return
+        }
+        let p = provider
+        let r: String? = provider == .azure ? region : nil
+        let a: String? = provider == .volcengine ? appID : nil
         connect.start(String(localized: "正在试新的 Key…"), delay: now ? .zero : .milliseconds(600)) {
-            try await p.tryKey(k, region: r)
+            try await p.tryKey(k, region: r, appID: a)
         } done: {
             stopEditing()
             focus.reload()
@@ -912,13 +1199,18 @@ struct CloudVoicePanel: View {
         } action: {
             guard !check.busy else { return }
             let p = provider
-            if p.isLocal {
+            if p == .free {
+                check.start("", delay: .zero) {
+                    try await p.tryFree()
+                } done: { focus.reload() }
+            } else if p.isLocal {
                 check.start("", delay: .zero) {
                     try await p.tryLocal(url: p.savedURL, model: p.savedModel, key: p.key ?? "")
                 } done: { focus.reload() }
             } else if let k = p.key {
                 let r: String? = p == .azure ? region : nil
-                check.start("", delay: .zero) { try await p.tryKey(k, region: r) } done: { focus.reload() }
+                let a: String? = p == .volcengine ? UserDefaults.standard.string(forKey: CloudVoice.Provider.volcAppIDName) : nil
+                check.start("", delay: .zero) { try await p.tryKey(k, region: r, appID: a) } done: { focus.reload() }
             }
         }
     }

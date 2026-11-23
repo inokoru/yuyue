@@ -147,12 +147,13 @@ private fun VoiceRow(
     openPicker: () -> Unit,
 ) {
     val language = player.language
+    val kokoroState = app.yuyue.speech.KokoroModel.state
     val liveState = app.yuyue.speech.LiveVoiceModel.state
     var current by remember { mutableStateOf<BookVoice?>(null) }
     var previewing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     DisposableEffect(Unit) { onDispose { SystemVoice.Engine.stopPreview() } }
-    LaunchedEffect(language, liveState, player.spot?.section) {
+    LaunchedEffect(language, kokoroState, liveState, player.spot?.section) {
         current = player.currentVoice(language)
         onCurrentChanged(current)
     }
@@ -168,10 +169,10 @@ private fun VoiceRow(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(v?.let(Voices::title) ?: t("没有能读的声音"), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 if (v is SystemVoice) {
-                    Text(t("系统自带"), fontSize = 9.5.sp, color = YY.c.t2, modifier = Modifier.background(YY.c.card, RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp))
+                    Text(t("系统自带 · 不推荐"), fontSize = 9.5.sp, color = Color(0xFFD97706), modifier = Modifier.background(YY.c.card, RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp))
                 }
             }
-            val subText = if (v is SystemVoice && liveState is app.yuyue.speech.LiveVoiceModel.State.Downloading) {
+            val subText = if (v is SystemVoice && kokoroState is app.yuyue.speech.KokoroModel.State.Downloading) {
                 t("先替你念完这一章，下好后下一章换默认旁白")
             } else {
                 listOf(language, if (v?.isOffline == false) t("云端（已读内容本地缓存）") else t("本地离线")).filter { it.isNotEmpty() }.joinToString(" · ")

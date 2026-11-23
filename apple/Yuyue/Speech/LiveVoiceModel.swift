@@ -87,6 +87,7 @@ nonisolated enum LiveVoiceModel {
         Task { @MainActor in
             await Self.registerAsync(core, dataDir)
             LiveVoiceDownload.shared.refresh()
+            KokoroDownload.shared.refresh()
             #if DEBUG
             if !installed(dataDir),
                UserDefaults.standard.string(forKey: "debugLiveVoiceURL") != nil
@@ -100,6 +101,7 @@ nonisolated enum LiveVoiceModel {
 
     @concurrent private static func registerAsync(_ core: YuyueCore, _ dataDir: URL) async {
         register(core, dataDir)
+        KokoroModel.register(core, dataDir)
     }
 
     /// 下载并解压单个组件压缩包（支持多源自动回退、HTTP Range 断点续传与 `-debugLiveVoiceURL` / `-debugVoicePackURL` 覆盖）。

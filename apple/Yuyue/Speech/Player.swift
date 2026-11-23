@@ -219,6 +219,9 @@ final class Player {
                 self.rolesChanged()
             }
         })
+        observers.append(center.addObserver(forName: KokoroModel.ready, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.liveVoiceBecameReady() }
+        })
         #if os(iOS)
         observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
             let type = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
@@ -256,11 +259,14 @@ final class Player {
         }
         let startLang = language(of: start.section)
         if !narrated {
+            KokoroDownload.shared.startIfWifi(for: startLang)
             LiveVoiceDownload.shared.startIfWifi(for: startLang)
+            let hasNeural = KokoroModel.isInstalled || LiveVoiceModel.isInstalled
             let userChose = UserDefaults.standard.string(forKey: Self.voiceKey(startLang)) != nil
-            if !LiveVoiceModel.isInstalled, !userChose {
+                || UserDefaults.standard.string(forKey: Self.voiceKey(CardVoice.canonicalLanguage(startLang))) != nil
+            if !hasNeural, !userChose {
                 holdSystemVoiceSection = start.section
-            } else if LiveVoiceModel.isInstalled, let held = holdSystemVoiceSection, held != start.section {
+            } else if hasNeural, let held = holdSystemVoiceSection, held != start.section {
                 holdSystemVoiceSection = nil
                 voices.removeAll()
             }
@@ -295,7 +301,7 @@ final class Player {
     func resume() {
         guard state == .paused else { return }
         // 若后台刚准备完“朗读声音”，用户手动暂停再播时立即切换成默认旁白卡。
-        if holdSystemVoiceSection != nil, LiveVoiceModel.isInstalled, let current = spot {
+        if holdSystemVoiceSection != nil, (KokoroModel.isInstalled || LiveVoiceModel.isInstalled), let current = spot {
             holdSystemVoiceSection = nil
             voices.removeAll()
             play(from: current.position)
@@ -596,8 +602,14 @@ final class Player {
                         } catch {
                             // Another voice chosen, or a jump: this sentence was called off, nothing failed.
                             if error is CancellationError || Task.isCancelled || self.generation != generation || self.renderToken != token { return }
-                            self.failed(String(localized: "朗读出错了（\(error.localizedDescription)）"))
-                            return
+                            if let cloud = voice as? CloudVoice, cloud.provider == .free,
+                               let fallback: any Voice = (KokoroModel.defaultNarrator(for: language) as (any Voice)?) ?? SystemVoice.best(for: language),
+                               let fbSpeech = try? await fallback.render(self.text(at: spot), language: language) {
+                                speech = fbSpeech
+                            } else {
+                                self.failed(String(localized: "朗读出错了（\(error.localizedDescription)）"))
+                                return
+                            }
                         }
                     }
                 }
@@ -812,7 +824,7 @@ final class Player {
         if line.extra == nil, skippedHead != nil, spot != nil, spot != line.spot { skippedHead = nil }
         spot = line.spot
         if newSection {
-            if let held = holdSystemVoiceSection, held != line.spot.section, LiveVoiceModel.isInstalled {
+            if let held = holdSystemVoiceSection, held != line.spot.section, (KokoroModel.isInstalled || LiveVoiceModel.isInstalled) {
                 holdSystemVoiceSection = nil
                 voices.removeAll()
             }
@@ -976,15 +988,25 @@ final class Player {
     private func voice(for language: String, section: UInt32? = nil) -> (any Voice)? {
         let holdSys = (section != nil && holdSystemVoiceSection == section)
         if !holdSys, let known = voices[language] { return known }
-        let chosen = UserDefaults.standard.string(forKey: Self.voiceKey(language))
-            .flatMap { Voices.find($0, bookID: detail.summary.id) }
-        if let chosen {
+        let canon = CardVoice.canonicalLanguage(language)
+        let savedID = UserDefaults.standard.string(forKey: Self.voiceKey(language))
+            ?? UserDefaults.standard.string(forKey: Self.voiceKey(canon))
+        if let savedID, let chosen = Voices.find(savedID, bookID: detail.summary.id) {
             voices[language] = chosen
             return chosen
+        }
+        if !holdSys, KokoroModel.isInstalled, let def = KokoroModel.defaultNarrator(for: language) {
+            voices[language] = def
+            return def
         }
         if !holdSys, LiveVoiceModel.isInstalled, let def = VoicePack.defaultNarrator(for: language) {
             voices[language] = def
             return def
+        }
+        if CloudVoice.Provider.free.isSetUp, CardVoice.supportsLanguage(language),
+           let free = CloudVoice.all().first(where: { $0.provider == .free && $0.speaks(language) }) {
+            if !holdSys { voices[language] = free }
+            return free
         }
         let sys = SystemVoice.best(for: language)
         if !holdSys { voices[language] = sys }

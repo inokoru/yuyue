@@ -102,6 +102,12 @@ if [ -f "$LIVE" ]; then
   [ -n "$LIVE_DIGEST" ] && maybe_add "$DIR/live-zipvoice-1.zip" "$LIVE_DIGEST"
   [ -n "$PACK_DIGEST" ] && maybe_add "$DIR/voices-1.zip" "$PACK_DIGEST"
 fi
+# 跨端轻量旁白模型（Kokoro-82M-v1.1-zh Int8，Apache-2.0）。
+KOKORO=$ROOT/apple/Yuyue/Speech/KokoroVoice.swift
+if [ -f "$KOKORO" ]; then
+  KOKORO_DIGEST=$(sed -n 's/.*static let bundleDigest = "\(.*\)".*/\1/p' "$KOKORO")
+  [ -n "$KOKORO_DIGEST" ] && maybe_add "$DIR/kokoro-v1_1-1.zip" "$KOKORO_DIGEST"
+fi
 [ -n "$FILES" ] || { echo "$DIR 里没有待上传的模型文件" >&2; exit 1; }
 
 if [ "$ONLY_MS" -eq 0 ]; then

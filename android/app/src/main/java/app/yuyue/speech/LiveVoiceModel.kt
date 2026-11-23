@@ -169,6 +169,16 @@ object LiveVoiceModel {
         }
     }
 
+    /** Re-checks on-disk files after storage cleanup and updates state without triggering a download. */
+    fun refresh(dataDir: File) {
+        if (deviceUnsupported) {
+            state = State.Unsupported
+            return
+        }
+        if (state is State.Downloading) return
+        state = if (ready(dataDir)) State.Ready else State.Idle
+    }
+
     /** Debug helper (`-e liveVoicePath <zip-or-dir>`). */
     fun installDebug(core: YuyueCore, dataDir: File, from: File) {
         if (!from.exists()) return

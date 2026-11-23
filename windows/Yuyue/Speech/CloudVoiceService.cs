@@ -9,6 +9,9 @@ namespace Yuyue.Speech;
 
 public enum CloudTtsProvider
 {
+    Free,
+    Volcengine,
+    Fish,
     OpenAi,
     Azure,
     ElevenLabs,
@@ -26,6 +29,9 @@ public sealed record CloudVoiceEntry(
 
     public static string ProviderKey(CloudTtsProvider p) => p switch
     {
+        CloudTtsProvider.Free => "free",
+        CloudTtsProvider.Volcengine => "volcengine",
+        CloudTtsProvider.Fish => "fish",
         CloudTtsProvider.OpenAi => "openai",
         CloudTtsProvider.Azure => "azure",
         _ => "elevenlabs",
@@ -57,6 +63,35 @@ public sealed record CloudVoiceActing(
 public sealed class CloudVoiceService
 {
     private static readonly HttpClient Http = new() { Timeout = System.TimeSpan.FromSeconds(30) };
+
+    public static readonly (string Id, string Name, string Locale, string Gender, int Sid)[] FreeBuiltinVoices =
+    [
+        ("zf_001", "晓语 · 温和女声", "zh-CN", "female", 55),
+        ("zf_002", "清禾 · 清润女声", "zh-CN", "female", 56),
+        ("zm_010", "云泽 · 沉稳男声", "zh-CN", "male", 100),
+        ("zm_009", "知行 · 明朗男声", "zh-CN", "male", 99),
+        ("af_heart", "Heart · Warm Narrator", "en-US", "female", 3),
+        ("af_bella", "Bella · Clear Female", "en-US", "female", 2),
+        ("am_michael", "Michael · Steady Male", "en-US", "male", 16),
+        ("bf_emma", "Emma · British Narrator", "en-GB", "female", 21),
+    ];
+
+    public static readonly (string Id, string Name, string Locale, string Gender)[] VolcengineBuiltinVoices =
+    [
+        ("zh_female_cancan_mars_bigtts", "灿灿 · 温暖女声", "zh-CN", "female"),
+        ("zh_female_shuangkuaisisi_moon_bigtts", "思思 · 爽快自然", "zh-CN", "female"),
+        ("zh_male_wennuanahu_moon_bigtts", "阿虎 · 温暖男声", "zh-CN", "male"),
+        ("zh_male_shaonianzixin_moon_bigtts", "梓新 · 少年男声", "zh-CN", "male"),
+        ("zh_female_wanwanxiaohe_moon_bigtts", "小荷 · 温婉旁白", "zh-CN", "female"),
+        ("en_female_anna_mars_bigtts", "Anna · English Narrator", "en-US", "female"),
+    ];
+
+    public static readonly (string Id, string Name, string Locale, string Gender)[] FishBuiltinVoices =
+    [
+        ("default", "OpenAudio S1 · 默认自然旁白", "zh-CN", "female"),
+        ("7f92f8afb8ec43bf81429cc1c9199cb1", "丁真 · 社区热榜示例", "zh-CN", "male"),
+        ("54a5170264694bfc8e9ad98df7bd89c3", "温柔电台女声", "zh-CN", "female"),
+    ];
 
     public static readonly (string Id, string Gender)[] OpenAiBuiltinVoices =
     [
@@ -102,6 +137,9 @@ public sealed class CloudVoiceService
         voiceId = id[(secondDot + 1)..];
         provider = pKey switch
         {
+            "free" => CloudTtsProvider.Free,
+            "volcengine" => CloudTtsProvider.Volcengine,
+            "fish" => CloudTtsProvider.Fish,
             "openai" => CloudTtsProvider.OpenAi,
             "azure" => CloudTtsProvider.Azure,
             "elevenlabs" => CloudTtsProvider.ElevenLabs,
@@ -112,8 +150,12 @@ public sealed class CloudVoiceService
 
     public bool IsConfigured(CloudTtsProvider provider)
     {
+        if (provider == CloudTtsProvider.Free)
+            return _library.Secrets.Get("tts.free.dismissed") != "1";
         string key = _library.Secrets.Get($"tts.{CloudVoiceEntry.ProviderKey(provider)}.key");
         if (string.IsNullOrWhiteSpace(key)) return false;
+        if (provider == CloudTtsProvider.Volcengine)
+            return key.Contains('|') || !string.IsNullOrWhiteSpace(_library.Secrets.Get("tts.volcengine.appid"));
         if (provider == CloudTtsProvider.Azure)
             return !string.IsNullOrWhiteSpace(_library.Prefs.CloudVoiceAzureRegion);
         return true;
@@ -122,6 +164,18 @@ public sealed class CloudVoiceService
     public IReadOnlyList<CloudVoiceEntry> GetVoices(CloudTtsProvider provider)
     {
         string pKey = CloudVoiceEntry.ProviderKey(provider);
+        if (provider == CloudTtsProvider.Free)
+        {
+            return FreeBuiltinVoices
+                .Select(v => new CloudVoiceEntry(CloudTtsProvider.Free, v.Id, v.Name, v.Locale, v.Gender, null))
+                .ToArray();
+        }
+        if (provider == CloudTtsProvider.Volcengine)
+        {
+            return VolcengineBuiltinVoices
+                .Select(v => new CloudVoiceEntry(CloudTtsProvider.Volcengine, v.Id, v.Name, v.Locale, v.Gender, null))
+                .ToArray();
+        }
         if (provider == CloudTtsProvider.OpenAi)
         {
             return OpenAiBuiltinVoices
@@ -149,6 +203,13 @@ public sealed class CloudVoiceService
                 .ToArray();
         }
 
+        if (provider == CloudTtsProvider.Fish)
+        {
+            return FishBuiltinVoices
+                .Select(v => new CloudVoiceEntry(CloudTtsProvider.Fish, v.Id, v.Name, v.Locale, v.Gender, null))
+                .ToArray();
+        }
+
         if (provider == CloudTtsProvider.Azure)
         {
             return DefaultAzureVoices
@@ -162,7 +223,7 @@ public sealed class CloudVoiceService
     public IReadOnlyList<CloudVoiceEntry> GetAllConfiguredVoices()
     {
         var list = new List<CloudVoiceEntry>();
-        foreach (var p in new[] { CloudTtsProvider.OpenAi, CloudTtsProvider.Azure, CloudTtsProvider.ElevenLabs })
+        foreach (var p in new[] { CloudTtsProvider.Free, CloudTtsProvider.Volcengine, CloudTtsProvider.Fish, CloudTtsProvider.OpenAi, CloudTtsProvider.Azure, CloudTtsProvider.ElevenLabs })
         {
             if (IsConfigured(p)) list.AddRange(GetVoices(p));
         }
@@ -173,13 +234,73 @@ public sealed class CloudVoiceService
     {
         string pKey = CloudVoiceEntry.ProviderKey(provider);
         string apiKey = _library.Secrets.Get($"tts.{pKey}.key").Trim();
-        if (string.IsNullOrEmpty(apiKey))
+        if (provider != CloudTtsProvider.Free && string.IsNullOrEmpty(apiKey))
             return (false, 0, "请先填写 API Key");
 
         try
         {
             switch (provider)
             {
+                case CloudTtsProvider.Free:
+                {
+                    _library.Secrets.Set("tts.free.dismissed", "");
+                    byte[]? probe = await FetchFreeOnlineWavAsync("zf_001", "你好", "zh-CN", ct);
+                    if (probe is null || probe.Length < 128)
+                        return (false, 0, "在线公共线路当前繁忙，请稍后再试或下载本地离线模型");
+                    return (true, FreeBuiltinVoices.Length, $"已连通免 Key 在线自然语音（{FreeBuiltinVoices.Length} 个音色可用）");
+                }
+
+                case CloudTtsProvider.Volcengine:
+                {
+                    var (appId, token) = ResolveVolcengineCredentials(apiKey);
+                    if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(token))
+                        return (false, 0, "请同时填写火山引擎 AppID 与 Access Token");
+                    var probeBody = new
+                    {
+                        app = new { appid = appId, token = token, cluster = "volcano_tts" },
+                        user = new { uid = "yuyue-win-probe" },
+                        audio = new { voice_type = "zh_female_cancan_mars_bigtts", encoding = "wav", rate = 24000 },
+                        request = new { reqid = Guid.NewGuid().ToString(), text = "好", text_type = "plain", operation = "query" },
+                    };
+                    using var req = new HttpRequestMessage(HttpMethod.Post, "https://openspeech.bytedance.com/api/v1/tts");
+                    req.Headers.TryAddWithoutValidation("Authorization", $"Bearer;{token}");
+                    req.Content = new StringContent(JsonSerializer.Serialize(probeBody), Encoding.UTF8, "application/json");
+                    using var resp = await Http.SendAsync(req, ct);
+                    if (!resp.IsSuccessStatusCode)
+                        return (false, 0, await FormatHttpErrorAsync("火山豆包", resp));
+                    using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+                    if (doc.RootElement.TryGetProperty("code", out var cProp) && cProp.GetInt32() != 3000)
+                        return (false, 0, "火山引擎 AppID 或 Token 验证未通过");
+                    return (true, VolcengineBuiltinVoices.Length, $"已连通火山引擎豆包语音（{VolcengineBuiltinVoices.Length} 个精选音色）");
+                }
+
+                case CloudTtsProvider.Fish:
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Get, "https://api.fish.audio/model?page_size=20&page_number=1&sort_by=score");
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                    using var resp = await Http.SendAsync(req, ct);
+                    if (!resp.IsSuccessStatusCode)
+                        return (false, 0, await FormatHttpErrorAsync("Fish Audio", resp));
+                    using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+                    var rows = new List<string[]>
+                    {
+                        new[] { "default", "OpenAudio S1 · 默认自然旁白", "zh-CN", "female", "" },
+                    };
+                    if (doc.RootElement.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var el in items.EnumerateArray())
+                        {
+                            string id = el.TryGetProperty("_id", out var ip) ? ip.GetString() ?? "" : "";
+                            string title = el.TryGetProperty("title", out var tp) ? tp.GetString() ?? "" : "";
+                            if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(title))
+                                rows.Add(new[] { id, title, "", "", "" });
+                        }
+                    }
+                    _library.Prefs.CachedCloudVoices[pKey] = rows;
+                    _library.SavePrefs();
+                    return (true, rows.Count, $"已连通 Fish Audio（共加载 {rows.Count} 个 OpenAudio S1 音色）");
+                }
+
                 case CloudTtsProvider.OpenAi:
                 {
                     using var req = new HttpRequestMessage(HttpMethod.Get, "https://api.openai.com/v1/models/gpt-4o-mini-tts");
@@ -313,7 +434,7 @@ public sealed class CloudVoiceService
 
         string pKey = CloudVoiceEntry.ProviderKey(provider);
         string apiKey = _library.Secrets.Get($"tts.{pKey}.key").Trim();
-        if (string.IsNullOrEmpty(apiKey)) return null;
+        if (provider != CloudTtsProvider.Free && string.IsNullOrEmpty(apiKey)) return null;
 
         var act = acting ?? new CloudVoiceActing();
         SpokenPart[]? parts = null;
@@ -338,6 +459,52 @@ public sealed class CloudVoiceService
         byte[] wavBytes;
         switch (provider)
         {
+            case CloudTtsProvider.Free:
+            {
+                byte[]? freeWav = await FetchFreeOnlineWavAsync(voiceId, plain, language, ct);
+                if (freeWav is null || freeWav.Length <= 44) return null;
+                wavBytes = freeWav;
+                break;
+            }
+
+            case CloudTtsProvider.Volcengine:
+            {
+                var (appId, token) = ResolveVolcengineCredentials(apiKey);
+                if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(token)) return null;
+                var body = new
+                {
+                    app = new { appid = appId, token = token, cluster = "volcano_tts" },
+                    user = new { uid = "yuyue-reader" },
+                    audio = new { voice_type = voiceId, encoding = "wav", rate = 24000, speed_ratio = 1.0 },
+                    request = new { reqid = Guid.NewGuid().ToString(), text = plain, text_type = "plain", operation = "query" },
+                };
+                using var req = new HttpRequestMessage(HttpMethod.Post, "https://openspeech.bytedance.com/api/v1/tts");
+                req.Headers.TryAddWithoutValidation("Authorization", $"Bearer;{token}");
+                req.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+                using var resp = await Http.SendAsync(req, ct);
+                if (!resp.IsSuccessStatusCode) throw new InvalidOperationException(await FormatHttpErrorAsync("火山豆包", resp));
+                using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+                string b64 = doc.RootElement.TryGetProperty("data", out var dp) ? dp.GetString() ?? "" : "";
+                if (string.IsNullOrEmpty(b64)) return null;
+                wavBytes = Convert.FromBase64String(b64);
+                break;
+            }
+
+            case CloudTtsProvider.Fish:
+            {
+                object payload = voiceId == "default"
+                    ? new { text = plain, format = "wav", sample_rate = 24000, latency = "normal" }
+                    : new { text = plain, reference_id = voiceId, format = "wav", sample_rate = 24000, latency = "normal" };
+                using var req = new HttpRequestMessage(HttpMethod.Post, "https://api.fish.audio/v1/tts");
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                req.Headers.TryAddWithoutValidation("model", "s1");
+                req.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+                using var resp = await Http.SendAsync(req, ct);
+                if (!resp.IsSuccessStatusCode) throw new InvalidOperationException(await FormatHttpErrorAsync("Fish Audio", resp));
+                wavBytes = await resp.Content.ReadAsByteArrayAsync(ct);
+                break;
+            }
+
             case CloudTtsProvider.OpenAi:
             {
                 using var req = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/audio/speech");
@@ -433,6 +600,94 @@ public sealed class CloudVoiceService
             {
                 break; // Stop prefetch immediately on first failure per CloudVoice.swift
             }
+        }
+    }
+
+    private (string AppId, string Token) ResolveVolcengineCredentials(string rawKey)
+    {
+        int bar = rawKey.IndexOf('|');
+        if (bar > 0 && bar < rawKey.Length - 1)
+            return (rawKey[..bar].Trim(), rawKey[(bar + 1)..].Trim());
+        return (_library.Secrets.Get("tts.volcengine.appid").Trim(), rawKey);
+    }
+
+    private static async Task<byte[]?> FetchFreeOnlineWavAsync(string voiceId, string text, string language, CancellationToken ct)
+    {
+        bool isZh = language.StartsWith("zh", StringComparison.OrdinalIgnoreCase) || text.Any(c => c >= 0x4E00 && c <= 0x9FFF);
+        int sid = FreeBuiltinVoices.FirstOrDefault(v => v.Id == voiceId).Sid;
+        if (sid <= 0) sid = isZh ? 55 : 3;
+
+        string[] bases =
+        [
+            "https://www.modelscope.cn/api/v1/studio/k2-fsa/text-to-speech/gradio",
+            "https://k2-fsa-text-to-speech.hf.space",
+        ];
+        string langLabel = isZh ? "Chinese+English (kokoro-v1.1-zh)" : "English (kokoro-v1.0)";
+        string modelLabel = isZh ? "csukuangfj/kokoro-int8-multi-lang-v1_1|103" : "csukuangfj/kokoro-int8-en-v0_19|11";
+        foreach (string b in bases)
+        {
+            byte[]? wav = await CallGradioWavAsync(b, "process", new object[] { langLabel, modelLabel, text, sid, 1.0 }, ct);
+            if (wav is not null) return wav;
+        }
+        string meloLang = isZh ? "ZH" : "EN-US";
+        string meloSpk = isZh ? "ZH" : "EN";
+        return await CallGradioWavAsync("https://mrfakename-melotts.hf.space", "synthesize", new object[] { text, meloLang, 1.0, meloSpk }, ct);
+    }
+
+    private static async Task<byte[]?> CallGradioWavAsync(string baseUrl, string fnName, object[] args, CancellationToken ct)
+    {
+        try
+        {
+            string joinUrl = $"{baseUrl.TrimEnd('/')}/gradio_api/call/{fnName}";
+            using var joinReq = new HttpRequestMessage(HttpMethod.Post, joinUrl)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new { data = args }), Encoding.UTF8, "application/json"),
+            };
+            using var joinResp = await Http.SendAsync(joinReq, ct);
+            if (!joinResp.IsSuccessStatusCode) return null;
+            using var joinDoc = JsonDocument.Parse(await joinResp.Content.ReadAsStringAsync(ct));
+            string eventId = joinDoc.RootElement.TryGetProperty("event_id", out var ep) ? ep.GetString() ?? "" : "";
+            if (string.IsNullOrEmpty(eventId)) return null;
+
+            using var sseResp = await Http.GetAsync($"{joinUrl}/{eventId}", ct);
+            if (!sseResp.IsSuccessStatusCode) return null;
+            string sseText = await sseResp.Content.ReadAsStringAsync(ct);
+            string? audioUrl = null;
+            string lastEvent = "";
+            foreach (string rawLine in sseText.Split('\n'))
+            {
+                string line = rawLine.Trim();
+                if (line.StartsWith("event:", StringComparison.Ordinal))
+                    lastEvent = line[6..].Trim();
+                else if (line.StartsWith("data:", StringComparison.Ordinal) && lastEvent == "complete")
+                {
+                    using var arrDoc = JsonDocument.Parse(line[5..].Trim());
+                    if (arrDoc.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var el in arrDoc.RootElement.EnumerateArray())
+                        {
+                            if (el.ValueKind != JsonValueKind.Object) continue;
+                            if (el.TryGetProperty("url", out var uProp) && uProp.GetString() is { } u && u.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                            {
+                                audioUrl = u;
+                                break;
+                            }
+                            if (el.TryGetProperty("path", out var pProp) && pProp.GetString() is { } p && !string.IsNullOrEmpty(p))
+                            {
+                                audioUrl = $"{baseUrl.TrimEnd('/')}/gradio_api/file={p}";
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if (string.IsNullOrEmpty(audioUrl)) return null;
+            byte[] bytes = await Http.GetByteArrayAsync(audioUrl, ct);
+            return bytes.Length > 128 ? bytes : null;
+        }
+        catch
+        {
+            return null;
         }
     }
 

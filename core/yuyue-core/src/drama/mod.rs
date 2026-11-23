@@ -36,6 +36,7 @@ pub mod queue;
 pub mod speaker;
 pub mod scenes;
 pub mod sound;
+pub mod kokoro;
 pub mod zipvoice;
 pub mod spans;
 pub mod timeline;

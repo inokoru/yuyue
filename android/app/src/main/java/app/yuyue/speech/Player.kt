@@ -211,8 +211,8 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         val langTag = lang(start.section)
         if (Prefs.string("player.voice.$langTag").isEmpty() && CardVoice.speaksLanguage(langTag)) {
             runCatching { app.yuyue.YuyueApp.instance.library }.getOrNull()?.let { lib ->
-                if (!LiveVoiceModel.ready(lib.dataDir) && !LiveVoiceModel.deviceUnsupported) {
-                    LiveVoiceModel.onFirstListen(context, core, lib.dataDir)
+                if (!KokoroModel.installed(lib.dataDir) && !KokoroModel.deviceUnsupported) {
+                    KokoroModel.onFirstListen(context, core, lib.dataDir)
                 }
             }
         }
@@ -884,7 +884,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     private suspend fun voice(language: String): BookVoice? {
         if (voices.containsKey(language)) return voices[language]
         val chosen = Prefs.string("player.voice.$language").takeIf { it.isNotEmpty() }?.let { Voices.find(it, detail.summary.id) }
-        val v = chosen ?: Voices.defaultNarrator(language) ?: Voices.systemBest(language)
+        val v = chosen ?: Voices.best(language)
         voices[language] = v
         return v
     }
@@ -911,6 +911,12 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     init {
         SystemVoice.Engine.init(context)
         ClonedVoices.init(context)
+        scope.launch {
+            KokoroModel.readyEvents.collect {
+                pendingDefaultUpgrade = true
+                if (state != State.Playing) voices.clear()
+            }
+        }
         scope.launch {
             LiveVoiceModel.readyEvents.collect {
                 pendingDefaultUpgrade = true

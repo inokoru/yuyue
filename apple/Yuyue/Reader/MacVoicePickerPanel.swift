@@ -65,6 +65,7 @@ struct MacVoicePickerPanel: View {
 
     var body: some View {
         let _ = refreshTick
+        let _ = KokoroDownload.shared.phase
         let _ = LiveVoiceDownload.shared.phase
         let catalog = Voices.catalog(for: language, bookID: bookID)
         let groups = rows(catalog)
@@ -88,6 +89,7 @@ struct MacVoicePickerPanel: View {
         }
         .onDisappear { hoverPreview?.cancel() }
         .onReceive(NotificationCenter.default.publisher(for: ClonedVoices.changed)) { _ in refreshTick &+= 1 }
+        .onReceive(NotificationCenter.default.publisher(for: KokoroModel.ready)) { _ in refreshTick &+= 1 }
         .onReceive(NotificationCenter.default.publisher(for: LiveVoiceModel.ready)) { _ in refreshTick &+= 1 }
     }
 
@@ -289,11 +291,12 @@ struct MacVoicePickerPanel: View {
         switch s {
         case .recommended:
             if case .needsDownload = Voices.catalog(for: language, bookID: bookID).recommended {
-                String(localized: "\(VoicePack.totalCards) 张自带好声音")
+                String(localized: "Kokoro 轻量离线 · \(KokoroModel.totalMegabytes) MB")
             } else {
-                String(localized: "自带声音 · 七档语气")
+                String(localized: "跨端离线好声音")
             }
         case .mine: String(localized: "克隆与本书角色")
+        case .system: String(localized: "不推荐 · 仅断网兜底")
         default: nil
         }
     }
@@ -302,11 +305,11 @@ struct MacVoicePickerPanel: View {
     private func sectionBody(_ s: Section, _ catalog: Voices.Catalog, _ rows: [Row]) -> some View {
         switch (s, catalog.recommended) {
         case (.recommended, .needsDownload?):
-            LiveVoicePrepBanner(language: language, alwaysShowIdle: true, pill: true)
+            KokoroPrepBanner(language: language, alwaysShowIdle: true, pill: true)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 2)
         case (.recommended, .unsupported?):
-            Text("这台 Mac 带不动（内存不足 6 GB，已使用系统声音）")
+            Text("这台设备带不动离线语音，可使用在线自然语音（免 Key）")
                 .font(.yy(size: 11))
                 .foregroundStyle(YYColor.t3)
                 .padding(.horizontal, 8)
@@ -538,14 +541,35 @@ struct MacVoicePickerPanel: View {
 
     private func rows(_ catalog: Voices.Catalog) -> [Section: [Row]] {
         var out: [Section: [Row]] = [:]
-        if case let .ready(cards) = catalog.recommended {
-            let defaultID = VoicePack.defaultNarrator(for: language)?.id
-            out[.recommended] = cards.map { v in
+        if case let .ready(voices) = catalog.recommended {
+            let defaultID = KokoroModel.defaultNarrator(for: language)?.id ?? VoicePack.defaultNarrator(for: language)?.id
+            out[.recommended] = voices.map { v in
                 let isDefault = v.id == defaultID
-                return Row(id: v.id, name: v.name,
-                    badge: isDefault ? String(localized: "默认旁白") : (v.card.narrator ? String(localized: "推荐旁白") : nil),
-                    narrator: isDefault,
-                    detail: v.summaryLine, female: Self.female(v.card.gender), voice: v, clone: nil)
+                if let k = v as? KokoroVoice {
+                    return Row(
+                        id: k.id,
+                        name: k.name,
+                        badge: isDefault ? String(localized: "默认旁白") : (k.speaker.narrator ? String(localized: "推荐旁白") : nil),
+                        narrator: isDefault,
+                        detail: k.summaryLine,
+                        female: Self.female(k.speaker.gender),
+                        voice: k,
+                        clone: nil
+                    )
+                } else if let c = v as? CardVoice {
+                    return Row(
+                        id: c.id,
+                        name: c.name,
+                        badge: isDefault ? String(localized: "默认旁白") : (c.card.narrator ? String(localized: "角色旁白") : nil),
+                        narrator: isDefault,
+                        detail: c.summaryLine,
+                        female: Self.female(c.card.gender),
+                        voice: c,
+                        clone: nil
+                    )
+                } else {
+                    return Row(id: v.id, name: v.name, badge: v.qualityName, narrator: isDefault, detail: "", female: nil, voice: v, clone: nil)
+                }
             }
         }
         var mine: [Row] = catalog.clones.map { e in
@@ -563,7 +587,7 @@ struct MacVoicePickerPanel: View {
                 detail: String(localized: "云端（已读内容本地缓存）"), female: nil, voice: v, clone: nil)
         }
         out[.system] = catalog.system.map { v in
-            Row(id: v.id, name: v.name, badge: v.qualityName, narrator: false,
+            Row(id: v.id, name: v.name, badge: v.qualityName ?? String(localized: "不推荐"), narrator: false,
                 detail: v.listLine,
                 female: v.gender == .female ? true : (v.gender == .male ? false : nil), voice: v, clone: nil)
         }

@@ -1,6 +1,7 @@
 #include "ort_shim.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <onnxruntime/onnxruntime_c_api.h>
@@ -275,4 +276,147 @@ void yy_ort_free_spec(YYVocosSpec *spec) {
     free(spec->x_cos);
     free(spec->y_sin);
     memset(spec, 0, sizeof(YYVocosSpec));
+}
+
+struct YYOrtKokoro {
+    const OrtApi *api;
+    OrtEnv *env;
+    OrtSessionOptions *opts;
+    OrtSession *sess;
+    OrtMemoryInfo *mem;
+    char *voices_path;
+};
+
+YYOrtKokoro *yy_ort_kokoro_open(const char *model_path,
+                                const char *voices_path,
+                                int32_t num_threads) {
+    if (!model_path || !voices_path) return NULL;
+    const OrtApiBase *base = OrtGetApiBase();
+    if (!base) return NULL;
+    const OrtApi *api = base->GetApi(ORT_API_VERSION);
+    if (!api) return NULL;
+
+    YYOrtKokoro *h = (YYOrtKokoro *)calloc(1, sizeof(YYOrtKokoro));
+    if (!h) return NULL;
+    h->api = api;
+    h->voices_path = strdup(voices_path);
+    if (!h->voices_path) {
+        yy_ort_kokoro_close(h);
+        return NULL;
+    }
+
+    if (!check_ok(api, api->CreateEnv(ORT_LOGGING_LEVEL_ERROR, "yuyue-kokoro", &h->env)) ||
+        !check_ok(api, api->CreateSessionOptions(&h->opts))) {
+        yy_ort_kokoro_close(h);
+        return NULL;
+    }
+    int32_t threads = num_threads > 0 ? num_threads : 2;
+    (void)check_ok(api, api->SetIntraOpNumThreads(h->opts, threads));
+    (void)check_ok(api, api->SetInterOpNumThreads(h->opts, 1));
+    (void)check_ok(api, api->DisableCpuMemArena(h->opts));
+    (void)check_ok(api, api->DisableMemPattern(h->opts));
+    (void)check_ok(api, api->SetSessionGraphOptimizationLevel(h->opts, ORT_ENABLE_ALL));
+
+    if (!check_ok(api, api->CreateCpuMemoryInfo(OrtDeviceAllocator, OrtMemTypeDefault, &h->mem)) ||
+        !check_ok(api, api->CreateSession(h->env, model_path, h->opts, &h->sess))) {
+        yy_ort_kokoro_close(h);
+        return NULL;
+    }
+    return h;
+}
+
+void yy_ort_kokoro_close(YYOrtKokoro *h) {
+    if (!h) return;
+    const OrtApi *api = h->api;
+    if (api) {
+        if (h->sess) api->ReleaseSession(h->sess);
+        if (h->mem) api->ReleaseMemoryInfo(h->mem);
+        if (h->opts) api->ReleaseSessionOptions(h->opts);
+        if (h->env) api->ReleaseEnv(h->env);
+    }
+    free(h->voices_path);
+    free(h);
+}
+
+int yy_ort_kokoro_synth(YYOrtKokoro *h,
+                        const int64_t *tokens,
+                        int64_t n_tokens,
+                        int32_t sid,
+                        float speed,
+                        YYKokoroAudio *out) {
+    if (!h || !tokens || n_tokens <= 0 || sid < 0 || sid >= 103 || !out) {
+        return -1;
+    }
+    memset(out, 0, sizeof(YYKokoroAudio));
+    const OrtApi *api = h->api;
+    int rc = -1;
+
+    int64_t inner_len = n_tokens < 509 ? n_tokens : 509;
+    int64_t padded_len = inner_len + 2;
+    int64_t *padded = (int64_t *)calloc((size_t)padded_len, sizeof(int64_t));
+    if (!padded) return -1;
+    memcpy(padded + 1, tokens, (size_t)inner_len * sizeof(int64_t));
+
+    float style[256];
+    FILE *vf = fopen(h->voices_path, "rb");
+    if (!vf) {
+        free(padded);
+        return -1;
+    }
+    long byte_off = ((long)sid * 510L + (long)inner_len) * 256L * (long)sizeof(float);
+    if (fseek(vf, byte_off, SEEK_SET) != 0 || fread(style, sizeof(float), 256, vf) != 256) {
+        fclose(vf);
+        free(padded);
+        return -1;
+    }
+    fclose(vf);
+
+    OrtValue *v_tok = NULL, *v_sty = NULL, *v_spd = NULL, *v_out = NULL;
+    int64_t tok_shape[2] = {1, padded_len};
+    int64_t sty_shape[2] = {1, 256};
+    int64_t spd_shape[1] = {1};
+    float spd_val = speed > 0.0f ? speed : 1.0f;
+
+    if (!check_ok(api, api->CreateTensorWithDataAsOrtValue(h->mem, padded, (size_t)padded_len * sizeof(int64_t), tok_shape, 2, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &v_tok)) ||
+        !check_ok(api, api->CreateTensorWithDataAsOrtValue(h->mem, style, sizeof(style), sty_shape, 2, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &v_sty)) ||
+        !check_ok(api, api->CreateTensorWithDataAsOrtValue(h->mem, &spd_val, sizeof(float), spd_shape, 1, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &v_spd))) {
+        goto cleanup;
+    }
+
+    const char *in_names[3] = {"tokens", "style", "speed"};
+    const OrtValue *ins[3] = {v_tok, v_sty, v_spd};
+    const char *out_names[1] = {"audio"};
+    if (!check_ok(api, api->Run(h->sess, NULL, in_names, ins, 3, out_names, 1, &v_out))) {
+        goto cleanup;
+    }
+
+    OrtTensorTypeAndShapeInfo *info = NULL;
+    if (!check_ok(api, api->GetTensorTypeAndShape(v_out, &info))) goto cleanup;
+    size_t elem_count = 0;
+    int ok_cnt = check_ok(api, api->GetTensorShapeElementCount(info, &elem_count));
+    api->ReleaseTensorTypeAndShapeInfo(info);
+    if (!ok_cnt || elem_count == 0) goto cleanup;
+
+    void *raw_pcm = NULL;
+    if (!check_ok(api, api->GetTensorMutableData(v_out, &raw_pcm)) || !raw_pcm) goto cleanup;
+
+    out->samples = (float *)malloc(elem_count * sizeof(float));
+    if (!out->samples) goto cleanup;
+    memcpy(out->samples, raw_pcm, elem_count * sizeof(float));
+    out->count = (int64_t)elem_count;
+    rc = 0;
+
+cleanup:
+    if (v_out) api->ReleaseValue(v_out);
+    if (v_spd) api->ReleaseValue(v_spd);
+    if (v_sty) api->ReleaseValue(v_sty);
+    if (v_tok) api->ReleaseValue(v_tok);
+    free(padded);
+    return rc;
+}
+
+void yy_ort_kokoro_free(YYKokoroAudio *audio) {
+    if (!audio) return;
+    free(audio->samples);
+    memset(audio, 0, sizeof(YYKokoroAudio));
 }
