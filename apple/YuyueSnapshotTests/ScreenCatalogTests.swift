@@ -212,6 +212,45 @@ extension ScreenCatalogTests {
     func testMacBookWontOpen() {
         snap(bookWontOpen, width: 480, height: 360)
     }
+
+    @MainActor
+    func testMacCollectionsWallPopulated() throws {
+        let scratch = FileManager.default.temporaryDirectory.appending(path: "yuyue-col-pop-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer {
+            UserDefaults.standard.removeObject(forKey: "debugLibrary")
+            try? FileManager.default.removeItem(at: scratch)
+        }
+        UserDefaults.standard.set(scratch.path(percentEncoded: false), forKey: "debugLibrary")
+        let library = try Library()
+        let b1 = try XCTUnwrap(library.addRecordBook("The Great Gatsby", status: .reading))
+        let b2 = try XCTUnwrap(library.addRecordBook("Pride and Prejudice", status: .want))
+        let b3 = try XCTUnwrap(library.addRecordBook("Walden", status: .reading))
+        let b4 = try XCTUnwrap(library.addRecordBook("百年孤独", status: .finished))
+        let b5 = try XCTUnwrap(library.addRecordBook("红楼梦", status: .reading))
+        let b6 = try XCTUnwrap(library.addRecordBook("万历十五年", status: .finished))
+
+        let c1 = try XCTUnwrap(library.createCollection("英文原著", with: b1.id))
+        library.setBook(b2.id, in: c1, true)
+        library.setBook(b3.id, in: c1, true)
+
+        let c2 = try XCTUnwrap(library.createCollection("文学与思想", with: b4.id))
+        library.setBook(b5.id, in: c2, true)
+        library.setBook(b6.id, in: c2, true)
+
+        let c3 = try XCTUnwrap(library.createCollection("通勤听", with: b5.id))
+        library.setBook(b3.id, in: c3, true)
+
+        let c4 = try XCTUnwrap(library.createCollection("科幻", with: b1.id))
+        _ = library.createCollection("睡前")
+        let c6 = try XCTUnwrap(library.createCollection("历史与社会"))
+        _ = library.createCollection("周末闲读")
+        _ = library.createCollection("诗词选")
+        _ = c4
+
+        let pinned = PinnedCollections.raw([c1, c2, c6])
+        let wall = CollectionWall(library: library, pinnedRaw: .constant(pinned), leading: 30) { _ in }
+        snap(wall, width: 960, height: 640)
+    }
 }
 #endif
 

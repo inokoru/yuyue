@@ -42591,6 +42591,96 @@
           }
         }
       }
+    },
+    "%lld 个 · 收纳 %lld 本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld · %2$lld books"
+          }
+        }
+      }
+    },
+    "固定在侧栏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pinned"
+          }
+        }
+      }
+    },
+    "还没有合集" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Collections Yet"
+          }
+        }
+      }
+    },
+    "按主题、心境或阅读计划建几个书匣，把书放进去慢慢读。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create collections by theme, mood, or reading plan, and tuck books inside."
+          }
+        }
+      }
+    },
+    "还没有固定到侧栏的合集" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No collections pinned to the sidebar"
+          }
+        }
+      }
+    },
+    "没有找到“%@”相关的合集" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No collections matching “%@”"
+          }
+        }
+      }
+    },
+    "还没有书" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No books yet"
+          }
+        }
+      }
+    },
+    "回到全部合集" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Back to All Collections"
+          }
+        }
+      }
+    },
+    "还没有书。把文件拖进窗口，或在书架上右键一本书“加入合集…”" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No books yet. Drag files into the window, or right-click a book on the shelf and choose “Add to Collection…”"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

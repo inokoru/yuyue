@@ -1,4 +1,5 @@
 import SwiftUI
+import Synchronization
 import YuyueCore
 #if os(macOS)
 import AppKit
@@ -36,6 +37,9 @@ struct MacShelfView: View {
     @State private var pendingReveal: String?
     @State private var newName = ""
     @State private var renaming: String?
+    @State private var renamingPromptID: String?
+    @State private var renamingPromptText = ""
+    @State private var cameFromWall = false
     @State private var dropCollection: String?
     @FocusState private var nameFocused: Bool
     @Environment(\.openWindow) private var openWindow
@@ -55,78 +59,8 @@ struct MacShelfView: View {
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
 
     var body: some View {
-        // 首页导航: the sidebar is written straight on the desk, no
-        // card; the page is a sheet of paper lifted off it, 8 in from the window's edges. Put away,
-        // the sidebar slides out to the left while the paper widens to the window's left edge.
-        ZStack(alignment: .topLeading) {
-            Group {
-                switch filter {
-                case .notes: MacNotesView(library: library)
-                case .words: MacWordsView(library: library)
-                case .podcasts: MacPodcastView(library: library)
-                case .books, .status:
-                    MacBooksView(library: library, start: { if case .status(let s) = filter { s } else { .reading } }(), open: open) { book, point in
-                        showMenu(for: book, at: point)
-                    } pick: { book in
-                        pickingSheet = book.id
-                    }
-                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { mainFrame = $0 }
-                    .overlay { menuLayer.animation(YYMotion.quick, value: menu?.book) }
-                case .collections:
-                    CollectionWall(library: library, pinnedRaw: $pinnedRaw, leading: headerInset) { filter = .collection($0) }
-                default: main
-                }
-            }
-            // Another page fades in a few points lower, rather than replacing this at once.
-            .id(filter)
-            .transition(YYMotion.swap)
-            .animation(YYMotion.standard, value: filter)
-            .environment(\.shelfHeaderInset, headerInset)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // Clipped to the sheet before its shadow goes under, so the shadow isn't clipped too.
-            .clipShape(.rect(cornerRadius: ShelfDesk.paperRadius))
-            .background { ShelfDesk.Paper() }
-            .padding([.top, .bottom, .trailing], ShelfDesk.margin)
-            .padding(.leading, paperLeading)
-            sidebar
-                .frame(width: 212)
-                .padding(8)
-                .offset(x: sidebarShown ? 0 : -240)
-                .opacity(sidebarShown ? 1 : 0)
-                .allowsHitTesting(sidebarShown)
-                .accessibilityHidden(!sidebarShown)
-        }
-        // Over every page beside the sidebar (书架, 笔记, 生词本, 合集), so deleting a mark, a
-        // word or a collection shows its banner too, not only deleting a book.
-        .overlay(alignment: .top) { toast.padding(.leading, sidebarShown ? 228 : 0).padding(.horizontal, 16) }
-        .yyToastMotion(value: library.toast?.id)
-        .ignoresSafeArea(.container, edges: .top)
-        .onReceive(NotificationCenter.default.publisher(for: .toggleShelfSidebar)) { _ in toggleSidebar(animated: false) }
-        .onGeometryChange(for: Bool.self) { $0.size.width < 760 } action: { narrow in
-            withAnimation(Self.slide) {
-                narrowWindow = narrow
-                if !narrow { openedWhileNarrow = false }
-            }
-        }
-        .background(ShelfDesk.fill)
-        // 显示侧栏 / 隐藏侧栏 sits in the page, just before its title on the title's line, and
-        // moves with the page; put away, the sidebar takes the window's buttons with it, so the
-        // button and the title start the page clean at its left edge.
-        .overlay(alignment: .topLeading) {
-            sidebarButton
-                .padding(.leading, paperLeading + 16)
-                .padding(.top, Self.lineY - 11)
-                .ignoresSafeArea(.container, edges: .top)
-        }
-        .toolbar(removing: .title)
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-        // In the sidebar card's top corner, inside the title bar so they
-        // can be clicked; they fade out and back with the sidebar.
-        .trafficLights(CGPoint(x: 30, y: 24), hidden: !sidebarShown)
-        // No fade where lists meet the title bar, the search field or the line
-        // above 同步: what scrolls up just goes under, clean.
-        .noScrollEdgeFade()
-        .fileImporter(isPresented: $importerShown, allowedContentTypes: Library.importTypes, allowsMultipleSelection: true) { result in
+        deskCanvas
+            .fileImporter(isPresented: $importerShown, allowedContentTypes: Library.importTypes, allowsMultipleSelection: true) { result in
             if case .success(let urls) = result {
                 Task { await library.importFiles(urls, into: currentCollection) }
             }
@@ -267,7 +201,97 @@ struct MacShelfView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .quickSearch)) { _ in quick = quick == nil ? "" : nil }
+        .onChange(of: filter) { old, next in
+            if case .collection = next, old != .collections {
+                // Navigated directly from the sidebar rather than the wall.
+                cameFromWall = false
+            } else if case .collection = next {
+                // Keep cameFromWall when arriving from .collections.
+            } else {
+                cameFromWall = false
+            }
+        }
+        .yyPrompt(
+            String(localized: "重命名合集"),
+            message: "",
+            text: $renamingPromptText,
+            prompt: String(localized: "合集的名字"),
+            isPresented: Binding(get: { renamingPromptID != nil }, set: { if !$0 { renamingPromptID = nil } }),
+            confirm: String(localized: "保存")
+        ) {
+            let trimmed = renamingPromptText.trimmingCharacters(in: .whitespaces)
+            if let id = renamingPromptID, !trimmed.isEmpty {
+                library.renameCollection(id, to: trimmed)
+            }
+            renamingPromptID = nil
+        }
         .yyConfirm($confirming)
+    }
+
+    private var deskCanvas: some View {
+        // 首页导航: the sidebar is written straight on the desk, no
+        // card; the page is a sheet of paper lifted off it, 8 in from the window's edges. Put away,
+        // the sidebar slides out to the left while the paper widens to the window's left edge.
+        ZStack(alignment: .topLeading) {
+            Group {
+                switch filter {
+                case .notes: MacNotesView(library: library)
+                case .words: MacWordsView(library: library)
+                case .podcasts: MacPodcastView(library: library)
+                case .books, .status:
+                    MacBooksView(library: library, start: { if case .status(let s) = filter { s } else { .reading } }(), open: open) { book, point in
+                        showMenu(for: book, at: point)
+                    } pick: { book in
+                        pickingSheet = book.id
+                    }
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { mainFrame = $0 }
+                    .overlay { menuLayer.animation(YYMotion.quick, value: menu?.book) }
+                case .collections:
+                    CollectionWall(library: library, pinnedRaw: $pinnedRaw, leading: headerInset) {
+                        cameFromWall = true
+                        filter = .collection($0)
+                    }
+                default: main
+                }
+            }
+            .id(filter)
+            .transition(YYMotion.swap)
+            .animation(YYMotion.standard, value: filter)
+            .environment(\.shelfHeaderInset, headerInset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipShape(.rect(cornerRadius: ShelfDesk.paperRadius))
+            .background { ShelfDesk.Paper() }
+            .padding([.top, .bottom, .trailing], ShelfDesk.margin)
+            .padding(.leading, paperLeading)
+            sidebar
+                .frame(width: 212)
+                .padding(8)
+                .offset(x: sidebarShown ? 0 : -240)
+                .opacity(sidebarShown ? 1 : 0)
+                .allowsHitTesting(sidebarShown)
+                .accessibilityHidden(!sidebarShown)
+        }
+        .overlay(alignment: .top) { toast.padding(.leading, sidebarShown ? 228 : 0).padding(.horizontal, 16) }
+        .yyToastMotion(value: library.toast?.id)
+        .ignoresSafeArea(.container, edges: .top)
+        .onReceive(NotificationCenter.default.publisher(for: .toggleShelfSidebar)) { _ in toggleSidebar(animated: false) }
+        .onGeometryChange(for: Bool.self) { $0.size.width < 760 } action: { narrow in
+            withAnimation(Self.slide) {
+                narrowWindow = narrow
+                if !narrow { openedWhileNarrow = false }
+            }
+        }
+        .background(ShelfDesk.fill)
+        .overlay(alignment: .topLeading) {
+            sidebarButton
+                .padding(.leading, paperLeading + 16)
+                .padding(.top, Self.lineY - 11)
+                .ignoresSafeArea(.container, edges: .top)
+        }
+        .toolbar(removing: .title)
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .trafficLights(CGPoint(x: 30, y: 24), hidden: !sidebarShown)
+        .noScrollEdgeFade()
     }
 
     /// 问书伴 from ⌘K: in the book read last.
@@ -626,6 +650,59 @@ struct MacShelfView: View {
         if case .collection(let id) = filter { id } else { nil }
     }
 
+    private var activeCollection: BookCollection? {
+        guard let id = currentCollection else { return nil }
+        return library.collections.first { $0.id == id }
+    }
+
+    private func collectionHeaderMenu(_ c: BookCollection) -> some View {
+        let ids = PinnedCollections.ids(pinnedRaw)
+        let isPinned = ids.contains(c.id)
+        return Menu {
+            Button(isPinned ? String(localized: "取消固定") : String(localized: "固定到侧栏")) {
+                var next = ids
+                if let i = next.firstIndex(of: c.id) { next.remove(at: i) } else { next.append(c.id) }
+                pinnedRaw = PinnedCollections.raw(next)
+            }
+            Divider()
+            Button("重命名") {
+                renamingPromptText = c.name
+                renamingPromptID = c.id
+            }
+            CollectionIconMenu(collection: c, library: library)
+            Divider()
+            Button("删除合集…", role: .destructive) {
+                confirming = YYConfirm(
+                    title: String(localized: "删除合集“\(c.name)”？"),
+                    message: String(localized: "这个合集删掉，里面的书还在书架上。"),
+                    button: String(localized: "删除")
+                ) {
+                    let backToWall = cameFromWall
+                    filter = backToWall ? .collections : .all
+                    pinnedRaw = PinnedCollections.raw(PinnedCollections.ids(pinnedRaw).filter { $0 != c.id })
+                    library.deleteCollection(c)
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.yy(size: 11.5, weight: .semibold))
+                .foregroundStyle(YYColor.t1)
+                .frame(width: 28, height: 28)
+                .background {
+                    Circle().fill(YYColor.pill)
+                        .overlay { Circle().strokeBorder(YYColor.pillLine, lineWidth: 0.5) }
+                        .shadow(color: .black.opacity(scheme == .dark || eink ? 0 : 0.04), radius: 2, y: 1)
+                }
+                .contentShape(.circle)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(String(localized: "管理合集“\(c.name)”"))
+        .accessibilityLabel(String(localized: "管理合集“\(c.name)”"))
+    }
+
     private var title: String {
         switch filter ?? .all {
         case .all: return String(localized: "书")
@@ -695,26 +772,55 @@ struct MacShelfView: View {
         return Array(repeating: GridItem(.flexible(minimum: 40, maximum: width), spacing: 18, alignment: .top), count: count)
     }
 
+    private var mainHeader: some View {
+        let col = activeCollection
+        let showBack = col.map { c in cameFromWall || !pinnedCollections.contains(where: { $0.id == c.id }) } ?? false
+        return HStack(spacing: 8) {
+            if let col, showBack {
+                Button { filter = .collections } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left").font(.yy(size: 12, weight: .semibold))
+                        Text("合集").font(.yy(size: 12.5))
+                    }
+                    .foregroundStyle(YYColor.t2)
+                    .padding(.vertical, 4)
+                    .padding(.trailing, 4)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut("[", modifiers: .command)
+                .help(String(localized: "回到全部合集"))
+                .padding(.leading, headerInset)
+
+                Text(col.name)
+                    .font(.yy(size: 22, weight: .bold))
+                    .foregroundStyle(YYColor.t1)
+                    .lineLimit(1)
+            } else {
+                Text(title)
+                    .font(.yy(size: 22, weight: .bold))
+                    .foregroundStyle(YYColor.t1)
+                    .lineLimit(1)
+                    .padding(.leading, headerInset)
+            }
+            Spacer()
+            if let col {
+                collectionHeaderMenu(col)
+            }
+            importButton
+        }
+        .frame(height: 60)
+        .padding(.top, 4)
+        .padding(.bottom, 5)
+        .padding(.leading, 22)
+        .padding(.trailing, 28)
+    }
+
     private var main: some View {
         ScrollViewReader { scroll in
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Text(title)
-                        .font(.yy(size: 22, weight: .bold))
-                        .foregroundStyle(YYColor.t1)
-                        .lineLimit(1)
-                        // Clear of the window's buttons and 显示侧栏 when the sidebar is away.
-                        .padding(.leading, headerInset)
-                    Spacer()
-                    importButton
-                }
-                // 64 high, 4 of it above, the title in the middle.
-                .frame(height: 60)
-                .padding(.top, 4)
-                .padding(.bottom, 5)
-                .padding(.leading, 22)
-                .padding(.trailing, 28)
+                mainHeader
 
                 if !library.imports.isEmpty {
                     MacImportCard(library: library, tint: tint) { id in reveal(id) }
@@ -734,7 +840,7 @@ struct MacShelfView: View {
                             } else {
                                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 266), spacing: 12)], spacing: 12) {
                                     ForEach(reading) { book in
-                                        readingTile(book, tinted: book.id == reading.first?.id)
+                                        readingTile(book, tinted: true)
                                     }
                                 }
                             }
@@ -1012,8 +1118,12 @@ struct MacShelfView: View {
         } else {
             let (symbol, text): (String, String) = if library.books.isEmpty {
                 ("books.vertical", String(localized: "书架是空的，把 EPUB、PDF、MOBI、TXT 拖进窗口就能开始读"))
-            } else if currentCollection != nil {
-                ("tray", String(localized: "还没有书。把书拖到左边这个合集上，或者把文件拖进来"))
+            } else if let colID = currentCollection {
+                if pinnedCollections.contains(where: { $0.id == colID }) {
+                    ("tray", String(localized: "还没有书。把书拖到左边这个合集上，或者把文件拖进来"))
+                } else {
+                    ("tray", String(localized: "还没有书。把文件拖进窗口，或在书架上右键一本书“加入合集…”"))
+                }
             } else {
                 ("book.closed", String(localized: "这里还没有书"))
             }
@@ -1563,11 +1673,12 @@ struct ReadingCard: View {
     /// right-side 🎧 & ··· icon cluster, and a whisper-thin bottom progress hairline.
     private var macBody: some View {
         let useTint = tinted && !eink
-        let colors = (hue ?? .paper).leadCard(dark: scheme == .dark, grey: eink)
+        let resolvedHue = hue ?? CoverHue.cached(book.coverPath) ?? .paper
+        let colors = resolvedHue.continueGradient(dark: scheme == .dark)
         let titleColor: Color = useTint ? .white : YYColor.t1
-        let authorColor: Color = useTint ? .white.opacity(0.78) : YYColor.t2
-        let metaColor: Color = useTint ? .white.opacity(0.74) : YYColor.t3
-        let pctColor: Color = useTint ? .white : tint.accent
+        let authorColor: Color = useTint ? .white.opacity(0.85) : YYColor.t2
+        let metaColor: Color = useTint ? .white.opacity(0.68) : YYColor.t3
+        let pctColor: Color = useTint ? .white.opacity(0.95) : tint.accent
 
         return ZStack {
             // Whole card opens the book directly (no bulky bottom "接着读" bar).
@@ -1578,6 +1689,7 @@ struct ReadingCard: View {
             HStack(spacing: 12) {
                 BookCover(book: book)
                     .frame(width: 46, height: 64)
+                    .shadow(color: useTint ? .black.opacity(0.24) : .clear, radius: 4, y: 2)
                     .allowsHitTesting(false)
 
                 VStack(alignment: .leading, spacing: 2.5) {
@@ -1598,7 +1710,7 @@ struct ReadingCard: View {
                 .allowsHitTesting(false)
 
                 HStack(spacing: 2) {
-                    listenButton(useTint: useTint, tintBg: colors.bg)
+                    listenButton(useTint: useTint, tintBg: colors.right)
                     if let menuAt {
                         moreButton(useTint: useTint, menuAt: menuAt)
                     }
@@ -1616,10 +1728,12 @@ struct ReadingCard: View {
         .background {
             if useTint {
                 RoundedRectangle(cornerRadius: YYRadius.block)
-                    .fill(colors.bg)
-                    .overlay(
-                        LinearGradient(colors: [.white.opacity(0.14), .clear], startPoint: .topLeading, endPoint: .center)
-                            .clipShape(.rect(cornerRadius: YYRadius.block))
+                    .fill(
+                        LinearGradient(
+                            colors: [colors.left, colors.right],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
                     )
             } else {
                 RoundedRectangle(cornerRadius: YYRadius.block)
@@ -1643,11 +1757,14 @@ struct ReadingCard: View {
         )
         .offset(y: cardHover && !YYMotion.reduce ? -1 : 0)
         .animation(YYMotion.quick, value: cardHover)
-        .animation(.easeOut(duration: 0.25), value: hue)
+        .animation(.easeOut(duration: 0.22), value: hue)
         .onHover { cardHover = $0 }
         .help(book.remaining.isEmpty ? book.title : "\(book.title) · \(book.remaining)")
         .task(id: book.coverPath) {
-            if tinted {
+            guard tinted else { return }
+            if let hit = CoverHue.cached(book.coverPath) {
+                hue = hit
+            } else {
                 hue = await CoverHue.load(book.coverPath)
             }
         }
@@ -1815,58 +1932,250 @@ struct ReadingCard: View {
 }
 
 #if os(macOS)
-/// The colour of a cover, averaged, and the card and ink a 在读 card takes from it.
-struct CoverHue: Equatable {
-    var hue: Double
-    var saturation: Double
-    var brightness: Double
-
-    /// No cover: the 纸本 paper the placeholder is drawn on.
-    static let paper = CoverHue(hue: 0.11, saturation: 0.1, brightness: 0.93)
-
-    /// Muted medium-dark cover tone for the lead 在读 card so white text always reads crisply.
-    func leadCard(dark: Bool, grey: Bool) -> (bg: Color, fg: Color) {
-        let s = grey ? 0 : max(saturation, 0.05)
-        let cool = hue > 0.2 && hue < 0.9
-        let satCap = cool ? 0.24 : 0.28
-        if dark {
-            return (Color(hue: hue, saturation: min(s, satCap), brightness: 0.26), .white)
-        }
-        return (Color(hue: hue, saturation: min(s, satCap), brightness: min(max(brightness, 0.36), 0.48)), .white)
+/// Apple Books–style dominant cover pigment analysis and horizontal linear gradient
+/// for 在读 ("Continue") cards: trims outer border artifacts, clusters pixels by area
+/// across 24 circular hue bins plus dark/light neutral buckets, normalizes relative
+/// luminance for crisp white text contrast, and steps down smoothly from leading to trailing.
+nonisolated struct CoverHue: Equatable, Sendable {
+    enum Kind: Equatable, Sendable {
+        case darkNeutral
+        case chromatic(hue: Double, saturation: Double, brightness: Double)
+        case lightPaper(hue: Double, saturation: Double)
     }
 
-    /// A light cover gives a pale card with dark ink in its hue; a dark one stays dark with pale ink.
-    /// In dark mode every card is dark. Greys get a touch of warmth so they don't read as blank.
-    func card(dark: Bool, grey: Bool) -> (bg: Color, fg: Color) {
-        let s = grey ? 0 : max(saturation, 0.06)
-        // The shelf is warm grey paper; a card may take a cover's hue but never be louder than
-        // the shelf around it. Cool hues (green through violet) stand out more, so they're kept
-        // paler still.
-        let cool = hue > 0.2 && hue < 0.9
-        let k = cool ? 0.6 : 1.0
-        if dark {
-            return (Color(hue: hue, saturation: min(s, 0.32 * k), brightness: 0.22),
-                    Color(hue: hue, saturation: min(s, 0.12), brightness: 0.94))
-        }
-        if brightness > 0.55 {
-            return (Color(hue: hue, saturation: min(s, 0.16 * k), brightness: 0.91),
-                    Color(hue: hue, saturation: min(max(s, 0.2), 0.45 * k), brightness: 0.24))
-        }
-        return (Color(hue: hue, saturation: min(s, 0.45 * k), brightness: min(max(brightness, 0.22), 0.36)),
-                Color(hue: hue, saturation: min(s, 0.15), brightness: 0.96))
+    var kind: Kind
+
+    /// No cover: the warm 纸本 paper placeholder tone.
+    static let paper = CoverHue(kind: .lightPaper(hue: 0.105, saturation: 0.08))
+
+    private static let cache = Mutex<[String: CoverHue]>([:])
+
+    static func cached(_ path: String?) -> CoverHue? {
+        guard let path, !path.isEmpty else { return .paper }
+        return cache.withLock { $0[path] }
     }
 
-    /// The cover drawn down to one pixel, off the main thread.
+    /// Horizontal 90° linear gradient (`leading` → `trailing`) matching Apple Books' Continue cards.
+    func continueGradient(dark: Bool) -> (left: Color, right: Color) {
+        switch kind {
+        case .darkNeutral:
+            let vL = dark ? 0.25 : 0.302
+            let vR = dark ? 0.21 : 0.259
+            return (
+                Color(.sRGB, red: vL, green: vL, blue: dark ? vL + 0.005 : vL),
+                Color(.sRGB, red: vR, green: vR, blue: dark ? vR + 0.005 : vR)
+            )
+        case .chromatic(var h, var s, let v):
+            // Warm-shift bright yellow/orange slightly toward amber/terracotta so darkening never turns olive-muddy.
+            if h > 0.055 && h < 0.18 && v > 0.65 {
+                h = max(0.032, h - 0.038)
+                s = min(0.90, s * 1.06)
+            }
+            // Recover diluted HSV saturation when bringing pastel tints down into mid-tone luminance.
+            if v > 0.82 && s < 0.48 {
+                s = min(0.66, max(s * 1.62, 0.42))
+            } else {
+                s = min(0.88, max(s * 0.96, 0.28))
+            }
+            if dark {
+                s = min(0.76, s * 0.88)
+            }
+
+            let targetLum = dark
+                ? min(0.13, max(0.065, 0.06 + 0.07 * v))
+                : min(0.185, max(0.09, 0.08 + 0.115 * v))
+
+            var lo = 0.18, hi = 0.82
+            for _ in 0 ..< 18 {
+                let mid = (lo + hi) * 0.5
+                let (rr, gg, bb) = Self.hsvToRGB(h: h, s: s, v: mid)
+                if Self.relativeLuminance(r: rr, g: gg, b: bb) < targetLum {
+                    lo = mid
+                } else {
+                    hi = mid
+                }
+            }
+            let vL = (lo + hi) * 0.5
+            let vR = max(0.16, vL * 0.86)
+            let sR = max(0.18, s * 0.93)
+            let (lR, lG, lB) = Self.hsvToRGB(h: h, s: s, v: vL)
+            let (rR, rG, rB) = Self.hsvToRGB(h: h, s: sR, v: vR)
+            return (
+                Color(.sRGB, red: lR, green: lG, blue: lB),
+                Color(.sRGB, red: rR, green: rG, blue: rB)
+            )
+        case .lightPaper(let h, let s):
+            let sat = min(0.14, max(s * 1.5, 0.04))
+            let vL = dark ? 0.30 : 0.53
+            let vR = dark ? 0.25 : 0.46
+            let (lR, lG, lB) = Self.hsvToRGB(h: h, s: sat, v: vL)
+            let (rR, rG, rB) = Self.hsvToRGB(h: h, s: sat * 0.9, v: vR)
+            return (
+                Color(.sRGB, red: lR, green: lG, blue: lB),
+                Color(.sRGB, red: rR, green: rG, blue: rB)
+            )
+        }
+    }
+
+    /// Samples a 64×64 sRGB thumbnail off the main thread and extracts the dominant cover palette.
     @concurrent nonisolated static func load(_ path: String?) async -> CoverHue? {
-        guard let image = await Thumbnail.load(path, maxPixels: 48) else { return nil }
-        var pixel = [UInt8](repeating: 0, count: 4)
-        guard let context = CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
-                                      space: CGColorSpaceCreateDeviceRGB(),
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        guard let path, !path.isEmpty else { return .paper }
+        if let hit = cached(path) { return hit }
+        guard let image = await Thumbnail.load(path, maxPixels: 64) else { return nil }
+
+        let n = 64
+        var buf = [UInt8](repeating: 0, count: n * n * 4)
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: &buf,
+            width: n,
+            height: n,
+            bitsPerComponent: 8,
+            bytesPerRow: n * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
         context.interpolationQuality = .medium
-        context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-        let color = NSColor(srgbRed: CGFloat(pixel[0]) / 255, green: CGFloat(pixel[1]) / 255, blue: CGFloat(pixel[2]) / 255, alpha: 1)
-        return CoverHue(hue: color.hueComponent, saturation: color.saturationComponent, brightness: color.brightnessComponent)
+        context.draw(image, in: CGRect(x: 0, y: 0, width: n, height: n))
+
+        struct Bin { var area = 0.0; var r = 0.0; var g = 0.0; var b = 0.0 }
+        var bins = Array(repeating: Bin(), count: 24)
+        var darkArea = 0.0, midArea = 0.0, lightArea = 0.0, total = 0.0
+        var edgeDark = 0.0, edgeTotal = 0.0
+        var lightRGB = (0.0, 0.0, 0.0)
+        var midRGB = (0.0, 0.0, 0.0)
+
+        let margin = 4
+        for y in margin ..< (n - margin) {
+            for x in margin ..< (n - margin) {
+                let i = (y * n + x) * 4
+                guard buf[i + 3] >= 128 else { continue }
+                let r = Double(buf[i]) / 255.0
+                let g = Double(buf[i + 1]) / 255.0
+                let b = Double(buf[i + 2]) / 255.0
+                let (h, s, v) = rgbToHSV(r: r, g: g, b: b)
+
+                let isEdge = (x < margin + 6 || x >= n - margin - 6 || y < margin + 6 || y >= n - margin - 6)
+                let w = isEdge ? 1.35 : 1.0
+                total += w
+                if isEdge {
+                    edgeTotal += 1
+                    if v < 0.24 { edgeDark += 1 }
+                }
+
+                if s >= 0.15 && v >= 0.15 && !(v > 0.95 && s < 0.20) {
+                    let idx = min(23, Int(h * 24.0))
+                    bins[idx].area += w
+                    bins[idx].r += r * w
+                    bins[idx].g += g * w
+                    bins[idx].b += b * w
+                } else if v < 0.22 {
+                    darkArea += w
+                } else if v > 0.76 {
+                    lightArea += w
+                    lightRGB.0 += r * w
+                    lightRGB.1 += g * w
+                    lightRGB.2 += b * w
+                } else {
+                    midArea += w
+                    midRGB.0 += r * w
+                    midRGB.1 += g * w
+                    midRGB.2 += b * w
+                }
+            }
+        }
+
+        guard total > 0 else { return .paper }
+
+        var bestIdx = 0
+        var bestChromaArea = 0.0
+        for i in 0 ..< 24 {
+            let p = (i + 23) % 24
+            let nx = (i + 1) % 24
+            let a = bins[i].area + bins[p].area + bins[nx].area
+            if a > bestChromaArea {
+                bestChromaArea = a
+                bestIdx = i
+            }
+        }
+
+        let chromaFrac = bestChromaArea / total
+        let darkFrac = darkArea / total
+        let edgeDarkFrac = edgeDark / max(1.0, edgeTotal)
+
+        let extracted: CoverHue
+        if (darkFrac >= 0.44 && darkFrac > chromaFrac * 1.02) || (darkFrac >= 0.36 && edgeDarkFrac >= 0.56) {
+            extracted = CoverHue(kind: .darkNeutral)
+        } else if chromaFrac >= 0.16 {
+            let p = (bestIdx + 23) % 24
+            let nx = (bestIdx + 1) % 24
+            let aSum = max(1e-6, bins[bestIdx].area + bins[p].area + bins[nx].area)
+            let cr = (bins[bestIdx].r + bins[p].r + bins[nx].r) / aSum
+            let cg = (bins[bestIdx].g + bins[p].g + bins[nx].g) / aSum
+            let cb = (bins[bestIdx].b + bins[p].b + bins[nx].b) / aSum
+            let (h, s, v) = rgbToHSV(r: cr, g: cg, b: cb)
+            extracted = CoverHue(kind: .chromatic(hue: h, saturation: s, brightness: v))
+        } else {
+            let base: (Double, Double, Double) = if lightArea >= midArea && lightArea > 0 {
+                (lightRGB.0 / lightArea, lightRGB.1 / lightArea, lightRGB.2 / lightArea)
+            } else if midArea > 0 {
+                (midRGB.0 / midArea, midRGB.1 / midArea, midRGB.2 / midArea)
+            } else {
+                (0.90, 0.88, 0.84)
+            }
+            let (h, s, _) = rgbToHSV(r: base.0, g: base.1, b: base.2)
+            extracted = CoverHue(kind: .lightPaper(hue: h, saturation: s))
+        }
+
+        cache.withLock { store in
+            if store.count > 256 { store.removeAll(keepingCapacity: true) }
+            store[path] = extracted
+        }
+        return extracted
+    }
+
+    private static func rgbToHSV(r: Double, g: Double, b: Double) -> (Double, Double, Double) {
+        let mx = max(r, g, b)
+        let mn = min(r, g, b)
+        let d = mx - mn
+        var h = 0.0
+        if d > 1e-5 {
+            if mx == r {
+                h = ((g - b) / d).truncatingRemainder(dividingBy: 6.0)
+            } else if mx == g {
+                h = (b - r) / d + 2.0
+            } else {
+                h = (r - g) / d + 4.0
+            }
+            h /= 6.0
+            if h < 0 { h += 1.0 }
+        }
+        let s = mx > 1e-4 ? d / mx : 0.0
+        return (h, s, mx)
+    }
+
+    private static func hsvToRGB(h: Double, s: Double, v: Double) -> (Double, Double, Double) {
+        let wrapped = (h.truncatingRemainder(dividingBy: 1.0) + 1.0).truncatingRemainder(dividingBy: 1.0) * 6.0
+        let i = Int(floor(wrapped))
+        let f = wrapped - Double(i)
+        let p = v * (1.0 - s)
+        let q = v * (1.0 - s * f)
+        let t = v * (1.0 - s * (1.0 - f))
+        switch i % 6 {
+        case 0: return (v, t, p)
+        case 1: return (q, v, p)
+        case 2: return (p, v, t)
+        case 3: return (p, q, v)
+        case 4: return (t, p, v)
+        default: return (v, p, q)
+        }
+    }
+
+    private static func relativeLuminance(r: Double, g: Double, b: Double) -> Double {
+        func linear(_ c: Double) -> Double {
+            c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
     }
 }
 #endif
