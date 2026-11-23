@@ -106,7 +106,9 @@ struct MacSettings: View {
         .frame(minWidth: 860, idealWidth: 1020, maxWidth: .infinity, minHeight: 540, idealHeight: height, maxHeight: .infinity)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
         .tint(tint.accent)
-        .navigationTitle(page.title)
+        // Keep the window title fixed (hidden visually; the sidebar names the page) so tab
+        // switches don't trigger AppKit titlebar relayout and reset the traffic lights.
+        .navigationTitle(String(localized: "设置"))
         .background(SettingsTitlebar { windowBox.window = $0 })
         // At the top of the sidebar, as in the shelf window.
         .trafficLights(CGPoint(x: 22, y: 20))
@@ -374,10 +376,11 @@ private struct SettingsTitlebar: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             observer.map(NotificationCenter.default.removeObserver)
+            observer = nil
             guard let window else { return }
             onWindow?(window)
             tidy(window)
-            observer = NotificationCenter.default.addObserver(forName: NSWindow.didUpdateNotification, object: window, queue: .main) { [weak self] note in
+            observer = NotificationCenter.default.addObserver(forName: NSWindow.didUpdateNotification, object: window, queue: nil) { [weak self] note in
                 guard let window = note.object as? NSWindow else { return }
                 MainActor.assumeIsolated { self?.tidy(window) }
             }
@@ -391,10 +394,9 @@ private struct SettingsTitlebar: NSViewRepresentable {
             if !window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = true }
             if !window.styleMask.contains(.fullSizeContentView) { window.styleMask.insert(.fullSizeContentView) }
             if !window.styleMask.contains(.resizable) { window.styleMask.insert(.resizable) }
-            window.standardWindowButton(.zoomButton)?.isEnabled = true
-            window.minSize = NSSize(width: 860, height: 540)
+            if let zoom = window.standardWindowButton(.zoomButton), !zoom.isEnabled { zoom.isEnabled = true }
             if window.titlebarSeparatorStyle != .none { window.titlebarSeparatorStyle = .none }
-            window.backgroundColor = SettingsSidebar.header
+            if window.backgroundColor !== SettingsSidebar.header { window.backgroundColor = SettingsSidebar.header }
         }
     }
 
@@ -434,38 +436,85 @@ private struct TrafficLights: NSViewRepresentable {
         var close = CGPoint.zero
         var lightsHidden = false
         private var shownHidden: Bool?
+        private var isPlacing = false
+        private var step: CGFloat?
+        private weak var observedBar: NSView?
         nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
+        nonisolated(unsafe) private var barObserver: NSObjectProtocol?
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             observers.forEach(NotificationCenter.default.removeObserver)
             observers = []
+            barObserver.map(NotificationCenter.default.removeObserver)
+            barObserver = nil
+            observedBar = nil
+            step = nil
             guard let window else { return }
             for name in [NSWindow.didUpdateNotification, NSWindow.didResizeNotification, NSWindow.didExitFullScreenNotification] {
-                observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] note in
+                observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: nil) { [weak self] note in
                     guard let window = note.object as? NSWindow else { return }
                     MainActor.assumeIsolated { self?.place(in: window) }
+                })
+            }
+            let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { window.standardWindowButton($0) }
+            captureStep(buttons)
+            for b in buttons {
+                b.postsFrameChangedNotifications = true
+                observers.append(NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: b, queue: nil) { [weak self, weak window] _ in
+                    MainActor.assumeIsolated {
+                        guard let self, let window, !self.isPlacing else { return }
+                        self.place(in: window)
+                    }
                 })
             }
             place(in: window)
         }
 
-        deinit { observers.forEach(NotificationCenter.default.removeObserver) }
+        deinit {
+            observers.forEach(NotificationCenter.default.removeObserver)
+            barObserver.map(NotificationCenter.default.removeObserver)
+        }
+
+        private func captureStep(_ buttons: [NSButton]) {
+            guard step == nil, buttons.count == 3 else { return }
+            let d01 = buttons[1].frame.minX - buttons[0].frame.minX
+            let d12 = buttons[2].frame.minX - buttons[1].frame.minX
+            if d01 > 0, abs(d01 - d12) < 1 { step = d01 }
+        }
+
+        private func observeBar(_ bar: NSView, in window: NSWindow) {
+            guard observedBar !== bar else { return }
+            barObserver.map(NotificationCenter.default.removeObserver)
+            observedBar = bar
+            bar.postsFrameChangedNotifications = true
+            barObserver = NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: bar, queue: nil) { [weak self, weak window] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let window, !self.isPlacing else { return }
+                    self.place(in: window)
+                }
+            }
+        }
 
         func place(in window: NSWindow) {
-            guard !window.styleMask.contains(.fullScreen) else { return }
+            guard !isPlacing, !window.styleMask.contains(.fullScreen) else { return }
             let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { window.standardWindowButton($0) }
             guard buttons.count == 3, let bar = buttons[0].superview else { return }
+            observeBar(bar, in: window)
+            captureStep(buttons)
             // A button below the title bar shows but can't be clicked: such a window needs a
             // toolbar, which makes the bar 52 high (SwiftUI owns it, so it isn't added here).
-            guard bar.frame.height >= close.y + buttons[0].frame.height / 2 else { return }
-            let step = buttons[1].frame.minX - buttons[0].frame.minX
-            // The middle of the close button, in the bar's own coordinates.
-            let top = window.frame.height - close.y
-            let middle = bar.convert(NSPoint(x: close.x, y: top), from: nil)
+            guard bar.bounds.height >= close.y + buttons[0].frame.height / 2 else { return }
+            let step = self.step ?? max(20, buttons[1].frame.minX - buttons[0].frame.minX)
+            // The middle of the close button, in the bar's own coordinates (height-relative so
+            // live resizes never jump before AppKit repositions the title bar container).
+            let midX = bar.convert(NSPoint(x: close.x, y: 0), from: nil).x
+            let midY = bar.isFlipped ? close.y : bar.bounds.height - close.y
+            isPlacing = true
+            defer { isPlacing = false }
             for (i, b) in buttons.enumerated() {
-                let origin = NSPoint(x: (middle.x + CGFloat(i) * step - b.frame.width / 2).rounded(),
-                                     y: (middle.y - b.frame.height / 2).rounded())
+                let origin = NSPoint(x: (midX + CGFloat(i) * step - b.frame.width / 2).rounded(),
+                                     y: (midY - b.frame.height / 2).rounded())
                 if b.frame.origin != origin { b.setFrameOrigin(origin) }
             }
             fade(buttons)
@@ -536,33 +585,69 @@ struct SettingsRow<Trailing: View>: View {
     var detail: String?
     /// A list of switches, 38 high.
     var compact = false
+    /// Allows wide trailing controls (e.g. segmented bars, sliders) to stack cleanly below the
+    /// label when the column narrows, rather than crushing text or clipping controls.
+    var stackWhenNarrow = false
     @ViewBuilder let trailing: Trailing
 
-    init(_ title: String, detail: String? = nil, compact: Bool = false, @ViewBuilder trailing: () -> Trailing) {
+    init(_ title: String, detail: String? = nil, compact: Bool = false, stackWhenNarrow: Bool = false, @ViewBuilder trailing: () -> Trailing) {
         self.title = title
         self.detail = detail
         self.compact = compact
+        self.stackWhenNarrow = stackWhenNarrow
         self.trailing = trailing()
     }
 
     var body: some View {
         // 12.5 over 10.5, at least 46 high.
-        HStack(alignment: .center, spacing: 18) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.yy(size: 12.5, weight: .medium)).foregroundStyle(YYColor.t1)
-                if let detail {
-                    Text(detail).font(.yy(size: 10.5)).lineSpacing(2).foregroundStyle(YYColor.t3)
-                        .fixedSize(horizontal: false, vertical: true)
+        Group {
+            if stackWhenNarrow {
+                ViewThatFits(in: .horizontal) {
+                    horizontal
+                    vertical
                 }
+            } else {
+                horizontal
             }
-            Spacer(minLength: 12)
-            trailing
-                // A switch on the right says what it switches to VoiceOver: the row's title.
-                .environment(\.settingsRowTitle, title)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, compact ? 8 : 10)
         .frame(minHeight: compact ? 38 : 46)
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.yy(size: 12.5, weight: .medium))
+                .foregroundStyle(YYColor.t1)
+                .fixedSize(horizontal: false, vertical: true)
+            if let detail {
+                Text(detail)
+                    .font(.yy(size: 10.5))
+                    .lineSpacing(2)
+                    .foregroundStyle(YYColor.t3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var horizontal: some View {
+        HStack(alignment: .center, spacing: 0) {
+            header
+            Spacer(minLength: 16)
+            trailing
+                // A switch on the right says what it switches to VoiceOver: the row's title.
+                .environment(\.settingsRowTitle, title)
+        }
+    }
+
+    private var vertical: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            header
+                .frame(maxWidth: .infinity, alignment: .leading)
+            trailing
+                .environment(\.settingsRowTitle, title)
+        }
     }
 }
 
@@ -657,6 +742,7 @@ private struct GeneralSettings: View {
             SettingsCard {
                 SettingsRow(String(localized: "拖入书架即可导入"), detail: String(localized: "文件会复制到书库，移动或删除原文件不受影响")) {
                     Text(verbatim: "EPUB PDF MOBI AZW3 TXT").font(.yy(size: 11, design: .monospaced)).foregroundStyle(YYColor.t3)
+                        .lineLimit(1).fixedSize()
                 }
             }
             Spacer(minLength: 0)
@@ -996,7 +1082,7 @@ private struct ReadingSettings: View {
                     }, current: FontShelf.id(of: settings))
                     .paperWindow()
                 }
-                SettingsRow(String(localized: "字号")) {
+                SettingsRow(String(localized: "字号"), stackWhenNarrow: true) {
                     HStack(spacing: 10) {
                         Slider(value: Binding(get: { settings.fontSize }, set: { v in change { $0.fontSize = v.rounded() } }),
                                in: TypesetCard.sizes)
@@ -1004,14 +1090,14 @@ private struct ReadingSettings: View {
                         Text("\(Int(settings.fontSize))").monospacedDigit().foregroundStyle(YYColor.t2).frame(width: 22)
                     }
                 }
-                SettingsRow(String(localized: "行距")) {
+                SettingsRow(String(localized: "行距"), stackWhenNarrow: true) {
                     YYSegments(items: [(Double?.some(1.6), String(localized: "紧")), (nil, String(localized: "适中")), (.some(2.2), String(localized: "松"))],
                                selection: Binding(get: { settings.lineHeight }, set: { v in change { $0.lineHeight = v } }), small: true)
                         .frame(minWidth: 160).fixedSize()
                 }
             }
             SettingsCard {
-                SettingsRow(String(localized: "翻页方式")) {
+                SettingsRow(String(localized: "翻页方式"), stackWhenNarrow: true) {
                     YYSegments(items: [(LayoutMode.paginated, String(localized: "左右翻页")), (.scrolled, String(localized: "上下滚动"))],
                                selection: Binding(get: { settings.mode }, set: { v in change { $0.mode = v } }), small: true)
                         .frame(minWidth: 160).fixedSize()
@@ -1033,6 +1119,7 @@ private struct ReadingSettings: View {
             SettingsCard {
                 SettingsRow(String(localized: "进入与退出"), detail: String(localized: "全屏隐藏界面，指针移至底部唤出控制栏")) {
                     Text("⌃⌘F 或 Esc").font(.yy(size: 12)).foregroundStyle(YYColor.t2)
+                        .lineLimit(1).fixedSize()
                 }
                 SettingsRow(String(localized: "打开书籍时自动进入")) { SettingsSwitch(isOn: $immersiveAlways) }
                 SettingsRow(String(localized: "底部保留进度细线")) { SettingsSwitch(isOn: $immersiveLine) }
@@ -1043,6 +1130,7 @@ private struct ReadingSettings: View {
                     Button("专注模式设置…") {
                         if let url = URL(string: "x-apple.systempreferences:com.apple.Focus-Settings.extension") { NSWorkspace.shared.open(url) }
                     }
+                    .lineLimit(1).fixedSize()
                 }
             }
             Spacer(minLength: 0)
@@ -1204,6 +1292,7 @@ private struct DataSettings: View {
                 SettingsRow(String(localized: "导出阅读记录"), detail: String(localized: "导出想读、在读、读完状态与完成日期（CSV），可导入 Goodreads 或 StoryGraph")) {
                     Button("导出…") { exporting = true }
                         .buttonStyle(YYButtonStyle(kind: .raised, size: .small))
+                        .lineLimit(1).fixedSize()
                 }
             }
             if !snapshots.saved.isEmpty {
@@ -1217,6 +1306,7 @@ private struct DataSettings: View {
                                 ShareLink(item: s.url) { Image(systemName: "square.and.arrow.up").font(.yy(size: 12)) }
                                     .help("分享")
                             }
+                            .lineLimit(1).fixedSize()
                         }
                         .contextMenu {
                             Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([s.url]) }
@@ -1299,7 +1389,8 @@ private struct StorageSettings: View {
                                                message: String(localized: "清空后文件将彻底删除，无法恢复。"),
                                                button: String(localized: "立即清空")) { purge() }
                     }
-                        .disabled((usage?.deleted.isEmpty ?? true) || cleaning)
+                    .lineLimit(1).fixedSize()
+                    .disabled((usage?.deleted.isEmpty ?? true) || cleaning)
                 }
                 .monospacedDigit()
                 if let usage, usage.voiceModelBytes > 0 {
@@ -1318,6 +1409,7 @@ private struct StorageSettings: View {
                             }
                             .disabled({ if case .downloading = LiveVoiceDownload.shared.phase { true } else { false } }())
                         }
+                        .lineLimit(1).fixedSize()
                     }
                 }
                 if let usage, usage.alignerBytes > 0 {
@@ -1335,6 +1427,7 @@ private struct StorageSettings: View {
                             }
                             .disabled(library.audiobooks.job != nil)
                         }
+                        .lineLimit(1).fixedSize()
                     }
                 }
                 SettingsRow(String(localized: "书伴问答缓存"), detail: String(localized: "同章节重复提问直接读取本地缓存，不重复调用模型")) {
@@ -1351,6 +1444,7 @@ private struct StorageSettings: View {
                         }
                         .disabled(companionBytes == 0)
                     }
+                    .lineLimit(1).fixedSize()
                 }
             }
             if let usage, !usage.books.isEmpty {
@@ -1359,6 +1453,7 @@ private struct StorageSettings: View {
                     ForEach(usage.books.prefix(12), id: \.id) { b in
                         SettingsRow(b.title) {
                             Text(Self.size(b.bytes)).monospacedDigit().foregroundStyle(YYColor.t2)
+                                .lineLimit(1).fixedSize()
                         }
                     }
                 }
@@ -1583,6 +1678,7 @@ struct LoginItemRow: View {
             HStack(spacing: 10) {
                 if LoginItem.needsApproval {
                     Button("打开设置") { LoginItem.openSettings() }
+                        .lineLimit(1).fixedSize()
                 }
                 SettingsSwitch(isOn: Binding(get: { atLogin }, set: { on in
                     do {

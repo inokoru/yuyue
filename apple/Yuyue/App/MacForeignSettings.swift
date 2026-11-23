@@ -25,9 +25,10 @@ struct ForeignSettings: View {
             SettingsCard {
                 SettingsRow(String(localized: "系统词典"), detail: String(localized: "导入词典未命中时使用；启用项与顺序可在系统「词典」中设置")) {
                     Button("打开词典") { openDictionary() }
+                        .lineLimit(1).fixedSize()
                 }
                 SettingsRow(String(localized: "查词时自动发音")) { SettingsSwitch(isOn: $speak) }
-                SettingsRow(String(localized: "英文发音")) {
+                SettingsRow(String(localized: "英文发音"), stackWhenNarrow: true) {
                     YYSegments(items: [(ForeignPrefs.Accent.british, String(localized: "英音")), (.american, String(localized: "美音"))], selection: $accent, small: true)
                         .frame(width: 120)
                 }
@@ -39,9 +40,9 @@ struct ForeignSettings: View {
                 SettingsRow(String(localized: "难词行间释义"), detail: String(localized: "阅读英文书时，在较难词汇上方标注简短中文词义")) {
                     SettingsSwitch(isOn: $gloss)
                 }
-                SettingsRow(String(localized: "词汇难度"), detail: String(localized: "等级越高，仅标注更生僻的词")) {
+                SettingsRow(String(localized: "词汇难度"), detail: String(localized: "等级越高，仅标注更生僻的词"), stackWhenNarrow: true) {
                     YYSegments(items: ForeignPrefs.levels.map { (Int($0.level), $0.name) }, selection: $level, small: true)
-                        .frame(width: 260)
+                        .frame(minWidth: 230, idealWidth: 250, maxWidth: 260)
                 }
                 .disabled(!gloss || glossVocab)
                 SettingsRow(String(localized: "仅标注生词本中的词")) { SettingsSwitch(isOn: $glossVocab) }
@@ -88,13 +89,16 @@ struct ForeignSettings: View {
         case .installed?:
             Label("英文 → 中文 已下载", systemImage: "checkmark")
                 .font(.yy(size: 12)).foregroundStyle(YYColor.t2)
+                .lineLimit(1).fixedSize()
         case .supported?:
             Button("下载英文 → 中文") {
                 download = .init(source: Locale.Language(identifier: "en"), target: Translator.target)
             }
+            .lineLimit(1).fixedSize()
             .disabled(download != nil)
         case .unsupported?:
             Text("当前系统不支持").font(.yy(size: 12)).foregroundStyle(YYColor.t3)
+                .lineLimit(1).fixedSize()
         default:
             ProgressView().controlSize(.small)
         }
@@ -147,6 +151,7 @@ private struct MDictList: View {
                     ProgressView().controlSize(.small)
                 } else {
                     Button("选择文件…") { picking = true }
+                        .lineLimit(1).fixedSize()
                 }
             }
         }

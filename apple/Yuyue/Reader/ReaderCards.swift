@@ -158,9 +158,6 @@ struct SelectionCard: View {
                 if Self.touch, current == nil, model.contextLine != nil {
                     action(String(localized: "谁说的"), "person.crop.circle") { model.pickSpeakerFromMenu() }
                 }
-                if Self.touch, current == nil, let sel = model.selection, model.canLoop(to: sel.section, sel.end.s) {
-                    action(String(localized: "循环到这"), "repeat") { model.loop(to: sel.section, sel.end.s) }
-                }
                 if current == nil, let sel = model.selection, model.canPin {
                     action(String(localized: "对准"), "scope") { model.pinHere(section: sel.section, sentence: sel.start.s) }
                 }
@@ -284,7 +281,7 @@ extension Int64 {
 /// Liquid Glass when it's on (液态玻璃效果), frosted otherwise.
 struct CapsuleGlass: ViewModifier {
     func body(content: Content) -> some View {
-        content.yyGlass(Capsule(), fill: .clear, shadow: 0)
+        content.yyGlass(Capsule(), fill: .clear, line: YYColor.line, shadow: 0.08, radius: 10, y: 4)
     }
 }
 

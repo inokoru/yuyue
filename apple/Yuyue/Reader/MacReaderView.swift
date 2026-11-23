@@ -825,19 +825,20 @@ struct MacReaderView: View {
         if let c = model.contextLine {
             who = [ActionMenuItem(String(localized: "谁说的：\(c.line.who ?? String(localized: "没认出"))…"), symbol: "person.crop.circle") { model.pickSpeakerFromMenu() }, .separator()]
         }
-        // While reading: from the sentence being read to the one right-clicked, over and over.
-        var loopItem: [NSMenuItem] = []
+        // Right-clicking a sentence: read right from this sentence (and optionally pause if already playing).
+        var readItems: [NSMenuItem] = []
         if let c = model.contextSentence {
-            if model.canLoop(to: c.section, c.sentence) {
-                loopItem.append(ActionMenuItem(String(localized: "从正在念的这句循环到这里"), symbol: "repeat") { model.loop(to: c.section, c.sentence) })
+            readItems.append(ActionMenuItem(String(localized: "从这句读"), symbol: "headphones") { model.read(from: c.section, sentence: c.sentence) })
+            if model.isPlaying {
+                readItems.append(ActionMenuItem(String(localized: "暂停朗读"), symbol: "pause") { model.togglePlay() })
             }
             if model.canPin {
-                loopItem.append(ActionMenuItem(String(localized: "从这里对准"), symbol: "scope") { model.pinHere(section: c.section, sentence: c.sentence) })
+                readItems.append(ActionMenuItem(String(localized: "从这里对准"), symbol: "scope") { model.pinHere(section: c.section, sentence: c.sentence) })
             }
+        } else {
+            readItems.append(ActionMenuItem(model.isPlaying ? String(localized: "暂停朗读") : String(localized: "从这页读"), symbol: model.isPlaying ? "pause" : "headphones") { model.togglePlay() })
         }
-        return who + [
-            ActionMenuItem(model.isPlaying ? String(localized: "暂停朗读") : String(localized: "从这页读"), symbol: model.isPlaying ? "pause" : "headphones") { model.togglePlay() },
-        ] + loopItem + [
+        return who + readItems + [
             ActionMenuItem(marked ? String(localized: "拿掉书签") : String(localized: "加书签"), symbol: marked ? "bookmark.slash" : "bookmark", key: "d", modifiers: .command) { model.toggleBookmark() },
             .separator(),
             ActionMenuItem(String(localized: "书内搜索"), symbol: "magnifyingglass", key: "f", modifiers: .command) { startSearch() },

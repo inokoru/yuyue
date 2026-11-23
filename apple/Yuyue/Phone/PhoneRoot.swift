@@ -253,78 +253,135 @@ extension View {
     }
 }
 
-/// Cover, the sentence being read, ‹ ▶ ›, and a thin line for the chapter underneath. A tap
-/// anywhere else goes back to the page.
+/// Cover, the sentence being read, ‹ ▶ ›, and a thin chapter progress rail along the top edge.
+/// Matches `PhonePodcastMiniPlayerBar` (`14pt` continuous stationery card, flat bordered card on
+/// 墨水屏模式). A tap on the book info goes back to the page.
 struct NowPlayingBar: View {
     let playing: any NowPlaying
     let book: BookSummary
     let open: () -> Void
-    private let tint = YYTint.standard
+    @Environment(\.colorScheme) private var scheme
+    @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
+    @AppStorage(EInk.key) private var eink = false
+    private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
     /// 有声书: −15 s / +30 s, and the time.
     private var audio: AudiobookPlayer? { playing as? AudiobookPlayer }
 
+    private var progress: Double {
+        let raw = audio.map { $0.inChapter.of > 0 ? $0.inChapter.at / $0.inChapter.of : 0 } ?? playing.player?.sectionProgress ?? 0
+        return min(1, max(0, raw))
+    }
+
     var body: some View {
-        HStack(spacing: 10) {
-            BookCover(book: book)
-                .frame(width: 30)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(audio.map { $0.title($0.chapter) } ?? playing.player?.line ?? book.title)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(YYColor.t1)
-                    .lineLimit(1)
-                Text(audio.map { "\(book.title) · \(AudiobookPlayer.clock($0.inChapter.at)) / \(AudiobookPlayer.clock($0.inChapter.of))" } ?? book.title)
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(YYColor.t3)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            HStack(spacing: 0) {
-                if let audio {
-                    Button("后退 15 秒", systemImage: "gobackward.15") { audio.skip(-AudiobookPlayer.back) }
-                        .frame(width: 44, height: 44)
-                        .contentShape(.rect)
-                } else {
-                    Button("上一句", systemImage: "backward.end.fill") { playing.player?.skip(forward: false) }
-                        .frame(width: 44, height: 44)
-                        .contentShape(.rect)
-                }
-                Button(playing.isPlaying ? String(localized: "暂停") : String(localized: "接着听"), systemImage: playing.isPlaying ? "pause.fill" : "play.fill") {
-                    playing.togglePlay()
-                }
-                .contentTransition(.symbolEffect(.replace))
-                .animation(YYMotion.quick, value: playing.isPlaying)
-                .font(.title3)
-                .frame(width: 44, height: 44)
-                .contentShape(.rect)
-                if let audio {
-                    Button("前进 30 秒", systemImage: "goforward.30") { audio.skip(AudiobookPlayer.ahead) }
-                        .frame(width: 44, height: 44)
-                        .contentShape(.rect)
-                } else {
-                    Button("下一句", systemImage: "forward.end.fill") { playing.player?.skip(forward: true) }
-                        .frame(width: 44, height: 44)
-                        .contentShape(.rect)
-                }
-            }
-        }
-        .labelStyle(.iconOnly)
-        .buttonStyle(YYPressStyle(scale: 0.92))
-        .foregroundStyle(YYColor.t1)
-        .padding(.leading, 10)
-        .padding(.trailing, 8)
-        .padding(.vertical, 7)
-        .overlay(alignment: .bottom) {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        VStack(spacing: 0) {
             GeometryReader { g in
-                Capsule().fill(tint.accent)
-                    .frame(width: g.size.width * (audio.map { $0.inChapter.of > 0 ? $0.inChapter.at / $0.inChapter.of : 0 } ?? playing.player?.sectionProgress ?? 0), height: 2)
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(eink ? YYColor.line.opacity(0.6) : YYColor.inset.opacity(0.8))
+                    if progress > 0 {
+                        Rectangle()
+                            .fill(eink ? YYColor.t1 : tint.accent)
+                            .frame(width: max(3, g.size.width * progress))
+                    }
+                }
             }
-            .frame(height: 2)
-            .padding(.horizontal, 22)
-            .padding(.bottom, 2)
+            .frame(height: 2.5)
+
+            HStack(spacing: 8) {
+                HStack(spacing: 10) {
+                    if audio != nil {
+                        SquareCover(book: book, shadow: false)
+                            .frame(width: 34, height: 34)
+                    } else {
+                        BookCover(book: book)
+                            .frame(width: 26, height: 39)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(audio.map { $0.title($0.chapter) } ?? playing.player?.line ?? book.title)
+                            .font(.yy(size: 12.5, weight: .medium))
+                            .foregroundStyle(YYColor.t1)
+                            .lineLimit(1)
+                        Text(audio.map { "\(book.title) · \(AudiobookPlayer.clock($0.inChapter.at)) / \(AudiobookPlayer.clock($0.inChapter.of))" } ?? book.title)
+                            .font(.yy(size: 10.5))
+                            .monospacedDigit()
+                            .foregroundStyle(YYColor.t3)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(.rect)
+                .onTapGesture(perform: open)
+
+                HStack(spacing: 2) {
+                    if let audio {
+                        Button { audio.skip(-AudiobookPlayer.back) } label: {
+                            Image(systemName: "gobackward.15")
+                                .font(.system(size: 14.5, weight: .medium))
+                                .foregroundStyle(YYColor.t2)
+                                .frame(width: 34, height: 44)
+                                .contentShape(.rect)
+                        }
+                        .accessibilityLabel(String(localized: "后退 15 秒"))
+                    } else {
+                        Button { playing.player?.skip(forward: false) } label: {
+                            Image(systemName: "backward.end.fill")
+                                .font(.system(size: 12.5, weight: .medium))
+                                .foregroundStyle(YYColor.t2)
+                                .frame(width: 34, height: 44)
+                                .contentShape(.rect)
+                        }
+                        .accessibilityLabel(String(localized: "上一句"))
+                    }
+
+                    Button { playing.togglePlay() } label: {
+                        Image(systemName: playing.isPlaying ? "pause.fill" : "play.fill")
+                            .contentTransition(.symbolEffect(.replace))
+                            .animation(YYMotion.quick, value: playing.isPlaying)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(YYColor.card)
+                            .offset(x: playing.isPlaying ? 0 : 1)
+                            .frame(width: 32, height: 32)
+                            .background(YYColor.t1, in: Circle())
+                            .frame(width: 40, height: 44)
+                            .contentShape(.rect)
+                    }
+                    .accessibilityLabel(playing.isPlaying ? String(localized: "暂停") : String(localized: "接着听"))
+
+                    if let audio {
+                        Button { audio.skip(AudiobookPlayer.ahead) } label: {
+                            Image(systemName: "goforward.30")
+                                .font(.system(size: 14.5, weight: .medium))
+                                .foregroundStyle(YYColor.t2)
+                                .frame(width: 34, height: 44)
+                                .contentShape(.rect)
+                        }
+                        .accessibilityLabel(String(localized: "前进 30 秒"))
+                    } else {
+                        Button { playing.player?.skip(forward: true) } label: {
+                            Image(systemName: "forward.end.fill")
+                                .font(.system(size: 12.5, weight: .medium))
+                                .foregroundStyle(YYColor.t2)
+                                .frame(width: 34, height: 44)
+                                .contentShape(.rect)
+                        }
+                        .accessibilityLabel(String(localized: "下一句"))
+                    }
+                }
+                .buttonStyle(YYPressStyle(scale: 0.92))
+                .fixedSize()
+            }
+            .padding(.leading, 10)
+            .padding(.trailing, 6)
+            .frame(height: 52)
         }
-        .contentShape(.capsule)
-        .onTapGesture(perform: open)
-        .modifier(CapsuleGlass())
+        .background(YYColor.card)
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(YYColor.line, lineWidth: eink ? 0.75 : 0.5))
+        .shadow(
+            color: eink ? .clear : (scheme == .dark ? Color.black.opacity(0.45) : Color(yy: YYRGBA(25, 22, 18, 0.14))),
+            radius: 16,
+            y: 6
+        )
         .accessibilityElement(children: .contain)
         .accessibilityLabel("正在听《\(book.title)》")
         .accessibilityAction(named: Text("回到正在读的页"), open)

@@ -57,9 +57,12 @@ private struct YYGlass<S: Shape>: ViewModifier {
         if eink || !allowed && !chosen {
             if eink {
                 content
-                    .background(fill, in: shape)
+                    .background {
+                        shape.fill(YYColor.card)
+                        shape.fill(fill)
+                    }
                     .overlay {
-                        if let line { shape.stroke(line, lineWidth: 0.75) }
+                        shape.stroke(line ?? YYColor.line, lineWidth: 0.75)
                     }
             } else {
                 frosted(content)

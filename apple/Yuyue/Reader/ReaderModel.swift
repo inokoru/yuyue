@@ -168,7 +168,7 @@ final class ReaderModel {
     }
     /// After a page is turned by hand the pages stop following the voice for a while, so the
     /// reader can look back without being pulled along.
-    @ObservationIgnored private var followFrom = Date.distantPast
+    @ObservationIgnored var followFrom = Date.distantPast
     @ObservationIgnored private var saved: Position?
     /// Opening a book only shows where it was; the position is written once the reader moves,
     /// so a glance on one device doesn't bury further reading on another.

@@ -174,9 +174,16 @@ extension ReaderModel {
 
     /// 从这读: reads aloud from the first selected sentence.
     func readFromSelection() {
-        guard let player, let selection else { return }
-        let start = narratedStart(Position(section: selection.section, sentence: UInt32(selection.start.s)))
+        guard let selection else { return }
+        read(from: selection.section, sentence: selection.start.s)
+    }
+
+    /// 从这句读: reads aloud starting from `sentence` in `section`.
+    func read(from section: UInt32, sentence: Int) {
+        guard let player else { return }
+        let start = narratedStart(Position(section: section, sentence: UInt32(max(0, sentence))))
         dismissCards()
+        followFrom = .distantPast
         player.play(from: start)
     }
 

@@ -832,6 +832,7 @@ struct PhonePodcastMiniPlayerBar: View {
     @State private var clipFlash = false
     @Environment(\.colorScheme) private var scheme
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
+    @AppStorage(EInk.key) private var eink = false
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
 
     private var hub: PodcastHub { library.podcastHub }
@@ -846,10 +847,10 @@ struct PhonePodcastMiniPlayerBar: View {
             // Thin accent progress rail along the top edge
             GeometryReader { g in
                 ZStack(alignment: .leading) {
-                    Rectangle().fill(YYColor.inset.opacity(0.8))
+                    Rectangle().fill(eink ? YYColor.line.opacity(0.6) : YYColor.inset.opacity(0.8))
                     if frac > 0 {
                         Rectangle()
-                            .fill(tint.accent)
+                            .fill(eink ? YYColor.t1 : tint.accent)
                             .frame(width: max(3, g.size.width * frac))
                     }
                 }
@@ -954,10 +955,10 @@ struct PhonePodcastMiniPlayerBar: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(PodcastStyle.hairline(scheme), lineWidth: 0.5)
+                .strokeBorder(eink ? YYColor.line : PodcastStyle.hairline(scheme), lineWidth: eink ? 0.75 : 0.5)
         )
         .shadow(
-            color: scheme == .dark ? Color.black.opacity(0.45) : Color(yy: YYRGBA(25, 22, 18, 0.14)),
+            color: eink ? .clear : (scheme == .dark ? Color.black.opacity(0.45) : Color(yy: YYRGBA(25, 22, 18, 0.14))),
             radius: 16,
             y: 6
         )

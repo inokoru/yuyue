@@ -1728,8 +1728,11 @@ private struct DailyCapPills: View {
                 } label: {
                     Text(title)
                         .font(.yy(size: 11, weight: active ? .medium : .regular))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(active ? YYColor.t1 : YYColor.t2)
-                        .padding(.horizontal, 9)
+                        .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background {
                             if active {
@@ -1741,10 +1744,13 @@ private struct DailyCapPills: View {
                         .contentShape(.capsule)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(title)
+                .accessibilityAddTraits(active ? .isSelected : [])
             }
         }
         .padding(2)
         .background(YYColor.inset, in: .capsule)
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
@@ -1787,7 +1793,7 @@ struct CompanionUsageAndCostSection: View {
             SettingsRow(String(localized: "批量任务自动用轻量模型"), detail: tierHint(for: current)) {
                 SettingsSwitch(isOn: $tierRouting)
             }
-            SettingsRow(String(localized: "每日用量上限"), detail: String(localized: "达到后自动暂停后台批量任务")) {
+            SettingsRow(String(localized: "每日用量上限"), detail: String(localized: "达到后自动暂停后台批量任务"), stackWhenNarrow: true) {
                 DailyCapPills(limit: $dailyTokenLimit)
             }
         }
