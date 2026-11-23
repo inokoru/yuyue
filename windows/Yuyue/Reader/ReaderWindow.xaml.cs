@@ -358,7 +358,7 @@ public sealed partial class ReaderWindow : Window
         var t1Brush = ThemeHelper.Brush(uiPalette.T1);
         SelDeleteIcon.Content = YYIcons.Make("trash", 12.5, ThemeHelper.Brush(uiPalette.Danger));
         SelThoughtIcon.Content = YYIcons.Make("pencil", 14, t1Brush);
-        SelSpeakIcon.Content = YYIcons.Make("headphones", 14, t1Brush);
+        SelSpeakIcon.Content = YYIcons.Make("speaker", 14, t1Brush);
         SelAskIcon.Content = YYIcons.Make("sparkle", 14, accentBrush);
         SelTransIcon.Content = YYIcons.Make("a-wen", 14, t1Brush);
         SelCopyIcon.Content = YYIcons.Make("copy", 13.5, t1Brush);
@@ -1092,7 +1092,7 @@ public sealed partial class ReaderWindow : Window
             thoughtItem.Click += AddThought_Click;
             menu.Items.Add(thoughtItem);
 
-            var speakItem = new MenuFlyoutItem { Text = "从这读" };
+            var speakItem = new MenuFlyoutItem { Text = "从这听" };
             speakItem.Click += SpeakFromSelection_Click;
             menu.Items.Add(speakItem);
 

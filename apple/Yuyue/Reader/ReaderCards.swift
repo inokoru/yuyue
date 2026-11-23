@@ -47,7 +47,7 @@ struct Above: ViewModifier {
 // MARK: - The card over selected text
 
 /// 选中文字: the four highlight colours (1–4) with the last one used ringed, the two lines, then
-/// 想法 · 从这读 · 问 · 翻译 · 复制. Over a highlight already made, it changes its colour or
+/// 想法 · 从这听 · 问 · 翻译 · 复制. Over a highlight already made, it changes its colour or
 /// takes it off.
 struct SelectionCard: View {
     let model: ReaderModel
@@ -93,63 +93,55 @@ struct SelectionCard: View {
                 .buttonStyle(.plain)
                 Rectangle().fill(YYColor.line).frame(height: 0.5)
             }
-            HStack(alignment: .top, spacing: Self.touch ? 10 : 14) {
-                ForEach(Array(MarkStyle.colours.enumerated()), id: \.offset) { i, style in
-                    Button { pick(style) } label: {
-                        VStack(spacing: Self.touch ? 5 : 4) {
-                            swatch(style)
-                            #if os(macOS)
-                            // The key that makes it, with the text still selected.
-                            Text("\(i + 1)")
-                                .font(.yy(size: 10, weight: .semibold))
-                                .foregroundStyle(ringed(style) ? YYColor.t1 : YYColor.t2)
-                                .frame(width: 16, height: 15)
-                                .background(YYColor.inset, in: .rect(cornerRadius: 4))
-                            #endif
-                        }
-                        .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    .help("\(style.name) · 按 \(i + 1)")
-                    .accessibilityLabel(style.name)
-                    .accessibilityAddTraits(ringed(style) ? .isSelected : [])
-                }
-                Spacer(minLength: 16)
-                ForEach(MarkStyle.lines, id: \.self) { style in
-                    Button { pick(style) } label: {
-                        Text("A")
-                            .font(YYUI.serif(14.5))
-                            .underline(pattern: style == .dotted ? .dot : .solid)
-                            .foregroundStyle(ringed(style) ? tint.accent : YYColor.t2)
-                            .frame(width: Self.touch ? 32 : 24, height: Self.touch ? 28 : 25)
-                            .background(ringed(style) ? tint.soft : .clear, in: .rect(cornerRadius: 6))
+            HStack(alignment: .center, spacing: 0) {
+                HStack(alignment: .top, spacing: Self.touch ? 10 : 14) {
+                    ForEach(Array(MarkStyle.colours.enumerated()), id: \.offset) { i, style in
+                        Button { pick(style) } label: {
+                            VStack(spacing: Self.touch ? 5 : 4) {
+                                swatch(style)
+                                #if os(macOS)
+                                // The key that makes it, with the text still selected.
+                                Text("\(i + 1)")
+                                    .font(.yy(size: 10, weight: .semibold))
+                                    .foregroundStyle(ringed(style) ? YYColor.t1 : YYColor.t2)
+                                    .frame(width: 16, height: 15)
+                                    .background(YYColor.inset, in: .rect(cornerRadius: 4))
+                                #endif
+                            }
                             .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .help("\(style.name) · 按 \(i + 1)")
+                        .accessibilityLabel(style.name)
+                        .accessibilityAddTraits(ringed(style) ? .isSelected : [])
                     }
-                    .buttonStyle(.plain)
-                    .help(style.name)
-                    .accessibilityLabel(style.name)
-                    .accessibilityAddTraits(ringed(style) ? .isSelected : [])
                 }
-                if let current {
-                    Button { model.deleteMark(current) } label: {
-                        Image(systemName: "trash")
-                            .font(.yy(size: 12.5))
-                            .foregroundStyle(YYColor.danger)
-                            .frame(width: Self.touch ? 28 : 25, height: Self.touch ? 28 : 25)
-                            .contentShape(.circle)
+                Spacer(minLength: 12)
+                HStack(spacing: Self.touch ? 8 : 7) {
+                    ForEach(MarkStyle.lines, id: \.self) { style in
+                        lineButton(style)
                     }
-                    .accessibilityLabel(Text("删除划线"))
-                    .buttonStyle(.plain)
-                    .help("删除划线")
+                    if let current {
+                        Button { model.deleteMark(current) } label: {
+                            Image(systemName: "trash")
+                                .font(.yy(size: 12.5))
+                                .foregroundStyle(YYColor.danger)
+                                .frame(width: Self.touch ? 30 : 26, height: Self.touch ? 30 : 26)
+                                .contentShape(.circle)
+                        }
+                        .accessibilityLabel(Text("删除划线"))
+                        .buttonStyle(.plain)
+                        .help("删除划线")
+                    }
                 }
             }
             .padding(.horizontal, Self.touch ? 12 : 16)
             .padding(.top, Self.touch ? 10 : 9)
-            .padding(.bottom, Self.touch ? 8 : 6)
+            .padding(.bottom, Self.touch ? 8 : 7)
             Rectangle().fill(YYColor.line).frame(height: 0.5)
             HStack(spacing: 0) {
                 action(hasNote ? String(localized: "改想法") : String(localized: "想法"), "square.and.pencil", thought, accent: hasNote)
-                action(String(localized: "从这读"), "headphones") {
+                action(String(localized: "从这听"), "speaker.wave.2") {
                     if let current {
                         model.selection = TextSelection(section: current.section, start: .init(s: Int(current.start.sentence), o: 0), end: .init(s: Int(current.end.sentence), o: 0), text: current.text, rect: .zero)
                     }
@@ -192,6 +184,46 @@ struct SelectionCard: View {
         .frame(width: Self.touch ? 22 : 20, height: Self.touch ? 22 : 20)
         .padding(Self.touch ? 3 : 2.5)
         .overlay(Circle().strokeBorder(ringed(style) ? tint.accent : .clear, lineWidth: 1.5))
+    }
+
+    private func lineButton(_ style: MarkStyle) -> some View {
+        let selected = ringed(style)
+        let ink = selected ? tint.accent : YYColor.t1
+        let radius: CGFloat = Self.touch ? 8.5 : 8
+        return Button { pick(style) } label: {
+            VStack(spacing: Self.touch ? 3.5 : 3) {
+                Text("A")
+                    .font(YYUI.serif(Self.touch ? 14.5 : 13.5, .medium))
+                    .foregroundStyle(ink)
+                    .frame(height: Self.touch ? 14 : 13)
+                if style == .dotted {
+                    HStack(spacing: Self.touch ? 2.9 : 2.5) {
+                        ForEach(0 ..< 4, id: \.self) { _ in
+                            Circle()
+                                .fill(ink)
+                                .frame(width: Self.touch ? 2.8 : 2.6, height: Self.touch ? 2.8 : 2.6)
+                        }
+                    }
+                    .frame(height: 3.5)
+                } else {
+                    Capsule()
+                        .fill(ink)
+                        .frame(width: Self.touch ? 20 : 18, height: Self.touch ? 2.2 : 2)
+                        .frame(height: 3.5)
+                }
+            }
+            .frame(width: Self.touch ? 36 : 32, height: Self.touch ? 34 : 32)
+            .background(selected ? tint.soft : YYColor.inset, in: .rect(cornerRadius: radius))
+            .overlay(
+                RoundedRectangle(cornerRadius: radius)
+                    .strokeBorder(selected ? tint.accent : YYColor.pillLine, lineWidth: selected ? 1.5 : 0.75)
+            )
+            .contentShape(.rect)
+        }
+        .buttonStyle(YYPressStyle(scale: 0.94))
+        .help(style.name)
+        .accessibilityLabel(style.name)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func pick(_ style: MarkStyle) {

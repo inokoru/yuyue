@@ -417,7 +417,7 @@ private struct PdfNotes: View {
                     Button(style.name) { model.setStyle(style, of: mark) }
                 }
             }
-            Button("从这读") { readFrom(mark) }
+            Button("从这听") { readFrom(mark) }
             Divider()
             Button("删除划线", role: .destructive) { model.deleteMark(mark) }
         }
@@ -772,7 +772,7 @@ final class MarkingPDFView: PDFView {
                 model.writeNote(on: selection)
                 self?.clearSelection()
             },
-            MenuAction(String(localized: "从这读"), symbol: "play") { [weak self] in
+            MenuAction(String(localized: "从这听"), symbol: "speaker.wave.2") { [weak self] in
                 if let at = model.sentence(at: selection) { model.read(from: at.page, sentence: at.sentence) }
                 self?.clearSelection()
             },
@@ -786,7 +786,7 @@ final class MarkingPDFView: PDFView {
             MenuAction(mark.note == nil ? String(localized: "写想法…") : String(localized: "改想法…"), symbol: "pencil") { model.writing = mark },
             styles(current: mark.style) { model.setStyle($0, of: mark) },
             MenuAction(String(localized: "复制"), symbol: "doc.on.doc") { model.copy(mark.text) },
-            MenuAction(String(localized: "从这读"), symbol: "play") {
+            MenuAction(String(localized: "从这听"), symbol: "speaker.wave.2") {
                 let p = Int(mark.start.sentence)
                 let i = model.sentences(on: p).lastIndex { $0.start <= mark.start.offset } ?? 0
                 model.read(from: p, sentence: i)

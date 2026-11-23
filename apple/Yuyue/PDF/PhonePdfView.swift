@@ -143,7 +143,7 @@ struct PhonePdfView: View {
         HStack(spacing: 0) {
             barButton(String(localized: "划线"), "highlighter") { model.mark(selection) }
             barButton(String(localized: "写想法"), "pencil") { model.writeNote(on: selection) }
-            barButton(String(localized: "从这读"), "play") {
+            barButton(String(localized: "从这听"), "speaker.wave.2") {
                 if let at = model.sentence(at: selection) { model.read(from: at.page, sentence: at.sentence) }
             }
             barButton(String(localized: "复制"), "doc.on.doc") {

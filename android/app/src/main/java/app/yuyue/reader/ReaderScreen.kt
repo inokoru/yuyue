@@ -588,7 +588,7 @@ private data class CardSnapshot(
 )
 
 /** 选中文字, or a highlight tapped: the same card as on iPhone, over the words — three colours
- *  and the wave, the two underlines (and 删除 for a highlight), then 想法 · 从这读 · 翻译 · 复制 · 分享. */
+ *  and the wave, the two underlines (and 删除 for a highlight), then 想法 · 从这听 · 翻译 · 复制 · 分享. */
 @Composable
 private fun Cards(model: ReaderModel, paper: YYPaper, thought: (Mark) -> Unit, translate: (String) -> Unit) {
     val context = LocalContext.current
@@ -677,16 +677,44 @@ private fun Cards(model: ReaderModel, paper: YYPaper, thought: (Mark) -> Unit, t
                         }
                     }
                     Box(Modifier.weight(1f))
-                    for (style in listOf(MarkStyle.UNDERLINE, MarkStyle.DOTTED)) {
-                        Box(
-                            Modifier.size(width = 36.dp, height = 44.dp).heightIn(min = 42.dp).clip(RoundedCornerShape(8.dp)).clickable { pick(style) },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                "A", fontFamily = YY.serif, fontSize = 17.sp, color = if (ringed(style)) tint.accent else YY.c.t2,
-                                textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        for (style in listOf(MarkStyle.UNDERLINE, MarkStyle.DOTTED)) {
+                            val selected = ringed(style)
+                            val ink = if (selected) tint.accent else YY.c.t1
+                            val shape = RoundedCornerShape(8.5.dp)
+                            val desc = if (style == MarkStyle.DOTTED) t("点线") else t("下划线")
+                            Box(
+                                Modifier.size(width = 38.dp, height = 44.dp).clip(shape)
+                                    .semantics { contentDescription = desc }
+                                    .clickable { pick(style) },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Column(
+                                    Modifier.size(width = 36.dp, height = 34.dp).clip(shape)
+                                        .background(if (selected) tint.soft else YY.c.inset)
+                                        .border(if (selected) 1.5.dp else 0.75.dp, if (selected) tint.accent else YY.c.pillLine, shape),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(3.5.dp, Alignment.CenterVertically),
+                                ) {
+                                    Text(
+                                        "A",
+                                        fontFamily = YY.serif,
+                                        fontSize = 14.5.sp,
+                                        lineHeight = 14.5.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = ink,
+                                    )
+                                    if (style == MarkStyle.DOTTED) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(2.8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            repeat(4) {
+                                                Box(Modifier.size(2.8.dp).clip(CircleShape).background(ink))
+                                            }
+                                        }
+                                    } else {
+                                        Box(Modifier.size(width = 20.dp, height = 2.2.dp).clip(CircleShape).background(ink))
+                                    }
+                                }
+                            }
                         }
                     }
                     if (current != null) {
@@ -702,7 +730,7 @@ private fun Cards(model: ReaderModel, paper: YYPaper, thought: (Mark) -> Unit, t
                         model.dismissCards()
                         if (m != null) thought(m)
                     }
-                    if (model.player != null) CardAction(Icons.headphones, t("从这读"), Modifier.weight(1f)) { model.readFrom(current) }
+                    if (model.player != null) CardAction(Icons.speakerWave, t("从这听"), Modifier.weight(1f)) { model.readFrom(current) }
                     if (current == null && model.contextLine != null) CardAction(Icons.personCircle, t("谁说的"), Modifier.weight(1f)) { model.pickSpeakerFromSelection() }
                     snap.sel?.takeIf { current == null }?.let { s ->
                         if (model.canPin) CardAction(Icons.target, t("对准"), Modifier.weight(1f)) { model.pinHere(s.section, s.start.s) }

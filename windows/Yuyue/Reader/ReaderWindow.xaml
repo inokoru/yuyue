@@ -94,20 +94,25 @@
                                 </Button>
                             </StackPanel>
 
-                            <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right" VerticalAlignment="Center">
-                                <Button Tag="underline" Width="28" Height="26" Padding="0" CornerRadius="6" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="实线下划线" Click="MarkColor_Click">
-                                    <StackPanel Spacing="1" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                        <TextBlock Text="A" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" />
-                                        <Border Width="12" Height="1.5" Background="{ThemeResource YYText1Brush}" />
+                            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <Button Tag="underline" Width="32" Height="30" Padding="0" CornerRadius="8" Background="{ThemeResource YYInsetBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="1" UseSystemFocusVisuals="False" ToolTipService.ToolTip="实线下划线" Click="MarkColor_Click">
+                                    <StackPanel Spacing="3" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <TextBlock Text="A" FontSize="13" FontWeight="SemiBold" LineHeight="13" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" />
+                                        <Border Width="18" Height="2" CornerRadius="1" Background="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
-                                <Button Tag="dotted" Width="28" Height="26" Padding="0" CornerRadius="6" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="点线下划线" Click="MarkColor_Click">
-                                    <StackPanel Spacing="0" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                        <TextBlock Text="A" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" />
-                                        <TextBlock Text="···" FontSize="9" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,-4,0,0" />
+                                <Button Tag="dotted" Width="32" Height="30" Padding="0" CornerRadius="8" Background="{ThemeResource YYInsetBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="1" UseSystemFocusVisuals="False" ToolTipService.ToolTip="点线下划线" Click="MarkColor_Click">
+                                    <StackPanel Spacing="3" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <TextBlock Text="A" FontSize="13" FontWeight="SemiBold" LineHeight="13" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" />
+                                        <StackPanel Orientation="Horizontal" Spacing="2.5" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                            <Ellipse Width="2.6" Height="2.6" Fill="{ThemeResource YYText1Brush}" />
+                                            <Ellipse Width="2.6" Height="2.6" Fill="{ThemeResource YYText1Brush}" />
+                                            <Ellipse Width="2.6" Height="2.6" Fill="{ThemeResource YYText1Brush}" />
+                                            <Ellipse Width="2.6" Height="2.6" Fill="{ThemeResource YYText1Brush}" />
+                                        </StackPanel>
                                     </StackPanel>
                                 </Button>
-                                <Button x:Name="DeleteMarkCardBtn" Visibility="Collapsed" Width="28" Height="26" Padding="0" CornerRadius="6" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="删除划线" Click="DeleteOpenMark_Click">
+                                <Button x:Name="DeleteMarkCardBtn" Visibility="Collapsed" Width="28" Height="28" Padding="0" CornerRadius="8" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="删除划线" Click="DeleteOpenMark_Click">
                                     <ContentPresenter x:Name="SelDeleteIcon" />
                                 </Button>
                             </StackPanel>
@@ -115,7 +120,7 @@
 
                         <Border Height="0.5" Background="{ThemeResource YYLineBrush}" />
 
-                        <!-- Row 2: 5 个等宽竖排图标+文字按钮（想法 / 从这读 / 问 / 翻译 / 复制） -->
+                        <!-- Row 2: 5 个等宽竖排图标+文字按钮（想法 / 从这听 / 问 / 翻译 / 复制） -->
                         <Grid ColumnSpacing="2">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -133,7 +138,7 @@
                             <Button Grid.Column="1" Height="41" HorizontalAlignment="Stretch" Padding="0" CornerRadius="8" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" Click="SpeakFromSelection_Click">
                                 <StackPanel Spacing="3" HorizontalAlignment="Center" VerticalAlignment="Center">
                                     <ContentPresenter x:Name="SelSpeakIcon" HorizontalAlignment="Center" />
-                                    <TextBlock Text="从这读" FontSize="11" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" />
+                                    <TextBlock Text="从这听" FontSize="11" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" />
                                 </StackPanel>
                             </Button>
                             <Button Grid.Column="2" Height="41" HorizontalAlignment="Stretch" Padding="0" CornerRadius="8" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" Click="AskSelection_Click">

@@ -799,7 +799,7 @@ struct MacReaderView: View {
             items.append(ActionMenuItem(String(localized: "划下划线"), symbol: "underline") { model.mark(.underline) })
             items.append(.separator())
             items.append(ActionMenuItem(String(localized: "想法…"), symbol: "square.and.pencil") { startThought() })
-            items.append(ActionMenuItem(String(localized: "从这读"), symbol: "headphones") { model.readFromSelection() })
+            items.append(ActionMenuItem(String(localized: "从这听"), symbol: "speaker.wave.2") { model.readFromSelection() })
             if model.canPin {
                 items.append(ActionMenuItem(String(localized: "从这里对准"), symbol: "scope") { model.pinHere(section: selection.section, sentence: selection.start.s) })
             }

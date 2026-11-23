@@ -915,7 +915,7 @@ public sealed partial class PdfReaderWindow : Window
                         styleSub.Items.Add(si);
                     }
 
-                    var speakFrom = new MenuFlyoutItem { Text = "从这读" };
+                    var speakFrom = new MenuFlyoutItem { Text = "从这听" };
                     speakFrom.Click += async (_, _) => { await GoToPageAsync(pg); StartListeningCurrentPage(0); };
 
                     var del = new MenuFlyoutItem { Text = "删除划线", Foreground = ThemeHelper.Brush(p.Danger) };
