@@ -225,9 +225,6 @@ struct PhoneNotes: View {
                 timeline
             }
         }
-        // 全部 / 想法 / 生词, 按时间 / 按书: a quick crossfade, not a cut.
-        .animation(YYMotion.quick, value: kind)
-        .animation(YYMotion.quick, value: byBook)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(YYColor.bg)
         .navigationTitle("笔记")
@@ -388,12 +385,16 @@ struct PhoneNotes: View {
                         NoteRow(mark: item.mark, selecting: selecting) { act($0, item) } footer: {
                             HStack(spacing: 7) {
                                 BookCover(book: item.noted.book).frame(width: 13)
-                                Text(item.noted.book.title).font(.yy(size: 12, weight: .semibold)).foregroundStyle(YYColor.t2)
+                                Text(item.noted.book.title)
+                                    .font(.yy(size: 12, weight: .semibold))
+                                    .foregroundStyle(YYColor.t2)
+                                    .layoutPriority(1)
                                 if let chapter = item.noted.chapter(of: item.mark) {
                                     Text("· \(chapter)").font(.yy(size: 12)).foregroundStyle(YYColor.t3)
                                 }
                                 Spacer(minLength: 6)
                                 NoteStamp(mark: item.mark, text: Notes.time(item.mark.at), size: 11.5)
+                                    .fixedSize(horizontal: true, vertical: false)
                             }
                             .lineLimit(1)
                         }
@@ -410,8 +411,6 @@ struct PhoneNotes: View {
                 }
             }
         }
-        // A row taken out closes up; the rest move into its place.
-        .animation(YYMotion.layout, value: days.flatMap { $0.items.map(\.id) })
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .environment(\.editMode, .constant(selecting ? .active : .inactive))
@@ -437,13 +436,12 @@ struct PhoneNotes: View {
                 }
             } header: {
                 Text("\(shown.count) 本书 · \(shown.reduce(0) { $0 + $1.marks.count }) 条")
-                .font(.yy(size: 12))
-                .foregroundStyle(YYColor.t3)
-                .textCase(nil)
+                    .font(.yy(size: 12))
+                    .monospacedDigit()
+                    .foregroundStyle(YYColor.t3)
+                    .textCase(nil)
             }
         }
-        // A row taken out closes up; the rest move into its place.
-        .animation(YYMotion.layout, value: shown.map(\.id))
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
     }
@@ -486,7 +484,7 @@ struct PhoneNotes: View {
                           preview: SharePreview(String(localized: "选中的笔记"))) { barLabel(String(localized: "导出"), "doc.text") }
                     .disabled(items.isEmpty)
                 Button {
-                    library.deleteMarks(items.map { ($0.noted.id, $0.mark) })
+                    removeMarks(items.map { ($0.noted.id, $0.mark) })
                     stopSelecting()
                 } label: { barLabel(String(localized: "删除"), "trash", danger: true) }
                 .disabled(items.isEmpty)
@@ -538,7 +536,18 @@ struct PhoneNotes: View {
         case .share: sharing = item.noted.quote(item.mark)
         case .write: writing = item
         case .copy: UIPasteboard.general.string = item.mark.text + (item.mark.note.map { "\n\n" + $0 } ?? "")
-        case .delete: library.deleteMarks([(item.noted.id, item.mark)])
+        case .delete: removeMarks([(item.noted.id, item.mark)])
+        }
+    }
+
+    private func removeMarks(_ targets: [(String, Mark)]) {
+        let drop = Set(targets.map { "\($0.0)/\($0.1.id)" })
+        withAnimation(YYMotion.layout) {
+            notes = notes.compactMap { n in
+                let kept = n.marks.filter { !drop.contains("\(n.id)/\($0.id)") }
+                return kept.isEmpty ? nil : NotedBook(book: n.book, detail: n.detail, marks: kept)
+            }
+            library.deleteMarks(targets)
         }
     }
 
@@ -610,7 +619,7 @@ struct PhoneBookNotes: View {
                             HStack {
                                 Text(title).font(.yy(size: 14, weight: .semibold)).foregroundStyle(YYColor.t1).lineLimit(1)
                                 Spacer()
-                                Text("\(marks.count) 条").font(.yy(size: 12)).foregroundStyle(YYColor.t3)
+                                Text("\(marks.count) 条").font(.yy(size: 12)).monospacedDigit().foregroundStyle(YYColor.t3)
                             }
                             .textCase(nil)
                         }
@@ -740,7 +749,10 @@ struct PhoneBookNotes: View {
         case .share: sharing = item.noted.quote(item.mark)
         case .write: writing = item
         case .copy: UIPasteboard.general.string = item.mark.text + (item.mark.note.map { "\n\n" + $0 } ?? "")
-        case .delete: library.deleteMarks([(item.noted.id, item.mark)])
+        case .delete:
+            withAnimation(YYMotion.layout) {
+                library.deleteMarks([(item.noted.id, item.mark)])
+            }
         }
     }
 }
@@ -1068,7 +1080,7 @@ struct PhoneWords: View {
                                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                                     Text(title(of: b.id)).font(.yy(size: 15, weight: .semibold)).foregroundStyle(YYColor.t1).lineLimit(1)
                                     Spacer()
-                                    Text("\(b.words.count) 个").font(.yy(size: 12)).foregroundStyle(YYColor.t3)
+                                    Text("\(b.words.count) 个").font(.yy(size: 12)).monospacedDigit().foregroundStyle(YYColor.t3)
                                 }
                                 .textCase(nil)
                             }
@@ -1082,15 +1094,13 @@ struct PhoneWords: View {
                                 Text(Notes.dayName(day.id)).font(.yy(size: 15, weight: .semibold)).foregroundStyle(YYColor.t1)
                                 Text(Notes.monthDay(day.id)).font(.yy(size: 12)).foregroundStyle(YYColor.t3)
                                 Spacer()
-                                Text("\(day.words.count) 个").font(.yy(size: 12)).foregroundStyle(YYColor.t3)
+                                Text("\(day.words.count) 个").font(.yy(size: 12)).monospacedDigit().foregroundStyle(YYColor.t3)
                             }
                             .textCase(nil)
                         }
                     }
                     }
                 }
-                // A row taken out closes up; the rest move into its place.
-                .animation(YYMotion.layout, value: days.flatMap { $0.words.map(\.word) })
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
             }
@@ -1118,30 +1128,35 @@ struct PhoneWords: View {
 
     private func row(_ w: VocabWord) -> some View {
         let meaning = Vocab.split(meaning: w.meaning)
+        let head = Text(w.word)
+            .font(.custom("Georgia", fixedSize: 20 * TextScale.shared.factor).weight(.bold))
+            .foregroundStyle(YYColor.t1)
+        let pron = w.phonetic.map {
+            Text("  " + $0).font(.yy(size: 13)).foregroundStyle(YYColor.t2)
+        } ?? Text("")
         return VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 9) {
-                HStack(alignment: .firstTextBaseline, spacing: 9) {
-                    Text(w.word).font(.custom("Georgia", size: 20).weight(.bold)).foregroundStyle(YYColor.t1)
-                    if let p = w.phonetic {
-                        Text(p).font(.yy(size: 13)).foregroundStyle(YYColor.t2)
-                    }
-                }
+            HStack(alignment: .top, spacing: 9) {
+                (head + pron)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 2)
                 Spacer(minLength: 8)
                 Button { say(w) } label: {
                     Image(systemName: "speaker.wave.2").font(.yy(size: 13, weight: .medium)).foregroundStyle(YYColor.t1)
-                        .frame(width: 32, height: 32).background(YYColor.inset, in: .circle)
+                        .frame(width: 32, height: 32)
+                        .background(YYColor.inset, in: .circle)
+                        .contentShape(Circle().inset(by: -6))
                 }
                 .buttonStyle(.borderless)
                 .accessibilityLabel("读一遍")
             }
             if let meaning {
-                (Text(meaning.pos.map { $0 + " " } ?? "").font(.custom("Georgia", size: 14)).italic().foregroundStyle(YYColor.t3)
+                (Text(meaning.pos.map { $0 + " " } ?? "").font(.custom("Georgia", fixedSize: 14 * TextScale.shared.factor)).italic().foregroundStyle(YYColor.t3)
                     + Text(meaning.text).font(.yy(size: 14)).foregroundStyle(YYColor.t1))
                     .padding(.top, 4)
             }
             if !w.context.isEmpty {
                 Text(Vocab.attributed(w.context, word: w.word, accent: tint.accent, limit: 200))
-                    .font(.custom("Georgia", size: 14.5)).foregroundStyle(YYColor.t2)
+                    .font(.custom("Georgia", fixedSize: 14.5 * TextScale.shared.factor)).foregroundStyle(YYColor.t2)
                     .lineSpacing(5)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 9)
@@ -1159,7 +1174,9 @@ struct PhoneWords: View {
                 .tint(w.known ? .orange : .green)
         }
         .swipeActions(edge: .trailing) {
-            Button("删除", systemImage: "trash", role: .destructive) { library.deleteWord(w.word) }
+            Button("删除", systemImage: "trash", role: .destructive) {
+                withAnimation(YYMotion.layout) { library.deleteWord(w.word) }
+            }
         }
         .contextMenu {
             Button("回到书里这一句", systemImage: "book") { open(w) }
@@ -1170,13 +1187,17 @@ struct PhoneWords: View {
                 UIPasteboard.general.string = [w.word, w.phonetic, w.meaning].compactMap { $0 }.joined(separator: " ")
             }
             Divider()
-            Button("删除", systemImage: "trash", role: .destructive) { library.deleteWord(w.word) }
+            Button("删除", systemImage: "trash", role: .destructive) {
+                withAnimation(YYMotion.layout) { library.deleteWord(w.word) }
+            }
         }
     }
 
     private func setKnown(_ w: VocabWord, _ on: Bool) {
-        try? library.core.setWordKnown(word: w.word, known: on)
-        NotificationCenter.default.post(name: .vocabChanged, object: nil)
+        withAnimation(YYMotion.layout) {
+            try? library.core.setWordKnown(word: w.word, known: on)
+            NotificationCenter.default.post(name: .vocabChanged, object: nil)
+        }
     }
 
     private func open(_ w: VocabWord) {

@@ -185,9 +185,9 @@ struct SyncSettings: View {
                     .font(.yy(size: 11.5, weight: .semibold)).foregroundStyle(YYColor.t1).lineLimit(1)
                 Text(detail(of: d)).font(.yy(size: 10.5)).monospacedDigit().foregroundStyle(YYColor.t3).lineLimit(1)
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 6)
             if d.thisDevice {
-                Text("这台").font(.yy(size: 10.5)).foregroundStyle(YYColor.t2)
+                Text("这台").font(.yy(size: 10.5)).foregroundStyle(YYColor.t2).lineLimit(1).fixedSize()
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 8)

@@ -378,14 +378,21 @@ struct PhoneReaderChrome: View {
                     .onChange(of: model.query) { model.search() }
                 if !model.query.isEmpty {
                     Button { model.query = "" } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(paper.ink2)
+                    .buttonStyle(YYPressStyle(scale: 0.92))
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(paper.ink2)
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle().inset(by: -4))
                     }
                     .accessibilityLabel("清空")
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.leading, 12)
+            .padding(.trailing, model.query.isEmpty ? 12 : 4)
             .frame(height: 40)
+                    .contentShape(Circle().inset(by: -2))
             .glass(paper, in: Capsule())
+            .buttonStyle(YYPressStyle(scale: 0.92))
             Button { model.endSearch() } label: {
                 Image(systemName: "xmark").font(.yy(size: 14, weight: .semibold))
                     .frame(width: 40, height: 40)
@@ -395,6 +402,7 @@ struct PhoneReaderChrome: View {
         }
         .padding(.top, 4)
     }
+                .buttonStyle(YYPressStyle(scale: 0.92))
 
     private var searchCapsule: some View {
         let q = model.query.trimmingCharacters(in: .whitespaces)
@@ -420,9 +428,11 @@ struct PhoneReaderChrome: View {
             }
             .monospacedDigit()
             .lineLimit(1)
+                .buttonStyle(YYPressStyle(scale: 0.92))
             .padding(.leading, 2)
             .frame(maxWidth: .infinity, alignment: .leading)
             Button { model.nextHit(forward: false) } label: { capButton("chevron.left") }
+                .buttonStyle(YYPressStyle(scale: 0.92))
                 .accessibilityLabel("上一处")
                 .disabled(model.hits.isEmpty)
             Button { model.nextHit(forward: true) } label: { capButton("chevron.right") }
@@ -430,7 +440,8 @@ struct PhoneReaderChrome: View {
                 .disabled(model.hits.isEmpty)
         }
         .padding(.horizontal, 5)
-        .frame(height: 50)
+        .padding(.vertical, 4)
+        .frame(minHeight: 50)
         .glass(paper, in: Capsule())
     }
 
@@ -603,18 +614,22 @@ struct PhoneReaderTopBar<More: View>: View {
             .accessibilityLabel("返回书架")
             VStack(spacing: 1) {
                 Text(title).font(.yy(size: 13, weight: .semibold)).lineLimit(1)
+                    .contentShape(Circle().inset(by: -2))
                 Text(subtitle).font(.yy(size: 11)).foregroundStyle(paper.ink2).lineLimit(1).monospacedDigit()
+            .buttonStyle(YYPressStyle(scale: 0.92))
             }
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity)
-            .frame(height: 40)
+            .frame(minHeight: 40)
             .glass(paper, in: Capsule())
             HStack(spacing: 0) {
+            .padding(.vertical, 4)
                 Button(action: onSearch) { readerIcon("magnifyingglass") }
                     .accessibilityLabel("搜索这本书")
                 Button(action: onBookmark) {
                     readerIcon(bookmarked ? "bookmark.fill" : "bookmark")
                         .foregroundStyle(bookmarked ? YYTint.standard.accent : paper.ink)
+                    .buttonStyle(YYPressStyle(scale: 0.92))
                         .contentTransition(.symbolEffect(.replace))
                         .animation(YYMotion.quick, value: bookmarked)
                 }
@@ -622,6 +637,7 @@ struct PhoneReaderTopBar<More: View>: View {
                 more()
             }
             .padding(.horizontal, 3)
+                .buttonStyle(YYPressStyle(scale: 0.92))
             .frame(height: 40)
             .glass(paper, in: Capsule())
         }
@@ -653,6 +669,7 @@ struct PhoneReaderCapsule: View {
             Button(action: onCenter) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title).font(.yy(size: 12, weight: .semibold))
+                .buttonStyle(YYPressStyle(scale: 0.92))
                     Text(note)
                         .font(.yy(size: 10.5, weight: noteAccent ? .semibold : .regular))
                         .foregroundStyle(noteAccent ? YYTint.standard.accent : paper.ink2)
@@ -661,15 +678,17 @@ struct PhoneReaderCapsule: View {
                 .lineLimit(1)
                 .padding(.leading, 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: 40)
+                .frame(minHeight: 40)
                 .contentShape(.rect)
             }
+                .padding(.vertical, 2)
             .accessibilityHint("听书：声音、速度、睡眠定时")
             Button(action: onPrevious) { capButton("chevron.left") }
                 .accessibilityLabel(sentenceStep ? String(localized: "上一句") : String(localized: "上一页"))
             Button(action: onPlay) {
                 Image(systemName: playing ? "pause.fill" : "play.fill")
                     // ▶ and ❚❚ turn into each other.
+                .buttonStyle(YYPressStyle(scale: 0.92))
                     .contentTransition(.symbolEffect(.replace))
                     .animation(YYMotion.quick, value: playing)
                     .font(.yy(size: 14, weight: .semibold))
@@ -681,14 +700,19 @@ struct PhoneReaderCapsule: View {
             .accessibilityLabel(playing ? String(localized: "暂停") : String(localized: "朗读"))
             .disabled(!playEnabled)
             Button(action: onNext) { capButton("chevron.right") }
+                    .contentShape(Circle().inset(by: -2))
                 .accessibilityLabel(sentenceStep ? String(localized: "下一句") : String(localized: "下一页"))
+            .buttonStyle(YYPressStyle(scale: 0.92))
             Button(action: onTypeset) {
-                Text("Aa").font(.yy(size: 14, weight: .semibold)).frame(width: 36, height: 36).contentShape(.rect)
+                Text("Aa").font(.yy(size: 14, weight: .semibold)).frame(minWidth: 40, minHeight: 44).contentShape(.rect)
             }
+                .buttonStyle(YYPressStyle(scale: 0.92))
             .accessibilityLabel("排版")
         }
         .padding(.horizontal, 5)
-        .frame(height: 50)
+        .padding(.vertical, 4)
+        .frame(minHeight: 50)
+            .buttonStyle(YYPressStyle(scale: 0.92))
         .glass(paper, in: Capsule())
         .overlay(alignment: .bottom) {
             GeometryReader { g in
@@ -702,7 +726,7 @@ struct PhoneReaderCapsule: View {
     }
 
     private func capButton(_ name: String) -> some View {
-        Image(systemName: name).font(.yy(size: 14, weight: .semibold)).frame(width: 34, height: 40).contentShape(.rect)
+        Image(systemName: name).font(.yy(size: 14, weight: .semibold)).frame(minWidth: 38, minHeight: 44).contentShape(.rect)
     }
 }
 
@@ -748,7 +772,10 @@ struct PhoneReaderChromeFixture: View {
 }
 
 fileprivate func readerIcon(_ name: String) -> some View {
-    Image(systemName: name).font(.yy(size: 15, weight: .medium)).frame(width: 34, height: 34)
+    Image(systemName: name)
+        .font(.yy(size: 15, weight: .medium))
+        .frame(width: 36, height: 36)
+        .contentShape(Circle().inset(by: -4))
 }
 
 private extension View {

@@ -1321,9 +1321,8 @@ private struct VoiceMessage: View {
                     ChooseButton(chosen: false, small: true) { focus.pick(voice, book: book) }
                         .padding(.leading, 4)
                         .opacity(open ? 1 : 0)
-                        .offset(x: open ? 0 : -4)
                         .allowsHitTesting(open)
-                        .animation(.easeOut(duration: 0.12), value: open)
+                        .animation(YYMotion.quick, value: open)
                     if let onDetail {
                         Button(action: onDetail) {
                             Image(systemName: "ellipsis")

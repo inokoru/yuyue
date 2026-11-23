@@ -73,7 +73,8 @@ fun UpdateScreen() {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = YY.s(16)).padding(bottom = YY.s(28)),
     ) {
         // checking → a release → downloading → ready: each fades in where the last one was.
-        androidx.compose.animation.AnimatedContent(u.phase, transitionSpec = { app.yuyue.design.YYMotion.swap() }, contentKey = { it::class }, label = "update") { phase ->
+        val reduce = app.yuyue.design.YYMotion.isReduceMotion()
+        androidx.compose.animation.AnimatedContent(u.phase, transitionSpec = { app.yuyue.design.YYMotion.swap(reduce) }, contentKey = { it::class }, label = "update") { phase ->
         when (phase) {
             UpdatePhase.Checking -> Status(checking = true)
             UpdatePhase.CheckFailed -> FailedCheck()

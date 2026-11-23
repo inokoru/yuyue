@@ -138,7 +138,7 @@ fun DeckCard(review: Review, library: Library, start: () -> Unit) {
         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(t("今天回顾"), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = YY.c.t1)
-                Text(if (review.items.isEmpty()) t("看完了") else t("%lld 条 · 约 %lld 分钟", review.items.size, review.minutes), fontSize = 12.sp, color = YY.c.t3)
+                Text(if (review.items.isEmpty()) t("看完了") else t("%lld 条 · 约 %lld 分钟", review.items.size, review.minutes), fontSize = 12.sp, color = YY.c.t3, style = YY.tnum)
             }
             val first = review.items.firstOrNull()
             if (first != null) {

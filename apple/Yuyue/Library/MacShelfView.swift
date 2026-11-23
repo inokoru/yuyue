@@ -1073,10 +1073,12 @@ struct MacShelfView: View {
             Label("正在听 · \(book.percent)", systemImage: "headphones")
                 .labelStyle(TightLabel())
                 .font(.yy(size: 10.5))
+                .monospacedDigit()
                 .foregroundStyle(tint.accent)
         } else {
             Text(library.shelfNote(book))
                 .font(.yy(size: 10.5))
+                .monospacedDigit()
                 .foregroundStyle(YYColor.t3)
         }
     }
@@ -1102,21 +1104,42 @@ struct MacShelfView: View {
                         .overlay(RightClickCatcher { _ in self.menu = nil })
                     BookMenuCard(book: book, perform: { perform($0, on: book) }, close: { self.menu = nil },
                                  setStatus: { library.setStatus(book, $0) })
-                        .onGeometryChange(for: CGSize.self, of: \.size) { menuSize = $0 }
-                        .offset(menuOffset(at: menu.at, in: g.size))
-                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topLeading)))
+                        .id(menu.book)
+                        .modifier(MenuPop(at: menu.at, in: g.size, menuSize: $menuSize))
+                        .transition(.opacity)
                 }
             }
         }
     }
 
-    /// From the pointer toward the lower right; to the left or up near the window's edges.
-    private func menuOffset(at p: CGPoint, in size: CGSize) -> CGSize {
-        let margin: CGFloat = 8
-        var x = p.x + 2, y = p.y + 2
-        if x + menuSize.width > size.width - margin { x = p.x - menuSize.width - 2 }
-        if y + menuSize.height > size.height - margin { y = p.y - menuSize.height - 2 }
-        return CGSize(width: max(margin, x), height: max(margin, y))
+    /// From the pointer toward the lower right; to the left or up near the window's edges,
+    /// scaling around the card's own anchored corner before applying offset.
+    private struct MenuPop: ViewModifier {
+        let at: CGPoint
+        let size: CGSize
+        @Binding var menuSize: CGSize
+        @State private var shown = false
+
+        init(at: CGPoint, in size: CGSize, menuSize: Binding<CGSize>) {
+            self.at = at
+            self.size = size
+            self._menuSize = menuSize
+        }
+
+        func body(content: Content) -> some View {
+            let margin: CGFloat = 8
+            let flippedX = at.x + 2 + menuSize.width > size.width - margin
+            let flippedY = at.y + 2 + menuSize.height > size.height - margin
+            let x = flippedX ? at.x - menuSize.width - 2 : at.x + 2
+            let y = flippedY ? at.y - menuSize.height - 2 : at.y + 2
+            let anchor = UnitPoint(x: flippedX ? 1 : 0, y: flippedY ? 1 : 0)
+            return content
+                .onGeometryChange(for: CGSize.self, of: \.size) { menuSize = $0 }
+                .scaleEffect(shown || YYMotion.reduce ? 1 : 0.96, anchor: anchor)
+                .opacity(shown ? 1 : 0)
+                .onAppear { withAnimation(YYMotion.quick) { shown = true } }
+                .offset(x: max(margin, x), y: max(margin, y))
+        }
     }
 
     private func perform(_ action: BookAction, on book: BookSummary) {

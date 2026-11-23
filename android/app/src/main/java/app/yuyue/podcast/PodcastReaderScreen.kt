@@ -46,11 +46,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -114,7 +117,7 @@ private data class ActiveVocabCard(
  * - Book citation anchors (`打开原书 ›`) jumping directly into the e-book section & sentence.
  * - Live microphone cut-in interjection (`语音插话`) with runtime permission, live RMS waveform, and spoken Companion Q&A.
  */
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun PodcastReaderScreen(
     library: Library,
@@ -426,9 +429,16 @@ fun PodcastReaderScreen(
                                 isStudio = issue.studioKind != null,
                                 size = 20.dp,
                             )
-                            Text(issue.showTitle, fontSize = 12.sp, color = YY.c.t3)
-                            Text("·", fontSize = 12.sp, color = YY.c.t3)
-                            Text(PodcastFormat.compactDuration(issue.durationSec), fontSize = 12.sp, color = YY.c.t3, style = YY.tnum)
+                            Text(
+                                issue.showTitle,
+                                fontSize = 12.sp,
+                                color = YY.c.t3,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            Text("·", fontSize = 12.sp, color = YY.c.t3, maxLines = 1)
+                            Text(PodcastFormat.compactDuration(issue.durationSec), fontSize = 12.sp, color = YY.c.t3, style = YY.tnum, maxLines = 1)
                         }
 
                         Text(
@@ -563,13 +573,14 @@ fun PodcastReaderScreen(
         }
 
         // Inline Vocabulary Lookup Card
+        val reduceMotion = YYMotion.isReduceMotion()
         AnimatedVisibility(
             visible = vocabCard != null,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(horizontal = 16.dp, vertical = 92.dp),
-            enter = fadeIn(YYMotion.quick()) + slideInVertically(YYMotion.quick()) { it / 3 },
-            exit = fadeOut(YYMotion.exit()) + slideOutVertically(YYMotion.exit()) { it / 3 },
+            enter = if (reduceMotion) fadeIn(YYMotion.quick()) else fadeIn(YYMotion.quick()) + slideInVertically(YYMotion.quick()) { it / 3 },
+            exit = if (reduceMotion) fadeOut(YYMotion.exit()) else fadeOut(YYMotion.exit()) + slideOutVertically(YYMotion.exit()) { it / 3 },
         ) {
             vocabCard?.let { card ->
                 PodcastStationeryCard(
@@ -623,15 +634,35 @@ fun PodcastReaderScreen(
             }
         }
 
-        // Cut-In Voice / Text Q&A ("插话") Overlay
+        // Floating Toast
         AnimatedVisibility(
-            visible = interrupting,
+            visible = toastText != null,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .windowInsetsPadding(WindowInsets.navigationBars)
-                .imePadding(),
-            enter = fadeIn(YYMotion.standard()) + slideInVertically(YYMotion.standard()) { it / 2 },
-            exit = fadeOut(YYMotion.exit()) + slideOutVertically(YYMotion.exit()) { it / 2 },
+                .padding(bottom = 96.dp),
+            enter = fadeIn(YYMotion.quick()),
+            exit = fadeOut(YYMotion.exit()),
+        ) {
+            toastText?.let { msg ->
+                Box(
+                    Modifier
+                        .clip(CircleShape)
+                        .background(YY.c.t1)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    Text(msg, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, color = YY.c.card)
+                }
+            }
+        }
+    }
+
+    if (interrupting) {
+        ModalBottomSheet(
+            onDismissRequest = { closeInterrupt(rewind = true) },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = YY.c.card,
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+            dragHandle = null,
         ) {
             PodcastInterruptSheetCard(
                 library = library,
@@ -663,27 +694,6 @@ fun PodcastReaderScreen(
                 },
                 onResume = { closeInterrupt(rewind = true) },
             )
-        }
-
-        // Floating Toast
-        AnimatedVisibility(
-            visible = toastText != null,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 96.dp),
-            enter = fadeIn(YYMotion.quick()),
-            exit = fadeOut(YYMotion.exit()),
-        ) {
-            toastText?.let { msg ->
-                Box(
-                    Modifier
-                        .clip(CircleShape)
-                        .background(YY.c.t1)
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                ) {
-                    Text(msg, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, color = YY.c.card)
-                }
-            }
         }
     }
 
@@ -1075,13 +1085,19 @@ private fun PodcastInterruptSheetCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(18.dp, shape)
-            .clip(shape)
             .background(YY.c.card)
-            .border(0.5.dp, YY.c.line, shape)
-            .padding(horizontal = 18.dp, vertical = 16.dp),
+            .imePadding()
+            .padding(start = 18.dp, end = 18.dp, top = 10.dp, bottom = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        Box(
+            Modifier
+                .align(Alignment.CenterHorizontally)
+                .width(36.dp)
+                .height(4.dp)
+                .clip(CircleShape)
+                .background(YY.c.line)
+        )
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(t("边听边插话"), fontFamily = YY.serif, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = YY.c.t1)

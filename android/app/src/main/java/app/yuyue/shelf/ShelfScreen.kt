@@ -239,7 +239,7 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
                 }
                 items(shown, key = { it.id }) { book ->
                     // Sorted, filtered, brought in or taken out, each book moves to its place.
-                    Box(Modifier.animateItem(fadeInSpec = app.yuyue.design.YYMotion.standard(), placementSpec = app.yuyue.design.YYMotion.place, fadeOutSpec = app.yuyue.design.YYMotion.exit())) {
+                    Box(Modifier.animateItem(fadeInSpec = app.yuyue.design.YYMotion.standard(), placementSpec = app.yuyue.design.YYMotion.place(), fadeOutSpec = app.yuyue.design.YYMotion.exit())) {
                     Cell(
                         library, book, showProgress, selecting, book.id in selected,
                         onTap = {
@@ -254,6 +254,7 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
             }
         }
 
+        val reduce = YYMotion.isReduceMotion()
         if (!selecting) {
             // Scrolled: the shelf fades out under the chip and the buttons.
             val fade by animateFloatAsState(if (scrolled) 1f else 0f, YYMotion.standard(), label = "fade")
@@ -285,8 +286,8 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
             }
             AnimatedVisibility(
                 scrolled, Modifier.windowInsetsPadding(WindowInsets.statusBars).padding(top = 11.5.dp, start = 16.dp),
-                enter = fadeIn(YYMotion.quick()) + scaleIn(YYMotion.quick(), initialScale = 0.92f, transformOrigin = TransformOrigin(0f, 0.5f)),
-                exit = fadeOut(YYMotion.exit()) + scaleOut(YYMotion.exit(), targetScale = 0.92f, transformOrigin = TransformOrigin(0f, 0.5f)),
+                enter = if (reduce) fadeIn(YYMotion.quick()) else fadeIn(YYMotion.quick()) + scaleIn(YYMotion.quick(), initialScale = 0.92f, transformOrigin = TransformOrigin(0f, 0.5f)),
+                exit = if (reduce) fadeOut(YYMotion.exit()) else fadeOut(YYMotion.exit()) + scaleOut(YYMotion.exit(), targetScale = 0.92f, transformOrigin = TransformOrigin(0f, 0.5f)),
             ) {
                 Box(Modifier.alpha(if (panel == PanelFrom.Chip) 0f else 1f)) { PlaceChip(now) { chrome.switching = false; panel = PanelFrom.Chip } }
             }
@@ -298,8 +299,8 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
         }
         AnimatedVisibility(
             chrome.switching, Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = app.yuyue.LocalTabBarHeight.current + 10.dp),
-            enter = fadeIn(YYMotion.quick()) + scaleIn(YYMotion.quick(), initialScale = 0.92f, transformOrigin = TransformOrigin(0f, 1f)),
-            exit = fadeOut(YYMotion.exit()) + scaleOut(YYMotion.exit(), targetScale = 0.92f, transformOrigin = TransformOrigin(0f, 1f)),
+            enter = if (reduce) fadeIn(YYMotion.quick()) else fadeIn(YYMotion.quick()) + scaleIn(YYMotion.quick(), initialScale = 0.92f, transformOrigin = TransformOrigin(0f, 1f)),
+            exit = if (reduce) fadeOut(YYMotion.exit()) else fadeOut(YYMotion.exit()) + scaleOut(YYMotion.exit(), targetScale = 0.92f, transformOrigin = TransformOrigin(0f, 1f)),
         ) {
             PlaceStack(place, kinds, collections) { to -> chrome.switching = false; if (to != place) go(to) }
         }
@@ -311,8 +312,8 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
         val from = panel
         AnimatedVisibility(
             from != null, Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            enter = fadeIn(YYMotion.quick()) + scaleIn(YYMotion.quick(), initialScale = 0.92f, transformOrigin = TransformOrigin(0.12f, 0.06f)),
-            exit = fadeOut(YYMotion.exit()) + scaleOut(YYMotion.exit(), targetScale = 0.92f, transformOrigin = TransformOrigin(0.12f, 0.06f)),
+            enter = if (reduce) fadeIn(YYMotion.quick()) else fadeIn(YYMotion.quick()) + scaleIn(YYMotion.quick(), initialScale = 0.92f, transformOrigin = TransformOrigin(0.12f, 0.06f)),
+            exit = if (reduce) fadeOut(YYMotion.exit()) else fadeOut(YYMotion.exit()) + scaleOut(YYMotion.exit(), targetScale = 0.92f, transformOrigin = TransformOrigin(0.12f, 0.06f)),
         ) {
             // Under the buttons at the top right, never over them.
             val top = with(density) { WindowInsets.statusBars.getTop(this).toDp() } + 58.dp
@@ -635,7 +636,7 @@ fun BookPreview(book: BookSummary) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(book.title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).alignByBaseline())
-                book.author?.let { Text(it, fontSize = 12.sp, color = YY.c.t3, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.alignByBaseline()) }
+                book.author?.let { Text(it, fontSize = 12.sp, color = YY.c.t3, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 112.dp).alignByBaseline()) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (book.progress > 0 && book.status != ReadingStatus.FINISHED) {

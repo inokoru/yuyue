@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.offset
@@ -235,16 +236,22 @@ fun Root(library: Library) {
         CompositionLocalProvider(LocalTabBarHeight provides barHeight) {
             Box(Modifier.fillMaxSize().hazeSource(haze)) {
                 // A page going deeper comes a short way from the right; back, from the left. Switching
-                // tabs keeps the state null, so it stays instant.
+                // tabs snaps immediately with zero transition even when clearing pushed sub-pages.
                 val reducePages = app.yuyue.design.YYMotion.isReduceMotion()
                 androidx.compose.animation.AnimatedContent(
-                    pages.lastOrNull() to pages.size,
-                    transitionSpec = { app.yuyue.design.YYMotion.push(targetState.second > initialState.second, reducePages) },
+                    Triple(tab, pages.lastOrNull(), pages.size),
+                    transitionSpec = {
+                        if (targetState.first != initialState.first) {
+                            androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+                        } else {
+                            app.yuyue.design.YYMotion.push(targetState.third > initialState.third, reducePages)
+                        }
+                    },
                     label = "page",
-                ) { (page, _) ->
+                ) { (currentTab, page, _) ->
                 when (page) {
                     // Instant switch on core high-frequency bottom navigation.
-                    null -> when (tab) {
+                    null -> when (currentTab) {
                         Tab.Shelf -> ShelfScreen(library, chrome, openWifi = { pages += Page.Wifi }, openRemote = { pages += Page.Remote }, openWatched = { pages += Page.Watched }, openFeedback = { pages += Page.Feedback }, openRecord = { pages += Page.Record(it) })
                         Tab.Notes -> app.yuyue.notes.NotesScreen(library, notesPop)
                         Tab.Me -> app.yuyue.me.MeScreen(library, mePop)
@@ -274,15 +281,30 @@ fun Root(library: Library) {
         }
         BackHandler(enabled = pages.isNotEmpty()) { pages.removeAt(pages.lastIndex) }
 
-        // A book opens with a quick fade up from a touch smaller, and closes the same way back; the
-        // last one stays drawn while it goes.
+        // A book opens with a quick fade up from a touch smaller (or slides up like a sheet for
+        // 有声书 matching its 收起 chevron), and closes the same way back; the last one stays drawn while it goes.
         var shownBook by remember { mutableStateOf<String?>(null) }
         if (library.presented != null) shownBook = library.presented
         val reduceBook = app.yuyue.design.YYMotion.isReduceMotion()
+        val isAudioBook = shownBook?.let { id -> library.books.firstOrNull { it.id == id }?.format == uniffi.yuyue_core.BookFormat.AUDIO } == true
+        val bookEnter = when {
+            reduceBook -> androidx.compose.animation.fadeIn(app.yuyue.design.YYMotion.standard())
+            isAudioBook -> androidx.compose.animation.fadeIn(app.yuyue.design.YYMotion.standard()) +
+                androidx.compose.animation.slideInVertically(app.yuyue.design.YYMotion.standard()) { it / 5 }
+            else -> androidx.compose.animation.fadeIn(app.yuyue.design.YYMotion.standard()) +
+                androidx.compose.animation.scaleIn(app.yuyue.design.YYMotion.standard(), initialScale = 0.97f)
+        }
+        val bookExit = when {
+            reduceBook -> androidx.compose.animation.fadeOut(app.yuyue.design.YYMotion.exit())
+            isAudioBook -> androidx.compose.animation.fadeOut(app.yuyue.design.YYMotion.exit()) +
+                androidx.compose.animation.slideOutVertically(app.yuyue.design.YYMotion.exit()) { it / 4 }
+            else -> androidx.compose.animation.fadeOut(app.yuyue.design.YYMotion.exit()) +
+                androidx.compose.animation.scaleOut(app.yuyue.design.YYMotion.exit(), targetScale = 0.98f)
+        }
         androidx.compose.animation.AnimatedVisibility(
             library.presented != null,
-            enter = androidx.compose.animation.fadeIn(app.yuyue.design.YYMotion.standard()) + androidx.compose.animation.scaleIn(app.yuyue.design.YYMotion.standard(), initialScale = if (reduceBook) 1f else 0.97f),
-            exit = androidx.compose.animation.fadeOut(app.yuyue.design.YYMotion.exit()) + androidx.compose.animation.scaleOut(app.yuyue.design.YYMotion.exit(), targetScale = if (reduceBook) 1f else 0.98f),
+            enter = bookEnter,
+            exit = bookExit,
         ) {
             shownBook?.let { id ->
                 LaunchedEffect(id) { lastBook = id }
@@ -303,8 +325,8 @@ fun Root(library: Library) {
         if (openPodcastID != null) shownPodcast = openPodcastID
         androidx.compose.animation.AnimatedVisibility(
             openPodcastID != null,
-            enter = androidx.compose.animation.fadeIn(app.yuyue.design.YYMotion.standard()) + androidx.compose.animation.scaleIn(app.yuyue.design.YYMotion.standard(), initialScale = if (reduceBook) 1f else 0.97f),
-            exit = androidx.compose.animation.fadeOut(app.yuyue.design.YYMotion.exit()) + androidx.compose.animation.scaleOut(app.yuyue.design.YYMotion.exit(), targetScale = if (reduceBook) 1f else 0.98f),
+            enter = if (reduceBook) androidx.compose.animation.fadeIn(app.yuyue.design.YYMotion.standard()) else androidx.compose.animation.fadeIn(app.yuyue.design.YYMotion.standard()) + androidx.compose.animation.scaleIn(app.yuyue.design.YYMotion.standard(), initialScale = 0.97f),
+            exit = if (reduceBook) androidx.compose.animation.fadeOut(app.yuyue.design.YYMotion.exit()) else androidx.compose.animation.fadeOut(app.yuyue.design.YYMotion.exit()) + androidx.compose.animation.scaleOut(app.yuyue.design.YYMotion.exit(), targetScale = 0.98f),
         ) {
             shownPodcast?.let { issueId ->
                 app.yuyue.podcast.PodcastReaderScreen(library, issueId) {
@@ -382,7 +404,7 @@ private fun RowScope.TabItem(icon: ImageVector, iconOn: ImageVector, title: Stri
     val color = if (on) YY.tint.fill else YY.c.t2
     val press = remember { MutableInteractionSource() }
     Column(
-        Modifier.weight(1f).height(YY.s(44))
+        Modifier.weight(1f).heightIn(min = YY.s(44)).padding(vertical = 2.dp)
             .selectable(on, interactionSource = press, indication = null, role = androidx.compose.ui.semantics.Role.Tab, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
         // 2px wanted; Android's line box for the word already adds about 1.6 of it.
@@ -446,14 +468,15 @@ private fun NowPlayingBar(library: Library, onPodcastShelf: Boolean = false) {
         t("第 %lld / %lld 句 · 本章还剩 %lld 分钟", minOf(spot.sentence + 1, n), n, left)
     } else null
     val shape = RoundedCornerShape(YY.s(14))
+    val reduce = app.yuyue.design.YYMotion.isReduceMotion()
     Box(
-        Modifier.fillMaxWidth().padding(start = YY.s(8), end = YY.s(8), top = YY.s(8), bottom = YY.s(6)).height(YY.s(54))
+        Modifier.fillMaxWidth().padding(start = YY.s(8), end = YY.s(8), top = YY.s(8), bottom = YY.s(6)).heightIn(min = YY.s(54))
             .shadow(if (YY.dark) 0.dp else 6.dp, shape, ambientColor = Color(0x14000000), spotColor = Color(0x14000000))
             .clip(shape).background(YY.c.card.copy(alpha = 0.92f)).border(0.5.dp, YY.c.line, shape)
             .clickable(onClickLabel = t("回到正在读的页"), role = androidx.compose.ui.semantics.Role.Button) { library.presented = book.id },
     ) {
         Row(
-            Modifier.fillMaxSize().padding(start = YY.s(9), end = YY.s(6)),
+            Modifier.fillMaxWidth().heightIn(min = YY.s(54)).padding(start = YY.s(9), end = YY.s(6), top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(2)),
         ) {
             Box(Modifier.padding(end = YY.s(6)).size(YY.s(36)), contentAlignment = Alignment.Center) {
@@ -463,8 +486,13 @@ private fun NowPlayingBar(library: Library, onPodcastShelf: Boolean = false) {
                 Text(if (chapter != null) t("%@ · %@", book.title, chapter) else book.title, style = YY.font(11.5f, FontWeight.SemiBold), color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 // The line rolls up as the voice moves to the next sentence.
                 androidx.compose.animation.AnimatedContent(note ?: player.line ?: "", transitionSpec = {
-                    (androidx.compose.animation.fadeIn(app.yuyue.design.YYMotion.standard()) + androidx.compose.animation.slideInVertically(app.yuyue.design.YYMotion.standard()) { it / 2 }) togetherWith
-                        (androidx.compose.animation.fadeOut(app.yuyue.design.YYMotion.exit()) + androidx.compose.animation.slideOutVertically(app.yuyue.design.YYMotion.exit()) { -it / 2 })
+                    if (reduce) {
+                        androidx.compose.animation.fadeIn(app.yuyue.design.YYMotion.quick()) togetherWith
+                            androidx.compose.animation.fadeOut(app.yuyue.design.YYMotion.exit())
+                    } else {
+                        (androidx.compose.animation.fadeIn(app.yuyue.design.YYMotion.standard()) + androidx.compose.animation.slideInVertically(app.yuyue.design.YYMotion.standard()) { it / 2 }) togetherWith
+                            (androidx.compose.animation.fadeOut(app.yuyue.design.YYMotion.exit()) + androidx.compose.animation.slideOutVertically(app.yuyue.design.YYMotion.exit()) { -it / 2 })
+                    }
                 }, label = "line") { text ->
                     Text(text, style = YY.font(10f, tnum = true), color = YY.c.t2, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -506,13 +534,13 @@ private fun AudioPlayingBar(library: Library, player: app.yuyue.speech.Audiobook
     val (at, of) = player.inChapter
     val shape = RoundedCornerShape(YY.s(14))
     Box(
-        Modifier.fillMaxWidth().padding(start = YY.s(8), end = YY.s(8), top = YY.s(8), bottom = YY.s(6)).height(YY.s(54))
+        Modifier.fillMaxWidth().padding(start = YY.s(8), end = YY.s(8), top = YY.s(8), bottom = YY.s(6)).heightIn(min = YY.s(54))
             .shadow(if (YY.dark) 0.dp else 6.dp, shape, ambientColor = Color(0x14000000), spotColor = Color(0x14000000))
             .clip(shape).background(YY.c.card.copy(alpha = 0.92f)).border(0.5.dp, YY.c.line, shape)
             .clickable(onClickLabel = t("回到播放页"), role = androidx.compose.ui.semantics.Role.Button) { library.presented = book.id },
     ) {
         Row(
-            Modifier.fillMaxSize().padding(start = YY.s(9), end = YY.s(6)),
+            Modifier.fillMaxWidth().heightIn(min = YY.s(54)).padding(start = YY.s(9), end = YY.s(6), top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(2)),
         ) {
             Box(Modifier.padding(end = YY.s(6)).size(YY.s(36)), contentAlignment = Alignment.Center) {

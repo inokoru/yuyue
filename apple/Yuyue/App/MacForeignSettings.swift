@@ -123,12 +123,13 @@ private struct MDictList: View {
     var body: some View {
         SettingsCard {
             ForEach(list, id: \.id) { d in
-                SettingsRow(d.title, detail: String(localized: "\(d.entries) 个词条")) {
+                SettingsRow(d.title, detail: String(localized: "\(d.entries) 个词条").replacingOccurrences(of: String(d.entries), with: d.entries.formatted())) {
                     SettingsSwitch(isOn: Binding(get: { d.enabled }, set: { on in
                         try? core.setDictionary(id: d.id, enabled: on)
                         reload()
                     }))
                 }
+                .monospacedDigit()
                 .contextMenu {
                     if list.count > 1 {
                         Button("往上挪") { move(d, by: -1) }.disabled(list.first?.id == d.id)

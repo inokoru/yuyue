@@ -76,6 +76,7 @@ struct MacSettings: View {
                     .transition(YYMotion.swap)
                 }
             }
+            .animation(YYMotion.standard, value: page)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(YYColor.bg.ignoresSafeArea())
             if page.hasInspector {
@@ -83,6 +84,8 @@ struct MacSettings: View {
                     .ignoresSafeArea(.container, edges: .top)
             }
         }
+        .onKeyPress(.upArrow) { stepPage(-1) }
+        .onKeyPress(.downArrow) { stepPage(1) }
         // Nothing for the right column: the page takes the width, the corner stays where it was.
         .overlay(alignment: .topTrailing) {
             if !page.hasInspector {
@@ -185,6 +188,19 @@ struct MacSettings: View {
         // Two kinds of button in 设置: the one solid main action a page may have sets its own
         // style; every other action is words, no fill, no border.
         .buttonStyle(SettingsActionStyle())
+    }
+
+    private func stepPage(_ delta: Int) -> KeyPress.Result {
+        if NSApp.keyWindow?.firstResponder is NSTextView { return .ignored }
+        let all = SettingsPage.allCases
+        guard let i = all.firstIndex(of: page) else { return .ignored }
+        let nextIndex = i + delta
+        guard all.indices.contains(nextIndex) else { return .handled }
+        let next = all[nextIndex]
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) { page = next }
+        return .handled
     }
 }
 
@@ -772,7 +788,6 @@ struct AppearanceSettings: View {
                     // 跟随系统 on one line, not broken in two under its picture.
                     .fixedSize()
             }
-            .offset(y: hovered ? -1.5 : 0)
             .animation(YYMotion.quick, value: hovered)
         }
         .buttonStyle(YYPressStyle(scale: 0.97))
@@ -1258,10 +1273,10 @@ private struct StorageSettings: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text("已用空间").font(.yy(size: 13)).foregroundStyle(YYColor.t2)
                         Text(usage.map { Self.size($0.total) } ?? "…")
-                            .font(.yy(size: 22, weight: .bold)).foregroundStyle(YYColor.t1)
+                            .font(.yy(size: 22, weight: .bold)).monospacedDigit().foregroundStyle(YYColor.t1)
                         Spacer()
                         if let free = usage?.free {
-                            Text("本机可用 \(Self.size(free))").font(.yy(size: 11.5)).foregroundStyle(YYColor.t3)
+                            Text("本机可用 \(Self.size(free))").font(.yy(size: 11.5)).monospacedDigit().foregroundStyle(YYColor.t3)
                         }
                     }
                     if let usage { bar(usage) }
@@ -1277,6 +1292,7 @@ private struct StorageSettings: View {
                     }
                         .disabled((usage?.deleted.isEmpty ?? true) || cleaning)
                 }
+                .monospacedDigit()
                 if modelBytes > 0 {
                     SettingsRow(String(localized: "语音对齐模型"), detail: String(localized: "用于有声书句级对齐；移除后下次合成时重新下载（约 270 MB）")) {
                         HStack(spacing: 10) {

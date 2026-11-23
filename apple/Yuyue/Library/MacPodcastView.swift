@@ -198,7 +198,9 @@ struct MacPodcastView: View {
         }
         .onKeyPress(.escape) {
             if drawerOpen {
-                closeDrawer()
+                var t = Transaction()
+                t.disablesAnimations = true
+                withTransaction(t) { drawerOpen = false }
                 return .handled
             }
             if showSearchDrop || searchFocused {
@@ -206,6 +208,9 @@ struct MacPodcastView: View {
                 return .handled
             }
             return .ignored
+        }
+        .onDisappear {
+            toastTask?.cancel()
         }
     }
 
@@ -268,7 +273,7 @@ struct MacPodcastView: View {
                     rightEdgeCircularTriggers
                         .padding(.trailing, 12)
                         .offset(y: -h * 0.04)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .transition(YYMotion.reduce ? .opacity : .move(edge: .trailing).combined(with: .opacity))
                 }
 
                 // Floating Stationery Side Drawer
@@ -298,7 +303,7 @@ struct MacPodcastView: View {
                         y: 10
                     )
                     .padding(14)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .transition(YYMotion.reduce ? .opacity : .move(edge: .trailing).combined(with: .opacity))
                 }
 
                 // Subtle floating bottom confirmation toast
@@ -316,7 +321,7 @@ struct MacPodcastView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .allowsHitTesting(false)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(YYMotion.reduce ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                 }
             }
         }
@@ -768,6 +773,7 @@ struct MacPodcastView: View {
                     }
                 }
                 .font(.yy(size: 11.5))
+                .monospacedDigit()
                 .lineLimit(1)
 
                 if showProgress && dur > 0 {
@@ -1417,6 +1423,7 @@ struct MacPodcastView: View {
                             let rem = PodcastFormat.remaining(position: pos, duration: dur)
                             Text([issue.showTitle, status, rem].filter { !$0.isEmpty }.joined(separator: " · "))
                                 .font(.yy(size: 11.5))
+                                .monospacedDigit()
                                 .foregroundStyle(YYColor.t3)
                                 .lineLimit(1)
                         }

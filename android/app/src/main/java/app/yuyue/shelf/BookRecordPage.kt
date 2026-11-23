@@ -159,7 +159,8 @@ private fun Record(library: Library, book: BookSummary, pick: () -> Unit, delete
             TabChip(Icons.headphones, t("电台"), mentions.size.takeIf { it > 0 }, tab == RecordTab.Podcast) { tab = RecordTab.Podcast }
             TabChip(Icons.clock, t("记录"), log.size, tab == RecordTab.Log) { tab = RecordTab.Log }
         }
-        androidx.compose.animation.AnimatedContent(tab, Modifier.padding(top = 14.dp), transitionSpec = { app.yuyue.design.YYMotion.swap() }, label = "recordTab") { tab ->
+        val reduce = app.yuyue.design.YYMotion.isReduceMotion()
+        androidx.compose.animation.AnimatedContent(tab, Modifier.padding(top = 14.dp), transitionSpec = { app.yuyue.design.YYMotion.swap(reduce) }, label = "recordTab") { tab ->
             when (tab) {
                 RecordTab.Contents -> Contents(rows) { row ->
                     // The chapter being read opens where it was left; any other at its start.

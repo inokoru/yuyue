@@ -6,6 +6,7 @@ import SwiftUI
 struct UndoToast: View {
     let toast: Library.Toast
     let undo: () -> Void
+    var dismiss: (() -> Void)? = nil
     /// Pauses countdown while the pointer hovers over the note on Mac.
     static var hoveredID: UUID?
 
@@ -36,6 +37,10 @@ struct UndoToast: View {
     @State private var hovered = false
     @State private var overButton = false
     @State private var done = false
+    #if os(iOS)
+    @State private var dragY: CGFloat = 0
+    @State private var dismissed = false
+    #endif
     /// 墨水屏 has no shadow.
     @AppStorage(EInk.key) private var eink = false
 
@@ -62,7 +67,11 @@ struct UndoToast: View {
                         .foregroundStyle(YYColor.t1)
                         .frame(width: 24 * k, height: 24 * k)
                         .background(overButton ? UndoToast.buttonHover : UndoToast.button, in: .circle)
+                        #if os(iOS)
+                        .contentShape(Circle().inset(by: -6))
+                        #else
                         .contentShape(.circle)
+                        #endif
                 }
                 .buttonStyle(YYPressStyle())
                 .keyboardShortcut("z")
@@ -72,7 +81,7 @@ struct UndoToast: View {
                 .onHover { overButton = $0 }
                 #endif
                 .padding(.leading, 13 * k)
-                .transition(YYMotion.reduce ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
+                .transition(YYMotion.reduce ? .opacity : .scale(scale: 0.92).combined(with: .opacity))
             }
         }
         .padding(.leading, 14 * k)
@@ -83,6 +92,35 @@ struct UndoToast: View {
         .shadow(color: .black.opacity(eink ? 0 : 0.03), radius: 1, y: 1)
         .shadow(color: .black.opacity(eink ? 0 : 0.07), radius: 11, y: 6)
         .frame(maxWidth: 420)
+        #if os(iOS)
+        .offset(y: dismissed ? -60 : (YYMotion.reduce ? 0 : (dragY <= 0 ? dragY : dragY * 0.18)))
+        .opacity(dismissed ? 0 : 1)
+        .allowsHitTesting(!dismissed)
+        .accessibilityHidden(dismissed)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 8)
+                .onChanged { value in
+                    guard !dismissed else { return }
+                    if !YYMotion.reduce {
+                        dragY = value.translation.height
+                    }
+                }
+                .onEnded { value in
+                    guard !dismissed else { return }
+                    let shouldDismiss = value.translation.height < -24
+                        || (!YYMotion.reduce && value.predictedEndTranslation.height < -80)
+                    if shouldDismiss {
+                        if let dismiss {
+                            withAnimation(YYMotion.exit) { dismiss() }
+                        } else {
+                            withAnimation(YYMotion.exit) { dismissed = true }
+                        }
+                    } else if dragY != 0 {
+                        withAnimation(YYMotion.standard) { dragY = 0 }
+                    }
+                }
+        )
+        #endif
         #if os(macOS)
         .onHover { over in
             hovered = over

@@ -172,13 +172,15 @@ struct PhonePodcasts: View {
                     Button { searchQuery = "" } label: {
                         PodcastGlyphView(glyph: .xmark, size: 10, lineWidth: 1.8)
                             .foregroundStyle(YYColor.t3)
-                            .frame(width: 20, height: 20)
-                            .contentShape(.rect)
+                            .frame(width: 32, height: 36)
+                            .contentShape(Rectangle().inset(by: -4))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(YYPressStyle(scale: 0.92))
+                    .accessibilityLabel(String(localized: "清空"))
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.leading, 12)
+            .padding(.trailing, searchQuery.isEmpty ? 12 : 4)
             .frame(height: 38)
             .background(YYColor.inset, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             .overlay(
@@ -197,6 +199,7 @@ struct PhonePodcasts: View {
                 drawerTab = .clips
                 drawerPresented = true
             }
+            .contentShape(Circle().inset(by: -3))
 
             Menu {
                 Button {
@@ -222,6 +225,7 @@ struct PhonePodcasts: View {
                     .frame(width: 38, height: 38)
                     .background(Circle().fill(PodcastStyle.rowTintWash(tint, scheme)))
                     .overlay(Circle().strokeBorder(PodcastStyle.accentRing(tint, scheme), lineWidth: 0.5))
+                    .contentShape(Circle().inset(by: -3))
             }
             .accessibilityLabel(String(localized: "新建或添加播客"))
         }
@@ -318,6 +322,7 @@ struct PhonePodcasts: View {
                             let rem = PodcastFormat.remaining(position: pos, duration: dur)
                             Text([issue.showTitle, rem].filter { !$0.isEmpty }.joined(separator: " · "))
                                 .font(.yy(size: 11.5))
+                                .monospacedDigit()
                                 .foregroundStyle(YYColor.t3)
                                 .lineLimit(1)
                         }
@@ -409,15 +414,19 @@ struct PhonePodcasts: View {
 
     private var readyTabletopCard: some View {
         let readingBook = library.keptBooks.first(where: { $0.status == .reading }) ?? library.keptBooks.first
-        let title = readingBook != nil
-            ? String(localized: "《\(readingBook!.title)》· 导读待酿制")
-            : String(localized: "书房电台 · 准备就绪")
+        let title = if let book = readingBook {
+            String(localized: "《\(book.title)》· 导读待酿制")
+        } else {
+            String(localized: "书房电台 · 准备就绪")
+        }
         let meta = readingBook != nil
             ? String(localized: "书房电台 · 仅依已读进度 · 防剧透")
             : String(localized: "书房电台 · 本机整理")
-        let preview = readingBook != nil
-            ? String(localized: "轻点右侧播放键或「酿一期」，把《\(readingBook!.title)》酿成一期 8 分钟读前导读，绝不剧透后文。")
-            : String(localized: "在上方搜公开播客、粘贴单集链接直听，或点「酿一期」把你的书架酿成私人电台。")
+        let preview = if let book = readingBook {
+            String(localized: "轻点右侧播放键或「酿一期」，把《\(book.title)》酿成一期 8 分钟读前导读，绝不剧透后文。")
+        } else {
+            String(localized: "在上方搜公开播客、粘贴单集链接直听，或点「酿一期」把你的书架酿成私人电台。")
+        }
 
         let startBrew = {
             studioKind = readingBook != nil ? .bookGuide : .weeklyDigest
@@ -542,6 +551,7 @@ struct PhonePodcasts: View {
                                 .foregroundStyle(YYColor.t1)
                             Text(studioList.isEmpty ? String(localized: "防剧透") : String(localized: "\(studioList.count) 期"))
                                 .font(.yy(size: 11))
+                                .monospacedDigit()
                                 .foregroundStyle(YYColor.t3)
                             Spacer()
                             PodcastPaperPill(title: String(localized: "+ 酿一期"), accent: true, height: 24, horizontalPadding: 10) {
@@ -582,6 +592,7 @@ struct PhonePodcasts: View {
                                     .lineLimit(1)
                                 Text(String(localized: "\(eps.count) 期"))
                                     .font(.yy(size: 11))
+                                    .monospacedDigit()
                                     .foregroundStyle(YYColor.t3)
                                 Spacer()
                             }
@@ -607,12 +618,15 @@ struct PhonePodcasts: View {
 
     private var mobileStudioStarterRows: some View {
         let readingBook = library.keptBooks.first(where: { $0.status == .reading }) ?? library.keptBooks.first
+        let weeklyTitle = if let book = readingBook {
+            String(localized: "本周书房周刊：重读《\(book.title)》与夜间划线")
+        } else {
+            String(localized: "本周书房周刊：串联本周阅读与划线")
+        }
         let starters: [(kind: StudioKind, title: String, accent: String, tail: String)] = [
             (
                 .weeklyDigest,
-                readingBook != nil
-                    ? String(localized: "本周书房周刊：重读《\(readingBook!.title)》与夜间划线")
-                    : String(localized: "本周书房周刊：串联本周阅读与划线"),
+                weeklyTitle,
                 String(localized: "不剧透锁"),
                 String(localized: "10 分")
             ),
@@ -693,7 +707,7 @@ struct PhonePodcasts: View {
                 HStack(spacing: 5) {
                     Text(accentMeta).foregroundStyle(tint.accent)
                     Text("·").foregroundStyle(YYColor.t3)
-                    Text(PodcastFormat.compactDuration(item.durationSec)).foregroundStyle(YYColor.t3)
+                    Text(PodcastFormat.compactDuration(item.durationSec)).monospacedDigit().foregroundStyle(YYColor.t3)
                 }
                 .font(.yy(size: 11.5))
                 .lineLimit(1)
@@ -868,16 +882,17 @@ struct PhonePodcastMiniPlayerBar: View {
                 .onTapGesture(perform: onOpenReader)
 
                 // macOS-matched transport (`-15s · 30pt ▶ · +15s · 划线`)
-                HStack(spacing: 2) {
+                HStack(spacing: 4) {
                     Button { hub.skip(by: -15) } label: {
                         Text("-15s")
                             .font(.yy(size: 10.5, weight: .medium))
                             .monospacedDigit()
                             .foregroundStyle(YYColor.t2)
-                            .frame(width: 30, height: 30)
+                            .frame(minWidth: 38, minHeight: 44)
                             .contentShape(.rect)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(YYPressStyle(scale: 0.92))
+                    .accessibilityLabel(String(localized: "后退 15 秒"))
 
                     Button { hub.selectAndPlay(issue) } label: {
                         Image(systemName: isPlaying ? "pause.fill" : "play.fill")
@@ -888,19 +903,22 @@ struct PhonePodcastMiniPlayerBar: View {
                             .offset(x: isPlaying ? 0 : 1)
                             .frame(width: 30, height: 30)
                             .background(YYColor.t1, in: Circle())
-                            .contentShape(Circle())
+                            .frame(minWidth: 38, minHeight: 44)
+                            .contentShape(.rect)
                     }
-                    .buttonStyle(YYPressStyle(scale: 0.94))
+                    .buttonStyle(YYPressStyle(scale: 0.92))
+                    .accessibilityLabel(isPlaying ? String(localized: "暂停") : String(localized: "播放"))
 
                     Button { hub.skip(by: 15) } label: {
                         Text("+15s")
                             .font(.yy(size: 10.5, weight: .medium))
                             .monospacedDigit()
                             .foregroundStyle(YYColor.t2)
-                            .frame(width: 30, height: 30)
+                            .frame(minWidth: 38, minHeight: 44)
                             .contentShape(.rect)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(YYPressStyle(scale: 0.92))
+                    .accessibilityLabel(String(localized: "前进 15 秒"))
 
                     Button {
                         Task {
@@ -921,10 +939,10 @@ struct PhonePodcastMiniPlayerBar: View {
                             lineWidth: 1.45
                         )
                         .foregroundStyle(clipFlash ? tint.accent : YYColor.t2)
-                        .frame(width: 28, height: 30)
+                        .frame(minWidth: 38, minHeight: 44)
                         .contentShape(.rect)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(YYPressStyle(scale: 0.92))
                     .accessibilityLabel(String(localized: "原声划线"))
                 }
                 .fixedSize()

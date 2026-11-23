@@ -129,7 +129,7 @@ struct PhoneShelf: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 8)
-                    .transition(.move(edge: .bottom).combined(with: .scale(scale: 0.97)).combined(with: .opacity))
+                    .transition(YYMotion.reduce ? .opacity : .move(edge: .bottom).combined(with: .scale(scale: 0.97)).combined(with: .opacity))
                 }
             }
 
@@ -278,7 +278,7 @@ struct PhoneShelf: View {
         } else {
             LazyVGrid(columns: columns, alignment: .leading, spacing: regular ? 32 : 22) {
                 ForEach(shown) { book in
-                    cell(book).transition(.scale(scale: 0.9).combined(with: .opacity))
+                    cell(book).transition(YYMotion.reduce ? .opacity : .scale(scale: 0.9).combined(with: .opacity))
                 }
             }
             // Sorted or filtered another way, each book moves to its new place.
@@ -506,7 +506,7 @@ struct PhoneShelf: View {
                     .padding(.leading, inset - 8)
                     .padding(.bottom, 10)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                    .transition(.scale(scale: 0.92, anchor: .bottomLeading).combined(with: .opacity))
+                    .transition(YYMotion.reduce ? .opacity : .scale(scale: 0.92, anchor: .bottomLeading).combined(with: .opacity))
                 }
                 if chipShown {
                     PlaceChip(info: info(place)) { openPanel(.chip) }
@@ -514,7 +514,7 @@ struct PhoneShelf: View {
                         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { chipFrame = $0 }
                         .padding(.leading, inset)
                         .opacity(panelFrom == .chip ? 0 : 1)
-                        .transition(.scale(scale: 0.92, anchor: .leading).combined(with: .opacity))
+                        .transition(YYMotion.reduce ? .opacity : .scale(scale: 0.92, anchor: .leading).combined(with: .opacity))
                 }
                 if let from = panelFrom {
                     Color.black.opacity(0.001)
@@ -549,7 +549,7 @@ struct PhoneShelf: View {
                         .padding(.horizontal, 16)
                         .frame(maxWidth: .infinity)
                         .offset(y: top)
-                        .transition(.scale(scale: 0.9, anchor: UnitPoint(x: 0.12, y: 0.06)).combined(with: .opacity))
+                        .transition(YYMotion.reduce ? .opacity : .scale(scale: 0.95, anchor: UnitPoint(x: 0.12, y: 0.06)).combined(with: .opacity))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

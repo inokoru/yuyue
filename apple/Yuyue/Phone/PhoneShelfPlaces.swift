@@ -208,7 +208,8 @@ struct PlacePanel: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     ForEach(current.meta, id: \.self) { Text($0) }
                 }
-                .font(.system(size: 13.5))
+                .font(.yy(size: 13.5))
+                .monospacedDigit()
                 .foregroundStyle(YYColor.t3)
                 .padding(.trailing, 4)
             }
@@ -220,7 +221,7 @@ struct PlacePanel: View {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(kinds) { row($0) }
                     Text("合集")
-                        .font(.system(size: 12))
+                        .font(.yy(size: 12))
                         .foregroundStyle(YYColor.t3)
                         .padding(.horizontal, 8)
                         .padding(.top, 12)
@@ -241,12 +242,12 @@ struct PlacePanel: View {
                                 .strokeBorder(YYColor.line, lineWidth: 1)
                                 .frame(width: 36, height: 36)
                                 .overlay { Image(systemName: "plus").font(.system(size: 15, weight: .regular)) }
-                            Text("新建合集").font(.system(size: 16))
+                            Text("新建合集").font(.yy(size: 16))
                             Spacer()
                         }
                         .foregroundStyle(YYColor.t3)
                         .padding(.leading, 6)
-                        .frame(height: 52)
+                        .frame(minHeight: 52)
                         .contentShape(.rect)
                     }
                     .buttonStyle(PlaceRowStyle(on: false))
@@ -275,7 +276,7 @@ struct PlacePanel: View {
             HStack(spacing: 12) {
                 PlaceMark(symbol: info.symbol, size: 36)
                 Text(info.name)
-                    .font(.system(size: 16, weight: on ? .semibold : .medium))
+                    .font(.yy(size: 16, weight: on ? .semibold : .medium))
                     .foregroundStyle(YYColor.t1)
                     .lineLimit(1)
                 Spacer(minLength: 8)
@@ -283,7 +284,7 @@ struct PlacePanel: View {
                     if info.fresh { Circle().fill(YYColor.danger).frame(width: 6, height: 6) }
                     Text(info.short).monospacedDigit()
                 }
-                .font(.system(size: 13))
+                .font(.yy(size: 13))
                 .foregroundStyle(info.fresh ? YYColor.t2 : YYColor.t3)
                 Image(systemName: "checkmark")
                     .font(.system(size: 13, weight: .bold))
@@ -293,7 +294,7 @@ struct PlacePanel: View {
             }
             .padding(.leading, 6)
             .padding(.trailing, 12)
-            .frame(height: 52)
+            .frame(minHeight: 52)
             .contentShape(.rect)
         }
         .buttonStyle(PlaceRowStyle(on: on))
@@ -353,7 +354,7 @@ struct PlaceStack: View {
             HStack(spacing: 11) {
                 PlaceMark(symbol: info.symbol, size: 34)
                 Text(info.name)
-                    .font(.system(size: 16, weight: on ? .semibold : .medium))
+                    .font(.yy(size: 16, weight: on ? .semibold : .medium))
                     .foregroundStyle(YYColor.t1)
                     .lineLimit(1)
                 Spacer(minLength: 6)
@@ -361,12 +362,12 @@ struct PlaceStack: View {
                     if info.fresh { Circle().fill(YYColor.danger).frame(width: 6, height: 6) }
                     Text(info.short).monospacedDigit()
                 }
-                .font(.system(size: 12.5))
+                .font(.yy(size: 12.5))
                 .foregroundStyle(info.fresh ? YYColor.t2 : YYColor.t3)
             }
             .padding(.leading, 6)
             .padding(.trailing, 10)
-            .frame(height: 50)
+            .frame(minHeight: 50)
             .contentShape(.rect)
         }
         .buttonStyle(PlaceRowStyle(on: on))
@@ -387,7 +388,7 @@ struct PlaceChip: View {
                 PlaceMark(symbol: info.symbol, size: 33, round: true)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(info.name).font(YYUI.serif(16, .medium)).foregroundStyle(YYColor.t1)
-                    Text(info.short).font(.system(size: 11)).foregroundStyle(YYColor.t3).monospacedDigit()
+                    Text(info.short).font(.yy(size: 11)).foregroundStyle(YYColor.t3).monospacedDigit()
                 }
                 .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
@@ -399,7 +400,8 @@ struct PlaceChip: View {
             }
             .padding(.leading, 6)
             .padding(.trailing, 11)
-            .frame(height: 45)
+            .padding(.vertical, 6)
+            .frame(minHeight: 45)
             .background(YYColor.card, in: .capsule)
             .overlay { Capsule().strokeBorder(YYColor.line, lineWidth: 0.5) }
             .shadow(color: .black.opacity(eink ? 0 : 0.1), radius: 9, y: 4)

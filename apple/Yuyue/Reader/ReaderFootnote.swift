@@ -32,9 +32,10 @@ struct FootnoteCard: View {
                 Spacer()
                 Button(action: done) {
                     Image(systemName: "xmark").font(.yy(size: 10, weight: .bold)).foregroundStyle(YYColor.t3)
-                        .frame(width: 22, height: 22).contentShape(.rect)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Circle().inset(by: -8))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(YYPressStyle(scale: 0.92))
                 .accessibilityLabel("关上注释")
             }
             ScrollView {

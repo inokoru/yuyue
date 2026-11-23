@@ -148,6 +148,7 @@ struct MacReviewSheet: View {
     let only: (BookSummary) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
+    @FocusState private var focused: Bool
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
 
@@ -174,8 +175,26 @@ struct MacReviewSheet: View {
         .padding(.bottom, 24)
         #if os(macOS)
         .frame(width: 440, height: 560)
+        .focusable()
+        .focusEffectDisabled()
+        .focused($focused)
+        .onAppear { focused = true }
         #endif
         .background(YYColor.bg)
+        .onKeyPress(.return) {
+            guard review.current != nil else { return .ignored }
+            var t = Transaction()
+            t.disablesAnimations = true
+            withTransaction(t) { review.choose(true) }
+            return .handled
+        }
+        .onKeyPress(.delete) {
+            guard review.current != nil else { return .ignored }
+            var t = Transaction()
+            t.disablesAnimations = true
+            withTransaction(t) { review.choose(false) }
+            return .handled
+        }
     }
 
     private var heading: String {
@@ -285,7 +304,7 @@ struct MacReviewSheet: View {
         .background { stack }
         .id(item.mark.id)
         // The next card comes from a little to the right, not the whole way across: ↩ and ⌫ stay brisk.
-        .transition(.asymmetric(insertion: .opacity.combined(with: .offset(x: 24)), removal: .opacity))
+        .transition(YYMotion.reduce ? .opacity : .asymmetric(insertion: .opacity.combined(with: .offset(x: 16)), removal: .opacity))
     }
 
     /// The white card with two more under it.
@@ -411,22 +430,20 @@ struct MacReviewSheet: View {
     @ViewBuilder private var actions: some View {
         if review.current != nil {
             HStack(spacing: 10) {
-                Button { withAnimation(YYMotion.standard) { review.choose(false) } } label: {
+                Button { withAnimation(YYMotion.quick) { review.choose(false) } } label: {
                     Label("不要了", systemImage: "xmark")
                         .font(.yy(size: 13))
                         .frame(maxWidth: .infinity).frame(height: 36)
                         .foregroundStyle(YYColor.t1)
                 }
                 .buttonStyle(YYPillChrome())
-                .keyboardShortcut(.delete, modifiers: [])
-                Button { withAnimation(YYMotion.standard) { review.choose(true) } } label: {
+                Button { withAnimation(YYMotion.quick) { review.choose(true) } } label: {
                     Label("留下", systemImage: "checkmark")
                         .font(.yy(size: 13, weight: .semibold))
                         .frame(maxWidth: .infinity).frame(height: 36)
                         .foregroundStyle(tint.onBlack)
                 }
                 .buttonStyle(YYPillChrome(role: .primary))
-                .keyboardShortcut(.defaultAction)
             }
         } else {
             Button { dismiss() } label: {

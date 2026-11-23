@@ -462,7 +462,7 @@ struct PhoneForeign: View {
             .padding(.bottom, YYUI.s(14))
             groupLabel(String(localized: "MDict 词典"))
             PhoneMDictList(core: library.core)
-            YYNote(String(localized: "按列表顺序优先查词，左滑可移除。"))
+            YYNote(String(localized: "按列表顺序优先查词，点右侧菜单或长按可调整顺序与移除。"))
                 .padding(.bottom, YYUI.s(14))
             groupLabel(String(localized: "难词注释"))
             YYGroup {

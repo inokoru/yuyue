@@ -549,8 +549,8 @@ private struct VoiceGridTileStyle: ButtonStyle {
                     RoundedRectangle(cornerRadius: 9)
                         .strokeBorder(hovering ? YYColor.t3.opacity(0.45) : YYColor.line, lineWidth: 0.5)
                 )
-                .scaleEffect(configuration.isPressed ? 0.985 : 1.0)
-                .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+                .scaleEffect(configuration.isPressed && !YYMotion.reduce ? 0.985 : 1.0)
+                .animation(.easeOut(duration: configuration.isPressed ? 0.08 : YYDuration.quick), value: configuration.isPressed)
                 .contentShape(.rect)
                 .onHover { hovering = $0 }
         }

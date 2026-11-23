@@ -89,14 +89,15 @@ fun CompanionSheet(model: ReaderModel, settings: () -> Unit, dismiss: () -> Unit
                 Text(if (companion.scope == BookCompanion.Scope.Read) readUpTo + t("，不涉及后续情节") else t("检索整本书，可能包含后续剧透"), fontSize = 12.sp, color = YY.c.t3, style = YY.tnum)
             }
             val list = rememberLazyListState()
+            val reduce = YYMotion.isReduceMotion()
             LaunchedEffect(companion.turns.size, companion.busy) { if (companion.turns.isNotEmpty()) list.animateScrollToItem(companion.turns.size) }
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                if (companion.turns.isEmpty()) item(key = "welcome") { Box(Modifier.animateItem(fadeInSpec = YYMotion.standard(), placementSpec = YYMotion.place, fadeOutSpec = YYMotion.exit())) { Welcome(settings) } }
+                if (companion.turns.isEmpty()) item(key = "welcome") { Box(Modifier.animateItem(fadeInSpec = YYMotion.standard(), placementSpec = YYMotion.place(), fadeOutSpec = YYMotion.exit())) { Welcome(settings) } }
                 items(companion.turns, key = { it.id }) { turn ->
                     // A new question fades in as the list makes room; 正在翻阅原文… crossfades to the answer.
-                    Column(Modifier.animateItem(fadeInSpec = YYMotion.standard(), placementSpec = YYMotion.place, fadeOutSpec = YYMotion.exit()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(Modifier.animateItem(fadeInSpec = YYMotion.standard(), placementSpec = YYMotion.place(), fadeOutSpec = YYMotion.exit()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row { Spacer(Modifier.weight(1f).width(48.dp)); Bubble(turn.question) }
-                        androidx.compose.animation.AnimatedContent(turn.answer != null || turn.failed != null, transitionSpec = { YYMotion.swap() }, label = "reply") { _ -> Reply(model, turn, readUpTo) }
+                        androidx.compose.animation.AnimatedContent(turn.answer != null || turn.failed != null, transitionSpec = { YYMotion.swap(reduce) }, label = "reply") { _ -> Reply(model, turn, readUpTo) }
                     }
                 }
             }

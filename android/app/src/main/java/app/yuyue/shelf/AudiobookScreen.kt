@@ -1,11 +1,13 @@
 package app.yuyue.shelf
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -38,13 +40,17 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -100,11 +106,55 @@ fun AudiobookScreen(library: Library, bookID: String, close: () -> Unit) {
         app.yuyue.speech.Recordings.changed.collect { if (it == player.bookID) player.loadMap() }
     }
 
+    val scope = rememberCoroutineScope()
+    val pullOffsetY = remember { Animatable(0f) }
+    var rawPullY by remember { mutableFloatStateOf(0f) }
     Column(
-        Modifier.fillMaxSize().background(YY.c.bg).windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 16.dp),
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                val dy = pullOffsetY.value
+                translationY = dy
+                shape = if (dy > 1f) RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp) else RectangleShape
+                clip = dy > 1f
+            }
+            .background(YY.c.bg)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .padding(horizontal = 16.dp),
     ) {
-        Row(Modifier.fillMaxWidth().padding(top = YY.s(4))) {
-            Box(Modifier.size(maxOf(44.dp, YY.s(36))).clip(CircleShape).clickable(onClickLabel = t("收起"), onClick = close), contentAlignment = Alignment.Center) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = YY.s(4))
+                .pointerInput(Unit) {
+                    val velocityTracker = VelocityTracker()
+                    detectVerticalDragGestures(
+                        onDragStart = {
+                            rawPullY = pullOffsetY.value
+                            velocityTracker.resetTracking()
+                        },
+                        onDragEnd = {
+                            val vy = velocityTracker.calculateVelocity().y
+                            if (pullOffsetY.value > 72.dp.toPx() || vy > 500.dp.toPx()) {
+                                close()
+                            } else {
+                                scope.launch { pullOffsetY.animateTo(0f, app.yuyue.design.YYMotion.layout()) }
+                            }
+                        },
+                        onDragCancel = {
+                            scope.launch { pullOffsetY.animateTo(0f, app.yuyue.design.YYMotion.layout()) }
+                        },
+                    ) { change, dragAmount ->
+                        change.consume()
+                        velocityTracker.addPosition(change.uptimeMillis, change.position)
+                        rawPullY += dragAmount
+                        val visualY = if (rawPullY < 0f) rawPullY * 0.12f else rawPullY
+                        scope.launch { pullOffsetY.snapTo(visualY) }
+                    }
+                },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(maxOf(44.dp, YY.s(36))).clip(CircleShape).pressable(label = t("收起"), scale = 0.92f, onClick = close), contentAlignment = Alignment.Center) {
                 Icon(Icons.chevronDown, t("收起"), tint = YY.c.t1, modifier = Modifier.size(YY.s(22)))
             }
         }
@@ -691,7 +741,7 @@ private fun ChapterSheet(player: AudiobookPlayer, page: Int, select: (Int) -> Un
                     }
                     items(player.bookmarks, key = { it.id }) { b ->
                         Row(
-                            Modifier.animateItem(fadeInSpec = app.yuyue.design.YYMotion.standard(), placementSpec = app.yuyue.design.YYMotion.place, fadeOutSpec = app.yuyue.design.YYMotion.exit()).fillMaxWidth().clickable { player.seekTo(player.seconds(b)); dismiss() }.padding(start = YY.s(14), end = YY.s(6)).height(maxOf(44.dp, YY.s(40))),
+                            Modifier.animateItem(fadeInSpec = app.yuyue.design.YYMotion.standard(), placementSpec = app.yuyue.design.YYMotion.place(), fadeOutSpec = app.yuyue.design.YYMotion.exit()).fillMaxWidth().clickable { player.seekTo(player.seconds(b)); dismiss() }.padding(start = YY.s(14), end = YY.s(6)).height(maxOf(44.dp, YY.s(40))),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(player.title(b.section.toInt()), style = YY.font(13f), color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))

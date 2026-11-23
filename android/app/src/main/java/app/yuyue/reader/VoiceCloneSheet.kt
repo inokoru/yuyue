@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -505,7 +506,7 @@ fun VoiceClonePanel(
                         .padding(horizontal = 13.dp, vertical = 11.dp),
                     verticalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             if (!bookTitle.isNullOrEmpty() && LiveVoiceModel.canRun(dataDir)) {
                                 t("正在用你的声音念《%@》下一句", bookTitle)
@@ -514,6 +515,9 @@ fun VoiceClonePanel(
                             },
                             fontSize = 10.5.sp,
                             color = YY.c.t3,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
                         )
                         if (previewing) {
                             CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = YY.tint.accent)

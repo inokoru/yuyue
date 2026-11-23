@@ -253,7 +253,10 @@ struct MacReaderView: View {
             fullScreened = nil
             model.immersive = false
         }
-        .onDisappear { unpeek?.cancel() }
+        .onDisappear {
+            unpeek?.cancel()
+            settle?.cancel()
+        }
         .onChange(of: panel) { _, new in
             if new != .search { savedPanel = new?.rawValue ?? "" }
             if new != .search, model.searchShown { model.endSearch() }
@@ -441,7 +444,8 @@ struct MacReaderView: View {
                         .monospacedDigit()
                 }
                 .lineLimit(1)
-                .frame(minWidth: 200)
+                .truncationMode(.tail)
+                .frame(minWidth: 200, maxWidth: 360)
             }
             .withoutGlass()
         }
@@ -552,10 +556,12 @@ struct MacReaderView: View {
             Divider().frame(height: 14)
             Button { model.nextHit(forward: false) } label: { Image(systemName: "chevron.left") }
                 .accessibilityLabel(Text("上一处"))
+                .help(String(localized: "上一处 ⇧⌘G"))
                 .buttonStyle(.borderless)
                 .disabled(model.hits.isEmpty)
             Button { model.nextHit(forward: true) } label: { Image(systemName: "chevron.right") }
                 .accessibilityLabel(Text("下一处"))
+                .help(String(localized: "下一处 ⌘G"))
                 .buttonStyle(.borderless)
                 .disabled(model.hits.isEmpty)
             Button { closeSearch() } label: {
@@ -1104,7 +1110,7 @@ private struct TocPanel: View {
         let chapterCount = chapters.count
         // A book without a table of contents is listed by 节 (第 1 节…), and counted the same way.
         let unit = model.detail?.toc.isEmpty == true ? "节"
-            : chapters.lazy.compactMap { ChapterTitle($0.title).number?.last }.first.map(String.init).flatMap { ["回", "节", "卷", "篇", "话"].contains($0) ? $0 : nil } ?? "章"
+            : countedChapters.lazy.compactMap { ChapterTitle($0.title).number?.last }.first.map(String.init).flatMap { ["回", "节", "卷", "篇", "话"].contains($0) ? $0 : nil } ?? "章"
         let countLabel: String? = chapterCount > 1 ? {
             switch unit {
             case "节": String(localized: "共 \(chapterCount) 节")
@@ -1166,7 +1172,7 @@ private struct TocPanel: View {
                     ForEach(chapters) { c in
                         row(c)
                             .id(c.id)
-                        if c.id != currentID, c.id + 1 != currentID, c.id != chapters.count - 1 {
+                        if c.id != currentID, index < main.count - 1, main[index + 1].id != currentID {
                             Rectangle().fill(YYColor.line).frame(height: 0.5)
                         }
                     }

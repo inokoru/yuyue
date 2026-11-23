@@ -25,7 +25,7 @@ struct PhoneWifi: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text("正在接收").font(YYUI.font(12.5, .semibold)).foregroundStyle(YYColor.t1)
                         Spacer()
-                        Text("\(transfer.items.count) 个文件").font(YYUI.font(10.5)).foregroundStyle(YYColor.t3)
+                        Text("\(transfer.items.count) 个文件").font(YYUI.font(10.5).monospacedDigit()).foregroundStyle(YYColor.t3)
                     }
                     .padding(.horizontal, YYUI.s(2))
                     .padding(.top, YYUI.s(18))

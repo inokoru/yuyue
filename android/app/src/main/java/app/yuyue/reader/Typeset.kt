@@ -27,7 +27,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.SizeTransform
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -63,8 +63,10 @@ fun TypesetSheet(model: ReaderModel, dismiss: () -> Unit) {
         val reduce = app.yuyue.design.YYMotion.isReduceMotion()
         androidx.compose.animation.AnimatedContent(
             screen,
-            Modifier.animateContentSize(app.yuyue.design.YYMotion.layout()),
-            transitionSpec = { app.yuyue.design.YYMotion.push(targetState > initialState, reduce) },
+            transitionSpec = {
+                app.yuyue.design.YYMotion.push(targetState > initialState, reduce)
+                    .using(SizeTransform(clip = true) { _, _ -> app.yuyue.design.YYMotion.layout() })
+            },
             label = "typeset",
         ) { shown ->
             Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

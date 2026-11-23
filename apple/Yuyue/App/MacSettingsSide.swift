@@ -38,6 +38,7 @@ struct SettingsSidebar: View {
             }
             Spacer(minLength: 0)
         }
+        .animation(YYMotion.quick, value: page)
         .padding(.horizontal, 10)
         // Clear of the window's buttons, which sit in this column's top-left corner.
         .padding(.top, 46)
@@ -46,12 +47,14 @@ struct SettingsSidebar: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: Self.header))
         .overlay(alignment: .trailing) { Rectangle().fill(YYColor.line).frame(width: 0.5) }
+        .focusable()
+        .focusEffectDisabled()
     }
 
     private func row(_ p: SettingsPage) -> some View {
         let on = page == p
         return Button {
-            withAnimation(YYMotion.layout) { page = p }
+            page = p
         } label: {
             HStack(spacing: 9) {
                 Image(systemName: p.symbol)
@@ -126,56 +129,63 @@ struct SettingsCorner: View {
 struct SettingsInspector: View {
     let page: SettingsPage
     let library: Library
+    var windowWidth: CGFloat = 1020
     @State private var reader = ReaderSettings.standard
     private var log: SettingsLog { SettingsLog.shared }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                SettingsCorner()
-                    .padding(.leading, 16)
-                    .padding(.trailing, 10)
-                    // Level with the window's buttons.
-                    .padding(.top, 13)
-                    .padding(.bottom, 10)
-                if page == .reading {
-                    section(String(localized: "样张"), trailing: ReadingSample.summary(reader)) {
-                        ReadingSample(settings: reader)
-                        caption(sampleNote)
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsCorner()
+                .padding(.leading, 16)
+                .padding(.trailing, 10)
+                // Level with the window's buttons.
+                .padding(.top, 13)
+                .padding(.bottom, 10)
+            if modelListPinned {
+                CompanionInspector()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if page == .reading {
+                            section(String(localized: "样张"), trailing: ReadingSample.summary(reader)) {
+                                ReadingSample(settings: reader)
+                                caption(sampleNote)
+                            }
+                            divider
+                        } else if page == .foreign {
+                            section(String(localized: "样张"), trailing: ForeignSample.summary) {
+                                ForeignSample(paper: ReadingSample.paper(reader))
+                            }
+                            divider
+                        } else if page == .listening {
+                            if ListeningFocus.shared.macPanel {
+                                MacVoicePanel()
+                            } else if ListeningFocus.shared.page != nil {
+                                ListeningInspector()
+                                    .animation(.easeOut(duration: 0.18), value: ListeningFocus.shared.page)
+                            } else {
+                                ListeningVoiceCard()
+                            }
+                        } else if page == .companion {
+                            CompanionInspector()
+                                .animation(.easeOut(duration: 0.18), value: CompanionFocus.shared.page)
+                            divider
+                        } else if page == .notes {
+                            NotesInspector()
+                            divider
+                        } else if page == .data {
+                            section(String(localized: "上次快照"), trailing: "") { SnapshotCard(library: library) }
+                            divider
+                        } else if page == .storage {
+                            section(String(localized: "书库"), trailing: "") { LibraryCard(library: library) }
+                            divider
+                        }
                     }
-                    divider
-                } else if page == .foreign {
-                    section(String(localized: "样张"), trailing: ForeignSample.summary) {
-                        ForeignSample(paper: ReadingSample.paper(reader))
-                    }
-                    divider
-                } else if page == .listening {
-                    if ListeningFocus.shared.macPanel {
-                        MacVoicePanel()
-                    } else if ListeningFocus.shared.page != nil {
-                        ListeningInspector()
-                            .animation(.easeOut(duration: 0.18), value: ListeningFocus.shared.page)
-                    } else {
-                        ListeningVoiceCard()
-                    }
-                } else if page == .companion {
-                    CompanionInspector()
-                        .animation(.easeOut(duration: 0.18), value: CompanionFocus.shared.page)
-                    divider
-                } else if page == .notes {
-                    NotesInspector()
-                    divider
-                } else if page == .data {
-                    section(String(localized: "上次快照"), trailing: "") { SnapshotCard(library: library) }
-                    divider
-                } else if page == .storage {
-                    section(String(localized: "书库"), trailing: "") { LibraryCard(library: library) }
-                    divider
                 }
             }
         }
-        .scrollIndicators(.never)
-        .frame(width: 252)
+        .frame(width: effectiveWidth)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: SettingsSidebar.header))
         .overlay(alignment: .leading) { Rectangle().fill(YYColor.line).frame(width: 0.5) }
@@ -189,6 +199,7 @@ struct SettingsInspector: View {
     private var sampleNote: String {
         let id = FontShelf.id(of: reader)
         let shelf = FontShelf.shared
+                .scrollBounceBehavior(.basedOnSize)
         if shelf.progress[id] != nil { return String(localized: "正在下载「\(shelf.name(id))」，暂以\(ReadingSample.shownFont(reader))预览") }
         if shelf.failure[id] != nil { return String(localized: "「\(shelf.name(id))」下载未完成，点字体格可重试") }
         return String(localized: "节选自鲁迅《故乡》")

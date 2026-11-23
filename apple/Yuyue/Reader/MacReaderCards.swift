@@ -815,6 +815,7 @@ struct ListenCard: View {
                             .foregroundStyle(YYColor.t2)
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(YYColor.t1.opacity(0.06), in: .rect(cornerRadius: 4))
+                            .fixedSize()
                     }
                 }
                 Text(voiceLine(player, current))
@@ -838,6 +839,7 @@ struct ListenCard: View {
                         .shadow(color: .black.opacity(0.05), radius: 1, y: 1)
                 }
                 .buttonStyle(.plain)
+                .fixedSize()
             }
             Button { voicePickerShown = true } label: {
                 HStack(spacing: 1) {

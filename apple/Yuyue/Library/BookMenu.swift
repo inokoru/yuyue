@@ -60,7 +60,13 @@ struct BookMenuCard: View {
     /// 在读 · 想读 · 读过 · 搁置 · 弃读, first under the header; 标为读完 gives way to them.
     var setStatus: ((ReadingStatus) -> Void)?
 
-    @State private var cursor: BookAction?
+    private enum Item: Hashable {
+        case status(ReadingStatus)
+        case action(BookAction)
+    }
+
+    @State private var cursor: Item?
+    @State private var hoverPoint: CGPoint?
     @FocusState private var focused: Bool
     @Environment(\.colorScheme) private var scheme
     private let tint = YYTint.standard
@@ -71,8 +77,13 @@ struct BookMenuCard: View {
             if let setStatus {
                 VStack(spacing: 0) {
                     ForEach(ReadingStatus.shelfOrder) { s in
-                        MenuCardRow(title: s.name, symbol: s == book.status ? "checkmark" : s.symbol,
-                                    color: s == book.status ? tint.accent : YYColor.t1, bold: s == book.status) {
+                        itemRow(
+                            item: .status(s),
+                            title: s.name,
+                            symbol: s == book.status ? "checkmark" : s.symbol,
+                            color: s == book.status ? tint.accent : YYColor.t1,
+                            bold: s == book.status
+                        ) {
                             setStatus(s)
                             close()
                         }
@@ -97,15 +108,24 @@ struct BookMenuCard: View {
         .focused($focused)
         .onAppear { focused = true }
         .onKeyPress(phases: .down) { press in
-            let all = groups.flatMap { $0 }
+            let all = items
             switch press.key {
             case .escape:
                 close()
             case .downArrow, .upArrow:
+                guard !all.isEmpty else { return .handled }
                 let i = cursor.flatMap { all.firstIndex(of: $0) } ?? (press.key == .downArrow ? -1 : all.count)
                 cursor = all[(i + (press.key == .downArrow ? 1 : -1) + all.count) % all.count]
             case .return, .space:
-                if let cursor { perform(cursor) }
+                switch cursor {
+                case .status(let s)?:
+                    setStatus?(s)
+                    close()
+                case .action(let a)?:
+                    perform(a)
+                case nil:
+                    break
+                }
             default:
                 return .ignored
             }
@@ -117,6 +137,11 @@ struct BookMenuCard: View {
 
     private var groups: [[BookAction]] {
         BookAction.groups(for: book).map { $0.filter { setStatus == nil || $0 != .toggleFinished } }.filter { !$0.isEmpty }
+    }
+
+    private var items: [Item] {
+        let statuses = setStatus != nil ? ReadingStatus.shelfOrder.map(Item.status) : []
+        return statuses + groups.flatMap { $0 }.map(Item.action)
     }
 
     private var header: some View {
@@ -155,24 +180,47 @@ struct BookMenuCard: View {
         case .delete: YYColor.danger
         default: YYColor.t1
         }
-        return Button { perform(action) } label: {
+        return itemRow(
+            item: .action(action),
+            title: action.title(for: book),
+            symbol: action.symbol(for: book),
+            color: color,
+            bold: action == .resume
+        ) {
+            perform(action)
+        }
+    }
+
+    private func itemRow(item: Item, title: String, symbol: String, color: Color, bold: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             HStack {
-                Text(action.title(for: book))
-                    .font(.yy(size: 12.5, weight: action == .resume ? .semibold : .regular))
+                Text(title)
+                    .font(.yy(size: 12.5, weight: bold ? .semibold : .regular))
                 Spacer()
-                Image(systemName: action.symbol(for: book))
+                Image(systemName: symbol)
                     .font(.yy(size: 13))
                     .frame(width: 15)
             }
             .foregroundStyle(color)
             .padding(.horizontal, 9)
             .frame(height: 28)
-            .background(cursor == action ? YYColor.inset : .clear, in: .rect(cornerRadius: 7))
+            .background(cursor == item ? YYColor.inset : .clear, in: .rect(cornerRadius: 7))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 5)
-        .onHover { if $0 { cursor = action } else if cursor == action { cursor = nil } }
+        .onContinuousHover { phase in
+            switch phase {
+            case .active(let pt):
+                if hoverPoint != pt {
+                    hoverPoint = pt
+                    cursor = item
+                }
+            case .ended:
+                hoverPoint = nil
+                if cursor == item { cursor = nil }
+            }
+        }
     }
 }
 

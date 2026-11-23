@@ -14,48 +14,52 @@ struct PhoneImmersiveSheet: View {
     @AppStorage(ImmersivePrefs.marksKey) private var marks = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: YYUI.s(8)) {
-                Image(systemName: "viewfinder").font(YYUI.font(13, .medium)).foregroundStyle(YYColor.t1)
-                Text("沉浸阅读").font(YYUI.font(13, .semibold)).foregroundStyle(YYColor.t1)
-                Spacer()
-                YYSwitch(isOn: Binding { model?.immersive ?? always } set: { on in
-                    if let model {
-                        model.chromeShown = false
-                        model.immersive = on
-                    } else {
-                        always = on
-                    }
-                }, label: String(localized: "沉浸阅读"))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: YYUI.s(8)) {
+                    Image(systemName: "viewfinder").font(YYUI.font(13, .medium)).foregroundStyle(YYColor.t1)
+                    Text("沉浸阅读").font(YYUI.font(13, .semibold)).foregroundStyle(YYColor.t1)
+                    Spacer()
+                    YYSwitch(isOn: Binding { model?.immersive ?? always } set: { on in
+                        if let model {
+                            model.chromeShown = false
+                            model.immersive = on
+                        } else {
+                            always = on
+                        }
+                    }, label: String(localized: "沉浸阅读"))
+                }
+                Text(model == nil ? String(localized: "打开书籍时自动进入沉浸阅读，以下项目将默认隐藏或关闭，也可逐项保留。") : String(localized: "开启后全屏隐藏界面要素，以下项目将默认隐藏或关闭，也可逐项保留。"))
+                    .font(YYUI.font(10)).lineSpacing(YYUI.s(3)).foregroundStyle(YYColor.t3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, YYUI.s(6))
+                    .padding(.bottom, YYUI.s(12))
+                YYGroup {
+                    row(String(localized: "隐藏状态栏、时间和电量"), $status)
+                    row(String(localized: "隐藏进度、页码和剩余时间"), $progress)
+                    row(String(localized: "专注模式联动"), $quiet)
+                    row(String(localized: "隐藏书伴提示与难词注释"), $hints)
+                    row(String(localized: "关闭翻页动画"), $still)
+                    row(String(localized: "隐藏划线与想法"), $marks)
+                }
+                if quiet {
+                    YYNote(String(localized: "iOS 暂不支持应用自动开启勿扰；请在系统「设置 › 专注模式」中添加「阅读」，阅读前从控制中心开启。"))
+                        .transition(.opacity)
+                }
+                Text("双击屏幕边缘进出，轻点中央临时唤出控制栏")
+                    .font(YYUI.font(9.5)).foregroundStyle(YYColor.t3)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, YYUI.s(14))
             }
-            Text(model == nil ? String(localized: "打开书籍时自动进入沉浸阅读，以下项目将默认隐藏或关闭，也可逐项保留。") : String(localized: "开启后全屏隐藏界面要素，以下项目将默认隐藏或关闭，也可逐项保留。"))
-                .font(YYUI.font(10)).lineSpacing(YYUI.s(3)).foregroundStyle(YYColor.t3)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, YYUI.s(6))
-                .padding(.bottom, YYUI.s(12))
-            YYGroup {
-                row(String(localized: "隐藏状态栏、时间和电量"), $status)
-                row(String(localized: "隐藏进度、页码和剩余时间"), $progress)
-                row(String(localized: "专注模式联动"), $quiet)
-                row(String(localized: "隐藏书伴提示与难词注释"), $hints)
-                row(String(localized: "关闭翻页动画"), $still)
-                row(String(localized: "隐藏划线与想法"), $marks)
-            }
-            if quiet {
-                YYNote(String(localized: "iOS 暂不支持应用自动开启勿扰；请在系统「设置 › 专注模式」中添加「阅读」，阅读前从控制中心开启。"))
-                    .transition(.opacity)
-            }
-            Spacer(minLength: YYUI.s(12))
-            Text("双击屏幕边缘进出，轻点中央临时唤出控制栏")
-                .font(YYUI.font(9.5)).foregroundStyle(YYColor.t3)
-                .frame(maxWidth: .infinity)
+            .animation(YYMotion.standard, value: quiet)
+            .padding(.horizontal, YYUI.s(14))
+            .padding(.top, YYUI.sheetGrabberTop)
+            .padding(.bottom, YYUI.s(12))
         }
-        .animation(YYMotion.standard, value: quiet)
-        .padding(.horizontal, YYUI.s(14))
-        .padding(.top, YYUI.sheetGrabberTop)
-        .padding(.bottom, YYUI.s(8))
+        .scrollBounceBehavior(.basedOnSize)
         .background(YYColor.bg)
-        .presentationDetents([.height(YYUI.s(440))])
+        .presentationDetents([.height(YYUI.s(440)), .large])
         .presentationDragIndicator(.visible)
         // Each change shows at once on the page behind.
         .onChange(of: [hints, still, marks]) { if let model { model.immersive = model.immersive } }

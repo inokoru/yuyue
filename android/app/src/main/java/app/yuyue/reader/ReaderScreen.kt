@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
@@ -46,6 +47,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -65,6 +67,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -406,14 +409,14 @@ internal fun ReaderTopBar(
     more: @Composable () -> Unit,
 ) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(Modifier.size(40.dp).glass(paper, haze).pressable(label = t("返回书架"), scale = 0.92f, onClick = onClose), contentAlignment = Alignment.Center) {
+        Box(Modifier.defaultMinSize(minWidth = 44.dp, minHeight = 44.dp).glass(paper, haze).pressable(label = t("返回书架"), scale = 0.92f, onClick = onClose), contentAlignment = Alignment.Center) {
             Icon(Icons.back, t("返回书架"), tint = paper.ink, modifier = Modifier.size(20.dp))
         }
-        Column(Modifier.weight(1f).height(40.dp).glass(paper, haze).padding(horizontal = 12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Column(Modifier.weight(1f).heightIn(min = 40.dp).glass(paper, haze).padding(horizontal = 12.dp, vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = paper.ink, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             if (subtitle.isNotEmpty()) Text(subtitle, fontSize = 11.sp, color = paper.ink2, style = YY.tnum, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
-        Row(Modifier.height(40.dp).glass(paper, haze).padding(horizontal = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.heightIn(min = 40.dp).glass(paper, haze).padding(horizontal = 3.dp), verticalAlignment = Alignment.CenterVertically) {
             Glyph(Icons.search, t("搜索这本书"), paper.ink, onSearch)
             Glyph(if (bookmarked) Icons.bookmark else Icons.bookmarkOutline, if (bookmarked) t("拿掉书签") else t("加书签"), if (bookmarked) YY.tint.accent else paper.ink, onBookmark)
             more()
@@ -423,7 +426,7 @@ internal fun ReaderTopBar(
 
 @Composable
 private fun Glyph(icon: ImageVector, label: String, tint: Color, onClick: () -> Unit) {
-    Box(Modifier.size(36.dp).clip(CircleShape).pressable(label = label, scale = 0.9f, onClick = onClick), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(width = 38.dp, height = 44.dp).clip(CircleShape).pressable(label = label, scale = 0.9f, onClick = onClick), contentAlignment = Alignment.Center) {
         // 书签 ⇄ 已加书签: the glyph and its colour cross over rather than flip.
         val ink by androidx.compose.animation.animateColorAsState(tint, YYMotion.quick(), label = "glyph")
         androidx.compose.animation.Crossfade(icon, animationSpec = YYMotion.quick(), label = "glyphIcon") { Icon(it, label, tint = ink, modifier = Modifier.size(19.dp)) }
@@ -473,8 +476,8 @@ internal fun ReaderCapsuleBar(
     onPlay: () -> Unit,
     onTypeset: () -> Unit,
 ) {
-    Box(Modifier.fillMaxWidth().height(50.dp).glass(paper, haze)) {
-        Row(Modifier.fillMaxSize().padding(horizontal = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+    Box(Modifier.fillMaxWidth().heightIn(min = 50.dp).glass(paper, haze)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 50.dp).padding(horizontal = 5.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             Glyph(Icons.list, t("目录、书签和笔记"), paper.ink, onToc)
             Column(Modifier.weight(1f).padding(start = 2.dp).clickable(enabled = playEnabled, onClick = onCenter)) {
                 Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = paper.ink, style = YY.tnum, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
@@ -491,7 +494,7 @@ internal fun ReaderCapsuleBar(
                 androidx.compose.animation.Crossfade(playing, animationSpec = YYMotion.quick(), label = "play") { on -> Icon(if (on) Icons.pause else Icons.play, if (on) t("暂停") else t("朗读"), tint = paper.onMain, modifier = Modifier.size(20.dp)) }
             }
             Glyph(Icons.chevronRight, if (sentenceStep) t("下一句") else t("下一页"), paper.ink, onNext)
-            Box(Modifier.size(38.dp).clip(CircleShape).pressable(label = t("排版"), scale = 0.9f, onClick = onTypeset), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(width = 40.dp, height = 44.dp).clip(CircleShape).pressable(label = t("排版"), scale = 0.9f, onClick = onTypeset), contentAlignment = Alignment.Center) {
                 Text("Aa", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = paper.ink)
             }
         }
@@ -511,28 +514,43 @@ private fun SearchField(model: ReaderModel, paper: YYPaper, haze: HazeState) {
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.weight(1f).height(40.dp).glass(paper, haze).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            Modifier.weight(1f).heightIn(min = 44.dp).glass(paper, haze).padding(start = 12.dp, end = if (model.query.isNotEmpty()) 2.dp else 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             Icon(Icons.search, null, tint = paper.ink2, modifier = Modifier.size(17.dp))
             BasicTextField(
                 model.query, { model.query = it; model.search() }, singleLine = true,
                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = 15.sp, color = paper.ink),
                 cursorBrush = SolidColor(YY.tint.accent),
-                modifier = Modifier.weight(1f).focusRequester(focus).semantics { contentDescription = t("搜这本书") },
+                modifier = Modifier.weight(1f).padding(vertical = 6.dp).focusRequester(focus).semantics { contentDescription = t("搜这本书") },
                 decorationBox = { inner ->
                     if (model.query.isEmpty()) Text(t("搜这本书"), fontSize = 15.sp, color = paper.ink2)
                     inner()
                 },
             )
             if (model.query.isNotEmpty()) {
-                Icon(
-                    Icons.xmarkCircleFill,
-                    t("清空"),
-                    tint = paper.ink2,
-                    modifier = Modifier.size(17.dp).clip(CircleShape).clickable { model.query = ""; model.search() },
-                )
+                Box(
+                    Modifier
+                        .size(width = 40.dp, height = 40.dp)
+                        .clip(CircleShape)
+                        .pressable(label = t("清空"), scale = 0.9f) { model.query = ""; model.search() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.xmarkCircleFill,
+                        t("清空"),
+                        tint = paper.ink2,
+                        modifier = Modifier.size(17.dp),
+                    )
+                }
             }
         }
-        Box(Modifier.size(40.dp).glass(paper, haze).clickable(onClickLabel = t("结束搜索")) { model.endSearch() }, contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.defaultMinSize(minWidth = 44.dp, minHeight = 44.dp).glass(paper, haze).pressable(label = t("结束搜索"), scale = 0.92f) { model.endSearch() },
+            contentAlignment = Alignment.Center,
+        ) {
             Icon(Icons.close, t("结束搜索"), tint = paper.ink, modifier = Modifier.size(18.dp))
         }
     }
@@ -541,7 +559,7 @@ private fun SearchField(model: ReaderModel, paper: YYPaper, haze: HazeState) {
 @Composable
 private fun SearchCapsule(model: ReaderModel, paper: YYPaper, haze: HazeState) {
     val q = model.query.trim()
-    Row(Modifier.fillMaxWidth().height(50.dp).glass(paper, haze).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 50.dp).glass(paper, haze).padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(
                 when {
@@ -566,6 +584,7 @@ private data class CardSnapshot(
     val top: Float,
     val bottom: Float,
 )
+    val midX: Float?,
 
 /** 选中文字, or a highlight tapped: the same card as on iPhone, over the words — three colours
  *  and the wave, the two underlines (and 删除 for a highlight), then 想法 · 从这读 · 翻译 · 复制 · 分享. */
@@ -573,6 +592,8 @@ private data class CardSnapshot(
 private fun Cards(model: ReaderModel, paper: YYPaper, thought: (Mark) -> Unit, translate: (String) -> Unit) {
     val context = LocalContext.current
     val sel = model.selection
+    val density = LocalDensity.current
+    val reduce = YYMotion.isReduceMotion()
     val open = model.openMark
     val active = if (sel != null || open != null) {
         val txt = open?.mark?.text ?: sel?.text
@@ -583,6 +604,7 @@ private fun Cards(model: ReaderModel, paper: YYPaper, thought: (Mark) -> Unit, t
             top = (sel?.rect?.y ?: open?.y ?: 200.0).toFloat(),
             bottom = (sel?.rect?.let { it.y + it.height } ?: ((open?.y ?: 200.0) + 24)).toFloat(),
         ) else null
+            midX = (sel?.rect?.let { it.x + it.width / 2.0 } ?: open?.x)?.toFloat(),
     } else null
     var last by remember { mutableStateOf<CardSnapshot?>(null) }
     if (active != null) last = active
@@ -596,22 +618,33 @@ private fun Cards(model: ReaderModel, paper: YYPaper, thought: (Mark) -> Unit, t
     }
     val hasNote = !current?.note.isNullOrBlank()
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val cardHeight = if (hasNote) 168.dp else 116.dp
+    var cardHeightPx by remember { mutableIntStateOf(0) }
+    var cardWidthPx by remember { mutableIntStateOf(0) }
+        val cardHeight = if (cardHeightPx > 0) with(density) { cardHeightPx.toDp() } else if (hasNote) 168.dp else 116.dp
+        val cardWidth = if (cardWidthPx > 0) with(density) { cardWidthPx.toDp() } else minOf(maxWidth - 32.dp, 340.dp)
         // Above the words when there is room, under them otherwise.
         val aboveCandidate = snap.top.dp - cardHeight - 12.dp
         val isAbove = aboveCandidate > 56.dp
-        val y = if (isAbove) aboveCandidate else (snap.bottom.dp + 12.dp)
-        val origin = TransformOrigin(0.5f, if (isAbove) 1f else 0f)
+        val maxY = (maxHeight - cardHeight - 12.dp).coerceAtLeast(56.dp)
+        val y = (if (isAbove) aboveCandidate else (snap.bottom.dp + 12.dp)).coerceIn(56.dp, maxY)
+        val cardLeft = (maxWidth - cardWidth) / 2f
+        val selMidX = snap.midX?.dp
+        val originX = if (selMidX != null && cardWidth > 1.dp) ((selMidX - cardLeft) / cardWidth).coerceIn(0.15f, 0.85f) else 0.5f
+        val origin = TransformOrigin(originX, if (isAbove) 1f else 0f)
         AnimatedVisibility(
             visible = active != null,
             modifier = Modifier.align(Alignment.TopCenter).offset(y = y),
-            enter = fadeIn(YYMotion.quick()) + scaleIn(YYMotion.quick(), initialScale = 0.92f, transformOrigin = origin),
-            exit = fadeOut(YYMotion.exit()) + scaleOut(YYMotion.exit(), targetScale = 0.92f, transformOrigin = origin),
+            enter = if (reduce) fadeIn(YYMotion.quick()) else fadeIn(YYMotion.quick()) + scaleIn(YYMotion.quick(), initialScale = 0.92f, transformOrigin = origin),
+            exit = if (reduce) fadeOut(YYMotion.exit()) else fadeOut(YYMotion.exit()) + scaleOut(YYMotion.exit(), targetScale = 0.92f, transformOrigin = origin),
         ) {
             val eink = Prefs.isReady && Prefs.bool("eink.on", false)
             Column(
                 Modifier.padding(horizontal = 16.dp).widthIn(max = 340.dp).fillMaxWidth()
                     .shadow(if (eink) 0.dp else 16.dp, RoundedCornerShape(14.dp), ambientColor = Color.Black.copy(alpha = 0.14f), spotColor = Color.Black.copy(alpha = 0.2f))
+                    .onSizeChanged {
+                        cardHeightPx = it.height
+                        cardWidthPx = it.width
+                    }
                     .clip(RoundedCornerShape(14.dp)).background(YY.c.card)
                     .border(0.5.dp, YY.c.line, RoundedCornerShape(14.dp)),
             ) {
@@ -628,10 +661,10 @@ private fun Cards(model: ReaderModel, paper: YYPaper, thought: (Mark) -> Unit, t
                     }
                     Box(Modifier.fillMaxWidth().height(0.5.dp).background(YY.c.line))
                 }
-                Row(Modifier.padding(start = 10.dp, end = 8.dp, top = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.padding(start = 6.dp, end = 6.dp, top = 4.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     for (style in listOf(MarkStyle.YELLOW, MarkStyle.BLUE, MarkStyle.PINK, MarkStyle.WAVE)) {
                         Box(
-                            Modifier.size(34.dp).clip(CircleShape).clickable { pick(style) },
+                            Modifier.size(width = 38.dp, height = 44.dp).clip(CircleShape).clickable { pick(style) },
                             contentAlignment = Alignment.Center,
                         ) {
                             Box(
@@ -644,15 +677,19 @@ private fun Cards(model: ReaderModel, paper: YYPaper, thought: (Mark) -> Unit, t
                     }
                     Box(Modifier.weight(1f))
                     for (style in listOf(MarkStyle.UNDERLINE, MarkStyle.DOTTED)) {
-                        Text(
-                            "A", fontFamily = YY.serif, fontSize = 17.sp, color = if (ringed(style)) tint.accent else YY.c.t2,
-                            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
-                            modifier = Modifier.width(34.dp).clip(RoundedCornerShape(8.dp)).clickable { pick(style) }.padding(vertical = 7.dp),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        )
+                        Box(
+                            Modifier.size(width = 36.dp, height = 44.dp).heightIn(min = 42.dp).clip(RoundedCornerShape(8.dp)).clickable { pick(style) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "A", fontFamily = YY.serif, fontSize = 17.sp, color = if (ringed(style)) tint.accent else YY.c.t2,
+                                textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            )
+                        }
                     }
                     if (current != null) {
-                        Box(Modifier.size(36.dp).clip(CircleShape).clickable { model.deleteMark(current) }, contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(width = 38.dp, height = 44.dp).clip(CircleShape).clickable { model.deleteMark(current) }, contentAlignment = Alignment.Center) {
                             Icon(Icons.delete, t("删除划线"), tint = YY.c.danger, modifier = Modifier.size(18.dp))
                         }
                     }
@@ -772,7 +809,7 @@ private fun PageTapHint(model: ReaderModel, paper: YYPaper) {
     androidx.compose.animation.AnimatedVisibility(
         shown,
         enter = androidx.compose.animation.fadeIn(YYMotion.standard()),
-        exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(app.yuyue.design.YYDuration.Layout, easing = YYMotion.EaseOut)),
+        exit = androidx.compose.animation.fadeOut(YYMotion.exit()),
     ) {
         Row(Modifier.fillMaxSize()) {
             listOf(Triple(t("上一页"), Icons.chevronLeft, 0.3f), Triple(t("菜单"), Icons.handTap, 0.4f), Triple(t("下一页"), Icons.chevronRight, 0.3f))
@@ -822,15 +859,33 @@ internal fun PlayerFailure(player: app.yuyue.speech.Player) {
 /** 气泡: the card for who says a line, where its avatar was tapped; 别的人物… searches everyone. */
 @Composable
 private fun SpeakerLayer(model: ReaderModel) {
-    model.speakerPick?.let { pick ->
+    val active = model.speakerPick
+    var lastPick by remember { mutableStateOf<SpeakerPick?>(null) }
+    if (active != null) lastPick = active
+    val reduce = YYMotion.isReduceMotion()
+    if (active != null || lastPick != null) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxSize().clickable(interactionSource = null, indication = null) { model.speakerPick = null })
+            if (active != null) {
+                Box(Modifier.fillMaxSize().clickable(interactionSource = null, indication = null) { model.speakerPick = null })
+            }
+            val pick = active ?: lastPick!!
             val w = maxWidth
             val h = maxHeight
             val x = (pick.x.toFloat().dp + 4.dp).coerceAtMost(w - 238.dp).coerceAtLeast(8.dp)
             val y = (pick.y.toFloat().dp + 4.dp).coerceAtMost(h - 380.dp).coerceAtLeast(8.dp)
-            SpeakerCard(pick, Modifier.offset(x = x, y = y), choose = { model.setSpeaker(it, pick.section.toInt(), pick.line) },
-                others = { model.speakerOthers = pick; model.speakerPick = null })
+            AnimatedVisibility(
+                visible = active != null,
+                modifier = Modifier.offset(x = x, y = y),
+                enter = fadeIn(YYMotion.quick()) + scaleIn(YYMotion.quick(), initialScale = if (reduce) 1f else 0.92f, transformOrigin = TransformOrigin(0f, 0f)),
+                exit = fadeOut(YYMotion.exit()),
+            ) {
+                SpeakerCard(
+                    pick,
+                    Modifier,
+                    choose = { model.setSpeaker(it, pick.section.toInt(), pick.line) },
+                    others = { model.speakerOthers = pick; model.speakerPick = null },
+                )
+            }
         }
     }
     model.speakerOthers?.let { pick ->

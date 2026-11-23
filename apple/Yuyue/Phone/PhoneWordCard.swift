@@ -11,28 +11,33 @@ struct PhoneWordCard: View {
     private let tint = YYTint.standard
 
     var body: some View {
+        let head = Text(lookup.definition?.headword ?? lookup.word)
+            .font(.custom("Georgia", fixedSize: YYUI.s(20) * TextScale.shared.factor).weight(.bold))
+            .foregroundStyle(YYColor.t1)
+        let pron = lookup.definition?.phonetic.map {
+            Text("  " + $0).font(YYUI.font(11)).foregroundStyle(YYColor.t2)
+        } ?? Text("")
         VStack(alignment: .leading, spacing: YYUI.s(6)) {
-            HStack(alignment: .center, spacing: YYUI.s(8)) {
-                HStack(alignment: .firstTextBaseline, spacing: YYUI.s(8)) {
-                    Text(lookup.definition?.headword ?? lookup.word)
-                        .font(.custom("Georgia", size: YYUI.s(20)).weight(.bold))
-                        .foregroundStyle(YYColor.t1)
-                    if let phonetic = lookup.definition?.phonetic {
-                        Text(phonetic).font(YYUI.font(11)).foregroundStyle(YYColor.t2)
-                    }
-                }
+            HStack(alignment: .top, spacing: YYUI.s(8)) {
+                (head + pron)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, YYUI.s(2))
                 Spacer(minLength: YYUI.s(8))
                 Button { model.say(lookup.word) } label: {
                     Image(systemName: "headphones").font(YYUI.font(12, .medium)).foregroundStyle(YYColor.t1)
-                        .frame(width: YYUI.s(32), height: YYUI.s(32)).background(YYColor.inset, in: .circle)
+                        .frame(width: YYUI.s(32), height: YYUI.s(32))
+                        .background(YYColor.inset, in: .circle)
+                        .contentShape(Circle().inset(by: -6))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(YYPressStyle(scale: 0.92))
                 .accessibilityLabel(Text("再读一遍"))
                 Button { model.closeLookup() } label: {
                     Image(systemName: "xmark").font(YYUI.font(11, .semibold)).foregroundStyle(YYColor.t2)
-                        .frame(width: YYUI.s(32), height: YYUI.s(32)).background(YYColor.inset, in: .circle)
+                        .frame(width: YYUI.s(32), height: YYUI.s(32))
+                        .background(YYColor.inset, in: .circle)
+                        .contentShape(Circle().inset(by: -6))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(YYPressStyle(scale: 0.92))
                 .accessibilityLabel(Text("关闭"))
             }
             meaning
@@ -49,11 +54,15 @@ struct PhoneWordCard: View {
                         withAnimation(YYMotion.layout) { full.toggle() }
                     }
                     .buttonStyle(YYButtonStyle(kind: .soft, size: .small))
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(1)
                 }
                 Button { model.keep(!lookup.kept) } label: {
                     Label(lookup.kept ? String(localized: "在生词本里") : String(localized: "加入生词本"), systemImage: lookup.kept ? "checkmark" : "plus")
                 }
                 .buttonStyle(YYButtonStyle(kind: lookup.kept ? .soft : .main, size: .small))
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
             }
         }
         .padding(YYUI.s(16))
@@ -64,7 +73,7 @@ struct PhoneWordCard: View {
 
     @ViewBuilder private var meaning: some View {
         if let d = lookup.definition {
-            (Text(d.partOfSpeech.map { $0 + " " } ?? "").font(.custom("Georgia", size: YYUI.s(13))).italic().foregroundStyle(YYColor.t3)
+            (Text(d.partOfSpeech.map { $0 + " " } ?? "").font(.custom("Georgia", fixedSize: YYUI.s(13) * TextScale.shared.factor)).italic().foregroundStyle(YYColor.t3)
                 + Text(d.meaning).font(YYUI.font(13)).foregroundStyle(YYColor.t1))
                 .fixedSize(horizontal: false, vertical: true)
         } else if let gloss = lookup.gloss {
@@ -94,14 +103,16 @@ struct PhoneSentenceCard: View {
         VStack(alignment: .leading, spacing: YYUI.s(8)) {
             HStack(alignment: .top, spacing: YYUI.s(8)) {
                 Text(item.text)
-                    .font(.custom("Georgia", size: YYUI.s(13))).foregroundStyle(YYColor.t2)
+                    .font(.custom("Georgia", fixedSize: YYUI.s(13) * TextScale.shared.factor)).foregroundStyle(YYColor.t2)
                     .lineSpacing(3).lineLimit(4)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Button { model.sentenceTranslation = nil } label: {
                     Image(systemName: "xmark").font(YYUI.font(11, .semibold)).foregroundStyle(YYColor.t2)
-                        .frame(width: YYUI.s(30), height: YYUI.s(30)).background(YYColor.inset, in: .circle)
+                        .frame(width: YYUI.s(30), height: YYUI.s(30))
+                        .background(YYColor.inset, in: .circle)
+                        .contentShape(Circle().inset(by: -6))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(YYPressStyle(scale: 0.92))
                 .accessibilityLabel(Text("关闭"))
             }
             if let t = item.translated {
@@ -160,8 +171,27 @@ struct PhoneMDictList: View {
                         try? core.setDictionary(id: d.id, enabled: on)
                         reload()
                     }), label: d.title)
+                    Menu {
+                        if list.count > 1 {
+                            Button("往上挪", systemImage: "arrow.up") { move(d, by: -1) }.disabled(list.first?.id == d.id)
+                            Button("往下挪", systemImage: "arrow.down") { move(d, by: 1) }.disabled(list.last?.id == d.id)
+                        }
+                        Button("移除…", systemImage: "trash", role: .destructive) {
+                            confirming = YYConfirm(title: String(localized: "移除“\(d.title)”？"), message: String(localized: "词典文件会从语阅里删掉，要用得再导入一次。"), button: String(localized: "移除")) {
+                                try? core.removeDictionary(id: d.id)
+                                reload()
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(YYUI.font(14))
+                            .foregroundStyle(YYColor.t3)
+                            .frame(width: 32, height: 38)
+                            .contentShape(Rectangle().inset(by: -4))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(String(localized: "管理“\(d.title)”"))
                 }
-                .swipeActions { Button("移除", role: .destructive) { confirming = YYConfirm(title: String(localized: "移除“\(d.title)”？"), message: String(localized: "词典文件会从语阅里删掉，要用得再导入一次。"), button: String(localized: "移除")) { try? core.removeDictionary(id: d.id); reload() } } }
                 .contextMenu {
                     if list.count > 1 {
                         Button("往上挪", systemImage: "arrow.up") { move(d, by: -1) }.disabled(list.first?.id == d.id)

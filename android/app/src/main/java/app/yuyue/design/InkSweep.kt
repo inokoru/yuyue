@@ -1,7 +1,6 @@
 package app.yuyue.design
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,13 +24,20 @@ import app.yuyue.AppLanguage
 fun InkSweepOnce() {
     var shown by remember { mutableStateOf(AppLanguage.sweepPending) }
     if (!shown) return
+    if (YYMotion.isReduceMotion()) {
+        LaunchedEffect(Unit) {
+            AppLanguage.sweepPending = false
+            shown = false
+        }
+        return
+    }
     val fill = YY.tint.fill
     val x = remember { Animatable(0f) }
     val alpha = remember { Animatable(1f) }
     LaunchedEffect(Unit) {
         AppLanguage.sweepPending = false
-        x.animateTo(1f, tween(650, easing = CubicBezierEasing(0.4f, 0f, 0.3f, 1f)))
-        alpha.animateTo(0f, tween(200))
+        x.animateTo(1f, tween(260, easing = YYMotion.EaseOut))
+        alpha.animateTo(0f, tween(120, easing = YYMotion.EaseOut))
         shown = false
     }
     Canvas(Modifier.fillMaxSize()) {

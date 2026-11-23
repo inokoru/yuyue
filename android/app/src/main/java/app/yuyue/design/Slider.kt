@@ -2,20 +2,19 @@ package app.yuyue.design
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
@@ -31,9 +30,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.progressBarRangeInfo
@@ -56,9 +60,12 @@ fun YYSlider(
     state: String? = null,
 ) {
     val change by rememberUpdatedState(onChange)
-    val span = range.endInclusive - range.start
+    val currentValue by rememberUpdatedState(value)
+    val span = (range.endInclusive - range.start).coerceAtLeast(1e-6f)
     val fraction = ((value - range.start) / span).coerceIn(0f, 1f)
     val knob = 22.dp
+    val trackColor = YY.c.line
+    val fillColor = YY.tint.fill
     val knobBorder = if (YY.dark) Color.White.copy(alpha = 0.22f) else Color(0x33332E29)
     BoxWithConstraints(
         modifier
@@ -72,21 +79,45 @@ fun YYSlider(
             }
             .pointerInput(range) {
                 val k = knob.toPx()
-                fun at(x: Float) = range.start + ((x - k / 2) / (size.width - k)).coerceIn(0f, 1f) * span
-                detectTapGestures { change(at(it.x)) }
-            }
-            .pointerInput(range) {
-                val k = knob.toPx()
-                fun at(x: Float) = range.start + ((x - k / 2) / (size.width - k)).coerceIn(0f, 1f) * span
-                detectHorizontalDragGestures { c, _ -> c.consume(); change(at(c.position.x)) }
+                val localSpan = (range.endInclusive - range.start).coerceAtLeast(1e-6f)
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val usable = (size.width - k).coerceAtLeast(1f)
+                    val currentFraction = ((currentValue - range.start) / localSpan).coerceIn(0f, 1f)
+                    val knobCenterPx = k / 2f + currentFraction * usable
+                    val grabOffset = if (abs(down.position.x - knobCenterPx) <= k * 0.85f) {
+                        down.position.x - knobCenterPx
+                    } else {
+                        change(range.start + ((down.position.x - k / 2f) / usable).coerceIn(0f, 1f) * localSpan)
+                        0f
+                    }
+                    drag(down.id) { c ->
+                        c.consume()
+                        change(range.start + ((c.position.x - grabOffset - k / 2f) / usable).coerceIn(0f, 1f) * localSpan)
+                    }
+                }
             },
         contentAlignment = Alignment.CenterStart,
     ) {
-        val travel = maxWidth - knob
-        Box(Modifier.padding(horizontal = knob / 2).fillMaxWidth().height(4.dp).clip(CircleShape).background(YY.c.line))
-        Box(Modifier.padding(start = knob / 2).width(travel * fraction).height(4.dp).clip(CircleShape).background(YY.tint.fill))
+        val travelPx = with(LocalDensity.current) { (maxWidth - knob).coerceAtLeast(0.dp).toPx() }
+        Spacer(
+            Modifier
+                .padding(horizontal = knob / 2)
+                .fillMaxWidth()
+                .height(4.dp)
+                .drawBehind {
+                    val r = CornerRadius(size.height / 2f)
+                    drawRoundRect(trackColor, cornerRadius = r)
+                    val fillWidth = size.width * fraction
+                    if (fillWidth > 0f) {
+                        drawRoundRect(fillColor, size = Size(fillWidth, size.height), cornerRadius = r)
+                    }
+                }
+        )
         Box(
-            Modifier.offset(x = travel * fraction).size(knob)
+            Modifier
+                .graphicsLayer { translationX = travelPx * fraction }
+                .size(knob)
                 .shadow(3.dp, CircleShape, ambientColor = Color(0x26332E29), spotColor = Color(0x38332E29))
                 .background(Color.White, CircleShape)
                 .border(0.75.dp, knobBorder, CircleShape)
@@ -100,7 +131,7 @@ fun RateMenu(rate: Float, rates: List<Float>, pick: (Float) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         Row(
-            Modifier.heightIn(min = 36.dp).clip(RoundedCornerShape(YY.s(7))).clickable { open = true }.padding(horizontal = YY.s(6), vertical = YY.s(3)),
+            Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(YY.s(7))).pressable { open = true }.padding(horizontal = YY.s(6), vertical = YY.s(3)),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(YY.s(3)),
         ) {

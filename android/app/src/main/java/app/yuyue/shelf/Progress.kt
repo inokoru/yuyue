@@ -129,7 +129,8 @@ fun LazyGridScope.progressItems(
                 }
             }
             // Another status: its list fades in where the last one was.
-            androidx.compose.animation.AnimatedContent(status, transitionSpec = { app.yuyue.design.YYMotion.swap() }, label = "status") { shownStatus ->
+            val reduce = app.yuyue.design.YYMotion.isReduceMotion()
+            androidx.compose.animation.AnimatedContent(status, transitionSpec = { app.yuyue.design.YYMotion.swap(reduce) }, label = "status") { shownStatus ->
             // The list of the status being shown, so the one going keeps its own books as it fades.
             val status = shownStatus
             val books = (if (sort == BookSort.Color && status != ReadingStatus.FINISHED) BookSort.Recent else sort).sorted(library.keptBooks.filter { it.status == status })

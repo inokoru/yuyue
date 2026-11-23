@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
@@ -64,6 +65,8 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -141,12 +144,12 @@ fun PodcastPaperPill(
     val fg = if (accent) tint.accent else YY.c.t1
     Row(
         modifier = modifier
-            .height(height)
+            .heightIn(min = height)
             .clip(CircleShape)
             .background(bg.copy(alpha = if (enabled) 1f else 0.5f))
             .border(0.5.dp, border, CircleShape)
             .pressable(label = title, enabled = enabled, scale = 0.96f, onClick = onClick)
-            .padding(horizontal = horizontalPadding),
+            .padding(horizontal = horizontalPadding, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -179,23 +182,30 @@ fun PodcastCircleIconButton(
     val fg = if (accent) tint.accent else YY.c.t1
     Box(
         modifier = Modifier
-            .size(size)
+            .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
             .clip(CircleShape)
-            .background(bg)
-            .border(0.5.dp, ring, CircleShape)
             .pressable(label = label, scale = 0.93f, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, label, tint = fg, modifier = Modifier.size(iconSize))
-        if (showDot) {
-            Box(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 6.dp, end = 6.dp)
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(tint.accent)
-            )
+        Box(
+            modifier = Modifier
+                .size(size)
+                .clip(CircleShape)
+                .background(bg)
+                .border(0.5.dp, ring, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, label, tint = fg, modifier = Modifier.size(iconSize))
+            if (showDot) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 6.dp, end = 6.dp)
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(tint.accent)
+                )
+            }
         }
     }
 }
@@ -250,10 +260,28 @@ fun PodcastEqualizerBars(active: Boolean, color: Color = YY.tint.accent) {
         Icon(Icons.waveform, null, tint = color, modifier = Modifier.size(14.dp))
         return
     }
+    if (YYMotion.isReduceMotion()) {
+        Row(
+            modifier = Modifier.size(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            for (h in listOf(0.45f, 0.9f, 0.6f)) {
+                Box(
+                    Modifier
+                        .width(2.3.dp)
+                        .height((13f * h).dp)
+                        .clip(CircleShape)
+                        .background(color)
+                )
+            }
+        }
+        return
+    }
     val infinite = rememberInfiniteTransition(label = "podEq")
-    val b1 by infinite.animateFloat(0.32f, 0.95f, infiniteRepeatable(tween(420), RepeatMode.Reverse), label = "b1")
-    val b2 by infinite.animateFloat(0.85f, 0.28f, infiniteRepeatable(tween(340), RepeatMode.Reverse), label = "b2")
-    val b3 by infinite.animateFloat(0.45f, 1.0f, infiniteRepeatable(tween(510), RepeatMode.Reverse), label = "b3")
+    val b1 by infinite.animateFloat(0.32f, 0.95f, infiniteRepeatable(tween(420, easing = YYMotion.EaseOut), RepeatMode.Reverse), label = "b1")
+    val b2 by infinite.animateFloat(0.85f, 0.28f, infiniteRepeatable(tween(340, easing = YYMotion.EaseOut), RepeatMode.Reverse), label = "b2")
+    val b3 by infinite.animateFloat(0.45f, 1.0f, infiniteRepeatable(tween(510, easing = YYMotion.EaseOut), RepeatMode.Reverse), label = "b3")
     Row(
         modifier = Modifier.size(14.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterHorizontally),
@@ -263,7 +291,11 @@ fun PodcastEqualizerBars(active: Boolean, color: Color = YY.tint.accent) {
             Box(
                 Modifier
                     .width(2.3.dp)
-                    .height((13f * h).dp)
+                    .height(13.dp)
+                    .graphicsLayer {
+                        scaleY = h
+                        transformOrigin = TransformOrigin(0.5f, 1f)
+                    }
                     .clip(CircleShape)
                     .background(color)
             )
@@ -353,13 +385,12 @@ fun PodcastShelfContent(
             Row(
                 modifier = Modifier
                     .weight(1f)
-                    .height(38.dp)
+                    .heightIn(min = 42.dp)
                     .clip(RoundedCornerShape(11.dp))
                     .background(YY.c.inset)
                     .border(0.5.dp, YY.c.line, RoundedCornerShape(11.dp))
-                    .padding(horizontal = 12.dp),
+                    .padding(start = 12.dp, end = if (searchQuery.isNotEmpty()) 0.dp else 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Icon(
                     if (looksLikeURL) Icons.link else Icons.search,
@@ -367,6 +398,7 @@ fun PodcastShelfContent(
                     tint = YY.c.t3,
                     modifier = Modifier.size(15.dp),
                 )
+                Spacer(Modifier.width(8.dp))
                 BasicTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
@@ -375,7 +407,7 @@ fun PodcastShelfContent(
                     cursorBrush = SolidColor(tint.accent),
                     keyboardOptions = KeyboardOptions(imeAction = if (looksLikeURL) ImeAction.Go else ImeAction.Search),
                     keyboardActions = KeyboardActions(onAny = { submitSearch() }),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).padding(vertical = 6.dp),
                     decorationBox = { inner ->
                         if (searchQuery.isEmpty()) {
                             Text(
@@ -392,12 +424,12 @@ fun PodcastShelfContent(
                 if (searchQuery.isNotEmpty()) {
                     Box(
                         Modifier
-                            .size(20.dp)
+                            .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
                             .clip(CircleShape)
-                            .clickable { searchQuery = "" },
+                            .pressable(label = t("清空"), scale = 0.9f) { searchQuery = "" },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.xmarkCircleFill, t("清空"), tint = YY.c.t3, modifier = Modifier.size(14.dp))
+                        Icon(Icons.xmarkCircleFill, t("清空"), tint = YY.c.t3, modifier = Modifier.size(15.dp))
                     }
                 }
             }
@@ -1167,13 +1199,13 @@ fun PodcastMiniPlayerBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(50.dp)
-                .padding(horizontal = 10.dp),
+                .heightIn(min = 50.dp)
+                .padding(start = 10.dp, end = 6.dp, top = 3.dp, bottom = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Row(
-                modifier = Modifier.weight(1f).clickable(onClick = onOpenReader),
+                modifier = Modifier.weight(1f).heightIn(min = 44.dp).clickable(onClick = onOpenReader),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(9.dp),
             ) {
@@ -1202,39 +1234,46 @@ fun PodcastMiniPlayerBar(
                 }
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
-                    Modifier.size(32.dp).clip(CircleShape).clickable { hub.skip(-15.0) },
+                    Modifier.defaultMinSize(minWidth = 38.dp, minHeight = 44.dp).clip(CircleShape).clickable { hub.skip(-15.0) },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("-15s", fontSize = 10.5.sp, fontWeight = FontWeight.Medium, color = YY.c.t2, style = YY.tnum)
+                    Text("-15s", fontSize = 10.5.sp, fontWeight = FontWeight.Medium, color = YY.c.t2, style = YY.tnum, maxLines = 1)
                 }
                 Box(
                     modifier = Modifier
-                        .size(30.dp)
+                        .defaultMinSize(minWidth = 38.dp, minHeight = 44.dp)
                         .clip(CircleShape)
-                        .background(YY.c.t1)
                         .pressable(label = if (isPlaying) t("暂停") else t("接着听"), scale = 0.93f) {
                             hub.selectAndPlay(issue)
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        if (isPlaying) Icons.pause else Icons.play,
-                        contentDescription = null,
-                        tint = YY.c.card,
-                        modifier = Modifier.size(15.dp),
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(YY.c.t1),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            if (isPlaying) Icons.pause else Icons.play,
+                            contentDescription = null,
+                            tint = YY.c.card,
+                            modifier = Modifier.size(15.dp),
+                        )
+                    }
                 }
                 Box(
-                    Modifier.size(32.dp).clip(CircleShape).clickable { hub.skip(15.0) },
+                    Modifier.defaultMinSize(minWidth = 38.dp, minHeight = 44.dp).clip(CircleShape).clickable { hub.skip(15.0) },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("+15s", fontSize = 10.5.sp, fontWeight = FontWeight.Medium, color = YY.c.t2, style = YY.tnum)
+                    Text("+15s", fontSize = 10.5.sp, fontWeight = FontWeight.Medium, color = YY.c.t2, style = YY.tnum, maxLines = 1)
                 }
                 Box(
                     modifier = Modifier
-                        .size(30.dp)
+                        .defaultMinSize(minWidth = 38.dp, minHeight = 44.dp)
                         .clip(CircleShape)
                         .clickable {
                             scope.launch {
@@ -1351,15 +1390,15 @@ fun PodcastAddSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(40.dp)
+                    .heightIn(min = 44.dp)
                     .clip(RoundedCornerShape(11.dp))
                     .background(YY.c.inset)
                     .border(0.5.dp, YY.c.line, RoundedCornerShape(11.dp))
-                    .padding(horizontal = 12.dp),
+                    .padding(start = 12.dp, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Icon(if (looksLikeURL) Icons.link else Icons.search, null, tint = YY.c.t3, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(8.dp))
                 BasicTextField(
                     value = query,
                     onValueChange = { query = it },
@@ -1368,7 +1407,7 @@ fun PodcastAddSheet(
                     cursorBrush = SolidColor(tint.accent),
                     keyboardOptions = KeyboardOptions(imeAction = if (looksLikeURL) ImeAction.Go else ImeAction.Search),
                     keyboardActions = KeyboardActions(onAny = { submit() }),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).padding(vertical = 6.dp),
                     decorationBox = { inner ->
                         if (query.isEmpty()) {
                             Text(t("搜节目名，或贴 RSS / 单集网页 / 音频链接…"), fontSize = 13.sp, color = YY.c.t3, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1377,9 +1416,17 @@ fun PodcastAddSheet(
                     },
                 )
                 if (query.isNotEmpty()) {
-                    Box(Modifier.size(22.dp).clip(CircleShape).clickable { query = ""; hits = emptyList() }, contentAlignment = Alignment.Center) {
-                        Icon(Icons.xmarkCircleFill, t("清空"), tint = YY.c.t3, modifier = Modifier.size(14.dp))
+                    Box(
+                        Modifier
+                            .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
+                            .clip(CircleShape)
+                            .pressable(label = t("清空"), scale = 0.9f) { query = ""; hits = emptyList() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.xmarkCircleFill, t("清空"), tint = YY.c.t3, modifier = Modifier.size(15.dp))
                     }
+                } else {
+                    Spacer(Modifier.width(8.dp))
                 }
                 PodcastPaperPill(
                     title = if (hub.isAddingFeed) t("解析中…") else if (looksLikeURL) t("放入收听台") else t("搜索"),
@@ -2005,7 +2052,7 @@ fun PodcastDrawerSheet(
                                     is LiveVoiceModel.State.Unsupported -> t("这台手机内存较小，自动使用系统离线语音")
                                     else -> t("下载 160 MB 声音包后，电台主播将使用自然真人质感声线")
                                 }
-                                Text(desc, fontSize = 12.sp, color = YY.c.t2, modifier = Modifier.weight(1f))
+                                Text(desc, fontSize = 12.sp, color = YY.c.t2, style = YY.tnum, modifier = Modifier.weight(1f))
                                 if (voiceState !is LiveVoiceModel.State.Ready && voiceState !is LiveVoiceModel.State.Downloading && voiceState !is LiveVoiceModel.State.Unsupported) {
                                     PodcastPaperPill(t("下载"), accent = true, height = 25.dp) {
                                         LiveVoiceModel.startDownload(library.core, library.dataDir)

@@ -1013,7 +1013,7 @@ struct CastPanel: View {
                         }
                     }
                     .modifier(AtPoint(point: menu.at, size: g.size))
-                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topLeading)))
+                    .transition(.opacity)
                 }
             }
             .onExitCommand { self.menu = nil }

@@ -47,7 +47,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -211,19 +213,42 @@ fun WordCardHost(model: ReaderModel) {
     var last by remember { mutableStateOf<WordLookup?>(null) }
     if (active != null) last = active
     val lookup = active ?: last ?: return
+    val reduce = YYMotion.isReduceMotion()
+    val density = LocalDensity.current
+    var cardHeightPx by remember { mutableIntStateOf(0) }
+    var cardWidthPx by remember { mutableIntStateOf(0) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val top = (lookup.rect?.y ?: 200.0).toFloat()
-        val bottom = (lookup.rect?.let { it.y + it.height } ?: 220.0).toFloat()
-        val below = bottom + 230 < maxHeight.value
-        val y = if (below) (bottom + 10).dp else maxOf(56f, top - 230).dp
-        val origin = TransformOrigin(0.5f, if (below) 0f else 1f)
+        val top = (lookup.rect?.y ?: 200.0).toFloat().dp
+        val bottom = (lookup.rect?.let { it.y + it.height } ?: 220.0).toFloat().dp
+        val measuredDp = if (cardHeightPx > 0) with(density) { cardHeightPx.toDp() } else 210.dp
+        val minY = 56.dp
+        val maxY = (maxHeight - measuredDp - 12.dp).coerceAtLeast(minY)
+        val belowCandidate = bottom + 10.dp
+        val aboveCandidate = top - measuredDp - 10.dp
+        val placeBelow = belowCandidate <= maxY || (aboveCandidate < minY && (maxHeight - bottom) >= (top - minY))
+        val y = (if (placeBelow) belowCandidate else aboveCandidate).coerceIn(minY, maxY)
+        val wordMidX = lookup.rect?.let { (it.x + it.width / 2.0).toFloat().dp }
+        val cardW = if (cardWidthPx > 0) with(density) { cardWidthPx.toDp() } else minOf(maxWidth - 32.dp, 340.dp)
+        val cardLeft = (maxWidth - cardW) / 2f
+        val originX = if (wordMidX != null && cardW > 1.dp) ((wordMidX - cardLeft) / cardW).coerceIn(0.15f, 0.85f) else 0.5f
+        val maxCardHeight = maxHeight * 0.68f
+        val origin = TransformOrigin(originX, if (placeBelow) 0f else 1f)
         AnimatedVisibility(
             visible = active != null,
             modifier = Modifier.align(Alignment.TopCenter).offset(y = y),
-            enter = fadeIn(YYMotion.quick()) + scaleIn(YYMotion.quick(), initialScale = 0.92f, transformOrigin = origin),
-            exit = fadeOut(YYMotion.exit()) + scaleOut(YYMotion.exit(), targetScale = 0.92f, transformOrigin = origin),
+            enter = if (reduce) fadeIn(YYMotion.quick()) else fadeIn(YYMotion.quick()) + scaleIn(YYMotion.quick(), initialScale = 0.92f, transformOrigin = origin),
+            exit = if (reduce) fadeOut(YYMotion.exit()) else fadeOut(YYMotion.exit()) + scaleOut(YYMotion.exit(), targetScale = 0.92f, transformOrigin = origin),
         ) {
-            WordCardBody(model, lookup)
+            WordCardBody(
+                model,
+                lookup,
+                modifier = Modifier
+                    .heightIn(max = maxCardHeight)
+                    .onSizeChanged {
+                        cardHeightPx = it.height
+                        cardWidthPx = it.width
+                    },
+            )
         }
     }
 }
@@ -232,22 +257,39 @@ fun WordCardHost(model: ReaderModel) {
  *  the phrase it was met in, then where it is from · 本书出现 N 次, and 加入生词本. */
 @Composable
 fun WordCard(model: ReaderModel, lookup: WordLookup) {
+    val density = LocalDensity.current
+    var cardHeightPx by remember { mutableIntStateOf(0) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val top = (lookup.rect?.y ?: 200.0).toFloat()
-        val bottom = (lookup.rect?.let { it.y + it.height } ?: 220.0).toFloat()
-        val y = if (bottom + 230 < maxHeight.value) (bottom + 10).dp else maxOf(56f, top - 230).dp
+        val maxCardHeight = maxHeight * 0.68f
+        val top = (lookup.rect?.y ?: 200.0).toFloat().dp
+        val bottom = (lookup.rect?.let { it.y + it.height } ?: 220.0).toFloat().dp
+        val measuredDp = if (cardHeightPx > 0) with(density) { cardHeightPx.toDp() } else 210.dp
+        val minY = 56.dp
+        val maxY = (maxHeight - measuredDp - 12.dp).coerceAtLeast(minY)
+        val belowCandidate = bottom + 10.dp
+        val aboveCandidate = top - measuredDp - 10.dp
+        val placeBelow = belowCandidate <= maxY || (aboveCandidate < minY && (maxHeight - bottom) >= (top - minY))
+        val y = (if (placeBelow) belowCandidate else aboveCandidate).coerceIn(minY, maxY)
         Box(Modifier.align(Alignment.TopCenter).offset(y = y)) {
-            WordCardBody(model, lookup)
+            WordCardBody(
+                model,
+                lookup,
+                modifier = Modifier
+                    .heightIn(max = maxCardHeight)
+                    .onSizeChanged { cardHeightPx = it.height },
+            )
         }
     }
 }
 
 @Composable
-private fun WordCardBody(model: ReaderModel, lookup: WordLookup) {
+private fun WordCardBody(model: ReaderModel, lookup: WordLookup, modifier: Modifier = Modifier) {
     val tint = YY.tint
     val shape = RoundedCornerShape(14.dp)
+    var full by remember(lookup.word) { mutableStateOf(false) }
     Column(
         Modifier.padding(horizontal = 16.dp).widthIn(max = 340.dp).fillMaxWidth()
+            .then(modifier)
             .shadow(16.dp, shape).clip(shape).background(YY.c.card).border(0.5.dp, YY.c.line, shape)
             .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 12.dp),
     ) {
@@ -263,32 +305,33 @@ private fun WordCardBody(model: ReaderModel, lookup: WordLookup) {
                     Text(it, fontSize = 11.5.sp, color = YY.c.t2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.alignByBaseline())
                 }
             }
-            Box(Modifier.size(36.dp).clip(CircleShape).clickable(onClickLabel = t("再读一遍")) { model.say(lookup.word) }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(40.dp).clip(CircleShape).clickable(onClickLabel = t("再读一遍")) { model.say(lookup.word) }, contentAlignment = Alignment.Center) {
                 Box(Modifier.size(28.dp).background(YY.c.inset, CircleShape), contentAlignment = Alignment.Center) {
                     Icon(Icons.speakerWave, t("再读一遍"), tint = YY.c.t1, modifier = Modifier.size(14.dp))
                 }
             }
         }
-        val d = lookup.definition
-        if (d != null) {
-            Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                for (line in d.lines) {
-                    val pos = Regex("""^([a-z]+\.)\s*""").find(line)
-                    Text(
-                        buildAnnotatedString {
-                            if (pos != null) withStyle(SpanStyle(fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic, color = YY.c.t3)) { append(pos.groupValues[1] + " ") }
-                            append(if (pos != null) line.substring(pos.range.last + 1) else line)
-                        },
-                        fontSize = 13.sp, color = YY.c.t1,
-                    )
+        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+            val d = lookup.definition
+            if (d != null) {
+                Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    for (line in d.lines) {
+                        val pos = Regex("""^([a-z]+\.)\s*""").find(line)
+                        Text(
+                            buildAnnotatedString {
+                                if (pos != null) withStyle(SpanStyle(fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic, color = YY.c.t3)) { append(pos.groupValues[1] + " ") }
+                                append(if (pos != null) line.substring(pos.range.last + 1) else line)
+                            },
+                            fontSize = 13.sp, color = YY.c.t1,
+                        )
+                    }
                 }
+            } else {
+                Text(t("词典里没有这个词。"), fontSize = 12.sp, color = YY.c.t2, modifier = Modifier.padding(top = 6.dp))
             }
-        } else {
-            Text(t("词典里没有这个词。"), fontSize = 12.sp, color = YY.c.t2, modifier = Modifier.padding(top = 6.dp))
+            if (full && lookup.html != null) DictEntryWeb(lookup.html, Modifier.padding(top = 8.dp).fillMaxWidth().height(240.dp))
+            phrase(lookup)?.let { Text(it, fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic, fontSize = 11.5.sp, color = YY.c.t1, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp)) }
         }
-        var full by remember(lookup.word) { mutableStateOf(false) }
-        if (full && lookup.html != null) DictEntryWeb(lookup.html, Modifier.padding(top = 8.dp).fillMaxWidth().height(240.dp))
-        phrase(lookup)?.let { Text(it, fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic, fontSize = 11.5.sp, color = YY.c.t1, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp)) }
         Box(Modifier.padding(top = 12.dp).fillMaxWidth().height(0.5.dp).background(YY.c.line))
         Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val from = lookup.dictionary ?: t("英汉词典（内置）")
@@ -545,7 +588,8 @@ fun TranslateSheet(model: ReaderModel, text: String, recheck: Int, openSettings:
             }
 
             // 正在翻译… gives way to the translation (or why not) with a fade, the sheet growing to it.
-            androidx.compose.animation.AnimatedContent(result, transitionSpec = { app.yuyue.design.YYMotion.swap() }, contentKey = { if (it == TranslationResult.Idle) TranslationResult.Loading::class else it::class }, label = "translation") { r ->
+            val reduce = app.yuyue.design.YYMotion.isReduceMotion()
+            androidx.compose.animation.AnimatedContent(result, transitionSpec = { app.yuyue.design.YYMotion.swap(reduce) }, contentKey = { if (it == TranslationResult.Idle) TranslationResult.Loading::class else it::class }, label = "translation") { r ->
             when (r) {
                 TranslationResult.Idle, TranslationResult.Loading -> {
                     Row(

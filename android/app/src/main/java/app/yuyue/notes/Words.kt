@@ -196,7 +196,7 @@ fun WordsList(library: Library, byBook: Boolean) {
         }
         for ((day, list) in sections) {
             item(key = "h$day") {
-                Row(Modifier.animateItem(placementSpec = YYMotion.place).fillMaxWidth().padding(top = 18.dp, bottom = 8.dp, start = 4.dp, end = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.animateItem(placementSpec = YYMotion.place()).fillMaxWidth().padding(top = 18.dp, bottom = 8.dp, start = 4.dp, end = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (day is String) Text(title(day), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).alignByBaseline())
                     else {
                         val date = day as java.time.LocalDate
@@ -209,7 +209,7 @@ fun WordsList(library: Library, byBook: Boolean) {
             }
             item(key = "c$day") {
                 Column(
-                    Modifier.animateItem(placementSpec = YYMotion.place).animateContentSize(YYMotion.layout())
+                    Modifier.animateItem(placementSpec = YYMotion.place()).animateContentSize(YYMotion.layout())
                         .fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(YY.c.card).border(0.5.dp, YY.c.line, RoundedCornerShape(14.dp)),
                 ) {
                     list.forEachIndexed { i, w ->

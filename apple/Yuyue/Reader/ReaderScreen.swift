@@ -320,11 +320,13 @@ private struct ReaderContent: View {
                 // 点词 / 双击一句 in a foreign book.
                 if let lookup = model.lookup {
                     PhoneWordCard(model: model, lookup: lookup)
+                        .modifier(SwipeDownDismiss(resetKey: lookup.word) { model.closeLookup() })
                         .padding(.horizontal, 12)
                         .padding(.bottom, 12)
                         .transition(YYMotion.reduce ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                 } else if let sentence = model.sentenceTranslation {
                     PhoneSentenceCard(model: model, item: sentence)
+                        .modifier(SwipeDownDismiss(resetKey: "\(sentence.sentence)") { model.sentenceTranslation = nil })
                         .padding(.horizontal, 12)
                         .padding(.bottom, 12)
                         .transition(YYMotion.reduce ? .opacity : .move(edge: .bottom).combined(with: .opacity))
@@ -334,7 +336,7 @@ private struct ReaderContent: View {
             .animation(YYMotion.standard, value: model.sentenceTranslation?.sentence)
             .overlay(alignment: .top) {
                 if let toast = model.toast {
-                    UndoToast(toast: toast) { model.undoToast() }
+                    UndoToast(toast: toast, undo: { model.undoToast() }, dismiss: { model.toast = nil })
                         .padding(.horizontal, 16)
                         .padding(.top, model.chromeShown || model.searchShown ? 52 : 6)
                         .transition(UndoToast.transition)
@@ -343,8 +345,8 @@ private struct ReaderContent: View {
             }
             .animation(YYMotion.standard, value: model.chromeShown || model.searchShown)
             .yyToastMotion(value: model.toast?.id)
-            .animation(.easeOut(duration: 0.15), value: model.selection)
-            .animation(.easeOut(duration: 0.15), value: model.openMark)
+            .animation(YYMotion.quick, value: model.selection)
+            .animation(YYMotion.quick, value: model.openMark)
             .sheet(item: $thought) { mark in
                 PhoneThoughtSheet(mark: mark) { text in
                     model.setNote(text, of: mark)
@@ -355,7 +357,6 @@ private struct ReaderContent: View {
             }
             .translationPresentation(isPresented: Binding(get: { translating != nil }, set: { if !$0 { translating = nil } }), text: translating ?? "")
             .translationTask(model.translator.configuration) { session in await model.translator.run(session) }
-            .animation(.easeOut(duration: 0.2), value: model.chromeShown)
             .statusBarHidden(model.immersive ? hidesStatusBar : !model.chromeShown)
             .persistentSystemOverlays(model.immersive && !model.chromeShown ? .hidden : .automatic)
             .modifier(SpeakerOthersSheet(model: model))
@@ -678,9 +679,6 @@ private struct TocList: View {
                             .id(c.id)
                     }
                 }
-                .padding(.horizontal, YYUI.s(12))
-                .background(YYColor.card, in: .rect(cornerRadius: YYUI.s(14)))
-                .overlay(RoundedRectangle(cornerRadius: YYUI.s(14)).strokeBorder(YYColor.line, lineWidth: 0.5))
                 .padding(.horizontal, YYUI.s(14))
                 .padding(.bottom, YYUI.s(20))
             }
@@ -902,3 +900,36 @@ private struct PageTapHint: View {
     }
 }
 #endif
+
+/// 1:1 downward finger tracking with upward rubber-band for bottom lookup/sentence cards.
+private struct SwipeDownDismiss: ViewModifier {
+    let resetKey: String
+    let dismiss: () -> Void
+    @State private var dragY: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .offset(y: YYMotion.reduce ? 0 : (dragY >= 0 ? dragY : dragY * 0.18))
+            .onChange(of: resetKey) { dragY = 0 }
+            .gesture(
+                DragGesture(minimumDistance: 12)
+                    .onChanged { value in
+                        guard !YYMotion.reduce else { return }
+                        dragY = value.translation.height
+                    }
+                    .onEnded { value in
+                        guard !YYMotion.reduce else {
+                            if value.translation.height > 64 {
+                                withAnimation(YYMotion.exit) { dismiss() }
+                            }
+                            return
+                        }
+                        if value.translation.height > 64 || value.predictedEndTranslation.height > 140 {
+                            withAnimation(YYMotion.exit) { dismiss() }
+                        } else {
+                            withAnimation(YYMotion.standard) { dragY = 0 }
+                        }
+                    }
+            )
+    }
+}

@@ -137,11 +137,12 @@ struct MoreFontsTile: View {
     @State private var hover = false
 
     var body: some View {
+        let fan = hover && !YYMotion.reduce
         Button(action: open) {
             VStack(spacing: compact ? 3 : 6) {
                 ZStack {
-                    card("Kaiti SC").rotationEffect(.degrees(hover ? -16 : -10)).offset(x: hover ? (compact ? -7 : -9) : (compact ? -4 : -5))
-                    card("PingFang SC").rotationEffect(.degrees(hover ? 14 : 8)).offset(x: hover ? (compact ? 7 : 9) : (compact ? 4 : 5))
+                    card("Kaiti SC").rotationEffect(.degrees(fan ? -16 : -10)).offset(x: fan ? (compact ? -7 : -9) : (compact ? -4 : -5))
+                    card("PingFang SC").rotationEffect(.degrees(fan ? 14 : 8)).offset(x: fan ? (compact ? 7 : 9) : (compact ? 4 : 5))
                     card("Songti SC")
                 }
                 .frame(height: compact ? 24 : 30)
@@ -156,7 +157,7 @@ struct MoreFontsTile: View {
             .contentShape(.rect(cornerRadius: compact ? 9 : 11))
         }
         .buttonStyle(.plain)
-        .onHover { h in withAnimation(.snappy(duration: 0.3)) { hover = h } }
+        .onHover { h in withAnimation(YYMotion.reduce ? nil : .snappy(duration: 0.22)) { hover = h } }
         .help(Text("更多字体"))
         .accessibilityLabel(Text("更多字体"))
     }

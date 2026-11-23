@@ -12,6 +12,7 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -63,24 +64,39 @@ object YYMotion {
     fun <T> exit(): FiniteAnimationSpec<T> = if (isEink()) tween(0) else tween(YYDuration.Exit, easing = EaseOut)
 
     /** A layout spring for positions (LazyGrid / LazyColumn `animateItem`). */
-    val place: FiniteAnimationSpec<IntOffset> = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 400f)
+    val PlaceSpring: FiniteAnimationSpec<IntOffset> = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 400f)
+
+    @Composable
+    fun place(): FiniteAnimationSpec<IntOffset>? = if (isReduceMotion()) null else PlaceSpring
 
     /** A bar or panel showing: fades in and comes a little way from its edge (fade-only under reduce motion). */
-    fun barIn(fromTop: Boolean, reduce: Boolean = false): EnterTransition =
+    @Composable
+    fun barIn(fromTop: Boolean): EnterTransition = barIn(fromTop, isReduceMotion())
+
+    fun barIn(fromTop: Boolean, reduce: Boolean): EnterTransition =
         if (reduce) fadeIn(quick()) else fadeIn(standard()) + slideInVertically(standard()) { if (fromTop) -it / 3 else it / 3 }
 
-    fun barOut(toTop: Boolean, reduce: Boolean = false): ExitTransition =
+    @Composable
+    fun barOut(toTop: Boolean): ExitTransition = barOut(toTop, isReduceMotion())
+
+    fun barOut(toTop: Boolean, reduce: Boolean): ExitTransition =
         if (reduce) fadeOut(exit()) else fadeOut(exit()) + slideOutVertically(exit()) { if (toTop) -it / 3 else it / 3 }
 
     /** Content changing in place (another tab's list, loading → loaded): a quick crossfade, the new one
      *  a few dp lower (fade-only under reduce motion). */
-    fun swap(reduce: Boolean = false): ContentTransform =
+    @Composable
+    fun swap(): ContentTransform = swap(isReduceMotion())
+
+    fun swap(reduce: Boolean): ContentTransform =
         if (reduce) fadeIn(quick()) togetherWith fadeOut(exit())
         else (fadeIn(standard()) + slideInVertically(standard()) { 6 }) togetherWith fadeOut(exit())
 
     /** A page going deeper (forward) or back: the new one comes a short way from its side as the old
      *  one fades, never the whole width; fade-only under reduce motion. */
-    fun push(forward: Boolean, reduce: Boolean = false): ContentTransform =
+    @Composable
+    fun push(forward: Boolean): ContentTransform = push(forward, isReduceMotion())
+
+    fun push(forward: Boolean, reduce: Boolean): ContentTransform =
         if (reduce) swap(true)
         else if (forward) (fadeIn(standard()) + slideInHorizontally(standard()) { it / 6 }) togetherWith (fadeOut(exit()) + slideOutHorizontally(exit()) { -it / 12 })
         else (fadeIn(standard()) + slideInHorizontally(standard()) { -it / 12 }) togetherWith (fadeOut(exit()) + slideOutHorizontally(exit()) { it / 6 })
@@ -91,9 +107,16 @@ object YYMotion {
  *  source as the clickable. */
 @Composable
 fun Modifier.pressScale(source: MutableInteractionSource, scale: Float = 0.98f): Modifier {
+    val reduce = YYMotion.isReduceMotion()
     val pressed by source.collectIsPressedAsState()
-    val s by animateFloatAsState(if (pressed) scale else 1f, if (pressed) tween(80, easing = YYMotion.EaseOut) else YYMotion.quick(), label = "press")
-    return graphicsLayer { scaleX = s; scaleY = s }
+    val target = if (pressed && !reduce) scale else 1f
+    val spec: FiniteAnimationSpec<Float> = when {
+        reduce -> snap()
+        pressed -> tween(80, easing = YYMotion.EaseOut)
+        else -> YYMotion.quick()
+    }
+    val s by animateFloatAsState(target, spec, label = "press")
+    return if (reduce && s == 1f) this else graphicsLayer { scaleX = s; scaleY = s }
 }
 
 /** A tappable thing with no ripple of its own: clickable, giving a little while pressed. */

@@ -102,7 +102,7 @@ private fun ChoiceRow(name: String, icon: androidx.compose.ui.graphics.vector.Im
     ) {
         Icon(icon, null, tint = YY.c.t2, modifier = Modifier.size(YY.s(16)))
         Text(name, style = YY.font(11.5f, if (on) FontWeight.SemiBold else FontWeight.Normal), color = YY.c.t1, maxLines = 1, modifier = Modifier.weight(1f))
-        Text("$count", style = YY.font(10.5f), color = YY.c.t3)
+        Text("$count", style = YY.font(10.5f, tnum = true), color = YY.c.t3)
         if (on) Icon(Icons.check, null, tint = YY.tint.accent, modifier = Modifier.size(YY.s(13)))
     }
 }

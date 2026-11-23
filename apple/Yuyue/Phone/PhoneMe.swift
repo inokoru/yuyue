@@ -62,7 +62,7 @@ struct PhoneMe: View {
             .toolbar(InnerDisplay.isOn(sizeClass) ? .automatic : .hidden, for: .navigationBar)
             // Scrolled past the title, 我的 stays at the top, as the system's bar had it.
             .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 50 } action: { _, past in
-                withAnimation(.easeOut(duration: 0.18)) { titlePinned = past }
+                withAnimation(YYMotion.quick) { titlePinned = past }
             }
             .overlay(alignment: .top) {
                 if titlePinned, !InnerDisplay.isOn(sizeClass) {
@@ -98,7 +98,7 @@ struct PhoneMe: View {
             debugPage = page
         }
         #endif
-        .task(id: library.books.map(\.id)) { load() }
+        .task(id: library.books.map(\.id)) { await loadSummary() }
         .task {
             let dir = library.dataDir
             used = await StorageUsage.measure(dir: dir, active: [:]).total
@@ -147,7 +147,7 @@ struct PhoneMe: View {
 
     private var weekLink: some View {
         NavigationLink { PhoneStats(library: library) } label: { weekCard }
-            .buttonStyle(.plain)
+            .buttonStyle(YYPressStyle(scale: 0.985))
             .padding(.top, YYUI.s(14))
             .padding(.bottom, YYUI.s(10))
     }
@@ -278,10 +278,37 @@ struct PhoneMe: View {
     }
 
     private func load() {
+        Task { await loadSummary() }
+    }
+
+    private func loadSummary() async {
         let days = PhoneStats.Period.week.days(containing: Date())
-        week = (try? library.core.dayTimes(from: Notes.day(days.first!), to: Notes.day(days.last!))) ?? []
-        marks = library.books.filter(\.available).reduce(0) { $0 + ((try? library.core.marks(book: $1.id))?.count ?? 0) }
-        words = ((try? library.core.words()) ?? []).count { !$0.known }
+        guard let first = days.first, let last = days.last else { return }
+        let fromDay = Notes.day(first)
+        let toDay = Notes.day(last)
+        let bookIDs = library.books.filter(\.available).map(\.id)
+        let core = library.core
+        let summary = await Self.fetchSummary(core: core, fromDay: fromDay, toDay: toDay, bookIDs: bookIDs)
+        guard !Task.isCancelled else { return }
+        week = summary.week
+        marks = summary.marks
+        words = summary.words
+    }
+
+    @concurrent nonisolated private static func fetchSummary(
+        core: YuyueCore,
+        fromDay: String,
+        toDay: String,
+        bookIDs: [String]
+    ) async -> (week: [DayTime], marks: Int, words: Int) {
+        let week = (try? core.dayTimes(from: fromDay, to: toDay)) ?? []
+        var marks = 0
+        for id in bookIDs {
+            if Task.isCancelled { break }
+            marks += (try? core.marks(book: id))?.count ?? 0
+        }
+        let words = ((try? core.words()) ?? []).count { !$0.known }
+        return (week, marks, words)
     }
 
     private var finishedThisYear: Int {
@@ -608,8 +635,9 @@ struct PhoneStats: View {
         let cal = Calendar.current
         let now = Date()
         if period == .year {
+            guard let firstDay = days.first else { return [] }
             return (0 ..< 12).map { m in
-                let start = cal.date(byAdding: .month, value: m, to: days[0]) ?? days[0]
+                let start = cal.date(byAdding: .month, value: m, to: firstDay) ?? firstDay
                 let prefix = String(Notes.day(start).prefix(7))
                 let t = times.filter { $0.day.hasPrefix(prefix) }
                 return (t.reduce(0) { $0 + Int($1.readSeconds) }, t.reduce(0) { $0 + Int($1.listenSeconds) },
@@ -668,12 +696,13 @@ struct PhoneStats: View {
 
     private func axisLabel(_ i: Int) -> String {
         switch period {
-        case .week: WeekBars.weekday(days[i])
-        case .month: i % 7 == 0 ? "\(i + 1)" : ""
+        case .week: return days.indices.contains(i) ? WeekBars.weekday(days[i]) : ""
+        case .month: return i % 7 == 0 ? "\(i + 1)" : ""
         case .year:
-            i % 2 != 0 ? ""
+            let base = days.first ?? anchor
+            return i % 2 != 0 ? ""
                 : (Bundle.main.preferredLocalizations.first ?? "zh").hasPrefix("zh") ? String(localized: "\(i + 1) 月")
-                : (Calendar.current.date(byAdding: .month, value: i, to: days[0]) ?? days[0]).formatted(.dateTime.month(.abbreviated))
+                : (Calendar.current.date(byAdding: .month, value: i, to: base) ?? base).formatted(.dateTime.month(.abbreviated))
         }
     }
 

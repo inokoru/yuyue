@@ -100,7 +100,7 @@ fun WifiPage(library: Library) {
         if (transfer.items.isNotEmpty()) {
             Row(Modifier.padding(top = YY.s(18), bottom = YY.s(8), start = 2.dp, end = 2.dp)) {
                 Text(t("正在接收"), style = YY.font(12.5f, FontWeight.SemiBold), color = YY.c.t1, modifier = Modifier.weight(1f))
-                Text(t("%lld 个文件", transfer.items.size), style = YY.font(10.5f), color = YY.c.t3)
+                Text(t("%lld 个文件", transfer.items.size), style = YY.font(10.5f, tnum = true), color = YY.c.t3)
             }
             YYGroup { for (item in transfer.items) row { Item(item) } }
         }
@@ -130,7 +130,7 @@ private fun Item(item: WifiTransfer.Item) {
                 WifiTransfer.Item.State.Done -> t("已经放进书架")
                 is WifiTransfer.Item.State.Failed -> s.message
             }
-            Text(Formatter.formatShortFileSize(LocalContext.current, item.size) + " · " + detail, style = YY.font(10f), color = if (failed) YY.c.danger else YY.c.t3, maxLines = 2)
+            Text(Formatter.formatShortFileSize(LocalContext.current, item.size) + " · " + detail, style = YY.font(10f, tnum = true), color = if (failed) YY.c.danger else YY.c.t3, maxLines = 2)
             if (item.state == WifiTransfer.Item.State.Receiving) {
                 BoxWithConstraints(Modifier.padding(top = YY.s(4)).fillMaxWidth().height(3.dp).background(YY.c.inset, CircleShape)) {
                     val got by androidx.compose.animation.core.animateFloatAsState(item.received.toFloat() / maxOf(item.size, 1), app.yuyue.design.YYMotion.standard(), label = "received")

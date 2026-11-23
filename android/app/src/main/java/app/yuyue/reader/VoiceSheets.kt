@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -48,6 +49,7 @@ import app.yuyue.design.YY
 import app.yuyue.design.YYButton
 import app.yuyue.design.YYGroup
 import app.yuyue.design.YYLabel
+import app.yuyue.design.pressable
 import app.yuyue.speech.BookVoice
 import app.yuyue.speech.CardVoice
 import app.yuyue.speech.ClonedVoice
@@ -188,19 +190,27 @@ fun VoicePickerSheet(
             when (val r = route) {
                 PickerSubRoute.List -> {
                     Row(
-                        Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        Modifier.fillMaxWidth().padding(bottom = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(t("声音"), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = YY.c.t1, modifier = Modifier.weight(1f))
                         Box(
                             Modifier
-                                .size(26.dp)
+                                .offset(x = 9.dp)
+                                .size(44.dp)
                                 .clip(CircleShape)
-                                .background(YY.c.inset)
-                                .clickable { dismiss() },
+                                .pressable(label = t("关闭"), scale = 0.92f) { dismiss() },
                             contentAlignment = Alignment.Center,
                         ) {
-                            Icon(Icons.close, t("关闭"), tint = YY.c.t2, modifier = Modifier.size(14.dp))
+                            Box(
+                                Modifier
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(YY.c.inset),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(Icons.close, t("关闭"), tint = YY.c.t2, modifier = Modifier.size(14.dp))
+                            }
                         }
                     }
                     VoiceGroupsContent(

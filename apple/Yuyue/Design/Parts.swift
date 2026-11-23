@@ -325,12 +325,14 @@ extension View {
 
 private struct YYLift: ViewModifier {
     @State private var hover = false
+    @AppStorage(EInk.key) private var eink = false
 
     func body(content: Content) -> some View {
+        let lift = hover && !YYMotion.reduce && !eink
         content
-            .offset(y: hover ? -1.5 : 0)
-            .shadow(color: .black.opacity(hover ? 0.10 : 0), radius: hover ? 10 : 0, y: hover ? 6 : 0)
-            .animation(YYMotion.quick, value: hover)
+            .offset(y: lift ? -1.5 : 0)
+            .shadow(color: .black.opacity(lift ? 0.10 : 0), radius: lift ? 10 : 0, y: lift ? 6 : 0)
+            .animation(YYMotion.quick, value: lift)
             #if os(macOS)
             .onHover { hover = $0 }
             #endif
@@ -574,11 +576,13 @@ private struct YYPillChromeBody: View {
         configuration.label
             .background { YYCapsuleLift(lift: lift) }
             .contentShape(.capsule)
-            .scaleEffect(enabled && configuration.isPressed ? 0.97 : 1)
-            .animation(.easeOut(duration: YYMotion.reduce ? 0.01 : 0.1), value: configuration.isPressed)
-            .animation(.easeOut(duration: YYMotion.reduce ? 0.01 : 0.2), value: hover)
+            .scaleEffect(enabled && configuration.isPressed && !YYMotion.reduce && !EInk.on ? 0.97 : 1)
+            .animation(EInk.on || YYMotion.reduce ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
             .opacity(enabled ? 1 : 0.4)
+            #if os(macOS)
+            .animation(EInk.on || YYMotion.reduce ? nil : .easeOut(duration: 0.2), value: hover)
             .onHover { hover = $0 && enabled }
+            #endif
     }
 
     private var lift: YYPillLift {
@@ -734,13 +738,19 @@ private struct YYPillButton: View {
         .frame(maxWidth: wide ? .infinity : nil)
         .frame(height: YYUI.s(box))
         .background { YYCapsuleLift(lift: lift(tint)) }
+        #if os(iOS)
+        .contentShape([.hoverEffect, .contextMenuPreview], .capsule)
+        #else
+        .contentShape(.focusEffect, .capsule)
+        #endif
         .contentShape(.interaction, ExpandedCapsuleHit(dx: min(hitDy, 3), dy: hitDy))
-        .contentShape(.capsule)
-        .scaleEffect(enabled && configuration.isPressed ? 0.97 : 1)
-        .animation(.easeOut(duration: YYMotion.reduce ? 0.01 : 0.1), value: configuration.isPressed)
-        .animation(.easeOut(duration: YYMotion.reduce ? 0.01 : 0.2), value: hover)
+        .scaleEffect(enabled && configuration.isPressed && !YYMotion.reduce && !EInk.on ? 0.97 : 1)
+        .animation(EInk.on || YYMotion.reduce ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
         .opacity(enabled ? 1 : 0.4)
+        #if os(macOS)
+        .animation(EInk.on || YYMotion.reduce ? nil : .easeOut(duration: 0.2), value: hover)
         .onHover { hover = $0 && enabled }
+        #endif
     }
 
     private func foreground(_ tint: YYTint) -> Color {

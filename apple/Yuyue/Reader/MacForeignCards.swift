@@ -18,8 +18,11 @@ struct WordCard: View {
                     Text(lookup.definition?.headword ?? lookup.word)
                         .font(.custom("Georgia", size: 21).weight(.bold))
                         .foregroundStyle(YYColor.t1)
+                        .lineLimit(2)
+                        .layoutPriority(1)
                     if let phonetic = lookup.definition?.phonetic {
                         Text(phonetic).font(.yy(size: 11.5)).foregroundStyle(YYColor.t2)
+                            .lineLimit(1)
                     }
                 }
                 Spacer(minLength: 8)
@@ -71,6 +74,7 @@ struct WordCard: View {
                 .fixedSize(horizontal: false, vertical: true)
         } else if let gloss = lookup.gloss {
             Text(gloss).font(.yy(size: 13)).foregroundStyle(YYColor.t1)
+                .fixedSize(horizontal: false, vertical: true)
         } else {
             Text("系统词典里没有这个词。可以在“词典”App 的设置里打开英汉词典。")
                 .font(.yy(size: 12)).foregroundStyle(YYColor.t2).lineSpacing(3)
