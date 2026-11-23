@@ -783,10 +783,10 @@ fileprivate func readerIcon(_ name: String) -> some View {
 }
 
 private extension View {
-    /// The page's frosted glass, as on the capsule. On e-ink, no glass and no shadow: the paper
-    /// itself, a black line round it, the corners less round.
+    /// The page's frosted glass, as on the capsule. On 墨水屏模式, no glass and no shadow:
+    /// pure white with a black border and tighter corners.
     @ViewBuilder func glass(_ paper: YYPaper, in shape: some Shape) -> some View {
-        if paper.id == YYPaper.eink.id {
+        if paper.id == EInk.paper.id {
             let flat = shape is Circle ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: 12))
             background(paper.bg, in: flat)
                 .overlay(flat.stroke(paper.ink, lineWidth: 1))

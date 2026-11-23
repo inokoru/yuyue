@@ -678,7 +678,7 @@
       kami: { zh: '纸本 · 温暖纸书', en: 'Paper · Warm Print' },
       plain: { zh: '素白 · 清爽明净', en: 'Plain · Crisp White' },
       sage: { zh: '芦苇 · 柔和护眼', en: 'Reed · Soft Sage' },
-      eink: { zh: '铅纸 · 墨水屏质感', en: 'E-Ink · Matte Grain' }
+      eink: { zh: '铅纸 · 颗粒铅印', en: 'Lead · Matte Grain' }
     };
     const NIGHT_LABELS = {
       kaminight: { zh: '纸本·夜 · 深夜暖黑', en: 'Night Paper · Warm Dark' },

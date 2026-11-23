@@ -435,7 +435,7 @@ public sealed partial class ReaderWindow : Window
             Top: _isFullScreen ? 40 : 64,
             Bottom: 88,
             Columns: cols,
-            ReducedMotion: _settings.Paper == Paper.Eink);
+            ReducedMotion: false);
     }
 
     private void LoadSection(uint section)
@@ -920,7 +920,7 @@ public sealed partial class ReaderWindow : Window
             indent = _settings.Indent,
             font = FontCssValue(_settings.Font, _settings.FontFace),
             compress = _settings.Compress,
-            motion = _settings.Paper == Paper.Eink ? "reduced" : "full",
+            motion = "full",
             margin = g.Margin,
             top = g.Top,
             bottom = g.Bottom,

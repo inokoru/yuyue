@@ -222,6 +222,7 @@ internal fun CoverStrip(book: BookSummary, note: String?, width: androidx.compos
         }
     }
     val eink by rememberPref("eink.on", false)
+    val einkGray by rememberPref("eink.grayscale", true)
     val f = field
     val light = f != null && f.second < 0.62f
     val ink = when {
@@ -235,7 +236,7 @@ internal fun CoverStrip(book: BookSummary, note: String?, width: androidx.compos
             Image(
                 f.first.asImageBitmap(), null, contentScale = ContentScale.FillBounds, filterQuality = FilterQuality.Low,
                 modifier = Modifier.fillMaxSize(),
-                colorFilter = if (eink) androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix().apply { setToSaturation(0f) }) else null,
+                colorFilter = if (eink && einkGray) androidx.compose.ui.graphics.ColorFilter.colorMatrix(androidx.compose.ui.graphics.ColorMatrix().apply { setToSaturation(0f) }) else null,
             )
         } else {
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(if (YY.dark) listOf(Color(0xFF3A352F), Color(0xFF282420)) else listOf(Color(0xFFEBE6DD), Color(0xFFD6CEC1)))))

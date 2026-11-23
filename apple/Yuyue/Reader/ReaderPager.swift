@@ -763,7 +763,8 @@ final class ReaderPager: PlatformView {
 
     private static func settings(for g: PageGeometry) -> [String: Any] {
         ["margin": g.margin, "top": g.top, "bottom": g.bottom, "cols": Int(g.columns),
-         "paging": g.paging == .native ? "native" : "snap", "motion": g.reducedMotion ? "reduced" : "full"]
+         "paging": g.paging == .native ? "native" : "snap", "motion": g.reducedMotion ? "reduced" : "full",
+         "eink": EInk.on, "einkGray": EInk.grayscaleImages]
     }
 
     /// The page geometry each device decides for itself (`PageGeometry`).

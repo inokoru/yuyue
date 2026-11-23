@@ -8,8 +8,9 @@ struct BookCover: View {
     /// Filling whatever it's given, edge to edge: no corners, line or shadow (a card's cover side).
     var bleed = false
     @State private var image: CGImage?
-    /// 墨水屏模式: covers in grey.
+    /// 墨水屏模式: no shadows; optional grayscale for monochrome screens.
     @AppStorage(EInk.key) private var eink = false
+    @AppStorage(EInk.grayscaleKey) private var einkGray = true
 
     var body: some View {
         let cached = image ?? Thumbnail.cached(book.coverPath, maxPixels: Thumbnail.defaultPixels)
@@ -25,7 +26,7 @@ struct BookCover: View {
                     }
                 }
                 .clipped()
-                .grayscale(eink ? 1 : 0)
+                .grayscale(eink && einkGray ? 1 : 0)
                 .task(id: book.coverPath) {
                     guard book.format != .audio, cached == nil else { return }
                     let loaded = await Thumbnail.load(book.coverPath, maxPixels: Thumbnail.defaultPixels)
@@ -57,7 +58,7 @@ struct BookCover: View {
             }
             .clipShape(.rect(cornerRadius: 4))
             .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(YYColor.line, lineWidth: 0.5))
-            .grayscale(eink ? 1 : 0)
+            .grayscale(eink && einkGray ? 1 : 0)
             .shadow(color: .black.opacity(eink ? 0 : 0.08), radius: 6, y: 3)
             .task(id: book.coverPath) {
                 guard cached == nil else { return }

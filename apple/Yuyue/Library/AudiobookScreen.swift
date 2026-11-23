@@ -644,6 +644,7 @@ struct SquareCover: View {
     var shadow = true
     @State private var image: CGImage?
     @AppStorage(EInk.key) private var eink = false
+    @AppStorage(EInk.grayscaleKey) private var einkGray = true
 
     var body: some View {
         Color.clear
@@ -660,7 +661,7 @@ struct SquareCover: View {
             }
             .clipShape(.rect(cornerRadius: shadow ? 10 : 4))
             .overlay(RoundedRectangle(cornerRadius: shadow ? 10 : 4).strokeBorder(.black.opacity(0.12), lineWidth: 0.5))
-            .grayscale(eink ? 1 : 0)
+            .grayscale(eink && einkGray ? 1 : 0)
             .shadow(color: .black.opacity(eink || !shadow ? 0 : 0.18), radius: 17, y: 14)
             .task(id: book.coverPath) { image = await Thumbnail.load(book.coverPath, maxPixels: 600) }
     }

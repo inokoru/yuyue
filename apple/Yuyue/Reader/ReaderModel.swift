@@ -44,12 +44,15 @@ final class ReaderModel {
     }
 
     private func applyImmersive() {
-        // 墨水屏 turns whole pages, never slides them.
-        pager.calm = (immersive && ImmersivePrefs.stillPages) || settings.paper == .eink
+        // 墨水屏模式 turns whole pages, never slides them.
+        pager.calm = (immersive && ImmersivePrefs.stillPages) || einkOn
         pager.marksHidden = immersive && ImmersivePrefs.hidesMarks
         pager.glossesHidden = immersive && ImmersivePrefs.hidesHints
         if immersive { panel = nil }
     }
+    /// Local device 墨水屏模式 state (never synced across devices).
+    private(set) var einkOn = EInk.on
+    private(set) var einkGrayscale = EInk.grayscale
     /// The section on screen, and its page.
     private(set) var section: UInt32?
     private(set) var page = 0
@@ -199,12 +202,11 @@ final class ReaderModel {
         self.detail = detail
         scriptValue = (try? core.bookScript(bookId: bookID)) ?? nil
         let own = (try? core.bookReaderSettings(bookId: bookID)) ?? nil
-        var settings = own ?? (try? core.readerSettings()) ?? .standard
-        // 我的 › 墨水屏: a book with its own paper reads on e-ink too.
-        if EInk.on { settings.paper = .eink; settings.customPaper = nil }
+        let settings = own ?? (try? core.readerSettings()) ?? .standard
         self.settings = settings
         self.ownSettings = own != nil
-        pager = ReaderPager(core: core, bookID: bookID, mode: settings.mode, background: settings.paperTokens.platformBackground)
+        let initialBg = (EInk.on ? EInk.paper : settings.paperTokens).platformBackground
+        pager = ReaderPager(core: core, bookID: bookID, mode: settings.mode, background: initialBg)
         player = detail.map { Player(core: core, detail: $0) }
         self.failure = failure
         companion.model = self
@@ -716,26 +718,26 @@ final class ReaderModel {
     }
 
     /// 设置 · 阅读 changed the shared settings: books without their own follow.
-    /// 墨水屏 mode overrides even a book's own paper while on.
+    /// 墨水屏模式 is a local display override and never mutates the synced paper settings.
     private func sharedSettingsChanged() {
-        if EInk.on {
-            if settings.paper != .eink || settings.customPaper != nil {
-                settings.paper = .eink
-                settings.customPaper = nil
-                applyToPager(settings)
-            }
-            return
+        let einkChanged = einkOn != EInk.on || einkGrayscale != EInk.grayscale
+        if einkChanged {
+            einkOn = EInk.on
+            einkGrayscale = EInk.grayscale
         }
-        guard let target = ownSettings ? ((try? core.bookReaderSettings(bookId: bookID)) ?? nil) : (try? core.readerSettings()),
-              target != settings else { return }
-        settings = target
-        applyToPager(target)
+        let target = ownSettings ? ((try? core.bookReaderSettings(bookId: bookID)) ?? nil) : (try? core.readerSettings())
+        if let target, target != settings {
+            settings = target
+            applyToPager(target)
+        } else if einkChanged {
+            applyToPager(settings)
+        }
     }
 
     private func applyToPager(_ new: ReaderSettings) {
         pager.fontSize = new.fontSize
         pager.mode = new.mode
-        pager.background = new.paperTokens.platformBackground
+        pager.background = (einkOn ? EInk.paper : new.paperTokens).platformBackground
         pager.apply(settings: new.script)
         applyImmersive()
     }
@@ -760,7 +762,7 @@ final class ReaderModel {
     /// The paper 调纸 shows, over the one in the settings.
     private(set) var previewing: YYPaper?
     /// The paper the page and the controls over it are drawn on.
-    var paperTokens: YYPaper { previewing ?? settings.paperTokens }
+    var paperTokens: YYPaper { einkOn ? EInk.paper : (previewing ?? settings.paperTokens) }
 
     // MARK: Progress
 
@@ -1114,32 +1116,34 @@ extension YYPaper {
 }
 
 /// 沉浸阅读: what goes when only the words should stay. Each can be kept.
-/// 墨水屏模式 (我的 › 墨水屏): every book on the e-ink paper — black on grain, marks as black lines,
-/// pictures and covers in grey, no animation, no shadows or glass.
+/// 墨水屏模式 (我的 › 墨水屏): local device display adaptation — pure white/black high-contrast
+/// page with no grain, marks as black lines, optional grayscale for covers/illustrations,
+/// zero animation, no shadows or glass. Never mutates the synced paper settings.
 enum EInk {
     static let key = "eink.on"
-    /// The paper before, to go back to.
-    static let previousKey = "eink.previous"
-    /// …and the 我的纸 it was, if one.
-    static let previousCustomKey = "eink.previousCustom"
+    static let grayscaleKey = "eink.grayscale"
     static var on: Bool { UserDefaults.standard.bool(forKey: key) }
+    static var grayscale: Bool { UserDefaults.standard.object(forKey: grayscaleKey) as? Bool ?? true }
+    static var grayscaleImages: Bool { on && grayscale }
 
-    static func set(_ on: Bool, core: YuyueCore) {
-        guard var shared = try? core.readerSettings() else { return }
-        if on {
-            if shared.paper != .eink {
-                UserDefaults.standard.set(shared.paper.tokens.id, forKey: previousKey)
-                UserDefaults.standard.set(shared.customPaper, forKey: previousCustomKey)
-            }
-            shared.paper = .eink
-            shared.customPaper = nil
-        } else {
-            let previous = UserDefaults.standard.string(forKey: previousKey).flatMap(Paper.init(id:))
-            shared.paper = previous == .eink ? .plain : (previous ?? .plain)
-            shared.customPaper = UserDefaults.standard.string(forKey: previousCustomKey)
-        }
+    /// High-contrast pure white/black surface for real e-ink displays (no grey background or grain).
+    static let paper = YYPaper(
+        id: "eink-mode", name: String(localized: "墨水屏"), isDark: false, hasNoiseTexture: false,
+        bg: Color(yy: YYRGBA(255, 255, 255)), ink: Color(yy: YYRGBA(0, 0, 0)), ink2: Color(yy: YYRGBA(68, 68, 68)),
+        line: Color(yy: YYRGBA(204, 204, 204)), accent: Color(yy: YYRGBA(0, 0, 0)),
+        hl: Color(yy: YYRGBA(0, 0, 0, 0)), wave: Color(yy: YYRGBA(0, 0, 0)), glass: Color(yy: YYRGBA(255, 255, 255)),
+        main: Color(yy: YYRGBA(0, 0, 0)), onMain: Color(yy: YYRGBA(255, 255, 255)),
+        paperAccent: Color(yy: YYRGBA(0, 0, 0)),
+        text: YYPaper.eink.text, title: YYPaper.eink.title, meta: YYPaper.eink.meta
+    )
+
+    static func set(_ on: Bool) {
         UserDefaults.standard.set(on, forKey: key)
-        try? core.setReaderSettings(settings: shared)
+        NotificationCenter.default.post(name: .readerSettingsChanged, object: nil)
+    }
+
+    static func setGrayscale(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: grayscaleKey)
         NotificationCenter.default.post(name: .readerSettingsChanged, object: nil)
     }
 }

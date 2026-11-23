@@ -533,59 +533,67 @@ fun ReadingPage(library: Library, push: (MePage) -> Unit) {
     ConfirmHost(asking) { asking = null }
     YYPage {
         SettingsLead(t("新书的默认排版；单本书可在阅读页 Aa 中单独调整"))
-        Sample(s, previewPaper, Modifier.padding(top = YY.s(12)))
+        Sample(s, previewPaper, eink, Modifier.padding(top = YY.s(12)))
         Spacer(Modifier.height(YY.s(12)))
         YYGroup {
             row {
                 Column(Modifier.padding(vertical = YY.s(12)), verticalArrangement = Arrangement.spacedBy(YY.s(8))) {
                     Text(t("纸色"), style = YY.font(11.5f, FontWeight.Medium), color = YY.c.t1)
+                    if (eink) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(6))) {
+                            Icon(Icons.eink, null, tint = YY.c.t2, modifier = Modifier.size(YY.s(12)))
+                            Text(t("墨水屏模式已接管纸色，关闭后恢复原纸色"), style = YY.font(10.5f), color = YY.c.t2)
+                        }
+                    }
                     val choices: List<Pair<String, YYPaper>?> =
                         paperPresets.map { it.tokens.id to it.tokens } +
                         Papers.list.map { it.id to customTokens(it) } +
                         listOf(null)
-                    TileGrid(choices, 3) { entry, m ->
-                        if (entry == null) {
-                            NewPaperChoice(m) { editingPaper = Papers.newDraft(s) }
-                        } else {
-                            val (id, paper) = entry
-                            val custom = Papers.paper(id)
-                            if (custom != null) {
-                                var menu by remember(custom.id) { mutableStateOf(false) }
-                                Box(m) {
+                    Box(Modifier.alpha(if (eink) 0.45f else 1f)) {
+                        TileGrid(choices, 3) { entry, m ->
+                            if (entry == null) {
+                                NewPaperChoice(m) { if (!eink) editingPaper = Papers.newDraft(s) }
+                            } else {
+                                val (id, paper) = entry
+                                val custom = Papers.paper(id)
+                                if (custom != null) {
+                                    var menu by remember(custom.id) { mutableStateOf(false) }
+                                    Box(m) {
+                                        PaperChoice(
+                                            paper,
+                                            custom.texture,
+                                            custom.name,
+                                            s.paperChoice == id,
+                                            Modifier.fillMaxWidth(),
+                                            onLongClick = if (eink) null else ({ menu = true }),
+                                        ) { if (!eink) choosePaper(custom) }
+                                        DropdownMenu(menu, { menu = false }, containerColor = YY.c.card) {
+                                            DropdownMenuItem({ Text(t("调整颜色")) }, { menu = false; editingPaper = custom })
+                                            DropdownMenuItem({ Text(t("重命名")) }, { menu = false; renamingPaper = custom })
+                                            DropdownMenuItem({ Text(t("复制一张")) }, {
+                                                menu = false
+                                                Papers.duplicate(custom)?.let { choosePaper(it) }
+                                            })
+                                            DropdownMenuItem({ Text(t("删除"), color = YY.c.danger) }, {
+                                                menu = false
+                                                asking = Confirm(
+                                                    t("删除“%@”？", custom.name),
+                                                    t("正在使用这张纸的书将恢复为相近的预设纸色。"),
+                                                    t("删除"),
+                                                ) { deletePaper(custom) }
+                                            })
+                                        }
+                                    }
+                                } else {
                                     PaperChoice(
                                         paper,
-                                        custom.texture,
-                                        custom.name,
+                                        if (id == Paper.EINK.tokens.id) PaperTexture.GRAIN else PaperTexture.NONE,
+                                        t(paper.name),
                                         s.paperChoice == id,
-                                        Modifier.fillMaxWidth(),
-                                        onLongClick = { menu = true },
-                                    ) { choosePaper(custom) }
-                                    DropdownMenu(menu, { menu = false }, containerColor = YY.c.card) {
-                                        DropdownMenuItem({ Text(t("调整颜色")) }, { menu = false; editingPaper = custom })
-                                        DropdownMenuItem({ Text(t("重命名")) }, { menu = false; renamingPaper = custom })
-                                        DropdownMenuItem({ Text(t("复制一张")) }, {
-                                            menu = false
-                                            Papers.duplicate(custom)?.let { choosePaper(it) }
-                                        })
-                                        DropdownMenuItem({ Text(t("删除"), color = YY.c.danger) }, {
-                                            menu = false
-                                            asking = Confirm(
-                                                t("删除“%@”？", custom.name),
-                                                t("正在使用这张纸的书将恢复为相近的预设纸色。"),
-                                                t("删除"),
-                                            ) { deletePaper(custom) }
-                                        })
+                                        m,
+                                    ) {
+                                        if (!eink) change { it.copy(paper = paperPresets.first { p -> p.tokens.id == id }, customPaper = null) }
                                     }
-                                }
-                            } else {
-                                PaperChoice(
-                                    paper,
-                                    if (id == Paper.EINK.tokens.id) PaperTexture.GRAIN else PaperTexture.NONE,
-                                    t(paper.name),
-                                    s.paperChoice == id,
-                                    m,
-                                ) {
-                                    change { it.copy(paper = paperPresets.first { p -> p.tokens.id == id }, customPaper = null) }
                                 }
                             }
                         }
@@ -677,12 +685,12 @@ fun ReadingPage(library: Library, push: (MePage) -> Unit) {
 
 /** The opening of 《故乡》 on the chosen paper, in the chosen font, size and spacing. */
 @Composable
-private fun Sample(s: ReaderSettings, preview: CustomPaper?, modifier: Modifier) {
-    val paper = preview?.let { customTokens(it) } ?: s.paperTokens
+private fun Sample(s: ReaderSettings, preview: CustomPaper?, eink: Boolean, modifier: Modifier) {
+    val paper = if (eink) EInk.paper else (preview?.let { customTokens(it) } ?: s.paperTokens)
     val size = (s.fontSize * 0.8).roundToInt().toFloat()
     val lineHeight = (s.lineHeight?.toFloat() ?: paper.text.lineHeight).coerceAtLeast(1.3f)
     val indent = if (s.indent ?: true) "　　" else ""
-    val texture = preview?.texture ?: Papers.paper(s.customPaper)?.texture ?: if (s.paper == Paper.EINK) PaperTexture.GRAIN else PaperTexture.NONE
+    val texture = if (eink) PaperTexture.NONE else (preview?.texture ?: Papers.paper(s.customPaper)?.texture ?: if (s.paper == Paper.EINK) PaperTexture.GRAIN else PaperTexture.NONE)
     Box(
         modifier.fillMaxWidth().clip(RoundedCornerShape(YY.s(12))).background(paper.bg)
             .border(0.5.dp, if (paper.isDark) Color.Transparent else YY.c.line, RoundedCornerShape(YY.s(12))),

@@ -28,7 +28,7 @@ pub enum Paper {
     KamiNight,
     /// 鼠尾草: a grey-green paper, laid out like 纸本
     Sage,
-    /// 铅印 (the e-ink paper; also what 墨水屏模式 puts every book on)
+    /// 铅纸: a warm-grey, grained monochrome paper (separate from the device-local 墨水屏模式)
     Eink,
 }
 
@@ -155,7 +155,7 @@ pub fn section_document(manifest: &Manifest, n: u32, content: &str, settings: &P
         tristate(s.justify),
         tristate(s.indent),
         u8::from(s.compress),
-        if s.reduced_motion || s.paper == Paper::Eink { "reduced" } else { "full" },
+        if s.reduced_motion { "reduced" } else { "full" },
         s.texture.map(|t| format!(r#" data-yy-texture="{t}""#)).unwrap_or_default(),
         escape(&custom_properties(s)),
     );
@@ -328,8 +328,9 @@ mod tests {
         assert!(html.contains(r#"<html lang="en" data-yy-paper="kaminight" data-yy-mode="scrolled" data-yy-paging="native" data-yy-justify="0" data-yy-indent="1" data-yy-compress="0" data-yy-motion="reduced""#), "{html}");
         assert!(html.contains(r#"style="--yy-fs:20.5px;--yy-margin:24px;--yy-top:60px;--yy-bottom:90px;--yy-cols:2;--yy-lh:1.86;--yy-ps:0.5em;--yy-font:var(--yy-kaiti);--yy-font-en:var(--yy-latin-serif)""#), "{html}");
         assert!(html.contains(r#"data-section="1" data-kind="image""#));
-        let eink = PageSettings { paper: Paper::Eink, ..PageSettings::default() };
-        assert!(section_document(&m, 0, "", &eink).contains(r#"data-yy-motion="reduced""#));
+        // 铅纸 (Paper::Eink) is a regular paper preset; reduced motion is controlled by device settings.
+        let lead = PageSettings { paper: Paper::Eink, ..PageSettings::default() };
+        assert!(section_document(&m, 0, "", &lead).contains(r#"data-yy-motion="full""#));
         // 我的纸: the preset's typography, its own colours and texture.
         let mine = PageSettings { paper_style: Some("--yy-p-bg:#CCE3CB;color-scheme:light".into()), texture: Some("xuan"), ..PageSettings::default() };
         let html = section_document(&m, 0, "", &mine);

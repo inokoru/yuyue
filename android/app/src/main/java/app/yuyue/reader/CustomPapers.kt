@@ -45,6 +45,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
@@ -74,6 +75,7 @@ import app.yuyue.design.Icons
 import app.yuyue.design.YY
 import app.yuyue.design.YYPaper
 import app.yuyue.design.YYSegments
+import app.yuyue.design.rememberPref
 import app.yuyue.library.Library
 import app.yuyue.t
 import uniffi.yuyue_core.CustomPaper
@@ -217,6 +219,7 @@ internal val paperPresets = listOf(Paper.PLAIN, Paper.DARK, Paper.KAMI, Paper.KA
 fun PaperRow(model: ReaderModel, edit: (CustomPaper) -> Unit) {
     var asking by remember { mutableStateOf<app.yuyue.me.Confirm?>(null) }
     app.yuyue.me.ConfirmHost(asking) { asking = null }
+    val einkOn by rememberPref(EInk.KEY, false)
     val choice = model.settings.paperChoice
     val scroll = rememberScrollState()
     var renaming by remember { mutableStateOf<CustomPaper?>(null) }
@@ -224,38 +227,46 @@ fun PaperRow(model: ReaderModel, edit: (CustomPaper) -> Unit) {
     val at = paperPresets.map { it.tokens.id }.plus(Papers.list.map { it.id }).indexOf(choice)
     val step = with(LocalDensity.current) { 58.dp.roundToPx() }
     LaunchedEffect(choice) { if (at > 3) scroll.animateScrollTo((at - 3) * step) }
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        Row(Modifier.weight(1f).horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            for (p in paperPresets) {
-                PaperTile(p.tokens, if (p == Paper.EINK) PaperTexture.GRAIN else PaperTexture.NONE, t(p.tokens.name), choice == p.tokens.id,
-                    Modifier.clickable { model.update { it.copy(paper = p, customPaper = null) } })
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (einkOn) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.eink, null, tint = YY.c.t2, modifier = Modifier.size(13.dp))
+                Text(t("墨水屏模式已接管纸色，关闭后恢复原纸色"), style = YY.font(10.5f), color = YY.c.t2)
             }
-            for (mine in Papers.list) {
-                var menu by remember { mutableStateOf(false) }
-                Box {
-                    PaperTile(customTokens(mine), mine.texture, mine.name, choice == mine.id,
-                        Modifier.combinedClickable(onLongClick = { menu = true }) { model.choose(mine) })
-                    DropdownMenu(menu, { menu = false }, containerColor = YY.c.card) {
-                        DropdownMenuItem({ Text(t("调整颜色")) }, { menu = false; edit(mine) })
-                        DropdownMenuItem({ Text(t("重命名")) }, { menu = false; renaming = mine })
-                        DropdownMenuItem({ Text(t("复制一张")) }, { menu = false; model.duplicatePaper(mine) })
-                        DropdownMenuItem({ Text(t("删除"), color = YY.c.danger) }, {
-                            menu = false
-                            asking = app.yuyue.me.Confirm(t("删除“%@”？", mine.name), t("正在使用这张纸的书将恢复为相近的预设纸色。"), t("删除")) { model.deletePaper(mine) }
-                        })
+        }
+        Row(Modifier.fillMaxWidth().alpha(if (einkOn) 0.45f else 1f), verticalAlignment = Alignment.Top) {
+            Row(Modifier.weight(1f).horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (p in paperPresets) {
+                    PaperTile(p.tokens, if (p == Paper.EINK) PaperTexture.GRAIN else PaperTexture.NONE, t(p.tokens.name), choice == p.tokens.id,
+                        Modifier.clickable(enabled = !einkOn) { model.update { it.copy(paper = p, customPaper = null) } })
+                }
+                for (mine in Papers.list) {
+                    var menu by remember { mutableStateOf(false) }
+                    Box {
+                        PaperTile(customTokens(mine), mine.texture, mine.name, choice == mine.id,
+                            Modifier.combinedClickable(enabled = !einkOn, onLongClick = { menu = true }) { model.choose(mine) })
+                        DropdownMenu(menu, { menu = false }, containerColor = YY.c.card) {
+                            DropdownMenuItem({ Text(t("调整颜色")) }, { menu = false; edit(mine) })
+                            DropdownMenuItem({ Text(t("重命名")) }, { menu = false; renaming = mine })
+                            DropdownMenuItem({ Text(t("复制一张")) }, { menu = false; model.duplicatePaper(mine) })
+                            DropdownMenuItem({ Text(t("删除"), color = YY.c.danger) }, {
+                                menu = false
+                                asking = app.yuyue.me.Confirm(t("删除“%@”？", mine.name), t("正在使用这张纸的书将恢复为相近的预设纸色。"), t("删除")) { model.deletePaper(mine) }
+                            })
+                        }
                     }
                 }
             }
-        }
-        Box(Modifier.padding(start = 6.dp).width(0.5.dp).height(44.dp).background(YY.c.line))
-        Column(
-            Modifier.padding(start = 6.dp).width(52.dp).clickable { edit(model.newPaper()) }.semantics { contentDescription = t("自己调一张纸") },
-            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Box(Modifier.fillMaxWidth().height(44.dp).background(YY.c.inset, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
-                Text("＋", fontSize = 18.sp, color = YY.c.t2)
+            Box(Modifier.padding(start = 6.dp).width(0.5.dp).height(44.dp).background(YY.c.line))
+            Column(
+                Modifier.padding(start = 6.dp).width(52.dp).clickable(enabled = !einkOn) { edit(model.newPaper()) }.semantics { contentDescription = t("自己调一张纸") },
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Box(Modifier.fillMaxWidth().height(44.dp).background(YY.c.inset, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
+                    Text("＋", fontSize = 18.sp, color = YY.c.t2)
+                }
+                Text(t("新建"), fontSize = 10.sp, color = YY.c.t2, maxLines = 1)
             }
-            Text(t("新建"), fontSize = 10.sp, color = YY.c.t2, maxLines = 1)
         }
     }
     renaming?.let { paper ->

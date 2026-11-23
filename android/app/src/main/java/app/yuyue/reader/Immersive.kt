@@ -33,6 +33,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -50,11 +52,11 @@ import app.yuyue.design.YYButton
 import app.yuyue.design.YYGroup
 import app.yuyue.design.YYNote
 import app.yuyue.design.YYPage
+import app.yuyue.design.YYPaper
 import app.yuyue.design.YYPapers
 import app.yuyue.design.YYRow
 import app.yuyue.design.rememberPref
 import app.yuyue.t
-import uniffi.yuyue_core.Paper
 import uniffi.yuyue_core.YuyueCore
 
 /** 沉浸阅读's settings, as on Apple. */
@@ -113,41 +115,56 @@ object DoNotDisturb {
     private fun manager(context: Context) = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 }
 
-/** 墨水屏模式, as on Apple: the e-ink paper and no motion. On a phone with an e-ink screen it is
- *  turned on by itself the first time 语阅 opens. */
+/** 墨水屏模式, as on Apple: local device display adaptation (pure white/black high-contrast page,
+ *  no grain, no animation, optional grayscale for monochrome vs. colour e-ink). Never mutates the
+ *  synced paper settings. On a device with an e-ink screen it is turned on automatically once. */
 object EInk {
     const val KEY = "eink.on"
-    private const val PREVIOUS = "eink.previous"
-    private const val PREVIOUS_CUSTOM = "eink.previousCustom"
+    const val GRAYSCALE_KEY = "eink.grayscale"
     private const val CHECKED = "eink.checked"
 
-    val on get() = Prefs.bool(KEY, false)
+    val on get() = Prefs.isReady && Prefs.bool(KEY, false)
+    val grayscale get() = !Prefs.isReady || Prefs.bool(GRAYSCALE_KEY, true)
+    val grayscaleImages get() = on && grayscale
 
-    fun set(on: Boolean, core: YuyueCore) {
-        val shared = runCatching { core.readerSettings() }.getOrNull() ?: return
-        val paper = if (on) {
-            if (shared.paper != Paper.EINK) {
-                Prefs.set(PREVIOUS, shared.paper.name)
-                Prefs.set(PREVIOUS_CUSTOM, shared.customPaper ?: "")
-            }
-            Paper.EINK
-        } else {
-            val prev = Paper.entries.firstOrNull { it.name == Prefs.string(PREVIOUS) }
-            if (prev == Paper.EINK) Paper.PLAIN else (prev ?: Paper.PLAIN)
-        }
-        val custom = if (on) null else Prefs.string(PREVIOUS_CUSTOM)?.takeIf { it.isNotEmpty() }
+    /** High-contrast pure white/black surface for real e-ink displays (no grey background or grain). */
+    val paper = YYPaper(
+        id = "eink-mode",
+        name = "墨水屏",
+        isDark = false,
+        hasNoiseTexture = false,
+        bg = Color(0xFFFFFFFFL),
+        ink = Color(0xFF000000L),
+        ink2 = Color(0xFF444444L),
+        line = Color(0xFFCCCCCCL),
+        accent = Color(0xFF000000L),
+        hl = Color(0x00000000L),
+        wave = Color(0xFF000000L),
+        glass = Color(0xFFFFFFFFL),
+        main = Color(0xFF000000L),
+        onMain = Color(0xFFFFFFFFL),
+        paperAccent = Color(0xFF000000L),
+        text = YYPapers.Eink.text,
+        title = YYPapers.Eink.title,
+        meta = YYPapers.Eink.meta,
+    )
+
+    fun set(on: Boolean) {
         Prefs.set(KEY, on)
-        runCatching { core.setReaderSettings(shared.copy(paper = paper, customPaper = custom)) }
+    }
+
+    fun setGrayscale(on: Boolean) {
+        Prefs.set(GRAYSCALE_KEY, on)
     }
 
     /** The makers whose phones and readers have e-ink screens. */
     private val makers = listOf("onyx", "boox", "boyue", "likebook", "meebook", "bigme", "pocketbook", "ireader", "hisense a", "kobo", "dasung", "moaan", "mooink", "inkpalm")
 
-    fun checkDevice(core: YuyueCore) {
+    fun checkDevice() {
         if (Prefs.bool(CHECKED, false)) return
         Prefs.set(CHECKED, true)
         val name = "${Build.MANUFACTURER} ${Build.BRAND} ${Build.MODEL}".lowercase()
-        if (makers.any { it in name }) set(true, core)
+        if (makers.any { it in name }) set(true)
     }
 }
 
@@ -201,19 +218,39 @@ fun ImmersiveSettings(model: ReaderModel?) {
     }
 }
 
-/** 我的 › 墨水屏: one switch, a piece of the page as it will look, and what changes with it. */
+/** 我的 › 墨水屏: local display mode toggle, optional grayscale for colour e-ink, and live preview. */
 @Composable
 fun EInkPage(core: YuyueCore) {
     var on by rememberPref(EInk.KEY, false)
+    var grayscale by rememberPref(EInk.GRAYSCALE_KEY, true)
     val shared = runCatching { core.readerSettings() }.getOrNull()
-    val paper = if (on) YYPapers.Eink else (shared?.paperTokens ?: YYPapers.Plain)
+    val paper = if (on) EInk.paper else (shared?.paperTokens ?: YYPapers.Plain)
     YYPage {
         Spacer(Modifier.height(YY.s(10)))
         YYGroup {
             row {
                 YYRow(t("墨水屏模式"), Icons.eink, trailing = {
-                    Switch(on, { EInk.set(it, core); on = it }, modifier = Modifier.semantics { contentDescription = t("墨水屏模式") }, colors = SwitchDefaults.colors(checkedTrackColor = YY.tint.fill, checkedThumbColor = YY.c.card, uncheckedTrackColor = YY.c.inset, uncheckedBorderColor = YY.c.line))
+                    Switch(on, { EInk.set(it); on = it }, modifier = Modifier.semantics { contentDescription = t("墨水屏模式") }, colors = SwitchDefaults.colors(checkedTrackColor = YY.tint.fill, checkedThumbColor = YY.c.card, uncheckedTrackColor = YY.c.inset, uncheckedBorderColor = YY.c.line))
                 })
+            }
+            row {
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = YY.s(8)).alpha(if (on) 1f else 0.45f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(YY.s(10)),
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(YY.s(1))) {
+                        Text(t("封面与插图转为灰度"), style = YY.font(11.5f), color = YY.c.t1)
+                        Text(t("彩墨屏可关闭以保留原色"), style = YY.font(10f), color = YY.c.t3)
+                    }
+                    Switch(
+                        grayscale,
+                        { EInk.setGrayscale(it); grayscale = it },
+                        enabled = on,
+                        modifier = Modifier.semantics { contentDescription = t("封面与插图转为灰度") },
+                        colors = SwitchDefaults.colors(checkedTrackColor = YY.tint.fill, checkedThumbColor = YY.c.card, uncheckedTrackColor = YY.c.inset, uncheckedBorderColor = YY.c.line),
+                    )
+                }
             }
         }
         Column(
@@ -236,6 +273,6 @@ fun EInkPage(core: YuyueCore) {
                 style = YY.font(13.5f, family = YY.serif).copy(lineHeight = YY.sp(28f)), color = paper.ink,
             )
         }
-        YYNote(t("启用颗粒灰底与纯黑字色，封面与插图转为灰度，并关闭翻页动画、阴影与毛玻璃效果；关闭后恢复原纸色。"))
+        YYNote(t("仅在本机生效：阅读页切换为纯白底与纯黑字（无颗粒噪点），划线转为黑线，并关闭翻页动画、阴影与毛玻璃效果；不改动跨设备同步的纸色，关闭后恢复原纸色。"))
     }
 }

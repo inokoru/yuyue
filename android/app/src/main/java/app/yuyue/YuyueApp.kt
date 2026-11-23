@@ -23,7 +23,7 @@ class YuyueApp : Application() {
         setUiLanguage(if (L10n.chinese) "zh-Hans" else "en")
         lap("l10n")
         library = Library(this)
-        app.yuyue.reader.EInk.checkDevice(library.core)
+        app.yuyue.reader.EInk.checkDevice()
         app.yuyue.me.SettingsLog.init(library.core)
         app.yuyue.reader.FontShelf.load()
         lap("library")

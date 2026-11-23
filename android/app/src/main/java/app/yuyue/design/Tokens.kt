@@ -125,7 +125,7 @@ data class YYTint(
         "dark" -> playDark
         "kaminight" -> playKaminight
         "sage" -> playSage
-        "eink" -> paper.main
+        "eink", "eink-mode" -> paper.main
         else -> if (paper.isDark) playDark else playPlain
     }
 }
@@ -351,9 +351,9 @@ object YYPapers {
         ink2 = Color(0xFF555555L),
         line = Color(0xFFC9C8C2L),
         accent = Color(0xFF141414L),
-        hl = Color(0x00000000L),
+        hl = Color(0xFFEFE0A8L),
         wave = Color(0xFF141414L),
-        glass = Color(0xFFE9E8E3L),
+        glass = Color(0xD6E9E8E3L),
         main = Color(0xFF141414L),
         onMain = Color(0xFFE9E8E3L),
         paperAccent = Color(0xFF141414L),

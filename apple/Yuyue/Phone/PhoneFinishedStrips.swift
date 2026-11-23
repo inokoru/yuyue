@@ -80,6 +80,7 @@ struct FinishedStrip: View {
     private let note: String?
     @State private var image: CGImage?
     @AppStorage(EInk.key) private var eink = false
+    @AppStorage(EInk.grayscaleKey) private var einkGray = true
     private var tones = CoverTones.shared
 
     init(book: BookSummary, size: CGSize = FinishedStrip.size, note: String? = nil) {
@@ -118,7 +119,7 @@ struct FinishedStrip: View {
         .frame(width: size.width, height: size.height)
         .clipShape(.rect(cornerRadius: 9))
         .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.black.opacity(0.06), lineWidth: 0.5))
-        .grayscale(eink ? 1 : 0)
+        .grayscale(eink && einkGray ? 1 : 0)
         .contentShape(.rect(cornerRadius: 9))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(book.title)

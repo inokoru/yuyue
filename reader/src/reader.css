@@ -36,6 +36,22 @@ html[data-yy-indent="1"] { --yy-ind: 2em; }
 html[data-yy-indent="0"] { --yy-ind: 0em; }
 html[data-yy-justify="1"] { --yy-al: justify; --yy-al-en: justify; }
 html[data-yy-justify="0"] { --yy-al: start; --yy-al-en: start; }
+/* 墨水屏模式 (device display mode): pure white & black, no paper grain, overriding presets and 我的纸. */
+html[data-yy-eink="1"] {
+  --yy-p-bg: #FFFFFF !important;
+  --yy-p-ink: #000000 !important;
+  --yy-p-ink-2: #444444 !important;
+  --yy-p-line: #CCCCCC !important;
+  --yy-p-accent: #000000 !important;
+  --yy-p-hl: rgba(0, 0, 0, 0) !important;
+  --yy-p-wave: #000000 !important;
+  --yy-p-glass: #FFFFFF !important;
+  --yy-p-main: #000000 !important;
+  --yy-p-on-main: #FFFFFF !important;
+  --yy-p-pa: #000000 !important;
+  --yy-p-texture: none !important;
+  color-scheme: light !important;
+}
 
 /* ---------- root and page box ---------- */
 html {
@@ -424,8 +440,8 @@ yy-ink.yy-ink-lite > i {
   background-color: color-mix(in srgb, var(--yy-p-accent) 30%, transparent);
 }
 ::highlight(yy-word) { text-decoration: underline 2px var(--yy-p-accent); text-underline-offset: 4px; }
-html[data-yy-paper="eink"] #yy-content .s.yy-ink-full { background-image: linear-gradient(#141414, #141414); }
-html[data-yy-paper="eink"] yy-ink > i { background-color: #141414; }
+html[data-yy-eink="1"] #yy-content .s.yy-ink-full { background-image: linear-gradient(#000000, #000000); }
+html[data-yy-eink="1"] yy-ink > i { background-color: #000000; }
 @media (prefers-reduced-motion: reduce) {
   #yy-content .s.yy-ink { background-size: 100% var(--yy-ink-w); }
   yy-ink { display: none !important; }
@@ -488,16 +504,18 @@ html #yy-content .wave {
   text-decoration-thickness: 1px;
   text-underline-offset: .357em;
 }
-html[data-yy-paper="eink"] #yy-content .hl {
+html[data-yy-eink="1"] #yy-content .hl {
   background-color: transparent !important;
   border-radius: 0;
-  box-shadow: inset 0 -2px 0 #141414;
+  box-shadow: inset 0 -2px 0 #000000;
 }
-/* 墨水屏: pictures in grey, as the screen would show them. */
-html[data-yy-paper="eink"] #yy-content img, html[data-yy-paper="eink"] #yy-content svg image, html[data-yy-paper="eink"] #yy-content video {
+/* 墨水屏模式: optional grayscale for monochrome screens (off for colour e-ink). */
+html[data-yy-eink="1"][data-yy-eink-gray="1"] #yy-content img,
+html[data-yy-eink="1"][data-yy-eink-gray="1"] #yy-content svg image,
+html[data-yy-eink="1"][data-yy-eink-gray="1"] #yy-content video {
   filter: grayscale(1) contrast(1.05);
 }
-html[data-yy-paper="eink"] *, html[data-yy-paper="eink"] *::before, html[data-yy-paper="eink"] *::after {
+html[data-yy-eink="1"] *, html[data-yy-eink="1"] *::before, html[data-yy-eink="1"] *::after {
   -webkit-animation: none !important;
   animation: none !important;
   -webkit-transition: none !important;
@@ -542,8 +560,9 @@ yy-fills > .yy-pink { background-color: var(--yy-mk-p); }
   text-decoration-thickness: 1.5px;
   text-underline-offset: .28em;
 }
-html[data-yy-paper="eink"] ::highlight(yy-note) {
-  text-decoration-color: #141414;
+html[data-yy-eink="1"] ::highlight(yy-wave),
+html[data-yy-eink="1"] ::highlight(yy-note) {
+  text-decoration-color: #000000;
 }
 ::highlight(yy-source) { background-color: var(--yy-accent-soft); }
 /* 书伴's 出处 label, in the margin beside the sentence (marks.ts placeSource). */
@@ -609,8 +628,10 @@ yy-tr {
 ::highlight(yy-hit) { background-color: var(--yy-accent-soft); }
 ::highlight(yy-hit-now) { background-color: var(--yy-p-main); color: var(--yy-p-on-main); }
 html[data-yy-paper="dark"] ::highlight(yy-underline), html[data-yy-paper="kaminight"] ::highlight(yy-underline) { text-decoration-color: var(--yy-p-ink); }
-html[data-yy-paper="eink"] yy-fills > i {
-  background-color: rgba(0, 0, 0, .12);
+html[data-yy-eink="1"] yy-fills > i {
+  background-color: transparent !important;
+  border-radius: 0;
+  border-bottom: 1.5px solid #000000;
 }
 /* The marks follow the paper, not the system appearance. */
 html[data-yy-paper="plain"], html[data-yy-paper="kami"], html[data-yy-paper="eink"] {
@@ -682,8 +703,8 @@ html[data-yy-paper="dark"], html[data-yy-paper="kaminight"] {
 #yy-content p.yy-pod-line.yy-pod-first { margin-top: .9em !important; }
 /* The bubble being read: a ring in the theme's colour. */
 #yy-content p.yy-pod-line:has(.s.yy-ink) { box-shadow: 0 0 0 1.5px var(--yy-p-accent); }
-html[data-yy-paper="eink"] #yy-content p.yy-pod-line { background: transparent; box-shadow: 0 0 0 1px #141414; }
-html[data-yy-paper="eink"] #yy-content p.yy-pod-line:has(.s.yy-ink) { box-shadow: 0 0 0 2.5px #141414; }
+html[data-yy-eink="1"] #yy-content p.yy-pod-line { background: transparent; box-shadow: 0 0 0 1px #000000; }
+html[data-yy-eink="1"] #yy-content p.yy-pod-line:has(.s.yy-ink) { box-shadow: 0 0 0 2.5px #000000; }
 
 /* 气泡模式: narration stays a paragraph, each quote a
    bubble with whoever says it. Each speaker's colour --yy-c is mixed with the paper, so changing
@@ -829,14 +850,14 @@ html[data-yy-bubbles] #yy-content .yy-bn { text-indent: 0 !important; }
   html[data-yy-paper="kaminight"] #yy-content .yy-bq-ch:hover { filter: brightness(1.12); }
   #yy-content .yy-bq-who:hover { opacity: .8; }
 }
-html[data-yy-paper="eink"] #yy-content .yy-bq-av:active,
-html[data-yy-paper="eink"] #yy-content .yy-bq-ch:active { transform: none; opacity: 1; background: rgba(20, 20, 20, .12); }
+html[data-yy-eink="1"] #yy-content .yy-bq-av:active,
+html[data-yy-eink="1"] #yy-content .yy-bq-ch:active { transform: none; opacity: 1; background: rgba(0, 0, 0, .12); }
 @media (prefers-reduced-motion: reduce) {
   #yy-content .yy-bq-av, #yy-content .yy-bq-ch, #yy-content .yy-bq-who { transition: none !important; }
   #yy-content .yy-bq-av:active, #yy-content .yy-bq-ch:active { transform: none; }
 }
-html[data-yy-paper="eink"] #yy-content .yy-bq-ch { background: none; color: #141414; box-shadow: inset 0 0 0 1px #141414; }
-html[data-yy-paper="eink"] #yy-content .yy-bq-av { background: none; color: #141414; box-shadow: inset 0 0 0 1px #141414; }
-html[data-yy-paper="eink"] #yy-content .yy-bq-nm b { color: #141414; }
-html[data-yy-paper="eink"] #yy-content .yy-bq-bu { background: none; box-shadow: inset 0 0 0 1px #141414; }
-html[data-yy-paper="eink"] #yy-content .yy-bq-unk .yy-bq-bu { box-shadow: none; border: 1px dashed #555; }
+html[data-yy-eink="1"] #yy-content .yy-bq-ch { background: none; color: #000000; box-shadow: inset 0 0 0 1px #000000; }
+html[data-yy-eink="1"] #yy-content .yy-bq-av { background: none; color: #000000; box-shadow: inset 0 0 0 1px #000000; }
+html[data-yy-eink="1"] #yy-content .yy-bq-nm b { color: #000000; }
+html[data-yy-eink="1"] #yy-content .yy-bq-bu { background: none; box-shadow: inset 0 0 0 1px #000000; }
+html[data-yy-eink="1"] #yy-content .yy-bq-unk .yy-bq-bu { box-shadow: none; border: 1px dashed #444444; }

@@ -72,32 +72,43 @@ struct PhoneImmersiveSheet: View {
 #endif
 
 #if os(iOS)
-/// 我的 › 墨水屏: one switch, a piece of the page as it will look, and what changes with it.
+/// 我的 › 墨水屏: local display mode toggle, optional grayscale for colour e-ink, and live preview.
 struct PhoneEInk: View {
     let library: Library
     @AppStorage(EInk.key) private var on = false
-    private let paper = YYPaper.eink
+    @AppStorage(EInk.grayscaleKey) private var grayscale = true
 
     var body: some View {
         YYPage {
             YYGroup {
                 YYRow(title: String(localized: "墨水屏模式"), icon: "rectangle.portrait.on.rectangle.portrait") {
-                    YYSwitch(isOn: Binding { on } set: { EInk.set($0, core: library.core) }, label: String(localized: "墨水屏模式"))
+                    YYSwitch(isOn: Binding { on } set: { EInk.set($0) }, label: String(localized: "墨水屏模式"))
                 }
+                HStack(spacing: YYUI.s(10)) {
+                    VStack(alignment: .leading, spacing: YYUI.s(1)) {
+                        Text("封面与插图转为灰度").font(YYUI.font(11.5)).foregroundStyle(YYColor.t1)
+                        Text("彩墨屏可关闭以保留原色").font(YYUI.font(10)).foregroundStyle(YYColor.t3)
+                    }
+                    Spacer(minLength: YYUI.s(8))
+                    YYSwitch(isOn: Binding { grayscale } set: { EInk.setGrayscale($0) }, label: String(localized: "封面与插图转为灰度"))
+                }
+                .padding(.vertical, YYUI.s(8))
+                .opacity(on ? 1 : 0.45)
+                .disabled(!on)
             }
             .padding(.top, YYUI.s(10))
             sample.padding(.top, YYUI.s(14))
-            YYNote(String(localized: "启用颗粒灰底与纯黑字色，封面与插图转为灰度，并关闭翻页动画、阴影与毛玻璃效果；关闭后恢复原纸色。"))
+            YYNote(String(localized: "仅在本机生效：阅读页切换为纯白底与纯黑字（无颗粒噪点），划线转为黑线，并关闭翻页动画、阴影与毛玻璃效果；不改动跨设备同步的纸色，关闭后恢复原纸色。"))
         }
         .navigationTitle("墨水屏")
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    /// A few lines on the current paper: when 墨水屏 is on, black on grain with black underlines;
+    /// A few lines on the current paper: when 墨水屏模式 is on, pure black on pure white with black underlines;
     /// when off, the reader's current shared paper so flipping the switch previews the change live.
     private var sample: some View {
         let shared = (try? library.core.readerSettings()) ?? .standard
-        let shownPaper = on ? paper : shared.paperTokens
+        let shownPaper = on ? EInk.paper : shared.paperTokens
         let size = YYUI.s(13.5)
         var text = AttributedString(String(localized: "父亲说：“事已如此，不必难过，"))
         var marked = AttributedString(String(localized: "好在天无绝人之路！”"))

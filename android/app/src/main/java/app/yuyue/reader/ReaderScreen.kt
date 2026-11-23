@@ -246,10 +246,10 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
     }
 }
 
-/** A paper-tinted glass shape over the page, opaque on e-ink. */
+/** A paper-tinted glass shape over the page, opaque in 墨水屏模式. */
 @Composable
 private fun Modifier.glass(paper: YYPaper, @Suppress("UNUSED_PARAMETER") haze: HazeState, shape: androidx.compose.ui.graphics.Shape = CircleShape): Modifier {
-    val eink = paper === YYPapers.Eink || (Prefs.isReady && Prefs.bool("eink.on", false))
+    val eink = EInk.on
     if (eink) {
         return this.clip(shape).background(paper.bg).border(1.dp, paper.ink, shape)
     }

@@ -60,8 +60,9 @@ fun BookCover(book: BookSummary, modifier: Modifier = Modifier) {
     LaunchedEffect(book.coverPath) {
         if (bitmap == null) bitmap = book.coverPath?.let { Thumbnails.load(it, 420) }
     }
-    // 墨水屏模式: covers in grey.
+    // 墨水屏模式: no shadows; optional grayscale for monochrome screens.
     val eink by rememberPref("eink.on", false)
+    val einkGray by rememberPref("eink.grayscale", true)
     val shape = RoundedCornerShape(4.dp)
     Box(
         modifier
@@ -77,7 +78,7 @@ fun BookCover(book: BookSummary, modifier: Modifier = Modifier) {
                     b.asImageBitmap(), null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
-                    colorFilter = if (eink) ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }) else null,
+                    colorFilter = if (eink && einkGray) ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }) else null,
                 )
             } else {
                 Placeholder(book)
@@ -138,6 +139,7 @@ fun SquareCover(book: BookSummary, modifier: Modifier = Modifier, radius: Dp = 1
         if (bitmap == null) bitmap = book.coverPath?.let { Thumbnails.load(it, 420) }
     }
     val eink by rememberPref("eink.on", false)
+    val einkGray by rememberPref("eink.grayscale", true)
     val shape = RoundedCornerShape(radius)
     Box(
         modifier
@@ -154,7 +156,7 @@ fun SquareCover(book: BookSummary, modifier: Modifier = Modifier, radius: Dp = 1
                 b.asImageBitmap(), null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
-                colorFilter = if (eink) ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }) else null,
+                colorFilter = if (eink && einkGray) ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }) else null,
             )
         } else {
             Icon(Icons.headphones, null, tint = YY.c.t3, modifier = Modifier.fillMaxSize(0.25f))

@@ -66,7 +66,7 @@ function useFull(): boolean {
   const root = document.documentElement;
   return (
     root.getAttribute('data-yy-motion') === 'reduced' ||
-    root.getAttribute('data-yy-paper') === 'eink' ||
+    root.getAttribute('data-yy-eink') === '1' ||
     !!(reducedMotion && reducedMotion.matches) ||
     typeof (document.documentElement as HTMLElement).animate !== 'function'
   );

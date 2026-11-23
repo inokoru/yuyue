@@ -180,15 +180,13 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
 
     init {
         val own = runCatching { core.bookReaderSettings(bookID) }.getOrNull()
-        var s = own ?: runCatching { core.readerSettings() }.getOrNull() ?: settings
-        // 我的 › 墨水屏: a book with its own paper reads on e-ink too.
-        if (Prefs.bool("eink.on", false)) s = s.copy(paper = Paper.EINK, customPaper = null)
+        val s = own ?: runCatching { core.readerSettings() }.getOrNull() ?: settings
         settings = s
         ownSettings = own != null
         pager.listener = this
         pager.fontSize = s.fontSize
         pager.mode = s.mode
-        pager.calm = s.paper == Paper.EINK
+        pager.calm = EInk.on
         pager.bubbles = bubbles
         // A few quotes in the first chapters: a book with dialogue.
         kotlinx.coroutines.MainScope().launch {
@@ -243,9 +241,9 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
 
     /** Opens 书伴 with a question. */
 
-    /** What 沉浸阅读 changes on the page. 墨水屏 turns whole pages, never slides them. */
+    /** What 沉浸阅读 changes on the page. 墨水屏模式 turns whole pages, never slides them. */
     fun applyImmersive() {
-        pager.calm = (immersive && ImmersivePrefs.stillPages) || settings.paper == Paper.EINK
+        pager.calm = (immersive && ImmersivePrefs.stillPages) || EInk.on
         pager.marksHidden = immersive && ImmersivePrefs.hidesMarks
         pager.glossesHidden = immersive && ImmersivePrefs.hidesHints
     }
@@ -651,7 +649,7 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
     var previewing by mutableStateOf<app.yuyue.design.YYPaper?>(null)
         private set
     /** The paper the page and the controls over it are drawn on. */
-    val paperTokens: app.yuyue.design.YYPaper get() = previewing ?: settings.paperTokens
+    val paperTokens: app.yuyue.design.YYPaper get() = if (EInk.on) EInk.paper else (previewing ?: settings.paperTokens)
 
     /** 调纸 being set: the page and the controls on `draft` until it is done or cancelled (null). */
     fun previewPaper(draft: uniffi.yuyue_core.CustomPaper?) {
@@ -1224,6 +1222,8 @@ fun ReaderSettings.script(g: uniffi.yuyue_core.PageGeometry): JSONObject = JSONO
     put("top", g.top)
     put("bottom", g.bottom)
     put("motion", if (g.reducedMotion) "reduced" else "full")
+    put("eink", EInk.on)
+    put("einkGray", EInk.grayscaleImages)
 }
 
 /** A message on the reading capsule with something to do. */

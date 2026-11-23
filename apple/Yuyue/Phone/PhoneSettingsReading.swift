@@ -202,44 +202,58 @@ struct PhoneReading: View {
             PhoneSettingsLead(String(localized: "新书的默认排版；单本书可在阅读页 Aa 中单独调整"))
             sample.padding(.top, YYUI.s(12))
             YYGroup {
-                tiles(String(localized: "纸色"), columns: 3) {
-                    ForEach(YYPaper.all) { paper in
-                        SettingsPaperTile(paper: paper, texture: paper.hasNoiseTexture ? .grain : .none, name: paper.name,
-                                          selected: settings.paperChoice == paper.id) {
-                            change { $0.paper = Paper(id: paper.id) ?? .plain; $0.customPaper = nil }
+                VStack(alignment: .leading, spacing: YYUI.s(6)) {
+                    if einkOn {
+                        HStack(spacing: YYUI.s(6)) {
+                            Image(systemName: "rectangle.portrait.on.rectangle.portrait")
+                                .font(YYUI.font(10.5))
+                            Text("墨水屏模式已接管纸色，关闭后恢复原纸色")
+                                .font(YYUI.font(10.5))
                         }
+                        .foregroundStyle(YYColor.t2)
+                        .padding(.top, YYUI.s(10))
                     }
-                    ForEach(Papers.shared.list, id: \.id) { mine in
-                        SettingsPaperTile(paper: YYPaper(custom: mine), texture: mine.texture, name: mine.name,
-                                          selected: settings.paperChoice == mine.id) {
-                            choosePaper(mine)
-                        }
-                        .contextMenu {
-                            Button(String(localized: "调整颜色"), systemImage: "paintpalette") {
-                                editingPaper = PaperDraft(paper: mine)
-                            }
-                            Button(String(localized: "重命名"), systemImage: "pencil") {
-                                newPaperName = mine.name
-                                renamingPaper = mine
-                            }
-                            Button(String(localized: "复制一张"), systemImage: "plus.square.on.square") {
-                                if let saved = Papers.shared.duplicate(mine) { choosePaper(saved) }
-                            }
-                            Divider()
-                            Button(String(localized: "删除…"), systemImage: "trash", role: .destructive) {
-                                confirming = YYConfirm(
-                                    title: String(localized: "删除“\(mine.name)”？"),
-                                    message: String(localized: "正在使用这张纸的书将恢复为相近的预设纸色。"),
-                                    button: String(localized: "删除")
-                                ) { deletePaper(mine) }
+                    tiles(String(localized: "纸色"), columns: 3) {
+                        ForEach(YYPaper.all) { paper in
+                            SettingsPaperTile(paper: paper, texture: paper.hasNoiseTexture ? .grain : .none, name: paper.name,
+                                              selected: settings.paperChoice == paper.id) {
+                                change { $0.paper = Paper(id: paper.id) ?? .plain; $0.customPaper = nil }
                             }
                         }
+                        ForEach(Papers.shared.list, id: \.id) { mine in
+                            SettingsPaperTile(paper: YYPaper(custom: mine), texture: mine.texture, name: mine.name,
+                                              selected: settings.paperChoice == mine.id) {
+                                choosePaper(mine)
+                            }
+                            .contextMenu {
+                                Button(String(localized: "调整颜色"), systemImage: "paintpalette") {
+                                    editingPaper = PaperDraft(paper: mine)
+                                }
+                                Button(String(localized: "重命名"), systemImage: "pencil") {
+                                    newPaperName = mine.name
+                                    renamingPaper = mine
+                                }
+                                Button(String(localized: "复制一张"), systemImage: "plus.square.on.square") {
+                                    if let saved = Papers.shared.duplicate(mine) { choosePaper(saved) }
+                                }
+                                Divider()
+                                Button(String(localized: "删除…"), systemImage: "trash", role: .destructive) {
+                                    confirming = YYConfirm(
+                                        title: String(localized: "删除“\(mine.name)”？"),
+                                        message: String(localized: "正在使用这张纸的书将恢复为相近的预设纸色。"),
+                                        button: String(localized: "删除")
+                                    ) { deletePaper(mine) }
+                                }
+                            }
+                        }
+                        SettingsNewPaperTile {
+                            editingPaper = PaperDraft(paper: Papers.shared.newDraft(from: settings))
+                        }
                     }
-                    SettingsNewPaperTile {
-                        editingPaper = PaperDraft(paper: Papers.shared.newDraft(from: settings))
-                    }
+                    .animation(YYMotion.layout, value: Papers.shared.list.map(\.id))
+                    .opacity(einkOn ? 0.45 : 1)
+                    .disabled(einkOn)
                 }
-                .animation(YYMotion.layout, value: Papers.shared.list.map(\.id))
                 PhoneFontTiles(selected: FontShelf.id(of: settings)) { id in
                     change { FontShelf.shared.apply(id, to: &$0) }
                     FontShelf.shared.ensure(id)
@@ -376,8 +390,8 @@ struct PhoneReading: View {
 
     /// The opening of 《故乡》 on the chosen paper, in the chosen font, size and spacing.
     private var sample: some View {
-        let paper = previewPaper.map { YYPaper(custom: $0) } ?? ReaderPaperOf.paper(settings)
-        let texture = previewPaper?.texture ?? ReaderPaperOf.texture(settings)
+        let paper = einkOn ? EInk.paper : (previewPaper.map { YYPaper(custom: $0) } ?? ReaderPaperOf.paper(settings))
+        let texture: PaperTexture = einkOn ? .none : (previewPaper?.texture ?? ReaderPaperOf.texture(settings))
         let size = (settings.fontSize * 0.8).rounded()
         let id = FontShelf.id(of: settings)
         let name = FontShelf.shared.family(id)

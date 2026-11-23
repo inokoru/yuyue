@@ -9,6 +9,7 @@ struct TypesetCard: View {
     @State private var confirming: YYConfirm?
     let model: ReaderModel
     @AppStorage("reader.twoColumns") private var twoColumns = true
+    @AppStorage(EInk.key) private var einkOn = false
     @State private var more = false
     /// 全部纸张, when 我的纸 are more than two rows.
     @State private var all = false
@@ -316,61 +317,74 @@ struct TypesetCard: View {
     /// The phone keeps the strip: the presets, then 我的纸, a finger swipes along them; ＋ stays
     /// pinned at the right so making one is always in sight.
     private var papers: some View {
-        HStack(alignment: .top, spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal) {
-                    HStack(spacing: 4) {
-                        ForEach(YYPaper.all) { paper in
-                            PaperTile(paper: paper, texture: paper.hasNoiseTexture ? .grain : .none, name: paper.name, selected: model.settings.paperChoice == paper.id) {
-                                if let id = Paper(id: paper.id) { model.update { $0.paper = id; $0.customPaper = nil } }
-                            }
-                            .id(paper.id)
-                        }
-                        ForEach(Papers.shared.list, id: \.id) { mine in
-                            PaperTile(paper: YYPaper(custom: mine), texture: mine.texture, name: mine.name, selected: model.settings.paperChoice == mine.id) { choose(mine) }
-                                .id(mine.id)
-                                // 长按 / 右键: a menu card, 删除 in red in a group of its own.
-                                .contextMenu {
-                                    Button(String(localized: "调整颜色"), systemImage: "paintpalette") { editing = mine }
-                                    Button(String(localized: "重命名"), systemImage: "pencil") { newName = mine.name; renaming = mine }
-                                    Button(String(localized: "复制一张"), systemImage: "plus.square.on.square") { duplicate(mine) }
-                                    Divider()
-                                    Button(String(localized: "删除…"), systemImage: "trash", role: .destructive) { confirming = YYConfirm(title: String(localized: "删除“\(mine.name)”？"), message: String(localized: "正在使用这张纸的书将恢复为相近的预设纸色。"), button: String(localized: "删除")) { delete(mine) } }
+        VStack(alignment: .leading, spacing: 8) {
+            if einkOn {
+                HStack(spacing: 6) {
+                    Image(systemName: "rectangle.portrait.on.rectangle.portrait")
+                        .font(.yy(size: 11))
+                    Text("墨水屏模式已接管纸色，关闭后恢复原纸色")
+                        .font(.yy(size: 11))
+                }
+                .foregroundStyle(YYColor.t2)
+            }
+            HStack(alignment: .top, spacing: 0) {
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 4) {
+                            ForEach(YYPaper.all) { paper in
+                                PaperTile(paper: paper, texture: paper.hasNoiseTexture ? .grain : .none, name: paper.name, selected: model.settings.paperChoice == paper.id) {
+                                    if let id = Paper(id: paper.id) { model.update { $0.paper = id; $0.customPaper = nil } }
                                 }
+                                .id(paper.id)
+                            }
+                            ForEach(Papers.shared.list, id: \.id) { mine in
+                                PaperTile(paper: YYPaper(custom: mine), texture: mine.texture, name: mine.name, selected: model.settings.paperChoice == mine.id) { choose(mine) }
+                                    .id(mine.id)
+                                    // 长按 / 右键: a menu card, 删除 in red in a group of its own.
+                                    .contextMenu {
+                                        Button(String(localized: "调整颜色"), systemImage: "paintpalette") { editing = mine }
+                                        Button(String(localized: "重命名"), systemImage: "pencil") { newName = mine.name; renaming = mine }
+                                        Button(String(localized: "复制一张"), systemImage: "plus.square.on.square") { duplicate(mine) }
+                                        Divider()
+                                        Button(String(localized: "删除…"), systemImage: "trash", role: .destructive) { confirming = YYConfirm(title: String(localized: "删除“\(mine.name)”？"), message: String(localized: "正在使用这张纸的书将恢复为相近的预设纸色。"), button: String(localized: "删除")) { delete(mine) } }
+                                    }
+                            }
                         }
+                        .padding(.leading, 16).padding(.trailing, 12)
                     }
-                    .padding(.leading, 16).padding(.trailing, 12)
+                    .scrollIndicators(.never)
+                    // The paper the page is on stays in sight, a new one too.
+                    .onAppear { proxy.scrollTo(model.settings.paperChoice, anchor: .center) }
+                    .onChange(of: model.settings.paperChoice) { _, id in withAnimation(YYMotion.standard) { proxy.scrollTo(id, anchor: .center) } }
                 }
-                .scrollIndicators(.never)
-                // The paper the page is on stays in sight, a new one too.
-                .onAppear { proxy.scrollTo(model.settings.paperChoice, anchor: .center) }
-                .onChange(of: model.settings.paperChoice) { _, id in withAnimation(YYMotion.standard) { proxy.scrollTo(id, anchor: .center) } }
-            }
-            .mask {
-                HStack(spacing: 0) {
-                    Rectangle()
-                    LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .leading, endPoint: .trailing).frame(width: 20)
+                .mask {
+                    HStack(spacing: 0) {
+                        Rectangle()
+                        LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .leading, endPoint: .trailing).frame(width: 20)
+                    }
                 }
-            }
-            Button { editing = newPaper() } label: {
-                VStack(spacing: 6) {
-                    Image(systemName: "plus")
-                        .font(.yy(size: 15, weight: .medium))
-                        .foregroundStyle(YYColor.t2)
-                        .frame(width: 46, height: 38)
-                        .background(YYColor.inset, in: .rect(cornerRadius: 10))
-                        .padding(2)
-                    Text("新建").font(.yy(size: 10.5)).foregroundStyle(YYColor.t2).lineLimit(1)
+                Button { editing = newPaper() } label: {
+                    VStack(spacing: 6) {
+                        Image(systemName: "plus")
+                            .font(.yy(size: 15, weight: .medium))
+                            .foregroundStyle(YYColor.t2)
+                            .frame(width: 46, height: 38)
+                            .background(YYColor.inset, in: .rect(cornerRadius: 10))
+                            .padding(2)
+                        Text("新建").font(.yy(size: 10.5)).foregroundStyle(YYColor.t2).lineLimit(1)
+                    }
+                    .padding(.leading, 6)
+                    .overlay(alignment: .leading) { Rectangle().fill(YYColor.line).frame(width: 0.5).padding(.vertical, 4) }
+                    .contentShape(.rect)
                 }
-                .padding(.leading, 6)
-                .overlay(alignment: .leading) { Rectangle().fill(YYColor.line).frame(width: 0.5).padding(.vertical, 4) }
-                .contentShape(.rect)
+                .buttonStyle(.plain)
+                .help(Text("自己调一张纸"))
+                .accessibilityLabel(Text("自己调一张纸"))
             }
-            .buttonStyle(.plain)
-            .help(Text("自己调一张纸"))
-            .accessibilityLabel(Text("自己调一张纸"))
+            .padding(.leading, -16)
+            .opacity(einkOn ? 0.45 : 1)
+            .disabled(einkOn)
         }
-        .padding(.leading, -16)
     }
     #else
     /// 纸张选择: the five presets fill a row; 我的纸 go under them five to
@@ -380,51 +394,64 @@ struct TypesetCard: View {
     private var papers: some View {
         let mine = Papers.shared.list
         return VStack(alignment: .leading, spacing: 10) {
-            paperGrid { ForEach(YYPaper.all) { presetTile($0) } }
-            if mine.isEmpty {
-                // The whole row is the button: the words alone were 13 high and easy to miss.
-                Button { editing = newPaper() } label: {
-                    HStack {
-                        Text("我的纸").font(.yy(size: 10.5, weight: .semibold)).foregroundStyle(YYColor.t2)
-                        Spacer()
-                        Label("自己调一张", systemImage: "plus").labelStyle(TightLabel())
-                            .font(.yy(size: 10.5)).foregroundStyle(YYColor.t2)
-                    }
-                    .padding(.horizontal, 8)
-                    .frame(height: 30)
-                    .background(hoverNew ? YYColor.inset : .clear, in: .rect(cornerRadius: 8))
-                    .contentShape(.rect)
+            if einkOn {
+                HStack(spacing: 6) {
+                    Image(systemName: "rectangle.portrait.on.rectangle.portrait")
+                        .font(.yy(size: 10.5))
+                    Text("墨水屏模式已接管纸色，关闭后恢复原纸色")
+                        .font(.yy(size: 10.5))
                 }
-                .buttonStyle(.plain)
-                .onHover { hoverNew = $0 }
-                .help(Text("自己调一张纸"))
-                .padding(.horizontal, -6)
-                .padding(.vertical, -4)
-            } else {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("我的纸").font(.yy(size: 10.5, weight: .semibold)).foregroundStyle(YYColor.t2)
-                    Text("\(mine.count) 张").font(.yy(size: 10.5)).monospacedDigit().foregroundStyle(YYColor.t3)
-                    Spacer()
-                    if mine.count > Self.shown {
-                        Button { all = true } label: {
-                            HStack(spacing: 2) {
-                                Text("全部")
-                                Image(systemName: "chevron.right").font(.yy(size: 8.5, weight: .semibold))
-                            }
-                            .font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
-                            .contentShape(.rect)
+                .foregroundStyle(YYColor.t2)
+            }
+            Group {
+                paperGrid { ForEach(YYPaper.all) { presetTile($0) } }
+                if mine.isEmpty {
+                    // The whole row is the button: the words alone were 13 high and easy to miss.
+                    Button { editing = newPaper() } label: {
+                        HStack {
+                            Text("我的纸").font(.yy(size: 10.5, weight: .semibold)).foregroundStyle(YYColor.t2)
+                            Spacer()
+                            Label("自己调一张", systemImage: "plus").labelStyle(TightLabel())
+                                .font(.yy(size: 10.5)).foregroundStyle(YYColor.t2)
                         }
-                        .buttonStyle(.plain)
+                        .padding(.horizontal, 8)
+                        .frame(height: 30)
+                        .background(hoverNew ? YYColor.inset : .clear, in: .rect(cornerRadius: 8))
+                        .contentShape(.rect)
                     }
-                }
-                .padding(.horizontal, 2)
-                .padding(.bottom, -4)
-                paperGrid {
-                    ForEach(shownMine(mine), id: \.id) { mineTile($0) }
-                    addTile
-                    if mine.count > Self.shown { allTile(mine.count) }
+                    .buttonStyle(.plain)
+                    .onHover { hoverNew = $0 }
+                    .help(Text("自己调一张纸"))
+                    .padding(.horizontal, -6)
+                    .padding(.vertical, -4)
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("我的纸").font(.yy(size: 10.5, weight: .semibold)).foregroundStyle(YYColor.t2)
+                        Text("\(mine.count) 张").font(.yy(size: 10.5)).monospacedDigit().foregroundStyle(YYColor.t3)
+                        Spacer()
+                        if mine.count > Self.shown {
+                            Button { all = true } label: {
+                                HStack(spacing: 2) {
+                                    Text("全部")
+                                    Image(systemName: "chevron.right").font(.yy(size: 8.5, weight: .semibold))
+                                }
+                                .font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
+                                .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 2)
+                    .padding(.bottom, -4)
+                    paperGrid {
+                        ForEach(shownMine(mine), id: \.id) { mineTile($0) }
+                        addTile
+                        if mine.count > Self.shown { allTile(mine.count) }
+                    }
                 }
             }
+            .opacity(einkOn ? 0.45 : 1)
+            .disabled(einkOn)
         }
     }
 

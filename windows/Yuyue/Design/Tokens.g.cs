@@ -153,7 +153,7 @@ public sealed record YYTint(
         "dark" => PlayDark,
         "kaminight" => PlayKaminight,
         "sage" => PlaySage,
-        "eink" => paper.Main,
+        "eink" or "eink-mode" => paper.Main,
         _ => paper.IsDark ? PlayDark : PlayPlain,
     };
 }
@@ -373,9 +373,9 @@ public static class YYPapers
         Ink2: Color.FromArgb(255, 85, 85, 85),
         Line: Color.FromArgb(255, 201, 200, 194),
         Accent: Color.FromArgb(255, 20, 20, 20),
-        Hl: Color.FromArgb(0, 0, 0, 0),
+        Hl: Color.FromArgb(255, 239, 224, 168),
         Wave: Color.FromArgb(255, 20, 20, 20),
-        Glass: Color.FromArgb(255, 233, 232, 227),
+        Glass: Color.FromArgb(214, 233, 232, 227),
         Main: Color.FromArgb(255, 20, 20, 20),
         OnMain: Color.FromArgb(255, 233, 232, 227),
         PaperAccent: Color.FromArgb(255, 20, 20, 20),

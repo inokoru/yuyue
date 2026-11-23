@@ -254,10 +254,14 @@ class SectionPage(context: Context, private val core: YuyueCore, private val geo
                 // Android WebView's wide-viewport quirk expands window.innerWidth to horizontal multi-column
                 // overflow unless useWideViewPort is paired with a non-scalable scale=1 viewport meta.
                 is Served.Html -> {
-                    val html = served.body.replace(
+                    var html = served.body.replace(
                         "content=\"width=device-width, initial-scale=1, viewport-fit=cover\"",
                         "content=\"width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover\"",
                     )
+                    if (EInk.on) {
+                        val attrs = if (EInk.grayscale) "data-yy-eink=\"1\" data-yy-eink-gray=\"1\" " else "data-yy-eink=\"1\" "
+                        html = html.replaceFirst("<html ", "<html $attrs")
+                    }
                     WebResourceResponse("text/html", "utf-8", ByteArrayInputStream(html.toByteArray())).noStore()
                 }
                 is Served.File -> {

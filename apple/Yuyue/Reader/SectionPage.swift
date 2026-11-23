@@ -366,7 +366,14 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
         }
         switch core.serve(path: path, geometry: geometry()) {
         case .html(let body):
-            respond(task, url, data: Data(body.utf8), mime: "text/html; charset=utf-8")
+            let html: String
+            if EInk.on, let range = body.range(of: "<html ") {
+                let attrs = EInk.grayscale ? #"data-yy-eink="1" data-yy-eink-gray="1" "# : #"data-yy-eink="1" "#
+                html = body.replacingCharacters(in: range, with: "<html " + attrs)
+            } else {
+                html = body
+            }
+            respond(task, url, data: Data(html.utf8), mime: "text/html; charset=utf-8")
         case .file(let file, let mime):
             if let data = try? Data(contentsOf: URL(filePath: file), options: .mappedIfSafe) {
                 respond(task, url, data: data, mime: mime)

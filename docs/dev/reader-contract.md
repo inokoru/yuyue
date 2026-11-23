@@ -64,14 +64,16 @@ paper default in the reader CSS: `auto` or an absent variable means "use the pap
 
 | Name | Values | Meaning |
 |---|---|---|
-| `data-yy-paper` | `plain` `dark` `kami` `kaminight` `eink` | paper theme (素白、暗黑、纸本、纸本·夜、墨水屏) |
+| `data-yy-paper` | `plain` `dark` `kami` `kaminight` `sage` `eink` | paper theme (素白、暗黑、纸本、纸本·夜、芦苇、铅纸) |
 | `data-yy-texture` | `grain` `xuan` `linen` or absent | 纹理 on 我的纸 (细颗粒、宣纸、亚麻) |
+| `data-yy-eink` | `0` `1` or absent | device-local 墨水屏模式: pure white/black high-contrast surface without grain, black mark lines, no animation; overrides synced paper & 我的纸 |
+| `data-yy-eink-gray` | `0` `1` or absent | grayscale images/videos while `data-yy-eink="1"` (off on colour e-ink screens) |
 | `data-yy-mode` | `paginated` `scrolled` | 翻页 or 滚动 |
 | `data-yy-paging` | `native` `snap` | `native`: the platform scroll view pages (iOS), so the reader must not add scroll snapping or animate scrolling. `snap`: the reader adds CSS scroll snapping and the JS page API scrolls smoothly (Mac, Android) |
 | `data-yy-justify` | `auto` `0` `1` | 两端对齐 |
 | `data-yy-indent` | `auto` `0` `1` | 首行缩进 2em |
 | `data-yy-compress` | `0` `1` | 中文标点挤压 (applies the `pz-*` classes below) |
-| `data-yy-motion` | `full` `reduced` | `reduced`: no ink-line animation (墨水屏, system reduced motion, 沉浸 option) |
+| `data-yy-motion` | `full` `reduced` | `reduced`: no ink-line animation (墨水屏模式, system reduced motion, 沉浸 option) |
 | `--yy-fs` | px | font size (always set) |
 | `--yy-lh` | number | line height |
 | `--yy-ps` | em | paragraph spacing (margin after a paragraph) |
@@ -105,7 +107,7 @@ paper default in the reader CSS: `auto` or an absent variable means "use the pap
 
 | Call | Effect |
 |---|---|
-| `applySettings(s)` | `s` has the keys of §2 in camelCase (`paper`, `paperStyle`, `texture`, `mode`, `paging`, `justify`, `indent`, `compress`, `motion`, `fontSize`, `lineHeight`, `paragraphSpacing`, `font`, `margin`, `top`, `bottom`, `cols`); missing keys keep their current value, `null` means paper default. Re-lays out, keeps the first visible sentence in view, posts `layout` |
+| `applySettings(s)` | `s` has the keys of §2 in camelCase (`paper`, `paperStyle`, `texture`, `eink`, `einkGray`, `mode`, `paging`, `justify`, `indent`, `compress`, `motion`, `fontSize`, `lineHeight`, `paragraphSpacing`, `font`, `margin`, `top`, `bottom`, `cols`); missing keys keep their current value, `null` means paper default. Re-lays out, keeps the first visible sentence in view, posts `layout` |
 | `scrollToPage(p, animated)` | go to page `p`. In `native` paging always instant (native animates by itself) |
 | `nextPage(animated)` / `prevPage(animated)` | returns `false` (and does nothing) at the last/first page, so native can move to the next/previous section |
 | `scrollToSentence(s, animated)` | go to the page where sentence `s` starts (scrolled mode: bring it to the top third); returns the page |
@@ -157,7 +159,7 @@ A 1.5px line in `--p-accent` under the sentence being read, growing from the
 start of the sentence to its end over the sentence's audio duration (`.s { padding-bottom: 2px }`).
 Fragments of one sentence grow one after another, each for its share of the characters.
 `setPlaying(false)` freezes it. With `data-yy-motion="reduced"` the full line is drawn at once
-(墨水屏 uses `#141414`).
+(墨水屏模式 uses `#000000`).
 
 ## 8. Highlights and search hits
 

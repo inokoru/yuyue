@@ -14,6 +14,10 @@ export interface Settings {
   indent?: string | number | boolean | null;
   compress?: string | number | boolean | null;
   motion?: string | null;
+  /** 墨水屏模式 (device display mode): overrides paper colours to pure white/black and removes animation. */
+  eink?: string | number | boolean | null;
+  /** 墨水屏模式: grayscale images/videos inside the book (off for colour e-ink screens). */
+  einkGray?: string | number | boolean | null;
   tint?: string | null;
   fontSize?: number | string | null;
   lineHeight?: number | string | null;
@@ -36,6 +40,8 @@ const ATTRS: { [k: string]: { attr: string; kind: Kind; values?: string[]; def: 
   compress: { attr: 'data-yy-compress', kind: 'bool', def: '1' },
   texture: { attr: 'data-yy-texture', kind: 'enum', values: ['grain', 'xuan', 'linen'], def: null },
   motion: { attr: 'data-yy-motion', kind: 'enum', values: ['full', 'reduced'], def: 'full' },
+  eink: { attr: 'data-yy-eink', kind: 'bool', def: '0' },
+  einkGray: { attr: 'data-yy-eink-gray', kind: 'bool', def: '0' },
   tint: { attr: 'data-yy-tint', kind: 'enum', values: ['blue', 'ink'], def: null },
 };
 

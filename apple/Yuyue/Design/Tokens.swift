@@ -157,7 +157,7 @@ public struct YYTint: Sendable, Hashable, Identifiable {
         case "dark": return playDark
         case "kaminight": return playKaminight
         case "sage": return playSage
-        case "eink": return paper.main
+        case "eink", "eink-mode": return paper.main
         default: return paper.isDark ? playDark : playPlain
         }
     }
@@ -340,7 +340,7 @@ public struct YYPaper: Sendable, Hashable, Identifiable {
     public static let eink = YYPaper(
         id: "eink", name: String(localized: "铅纸"), isDark: false, hasNoiseTexture: true,
         bg: Color(yy: YYRGBA(233, 232, 227)), ink: Color(yy: YYRGBA(20, 20, 20)), ink2: Color(yy: YYRGBA(85, 85, 85)), line: Color(yy: YYRGBA(201, 200, 194)), accent: Color(yy: YYRGBA(20, 20, 20)),
-        hl: Color(yy: YYRGBA(0, 0, 0, 0)), wave: Color(yy: YYRGBA(20, 20, 20)), glass: Color(yy: YYRGBA(233, 232, 227)), main: Color(yy: YYRGBA(20, 20, 20)), onMain: Color(yy: YYRGBA(233, 232, 227)),
+        hl: Color(yy: YYRGBA(239, 224, 168)), wave: Color(yy: YYRGBA(20, 20, 20)), glass: Color(yy: YYRGBA(233, 232, 227, 0.84)), main: Color(yy: YYRGBA(20, 20, 20)), onMain: Color(yy: YYRGBA(233, 232, 227)),
         paperAccent: Color(yy: YYRGBA(20, 20, 20)),
         text: YYPaperText(font: .serif, lineHeight: 2.05, paragraphSpacingEm: 0.3, indentEm: 2, justify: true, letterSpacingEm: 0.02, sizePx: 14),
         title: YYPaperTitle(font: .serif, sizePx: 24, weight: 700, lineHeight: 1.4, letterSpacingEm: 0.05, rule: false),

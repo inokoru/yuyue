@@ -213,3 +213,46 @@ test('font keywords choose the CJK face and a matching Latin face', async ({ pag
   expect(family).toContain('Georgia');
   expect(await page.evaluate(() => (window as any).yy.settings().font)).toBe('Georgia, serif');
 });
+
+test('墨水屏模式 overrides presets and 我的纸 to pure white/black, decoupled from 铅纸', async ({ page }) => {
+  await open(page, 'image/s/0.html');
+  const look = (): Promise<{ bg: string; ink: string; texture: string; imgFilter: string }> =>
+    page.evaluate(() => {
+      const r = getComputedStyle(document.documentElement);
+      const s = getComputedStyle(document.querySelector('#yy-content p .s') as Element);
+      const img = document.querySelector('#yy-content img') as Element | null;
+      return {
+        bg: r.backgroundColor,
+        ink: s.color,
+        texture: r.backgroundImage,
+        imgFilter: img ? getComputedStyle(img).filter : 'none',
+      };
+    });
+  // 铅纸 (paper: 'eink') keeps warm-grey grain and normal colour illustrations.
+  await apply(page, { paper: 'eink', eink: false, einkGray: false });
+  const lead = await look();
+  expect(lead.bg).toBe('rgb(233, 232, 227)');
+  expect(lead.ink).toBe('rgb(20, 20, 20)');
+  expect(lead.texture).toContain('svg+xml');
+  expect(lead.imgFilter).toBe('none');
+
+  // 墨水屏模式 overrides even 我的纸 inline colours and texture to pure white/black.
+  await apply(page, { paper: 'kaminight', paperStyle: '--yy-p-bg:#18202B;--yy-p-ink:#C9D3DE;color-scheme:dark', texture: 'linen', eink: true, einkGray: true });
+  const einkGrayOn = await look();
+  expect(einkGrayOn.bg).toBe('rgb(255, 255, 255)');
+  expect(einkGrayOn.ink).toBe('rgb(0, 0, 0)');
+  expect(einkGrayOn.texture).toBe('none');
+  expect(einkGrayOn.imgFilter).toContain('grayscale');
+
+  // Colour e-ink: disabling grayscale keeps pure white/black page while preserving artwork colour.
+  await apply(page, { eink: true, einkGray: false });
+  const einkColor = await look();
+  expect(einkColor.bg).toBe('rgb(255, 255, 255)');
+  expect(einkColor.imgFilter).toBe('none');
+
+  // Turning 墨水屏模式 off restores the underlying 我的纸 without touching synced paper settings.
+  await apply(page, { eink: false, einkGray: false });
+  const restored = await look();
+  expect(restored.bg).toBe('rgb(24, 32, 43)');
+  expect(restored.texture).toContain('repeating-linear-gradient');
+});

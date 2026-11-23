@@ -54,7 +54,7 @@ const SHADOWS = keys(T.shadow.light);
 const RADII = keys(T.radius);
 const MOTION = keys(T.motion);
 
-// Fine-grain noise used by the e-ink paper.
+// Fine-grain noise used by 铅纸 (the newsprint paper).
 const NOISE =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
 
@@ -258,7 +258,7 @@ ${FONTS.map((f) => `        case .${f}: return .${{ sans: 'default', serif: 'ser
   L.push('        case "dark": return playDark');
   L.push('        case "kaminight": return playKaminight');
   L.push('        case "sage": return playSage');
-  L.push('        case "eink": return paper.main');
+  L.push('        case "eink", "eink-mode": return paper.main');
   L.push('        default: return paper.isDark ? playDark : playPlain');
   L.push('        }');
   L.push('    }');
@@ -451,7 +451,7 @@ function genKotlin() {
         "dark" -> playDark
         "kaminight" -> playKaminight
         "sage" -> playSage
-        "eink" -> paper.main
+        "eink", "eink-mode" -> paper.main
         else -> if (paper.isDark) playDark else playPlain
     }
 }
@@ -644,7 +644,7 @@ function genCSharp() {
         "dark" => PlayDark,
         "kaminight" => PlayKaminight,
         "sage" => PlaySage,
-        "eink" => paper.Main,
+        "eink" or "eink-mode" => paper.Main,
         _ => paper.IsDark ? PlayDark : PlayPlain,
     };
 }
