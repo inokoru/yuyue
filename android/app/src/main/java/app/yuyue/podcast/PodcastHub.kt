@@ -561,9 +561,6 @@ class PodcastHub(
         }
     }
 
-    fun clipsForIssue(issueID: String): List<PodcastClip> =
-        clips.filter { it.issueId == issueID }
-
     fun activeSentence(issueID: String): MagazineSentence? {
         val list = sentences(issueID).filter { it.skipReason == null }
         if (list.isEmpty()) return null
@@ -885,26 +882,27 @@ class PodcastHub(
         return best to best
     }
 
-    private suspend fun playPcmSentence(speech: Speech, t0: Double, t1: Double) {
-        val track = AudioTrack.Builder()
-            .setAudioAttributes(
-                PlatformAudioAttributes.Builder()
-                    .setUsage(PlatformAudioAttributes.USAGE_MEDIA)
-                    .setContentType(PlatformAudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-            )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(speech.rate)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .build()
-            )
-            .setTransferMode(AudioTrack.MODE_STATIC)
-            .setBufferSizeInBytes(max(2, speech.samples.size * 2))
-            .build()
+    private fun buildSpeechAudioTrack(speech: Speech): AudioTrack = AudioTrack.Builder()
+        .setAudioAttributes(
+            PlatformAudioAttributes.Builder()
+                .setUsage(PlatformAudioAttributes.USAGE_MEDIA)
+                .setContentType(PlatformAudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+        )
+        .setAudioFormat(
+            AudioFormat.Builder()
+                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                .setSampleRate(speech.rate)
+                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                .build()
+        )
+        .setTransferMode(AudioTrack.MODE_STATIC)
+        .setBufferSizeInBytes(max(2, speech.samples.size * 2))
+        .build()
+        .also { it.write(speech.samples, 0, speech.samples.size) }
 
-        track.write(speech.samples, 0, speech.samples.size)
+    private suspend fun playPcmSentence(speech: Speech, t0: Double, t1: Double) {
+        val track = buildSpeechAudioTrack(speech)
         val vol = if (isDucked) 0.065f else 1f
         track.setVolume(vol)
         if (kotlin.math.abs(rate - 1f) > 0.02f) {
@@ -1209,24 +1207,7 @@ class PodcastHub(
                 val voice = Voices.best(lang)
                 val speech = voice?.render(answer, lang)
                 if (speech != null && speech.samples.isNotEmpty()) {
-                    val track = AudioTrack.Builder()
-                        .setAudioAttributes(
-                            PlatformAudioAttributes.Builder()
-                                .setUsage(PlatformAudioAttributes.USAGE_MEDIA)
-                                .setContentType(PlatformAudioAttributes.CONTENT_TYPE_SPEECH)
-                                .build()
-                        )
-                        .setAudioFormat(
-                            AudioFormat.Builder()
-                                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                                .setSampleRate(speech.rate)
-                                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                                .build()
-                        )
-                        .setTransferMode(AudioTrack.MODE_STATIC)
-                        .setBufferSizeInBytes(max(2, speech.samples.size * 2))
-                        .build()
-                    track.write(speech.samples, 0, speech.samples.size)
+                    val track = buildSpeechAudioTrack(speech)
                     replyTrack = track
                     try {
                         track.play()

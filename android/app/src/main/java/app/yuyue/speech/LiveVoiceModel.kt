@@ -40,25 +40,28 @@ object VoicePack {
 
     /** Debug helper (`-e voicePackPath <zip-or-dir>`). */
     fun installDebug(core: YuyueCore, dataDir: File, from: File) {
-        if (!from.exists()) return
-        val dst = folder(dataDir)
-        if (from.isDirectory) {
-            dst.deleteRecursively()
-            from.copyRecursively(dst, overwrite = true)
-        } else if (from.isFile) {
-            val unpack = File(dataDir, "models/unpack-$NAME")
-            try {
-                unpack.deleteRecursively()
-                uniffi.yuyue_core.unpackModel(from.path, unpack.path)
-                val inner = File(unpack, NAME).takeIf { it.isDirectory } ?: unpack
-                dst.deleteRecursively()
-                dst.parentFile?.mkdirs()
-                if (!inner.renameTo(dst)) inner.copyRecursively(dst, overwrite = true)
-            } finally {
-                unpack.deleteRecursively()
-            }
-        }
+        installDebugBundle(dataDir, NAME, folder(dataDir), from)
         register(core, dataDir)
+    }
+}
+
+internal fun installDebugBundle(dataDir: File, name: String, dst: File, from: File) {
+    if (!from.exists()) return
+    if (from.isDirectory) {
+        dst.deleteRecursively()
+        from.copyRecursively(dst, overwrite = true)
+    } else if (from.isFile) {
+        val unpack = File(dataDir, "models/unpack-$name")
+        try {
+            unpack.deleteRecursively()
+            uniffi.yuyue_core.unpackModel(from.path, unpack.path)
+            val inner = File(unpack, name).takeIf { it.isDirectory } ?: unpack
+            dst.deleteRecursively()
+            dst.parentFile?.mkdirs()
+            if (!inner.renameTo(dst)) inner.copyRecursively(dst, overwrite = true)
+        } finally {
+            unpack.deleteRecursively()
+        }
     }
 }
 
@@ -181,24 +184,7 @@ object LiveVoiceModel {
 
     /** Debug helper (`-e liveVoicePath <zip-or-dir>`). */
     fun installDebug(core: YuyueCore, dataDir: File, from: File) {
-        if (!from.exists()) return
-        val dst = folder(dataDir)
-        if (from.isDirectory) {
-            dst.deleteRecursively()
-            from.copyRecursively(dst, overwrite = true)
-        } else if (from.isFile) {
-            val unpack = File(dataDir, "models/unpack-$NAME")
-            try {
-                unpack.deleteRecursively()
-                uniffi.yuyue_core.unpackModel(from.path, unpack.path)
-                val inner = File(unpack, NAME).takeIf { it.isDirectory } ?: unpack
-                dst.deleteRecursively()
-                dst.parentFile?.mkdirs()
-                if (!inner.renameTo(dst)) inner.copyRecursively(dst, overwrite = true)
-            } finally {
-                unpack.deleteRecursively()
-            }
-        }
+        installDebugBundle(dataDir, NAME, folder(dataDir), from)
         register(core, dataDir)
     }
 

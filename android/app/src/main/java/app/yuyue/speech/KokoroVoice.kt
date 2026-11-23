@@ -37,7 +37,7 @@ import kotlin.coroutines.coroutineContext
 /**
  * 语阅跨端轻量离线语音 (`models/kokoro-v1_1-1/`, `Kokoro-82M-v1.1-zh Int8`, Apache-2.0).
  *
- * 125 MB 打包体积，统一走 ONNX Runtime 单次前向合成 24 kHz 音频，内含 53 个中英自然音色。
+ * 125 MB 打包体积，统一走 ONNX Runtime 单次前向合成 24 kHz 音频，内含 16 个精选的中英自然音色。
  * 支持多源自动回退（魔搭 / GitHub Releases / HuggingFace 镜像）与 BLAKE3 强校验。
  */
 object KokoroModel {
@@ -188,12 +188,6 @@ object KokoroModel {
                 downloadJob = null
             }
         }
-    }
-
-    fun cancelDownload() {
-        downloadJob?.cancel()
-        downloadJob = null
-        if (state !is State.Ready) state = State.Idle
     }
 
     private suspend fun ensureInstalled(dataDir: File, onProgress: (Double) -> Unit) {

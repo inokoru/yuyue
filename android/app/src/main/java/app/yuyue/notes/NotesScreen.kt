@@ -276,11 +276,6 @@ fun NotesScreen(library: Library, pop: Int = 0) {
     }
 }
 
-@Composable
-private fun Action(title: String, bold: Boolean = false, onClick: () -> Unit) {
-    Text(title, fontSize = 15.sp, fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal, color = YY.tint.accent, modifier = Modifier.clickable(onClick = onClick))
-}
-
 private fun key(n: NotedBook, m: Mark) = n.id + "/" + m.id
 
 @Composable

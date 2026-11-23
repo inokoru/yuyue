@@ -1130,15 +1130,6 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
     var contextLine: SpeakerPick? = null
         private set
 
-    /** 几句一起循环 can reach this sentence: something is being read in the same chapter, and
-     *  it's another sentence. */
-    fun canLoop(section: Int, sentence: Int): Boolean {
-        val p = player ?: return false
-        val here = p.spot ?: return false
-        val reading = p.state == app.yuyue.speech.Player.State.Playing || p.state == app.yuyue.speech.Player.State.Loading
-        return reading && here.section == section && here.sentence != sentence
-    }
-
     /** 循环到这: from the sentence being read to this one, over and over. */
     fun loopTo(section: Int, sentence: Int) {
         player?.loopTo(section, sentence)

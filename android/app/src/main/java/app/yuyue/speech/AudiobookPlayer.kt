@@ -798,6 +798,7 @@ class AudiobookPlayer(private val context: Context, private val library: Library
             save(now = true)
         }
         stopFilling()
+        arrivals.cancel()
         shake?.stop()
         runCatching { dynamics?.release(); eq?.release(); boost?.release() }
         closed = true

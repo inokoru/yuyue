@@ -127,9 +127,6 @@ class DramaSynth(private val context: android.content.Context, private val libra
         return status == android.os.BatteryManager.BATTERY_STATUS_CHARGING || status == android.os.BatteryManager.BATTERY_STATUS_FULL
     }
 
-    fun sectionAllMade(book: String, section: Int): Boolean =
-        runCatching { section.toUInt() in library.core.dramaMade(book).madeSections }.getOrDefault(false)
-
     /** The voices the core casts `language` with: when the live voice bundle is ready,
      *  this language's built-in cards plus any cards designed for `book` (`acts = true`, no system
      *  voices, no cloned cards); otherwise system voices; plus cloud voices when narrator is cloud. */

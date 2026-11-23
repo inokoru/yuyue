@@ -158,21 +158,6 @@ object ClonedVoices {
 
     val engineAvailable: Boolean get() = CloudVoice.Provider.ElevenLabs.apiKey != null
 
-    /** Keeps a recording as a new voice and asks the engine to make it; kept even when it can't yet. */
-    suspend fun save(recording: File, name: String, text: String?, seconds: Double): ClonedVoice = withContext(Dispatchers.IO) {
-        val id = "cloned." + UUID.randomUUID().toString().lowercase()
-        val folder = File(dir, id).apply { mkdirs() }
-        val sample = File(folder, "sample." + recording.extension.ifEmpty { "audio" })
-        recording.copyTo(sample, overwrite = true)
-        val meta = JSONObject().put("id", id).put("name", name).put("created", System.currentTimeMillis()).put("seconds", seconds)
-        if (text != null) meta.put("text", text)
-        if (engineAvailable) {
-            meta.put("remote", elevenLabs(name, sample)).put("engine", "ElevenLabs").put("alsoElevenLabs", true)
-        }
-        File(folder, "meta.json").writeText(meta.toString(2))
-        ClonedVoice(meta)
-    }
-
     fun delete(v: ClonedVoice) = deleteById(v.id)
 
     fun deleteById(id: String) {

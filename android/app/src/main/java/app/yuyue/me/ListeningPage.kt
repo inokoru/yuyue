@@ -1041,7 +1041,7 @@ fun VoiceSourceSettings(id: String, back: () -> Unit) {
         if (id == NEURAL) {
             PanelHeader(voiceSourceTitle(NEURAL), t("跨端轻量离线模型 · 推荐"), YY.c.ok) { SourceTile(NEURAL, 34f) }
             YYGroup {
-                row { YYRow(t("状态"), value = if (app.yuyue.speech.KokoroModel.installed(lib.dataDir)) t("已就绪 · 53 音色") else t("待下载 · 125 MB")) }
+                row { YYRow(t("状态"), value = if (app.yuyue.speech.KokoroModel.installed(lib.dataDir)) t("已就绪 · 16 音色") else t("待下载 · 125 MB")) }
                 row { YYRow(t("费用"), value = t("免费 · 不联网")) }
             }
             if (!app.yuyue.speech.KokoroModel.installed(lib.dataDir)) {
