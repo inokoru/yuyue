@@ -57,6 +57,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.yuyue.design.ButtonKind
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.ButtonSize
 import app.yuyue.design.Icons
 import app.yuyue.design.YY
@@ -158,7 +159,7 @@ private fun SourceForm(library: Library, source: RemoteSource?, dismiss: () -> U
     var checking by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 28.dp)) {
             Text(if (source == null) t("添加书库") else t("修改书库"), style = YY.font(14f, FontWeight.Bold), color = YY.c.t1, modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
             YYSegments(listOf(RemoteSource.Kind.OPDS to "OPDS", RemoteSource.Kind.WEBDAV to "WebDAV"), kind, { kind = it }, modifier = Modifier.fillMaxWidth())

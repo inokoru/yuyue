@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.yuyue.design.Icons
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.YY
 import app.yuyue.design.pressScale
 import app.yuyue.design.rememberPref
@@ -458,7 +459,7 @@ fun AddBookSheet(library: Library, status: ReadingStatus, done: () -> Unit) {
         library.addRecordBook(name, status)
         done()
     }
-    ModalBottomSheet(done, containerColor = YY.c.bg) {
+    ModalBottomSheet(done, containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(Modifier.size(36.dp, 52.dp).clip(RoundedCornerShape(3.dp)).background(YY.c.card).border(0.5.dp, YY.c.line, RoundedCornerShape(3.dp)), contentAlignment = Alignment.Center) {

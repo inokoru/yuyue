@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.sp
 import app.yuyue.companion.Companion
 import app.yuyue.companion.CompanionConfig
 import app.yuyue.design.ButtonKind
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.ButtonSize
 import app.yuyue.design.Icons
 import app.yuyue.design.Prefs
@@ -551,7 +552,7 @@ fun TranslateSheet(model: ReaderModel, text: String, recheck: Int, openSettings:
         }.onFailure { model.failure = Library.message(it) }
     }
 
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle(bottom = 2.dp) }) {
         Column(
             Modifier.fillMaxWidth().animateContentSize(app.yuyue.design.YYMotion.layout()).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),

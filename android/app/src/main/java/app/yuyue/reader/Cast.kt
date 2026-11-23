@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import app.yuyue.design.Icons
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.YY
 import app.yuyue.design.YYGroup
 import app.yuyue.design.YYLabel
@@ -186,7 +187,7 @@ fun CastSheet(model: ReaderModel, dismiss: () -> Unit) {
     }
 
     val route = stack.last()
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle(bottom = 2.dp) }) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp).verticalScroll(rememberScrollState())) {
             if (route !is CastRoute.Clone && route !is CastRoute.CloneDetail) {
                 Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {

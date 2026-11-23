@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.yuyue.design.Icons
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.YY
 import app.yuyue.design.YYMotion
 import app.yuyue.library.Library
@@ -162,7 +163,7 @@ fun DeckCard(review: Review, library: Library, start: () -> Unit) {
 @Composable
 fun ReviewSheet(review: Review, library: Library, open: (ReviewItem) -> Unit, only: (BookSummary) -> Unit, dismiss: () -> Unit) {
     val context = LocalContext.current
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(horizontal = 24.dp).padding(bottom = 24.dp)) {
             // 关闭 · 今天回顾 · 1 / 5 · 分享
             Row(verticalAlignment = Alignment.CenterVertically) {

@@ -705,7 +705,6 @@ private fun Cards(model: ReaderModel, paper: YYPaper, thought: (Mark) -> Unit, t
                     if (model.player != null) CardAction(Icons.headphones, t("从这读"), Modifier.weight(1f)) { model.readFrom(current) }
                     if (current == null && model.contextLine != null) CardAction(Icons.personCircle, t("谁说的"), Modifier.weight(1f)) { model.pickSpeakerFromSelection() }
                     snap.sel?.takeIf { current == null }?.let { s ->
-                        if (model.canLoop(s.section, s.end.s)) CardAction(Icons.repeat, t("循环到这"), Modifier.weight(1f)) { model.loopTo(s.section, s.end.s) }
                         if (model.canPin) CardAction(Icons.target, t("对准"), Modifier.weight(1f)) { model.pinHere(s.section, s.start.s) }
                     }
                     CardAction(Icons.sparkle, t("问"), Modifier.weight(1f), color = YY.tint.accent) {
@@ -838,7 +837,7 @@ internal fun PlayerFailure(player: app.yuyue.speech.Player) {
     AlertDialog(
         onDismissRequest = { player.failure = null },
         containerColor = YY.c.card,
-        title = { Text(if (missing != null) t("这台手机还没有%@声音", missing) else t("朗读出错了"), color = YY.c.t1) },
+        title = { Text(if (missing != null) t("这台手机还没有%@声音", missing) else t("朗读停下了"), color = YY.c.t1) },
         text = { Text(message, color = YY.c.t2) },
         confirmButton = if (missing != null) {
             {
@@ -849,11 +848,13 @@ internal fun PlayerFailure(player: app.yuyue.speech.Player) {
                 }) { Text(t("下载%@声音", missing), color = YY.tint.accent) }
             }
         } else {
-            { TextButton({ player.failure = null }) { Text(t("好"), color = YY.tint.accent) } }
+            { TextButton({ player.useSystemVoice() }) { Text(t("换成系统声音"), color = YY.tint.accent) } }
         },
         dismissButton = if (missing != null) {
             { TextButton({ player.failure = null }) { Text(t("先不听"), color = YY.c.t2) } }
-        } else null,
+        } else {
+            { TextButton({ player.retry() }) { Text(t("重试"), color = YY.c.t2) } }
+        },
     )
 }
 
@@ -994,7 +995,7 @@ private fun TimingAdjustSheet(model: ReaderModel, initialSection: Int, initialSe
             }
         }
     }
-    androidx.compose.material3.ModalBottomSheet(onDismissRequest = { stopPreview(); dismiss() }, sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = { stopPreview(); dismiss() }, sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { app.yuyue.design.YYSheetDragHandle(bottom = 2.dp) }) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             app.yuyue.design.YYSheetHeader(t("微调"), t("第 %lld 章 · 第 %lld 句", (cur.section + 1).toLong(), (cur.sentence + 1).toLong())) { stopPreview(); dismiss() }
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(YY.c.card).border(0.5.dp, YY.c.line, RoundedCornerShape(14.dp)).padding(12.dp)) {

@@ -81,9 +81,9 @@ fun YYPage(modifier: Modifier = Modifier, contentPadding: PaddingValues = Paddin
 
 /** A heading over a card, a grey note on its right. */
 @Composable
-fun YYLabel(title: String, trailing: String? = null) {
+fun YYLabel(title: String, trailing: String? = null, top: Dp = YY.s(18)) {
     Row(
-        Modifier.fillMaxWidth().padding(top = YY.s(18), bottom = YY.s(8), start = YY.s(2), end = YY.s(2)),
+        Modifier.fillMaxWidth().padding(top = top, bottom = YY.s(8), start = YY.s(2), end = YY.s(2)),
     ) {
         Text(title, style = YY.font(12.5f, FontWeight.SemiBold), color = YY.c.t1, modifier = Modifier.alignByBaseline())
         Spacer(Modifier.weight(1f))
@@ -350,13 +350,29 @@ fun YYTag(text: String, icon: ImageVector? = null) {
     }
 }
 
+/** Compact drag pill for modal sheets (Material 3's default DragHandle adds 48dp of vertical padding). */
+@Composable
+fun YYSheetDragHandle(top: Dp = 10.dp, bottom: Dp = 8.dp) {
+    Box(
+        Modifier.fillMaxWidth().padding(top = top, bottom = bottom),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(width = 36.dp, height = 4.dp)
+                .clip(CircleShape)
+                .background(YY.c.t3.copy(alpha = 0.35f)),
+        )
+    }
+}
+
 /** A sheet's own title with × on the right. */
 @Composable
 fun YYSheetHeader(title: String, subtitle: String? = null, close: () -> Unit) {
     val gap = YY.s(8)
     Row(
         // No side padding of its own: the sheet's edge is the edge, so × sits right against it.
-        Modifier.fillMaxWidth().padding(top = YY.s(10), bottom = YY.s(6)),
+        Modifier.fillMaxWidth().padding(bottom = YY.s(4)),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(YY.s(8)),
     ) {

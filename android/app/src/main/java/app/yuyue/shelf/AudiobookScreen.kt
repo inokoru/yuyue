@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import app.yuyue.design.Icons
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.YY
 import app.yuyue.design.YYSegments
 import app.yuyue.design.yyCard
@@ -236,7 +237,7 @@ private fun NoticeLine(player: AudiobookPlayer) {
 @UnstableApi
 @Composable
 private fun RecordingSheet(player: AudiobookPlayer, dismiss: () -> Unit) {
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = YY.s(24)).fillMaxWidth().yyCard(YY.s(14)).padding(horizontal = YY.s(12))) {
             Text(t("这本录音"), style = YY.font(12f, FontWeight.Bold), color = YY.c.t1, modifier = Modifier.padding(top = YY.s(10), bottom = YY.s(4)))
             val s = player.settings
@@ -401,7 +402,7 @@ private fun EbookPickerSheet(
             b.title.contains(q, ignoreCase = true) || b.authors.any { it.contains(q, ignoreCase = true) }
         }
     }
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
             Text(t("选一本电子书"), style = YY.font(15f, FontWeight.Bold), color = YY.c.t1)
             Text(t("听的时候书页跟着走"), style = YY.font(11f), color = YY.c.t3, modifier = Modifier.padding(top = 2.dp, bottom = 10.dp))
@@ -704,7 +705,7 @@ private fun ChapterSheet(player: AudiobookPlayer, page: Int, select: (Int) -> Un
             dismissButton = { androidx.compose.material3.TextButton({ renaming = null }) { Text(t("取消"), color = YY.c.t2) } },
         )
     }
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
             YYSegments(listOf(0 to t("章节 %lld", player.chapters.size), 1 to t("书签 %lld", player.bookmarks.size)), page, select)
             Spacer(Modifier.height(10.dp))

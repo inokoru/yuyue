@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.yuyue.design.ButtonKind
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.ButtonSize
 import app.yuyue.design.YY
 import app.yuyue.design.YYButton
@@ -153,7 +154,7 @@ fun QuoteShareSheet(quote: QuoteShare, dismiss: () -> Unit) {
     LaunchedEffect(quote.coverPath) { cover = quote.coverPath?.let { Thumbnails.load(it, 360) } }
     val layer = rememberGraphicsLayer()
     val scope = rememberCoroutineScope()
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(t("书摘分享"), style = YY.font(14f, FontWeight.Bold), color = YY.c.t1)
             val scale = minOf(1f, 330f / shape.width.value)

@@ -1,6 +1,7 @@
 package app.yuyue.reader
 
 import app.yuyue.design.YYSlider
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.RateMenu
 import app.yuyue.design.rateLabel
 import androidx.compose.ui.semantics.stateDescription
@@ -66,7 +67,7 @@ fun ListenSheet(model: ReaderModel, dismiss: () -> Unit) {
     val player = model.player ?: return dismiss()
     var pickingVoice by remember { mutableStateOf(false) }
     var currentVoiceId by remember { mutableStateOf<String?>(null) }
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.card) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.card, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             VoiceRow(model, player, onCurrentChanged = { currentVoiceId = it?.id }) { pickingVoice = true }
             PrepareBetterVoiceRow(model.core, model.library.dataDir, player.language)

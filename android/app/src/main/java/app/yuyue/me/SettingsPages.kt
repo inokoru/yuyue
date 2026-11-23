@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.yuyue.design.Appearance
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.ButtonKind
 import app.yuyue.design.ButtonSize
 import app.yuyue.design.Icons
@@ -656,6 +657,7 @@ fun ReadingPage(library: Library, push: (MePage) -> Unit) {
             sheetState = rememberModalBottomSheetState(),
             containerColor = YY.c.card,
             scrimColor = Color.Transparent,
+            dragHandle = { YYSheetDragHandle() },
         ) {
             Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 PaperEditor(
@@ -1150,7 +1152,7 @@ fun HistoryPage(push: (MePage) -> Unit) {
             val v = Voices.find(voiceId)
             if (v != null) {
                 val latin = label.count { it.code < 128 } > label.length / 2
-                val sample = if (latin && v.speaks("en") && !v.speaks("zh")) "It was the best of times." else "我冒了严寒，回到相隔二千余里的故乡去。"
+                val sample = app.yuyue.speech.DailyQuote.current(if (latin && v.speaks("en") && !v.speaks("zh")) "en" else "zh").text
                 if (v is SystemVoice) {
                     if (v.preview(sample)) delay(2400)
                 } else {

@@ -44,6 +44,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import app.yuyue.MainActivity
 import app.yuyue.design.ButtonKind
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.ButtonSize
 import app.yuyue.design.Icons
 import app.yuyue.design.Prefs
@@ -173,7 +174,7 @@ object EInk {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ImmersiveSheet(model: ReaderModel?, dismiss: () -> Unit) {
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) { ImmersiveSettings(model) }
     }
 }

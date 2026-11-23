@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import app.yuyue.design.ButtonKind
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.ButtonSize
 import app.yuyue.design.Icons
 import app.yuyue.design.YY
@@ -72,7 +73,7 @@ fun ReplaceRulesSheet(core: YuyueCore, bookID: String, changed: () -> Unit, dism
         runCatching { core.replaceRules(bookID) }.getOrDefault(emptyList()).filter { (it.book != null) == forBook }.sortedBy { it.order }
     }
     fun touched() { version++; changed() }
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 28.dp)) {
             Text(t("替换规则"), style = YY.font(14f, FontWeight.Bold), color = YY.c.t1, modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
             YYSegments(listOf(true to t("这本书"), false to t("全部书")), forBook, { forBook = it }, modifier = Modifier.fillMaxWidth())
@@ -128,7 +129,7 @@ private fun RuleEditor(core: YuyueCore, bookID: String, initial: ReplaceRule, sa
         delay(200)
         preview = if (rule.find.isEmpty()) null else withContext(Dispatchers.IO) { runCatching { core.previewReplaceRule(bookID, rule) }.getOrNull() }
     }
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 28.dp)) {
             Text(if (isNew) t("添加规则") else t("编辑规则"), style = YY.font(14f, FontWeight.Bold), color = YY.c.t1, modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
             YYGroup {
@@ -187,7 +188,7 @@ private fun RuleEditor(core: YuyueCore, bookID: String, initial: ReplaceRule, sa
 private fun CommonRules(core: YuyueCore, book: String?, added: () -> Unit, dismiss: () -> Unit) {
     val list = remember { runCatching { core.commonReplaceRules() }.getOrDefault(emptyList()) }
     var done by remember { mutableStateOf(setOf<String>()) }
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 28.dp)) {
             Text(if (book != null) t("加到这本书") else t("加到全部书"), style = YY.font(14f, FontWeight.Bold), color = YY.c.t1, modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
             YYGroup {

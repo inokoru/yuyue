@@ -49,6 +49,7 @@ import app.yuyue.design.YY
 import app.yuyue.design.YYButton
 import app.yuyue.design.YYGroup
 import app.yuyue.design.YYLabel
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.pressable
 import app.yuyue.speech.BookVoice
 import app.yuyue.speech.CardVoice
@@ -182,17 +183,13 @@ fun VoicePickerSheet(
         onDismissRequest = dismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = YY.c.bg,
+        dragHandle = { YYSheetDragHandle(bottom = 2.dp) },
     ) {
-        Column(
-            Modifier
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 24.dp)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            when (val r = route) {
-                PickerSubRoute.List -> {
+        when (val r = route) {
+            PickerSubRoute.List -> {
+                Column(Modifier.fillMaxWidth()) {
                     Row(
-                        Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(t("声音"), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = YY.c.t1, modifier = Modifier.weight(1f))
@@ -215,32 +212,48 @@ fun VoicePickerSheet(
                             }
                         }
                     }
-                    VoiceGroupsContent(
-                        core = core,
-                        dataDir = dataDir,
-                        bookID = bookID,
-                        bookTitle = bookTitle,
-                        language = language,
-                        roleName = null,
-                        narratorVoice = null,
-                        roles = emptyList(),
-                        selectedId = selectedId,
-                        sampleText = nextBookSentence ?: defaultSampleLine(language),
-                        refreshKey = refreshTick,
-                        onPickFollowNarrator = null,
-                        onPickVoice = { v ->
-                            onSelect(v)
-                            dismiss()
-                        },
-                        onOpenClone = { replacingId, initName ->
-                            route = PickerSubRoute.Clone(replacingId, initName)
-                        },
-                        onOpenDetail = { cardId ->
-                            route = PickerSubRoute.Detail(cardId)
-                        },
-                    )
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp)
+                            .padding(bottom = 24.dp),
+                    ) {
+                        VoiceGroupsContent(
+                            core = core,
+                            dataDir = dataDir,
+                            bookID = bookID,
+                            bookTitle = bookTitle,
+                            language = language,
+                            roleName = null,
+                            narratorVoice = null,
+                            roles = emptyList(),
+                            selectedId = selectedId,
+                            sampleText = nextBookSentence ?: defaultSampleLine(language),
+                            refreshKey = refreshTick,
+                            onPickFollowNarrator = null,
+                            onPickVoice = { v ->
+                                onSelect(v)
+                                dismiss()
+                            },
+                            onOpenClone = { replacingId, initName ->
+                                route = PickerSubRoute.Clone(replacingId, initName)
+                            },
+                            onOpenDetail = { cardId ->
+                                route = PickerSubRoute.Detail(cardId)
+                            },
+                        )
+                    }
                 }
-                is PickerSubRoute.Clone -> {
+            }
+            is PickerSubRoute.Clone -> {
+                Column(
+                    Modifier
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 24.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
                     VoiceClonePanel(
                         core = core,
                         dataDir = dataDir,
@@ -264,7 +277,14 @@ fun VoicePickerSheet(
                         },
                     )
                 }
-                is PickerSubRoute.Detail -> {
+            }
+            is PickerSubRoute.Detail -> {
+                Column(
+                    Modifier
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 24.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
                     ClonedCardDetailPanel(
                         core = core,
                         dataDir = dataDir,
@@ -377,6 +397,9 @@ fun VoiceGroupsContent(
         }
     }
 
+    val hasFollowRow = roleName != null && onPickFollowNarrator != null
+    val showRecommended = CardVoice.speaksLanguage(language)
+
     if (roleName != null && onPickFollowNarrator != null) {
         YYGroup(Modifier.padding(top = 4.dp)) {
             row {
@@ -397,10 +420,14 @@ fun VoiceGroupsContent(
     }
 
     // 1. 推荐
-    if (CardVoice.speaksLanguage(language)) {
+    if (showRecommended) {
         val defaultKokoroId = if (language.lowercase().startsWith("en")) "kokoro.af_heart" else "kokoro.zf_001"
         val primaryNarratorId = if (kokoroVoices.isNotEmpty()) defaultKokoroId else if (language.lowercase().startsWith("en")) "card.b.33" else "card.b.01"
-        YYLabel(t("推荐"), if (kokoroVoices.isNotEmpty() || recommended.isNotEmpty()) t("跨端离线好声音") else null)
+        YYLabel(
+            t("推荐"),
+            if (kokoroVoices.isNotEmpty() || recommended.isNotEmpty()) t("跨端离线好声音") else null,
+            top = if (!hasFollowRow) 4.dp else YY.s(18),
+        )
         YYGroup {
             when {
                 KokoroModel.deviceUnsupported && LiveVoiceModel.deviceUnsupported -> {
@@ -514,7 +541,7 @@ fun VoiceGroupsContent(
     }
 
     // 2. 我的
-    YYLabel(t("我的"), t("克隆与本书角色"))
+    YYLabel(t("我的"), t("克隆与本书角色"), top = if (!hasFollowRow && !showRecommended) 4.dp else YY.s(18))
     YYGroup {
         for (card in clonedCards) {
             val v: BookVoice = if (LiveVoiceModel.canRun(dataDir)) {

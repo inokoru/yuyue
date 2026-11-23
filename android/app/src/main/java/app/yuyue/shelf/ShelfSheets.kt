@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.yuyue.design.ButtonKind
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.ButtonSize
 import app.yuyue.design.Icons
 import app.yuyue.design.YY
@@ -141,7 +142,7 @@ fun BookInfoSheet(library: Library, book: uniffi.yuyue_core.BookSummary, dismiss
         val authors = author.split('、', ',', '，', ';', '；', '/').map { it.trim() }.filter { it.isNotEmpty() }
         if (title.trim() != current.title || authors != current.authors) library.editInfo(current, title.trim(), authors)
     }
-    ModalBottomSheet({ save(); dismiss() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet({ save(); dismiss() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 28.dp)) {
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 BookCover(current, Modifier.width(84.dp))
@@ -194,7 +195,7 @@ fun CollectionPickerSheet(library: Library, bookID: String, dismiss: () -> Unit)
     var query by remember { mutableStateOf("") }
     val book = library.books.firstOrNull { it.id == bookID }
     val mine = book?.collections?.toSet() ?: emptySet()
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 28.dp)) {
             Text(t("加入合集"), style = YY.font(14f, FontWeight.Bold), color = YY.c.t1, modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
             YYGroup {

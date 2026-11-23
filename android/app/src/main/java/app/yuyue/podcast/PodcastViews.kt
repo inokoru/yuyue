@@ -78,6 +78,7 @@ import androidx.compose.ui.unit.sp
 import app.yuyue.companion.CompanionConfig
 import app.yuyue.companion.CompanionSettingsSheet
 import app.yuyue.design.Icons
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.Prefs
 import app.yuyue.design.YY
 import app.yuyue.design.YYMotion
@@ -1373,6 +1374,7 @@ fun PodcastAddSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = YY.c.bg,
+        dragHandle = { YYSheetDragHandle() },
     ) {
         Column(
             modifier = Modifier
@@ -1603,6 +1605,7 @@ fun PodcastStudioSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = YY.c.bg,
+        dragHandle = { YYSheetDragHandle() },
     ) {
         Column(
             modifier = Modifier
@@ -1951,6 +1954,7 @@ fun PodcastDrawerSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = YY.c.bg,
+        dragHandle = { YYSheetDragHandle() },
     ) {
         Column(
             modifier = Modifier

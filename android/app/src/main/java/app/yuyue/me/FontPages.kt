@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.yuyue.design.Icons
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.YY
 import app.yuyue.reader.FontShelf
 import app.yuyue.t
@@ -204,7 +205,7 @@ private enum class Kind { SONG, KAI, HEI, MINE }
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MoreFonts(selected: String, close: () -> Unit, choose: (String) -> Unit) {
-    ModalBottomSheet(close, sheetState = rememberModalBottomSheetState(), containerColor = YY.c.bg, scrimColor = Color.Black.copy(alpha = 0.12f)) {
+    ModalBottomSheet(close, sheetState = rememberModalBottomSheetState(), containerColor = YY.c.bg, scrimColor = Color.Black.copy(alpha = 0.12f), dragHandle = { YYSheetDragHandle() }) {
         MoreFontsContent(selected, back = null, modifier = Modifier.padding(horizontal = YY.s(16)).navigationBarsPadding(), choose = choose)
     }
 }

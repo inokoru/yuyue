@@ -48,6 +48,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.yuyue.design.ButtonKind
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.ButtonSize
 import app.yuyue.design.Icons
 import app.yuyue.design.YY
@@ -562,7 +563,7 @@ fun ModelsPage(id: String, back: () -> Unit) {
 fun CompanionSettingsSheet(dismiss: () -> Unit) {
     var service by remember { mutableStateOf<String?>(null) }
     var models by remember { mutableStateOf(false) }
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f)) {
             val s = service
             if (s != null) Row(Modifier.heightIn(min = 44.dp).clickable { if (models) models = false else service = null }.padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -594,7 +595,7 @@ fun ProviderLogo(p: CompanionProvider, size: Dp = 18.dp) {
 @Composable
 private fun ProviderSheet(close: () -> Unit) {
     var picked by remember { mutableStateOf<CompanionProvider?>(null) }
-    ModalBottomSheet(close, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(close, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle(bottom = 2.dp) }) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 28.dp)) {
             val p = picked
             if (p != null) ProviderForm(p, adding = true, back = { picked = null }, close = close, done = close)
@@ -627,11 +628,11 @@ private fun Picker(back: (() -> Unit)?, close: () -> Unit, pick: (CompanionProvi
     for (group in CompanionProvider.Group.entries) {
         val list = matches.filter { it.group == group }
         if (list.isEmpty()) continue
-        Text(group.title, style = YY.font(10f, FontWeight.SemiBold), color = YY.c.t3, modifier = Modifier.padding(start = YY.s(4), top = YY.s(12), bottom = YY.s(4)))
-        Column(verticalArrangement = Arrangement.spacedBy(YY.s(6))) {
-            for (rowItems in list.chunked(4)) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(YY.s(6))) {
-                for (p in rowItems) Tile(p, Modifier.weight(1f)) { pick(p) }
-                repeat(4 - rowItems.size) { Spacer(Modifier.weight(1f)) }
+        Text(group.title, style = YY.font(10f, FontWeight.SemiBold), color = YY.c.t3, modifier = Modifier.padding(start = YY.s(8), top = YY.s(12), bottom = YY.s(2)))
+        Column(verticalArrangement = Arrangement.spacedBy(YY.s(2))) {
+            for (pair in list.chunked(2)) Row(horizontalArrangement = Arrangement.spacedBy(YY.s(2))) {
+                for (p in pair) Tile(p, Modifier.weight(1f)) { pick(p) }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }
@@ -655,19 +656,13 @@ private fun Picker(back: (() -> Unit)?, close: () -> Unit, pick: (CompanionProvi
 
 @Composable
 private fun Tile(p: CompanionProvider, modifier: Modifier, onClick: () -> Unit) {
-    Column(
-        modifier
-            .height(YY.s(58))
-            .clip(RoundedCornerShape(YY.s(9)))
-            .background(YY.c.card)
-            .border(0.5.dp, YY.c.line, RoundedCornerShape(YY.s(9)))
-            .clickable(onClick = onClick)
-            .padding(horizontal = YY.s(4), vertical = YY.s(6)),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(YY.s(4), Alignment.CenterVertically),
+    Row(
+        modifier.height(YY.s(36)).clip(RoundedCornerShape(YY.s(8))).clickable(onClick = onClick).padding(horizontal = YY.s(8)),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(YY.s(8)),
     ) {
-        app.yuyue.me.ServiceTile(26f) { ProviderLogo(p, YY.s(16)) }
-        Text(p.title, style = YY.font(10f, FontWeight.Medium), color = YY.c.t1, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+        ProviderLogo(p)
+        Text(p.title, style = YY.font(11.5f), color = YY.c.t1, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
     }
 }
 

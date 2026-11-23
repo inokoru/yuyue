@@ -44,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import app.yuyue.design.ButtonKind
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.ButtonSize
 import app.yuyue.design.Icons
 import app.yuyue.design.YY
@@ -85,7 +86,7 @@ fun AudiobookImportSheet(library: Library, pending: Library.PendingRecording) {
         audio = audio.copy(files = audio.files.toMutableList().also { it.add(j, it.removeAt(i)) })
     }
     val total = audio.files.sumOf { it.seconds }
-    ModalBottomSheet({ library.cancelRecording() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet({ library.cancelRecording() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 28.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(t("导入有声书"), style = YY.font(14f, FontWeight.SemiBold), color = YY.c.t1, modifier = Modifier.weight(1f))

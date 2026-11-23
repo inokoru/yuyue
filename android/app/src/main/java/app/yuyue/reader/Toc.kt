@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.yuyue.design.ButtonKind
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.Icons
 import app.yuyue.design.ProgressLine
 import app.yuyue.design.YY
@@ -128,7 +129,7 @@ fun TocSheet(model: ReaderModel, dismiss: () -> Unit) {
     var editing by remember { mutableStateOf<Mark?>(null) }
     val chapters = remember(model.section) { model.tocChapters }
     val current = model.currentChapter(chapters)
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.fillMaxSize().padding(top = YY.s(4)), verticalArrangement = Arrangement.spacedBy(YY.s(12))) {
             Header(model, chapters, current, dismiss)
             YYSegments(

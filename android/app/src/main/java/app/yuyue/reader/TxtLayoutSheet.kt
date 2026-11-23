@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.yuyue.design.ButtonKind
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.ButtonSize
 import app.yuyue.design.YY
 import app.yuyue.design.YYButton
@@ -69,7 +70,7 @@ fun TxtLayoutSheet(library: Library, bookID: String, title: String, rebuilt: () 
         if (layout != null) delay(250)
         layout = withContext(Dispatchers.IO) { runCatching { core.txtLayout(bookID, choice) }.getOrNull() }
     }
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 28.dp)) {
             Text(t("编码和目录"), style = YY.font(14f, FontWeight.Bold), color = YY.c.t1, modifier = Modifier.padding(start = 4.dp))
             Text(listOfNotNull("$title.txt", layout?.let { Formatter.formatShortFileSize(context, it.size.toLong()) }).joinToString(" · "), style = YY.font(10f), color = YY.c.t3, modifier = Modifier.padding(start = 4.dp))

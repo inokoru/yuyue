@@ -77,6 +77,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.yuyue.design.ButtonKind
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.pressScale
 import app.yuyue.design.Icons
 import app.yuyue.design.ProgressLine
@@ -673,7 +674,7 @@ private fun BarButton(title: String, icon: ImageVector, enabled: Boolean, modifi
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ImportSheet(watching: String?, dismiss: () -> Unit, files: () -> Unit, wifi: () -> Unit, remote: () -> Unit, watch: () -> Unit) {
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         ImportChoices(watching, files, wifi, remote, watch)
     }
 }

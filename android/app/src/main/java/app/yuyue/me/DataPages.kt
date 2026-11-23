@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import app.yuyue.YuyueApp
 import app.yuyue.design.ButtonKind
+import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.ButtonSize
 import app.yuyue.design.Icons
 import app.yuyue.design.YY
@@ -257,7 +258,7 @@ private fun WebDAVSheet(sync: Sync, dismiss: () -> Unit) {
     var checking by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 28.dp)) {
             Text("WebDAV", style = YY.font(14f, FontWeight.Bold), color = YY.c.t1, modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
             YYGroup {
@@ -457,7 +458,7 @@ private fun ReadingExportSheet(library: Library, dismiss: () -> Unit) {
         val offset = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60_000
         export = withContext(Dispatchers.IO) { runCatching { library.core.readingExport(site, offset) }.getOrNull() }
     }
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 28.dp)) {
             Text(t("导出阅读记录"), style = YY.font(14f, FontWeight.Bold), color = YY.c.t1, modifier = Modifier.padding(start = 4.dp, bottom = 12.dp))
             YYSegments(listOf(uniffi.yuyue_core.ReadingSite.GOODREADS to "Goodreads", uniffi.yuyue_core.ReadingSite.STORY_GRAPH to "StoryGraph"), site, { site = it }, modifier = Modifier.fillMaxWidth())
@@ -514,7 +515,7 @@ fun SnapshotImportSheet(library: Library, file: File, info: SnapshotInfo, dismis
     var working by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg) {
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 28.dp)) {
             Text(t("导入快照"), style = YY.font(14f, FontWeight.Bold), color = YY.c.t1, modifier = Modifier.padding(start = 4.dp, bottom = 12.dp))
             Column(Modifier.fillMaxWidth().background(YY.c.card, RoundedCornerShape(16.dp)).padding(12.dp)) {
