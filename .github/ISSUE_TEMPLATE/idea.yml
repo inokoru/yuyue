@@ -30,4 +30,4 @@ body:
     attributes:
       label: 设备 / Platform
       multiple: true
-      options: [Mac, iPhone, iPad, Android, 都要 / All]
+      options: [Mac, iPhone, iPad, Android, Windows, 都要 / All]

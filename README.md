@@ -121,7 +121,7 @@ web/        静态介绍页与隐私说明
 
 ### 构建
 
-需要 Rust、Node、pnpm；Apple 端另需 Xcode 与 XcodeGen，Android 端另需 Android SDK 与 NDK（通过 `ANDROID_HOME` 指定）。
+需要 Rust、Node、pnpm；Apple 端另需 Xcode 与 XcodeGen，Android 端另需 Android SDK 与 NDK（通过 `ANDROID_HOME` 指定），Windows 端（开发中）另需 .NET SDK 与 Windows App SDK。
 
 ```sh
 # 书页
@@ -134,6 +134,10 @@ cd apple && xcodegen
 # Android
 android/build-core.sh
 cd android && ./gradlew assembleDebug
+
+# Windows（在 Windows PowerShell 中运行）
+pwsh windows/build-core.ps1 -Debug
+dotnet build windows/Yuyue/Yuyue.csproj
 ```
 
 测试：在 `core/` 下运行 `cargo test`，在 `reader/` 下运行 `pnpm test`。界面快照与窗口图册说明见 [docs/dev/testing.md](docs/dev/testing.md)。打包发布文件见 `scripts/package-release.sh`。

@@ -15,7 +15,7 @@ body:
     attributes:
       label: 设备 / Platform
       multiple: true
-      options: [Mac, iPhone, iPad, Android, 墨水屏 Android / E-ink Android]
+      options: [Mac, iPhone, iPad, Android, 墨水屏 Android / E-ink Android, Windows]
     validations:
       required: true
   - type: input
