@@ -9,47 +9,47 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -67,10 +67,14 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.exifinterface.media.ExifInterface
 import app.yuyue.BuildConfig
 import app.yuyue.design.ButtonKind
 import app.yuyue.design.ButtonSize
@@ -78,14 +82,10 @@ import app.yuyue.design.Icons
 import app.yuyue.design.Prefs
 import app.yuyue.design.YY
 import app.yuyue.design.YYButton
-import app.yuyue.design.YYSegments
+import app.yuyue.design.YYMotion
 import app.yuyue.t
-import androidx.compose.runtime.mutableStateListOf
-import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -93,318 +93,283 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import uniffi.yuyue_core.FeedbackDraft
-import uniffi.yuyue_core.feedbackMessage
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.IOException
+import java.util.Base64
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
- * 反馈: the core turns what the form holds into one ntfy message (`feedbackMessage`) and it is
- * POSTed to ntfy.sh (docs/dev/feedback.md). 语阅 is open source: the title, body, optional device
- * info, and all attachments become a public GitHub Issue so anyone in the community can help debug.
- * No email or contact info is collected; without a network the message waits on this phone.
+ * 反馈: single-channel AirFeedback submission.
+ *
+ * The user's message, optional screenshots (EXIF-stripped JPEG), and optional device info are
+ * posted privately to the AirFeedback ingest endpoint. Nothing is published publicly and no email
+ * address is collected. Drafts stay local until sent or explicitly cleared.
  */
 object Feedback {
-    enum class Category(val id: String) {
-        Bug("bug"), Idea("idea"), Other("other");
-
-        val title: String get() = when (this) { Bug -> t("问题"); Idea -> t("建议"); Other -> t("其他") }
-        val titlePlaceholder: String get() = when (this) {
-            Bug -> t("一句话概括遇到的问题")
-            Idea -> t("一句话概括你的建议")
-            Other -> t("一句话标题")
-        }
-        val placeholder: String get() = when (this) {
-            Bug -> t("哪本书、哪一页，做了什么，结果怎样")
-            Idea -> t("想要什么功能，或者哪里可以更顺手")
-            Other -> t("想说的都可以")
-        }
-    }
-
-    /** [QueuedBusy]: kept and sent later because ntfy said too many (HTTP 429), not because the network is gone. */
-    enum class Outcome { Sent, Queued, QueuedBusy }
-
-    class Problem(message: String) : Exception(message)
-
-    /** HTTP 429: ntfy.sh's limit for this IP (shared by everyone behind the same carrier address). */
-    class Busy : Exception("busy")
-
-    /** The core's caps, counted in code points as Rust counts chars. */
-    const val TITLE_MAX = 60
-    const val TEXT_MAX = 800
-    const val FILES_MAX = 3
-    const val FILE_BYTES_MAX = 1_500_000
+    const val ENDPOINT = "https://apps.air.build/v1/ingest/feedback"
+    private const val APP_KEY = "ak_production_Qs0hTAYx4hLMr8ZINF6vA5UkGx06nSplVhloydvhOyg"
+    const val TEXT_MAX = 4000
+    const val FILES_MAX = 4
+    const val FILE_BYTES_MAX = 8_000_000
+    const val IMAGE_MAX_SIDE = 2048
     const val SUPPORT_EMAIL = "yuyue.app@icloud.com"
     /** 早期版本: the entries wear the theme colour. Set to false once 语阅 settles. */
     const val EARLY = true
 
-    private const val QUEUE_KEY = "feedback.queue"
-    private val topic = BuildConfig.FEEDBACK_TOPIC.trim()
-    private val http by lazy { OkHttpClient.Builder().callTimeout(15, TimeUnit.SECONDS).build() }
-    private val slow by lazy { http.newBuilder().callTimeout(40, TimeUnit.SECONDS).build() }
-    private val flushing = Mutex()
+    class Problem(message: String) : Exception(message)
 
-    /** Public builds carry no topic; the form says so and does not send. */
-    val isConfigured: Boolean get() = topic.isNotEmpty()
+    /** One image attachment: downscaled, EXIF-stripped JPEG bytes plus its decoded preview. */
+    class Attachment(val name: String, val data: ByteArray, val preview: ImageBitmap)
 
-    val queued: List<String> get() = readList(QUEUE_KEY)
-
-    /**
-     * One attachment: a screenshot, or another file such as a book that won't open. A picture is
-     * shrunk first (at most 1600 px on the long side, re-encoded as JPEG from the pixels, so what
-     * the original carried — place, camera, time — is gone); anything else goes as it is, up to 1.5 MB.
-     */
-    class Attachment(val name: String, val data: ByteArray, val preview: ImageBitmap?) {
-        /** A picture shrunk to a JPEG (inline image in the public Issue); other files become download links. */
-        val isShot: Boolean get() = preview != null
+    private val http by lazy {
+        OkHttpClient.Builder()
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .callTimeout(60, TimeUnit.SECONDS)
+            .build()
     }
 
-    /**
-     * [withInfo] false: the person turned 附加信息 off; version and system stay here.
-     *
-     * Attachments go first, each its own ntfy attachment; the report then names them.
-     * They need a network now: if one fails nothing is counted and the form keeps everything.
-     * Only the words wait in the queue (ntfy keeps an attachment 3 hours, too short to hold).
-     */
-    suspend fun send(
-        category: Category, title: String, text: String, withInfo: Boolean = true,
-        files: List<Attachment> = emptyList(),
-    ): Outcome {
-        if (!isConfigured) throw Problem(t("这个版本没有配置反馈地址，发不出去。"))
-        val ids = files.take(FILES_MAX).mapIndexed { i, file ->
-            try { upload(file, i + 1) } catch (_: Busy) {
-                throw Problem(t("反馈服务现在太忙，附件没传上去。写的都还在，过一会儿再点发送。"))
-            } catch (_: Exception) {
-                throw Problem(t("附件没传上去，可能是没网。写的都还在，联网后再点发送。"))
+    internal fun canSend(text: String, imageCount: Int, sending: Boolean): Boolean =
+        !sending && (text.isNotBlank() || imageCount > 0)
+
+    internal fun buildPayloadJson(
+        message: String,
+        withInfo: Boolean,
+        appVersion: String,
+        appBuild: String,
+        deviceModel: String,
+        osVersion: String,
+        locale: String,
+        images: List<ByteArray>,
+    ): String {
+        val encoder = Base64.getEncoder()
+        val clipped = clip(message.trim(), TEXT_MAX)
+        val cappedImages = images.take(FILES_MAX)
+        return buildString(256 + clipped.length) {
+            append('{')
+            append("\"message\":")
+            appendJsonString(clipped)
+            append(",\"appVersion\":")
+            appendJsonString(if (withInfo) appVersion else "")
+            append(",\"appBuild\":")
+            appendJsonString(if (withInfo) appBuild else "")
+            append(",\"deviceModel\":")
+            appendJsonString(if (withInfo) deviceModel else "")
+            append(",\"osVersion\":")
+            appendJsonString(if (withInfo) osVersion else "")
+            append(",\"locale\":")
+            appendJsonString(if (withInfo) locale else "")
+            append(",\"images\":[")
+            cappedImages.forEachIndexed { index, bytes ->
+                if (index > 0) append(',')
+                append("{\"mediaType\":\"image/jpeg\",\"data\":")
+                appendJsonString(encoder.encodeToString(bytes))
+                append('}')
             }
-        }
-        val body = feedbackMessage(FeedbackDraft(
-            category = category.id, title = title, text = text,
-            appVersion = if (withInfo) appVersion else "",
-            platform = if (withInfo) "android" else "",
-            osVersion = if (withInfo) "$osVersion · $device" else "",
-            files = ids,
-        ))
-        return try {
-            post(body)
-            flush()
-            app.yuyue.analytics.AirTraffic.trackFeedbackSubmitted(files.take(FILES_MAX).count { it.isShot }, withInfo)
-            Outcome.Sent
-        } catch (e: Exception) {
-            // At most 10, the newest kept.
-            writeList(QUEUE_KEY, (queued + body).takeLast(10))
-            if (e is Busy) Outcome.QueuedBusy else Outcome.Queued
+            append("]}")
         }
     }
 
-    /** Sends what waited for a network, oldest first; stops at the first one that fails. */
-    suspend fun flush() {
-        // Clean up email key left over from earlier versions.
-        Prefs.set("feedback.email", null)
-        if (!isConfigured || !flushing.tryLock()) return
+    internal suspend fun postPayload(
+        payloadJson: String,
+        client: OkHttpClient = http,
+        endpoint: String = ENDPOINT,
+        appKey: String = APP_KEY,
+    ) = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(endpoint)
+            .header("Authorization", "Bearer $appKey")
+            .post(payloadJson.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
         try {
-            while (true) {
-                val body = queued.firstOrNull() ?: return
-                try { post(body) } catch (_: Exception) { return }
-                writeList(QUEUE_KEY, queued.drop(1))
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) return@withContext
+                val body = response.body?.string().orEmpty()
+                val reason = parseErrorReason(body)
+                throw Problem(reason ?: t("当前没有网络或服务暂时不可用，内容和图片已保存在草稿里，稍后再点发送即可。"))
             }
-        } finally {
-            flushing.unlock()
+        } catch (_: IOException) {
+            throw Problem(t("当前没有网络或服务暂时不可用，内容和图片已保存在草稿里，稍后再点发送即可。"))
         }
     }
 
-    private suspend fun post(body: String) = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url("https://ntfy.sh/$topic")
-            .post(body.toRequestBody("text/plain".toMediaType()))
-            // Not pushed on through Google's FCM: the relay polls, nobody needs the push.
-            .header("X-Firebase", "no")
-            .build()
-        http.newCall(request).execute().use {
-            if (it.code == 429) throw Busy()
-            if (!it.isSuccessful) throw Problem("HTTP ${it.code}")
+    suspend fun send(text: String, withInfo: Boolean, files: List<Attachment>) {
+        if (!canSend(text, files.size, false)) {
+            throw Problem(t("请写点内容或附一张截图再发送。"))
         }
+        val images = files.take(FILES_MAX)
+        val payloadJson = buildPayloadJson(
+            message = text,
+            withInfo = withInfo,
+            appVersion = BuildConfig.VERSION_NAME,
+            appBuild = BuildConfig.VERSION_CODE.toString(),
+            deviceModel = device,
+            osVersion = osVersion,
+            locale = locale,
+            images = images.map { it.data },
+        )
+        postPayload(payloadJson)
+        app.yuyue.analytics.AirTraffic.trackFeedbackSubmitted(images.size, withInfo)
     }
 
-    /**
-     * One public attachment. Screenshots go up as JPEG marked `v2shot`; other files go up raw
-     * marked `v2file <percent-encoded-name>` with an ASCII-safe `Filename` header.
-     */
-    private suspend fun upload(file: Attachment, n: Int): String = withContext(Dispatchers.IO) {
-        val isShot = file.isShot
-        val filename = if (isShot) "shot-$n.jpg" else "file-$n${safeExt(file.name)}"
-        val message = if (isShot) "v2shot" else {
-            val encoded = encodeHeaderName(file.name)
-            if (encoded.isEmpty()) "v2file" else "v2file $encoded"
-        }
-        val request = Request.Builder()
-            .url("https://ntfy.sh/$topic")
-            .put(file.data.toRequestBody((if (isShot) "image/jpeg" else "application/octet-stream").toMediaType()))
-            .header("X-Firebase", "no")
-            .header("Filename", filename)
-            .header("X-Message", message)
-            .build()
-        slow.newCall(request).execute().use { reply ->
-            if (reply.code == 429) throw Busy()
-            if (!reply.isSuccessful) throw Problem("HTTP ${reply.code}")
-            JSONObject(reply.body?.string().orEmpty()).optString("id").ifEmpty { throw Problem("no id") }
-        }
-    }
-
-    private fun safeExt(name: String): String {
-        val ext = name.substringAfterLast('.', "").lowercase()
-        return if (ext.length in 1..10 && ext.all { it in 'a'..'z' || it in '0'..'9' }) ".$ext" else ".bin"
-    }
-
-    private fun encodeHeaderName(name: String): String {
-        val base = name.replace('\\', '/').substringAfterLast('/').trim()
-        if (base.isEmpty()) return ""
-        val bytes = clip(base, 80).toByteArray(Charsets.UTF_8)
-        val out = StringBuilder(bytes.size * 2)
-        for (b in bytes) {
-            val c = b.toInt() and 0xFF
-            if (c in 'A'.code..'Z'.code || c in 'a'.code..'z'.code || c in '0'.code..'9'.code ||
-                c == '.'.code || c == '_'.code || c == '-'.code || c == '~'.code) {
-                out.append(c.toChar())
-            } else {
-                out.append('%')
-                out.append("0123456789ABCDEF"[c ushr 4])
-                out.append("0123456789ABCDEF"[c and 0x0F])
-            }
-        }
-        return out.toString()
-    }
-
-    /** A picked file → an [Attachment]. Pictures are shrunk; anything else must already fit. */
+    /** A picked or pasted image URI -> an EXIF-stripped JPEG [Attachment]. Rejects non-images. */
     suspend fun attachment(context: Context, uri: Uri): Attachment = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
-        val name = resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+        val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
             if (it.moveToFirst()) it.getString(0) else null
-        } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "file"
-        val type = resolver.getType(uri).orEmpty()
-        if (type.startsWith("image/")) {
-            shrink(context, uri)?.let { (jpeg, bitmap) ->
-                return@withContext Attachment(name.substringBeforeLast('.') + ".jpg", jpeg, bitmap.asImageBitmap())
-            }
+        } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "image.jpg"
+        val mime = resolver.getType(uri)
+        if (mime != null && !mime.startsWith("image/")) {
+            throw Problem(t("只支持图片或截图，不支持上传普通文件。"))
         }
-        // Read a little past the cap, so a big file says so instead of loading whole.
-        val data = resolver.openInputStream(uri)?.use { it.readNBytesCompat(FILE_BYTES_MAX + 1) }
-            ?: throw Problem(t("「%@」读不出来。", name))
-        if (data.isEmpty()) throw Problem(t("「%@」读不出来。", name))
-        if (data.size > FILE_BYTES_MAX) throw Problem(t("「%@」太大了，一个附件最多 1.5 MB。", name))
-        Attachment(name, data, null)
-    }
-
-    private fun java.io.InputStream.readNBytesCompat(max: Int): ByteArray {
-        val out = ByteArrayOutputStream()
-        val buffer = ByteArray(64 * 1024)
-        while (out.size() < max) {
-            val n = read(buffer, 0, minOf(buffer.size, max - out.size()))
-            if (n < 0) break
-            out.write(buffer, 0, n)
-        }
-        return out.toByteArray()
-    }
-
-    /** An image → a JPEG under 1 MB and its bitmap, or null. Tries smaller and softer until it fits. */
-    private fun shrink(context: Context, uri: Uri): Pair<ByteArray, Bitmap>? = runCatching {
-        val resolver = context.contentResolver
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-        val long = maxOf(bounds.outWidth, bounds.outHeight)
-        if (long <= 0) return@runCatching null
+        runCatching { resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) } }
+        val longSide = maxOf(bounds.outWidth, bounds.outHeight)
+        if (longSide <= 0) {
+            throw Problem(t("只支持图片或截图，不支持上传普通文件。"))
+        }
+        val (jpeg, bitmap) = shrink(context, uri, longSide)
+            ?: throw Problem(t("图片太大或无法读取，请换一张再试。"))
+        val stem = name.substringBeforeLast('.').ifBlank { "image" }
+        Attachment("$stem.jpg", jpeg, bitmap.asImageBitmap())
+    }
+
+    /** Downscales long side to <= [IMAGE_MAX_SIDE], applies EXIF orientation, and re-encodes as JPEG (EXIF stripped). */
+    private fun shrink(context: Context, uri: Uri, longSide: Int): Pair<ByteArray, Bitmap>? = runCatching {
+        val resolver = context.contentResolver
         var sample = 1
-        while (long / (sample * 2) >= 1600) sample *= 2
+        while (longSide / (sample * 2) >= IMAGE_MAX_SIDE) sample *= 2
         val decoded = resolver.openInputStream(uri)?.use {
             BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
         } ?: return@runCatching null
-        val rotation = resolver.openInputStream(uri)?.use { ExifInterface(it).rotationDegrees } ?: 0
-        val upright = if (rotation == 0) decoded
-            else Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, Matrix().apply { postRotate(rotation.toFloat()) }, true)
-        for ((side, quality) in listOf(1600 to 78, 1600 to 60, 1200 to 60, 900 to 50)) {
+        val exif = runCatching { resolver.openInputStream(uri)?.use { ExifInterface(it) } }.getOrNull()
+        val rotation = exif?.rotationDegrees ?: 0
+        val flipped = exif?.isFlipped == true
+        val upright = if (rotation == 0 && !flipped) {
+            decoded
+        } else {
+            val matrix = Matrix().apply {
+                if (rotation != 0) postRotate(rotation.toFloat())
+                if (flipped) postScale(-1f, 1f)
+            }
+            Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+        }
+        val steps = listOf(IMAGE_MAX_SIDE to 82, IMAGE_MAX_SIDE to 68, 1600 to 68, 1200 to 58)
+        for ((side, quality) in steps) {
             val scale = minOf(1f, side.toFloat() / maxOf(upright.width, upright.height))
-            val fitted = if (scale >= 1f) upright
-                else Bitmap.createScaledBitmap(upright, (upright.width * scale).toInt().coerceAtLeast(1), (upright.height * scale).toInt().coerceAtLeast(1), true)
+            val fitted = if (scale >= 1f) {
+                upright
+            } else {
+                Bitmap.createScaledBitmap(
+                    upright,
+                    (upright.width * scale).toInt().coerceAtLeast(1),
+                    (upright.height * scale).toInt().coerceAtLeast(1),
+                    true,
+                )
+            }
             val out = ByteArrayOutputStream()
             fitted.compress(Bitmap.CompressFormat.JPEG, quality, out)
-            if (out.size() <= 1_000_000) return@runCatching out.toByteArray() to fitted
+            if (out.size() <= FILE_BYTES_MAX) return@runCatching out.toByteArray() to fitted
         }
         null
     }.getOrNull()
 
-    // Draft
+    // Draft persistence
 
     private const val DRAFT_KEY = "feedback.draft"
+    private val draftGeneration = java.util.concurrent.atomic.AtomicLong(0)
+    private val draftWriteLock = Any()
 
-    /** What the form held when it closed, so nothing written is lost. Cleared once sent (or queued). */
-    class Draft(val category: Category, val title: String, val text: String, val withInfo: Boolean, val files: List<Attachment>)
+    class Draft(val text: String, val withInfo: Boolean, val files: List<Attachment>)
 
-    private fun draftDir(context: Context) = java.io.File(context.filesDir, "feedback-draft")
+    private fun draftDir(context: Context) = File(context.filesDir, "feedback-draft")
 
     private fun draftJson(): JSONObject = runCatching { JSONObject(Prefs.string(DRAFT_KEY, "{}")) }.getOrDefault(JSONObject())
 
     private fun writeDraft(json: JSONObject) {
-        val empty = json.optString("title").isEmpty() && json.optString("text").isEmpty() &&
+        val empty = json.optString("text").isEmpty() &&
             (json.optJSONArray("files")?.length() ?: 0) == 0 &&
-            json.optBoolean("withInfo", true) &&
-            json.optString("category", Category.Bug.id) == Category.Bug.id
+            json.optBoolean("withInfo", true)
         Prefs.set(DRAFT_KEY, if (empty) null else json.toString())
     }
 
-    fun saveDraft(category: Category, title: String, text: String, withInfo: Boolean) =
-        writeDraft(draftJson().put("category", category.id).put("title", title).put("text", text).put("withInfo", withInfo))
+    fun saveDraft(text: String, withInfo: Boolean) =
+        writeDraft(draftJson().put("text", text).put("withInfo", withInfo))
 
     suspend fun saveDraftFiles(context: Context, files: List<Attachment>) = withContext(Dispatchers.IO) {
-        val dir = draftDir(context)
-        dir.deleteRecursively()
+        val gen = draftGeneration.get()
         val names = JSONArray()
-        if (files.isNotEmpty()) {
-            dir.mkdirs()
-            files.forEachIndexed { i, file ->
-                if (runCatching { java.io.File(dir, "$i").writeBytes(file.data) }.isSuccess) names.put(file.name)
+        val capped = files.take(FILES_MAX)
+        synchronized(draftWriteLock) {
+            if (draftGeneration.get() != gen) return@withContext
+            val dir = draftDir(context)
+            dir.deleteRecursively()
+            if (capped.isNotEmpty()) {
+                dir.mkdirs()
+                capped.forEachIndexed { i, file ->
+                    if (runCatching { File(dir, "$i").writeBytes(file.data) }.isSuccess) names.put(file.name)
+                }
             }
         }
-        withContext(Dispatchers.Main) { writeDraft(draftJson().put("files", names)) }
+        withContext(Dispatchers.Main) {
+            if (draftGeneration.get() == gen) writeDraft(draftJson().put("files", names))
+        }
     }
 
     suspend fun loadDraft(context: Context): Draft? = withContext(Dispatchers.IO) {
         val json = draftJson()
         if (json.length() == 0) return@withContext null
         val names = json.optJSONArray("files") ?: JSONArray()
-        val files = (0 until names.length()).mapNotNull { i ->
-            val data = runCatching { java.io.File(draftDir(context), "$i").readBytes() }.getOrNull() ?: return@mapNotNull null
-            val name = names.optString(i)
-            val preview = if (name.lowercase().endsWith(".jpg")) BitmapFactory.decodeByteArray(data, 0, data.size)?.asImageBitmap() else null
+        val files = (0 until minOf(names.length(), FILES_MAX)).mapNotNull { i ->
+            val data = runCatching { File(draftDir(context), "$i").readBytes() }.getOrNull() ?: return@mapNotNull null
+            val preview = BitmapFactory.decodeByteArray(data, 0, data.size)?.asImageBitmap() ?: return@mapNotNull null
+            val name = names.optString(i).ifBlank { "image-${i + 1}.jpg" }
             Attachment(name, data, preview)
         }
         Draft(
-            Category.entries.firstOrNull { it.id == json.optString("category") } ?: Category.Bug,
-            json.optString("title"), json.optString("text"), json.optBoolean("withInfo", true), files,
+            text = json.optString("text"),
+            withInfo = json.optBoolean("withInfo", true),
+            files = files,
         )
     }
 
     fun clearDraft(context: Context) {
+        draftGeneration.incrementAndGet()
         Prefs.set(DRAFT_KEY, null)
-        draftDir(context).deleteRecursively()
+        Prefs.set("feedback.queue", null)
+        Prefs.set("feedback.email", null)
+        synchronized(draftWriteLock) { draftDir(context).deleteRecursively() }
     }
 
-    /** 附加信息 as the form lists it; the same values go in the report. More may join later. */
-    val info: List<Pair<String, String>> get() = listOf(
-        t("版本") to t("语阅 %@", appVersion),
-        t("系统") to osVersion,
-        t("设备") to device,
-    )
+    // Device info
 
-    val device: String get() {
-        val mfr = Build.MANUFACTURER.trim().replaceFirstChar { it.uppercase() }
-        val model = Build.MODEL.trim()
-        return when {
-            mfr.isEmpty() -> model
-            model.isEmpty() -> mfr
-            model.startsWith(mfr, ignoreCase = true) -> model
-            else -> "$mfr $model"
+    val appVersion: String get() = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+    val osVersion: String get() = "Android ${Build.VERSION.RELEASE}"
+    val locale: String get() = Locale.getDefault().toLanguageTag()
+
+    val device: String
+        get() {
+            val mfr = Build.MANUFACTURER.trim().replaceFirstChar { it.uppercase() }
+            val model = Build.MODEL.trim()
+            return when {
+                mfr.isEmpty() -> model
+                model.isEmpty() -> mfr
+                model.startsWith(mfr, ignoreCase = true) -> model
+                else -> "$mfr $model"
+            }
         }
-    }
+
+    val shortInfo: String get() = "${BuildConfig.VERSION_NAME} · $osVersion · $device"
+
+    val info: List<Pair<String, String>>
+        get() = listOf(
+            t("版本") to appVersion,
+            t("系统") to osVersion,
+            t("设备") to device,
+            t("语言") to locale,
+        )
 
     /** Opens the user's mail app to write to the developer without the app collecting their email. */
     fun openMail(context: Context): Boolean {
@@ -412,43 +377,213 @@ object Feedback {
         return runCatching { context.startActivity(intent) }.isSuccess
     }
 
-    val appVersion: String get() = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
-    val osVersion: String get() = "Android ${Build.VERSION.RELEASE}"
-
     fun clip(text: String, max: Int): String =
         if (text.codePointCount(0, text.length) <= max) text else text.substring(0, text.offsetByCodePoints(0, max))
 
     fun length(text: String): Int = text.codePointCount(0, text.length)
 
-    private fun readList(key: String): List<String> = runCatching {
-        val array = JSONArray(Prefs.string(key, "[]"))
-        List(array.length()) { array.getString(it) }
-    }.getOrDefault(emptyList())
+    // Minimal pure-JVM RFC 8259 JSON helpers (keeps JVM unit tests free of Android stubbed org.json).
 
-    private fun writeList(key: String, list: List<String>) = Prefs.set(key, JSONArray(list).toString())
+    private fun StringBuilder.appendJsonString(value: String) {
+        append('"')
+        for (ch in value) {
+            when (ch) {
+                '"' -> append("\\\"")
+                '\\' -> append("\\\\")
+                '\b' -> append("\\b")
+                '\u000C' -> append("\\f")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> if (ch.code < 0x20) {
+                    append("\\u")
+                    append(ch.code.toString(16).padStart(4, '0'))
+                } else {
+                    append(ch)
+                }
+            }
+        }
+        append('"')
+    }
+
+    internal fun parseErrorReason(body: String): String? {
+        if (body.isBlank()) return null
+        val parser = JsonScanner(body)
+        return parser.readTopLevelStringField("reason")?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    private class JsonScanner(private val src: String) {
+        private var i = 0
+
+        fun readTopLevelStringField(target: String): String? {
+            skipWs()
+            if (peek() != '{') return null
+            i++
+            skipWs()
+            if (peek() == '}') return null
+            while (i < src.length) {
+                skipWs()
+                val key = readString() ?: return null
+                skipWs()
+                if (peek() != ':') return null
+                i++
+                skipWs()
+                if (key == target) {
+                    return if (peek() == '"') readString() else null
+                }
+                if (!skipValue()) return null
+                skipWs()
+                when (peek()) {
+                    ',' -> i++
+                    '}' -> return null
+                    else -> return null
+                }
+            }
+            return null
+        }
+
+        private fun peek(): Char? = if (i < src.length) src[i] else null
+
+        private fun skipWs() {
+            while (i < src.length && src[i] in charArrayOf(' ', '\t', '\r', '\n')) i++
+        }
+
+        private fun readString(): String? {
+            if (peek() != '"') return null
+            i++
+            val sb = StringBuilder()
+            while (i < src.length) {
+                val c = src[i++]
+                when (c) {
+                    '"' -> return sb.toString()
+                    '\\' -> {
+                        if (i >= src.length) return null
+                        when (val esc = src[i++]) {
+                            '"', '\\', '/' -> sb.append(esc)
+                            'b' -> sb.append('\b')
+                            'f' -> sb.append('\u000C')
+                            'n' -> sb.append('\n')
+                            'r' -> sb.append('\r')
+                            't' -> sb.append('\t')
+                            'u' -> {
+                                if (i + 4 > src.length) return null
+                                val code = src.substring(i, i + 4).toIntOrNull(16) ?: return null
+                                sb.append(code.toChar())
+                                i += 4
+                            }
+                            else -> return null
+                        }
+                    }
+                    else -> sb.append(c)
+                }
+            }
+            return null
+        }
+
+        private fun skipValue(): Boolean {
+            skipWs()
+            return when (peek()) {
+                '"' -> readString() != null
+                '{' -> skipObject()
+                '[' -> skipArray()
+                't' -> consume("true")
+                'f' -> consume("false")
+                'n' -> consume("null")
+                '-', in '0'..'9' -> skipNumber()
+                else -> false
+            }
+        }
+
+        private fun skipObject(): Boolean {
+            i++
+            skipWs()
+            if (peek() == '}') {
+                i++
+                return true
+            }
+            while (i < src.length) {
+                skipWs()
+                if (readString() == null) return false
+                skipWs()
+                if (peek() != ':') return false
+                i++
+                if (!skipValue()) return false
+                skipWs()
+                when (peek()) {
+                    ',' -> i++
+                    '}' -> {
+                        i++
+                        return true
+                    }
+                    else -> return false
+                }
+            }
+            return false
+        }
+
+        private fun skipArray(): Boolean {
+            i++
+            skipWs()
+            if (peek() == ']') {
+                i++
+                return true
+            }
+            while (i < src.length) {
+                if (!skipValue()) return false
+                skipWs()
+                when (peek()) {
+                    ',' -> i++
+                    ']' -> {
+                        i++
+                        return true
+                    }
+                    else -> return false
+                }
+            }
+            return false
+        }
+
+        private fun consume(literal: String): Boolean {
+            if (!src.startsWith(literal, i)) return false
+            i += literal.length
+            return true
+        }
+
+        private fun skipNumber(): Boolean {
+            val start = i
+            if (peek() == '-') i++
+            while (i < src.length && src[i] in '0'..'9') i++
+            if (peek() == '.') {
+                i++
+                while (i < src.length && src[i] in '0'..'9') i++
+            }
+            if (peek() == 'e' || peek() == 'E') {
+                i++
+                if (peek() == '+' || peek() == '-') i++
+                while (i < src.length && src[i] in '0'..'9') i++
+            }
+            return i > start
+        }
+    }
 }
 
-/** The form: 类别, 标题, 详细描述 (Markdown, with attachments), 附加信息, a mailto hint, then 发送. Its own page. */
+/** Single-channel AirFeedback form: unified editor + screenshots + collapsible device info + sticky footer. */
 @Composable
 fun FeedbackPage(close: () -> Unit) {
-    var category by remember { mutableStateOf(Feedback.Category.Bug) }
-    var title by remember { mutableStateOf("") }
     var text by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var done by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var withInfo by remember { mutableStateOf(true) }
-    var titleFocused by remember { mutableStateOf(false) }
+    var infoExpanded by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var restored by remember { mutableStateOf(false) }
-    val titleFocus = remember { FocusRequester() }
     val focus = remember { FocusRequester() }
     val files = remember { mutableStateListOf<Feedback.Attachment>() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val blank = title.isBlank() || text.isBlank()
-    val canSend = !blank && !sending && Feedback.isConfigured
+    val canSend = Feedback.canSend(text, files.size, sending)
 
     fun openMail() {
         if (!Feedback.openMail(context)) {
@@ -459,194 +594,279 @@ fun FeedbackPage(close: () -> Unit) {
     }
 
     fun take(uris: List<Uri>) {
+        if (uris.isEmpty()) return
         scope.launch {
+            notice = null
             for (uri in uris) {
                 if (files.size >= Feedback.FILES_MAX) break
-                try { files += Feedback.attachment(context, uri) } catch (e: Exception) {
-                    notice = (e as? Feedback.Problem)?.message ?: t("读不出来。")
+                try {
+                    files += Feedback.attachment(context, uri)
+                } catch (e: Exception) {
+                    notice = (e as? Feedback.Problem)?.message ?: t("图片太大或无法读取，请换一张再试。")
                 }
             }
         }
     }
-    val photos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(Feedback.FILES_MAX)) { take(it) }
-    val documents = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { take(it) }
 
-    LaunchedEffect(Unit) { Feedback.flush() }
-    // Back to where the person left off, then straight to typing.
+    fun pasteClipboardImage() {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val clip = clipboard?.primaryClip
+        val resolver = context.contentResolver
+        val imageUris = (0 until (clip?.itemCount ?: 0)).mapNotNull { index ->
+            val uri = clip?.getItemAt(index)?.uri ?: return@mapNotNull null
+            val mime = resolver.getType(uri)
+            if (mime != null && mime.startsWith("image/")) uri else null
+        }
+        if (imageUris.isEmpty()) {
+            notice = t("剪贴板里没有图片。")
+        } else {
+            take(imageUris)
+        }
+    }
+
+    val photos = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(Feedback.FILES_MAX),
+    ) { take(it) }
+
     LaunchedEffect(Unit) {
         Feedback.loadDraft(context)?.let { draft ->
-            category = draft.category
-            title = draft.title
             text = draft.text
             withInfo = draft.withInfo
             files.addAll(draft.files)
         }
         restored = true
-        runCatching { (if (title.isEmpty()) titleFocus else focus).requestFocus() }
+        runCatching { focus.requestFocus() }
     }
-    LaunchedEffect(category, title, text, withInfo) {
-        if (restored && !done) Feedback.saveDraft(category, title, text, withInfo)
+    LaunchedEffect(text, withInfo) {
+        if (restored && !done) Feedback.saveDraft(text, withInfo)
     }
-    LaunchedEffect(files.toList()) { if (restored) Feedback.saveDraftFiles(context, files.toList()) }
+    LaunchedEffect(files.toList()) {
+        if (restored && !done) Feedback.saveDraftFiles(context, files.toList())
+    }
 
     if (done) {
         Thanks(
             onMail = { openMail() },
-            again = { title = ""; text = ""; category = Feedback.Category.Bug; withInfo = true; files.clear(); done = false },
+            again = {
+                text = ""
+                withInfo = true
+                infoExpanded = false
+                files.clear()
+                notice = null
+                done = false
+            },
             close = close,
         )
         return
     }
 
-    Column(Modifier.fillMaxSize().background(YY.c.bg).imePadding()) {
+    val density = LocalDensity.current
+    val imeBottom = with(density) { WindowInsets.ime.getBottom(this).toDp() }
+    val bottomClearance = maxOf(imeBottom, app.yuyue.LocalTabBarHeight.current)
+
+    Column(Modifier.fillMaxSize().background(YY.c.bg).padding(bottom = bottomClearance)) {
         Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = YY.s(16)).padding(top = YY.s(4), bottom = YY.s(4)),
+            Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = YY.s(16))
+                .padding(top = YY.s(4), bottom = YY.s(12)),
             verticalArrangement = Arrangement.spacedBy(YY.s(10)),
         ) {
             Text(t("语阅还在早期，哪里不对、想要什么，直接写。"), style = YY.font(11.5f), color = YY.c.t2)
-            if (!Feedback.isConfigured) {
-                // Builds without a topic (see docs/dev/feedback.md) can't send; mail still works.
-                androidx.compose.foundation.text.selection.SelectionContainer {
-                    Text(
-                        t("这个版本发不出反馈。可以发邮件到 %@。", Feedback.SUPPORT_EMAIL), style = YY.font(11f), color = YY.c.t2,
-                        modifier = Modifier.fillMaxWidth().background(YY.c.inset, RoundedCornerShape(YY.s(12))).padding(YY.s(11)),
-                    )
-                }
-            }
-            YYSegments(Feedback.Category.entries.map { it to it.title }, category, { category = it }, modifier = Modifier.fillMaxWidth())
-            // 标题: single-line, hard-capped so the Issue title is never truncated.
-            Row(
-                Modifier.fillMaxWidth()
-                    .background(YY.c.card, RoundedCornerShape(YY.s(14)))
-                    .border(if (titleFocused) 1.dp else 0.5.dp, if (titleFocused) YY.tint.edge else YY.c.line, RoundedCornerShape(YY.s(14)))
-                    .padding(horizontal = YY.s(12), vertical = YY.s(11)),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(YY.s(8)),
-            ) {
-                BasicTextField(
-                    title,
-                    { raw ->
-                        val flat = raw.replace('\r', ' ').replace('\n', ' ')
-                        title = Feedback.clip(flat, Feedback.TITLE_MAX)
-                    },
-                    singleLine = true,
-                    textStyle = YY.font(12.5f, FontWeight.Medium).copy(color = YY.c.t1),
-                    cursorBrush = SolidColor(YY.tint.accent),
-                    decorationBox = { inner ->
-                        if (title.isEmpty()) Text(category.titlePlaceholder, style = YY.font(12.5f), color = YY.c.t3)
-                        inner()
-                    },
-                    modifier = Modifier.weight(1f).focusRequester(titleFocus).onFocusChanged { titleFocused = it.isFocused },
-                )
-                val titleLen = Feedback.length(title)
-                if (titleLen >= Feedback.TITLE_MAX - 15) {
-                    Text(
-                        "$titleLen/${Feedback.TITLE_MAX}",
-                        style = YY.font(9.5f),
-                        color = if (titleLen > Feedback.TITLE_MAX - 5) YY.c.warn else YY.c.t3,
-                    )
-                }
-            }
-            // 想说的, with the attachments and the count inside the box.
+
+            // Unified editor card: multi-line input, screenshot strip, divider, bottom toolbar.
             Column(
-                Modifier.fillMaxWidth()
-                    .background(YY.c.card, RoundedCornerShape(YY.s(14)))
-                    .border(if (focused) 1.dp else 0.5.dp, if (focused) YY.tint.edge else YY.c.line, RoundedCornerShape(YY.s(14)))
-                    .padding(start = YY.s(12), end = YY.s(12), top = YY.s(11), bottom = YY.s(6)),
-                verticalArrangement = Arrangement.spacedBy(YY.s(8)),
+                Modifier
+                    .fillMaxWidth()
+                    .background(YY.c.card, RoundedCornerShape(14.dp))
+                    .border(
+                        if (focused) 1.dp else 0.5.dp,
+                        if (focused) YY.tint.edge else YY.c.line,
+                        RoundedCornerShape(14.dp),
+                    ),
             ) {
-                BasicTextField(
-                    text, { text = Feedback.clip(it, Feedback.TEXT_MAX) },
-                    textStyle = YY.font(12.5f).copy(color = YY.c.t1, lineHeight = YY.sp(20f)),
-                    cursorBrush = SolidColor(YY.tint.accent),
-                    decorationBox = { inner ->
-                        if (text.isEmpty()) Text(category.placeholder, style = YY.font(12.5f), color = YY.c.t3)
-                        inner()
-                    },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = YY.s(120)).focusRequester(focus).onFocusChanged { focused = it.isFocused },
-                )
-                if (files.isNotEmpty()) {
-                    Row(Modifier.padding(top = YY.s(5)), horizontalArrangement = Arrangement.spacedBy(YY.s(10))) {
-                        files.forEach { file ->
-                            Box {
-                                val tile = Modifier.size(YY.s(56)).clip(RoundedCornerShape(YY.s(9))).border(0.5.dp, YY.c.line, RoundedCornerShape(YY.s(9)))
-                                val preview = file.preview
-                                if (preview != null) {
-                                    Image(preview, file.name, contentScale = ContentScale.Crop, modifier = tile)
-                                } else {
-                                    Column(tile.background(YY.c.inset), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                                        Icon(Icons.doc, file.name, tint = YY.c.t2, modifier = Modifier.size(YY.s(18)))
-                                        Text(file.name.substringAfterLast('.', "").uppercase().take(5), style = YY.font(8f, FontWeight.SemiBold), color = YY.c.t2, maxLines = 1)
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = YY.s(12), end = YY.s(12), top = YY.s(11), bottom = YY.s(8)),
+                    verticalArrangement = Arrangement.spacedBy(YY.s(8)),
+                ) {
+                    BasicTextField(
+                        value = text,
+                        onValueChange = { text = Feedback.clip(it, Feedback.TEXT_MAX) },
+                        textStyle = YY.font(12.5f).copy(color = YY.c.t1, lineHeight = YY.sp(20f)),
+                        cursorBrush = SolidColor(YY.tint.accent),
+                        decorationBox = { inner ->
+                            if (text.isEmpty()) {
+                                Text(
+                                    t("遇到什么问题、想要什么功能，或哪本书打开不对，都可以直接写"),
+                                    style = YY.font(12.5f).copy(lineHeight = YY.sp(20f)),
+                                    color = YY.c.t3,
+                                )
+                            }
+                            inner()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 128.dp)
+                            .focusRequester(focus)
+                            .onFocusChanged { focused = it.isFocused },
+                    )
+                    if (files.isNotEmpty()) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(top = YY.s(4), end = YY.s(6)),
+                            horizontalArrangement = Arrangement.spacedBy(YY.s(10)),
+                        ) {
+                            files.forEach { file ->
+                                Box(Modifier.padding(top = 5.dp, end = 5.dp)) {
+                                    Image(
+                                        bitmap = file.preview,
+                                        contentDescription = file.name,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(58.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .border(0.5.dp, YY.c.line, RoundedCornerShape(10.dp)),
+                                    )
+                                    Box(
+                                        Modifier
+                                            .align(Alignment.TopEnd)
+                                            .offset(x = 5.dp, y = (-5).dp)
+                                            .size(18.dp)
+                                            .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                                            .clickable(onClickLabel = t("去掉「%@」", file.name)) { files.remove(file) },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(Icons.close, t("去掉「%@」", file.name), tint = Color.White, modifier = Modifier.size(10.dp))
                                     }
                                 }
-                                Box(
-                                    Modifier.align(Alignment.TopEnd).offset(x = YY.s(5), y = YY.s(-5)).size(YY.s(18))
-                                        .background(Color.Black.copy(alpha = 0.55f), CircleShape)
-                                        .clickable(onClickLabel = t("去掉「%@」", file.name)) { files.remove(file) },
-                                    contentAlignment = Alignment.Center,
-                                ) { Icon(Icons.close, t("去掉「%@」", file.name), tint = Color.White, modifier = Modifier.size(YY.s(10))) }
                             }
                         }
                     }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.fillMaxWidth().height(0.5.dp).background(YY.c.line))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = YY.s(10), vertical = YY.s(7)),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     if (files.size < Feedback.FILES_MAX) {
                         Box {
                             Row(
-                                Modifier.height(YY.s(26)).clip(CircleShape).clickable(onClickLabel = t("加附件")) { menu = true }.padding(horizontal = YY.s(4)),
+                                Modifier
+                                    .clip(CircleShape)
+                                    .background(YY.c.inset)
+                                    .clickable(onClickLabel = t("图片")) { menu = true }
+                                    .padding(horizontal = YY.s(9), vertical = YY.s(4)),
                                 verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(YY.s(4)),
                             ) {
-                                Icon(Icons.paperclip, null, tint = YY.c.t2, modifier = Modifier.size(YY.s(13)))
-                                Text(t("附件"), style = YY.font(10.5f), color = YY.c.t2, modifier = Modifier.padding(start = YY.s(3)))
+                                Icon(Icons.photo, null, tint = YY.c.t2, modifier = Modifier.size(YY.s(12.5f)))
+                                Text(t("图片"), style = YY.font(10.5f, FontWeight.Medium), color = YY.c.t2)
                             }
                             DropdownMenu(menu, { menu = false }) {
-                                DropdownMenuItem({ Text(t("照片")) }, onClick = {
-                                    menu = false
-                                    photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                                }, leadingIcon = { Icon(Icons.photo, null) })
-                                DropdownMenuItem({ Text(t("文件")) }, onClick = {
-                                    menu = false
-                                    documents.launch(arrayOf("*/*"))
-                                }, leadingIcon = { Icon(Icons.folder, null) })
-                                DropdownMenuItem({ Text(t("粘贴")) }, onClick = {
-                                    menu = false
-                                    val clip = (context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).primaryClip
-                                    val uris = (0 until (clip?.itemCount ?: 0)).mapNotNull { clip?.getItemAt(it)?.uri }
-                                    if (uris.isEmpty()) notice = t("剪贴板里没有图片或文件。") else take(uris)
-                                }, leadingIcon = { Icon(Icons.clipboard, null) })
+                                DropdownMenuItem(
+                                    text = { Text(t("从相册选图")) },
+                                    onClick = {
+                                        menu = false
+                                        photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                    },
+                                    leadingIcon = { Icon(Icons.photo, null) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(t("粘贴剪贴板图片")) },
+                                    onClick = {
+                                        menu = false
+                                        pasteClipboardImage()
+                                    },
+                                    leadingIcon = { Icon(Icons.clipboard, null) },
+                                )
                             }
                         }
                     }
                     Spacer(Modifier.weight(1f))
-                    Text("Markdown", style = YY.font(9.5f), color = YY.c.t3)
-                    // Only near the end: a count from the first word reads like a quota.
+                    Text(
+                        if (files.isEmpty()) t("最多 4 张图") else t("图片 %lld/4", files.size),
+                        style = YY.font(9.5f, tnum = true),
+                        color = YY.c.t3,
+                    )
                     val n = Feedback.length(text)
-                    if (n >= Feedback.TEXT_MAX - 200) {
-                        Spacer(Modifier.size(YY.s(8)))
-                        Text("$n/${Feedback.TEXT_MAX}", style = YY.font(9.5f), color = if (n > Feedback.TEXT_MAX - 60) YY.c.warn else YY.c.t3)
+                    if (n >= 3600) {
+                        Spacer(Modifier.width(YY.s(8)))
+                        Text(
+                            "$n/${Feedback.TEXT_MAX}",
+                            style = YY.font(9.5f, tnum = true),
+                            color = if (n >= 3900) YY.c.warn else YY.c.t3,
+                        )
                     }
                 }
             }
-            // 附加信息: what goes along besides the words, shown as it is.
+
+            // Collapsible 附带设备信息 card (default ON, collapsed by default).
             Column(
-                Modifier.fillMaxWidth()
-                    .background(YY.c.card, RoundedCornerShape(YY.s(12)))
-                    .border(0.5.dp, YY.c.line, RoundedCornerShape(YY.s(12)))
-                    .padding(horizontal = YY.s(12)),
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(YY.c.card)
+                    .border(0.5.dp, YY.c.line, RoundedCornerShape(14.dp)),
             ) {
-                Row(Modifier.padding(vertical = YY.s(8)), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(t("附加信息"), style = YY.font(11.5f), color = YY.c.t1)
-                        Text(if (withInfo) t("一起发出，方便查问题") else t("不发送，查问题会难一点"), style = YY.font(9.5f), color = YY.c.t3)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = withInfo, onClickLabel = t("附带设备信息")) { infoExpanded = !infoExpanded }
+                        .padding(horizontal = YY.s(12), vertical = YY.s(8)),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(YY.s(10)),
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(YY.s(2))) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(YY.s(4)),
+                        ) {
+                            Text(t("附带设备信息"), style = YY.font(11.5f), color = YY.c.t1)
+                            if (withInfo) {
+                                Icon(
+                                    if (infoExpanded) Icons.chevronUp else Icons.chevronDown,
+                                    contentDescription = null,
+                                    tint = YY.c.t3,
+                                    modifier = Modifier.size(YY.s(11)),
+                                )
+                            }
+                        }
+                        Text(
+                            if (withInfo) Feedback.shortInfo else t("本次不附带"),
+                            style = YY.font(9.5f),
+                            color = YY.c.t3,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                     Switch(
-                        withInfo, { withInfo = it },
-                        modifier = Modifier.semantics { contentDescription = t("附加信息") },
-                        colors = SwitchDefaults.colors(checkedTrackColor = YY.tint.fill, checkedThumbColor = YY.c.card, uncheckedTrackColor = YY.c.inset, uncheckedBorderColor = YY.c.line),
+                        checked = withInfo,
+                        onCheckedChange = {
+                            withInfo = it
+                            if (!it) infoExpanded = false
+                        },
+                        modifier = Modifier.semantics { contentDescription = t("附带设备信息") },
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = YY.tint.fill,
+                            checkedThumbColor = YY.c.card,
+                            uncheckedTrackColor = YY.c.inset,
+                            uncheckedBorderColor = YY.c.line,
+                        ),
                     )
                 }
-                AnimatedVisibility(withInfo, enter = androidx.compose.animation.fadeIn(app.yuyue.design.YYMotion.standard()) + androidx.compose.animation.expandVertically(app.yuyue.design.YYMotion.layout()), exit = androidx.compose.animation.fadeOut(app.yuyue.design.YYMotion.exit()) + androidx.compose.animation.shrinkVertically(app.yuyue.design.YYMotion.layout())) {
-                    Column {
+                AnimatedVisibility(
+                    visible = withInfo && infoExpanded,
+                    enter = androidx.compose.animation.fadeIn(YYMotion.standard()) + androidx.compose.animation.expandVertically(YYMotion.layout()),
+                    exit = androidx.compose.animation.fadeOut(YYMotion.exit()) + androidx.compose.animation.shrinkVertically(YYMotion.layout()),
+                ) {
+                    Column(Modifier.padding(horizontal = YY.s(12))) {
                         Box(Modifier.fillMaxWidth().height(0.5.dp).background(YY.c.line))
                         val info = Feedback.info
                         val infoStyle = YY.font(10.5f)
@@ -669,64 +889,97 @@ fun FeedbackPage(close: () -> Unit) {
                     }
                 }
             }
+
+            // Mail hint row.
             Row(Modifier.padding(horizontal = YY.s(2)), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.globe, null, tint = YY.c.t3, modifier = Modifier.size(YY.s(11)))
-                Text(t("正文和附件都会公开在 GitHub 上，请勿上传隐私或完整版权书"), style = YY.font(10.5f), color = YY.c.t3, modifier = Modifier.padding(start = YY.s(5)))
-            }
-            Row(Modifier.padding(horizontal = YY.s(2)), verticalAlignment = Alignment.CenterVertically) {
-                Text(t("需要回复或不想公开？"), style = YY.font(10.5f), color = YY.c.t3)
+                Text(t("需要回复？"), style = YY.font(10.5f), color = YY.c.t3)
                 Text(
                     t("直接发邮件 ↗"),
-                    style = YY.font(10.5f), color = YY.tint.accent,
-                    modifier = Modifier.clickable(onClickLabel = t("直接发邮件 ↗")) { openMail() }.padding(horizontal = YY.s(4), vertical = YY.s(2)),
+                    style = YY.font(10.5f),
+                    color = YY.tint.accent,
+                    modifier = Modifier
+                        .clickable(onClickLabel = t("直接发邮件 ↗")) { openMail() }
+                        .padding(horizontal = YY.s(4), vertical = YY.s(2)),
                 )
             }
+
+            // Inline notice banner.
             notice?.let {
                 Row(
-                    Modifier.fillMaxWidth().background(YY.c.warn.copy(alpha = 0.1f), RoundedCornerShape(YY.s(12))).padding(YY.s(11)),
+                    Modifier
+                        .fillMaxWidth()
+                        .background(YY.c.warn.copy(alpha = 0.1f), RoundedCornerShape(YY.s(12)))
+                        .padding(YY.s(11)),
                     horizontalArrangement = Arrangement.spacedBy(YY.s(8)),
+                    verticalAlignment = Alignment.Top,
                 ) {
                     Icon(Icons.error, null, tint = YY.c.warn, modifier = Modifier.size(YY.s(14)))
                     Text(it, style = YY.font(11f), color = YY.c.t1)
                 }
             }
         }
-        // 发送, where the thumb is.
+
+        // Sticky bottom footer.
+        Box(Modifier.fillMaxWidth().height(0.5.dp).background(YY.c.line))
         Column(
-            Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = YY.s(16)).padding(top = YY.s(10), bottom = YY.s(12)),
+            Modifier
+                .fillMaxWidth()
+                .background(YY.c.bg)
+                .padding(horizontal = YY.s(16))
+                .padding(top = YY.s(10), bottom = YY.s(12)),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(YY.s(6)),
+            verticalArrangement = Arrangement.spacedBy(YY.s(8)),
         ) {
-            YYButton(if (sending) t("正在发送…") else t("发送"), ButtonKind.Main, ButtonSize.Large, wide = true, enabled = canSend) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(YY.s(5)),
+            ) {
+                Icon(Icons.lockFill, null, tint = YY.c.ok, modifier = Modifier.size(YY.s(11)))
+                Text(t("仅发给开发者，不会公开"), style = YY.font(10f), color = YY.c.t3)
+            }
+            YYButton(
+                title = if (sending) t("正在发送…") else t("发送给开发者"),
+                kind = ButtonKind.Main,
+                size = ButtonSize.Large,
+                wide = true,
+                enabled = canSend,
+            ) {
                 sending = true
                 notice = null
                 scope.launch {
                     try {
-                        val outcome = Feedback.send(category, title, text, withInfo, files.toList())
-                        when (outcome) {
-                            Feedback.Outcome.Sent -> {
-                                Feedback.clearDraft(context)
-                                done = true
-                            }
-                            Feedback.Outcome.Queued, Feedback.Outcome.QueuedBusy -> {
-                                val busy = outcome == Feedback.Outcome.QueuedBusy
-                                Feedback.clearDraft(context)
-                                title = ""
-                                text = ""
-                                files.clear()
-                                notice = if (busy) t("反馈服务现在太忙，这条先存在这台设备上，过一会儿自动发出，不用再点。")
-                                    else t("没网，这条先存在这台设备上，联网后自动发出，不用再点。待发 %lld 条。", Feedback.queued.size)
-                            }
-                        }
+                        Feedback.send(text, withInfo, files.toList())
+                        Feedback.clearDraft(context)
+                        done = true
                     } catch (e: Exception) {
-                        notice = (e as? Feedback.Problem)?.message ?: t("没发出去，内容有问题。")
+                        notice = (e as? Feedback.Problem)?.message
+                            ?: t("当前没有网络或服务暂时不可用，内容和图片已保存在草稿里，稍后再点发送即可。")
                     } finally {
                         sending = false
                     }
                 }
             }
-            if (!Feedback.isConfigured) {
-                Text(t("这个版本发不出反馈"), style = YY.font(10f), color = YY.c.t3)
+            if ((text.isNotBlank() || files.isNotEmpty()) && !sending) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(YY.s(6)),
+                ) {
+                    Text(t("草稿已自动保存"), style = YY.font(10f), color = YY.c.t3)
+                    Text("·", style = YY.font(10f), color = YY.c.t3)
+                    Text(
+                        t("清空"),
+                        style = YY.font(10f),
+                        color = YY.c.t2,
+                        modifier = Modifier
+                            .clickable(onClickLabel = t("清空")) {
+                                text = ""
+                                files.clear()
+                                notice = null
+                                Feedback.clearDraft(context)
+                            }
+                            .padding(horizontal = YY.s(2), vertical = YY.s(2)),
+                    )
+                }
             }
         }
     }
@@ -735,29 +988,47 @@ fun FeedbackPage(close: () -> Unit) {
 @Composable
 private fun Thanks(onMail: () -> Unit, again: () -> Unit, close: () -> Unit) {
     Column(
-        Modifier.fillMaxSize().background(YY.c.bg).padding(horizontal = YY.s(24)),
+        Modifier
+            .fillMaxSize()
+            .background(YY.c.bg)
+            .padding(bottom = app.yuyue.LocalTabBarHeight.current)
+            .padding(horizontal = YY.s(24)),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         Box(
-            Modifier.size(YY.s(56)).background(YY.tint.black, CircleShape).border(0.5.dp, YY.tint.edge, CircleShape),
+            Modifier
+                .size(YY.s(56))
+                .background(YY.c.ok.copy(alpha = 0.14f), CircleShape),
             contentAlignment = Alignment.Center,
-        ) { Icon(Icons.check, null, tint = YY.tint.accent, modifier = Modifier.size(YY.s(26))) }
-        Text(t("收到了，谢谢"), style = YY.font(15f, FontWeight.SemiBold), color = YY.c.t1, modifier = Modifier.padding(top = YY.s(14)))
+        ) {
+            Icon(Icons.checkCircleFill, null, tint = YY.c.ok, modifier = Modifier.size(YY.s(30)))
+        }
         Text(
-            t("稍后会出现在 GitHub 问题板上。"),
-            style = YY.font(11.5f), color = YY.c.t2, textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = YY.s(8)).widthIn(max = YY.s(240)),
+            t("已发给开发者，谢谢"),
+            style = YY.font(15f, FontWeight.SemiBold),
+            color = YY.c.t1,
+            modifier = Modifier.padding(top = YY.s(14)),
+        )
+        Text(
+            t("这条反馈仅开发者可见，不会公开。"),
+            style = YY.font(11.5f),
+            color = YY.c.t2,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = YY.s(8)).widthIn(max = YY.s(260)),
         )
         Row(
             Modifier.padding(top = YY.s(8)),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(t("需要回复或补充私密内容？"), style = YY.font(10.5f), color = YY.c.t3)
+            Text(t("如需回复，可发邮件至"), style = YY.font(10.5f), color = YY.c.t3)
             Text(
-                t("直接发邮件 ↗"),
-                style = YY.font(10.5f), color = YY.tint.accent,
-                modifier = Modifier.clickable(onClickLabel = t("直接发邮件 ↗"), onClick = onMail).padding(horizontal = YY.s(4), vertical = YY.s(2)),
+                Feedback.SUPPORT_EMAIL,
+                style = YY.font(10.5f),
+                color = YY.tint.accent,
+                modifier = Modifier
+                    .clickable(onClickLabel = Feedback.SUPPORT_EMAIL, onClick = onMail)
+                    .padding(horizontal = YY.s(4), vertical = YY.s(2)),
             )
         }
         Row(Modifier.padding(top = YY.s(18)), horizontalArrangement = Arrangement.spacedBy(YY.s(10))) {
