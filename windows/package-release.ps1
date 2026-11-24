@@ -101,6 +101,8 @@ $requiredFiles = @(
     "onnxruntime.dll",
     "WebView2Loader.dll",
     "Assets\AppIcon.ico",
+    "Assets\Brands\obsidian.png",
+    "Assets\Brands\deepseek.png",
     "Assets\Reader\reader.js",
     "Assets\Reader\reader.css",
     "Assets\L10n\en.json",

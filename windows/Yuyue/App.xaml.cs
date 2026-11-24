@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
+using WinRT.Interop;
 using Yuyue.Audiobook;
 using Yuyue.Core;
 using Yuyue.Pdf;
@@ -390,6 +392,53 @@ public partial class App : Application
     }
 #endif
 
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    private const int SW_RESTORE = 9;
+
+    private static void BringWindowToFront(Window win)
+    {
+        try
+        {
+            IntPtr hwnd = WindowNative.GetWindowHandle(win);
+            if (hwnd != IntPtr.Zero)
+            {
+                if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);
+                SetForegroundWindow(hwnd);
+            }
+        }
+        catch { }
+    }
+
+    private void CheckExitIfAllWindowsClosed()
+    {
+        if (_exitingApp) return;
+        if (_shelfWindow is not null
+            || _readerWindows.Count > 0
+            || _pdfWindows.Count > 0
+            || _audioWindows.Count > 0
+            || _podcastWindows.Count > 0)
+        {
+            return;
+        }
+        if (Library?.Prefs.AutoLaunchOnLogin == true)
+            return;
+
+        _exitingApp = true;
+        try { _syncTimer?.Stop(); } catch { }
+        try { _pauseActiveAudio?.Invoke(); } catch { }
+        try { _settingsWindow?.Close(); } catch { }
+        try { Library?.Dispose(); } catch { }
+        Environment.Exit(0);
+    }
+
     public void ShowShelf()
     {
         if (_shelfWindow is null)
@@ -397,24 +446,30 @@ public partial class App : Application
             _shelfWindow = new ShelfWindow(Library);
             _shelfWindow.AppWindow.Closing += (_, args) =>
             {
-                // Keep app resident in system tray when login auto-start or audio playback is active
-                if (!_exitingApp && (Library.Prefs.AutoLaunchOnLogin || Library.SystemIntegration.IsAudioPlaying))
+                // Only keep resident in system tray when user explicitly enabled login auto-start
+                if (!_exitingApp && Library.Prefs.AutoLaunchOnLogin)
                 {
                     args.Cancel = true;
                     Library.SystemIntegration.EnsureTrayVisible(forceVisible: true);
                     try { _shelfWindow?.AppWindow.Hide(); } catch { }
+                    return;
+                }
+
+                // If no reader windows remain open, pause active audio before closing
+                if (_readerWindows.Count == 0 && _pdfWindows.Count == 0 && _audioWindows.Count == 0 && _podcastWindows.Count == 0)
+                {
+                    try { _pauseActiveAudio?.Invoke(); } catch { }
                 }
             };
             _shelfWindow.Closed += (_, _) =>
             {
                 _shelfWindow = null;
-                // Windows desktop habit: closing the main shelf window cleanly closes settings if no reader is open
-                if (_readerWindows.Count == 0 && _pdfWindows.Count == 0 && _audioWindows.Count == 0 && _podcastWindows.Count == 0)
-                    _settingsWindow?.Close();
+                CheckExitIfAllWindowsClosed();
             };
         }
         try { _shelfWindow.AppWindow.Show(); } catch { }
         _shelfWindow.Activate();
+        BringWindowToFront(_shelfWindow);
     }
 
     public void OpenPodcastIssue(string issueId)
@@ -509,6 +564,7 @@ public partial class App : Application
             {
                 _audioWindows.Remove(bookId);
                 _shelfWindow?.RefreshBooks();
+                CheckExitIfAllWindowsClosed();
             };
             audioWin.Activate();
             return;
@@ -523,6 +579,7 @@ public partial class App : Application
             {
                 _pdfWindows.Remove(bookId);
                 _shelfWindow?.RefreshBooks();
+                CheckExitIfAllWindowsClosed();
             };
             pdfWin.Activate();
             return;
@@ -534,6 +591,7 @@ public partial class App : Application
         {
             _readerWindows.Remove(bookId);
             _shelfWindow?.RefreshBooks();
+            CheckExitIfAllWindowsClosed();
         };
         win.Activate();
     }
@@ -550,6 +608,7 @@ public partial class App : Application
             _settingsWindow.NavigateTo(initialPage);
         }
         _settingsWindow.Activate();
+        BringWindowToFront(_settingsWindow);
     }
 
     public void BroadcastAppearanceChanged()

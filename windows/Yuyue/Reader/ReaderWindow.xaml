@@ -670,12 +670,25 @@
             </Border>
         </Grid>
 
-        <!-- 顶部悬浮透明工具栏 (56px, F11 全屏沉浸时自动隐藏) -->
+        <!-- 顶部悬浮透明工具栏 (56px, F11 全屏沉浸时自动隐藏；TitleDragRegion 仅占中间空白列，避免 HTCAPTION 吞掉左右按钮点击) -->
         <Grid x:Name="TopToolbar" Height="56" VerticalAlignment="Top" Padding="14,6,144,4">
-            <Border x:Name="TitleDragRegion" Background="Transparent" />
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 中：绝对居中两行标题（不参与命中测试） -->
+            <StackPanel x:Name="TitleCenterStack" Grid.ColumnSpan="3" Spacing="1" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
+                <TextBlock x:Name="BookTitleText" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center" MaxWidth="360" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="SubtitleText" FontSize="11" HorizontalAlignment="Center" MaxWidth="420" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+
+            <!-- 中间空白拖动区（严格限制在 Column 1，绝不覆盖左/右按钮胶囊） -->
+            <Border x:Name="TitleDragRegion" Grid.Column="1" Background="Transparent" Margin="8,0" />
 
             <!-- 左：‹ 书架 胶囊 + 紧随其后的内联搜索胶囊 (MacReaderView.swift:446-458) -->
-            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Left" VerticalAlignment="Center">
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Left" VerticalAlignment="Center">
                 <Button
                     x:Name="BackToShelfBtn"
                     Height="30"
@@ -739,15 +752,10 @@
                 </Border>
             </StackPanel>
 
-            <!-- 中：绝对居中两行标题 -->
-            <StackPanel x:Name="TitleCenterStack" Spacing="1" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
-                <TextBlock x:Name="BookTitleText" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center" MaxWidth="360" TextTrimming="CharacterEllipsis" />
-                <TextBlock x:Name="SubtitleText" FontSize="11" HorizontalAlignment="Center" MaxWidth="420" TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-
             <!-- 右：统一毛玻璃工具胶囊（朗读 / 目录 / 搜索 / Aa / 译 / 书伴 / 人物 / 笔记） -->
             <Border
                 x:Name="ToolCapsule"
+                Grid.Column="2"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Center"
                 Height="32"

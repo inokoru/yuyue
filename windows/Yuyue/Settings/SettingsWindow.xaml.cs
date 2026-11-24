@@ -890,67 +890,56 @@ public sealed partial class SettingsWindow : Window
                         : _library.Prefs.GlossLevel switch { 2 => "四级及以上", 3 => "六级及以上", 4 => "考研及以上", 5 => "雅思及以上", _ => "GRE 及以上" };
                 InspectorHost.Children.Add(InspectorHead("样张", lvlText));
 
-                // 1:1 MacSettingsSide.swift:401-473：完整狄更斯《双城记》开篇 + 虚线生词下划线
-                (string Word, string? Gloss, byte Level, bool InVocab)[] sampleWords =
+                // 1:1 settings-foreign/1.png & MacSettingsSide.swift:401-473：4 行自然排版的《双城记》开篇 + 虚线生词下划线
+                (string Word, string? Gloss, byte Level, bool InVocab)[][] sampleLines =
                 [
-                    ("It was the best of times,", null, 0, false),
-                    ("it was the worst of times,", null, 0, false),
-                    ("it was the age of", null, 0, false),
-                    ("wisdom,", "智慧", 2, false),
-                    ("it was the age of", null, 0, false),
-                    ("foolishness,", "愚蠢", 4, false),
-                    ("it was the", null, 0, false),
-                    ("epoch", "时代", 5, false),
-                    ("of", null, 0, false),
-                    ("belief,", "信仰", 3, false),
-                    ("it was the epoch of", null, 0, false),
-                    ("incredulity…", "怀疑", 6, true),
+                    [("It was the best of times, it was the worst", null, 0, false)],
+                    [("of times, it was the age of", null, 0, false), ("wisdom,", "智慧", 2, false), ("it was", null, 0, false)],
+                    [("the age of", null, 0, false), ("foolishness,", "愚蠢", 4, false), ("it was the", null, 0, false), ("epoch", "时代", 5, false), ("of", null, 0, false)],
+                    [("belief,", "信仰", 3, false), ("it was the epoch of", null, 0, false), ("incredulity…", "怀疑", 6, true)],
                 ];
 
                 var linesStack = new StackPanel { Spacing = 5 };
-                var line1 = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-                var line2 = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-                var line3 = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-                var line4 = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-                var line5 = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-                var line6 = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-                for (int i = 0; i < sampleWords.Length; i++)
+                foreach (var rowWords in sampleLines)
                 {
-                    var w = sampleWords[i];
-                    bool showGloss = glossEnabled
+                    bool lineHasGloss = rowWords.Any(w => glossEnabled
                         && w.Gloss is not null
-                        && (_library.Prefs.GlossVocabOnly ? w.InVocab : w.Level >= _library.Prefs.GlossLevel);
+                        && (_library.Prefs.GlossVocabOnly ? w.InVocab : w.Level >= _library.Prefs.GlossLevel));
+                    var linePanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+                    foreach (var w in rowWords)
+                    {
+                        bool showGloss = glossEnabled
+                            && w.Gloss is not null
+                            && (_library.Prefs.GlossVocabOnly ? w.InVocab : w.Level >= _library.Prefs.GlossLevel);
 
-                    var token = new StackPanel { Spacing = 0 };
-                    token.Children.Add(new TextBlock
-                    {
-                        Text = showGloss ? w.Gloss! : " ",
-                        FontSize = 9,
-                        Foreground = ThemeHelper.Brush(ink2Col),
-                    });
-                    token.Children.Add(new TextBlock
-                    {
-                        Text = w.Word,
-                        FontFamily = new FontFamily(YYFontFamily.LatinSerif.WindowsFamily()),
-                        FontSize = 12.5,
-                        Foreground = ThemeHelper.Brush(inkCol),
-                    });
-                    if (_library.Prefs.ForeignMarkVocab && w.InVocab)
-                    {
-                        // 虚线 [2,2] 下划线
-                        var dashRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(0, 1, 0, 0) };
-                        for (int d = 0; d < 12; d++)
-                            dashRow.Children.Add(new Border { Width = 3, Height = 1, Background = ThemeHelper.Brush(inkCol), Opacity = 0.62 });
-                        token.Children.Add(dashRow);
+                        var token = new StackPanel { Spacing = 0 };
+                        if (lineHasGloss)
+                        {
+                            token.Children.Add(new TextBlock
+                            {
+                                Text = showGloss ? w.Gloss! : " ",
+                                FontSize = 9,
+                                Foreground = ThemeHelper.Brush(ink2Col),
+                            });
+                        }
+                        token.Children.Add(new TextBlock
+                        {
+                            Text = w.Word,
+                            FontFamily = new FontFamily(YYFontFamily.LatinSerif.WindowsFamily()),
+                            FontSize = 12,
+                            Foreground = ThemeHelper.Brush(inkCol),
+                        });
+                        if (_library.Prefs.ForeignMarkVocab && w.InVocab)
+                        {
+                            var dashRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(0, 1, 0, 0) };
+                            for (int d = 0; d < 12; d++)
+                                dashRow.Children.Add(new Border { Width = 3, Height = 1, Background = ThemeHelper.Brush(inkCol), Opacity = 0.62 });
+                            token.Children.Add(dashRow);
+                        }
+                        linePanel.Children.Add(token);
                     }
-                    (i == 0 ? line1 : i == 1 ? line2 : i < 4 ? line3 : i < 6 ? line4 : i < 10 ? line5 : line6).Children.Add(token);
+                    linesStack.Children.Add(linePanel);
                 }
-                linesStack.Children.Add(line1);
-                linesStack.Children.Add(line2);
-                linesStack.Children.Add(line3);
-                linesStack.Children.Add(line4);
-                linesStack.Children.Add(line5);
-                linesStack.Children.Add(line6);
 
                 InspectorHost.Children.Add(new Border
                 {
@@ -2235,8 +2224,8 @@ public sealed partial class SettingsWindow : Window
         // 1:1 MacForeignSettings.swift:24-34：查词卡仅 3 行（移除多余点词查译行）
         DynamicPageHost.Children.Add(MakeCard(
             MakeRow("系统词典", "点英文词即查，无需联网", builtInLabel),
-            MakeRow("查词时自动发音", null, MakeSwitch(_library.Prefs.ForeignSpeakOnLookup, v => { _library.Prefs.ForeignSpeakOnLookup = v; _library.SavePrefs(); RecordChange("自动发音", v ? "开" : "关"); })),
-            MakeRow("英文发音", null, accentSeg)));
+            MakeRow("查词时自动发音", null, MakeSwitch(_library.Prefs.ForeignSpeakOnLookup, v => { _library.Prefs.ForeignSpeakOnLookup = v; _library.SavePrefs(); RecordChange("自动发音", v ? "开" : "关"); }), compact: true),
+            MakeRow("英文发音", null, accentSeg, compact: true)));
 
         DynamicPageHost.Children.Add(MakeHeading("MDict 词典"));
         var dicts = _library.GetDictionaries();
@@ -2341,7 +2330,7 @@ public sealed partial class SettingsWindow : Window
         DynamicPageHost.Children.Add(MakeCard(
             MakeRow("难词行间释义", "阅读英文书时，在较难词汇上方标注简短中文词义", glossSw),
             MakeRow("词汇难度", "等级越高，仅标注更生僻的词", lvlSeg),
-            MakeRow("仅标注生词本中的词", null, vocabOnlySw)));
+            MakeRow("仅标注生词本中的词", null, vocabOnlySw, compact: true)));
 
         DynamicPageHost.Children.Add(MakeHeading("生词"));
         DynamicPageHost.Children.Add(MakeCard(
@@ -4079,7 +4068,7 @@ public sealed partial class SettingsWindow : Window
                         string pk = CloudVoiceEntry.ProviderKey(pr);
                         bool cfg = _library.CloudVoices.IsConfigured(pr);
                         var cell = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 9, VerticalAlignment = VerticalAlignment.Center };
-                        cell.Children.Add(YYChrome.MakeServiceTile(pk, IsDark, 24));
+                        cell.Children.Add(YYChrome.MakeBareServiceIcon(pk, IsDark, 20));
                         cell.Children.Add(new TextBlock
                         {
                             Text = cfg ? $"{CloudVoiceService.ProviderDisplayName(pr, _library.Prefs)} ✓" : CloudVoiceService.ProviderDisplayName(pr, _library.Prefs),
@@ -4438,9 +4427,9 @@ public sealed partial class SettingsWindow : Window
                     var pr = list[i];
                     bool already = _library.Prefs.ConfiguredAiProviders.Contains(pr.Id);
                     var row = new Grid { ColumnSpacing = 9 };
-                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
                     row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                    row.Children.Add(MakeServiceLogoTile(pr.Id, 24));
+                    row.Children.Add(YYChrome.MakeBareServiceIcon(pr.Id, IsDark, 20));
 
                     var lbl = new TextBlock
                     {
@@ -6150,6 +6139,7 @@ public sealed partial class SettingsWindow : Window
             long booksBytes = 0;
             long audioBytes = DirSize(Path.Combine(dataDir, "audiobooks")) + DirSize(Path.Combine(dataDir, "recordings"));
             long deletedBytes = DirSize(Path.Combine(dataDir, "trash"));
+            int deletedCount = 0;
             var perBookSizes = new List<(string Title, long Bytes)>();
 
             if (Directory.Exists(booksRoot))
@@ -6169,6 +6159,7 @@ public sealed partial class SettingsWindow : Window
                     else
                     {
                         deletedBytes += sz;
+                        deletedCount++;
                     }
                 }
             }
@@ -6181,7 +6172,7 @@ public sealed partial class SettingsWindow : Window
             try { freeBytes = new DriveInfo(Path.GetPathRoot(dataDir) ?? "C:\\").AvailableFreeSpace; } catch { }
 
             var topBooks = perBookSizes.OrderByDescending(x => x.Bytes).Take(12).ToArray();
-            return (booksBytes, audioBytes, voiceBytes, deletedBytes, otherBytes, totalBytes, freeBytes, qaBytes, topBooks);
+            return (booksBytes, audioBytes, voiceBytes, deletedBytes, deletedCount, otherBytes, totalBytes, freeBytes, qaBytes, topBooks);
         }).ContinueWith(t =>
         {
             if (t.Status != TaskStatus.RanToCompletion) return;
@@ -6203,31 +6194,41 @@ public sealed partial class SettingsWindow : Window
                     headLine.Children.Add(new TextBlock { Text = $"本机可用 {FormatBytes(s.freeBytes)}", FontSize = 11.5, Foreground = ThemeHelper.Brush(pal.T3), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom });
                 barWrap.Children.Add(headLine);
 
-                // 5 段彩条：书文件 / 有声书录音 / 语音模型 / 已删除 / 其他
+                // 5 段彩条：书文件 / 有声书录音 / 语音模型 / 已删除 / 其他（1:1 settings-storage/1.png 圆角浅灰底槽）
+                Color otherCol = IsDark ? Color.FromArgb(110, 180, 176, 170) : Color.FromArgb(128, 198, 194, 188);
                 (string Label, long Bytes, Color Col)[] parts =
                 [
                     ("书文件", s.booksBytes, tnt.Fill),
                     ("有声书录音", s.audioBytes, Color.FromArgb(205, tnt.Fill.R, tnt.Fill.G, tnt.Fill.B)),
                     ("语音模型", s.voiceBytes, Color.FromArgb(145, tnt.Fill.R, tnt.Fill.G, tnt.Fill.B)),
                     ("已删除", s.deletedBytes, pal.Danger),
-                    ("其他", s.otherBytes, pal.T3),
+                    ("其他", s.otherBytes, otherCol),
                 ];
 
                 var barGrid = new Grid { Height = 8, ColumnSpacing = 2 };
                 long sum = Math.Max(1, parts.Sum(x => x.Bytes));
                 int colIdx = 0;
-                foreach (var pt in parts.Where(x => x.Bytes > 0))
+                var activeParts = parts.Where(x => x.Bytes > 0).ToArray();
+                for (int pi = 0; pi < activeParts.Length; pi++)
                 {
+                    var pt = activeParts[pi];
                     barGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.03, (double)pt.Bytes / sum), GridUnitType.Star) });
-                    var seg = new Border { Background = ThemeHelper.Brush(pt.Col), CornerRadius = new CornerRadius(2) };
+                    double leftR = pi == 0 ? 4 : 1.5;
+                    double rightR = pi == activeParts.Length - 1 ? 4 : 1.5;
+                    var seg = new Border { Background = ThemeHelper.Brush(pt.Col), CornerRadius = new CornerRadius(leftR, rightR, rightR, leftR) };
                     Grid.SetColumn(seg, colIdx++);
                     barGrid.Children.Add(seg);
                 }
-                if (colIdx == 0) barGrid.Children.Add(new Border { Background = ThemeHelper.Brush(pal.Inset), CornerRadius = new CornerRadius(4) });
-                barWrap.Children.Add(barGrid);
+                barWrap.Children.Add(new Border
+                {
+                    Height = 8,
+                    CornerRadius = new CornerRadius(4),
+                    Background = ThemeHelper.Brush(pal.Inset),
+                    Child = barGrid,
+                });
 
-                var legend = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
-                foreach (var pt in parts.Where(x => x.Bytes > 0))
+                var legend = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16 };
+                foreach (var pt in activeParts)
                 {
                     var item = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
                     item.Children.Add(new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), Background = ThemeHelper.Brush(pt.Col), VerticalAlignment = VerticalAlignment.Center });
@@ -6236,6 +6237,7 @@ public sealed partial class SettingsWindow : Window
                 }
                 barWrap.Children.Add(legend);
 
+                int deletedCount = s.deletedCount;
                 var purgeBtn = YYChrome.MakeSettingsActionButton("立即清空", async () =>
                 {
                     var dlg = new ContentDialog
@@ -6251,7 +6253,7 @@ public sealed partial class SettingsWindow : Window
                     {
                         try { _library.Core.PurgeDeleted(0); RenderDynamicPage("storage"); } catch { }
                     }
-                }, IsDark, destructive: true, enabled: s.deletedBytes > 0);
+                }, IsDark, destructive: true, enabled: s.deletedBytes > 0 || deletedCount > 0);
 
                 var clearQaRight = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
                 clearQaRight.Children.Add(new TextBlock { Text = FormatBytes(s.qaBytes), FontSize = 12, Foreground = ThemeHelper.Brush(pal.T2), VerticalAlignment = VerticalAlignment.Center });
@@ -6282,7 +6284,7 @@ public sealed partial class SettingsWindow : Window
                 var cleanupRows = new List<UIElement>
                 {
                     barWrap,
-                    MakeRow($"最近删除 · {FormatBytes(s.deletedBytes)}", "保留 30 天以便恢复，到期自动清理", purgeBtn),
+                    MakeRow($"最近删除 · {deletedCount} 本 ({FormatBytes(s.deletedBytes)})", "保留 30 天以便恢复，到期自动清理", purgeBtn),
                 };
                 if (s.voiceBytes > 0)
                 {
@@ -6305,8 +6307,17 @@ public sealed partial class SettingsWindow : Window
                     cleanupRows.Add(MakeRow("语音合成模型", FormatBytes(s.voiceBytes), rmModelBtn));
                 }
                 cleanupRows.Add(MakeRow("书伴问答缓存", "同章节重复提问直接读取本地缓存，不重复调用模型", clearQaRight));
+                storageHost.Children.Add(MakeCard(cleanupRows.ToArray()));
 
-                // 强制对齐模型 (mms_fa.int8.onnx, 317 MB)
+                if (s.topBooks.Length > 0)
+                {
+                    storageHost.Children.Add(MakeHeading(L10n.T("各书占用空间")));
+                    storageHost.Children.Add(MakeCard(s.topBooks.Select(b =>
+                        (UIElement)L10n.Skip(MakeRow(b.Title, null, new TextBlock { Text = FormatBytes(b.Bytes), FontSize = 12, Foreground = ThemeHelper.Brush(pal.T2) }, compact: true))).ToArray()));
+                }
+
+                // 可选离线扩展包（放在「各书占用空间」之后，保持首屏 1:1 对齐 settings-storage/1.png）
+                var extRows = new List<UIElement>();
                 bool alignerInstalled = Aligner.IsInstalled(dataDir);
                 var alignerBtn = new Button
                 {
@@ -6338,12 +6349,11 @@ public sealed partial class SettingsWindow : Window
                         RecordChange("对齐模型", ex.Message);
                     }
                 };
-                cleanupRows.Add(MakeRow(
+                extRows.Add(MakeRow(
                     "有声书强制对齐模型",
                     alignerInstalled ? "已安装 (mms_fa.int8.onnx · 约 303 MB)" : "本地离线的 MMS 听读自动对齐模型，按需下载",
                     alignerBtn));
 
-                // 广播剧音效素材库 (sounds-1)
                 bool soundsInstalled = SoundLibraryService.IsInstalled(dataDir);
                 var soundsBtn = new Button
                 {
@@ -6383,20 +6393,14 @@ public sealed partial class SettingsWindow : Window
                         await errDlg.ShowAsync();
                     }
                 };
-                cleanupRows.Add(MakeRow(
+                extRows.Add(MakeRow(
                     "广播剧音效素材库",
                     soundsInstalled ? "已安装 (sounds-1) · 未安装时自动使用核心内置合成环境音" : "可选扩展（未安装时使用内置环境音与音效混音）",
                     soundsBtn));
 
-                storageHost.Children.Add(MakeCard(cleanupRows.ToArray()));
+                storageHost.Children.Add(MakeHeading("离线扩展包"));
+                storageHost.Children.Add(MakeCard(extRows.ToArray()));
                 L10n.ApplyTree(storageHost);
-
-                if (s.topBooks.Length > 0)
-                {
-                    storageHost.Children.Add(MakeHeading(L10n.T("各书占用空间")));
-                    storageHost.Children.Add(MakeCard(s.topBooks.Select(b =>
-                        (UIElement)L10n.Skip(MakeRow(b.Title, null, new TextBlock { Text = FormatBytes(b.Bytes), FontSize = 12, Foreground = ThemeHelper.Brush(pal.T2) }, compact: true))).ToArray()));
-                }
             });
         });
     }

@@ -15,7 +15,7 @@
         Drop="RootGrid_Drop"
         KeyDown="RootGrid_KeyDown">
         <Grid.RowDefinitions>
-            <RowDefinition Height="28" />
+            <RowDefinition Height="32" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
@@ -26,11 +26,11 @@
         <!-- 阴影接收面（铺满整个书桌底层，让纸页与封面投出柔和阴影） -->
         <Grid x:Name="DeskShadowReceiver" Grid.RowSpan="2" Grid.ColumnSpan="2" Background="Transparent" />
 
-        <!-- 顶部极简窗头拖动区：右上角 Windows 窗控键安静落在 28px 顶部区内，纸页贴顶 8px 完整浮起（1:1 macOS ShelfDesk.margin = 8） -->
-        <Grid x:Name="TopDragBar" Grid.Row="0" Grid.ColumnSpan="2" Background="Transparent" Canvas.ZIndex="10" />
+        <!-- 顶部 32px 书桌窗头拖动区：右上角 Windows [ — □ × ] 窗控键完整落在暖灰书桌条内，零遮挡下方纸页按钮 -->
+        <Grid x:Name="TopDragBar" Grid.Row="0" Grid.ColumnSpan="2" Background="Transparent" />
 
         <!-- 左侧栏：无卡片，直接写在书桌上 -->
-        <Grid x:Name="SidebarPanel" Grid.Row="0" Grid.RowSpan="2" Grid.Column="0" Padding="10,40,10,10">
+        <Grid x:Name="SidebarPanel" Grid.Row="0" Grid.RowSpan="2" Grid.Column="0" Padding="10,36,10,10">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
@@ -215,25 +215,24 @@
             </Grid>
         </Grid>
 
-        <!-- 右侧浮起的暖白纸页（完整四圆角 + 贴顶 8px 书桌边距 + ThemeShadow 柔和投影，标题与 + 导入自然避开右上角 28px Windows 窗控键） -->
+        <!-- 右侧浮起的暖白纸页（完整四圆角 + ThemeShadow 柔和投影，位于 32px 书桌窗控条下方，彻底避开右上角 Windows 窗控键） -->
         <Border
             x:Name="PaperSheet"
-            Grid.Row="0"
-            Grid.RowSpan="2"
+            Grid.Row="1"
             Grid.Column="1"
-            Margin="0,8,8,8"
+            Margin="0,0,8,8"
             CornerRadius="12"
             Background="{ThemeResource YYBgBrush}"
             BorderBrush="{ThemeResource YYPaperBorderBrush}"
             BorderThickness="0.5">
             <Grid x:Name="PaperInnerGrid">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="66" />
+                    <RowDefinition Height="56" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
                 <!-- 纸页标题行：左 侧栏开关 + 动态自定义区（播客托盘 / 返回按钮）或 22px 标题 + 副标题，右 动态页头操作区 -->
-                <Grid Grid.Row="0" Padding="18,22,28,0">
+                <Grid Grid.Row="0" Padding="18,14,24,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />

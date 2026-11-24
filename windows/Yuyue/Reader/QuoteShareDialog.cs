@@ -430,7 +430,7 @@ public static class QuoteShareDialog
         }
 
         var tc = ThemeHelper.TintColors(tint, darkUi);
-        var textBtn = YYChrome.MakeSheetPillButton(MakeActionLabel("doc-lines", "纯文字", uiPalette.T1), () =>
+        var textBtn = YYChrome.MakeSheetPillButton(MakeActionLabel("text-quote", "纯文字", uiPalette.T1), () =>
         {
             var dp = new DataPackage();
             dp.SetText(BuildPlainShareText());
@@ -439,7 +439,7 @@ public static class QuoteShareDialog
             statusText.Visibility = Visibility.Visible;
         }, darkUi, tint, "secondary", height: 40, stretch: true);
 
-        var savePngBtn = YYChrome.MakeSheetPillButton(MakeActionLabel("arrow-down-circle", "存图", uiPalette.T1), async () =>
+        var savePngBtn = YYChrome.MakeSheetPillButton(MakeActionLabel("share-down", "存图", uiPalette.T1), async () =>
         {
             try
             {
@@ -460,7 +460,7 @@ public static class QuoteShareDialog
             catch (Exception ex) { statusText.Text = $"保存失败：{ex.Message}"; statusText.Visibility = Visibility.Visible; }
         }, darkUi, tint, "secondary", height: 40, stretch: true);
 
-        var shareBtn = YYChrome.MakeSheetPillButton(MakeActionLabel("share", "分享", tc.Accent), async () =>
+        var shareBtn = YYChrome.MakeSheetPillButton(MakeActionLabel("share-up", "分享", tc.Accent), async () =>
         {
             try
             {

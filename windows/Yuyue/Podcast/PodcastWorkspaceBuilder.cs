@@ -1309,30 +1309,49 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             }
             else
             {
-                (StudioKind Kind, string Title, string Desc)[] starters =
+                string sampleBook = _library.GetShelfBooks().FirstOrDefault()?.Title ?? "书架在读书";
+                (StudioKind Kind, string Title, string Tag, string Meta)[] starters =
                 [
-                    (StudioKind.WeeklyDigest, "本周书房周刊", "串联近期在读章节与划线想法，双人对谈盘点"),
-                    (StudioKind.Roundtable, "跨书圆桌", "挑两三本书围桌碰撞同一个主题"),
-                    (StudioKind.BookGuide, "难书导读", "先听 10 分钟人物背景与脉络拆解，再开卷不迷路"),
-                    (StudioKind.VocabRadio, "生词伴听", "用你生词本里的在学词汇编织一段英文慢速短播客"),
+                    (StudioKind.WeeklyDigest, $"本周书房周刊：重读《{sampleBook}》…", "不剧透锁", "10 分 · 本机酿制"),
+                    (StudioKind.Roundtable, "跨书圆桌：挑两三本在读书同台碰撞…", "跨书对谈", "15 分 · 防剧透"),
+                    (StudioKind.BookGuide, $"难书导读：《{sampleBook}》直觉热身…", "读前热身", "8 分 · 附原文锚点"),
+                    (StudioKind.VocabRadio, "生词伴听 · 通勤外语台（融入在学词）", "生词本联动", "12 分 · 语速 0.9×"),
                 ];
                 for (int i = 0; i < starters.Length; i++)
                 {
                     if (i > 0) stack.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(14, 0, 14, 0) });
-                    var (kind, title, desc) = starters[i];
+                    var (kind, title, tag, meta) = starters[i];
                     var r = new Grid { ColumnSpacing = 10, Padding = new Thickness(14, 10, 14, 10) };
+                    r.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
                     r.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
                     r.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                     r.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                    r.Children.Add(new Border { Width = 24, Height = 24, CornerRadius = new CornerRadius(7), Background = ThemeHelper.Brush(tint.Soft), Child = YYIcons.Make("sparkle", 11.5, ThemeHelper.Brush(tint.Accent)) });
-                    var m = new StackPanel { Spacing = 1 };
-                    m.Children.Add(new TextBlock { Text = title, FontFamily = serif, FontSize = 13.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
-                    m.Children.Add(new TextBlock { Text = desc, FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
-                    Grid.SetColumn(m, 1);
+                    r.Children.Add(YYIcons.Make("play", 10, ThemeHelper.Brush(p.T3), filled: true));
+                    var badge = new Border
+                    {
+                        Width = 24,
+                        Height = 24,
+                        CornerRadius = new CornerRadius(6),
+                        Background = ThemeHelper.Brush(tint.Soft),
+                        Child = YYIcons.Make("book-open", 11.5, ThemeHelper.Brush(tint.Accent)),
+                    };
+                    Grid.SetColumn(badge, 1);
+                    r.Children.Add(badge);
+
+                    var m = new StackPanel { Spacing = 2 };
+                    m.Children.Add(new TextBlock { Text = title, FontSize = 13, FontWeight = FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
+                    var subLine = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
+                    subLine.Children.Add(new TextBlock { Text = tag, FontSize = 11, Foreground = ThemeHelper.Brush(tint.Accent) });
+                    subLine.Children.Add(new TextBlock { Text = $"· {meta}", FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
+                    m.Children.Add(subLine);
+                    Grid.SetColumn(m, 2);
                     r.Children.Add(m);
-                    var chev = YYIcons.Make("chevron-right", 10.5, ThemeHelper.Brush(p.T3));
-                    Grid.SetColumn(chev, 2);
-                    r.Children.Add(chev);
+
+                    var trail = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center, Opacity = 0.55 };
+                    trail.Children.Add(YYIcons.Make("doc-lines", 11.5, ThemeHelper.Brush(p.T3)));
+                    trail.Children.Add(YYIcons.Make("bookmark", 11.5, ThemeHelper.Brush(p.T3)));
+                    Grid.SetColumn(trail, 3);
+                    r.Children.Add(trail);
 
                     var btn = new Button
                     {
@@ -1455,13 +1474,31 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         Grid.SetColumn(mid, 2);
         r.Children.Add(mid);
 
-        var openIcon = YYIcons.Make("note-card", 13, ThemeHelper.Brush(p.T3));
-        Grid.SetColumn(openIcon, 3);
-        r.Children.Add(openIcon);
-
-        var ctx = new MenuFlyout();
         string iid = issue.Id;
         bool inLater = issue.Placement == PodcastPlacement.Archive;
+
+        var trailActs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+        trailActs.Children.Add(YYIcons.Make("doc-lines", 11.5, ThemeHelper.Brush(p.T3)));
+        var bmBtn = new Button
+        {
+            Width = 24,
+            Height = 24,
+            Padding = new Thickness(0),
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            UseSystemFocusVisuals = false,
+            Content = YYIcons.Make("bookmark", 11.5, ThemeHelper.Brush(inLater ? tint.Accent : p.T3), filled: inLater),
+        };
+        ToolTipService.SetToolTip(bmBtn, inLater ? "移回在听书桌" : "存入稍后听");
+        bmBtn.Click += (_, _) =>
+        {
+            try { _library.Core.PodcastSetPlacement(iid, inLater ? PodcastPlacement.Desk : PodcastPlacement.Archive); _shelf.RefreshBooks(); } catch { }
+        };
+        trailActs.Children.Add(bmBtn);
+        Grid.SetColumn(trailActs, 3);
+        r.Children.Add(trailActs);
+
+        var ctx = new MenuFlyout();
         var laterMi = new MenuFlyoutItem { Text = inLater ? "移回在听书桌" : "存入稍后听" };
         laterMi.Click += (_, _) =>
         {

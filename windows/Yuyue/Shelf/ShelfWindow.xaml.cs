@@ -215,7 +215,7 @@ public sealed partial class ShelfWindow : Window
         IconProgress.Content = YYIcons.Make("book", 14, _activeFilter == "progress" ? t1 : t2);
         IconPodcasts.Content = YYIcons.Make("radio", 14, _activeFilter == "podcasts" ? t1 : t2);
         IconAudio.Content = YYIcons.Make("wave", 14, _activeFilter == "audio" ? t1 : t2);
-        IconNotes.Content = YYIcons.Make("highlighter", 14, _activeFilter == "notes" ? t1 : t2);
+        IconNotes.Content = YYIcons.Make("square.and.pencil", 14, _activeFilter == "notes" ? t1 : t2);
         IconWords.Content = YYIcons.Make("a-wen", 14, _activeFilter == "words" ? t1 : t2);
         IconCollections.Content = YYIcons.Make("stack", 14, _activeFilter == "collections" ? t1 : t2);
     }
@@ -4954,7 +4954,7 @@ public sealed partial class ShelfWindow : Window
     {
         SidebarColumn.Width = visible ? new GridLength(220) : new GridLength(0);
         SidebarPanel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-        PaperSheet.Margin = visible ? new Thickness(0, 8, 8, 8) : new Thickness(8, 8, 8, 8);
+        PaperSheet.Margin = visible ? new Thickness(0, 0, 8, 8) : new Thickness(8, 0, 8, 8);
         if (visible) YYChrome.AnimateSlideX(SidebarPanel, fromX: -16f, durationMs: 170);
     }
 

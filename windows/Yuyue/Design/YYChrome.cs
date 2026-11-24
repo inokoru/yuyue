@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.Foundation;
 using Windows.System;
@@ -21,8 +22,88 @@ namespace Yuyue.Design;
 /// </summary>
 public static class YYChrome
 {
+    private static string? ResolveBrandAssetFile(string key, bool dark) => key.Trim().ToLowerInvariant() switch
+    {
+        "obsidian" => "obsidian.png",
+        "notion" => dark ? "notion-dark.png" : "notion.png",
+        "flomo" => "flomo.png",
+        "xinzhi" => "xinzhi.png",
+        "azure" => "azure.png",
+        "claude" or "anthropic" => "claude.png",
+        "openai" => dark ? "openai-dark.png" : "openai.png",
+        "deepseek" => "deepseek.png",
+        "gemini" or "google" => "gemini.png",
+        "openrouter" => dark ? "openrouter-dark.png" : "openrouter.png",
+        "qwen" or "dashscope" or "aliyun" => "dashscope.png",
+        "kimi" or "moonshot" => dark ? "moonshot-dark.png" : "moonshot.png",
+        "glm" or "zhipu" => "zhipu.png",
+        "doubao" or "volc" or "volcengine" => "volcengine.png",
+        "siliconflow" => "siliconflow.png",
+        "minimax" => "minimax.png",
+        "grok" or "xai" => dark ? "xai-dark.png" : "xai.png",
+        "mistral" => "mistral.png",
+        "groq" => dark ? "groq-dark.png" : "groq.png",
+        "ollama" => dark ? "ollama-dark.png" : "ollama.png",
+        "lmstudio" => dark ? "lmstudio-dark.png" : "lmstudio.png",
+        "magpie" => dark ? "magpie-dark.png" : "magpie.png",
+        _ => null,
+    };
+
+    private static Image? TryCreateBrandImage(string fileName, double displaySize)
+    {
+        try
+        {
+            string full = System.IO.Path.Combine(System.AppContext.BaseDirectory, "Assets", "Brands", fileName);
+            if (!System.IO.File.Exists(full)) return null;
+            var bmp = new BitmapImage
+            {
+                DecodePixelWidth = Math.Max(48, (int)Math.Round(displaySize * 3.0)),
+                UriSource = new System.Uri(full, System.UriKind.Absolute),
+            };
+            return new Image
+            {
+                Width = displaySize,
+                Height = displaySize,
+                Stretch = Stretch.Uniform,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Source = bmp,
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>
-    /// Crisp macOS rounded-square service/brand icon tile (32×32 default, CornerRadius ~25%).
+    /// Borderless bare brand/provider logo mark (used in 3-column picker sheets like <c>settings-companion-add/1.png</c>).
+    /// </summary>
+    public static FrameworkElement MakeBareServiceIcon(string key, bool dark, double size = 20)
+    {
+        if (ResolveBrandAssetFile(key, dark) is { } assetFile && TryCreateBrandImage(assetFile, size) is { } img)
+            return img;
+
+        var palette = ThemeHelper.Palette(dark);
+        return key.Trim().ToLowerInvariant() switch
+        {
+            "mimo" or "xiaomi" => new Border
+            {
+                Width = size,
+                Height = size,
+                CornerRadius = new CornerRadius(Math.Round(size * 0.28)),
+                Background = ThemeHelper.Brush(Color.FromArgb(255, 255, 105, 0)),
+                Child = MakeGlyphMark("mi", Colors.Transparent, Colors.White, size * 0.92),
+            },
+            "fish" or "fishaudio" => YYIcons.Make("wave", size * 0.86, ThemeHelper.Brush(Color.FromArgb(255, 58, 134, 220))),
+            "elevenlabs" => MakeGlyphMark("II", Colors.Transparent, dark ? Colors.White : Color.FromArgb(255, 28, 30, 34), size * 1.1),
+            "local" or "voicestudio" or "indextts" or "gpt-sovits" or "cosyvoice" => YYIcons.Make("laptop", size * 0.86, ThemeHelper.Brush(palette.T1)),
+            _ => YYIcons.Make("sparkle", size * 0.86, ThemeHelper.Brush(palette.T2)),
+        };
+    }
+
+    /// <summary>
+    /// Crisp macOS rounded-square service/brand icon tile (32×32 default, CornerRadius ~27%).
     /// Matches <c>MacListeningSettings.swift</c>, <c>MacCompanionSettings.swift</c>, and <c>MacNoteExportSettings.swift</c>.
     /// </summary>
     public static Border MakeServiceTile(string key, bool dark, double size = 32)
@@ -30,15 +111,16 @@ public static class YYChrome
         var palette = ThemeHelper.Palette(dark);
         double radius = Math.Round(size * 0.27);
         double iconSize = Math.Round(size * 0.50);
+        double brandImgSize = Math.Round(size * 0.62);
 
-        Border MakeTile(Color bg, Color border, UIElement child) => new()
+        Border MakeTile(Color bg, Color border, UIElement child, double borderThickness = 0.75) => new()
         {
             Width = size,
             Height = size,
             CornerRadius = new CornerRadius(radius),
             Background = ThemeHelper.Brush(bg),
             BorderBrush = ThemeHelper.Brush(border),
-            BorderThickness = new Thickness(0.75),
+            BorderThickness = new Thickness(borderThickness),
             Child = child,
         };
 
@@ -46,7 +128,19 @@ public static class YYChrome
         Color neutralLine = dark ? Color.FromArgb(24, 255, 255, 255) : Color.FromArgb(20, 42, 43, 46);
         Color whiteTile = dark ? Color.FromArgb(255, 34, 35, 38) : Colors.White;
 
-        switch (key.ToLowerInvariant())
+        string k = key.Trim().ToLowerInvariant();
+        if (k == "xinzhi" && TryCreateBrandImage("xinzhi.png", size) is { } xinzhiImg)
+        {
+            // xinzhi.svg already includes its full-bleed warm gradient rounded square
+            return MakeTile(Colors.Transparent, neutralLine, xinzhiImg, 0.5);
+        }
+
+        if (ResolveBrandAssetFile(k, dark) is { } brandAsset && TryCreateBrandImage(brandAsset, brandImgSize) is { } brandImg)
+        {
+            return MakeTile(whiteTile, neutralLine, brandImg);
+        }
+
+        switch (k)
         {
             case "kokoro":
                 return MakeTile(neutralBg, neutralLine,
@@ -95,87 +189,18 @@ public static class YYChrome
                 return MakeTile(neutralBg, neutralLine,
                     YYIcons.Make("plus", Math.Round(size * 0.42), ThemeHelper.Brush(palette.T2)));
 
-            // Note Export brands (settings-notes/1.png)
-            case "obsidian":
-                return MakeTile(whiteTile, neutralLine,
-                    YYIcons.Make("obsidian", iconSize + 1, ThemeHelper.Brush(Color.FromArgb(255, 130, 86, 214)), filled: false));
-
-            case "notion":
-                return MakeTile(whiteTile, neutralLine,
-                    YYIcons.Make("notion", iconSize + 1, ThemeHelper.Brush(dark ? Colors.White : Color.FromArgb(255, 34, 34, 36))));
-
-            case "flomo":
-                return MakeTile(whiteTile, neutralLine,
-                    YYIcons.Make("flomo", iconSize + 1, ThemeHelper.Brush(Color.FromArgb(255, 55, 178, 98))));
-
-            case "xinzhi":
-                return MakeTile(whiteTile, neutralLine,
-                    YYIcons.Make("xinzhi", iconSize + 1, ThemeHelper.Brush(Color.FromArgb(255, 86, 168, 92))));
-
-            // Companion & Cloud Voice brands (settings-companion-add/1.png)
-            case "claude" or "anthropic":
-                return MakeTile(whiteTile, neutralLine,
-                    YYIcons.Make("claude", iconSize, ThemeHelper.Brush(Color.FromArgb(255, 217, 119, 87))));
-
-            case "openai":
-                return MakeTile(whiteTile, neutralLine,
-                    YYIcons.Make("openai", iconSize + 1, ThemeHelper.Brush(dark ? Colors.White : Color.FromArgb(255, 34, 36, 40))));
-
-            case "deepseek":
-                return MakeTile(whiteTile, neutralLine,
-                    YYIcons.Make("deepseek", iconSize + 1, ThemeHelper.Brush(Color.FromArgb(255, 77, 107, 254))));
-
-            case "gemini" or "google":
-                return MakeTile(whiteTile, neutralLine,
-                    YYIcons.Make("gemini", iconSize, ThemeHelper.Brush(Color.FromArgb(255, 66, 133, 244)), filled: true));
-
-            case "openrouter":
-                return MakeTile(whiteTile, neutralLine,
-                    YYIcons.Make("openrouter", iconSize, ThemeHelper.Brush(dark ? Colors.White : Color.FromArgb(255, 38, 40, 46))));
-
-            case "ollama" or "lmstudio":
-                return MakeTile(whiteTile, neutralLine,
-                    YYIcons.Make("laptop", iconSize, ThemeHelper.Brush(palette.T1)));
-
-            case "kimi" or "moonshot":
-                return MakeTile(whiteTile, neutralLine,
-                    MakeGlyphMark("K", Color.FromArgb(255, 34, 36, 42), dark ? Colors.White : Color.FromArgb(255, 34, 36, 42), size));
-
-            case "qwen" or "dashscope" or "aliyun":
-                return MakeTile(whiteTile, neutralLine,
-                    YYIcons.Make("sparkle", iconSize, ThemeHelper.Brush(Color.FromArgb(255, 108, 92, 231))));
-
-            case "glm" or "zhipu":
-                return MakeTile(whiteTile, neutralLine,
-                    MakeGlyphMark("Z", Color.FromArgb(255, 64, 114, 245), Color.FromArgb(255, 64, 114, 245), size));
-
-            case "doubao" or "volc" or "volcengine":
-                return MakeTile(whiteTile, neutralLine,
-                    YYIcons.Make("bubble-lines", iconSize, ThemeHelper.Brush(Color.FromArgb(255, 52, 132, 245))));
-
-            case "siliconflow":
-                return MakeTile(whiteTile, neutralLine,
-                    YYIcons.Make("sliders", iconSize, ThemeHelper.Brush(Color.FromArgb(255, 118, 75, 226))));
-
-            case "minimax":
-                return MakeTile(whiteTile, neutralLine,
-                    YYIcons.Make("wave", iconSize, ThemeHelper.Brush(Color.FromArgb(255, 224, 72, 118))));
-
             case "mimo" or "xiaomi":
-                return MakeTile(whiteTile, neutralLine,
-                    MakeGlyphMark("M", Color.FromArgb(255, 240, 110, 42), Color.FromArgb(255, 240, 110, 42), size));
-
-            case "grok" or "xai":
-                return MakeTile(whiteTile, neutralLine,
-                    MakeGlyphMark("G", dark ? Colors.White : Color.FromArgb(255, 28, 30, 34), dark ? Colors.White : Color.FromArgb(255, 28, 30, 34), size));
-
-            case "mistral":
-                return MakeTile(whiteTile, neutralLine,
-                    MakeGlyphMark("M", Color.FromArgb(255, 232, 108, 36), Color.FromArgb(255, 232, 108, 36), size));
-
-            case "groq":
-                return MakeTile(whiteTile, neutralLine,
-                    MakeGlyphMark("g", Color.FromArgb(255, 245, 80, 54), Color.FromArgb(255, 245, 80, 54), size));
+            {
+                var badge = new Border
+                {
+                    Width = Math.Round(size * 0.62),
+                    Height = Math.Round(size * 0.62),
+                    CornerRadius = new CornerRadius(Math.Round(size * 0.19)),
+                    Background = ThemeHelper.Brush(Color.FromArgb(255, 255, 105, 0)),
+                    Child = MakeGlyphMark("mi", Colors.Transparent, Colors.White, size * 0.78),
+                };
+                return MakeTile(whiteTile, neutralLine, badge);
+            }
 
             case "fish" or "fishaudio":
                 return MakeTile(whiteTile, neutralLine,
@@ -183,7 +208,7 @@ public static class YYChrome
 
             case "elevenlabs":
                 return MakeTile(whiteTile, neutralLine,
-                    MakeGlyphMark("II", dark ? Colors.White : Color.FromArgb(255, 34, 36, 40), dark ? Colors.White : Color.FromArgb(255, 34, 36, 40), size));
+                    MakeGlyphMark("II", Colors.Transparent, dark ? Colors.White : Color.FromArgb(255, 34, 36, 40), size));
 
             default:
                 return MakeTile(whiteTile, neutralLine,
