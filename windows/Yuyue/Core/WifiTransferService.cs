@@ -94,11 +94,23 @@ public sealed class WifiTransferService : IDisposable
         {
             try
             {
+                client.ReceiveTimeout = 30_000;
+                client.SendTimeout = 30_000;
                 await using var stream = client.GetStream();
-                var (method, target, contentLen, bodyPrefix) = await ReadHttpHeaderAsync(stream, ct);
+                var (method, target, contentLen, badContentLen, bodyPrefix) = await ReadHttpHeaderAsync(stream, ct);
                 if (string.IsNullOrEmpty(method)) return;
 
-                var uri = new Uri("http://localhost" + (target.StartsWith('/') ? target : "/" + target));
+                if (badContentLen || contentLen < 0)
+                {
+                    await WriteHttpResponseAsync(stream, "400 Bad Request", "text/plain", "Bad Request"u8.ToArray(), ct);
+                    return;
+                }
+
+                if (!Uri.TryCreate("http://localhost" + (target.StartsWith('/') ? target : "/" + target), UriKind.Absolute, out var uri))
+                {
+                    await WriteHttpResponseAsync(stream, "400 Bad Request", "text/plain", "Bad Request"u8.ToArray(), ct);
+                    return;
+                }
                 string path = uri.AbsolutePath;
 
                 if (method == "GET" && path == "/")
@@ -108,7 +120,7 @@ public sealed class WifiTransferService : IDisposable
                     return;
                 }
 
-                if (contentLen < 0 || contentLen > MaxBodyBytes)
+                if (contentLen > MaxBodyBytes)
                 {
                     await WriteHttpResponseAsync(stream, "413 Payload Too Large", "text/plain", "Payload Too Large"u8.ToArray(), ct);
                     return;
@@ -146,9 +158,17 @@ public sealed class WifiTransferService : IDisposable
 
                 if (method == "PUT" && path == "/chunk")
                 {
-                    var query = ParseQuery(uri.Query);
+                    if (!TryParseQuery(uri.Query, out var query))
+                    {
+                        await WriteHttpResponseAsync(stream, "400 Bad Request", "text/plain", "Bad Request"u8.ToArray(), ct);
+                        return;
+                    }
                     string id = query.GetValueOrDefault("id", "");
-                    long offset = long.TryParse(query.GetValueOrDefault("offset", "-1"), out var o) ? o : -1;
+                    if (!long.TryParse(query.GetValueOrDefault("offset", ""), out var offset) || offset < 0)
+                    {
+                        await WriteHttpResponseAsync(stream, "400 Bad Request", "text/plain", "Bad Request"u8.ToArray(), ct);
+                        return;
+                    }
 
                     if (!IsSafeUploadId(id) || !_uploads.TryGetValue(id, out var entry))
                     {
@@ -320,7 +340,7 @@ public sealed class WifiTransferService : IDisposable
             .Replace("{{awake}}", en ? "Keep the Wi-Fi Transfer window open on your PC while sending." : "传书期间请保持电脑端「局域网传书」窗口打开。");
     }
 
-    private static async Task<(string Method, string Target, long ContentLength, byte[] BodyPrefix)> ReadHttpHeaderAsync(
+    private static async Task<(string Method, string Target, long ContentLength, bool BadContentLength, byte[] BodyPrefix)> ReadHttpHeaderAsync(
         NetworkStream stream, CancellationToken ct)
     {
         using var ms = new MemoryStream();
@@ -329,33 +349,35 @@ public sealed class WifiTransferService : IDisposable
         while (headerEnd < 0 && ms.Length < 65536)
         {
             int r = await stream.ReadAsync(buf, ct);
-            if (r <= 0) return ("", "", 0, Array.Empty<byte>());
+            if (r <= 0) return ("", "", 0, false, Array.Empty<byte>());
             ms.Write(buf, 0, r);
             headerEnd = FindDoubleCrlf(ms.GetBuffer(), (int)ms.Length);
         }
-        if (headerEnd < 0) return ("", "", 0, Array.Empty<byte>());
+        if (headerEnd < 0) return ("", "", 0, false, Array.Empty<byte>());
 
         byte[] all = ms.ToArray();
         string headerText = Encoding.ASCII.GetString(all, 0, headerEnd);
         string[] lines = headerText.Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
-        if (lines.Length == 0) return ("", "", 0, Array.Empty<byte>());
+        if (lines.Length == 0) return ("", "", 0, false, Array.Empty<byte>());
 
         string[] reqParts = lines[0].Split(' ');
-        if (reqParts.Length < 2) return ("", "", 0, Array.Empty<byte>());
+        if (reqParts.Length < 2) return ("", "", 0, false, Array.Empty<byte>());
 
         long contentLen = 0;
+        bool badContentLen = false;
         for (int i = 1; i < lines.Length; i++)
         {
             int colon = lines[i].IndexOf(':');
             if (colon > 0 && lines[i][..colon].Trim().Equals("Content-Length", StringComparison.OrdinalIgnoreCase))
             {
-                long.TryParse(lines[i][(colon + 1)..].Trim(), out contentLen);
+                if (!long.TryParse(lines[i][(colon + 1)..].Trim(), out contentLen) || contentLen < 0)
+                    badContentLen = true;
             }
         }
 
         int bodyStart = headerEnd + 4;
         byte[] prefix = bodyStart < all.Length ? all[bodyStart..] : Array.Empty<byte>();
-        return (reqParts[0].ToUpperInvariant(), reqParts[1], contentLen, prefix);
+        return (reqParts[0].ToUpperInvariant(), reqParts[1], contentLen, badContentLen, prefix);
     }
 
     private static int FindDoubleCrlf(byte[] data, int len)
@@ -392,15 +414,22 @@ public sealed class WifiTransferService : IDisposable
         if (body.Length > 0) await stream.WriteAsync(body, ct);
     }
 
-    private static Dictionary<string, string> ParseQuery(string query)
+    private static bool TryParseQuery(string query, out Dictionary<string, string> dict)
     {
-        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var part in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
         {
-            int eq = part.IndexOf('=');
-            if (eq > 0) dict[Uri.UnescapeDataString(part[..eq])] = Uri.UnescapeDataString(part[(eq + 1)..]);
+            foreach (var part in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                int eq = part.IndexOf('=');
+                if (eq > 0) dict[Uri.UnescapeDataString(part[..eq])] = Uri.UnescapeDataString(part[(eq + 1)..]);
+            }
+            return true;
         }
-        return dict;
+        catch
+        {
+            return false;
+        }
     }
 
     private async Task<BookSummary> ImportZipArchiveAsync(string uploadId, string zipFileName, string zipPath)

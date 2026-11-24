@@ -191,6 +191,7 @@ public sealed class KokoroVoiceModel
         _downloadCts?.Cancel();
         _downloadCts = new CancellationTokenSource();
         var ct = _downloadCts.Token;
+        long runId = Interlocked.Increment(ref _downloadRunId);
 
         State = KokoroStateKind.Downloading;
         DownloadProgress = 0.0;
@@ -232,7 +233,7 @@ public sealed class KokoroVoiceModel
                         tmpZip,
                         BundleBytes,
                         BundleDigest,
-                        (done, total) => ReportProgress(done, total > 0 ? total : BundleBytes),
+                        (done, total) => ReportProgress(runId, done, total > 0 ? total : BundleBytes),
                         ct);
 
                     StatusMessage = "正在解压 Kokoro 轻量离线语音…";
@@ -293,7 +294,7 @@ public sealed class KokoroVoiceModel
                         if (ok)
                         {
                             completed += rf.Bytes;
-                            ReportProgress(completed, totalRaw);
+                            ReportProgress(runId, completed, totalRaw);
                             continue;
                         }
                     }
@@ -306,13 +307,13 @@ public sealed class KokoroVoiceModel
                         part,
                         rf.Bytes,
                         rf.Blake3,
-                        (done, _) => ReportProgress(baseDone + Math.Min(done, rf.Bytes), totalRaw),
+                        (done, _) => ReportProgress(runId, baseDone + Math.Min(done, rf.Bytes), totalRaw),
                         ct);
 
                     if (File.Exists(dst)) File.Delete(dst);
                     File.Move(part, dst);
                     completed += rf.Bytes;
-                    ReportProgress(completed, totalRaw);
+                    ReportProgress(runId, completed, totalRaw);
                 }
 
                 await Task.Run(() =>
@@ -376,9 +377,11 @@ public sealed class KokoroVoiceModel
         }
     }
 
-    private void ReportProgress(long downloaded, long total)
+    private long _downloadRunId;
+
+    private void ReportProgress(long runId, long downloaded, long total)
     {
-        if (total <= 0) return;
+        if (total <= 0 || Interlocked.Read(ref _downloadRunId) != runId || State != KokoroStateKind.Downloading) return;
         double p = Math.Clamp((double)downloaded / total, 0.0, 0.99);
         if (Math.Abs(p - DownloadProgress) >= 0.01)
         {

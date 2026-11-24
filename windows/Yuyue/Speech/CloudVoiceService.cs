@@ -386,6 +386,78 @@ public sealed class CloudVoiceService
     private static readonly HttpClient LocalHttp = new() { Timeout = System.TimeSpan.FromSeconds(90) };
     private int _trimCounter;
 
+    private sealed class InFlightFetch
+    {
+        public CancellationTokenSource SharedCts { get; } = new();
+        public Task<byte[]> Task { get; set; } = null!;
+        public int RefCount;
+    }
+
+    private readonly object _inFlightLock = new();
+    private readonly Dictionary<string, InFlightFetch> _inFlightFetches = new(StringComparer.OrdinalIgnoreCase);
+
+    private async Task<byte[]> CoalesceFetchAsync(string key, Func<CancellationToken, Task<byte[]>> factory, CancellationToken callerCt)
+    {
+        callerCt.ThrowIfCancellationRequested();
+        InFlightFetch entry;
+        bool isOwner = false;
+        lock (_inFlightLock)
+        {
+            if (!_inFlightFetches.TryGetValue(key, out entry!))
+            {
+                entry = new InFlightFetch { RefCount = 1 };
+                entry.Task = RunOwnedFetchAsync(key, entry, factory);
+                _inFlightFetches[key] = entry;
+                isOwner = true;
+            }
+            else
+            {
+                entry.RefCount++;
+            }
+        }
+        _ = isOwner;
+
+        try
+        {
+            return await entry.Task.WaitAsync(callerCt);
+        }
+        catch (OperationCanceledException) when (callerCt.IsCancellationRequested)
+        {
+            bool cancelShared = false;
+            lock (_inFlightLock)
+            {
+                entry.RefCount--;
+                if (entry.RefCount <= 0)
+                {
+                    _inFlightFetches.Remove(key);
+                    cancelShared = true;
+                }
+            }
+            if (cancelShared)
+            {
+                try { entry.SharedCts.Cancel(); } catch { }
+            }
+            throw;
+        }
+    }
+
+    private async Task<byte[]> RunOwnedFetchAsync(string key, InFlightFetch entry, Func<CancellationToken, Task<byte[]>> factory)
+    {
+        try
+        {
+            return await factory(entry.SharedCts.Token);
+        }
+        finally
+        {
+            lock (_inFlightLock)
+            {
+                if (_inFlightFetches.TryGetValue(key, out var cur) && ReferenceEquals(cur, entry))
+                    _inFlightFetches.Remove(key);
+            }
+            try { entry.SharedCts.Dispose(); } catch { }
+        }
+    }
+
     public static readonly CloudTtsProvider[] AllProviders =
     [
         CloudTtsProvider.Edge,
@@ -1217,27 +1289,44 @@ public sealed class CloudVoiceService
             }
         }
 
-        if (IsPaidCloud(provider))
-            _library.Usage.CheckTtsBudget(plain.Length);
-
-        byte[] rawAudio = await FetchProviderAudioAsync(provider, voiceId, apiKey, plain, language, parts, act, ct);
-        if (IsPaidCloud(provider))
-            _library.Usage.RecordTts(plain.Length, cached: false);
-
-        byte[] wavBytes = await EnsureWavBytesAsync(rawAudio, ct);
-        if (!IsValidRiffWav(wavBytes))
-            throw new InvalidOperationException("语音服务返回的音频数据无法解码为 WAV");
-
-        try
+        return await CoalesceFetchAsync(cachePath, async sharedCt =>
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
-            string tmp = cachePath + ".part";
-            await File.WriteAllBytesAsync(tmp, wavBytes, ct);
-            File.Move(tmp, cachePath, overwrite: true);
-            TrimPersistentCacheIfNeeded();
-        }
-        catch { }
-        return wavBytes;
+            if (File.Exists(cachePath))
+            {
+                try
+                {
+                    byte[] raceHit = await File.ReadAllBytesAsync(cachePath, sharedCt);
+                    if (IsValidRiffWav(raceHit)) return raceHit;
+                }
+                catch { }
+            }
+
+            if (IsPaidCloud(provider))
+                _library.Usage.CheckTtsBudget(plain.Length);
+
+            byte[] rawAudio = await FetchProviderAudioAsync(provider, voiceId, apiKey, plain, language, parts, act, sharedCt);
+            if (IsPaidCloud(provider))
+                _library.Usage.RecordTts(plain.Length, cached: false);
+
+            byte[] wavBytes = await EnsureWavBytesAsync(rawAudio, sharedCt);
+            if (!IsValidRiffWav(wavBytes))
+                throw new InvalidOperationException("语音服务返回的音频数据无法解码为 WAV");
+
+            string? tmp = null;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
+                tmp = $"{cachePath}.{Guid.NewGuid():N}.part";
+                await File.WriteAllBytesAsync(tmp, wavBytes, sharedCt);
+                File.Move(tmp, cachePath, overwrite: true);
+                TrimPersistentCacheIfNeeded();
+            }
+            catch
+            {
+                if (tmp is not null) { try { if (File.Exists(tmp)) File.Delete(tmp); } catch { } }
+            }
+            return wavBytes;
+        }, ct);
     }
 
     private async Task<byte[]> FetchEdgeAudioAsync(string voiceId, string plain, string language, CancellationToken ct)

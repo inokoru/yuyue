@@ -1128,6 +1128,7 @@ public sealed class AudioPlayer : IDisposable
 
         try
         {
+            try { App.CurrentApp?.ClaimAudioPlayback(preview, StopActivePreview); } catch { }
             preview.SetRate(rate);
             var tcs = new TaskCompletionSource();
             preview.SectionFinished += () => tcs.TrySetResult();
@@ -1183,6 +1184,7 @@ public sealed class AudioPlayer : IDisposable
         }
         try
         {
+            try { App.CurrentApp?.ClaimAudioPlayback(preview, StopActivePreview); } catch { }
             preview.SetRate(rate);
             var tcs = new TaskCompletionSource();
             preview.SectionFinished += () => tcs.TrySetResult();

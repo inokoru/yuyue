@@ -128,7 +128,13 @@ public static class ModelDownload
                 }
                 else
                 {
+                    bool hadPartial = File.Exists(partFile) && new FileInfo(partFile).Length > 0;
                     await StreamOneSourceAsync(url, partFile, expectedBytes, expectedBlake3, onBytes, ct);
+                    if (hadPartial && !await MatchesDigestAsync(partFile, expectedBlake3, expectedBytes, ct))
+                    {
+                        if (File.Exists(partFile)) File.Delete(partFile);
+                        await StreamOneSourceAsync(url, partFile, expectedBytes, expectedBlake3, onBytes, ct);
+                    }
                 }
                 if (await MatchesDigestAsync(partFile, expectedBlake3, expectedBytes, ct))
                     return;
