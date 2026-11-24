@@ -12036,7 +12036,7 @@ public sealed partial class SettingsWindow : Window
         srcBtn.Click += (_, _) => _ = Launcher.LaunchUriAsync(new Uri(repoUrl));
 
         rightStack.Children.Add(MakeCard(
-            MakeRow("问题与建议", "可附截图或文件，无需注册账号", feedbackRight),
+            MakeRow("问题与建议", "可附截图，无需注册账号", feedbackRight),
             MakeRow("匿名使用统计", "仅记录功能使用形态，不关联身份，绝不收集书名、笔记或搜索词", MakeSwitch(_library.Prefs.AnalyticsEnabled, v =>
             {
                 bool prev = _library.Prefs.AnalyticsEnabled;

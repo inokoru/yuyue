@@ -107,10 +107,7 @@ public sealed class DevicePrefs
     public bool QuoteShareIncludeThought { get; set; } = true;
     public HashSet<string> DismissedTxtDoubtBooks { get; set; } = new();
     public HashSet<string> FinishedPromptedBooks { get; set; } = new();
-    public string FeedbackDraftCategory { get; set; } = "bug";
-    public string FeedbackDraftTitle { get; set; } = "";
     public bool FeedbackAttachInfo { get; set; } = true;
-    public bool FeedbackAttachLogs { get; set; } = false;
     public List<string> FeedbackDraftFiles { get; set; } = [];
     public HashSet<string> RemoteAcquiredUrls { get; set; } = new();
     public Dictionary<string, string> RemoteAcquiredBooks { get; set; } = new();
@@ -154,7 +151,6 @@ public sealed class DevicePrefs
     public long? UpdateLastCheckedMs { get; set; }
     public ulong? UpdateCheckedBuild { get; set; }
     public string FeedbackDraftText { get; set; } = "";
-    public List<string> FeedbackOfflineQueue { get; set; } = [];
     public Dictionary<string, long[]> SleepReturnSpots { get; set; } = new();
     public Dictionary<string, string> AudiobookPairOverrides { get; set; } = new();
     public string RemoteSourcesJson { get; set; } = "";

@@ -199,10 +199,9 @@ public partial class App : Application
         else
             ShowShelf();
 
-        // Background auto-sync (startup + every 5 minutes when enabled), 24h silent update check, & offline feedback flush
+        // Background auto-sync (startup + every 5 minutes when enabled) & 24h silent update check
         if (Library.Sync.IsEnabled) _ = Library.Sync.SyncNowAsync();
         _ = Library.Updates.CheckForUpdatesAsync(manual: false);
-        _ = Library.Updates.FlushOfflineFeedbackQueueAsync();
         _syncTimer = new DispatcherTimer { Interval = System.TimeSpan.FromMinutes(5) };
         _syncTimer.Tick += (_, _) => { if (Library.Sync.IsEnabled) _ = Library.Sync.SyncNowAsync(); };
         _syncTimer.Start();
