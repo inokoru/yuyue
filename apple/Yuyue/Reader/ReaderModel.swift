@@ -24,7 +24,9 @@ final class ReaderModel {
     /// 搜索 · 问 ⌘K over this window.
     var quickSearchShown = false
     /// 外文原著: the word clicked, and its card.
-    var lookup: WordLookup?
+    var lookup: WordLookup? {
+        didSet { syncBottomCapsuleVisible() }
+    }
     /// This book's words in the 生词本, in reading order.
     var bookWords: [VocabWord] = []
     /// 双击一句只翻这一句.
@@ -48,7 +50,14 @@ final class ReaderModel {
         pager.calm = (immersive && ImmersivePrefs.stillPages) || einkOn
         pager.marksHidden = immersive && ImmersivePrefs.hidesMarks
         pager.glossesHidden = immersive && ImmersivePrefs.hidesHints
+        syncBottomCapsuleVisible()
         if immersive { panel = nil }
+    }
+
+    private func syncBottomCapsuleVisible() {
+        #if os(iOS)
+        pager.bottomCapsuleVisible = lookup == nil && ((!immersive && !barsAway) || chromeShown || searchShown)
+        #endif
     }
     /// Local device 墨水屏模式 state (never synced across devices).
     private(set) var einkOn = EInk.on
@@ -60,10 +69,15 @@ final class ReaderModel {
     private(set) var page = 0
     private(set) var pageCount = 1
     var chromeShown = false {
-        didSet { if chromeShown { barsAway = false } }
+        didSet {
+            if chromeShown { barsAway = false }
+            syncBottomCapsuleVisible()
+        }
     }
     /// Scrolling down the page sent the capsule away, and the top bar if it was up.
-    private(set) var barsAway = false
+    private(set) var barsAway = false {
+        didSet { syncBottomCapsuleVisible() }
+    }
     private var chromeComesBack = false
     var tocShown = false
     var settingsShown = false
@@ -110,7 +124,9 @@ final class ReaderModel {
     /// 脚注: a note marker tapped, its note in a card over the page.
     var openNote: OpenNote?
     /// 书内搜索.
-    var searchShown = false
+    var searchShown = false {
+        didSet { syncBottomCapsuleVisible() }
+    }
     /// Bumped when the open search field should take the keyboard again.
     var searchFieldWanted = 0
     var query = ""
@@ -214,12 +230,15 @@ final class ReaderModel {
         self.ownSettings = own != nil
         let resolved = PaperAppearance.shared.resolve(settings)
         self.appliedPaper = resolved
-        let initialBg = (EInk.on ? EInk.paper : resolved.tokens).platformBackground
-        pager = ReaderPager(core: core, bookID: bookID, mode: settings.mode, background: initialBg)
+        let initialPaper = EInk.on ? EInk.paper : resolved.tokens
+        pager = ReaderPager(core: core, bookID: bookID, mode: settings.mode, background: initialPaper.platformBackground)
+        pager.ink = initialPaper.platformInk
+        pager.accent = initialPaper.platformAccent
         player = detail.map { Player(core: core, detail: $0) }
         self.failure = failure
         companion.model = self
         pager.fontSize = settings.fontSize
+        pager.chapterTitle = { [weak self] section in self?.detail?.chapterTitle(for: section) }
         pager.delegate = self
         if let player {
             player.recording = Audiobooks.shared?.recording(for: bookID)
@@ -787,7 +806,10 @@ final class ReaderModel {
         appliedPaper = resolved
         pager.fontSize = new.fontSize
         pager.mode = new.mode
-        pager.background = (einkOn ? EInk.paper : resolved.tokens).platformBackground
+        let tokens = einkOn ? EInk.paper : resolved.tokens
+        pager.background = tokens.platformBackground
+        pager.ink = tokens.platformInk
+        pager.accent = tokens.platformAccent
         pager.apply(settings: new.script(resolved: resolved))
         applyImmersive()
     }
@@ -803,6 +825,8 @@ final class ReaderModel {
         let tokens = YYPaper(custom: draft)
         previewing = tokens
         pager.background = tokens.platformBackground
+        pager.ink = tokens.platformInk
+        pager.accent = tokens.platformAccent
         var script = settings.script()
         script["paper"] = paperColors(paper: draft).preset.tokens.id
         script["paperStyle"] = paperStyle(paper: draft)
@@ -848,11 +872,13 @@ final class ReaderModel {
     /// 读完了？: at the very end, once a reading, ask rather than mark it 读过 unasked.
     var askingFinished = false
 
-    private func askIfFinished() {
+    private func askIfFinished(atEnd: Bool = false) {
         let key = "finishAsked.\(bookID)"
         guard !askingFinished, !UserDefaults.standard.bool(forKey: key),
-              let fraction = (try? core.latestProgress(bookId: bookID))?.fraction, fraction >= 0.995,
               let book = library?.book(bookID), book.status != .finished, book.format != .audio else { return }
+        if !atEnd {
+            guard let fraction = (try? core.latestProgress(bookId: bookID))?.fraction, fraction >= 0.995 else { return }
+        }
         UserDefaults.standard.set(true, forKey: key)
         askingFinished = true
     }
@@ -1042,6 +1068,10 @@ extension ReaderModel: ReaderPagerDelegate {
         #endif
     }
 
+    func pagerReachedBookEnd(_ pager: ReaderPager) {
+        askIfFinished(atEnd: true)
+    }
+
     #if os(iOS)
     func pager(_ pager: ReaderPager, barsAway away: Bool) {
         guard !searchShown, away != barsAway else { return }
@@ -1096,7 +1126,7 @@ extension Notification.Name {
 
 extension BookDetail {
     /// The chapter a section belongs to, as the table of contents names it.
-    func chapterTitle(for section: UInt32) -> String? {
+    nonisolated func chapterTitle(for section: UInt32) -> String? {
         if let item = toc.first(where: { $0.section == section }) ?? toc.last(where: { $0.section < section }) {
             return item.title
         }
@@ -1206,6 +1236,8 @@ extension Paper {
 
 extension YYPaper {
     var platformBackground: PlatformColor { PlatformColor(bg) }
+    var platformInk: PlatformColor { PlatformColor(ink) }
+    var platformAccent: PlatformColor { PlatformColor(accent) }
 }
 
 /// 沉浸阅读: what goes when only the words should stay. Each can be kept.

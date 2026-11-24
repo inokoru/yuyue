@@ -120,18 +120,58 @@ public sealed class ReaderWebViewHost : IDisposable
         await core.AddScriptToExecuteOnDocumentCreatedAsync(@"
             (() => {
                 let lastWheel = 0;
+                let lastScrollMove = 0;
+                let lastEdgeDir = 0;
+                let lastEdgeTime = 0;
+                let edgeAccum = 0;
+                let lastCross = 0;
+                window.addEventListener('scroll', () => {
+                    lastScrollMove = performance.now();
+                    edgeAccum = 0;
+                    lastEdgeDir = 0;
+                }, { passive: true });
                 window.addEventListener('wheel', (e) => {
                     if (e.ctrlKey) {
                         e.preventDefault();
                         window.chrome?.webview?.postMessage({ type: 'wheel', deltaY: e.deltaY, ctrl: true });
                         return;
                     }
-                    if (document.documentElement.dataset.yyMode !== 'scrolled' && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+                    if (Math.abs(e.deltaY) < Math.abs(e.deltaX) || e.deltaY === 0) return;
+                    if (document.documentElement.dataset.yyMode !== 'scrolled') {
                         e.preventDefault();
                         const now = performance.now();
                         if (now - lastWheel < 200) return;
                         lastWheel = now;
                         window.chrome?.webview?.postMessage({ type: 'wheel', deltaY: e.deltaY, ctrl: false });
+                        return;
+                    }
+                    const el = document.scrollingElement || document.documentElement;
+                    const maxY = Math.max(0, el.scrollHeight - window.innerHeight);
+                    const y = window.pageYOffset;
+                    const forward = e.deltaY > 0;
+                    const atEdge = forward ? (maxY <= 1 || y >= maxY - 2) : (y <= 2);
+                    if (!atEdge) {
+                        edgeAccum = 0;
+                        lastEdgeDir = 0;
+                        return;
+                    }
+                    const now = performance.now();
+                    if (now - lastScrollMove < 220) return;
+                    const dir = forward ? 1 : -1;
+                    if (dir !== lastEdgeDir || now - lastEdgeTime > 900) {
+                        edgeAccum = 0;
+                        lastEdgeDir = dir;
+                    }
+                    lastEdgeTime = now;
+                    const rawMag = e.deltaMode === 1 ? Math.abs(e.deltaY) * 40 : (e.deltaMode === 2 ? 200 : Math.abs(e.deltaY));
+                    edgeAccum += Math.min(rawMag, 120);
+                    if (edgeAccum >= 180 && now - lastCross > 500) {
+                        edgeAccum = 0;
+                        lastEdgeDir = 0;
+                        lastCross = now;
+                        window.chrome?.webview?.postMessage({ type: 'scrollEdge', deltaY: dir, armed: true });
+                    } else if (now - lastCross > 500) {
+                        window.chrome?.webview?.postMessage({ type: 'scrollEdge', deltaY: dir, armed: false });
                     }
                 }, { passive: false });
                 window.addEventListener('contextmenu', (e) => {

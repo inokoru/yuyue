@@ -2322,6 +2322,23 @@ public sealed partial class ReaderWindow : Window
                 }
                 break;
 
+            case "scrollEdge":
+                _lastInteractionUtc = DateTime.UtcNow;
+                if (_settings.Mode == LayoutMode.Scrolled && msg.DeltaY is double edgeDir && edgeDir != 0)
+                {
+                    bool forward = edgeDir > 0;
+                    if (msg.Armed == true)
+                    {
+                        HideScrollEdgeCue();
+                        await CrossSectionFromScrollEdgeAsync(forward);
+                    }
+                    else
+                    {
+                        ShowScrollEdgeCue(forward);
+                    }
+                }
+                break;
+
             case "winContext":
                 if (msg.X is double cx && msg.Y is double cy)
                     ShowPageContextMenu(new Point(cx, cy), targetSentence: msg.Sentence, targetOffset: msg.Offset);
@@ -3211,6 +3228,79 @@ public sealed partial class ReaderWindow : Window
                 LoadSection(s);
             }
         }
+    }
+
+    private CancellationTokenSource? _scrollEdgeCueCts;
+
+    private async Task CrossSectionFromScrollEdgeAsync(bool forward)
+    {
+        _lastInteractionUtc = DateTime.UtcNow;
+        _hasUserMoved = true;
+        if (forward)
+        {
+            if (_library.NextSection(_bookId, _currentSection) is uint s)
+            {
+                if (!_audio.IsPlaying && _hasPausedAudioSession) _pausedOffSpot = true;
+                _pendingSentence = 0;
+                LoadSection(s);
+            }
+            else
+            {
+                await MaybeOfferFinishedSheetAsync();
+            }
+        }
+        else if (_library.PreviousSection(_bookId, _currentSection) is uint s)
+        {
+            if (!_audio.IsPlaying && _hasPausedAudioSession) _pausedOffSpot = true;
+            _pendingEndOfSection = true;
+            LoadSection(s);
+        }
+    }
+
+    private void ShowScrollEdgeCue(bool forward)
+    {
+        uint? target = forward
+            ? _library.NextSection(_bookId, _currentSection)
+            : _library.PreviousSection(_bookId, _currentSection);
+        if (!forward && target is null) return;
+
+        if (target is null)
+        {
+            ScrollEdgeCueText.Text = L10n.T("已是最后一章");
+        }
+        else
+        {
+            string title = target.Value < _detail.Sections.Length ? (_detail.Sections[target.Value].Title ?? "").Trim() : "";
+            string dest = !string.IsNullOrEmpty(title) ? title : L10n.T(forward ? "下一章" : "上一章");
+            string verb = L10n.T(forward ? "继续向下" : "继续向上");
+            ScrollEdgeCueText.Text = $"{(forward ? "↓" : "↑")}  {verb} · {dest}";
+        }
+        ScrollEdgeCue.VerticalAlignment = forward ? VerticalAlignment.Bottom : VerticalAlignment.Top;
+        ScrollEdgeCue.Visibility = Visibility.Visible;
+
+        _scrollEdgeCueCts?.Cancel();
+        _scrollEdgeCueCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _scrollEdgeCueCts = cts;
+        _ = HideScrollEdgeCueAfterDelayAsync(cts.Token);
+    }
+
+    private async Task HideScrollEdgeCueAfterDelayAsync(CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(1000, ct);
+            if (!ct.IsCancellationRequested) ScrollEdgeCue.Visibility = Visibility.Collapsed;
+        }
+        catch (TaskCanceledException) { }
+    }
+
+    private void HideScrollEdgeCue()
+    {
+        _scrollEdgeCueCts?.Cancel();
+        _scrollEdgeCueCts?.Dispose();
+        _scrollEdgeCueCts = null;
+        ScrollEdgeCue.Visibility = Visibility.Collapsed;
     }
 
     private void HandleForwardedWebKey(ReaderMessage msg)

@@ -95,6 +95,9 @@ public sealed class ReaderMessage
     [JsonPropertyName("deltaY")]
     public double? DeltaY { get; set; }
 
+    [JsonPropertyName("armed")]
+    public bool? Armed { get; set; }
+
     [JsonPropertyName("ctrl")]
     public bool? Ctrl { get; set; }
 

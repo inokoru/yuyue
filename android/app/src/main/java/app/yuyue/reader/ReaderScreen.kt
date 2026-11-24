@@ -130,6 +130,8 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
     }
     val paper = model.paperTokens
     model.pager.background = paper.bg.toArgb()
+    model.pager.ink = paper.ink.toArgb()
+    model.pager.accent = paper.accent.toArgb()
     LaunchedEffect(model, Papers.version, PaperAppearance.version) { model.papersChanged() }
     LaunchedEffect(model, bookID) { model.consumeIntent() }
     DisposableEffect(model) {
@@ -368,6 +370,7 @@ private fun Chrome(model: ReaderModel, paper: YYPaper, haze: HazeState, popupOpe
             }
             // 沉浸阅读 hides the capsule until the middle is tapped; scrolling down the page, until back up it.
             val capsule = ((!model.immersive && !model.barsAway) || model.chromeShown || model.searchShown) && !popupOpen
+            model.pager.bottomCapsuleVisible = capsule
             AnimatedVisibility(capsule, enter = YYMotion.barIn(fromTop = false, reduce), exit = YYMotion.barOut(toTop = false, reduce)) {
                 if (model.searchShown) SearchCapsule(model, paper, haze) else Capsule(model, paper, haze)
             }

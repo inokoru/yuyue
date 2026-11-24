@@ -22,6 +22,28 @@
                 <!-- 启动瞬时上次书页截图缓存（TECH.md §3：首帧 ready 后无缝退场） -->
                 <Image x:Name="LaunchSnapshotImage" Visibility="Collapsed" Stretch="UniformToFill" IsHitTestVisible="False" />
 
+                <!-- 上下滚动边界切章提示胶囊 -->
+                <Border
+                    x:Name="ScrollEdgeCue"
+                    Visibility="Collapsed"
+                    IsHitTestVisible="False"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom"
+                    Margin="0,48,0,92"
+                    Padding="14,6"
+                    CornerRadius="15"
+                    Background="{ThemeResource YYCardBrush}"
+                    BorderBrush="{ThemeResource YYLineBrush}"
+                    BorderThickness="1">
+                    <TextBlock
+                        x:Name="ScrollEdgeCueText"
+                        FontSize="12"
+                        FontWeight="Medium"
+                        Foreground="{ThemeResource YYText2Brush}"
+                        MaxWidth="300"
+                        TextTrimming="CharacterEllipsis" />
+                </Border>
+
                 <!-- 纯听模式覆盖层 (ListenOnlyCover, MacReaderCards.swift:1374-1398) -->
                 <Grid x:Name="ListenOnlyCover" Visibility="Collapsed">
                     <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="360">

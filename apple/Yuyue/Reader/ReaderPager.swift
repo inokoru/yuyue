@@ -5,6 +5,7 @@ import UIKit
 typealias PlatformView = UIView
 #else
 import AppKit
+import QuartzCore
 typealias PlatformView = NSView
 #endif
 
@@ -24,6 +25,8 @@ protocol ReaderPagerDelegate: AnyObject {
     func pager(_ pager: ReaderPager, doubleTapped message: ReaderMessage)
     /// 气泡: a bubble's avatar or name was clicked (`choice` nil), or a name it offers ('' for 别人…).
     func pager(_ pager: ReaderPager, bubble line: BubbleLine, section: UInt32, choice: String?, at point: CGPoint)
+    /// Scrolled past the end of the book's last chapter.
+    func pagerReachedBookEnd(_ pager: ReaderPager)
     #if os(iOS)
     /// Scrolling: the reader moved on down the page (controls away), back up it, or reached an end of it.
     func pager(_ pager: ReaderPager, barsAway away: Bool)
@@ -48,7 +51,48 @@ final class ReaderPager: PlatformView {
         didSet { if mode != oldValue { modeChanged() } }
     }
     var background: PlatformColor {
-        didSet { slots.forEach { $0.setBackground(background) } }
+        didSet {
+            slots.forEach { $0.setBackground(background) }
+            updatePullCueColors()
+        }
+    }
+    /// Ink & accent colours from the active paper, used for the scrolled chapter-pull cue.
+    var ink: PlatformColor = {
+        #if os(iOS)
+        return .label
+        #else
+        return .labelColor
+        #endif
+    }() {
+        didSet { updatePullCueColors() }
+    }
+    var accent: PlatformColor = {
+        #if os(iOS)
+        return .tintColor
+        #else
+        return .controlAccentColor
+        #endif
+    }() {
+        didSet { updatePullCueColors() }
+    }
+    /// Optional chapter title lookup for the pull-to-cross cue.
+    var chapterTitle: ((UInt32) -> String?)?
+
+    enum PullEdge: Equatable, Sendable { case previous, next }
+    nonisolated static let pullThreshold: CGFloat = 64
+    nonisolated static let pullHysteresis: CGFloat = 8
+
+    /// Overscroll past a scrolled section's vertical edges (works for short sections where maxY == 0).
+    nonisolated static func verticalOverscroll(y: CGFloat, maxY: CGFloat) -> (edge: PullEdge, amount: CGFloat)? {
+        let clampedMax = max(0, maxY)
+        if y > clampedMax + 0.5 { return (.next, y - clampedMax) }
+        if y < -0.5 { return (.previous, -y) }
+        return nil
+    }
+
+    /// Hysteretic arming so small thumb jitter around the threshold does not double-fire haptics.
+    nonisolated static func isPullArmed(amount: CGFloat, wasArmed: Bool, threshold: CGFloat = pullThreshold) -> Bool {
+        wasArmed ? amount >= threshold - pullHysteresis : amount >= threshold
     }
 
     private let messages = MessageProxy()
@@ -60,17 +104,44 @@ final class ReaderPager: PlatformView {
     private var spare: [SectionPage] = []
     private var pendingOpen: (section: UInt32, target: SectionPage.Target)?
     private var appliedGeometry: PageGeometry?
+    private var verticalTransitioning = false
 
     #if os(iOS)
     private let outer = SectionScrollView()
+    private let pullCue = PullCueView()
+    /// Whether the bottom floating capsule is currently visible (used to position the bottom pull cue clear of it).
+    var bottomCapsuleVisible = true
     /// Directions the outer scroll view may move during the current drag.
     private var outerMayMove: (forward: Bool, backward: Bool) = (false, false)
+    /// Scrolled vertical pull-to-cross state.
+    private var pullEdge: PullEdge?
+    private var pullArmed = false
+    private let pullHaptic = UIImpactFeedbackGenerator(style: .light)
     /// Scrolling: where the page was last, and how far the hand has moved it one way.
     private var barsLastY: CGFloat = 0
     private var barsTravel: CGFloat = 0
     private var arranging = false
     /// Paginated mode temporarily locks scrolling while a text selection is active.
     private var holding = false
+    #else
+    private let pullCue = MacPullCueView()
+    private struct MacPullState {
+        var session = 0
+        var checked = false
+        var mayPrev = false
+        var mayNext = false
+        var edge: PullEdge?
+        var accum: CGFloat = 0
+        var armed = false
+    }
+    private var macPull = MacPullState()
+    private var macLastWheelY: CGFloat = -1
+    private var macLastWheelMovedAt: TimeInterval = 0
+    private var macLastWheelEdgeAt: TimeInterval = 0
+    private var macLastCrossAt: TimeInterval = 0
+    private var macWheelEdge: PullEdge?
+    private var macWheelAccum: CGFloat = 0
+    private var macCueHideTask: Task<Void, Never>?
     #endif
 
     init(core: YuyueCore, bookID: String, mode: LayoutMode, background: PlatformColor) {
@@ -96,9 +167,16 @@ final class ReaderPager: PlatformView {
         outer.decelerationRate = .fast
         outer.delegate = self
         addSubview(outer)
+        pullCue.isUserInteractionEnabled = false
+        pullCue.alpha = 0
+        addSubview(pullCue)
         #else
         wantsLayer = true
+        pullCue.alphaValue = 0
+        pullCue.isHidden = true
+        addSubview(pullCue)
         #endif
+        updatePullCueColors()
     }
 
     @available(*, unavailable)
@@ -142,6 +220,7 @@ final class ReaderPager: PlatformView {
         #if os(iOS)
         holdStill(false)
         #endif
+        resetVerticalPull()
         for slot in slots { recycle(slot) }
         let page = makePage()
         page.load(bookID: bookID, section: section, target: target)
@@ -208,12 +287,13 @@ final class ReaderPager: PlatformView {
         outer.addSubview(page.webView)
         #else
         page.webView.onKey = { [weak self] event in self?.key(event) ?? false }
+        page.webView.onScrollWheel = { [weak self] event in self?.handleScrollWheel(event) }
         page.webView.menuItems = { [weak self] in self?.menuItems?() ?? [] }
         page.webView.isHidden = true
         // Hidden neighbours are laid out at the pager's size too, so their pages are the real ones.
         page.webView.frame = bounds
         page.webView.autoresizingMask = [.width, .height]
-        addSubview(page.webView)
+        addSubview(page.webView, positioned: .below, relativeTo: pullCue)
         #endif
         return page
     }
@@ -221,6 +301,7 @@ final class ReaderPager: PlatformView {
     private func recycle(_ page: SectionPage) {
         page.clear()
         #if os(iOS)
+        page.webView.transform = .identity
         page.webView.scrollView.isScrollEnabled = true
         #else
         page.webView.isHidden = true
@@ -405,8 +486,12 @@ final class ReaderPager: PlatformView {
         }
         guard let i = slots.firstIndex(where: { $0 === current }) else { return }
         let j = forward ? i + 1 : i - 1
-        guard slots.indices.contains(j), slots[j].isReady else { return }
-        move(toSlot: j, animated: animated)
+        guard slots.indices.contains(j) else {
+            if forward && mode == .scrolled { delegate?.pagerReachedBookEnd(self) }
+            return
+        }
+        guard slots[j].isReady else { return }
+        move(toSlot: j, animated: animated, snapEdge: true)
         #else
         let generation = current.generation
         Task {
@@ -422,8 +507,12 @@ final class ReaderPager: PlatformView {
             }
             guard let i = slots.firstIndex(where: { $0 === current }) else { return }
             let j = forward ? i + 1 : i - 1
-            guard slots.indices.contains(j), slots[j].isReady else { return }
-            move(toSlot: j, animated: animated)
+            guard slots.indices.contains(j) else {
+                if forward && mode == .scrolled { delegate?.pagerReachedBookEnd(self) }
+                return
+            }
+            guard slots[j].isReady else { return }
+            move(toSlot: j, animated: animated, snapEdge: true)
         }
         #endif
     }
@@ -447,9 +536,13 @@ final class ReaderPager: PlatformView {
         }
     }
 
-    private func move(toSlot j: Int, animated: Bool) {
+    private func move(toSlot j: Int, animated: Bool, snapEdge: Bool = false) {
         #if os(iOS)
         guard let i = slots.firstIndex(where: { $0 === current }) else { return }
+        if mode == .scrolled {
+            crossVertically(toSlot: j, forward: j > i, pullOffset: 0, animated: animated, snapEdge: snapEdge)
+            return
+        }
         outerMayMove = (j > i, j < i)
         if animated {
             outer.setContentOffset(CGPoint(x: CGFloat(j) * bounds.width, y: 0), animated: true)
@@ -458,6 +551,10 @@ final class ReaderPager: PlatformView {
             settle()
         }
         #else
+        if mode == .scrolled, let i = slots.firstIndex(where: { $0 === current }) {
+            crossVerticallyMac(toSlot: j, forward: j > i, animated: animated, snapEdge: snapEdge)
+            return
+        }
         let page = slots[j]
         current = page
         show(page)
@@ -479,22 +576,22 @@ final class ReaderPager: PlatformView {
         var at = Date()
     }
 
-    private var ink: Ink?
+    private var activeInk: Ink?
 
     /// Draws the ink line under a sentence being read: `elapsedMs` of `durationMs` read so far.
     /// A section loaded later picks it up where it has got to.
     func setInk(section: UInt32, sentence: Int, durationMs: Double, elapsedMs: Double, playing: Bool, words: [Double]? = nil) {
-        ink = Ink(section: section, sentence: sentence, durationMs: durationMs, elapsedMs: elapsedMs, playing: playing, words: words)
+        activeInk = Ink(section: section, sentence: sentence, durationMs: durationMs, elapsedMs: elapsedMs, playing: playing, words: words)
         slots.forEach(sendInk)
     }
 
     func clearInk() {
-        ink = nil
+        activeInk = nil
         slots.forEach(sendInk)
     }
 
     private func sendInk(to page: SectionPage) {
-        guard let ink, page.section == ink.section else { return page.call("yy.setActive(null)") }
+        guard let ink = activeInk, page.section == ink.section else { return page.call("yy.setActive(null)") }
         let elapsed = ink.elapsedMs + (ink.playing ? Date().timeIntervalSince(ink.at) * 1000 : 0)
         var options: [String: Any] = ["durationMs": ink.durationMs, "elapsedMs": min(elapsed, ink.durationMs), "playing": ink.playing]
         options["words"] = ink.words ?? NSNull()
@@ -897,6 +994,7 @@ final class ReaderPager: PlatformView {
         // The other mode shows the text from another start: the position is taken again from
         // what it shows, as the reader does.
         position = nil
+        resetVerticalPull()
         #if os(iOS)
         holding = false
         for page in slots + spare { configure(page.webView.scrollView) }
@@ -905,25 +1003,84 @@ final class ReaderPager: PlatformView {
         #endif
     }
 
+    private func neighbourSlot(for edge: PullEdge) -> (index: Int, page: SectionPage)? {
+        guard let current, let i = slots.firstIndex(where: { $0 === current }) else { return nil }
+        let j = edge == .next ? i + 1 : i - 1
+        guard slots.indices.contains(j) else { return nil }
+        return (j, slots[j])
+    }
+
+    private func cueText(edge: PullEdge, armed: Bool, hasTarget: Bool, targetSection: UInt32?) -> String {
+        guard hasTarget else { return String(localized: "已是最后一章") }
+        let title = targetSection.flatMap { chapterTitle?($0) }?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = edge == .next ? String(localized: "下一章") : String(localized: "上一章")
+        let dest = (title?.isEmpty == false) ? title! : fallback
+        let verb: String
+        #if os(iOS)
+        if edge == .next {
+            verb = armed ? String(localized: "松手进入") : String(localized: "继续上拉")
+        } else {
+            verb = armed ? String(localized: "松手回到") : String(localized: "继续下拉")
+        }
+        #else
+        if edge == .next {
+            verb = armed ? String(localized: "松手进入") : String(localized: "继续向下")
+        } else {
+            verb = armed ? String(localized: "松手回到") : String(localized: "继续向上")
+        }
+        #endif
+        return "\(verb) · \(dest)"
+    }
+
+    private func updatePullCueColors() {
+        pullCue.applyColors(background: background, ink: ink, accent: accent)
+    }
+
+    private func resetVerticalPull() {
+        verticalTransitioning = false
+        #if os(iOS)
+        pullEdge = nil
+        pullArmed = false
+        for page in slots + spare {
+            page.webView.transform = .identity
+            page.webView.scrollView.isScrollEnabled = !(mode == .paginated && holding)
+        }
+        hidePullCue(animated: false)
+        #else
+        macPull = MacPullState()
+        macWheelEdge = nil
+        macWheelAccum = 0
+        macLastWheelY = -1
+        macCueHideTask?.cancel()
+        macCueHideTask = nil
+        hidePullCue(animated: false)
+        #endif
+    }
+
     // MARK: Layout
 
     #if os(iOS)
     override func layoutSubviews() {
         super.layoutSubviews()
-        if outer.frame != bounds {
+        if !verticalTransitioning && outer.frame != bounds {
             outer.frame = bounds
             arrange()
         }
+        if let edge = pullEdge { layoutPullCue(edge: edge) }
         afterLayout()
     }
 
     override func safeAreaInsetsDidChange() {
         super.safeAreaInsetsDidChange()
         geometryChanged()
+        if let edge = pullEdge { layoutPullCue(edge: edge) }
     }
     #else
     override func layout() {
         super.layout()
+        if let edge = macPull.edge ?? macWheelEdge, !pullCue.isHidden {
+            layoutMacPullCue(edge: edge)
+        }
         afterLayout()
     }
 
@@ -946,10 +1103,14 @@ final class ReaderPager: PlatformView {
         defer { arranging = false }
         let w = bounds.width, h = bounds.height
         for (i, page) in slots.enumerated() {
+            page.webView.transform = .identity
             page.webView.frame = CGRect(x: CGFloat(i) * w, y: 0, width: w, height: h)
             page.webView.isHidden = false
         }
-        for page in spare { page.webView.isHidden = true }
+        for page in spare {
+            page.webView.transform = .identity
+            page.webView.isHidden = true
+        }
         outer.contentSize = CGSize(width: CGFloat(slots.count) * w, height: h)
         if let current, let i = slots.firstIndex(where: { $0 === current }) {
             outer.contentOffset = CGPoint(x: CGFloat(i) * w, y: 0)
@@ -990,6 +1151,245 @@ final class ReaderPager: PlatformView {
         turn(forward: forward)
         return true
     }
+
+    private func scrollMetrics(of page: SectionPage) async -> (y: CGFloat, maxY: CGFloat)? {
+        guard let arr = await page.ask("[window.pageYOffset, Math.max(0, (document.scrollingElement || document.documentElement).scrollHeight - window.innerHeight)]") as? [Any],
+              arr.count == 2,
+              let y = (arr[0] as? NSNumber)?.doubleValue,
+              let maxY = (arr[1] as? NSNumber)?.doubleValue
+        else { return nil }
+        return (CGFloat(y), CGFloat(maxY))
+    }
+
+    private func handleScrollWheel(_ event: NSEvent) {
+        guard mode == .scrolled, !verticalTransitioning, let current else { return }
+        // Ignore inertial momentum so a fast flick stops cleanly at the chapter boundary.
+        guard event.momentumPhase.isEmpty else { return }
+        let dy = event.scrollingDeltaY
+        let dx = event.scrollingDeltaX
+        if event.phase.isEmpty {
+            // Stepped mouse wheel (no gesture phases).
+            guard abs(dy) > 0, abs(dy) >= abs(dx) else { return }
+            let forward = dy < 0
+            let step = min(max(abs(dy), 16), 24)
+            let gen = current.generation
+            Task { [weak self] in
+                guard let self, let metrics = await self.scrollMetrics(of: current),
+                      self.current === current, current.generation == gen,
+                      self.mode == .scrolled, !self.verticalTransitioning
+                else { return }
+                let now = ProcessInfo.processInfo.systemUptime
+                if self.macLastWheelY >= 0, abs(metrics.y - self.macLastWheelY) > 1 {
+                    self.macLastWheelY = metrics.y
+                    self.macLastWheelMovedAt = now
+                    self.macWheelAccum = 0
+                    self.macWheelEdge = nil
+                    self.hidePullCue(animated: true)
+                    return
+                }
+                self.macLastWheelY = metrics.y
+                let atEdge = forward ? (metrics.maxY <= 1 || metrics.y >= metrics.maxY - 2) : (metrics.y <= 2)
+                guard atEdge else {
+                    self.macWheelAccum = 0
+                    self.macWheelEdge = nil
+                    self.hidePullCue(animated: true)
+                    return
+                }
+                // Wait briefly after arriving at the edge so continuous wheel rolls stop there first.
+                guard now - self.macLastWheelMovedAt >= 0.22 else { return }
+                let edge: PullEdge = forward ? .next : .previous
+                let neighbour = self.neighbourSlot(for: edge)
+                if edge == .previous && neighbour == nil { return }
+                if self.macWheelEdge != edge || now - self.macLastWheelEdgeAt > 0.9 {
+                    self.macWheelAccum = 0
+                }
+                self.macWheelEdge = edge
+                self.macLastWheelEdgeAt = now
+                self.macWheelAccum += step
+                let hasTarget = neighbour != nil
+                self.showMacPullCue(edge: edge, text: self.cueText(edge: edge, armed: false, hasTarget: hasTarget, targetSection: neighbour?.page.section), armed: false, showIcon: hasTarget)
+                self.scheduleMacCueHide()
+                if self.macWheelAccum >= 30, now - self.macLastCrossAt > 0.45 {
+                    self.macWheelAccum = 0
+                    self.macWheelEdge = nil
+                    self.macLastCrossAt = now
+                    self.hidePullCue(animated: false)
+                    if let neighbour, neighbour.page.isReady {
+                        self.delegate?.pagerTurnedByHand(self)
+                        self.move(toSlot: neighbour.index, animated: !self.reduceMotion, snapEdge: true)
+                    } else if edge == .next && neighbour == nil {
+                        self.delegate?.pagerReachedBookEnd(self)
+                    }
+                }
+            }
+            return
+        }
+
+        // Trackpad / Magic Mouse two-finger scroll with explicit phases.
+        if event.phase == .began {
+            macCueHideTask?.cancel()
+            macWheelEdge = nil
+            macWheelAccum = 0
+            let nextSession = macPull.session + 1
+            macPull = MacPullState(session: nextSession)
+            let gen = current.generation
+            Task { [weak self] in
+                guard let self, let metrics = await self.scrollMetrics(of: current),
+                      self.macPull.session == nextSession,
+                      self.current === current, current.generation == gen
+                else { return }
+                self.macPull.checked = true
+                self.macPull.mayPrev = metrics.y <= 2
+                self.macPull.mayNext = metrics.maxY <= 1 || metrics.y >= metrics.maxY - 2
+            }
+            return
+        }
+
+        if event.phase == .changed {
+            guard macPull.checked, abs(dy) >= abs(dx) else { return }
+            let threshold: CGFloat = 72
+            if macPull.edge == nil {
+                if dy < 0, macPull.mayNext {
+                    macPull.edge = .next
+                } else if dy > 0, macPull.mayPrev {
+                    macPull.edge = .previous
+                }
+            }
+            guard let edge = macPull.edge else { return }
+            let neighbour = neighbourSlot(for: edge)
+            if edge == .previous && neighbour == nil { return }
+            let delta = edge == .next ? -dy : dy
+            macPull.accum = max(0, macPull.accum + delta)
+            if macPull.accum <= 2 {
+                macPull.armed = false
+                hidePullCue(animated: true)
+                return
+            }
+            let wasArmed = macPull.armed
+            let armed = Self.isPullArmed(amount: macPull.accum, wasArmed: wasArmed, threshold: threshold)
+            let hasTarget = neighbour != nil
+            if armed && !wasArmed {
+                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            }
+            macPull.armed = armed
+            showMacPullCue(
+                edge: edge,
+                text: cueText(edge: edge, armed: armed && hasTarget, hasTarget: hasTarget, targetSection: neighbour?.page.section),
+                armed: armed && hasTarget,
+                showIcon: hasTarget
+            )
+            return
+        }
+
+        if event.phase == .ended {
+            let state = macPull
+            macPull = MacPullState(session: state.session + 1)
+            hidePullCue(animated: true)
+            guard state.armed, let edge = state.edge else { return }
+            if let neighbour = neighbourSlot(for: edge), neighbour.page.isReady {
+                delegate?.pagerTurnedByHand(self)
+                move(toSlot: neighbour.index, animated: !reduceMotion, snapEdge: true)
+            } else if edge == .next && neighbourSlot(for: .next) == nil {
+                delegate?.pagerReachedBookEnd(self)
+            }
+            return
+        }
+
+        if event.phase == .cancelled {
+            macPull = MacPullState(session: macPull.session + 1)
+            hidePullCue(animated: true)
+        }
+    }
+
+    private func showMacPullCue(edge: PullEdge, text: String, armed: Bool, showIcon: Bool) {
+        pullCue.configure(text: text, edge: edge, armed: armed, showIcon: showIcon, animated: !reduceMotion)
+        layoutMacPullCue(edge: edge)
+        pullCue.isHidden = false
+        if reduceMotion {
+            pullCue.alphaValue = 1
+        } else {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.14
+                pullCue.animator().alphaValue = 1
+            }
+        }
+    }
+
+    private func scheduleMacCueHide() {
+        macCueHideTask?.cancel()
+        macCueHideTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(1000))
+            guard !Task.isCancelled, let self else { return }
+            self.macWheelEdge = nil
+            self.macWheelAccum = 0
+            self.hidePullCue(animated: true)
+        }
+    }
+
+    private func hidePullCue(animated: Bool) {
+        if !animated || reduceMotion {
+            pullCue.alphaValue = 0
+            pullCue.isHidden = true
+            return
+        }
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.16
+            pullCue.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.pullCue.alphaValue <= 0.01 else { return }
+                self.pullCue.isHidden = true
+            }
+        })
+    }
+
+    private func layoutMacPullCue(edge: PullEdge) {
+        let maxW = max(120, min(bounds.width - 48, 320))
+        let size = pullCue.preferredSize(maxWidth: maxW)
+        let x = ((bounds.width - size.width) / 2).rounded()
+        // AppKit origin is bottom-left; clear the bottom reading capsule (96pt) or top bar (46pt).
+        let y: CGFloat = edge == .next ? 92 : max(16, bounds.height - 46 - size.height)
+        pullCue.frame = CGRect(x: x, y: y, width: size.width, height: size.height)
+    }
+
+    private func crossVerticallyMac(toSlot j: Int, forward: Bool, animated: Bool, snapEdge: Bool) {
+        guard !verticalTransitioning, let old = current, slots.indices.contains(j), slots[j].isReady else { return }
+        let target = slots[j]
+        hidePullCue(animated: false)
+        if snapEdge {
+            let p = forward ? 0 : max(0, (target.layout?.pageCount ?? 1) - 1)
+            target.call("yy.scrollToPage(p, false)", ["p": p])
+        }
+        guard animated, !reduceMotion, bounds.height > 0 else {
+            current = target
+            show(target)
+            loadNeighbours()
+            moved()
+            return
+        }
+        verticalTransitioning = true
+        let h = bounds.height
+        // AppKit bottom-up coordinates: next chapter rises from below (y = -h -> 0).
+        target.webView.frame = bounds.offsetBy(dx: 0, dy: forward ? -h : h)
+        target.webView.isHidden = false
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.24
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            old.webView.animator().frame = self.bounds.offsetBy(dx: 0, dy: forward ? h : -h)
+            target.webView.animator().frame = self.bounds
+        }, completionHandler: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.verticalTransitioning = false
+                old.webView.frame = self.bounds
+                guard self.current === old else { return }
+                self.current = target
+                self.show(target)
+                self.loadNeighbours()
+                self.moved()
+            }
+        })
+    }
     #endif
 }
 
@@ -1010,6 +1410,92 @@ extension SectionPage {
 final class SectionScrollView: UIScrollView, UIGestureRecognizerDelegate {
     func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
         g === panGestureRecognizer && other.view is UIScrollView && other.view !== self
+    }
+}
+
+/// Minimal pill shown while pulling past a scrolled chapter's bottom or top edge.
+private final class PullCueView: UIView {
+    private let icon = UIImageView()
+    private let label = UILabel()
+    private var inkColor: UIColor = .label
+    private var accentColor: UIColor = .tintColor
+    private var isArmed = false
+    private var currentEdge: ReaderPager.PullEdge = .next
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        layer.cornerCurve = .continuous
+        layer.borderWidth = 0.5
+        icon.contentMode = .scaleAspectFit
+        icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+        label.font = .systemFont(ofSize: 12.5, weight: .medium)
+        label.lineBreakMode = .byTruncatingTail
+        addSubview(icon)
+        addSubview(label)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    func applyColors(background: UIColor, ink: UIColor, accent: UIColor) {
+        inkColor = ink
+        accentColor = accent
+        backgroundColor = background.withAlphaComponent(0.94)
+        layer.borderColor = ink.withAlphaComponent(0.14).cgColor
+        applyStateColors()
+    }
+
+    func configure(text: String, edge: ReaderPager.PullEdge, armed: Bool, showIcon: Bool, animated: Bool) {
+        let changed = armed != isArmed || edge != currentEdge
+        isArmed = armed
+        currentEdge = edge
+        label.text = text
+        icon.isHidden = !showIcon
+        if showIcon {
+            icon.image = UIImage(systemName: edge == .next ? "arrow.up" : "arrow.down")
+        }
+        applyStateColors()
+        let targetTransform: CGAffineTransform = armed ? CGAffineTransform(rotationAngle: .pi) : .identity
+        if changed && animated {
+            UIView.animate(withDuration: 0.16, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) {
+                self.icon.transform = targetTransform
+            }
+        } else {
+            icon.transform = targetTransform
+        }
+    }
+
+    private func applyStateColors() {
+        let fg = isArmed ? accentColor : inkColor.withAlphaComponent(0.72)
+        icon.tintColor = fg
+        label.textColor = fg
+        layer.borderColor = (isArmed ? accentColor.withAlphaComponent(0.42) : inkColor.withAlphaComponent(0.14)).cgColor
+    }
+
+    func preferredSize(maxWidth: CGFloat) -> CGSize {
+        let iconW: CGFloat = icon.isHidden ? 0 : 14
+        let gap: CGFloat = icon.isHidden ? 0 : 6
+        let padX: CGFloat = 14
+        let padY: CGFloat = 7
+        let textMax = max(40, maxWidth - padX * 2 - iconW - gap)
+        let textSize = label.sizeThatFits(CGSize(width: textMax, height: 24))
+        let w = min(maxWidth, ceil(textSize.width) + padX * 2 + iconW + gap)
+        let h = max(30, ceil(textSize.height) + padY * 2)
+        return CGSize(width: w, height: h)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layer.cornerRadius = bounds.height / 2
+        let padX: CGFloat = 14
+        let iconW: CGFloat = icon.isHidden ? 0 : 14
+        let gap: CGFloat = icon.isHidden ? 0 : 6
+        if !icon.isHidden {
+            icon.bounds = CGRect(x: 0, y: 0, width: iconW, height: 14)
+            icon.center = CGPoint(x: padX + iconW / 2, y: bounds.midY)
+        }
+        let labelX = padX + iconW + gap
+        label.frame = CGRect(x: labelX, y: 0, width: max(0, bounds.width - labelX - padX), height: bounds.height)
     }
 }
 
@@ -1035,6 +1521,13 @@ extension ReaderPager: UIScrollViewDelegate {
         barsLastY = scrollView.contentOffset.y
         barsTravel = 0
         delegate?.pagerTurnedByHand(self)
+        if mode == .scrolled, scrollView === current?.webView.scrollView {
+            pullEdge = nil
+            pullArmed = false
+            hidePullCue(animated: false)
+            pullHaptic.prepare()
+            return
+        }
         guard scrollView === outer, let current else { return }
         let inner = current.webView.scrollView
         outerMayMove = (atEnd(inner), atStart(inner))
@@ -1043,7 +1536,7 @@ extension ReaderPager: UIScrollViewDelegate {
     /// The controls follow the hand only: the ink line moving the page doesn't send them away.
     /// At either end of a section they come back, for 下一章 is on them.
     private func trackBars(_ scroll: UIScrollView) {
-        guard mode == .scrolled, scroll === current?.webView.scrollView else { return }
+        guard mode == .scrolled, !verticalTransitioning, scroll === current?.webView.scrollView else { return }
         let y = scroll.contentOffset.y
         let moved = y - barsLastY
         barsLastY = y
@@ -1063,8 +1556,137 @@ extension ReaderPager: UIScrollViewDelegate {
         }
     }
 
+    private func updateVerticalPull(_ scroll: UIScrollView) {
+        guard scroll.isDragging else {
+            if pullEdge != nil {
+                pullEdge = nil
+                pullArmed = false
+                hidePullCue(animated: true)
+            }
+            return
+        }
+        let maxY = max(0, scroll.contentSize.height - scroll.bounds.height)
+        guard let over = Self.verticalOverscroll(y: scroll.contentOffset.y, maxY: maxY) else {
+            if pullEdge != nil {
+                pullEdge = nil
+                pullArmed = false
+                hidePullCue(animated: false)
+            }
+            return
+        }
+        let neighbour = neighbourSlot(for: over.edge)
+        if over.edge == .previous && neighbour == nil {
+            if pullEdge != nil {
+                pullEdge = nil
+                pullArmed = false
+                hidePullCue(animated: false)
+            }
+            return
+        }
+        let wasArmed = (pullEdge == over.edge) && pullArmed
+        let armed = Self.isPullArmed(amount: over.amount, wasArmed: wasArmed)
+        let hasTarget = neighbour != nil
+        if armed && !wasArmed {
+            pullHaptic.impactOccurred()
+        }
+        pullEdge = over.edge
+        pullArmed = armed
+        pullCue.configure(
+            text: cueText(edge: over.edge, armed: armed && hasTarget, hasTarget: hasTarget, targetSection: neighbour?.page.section),
+            edge: over.edge,
+            armed: armed && hasTarget,
+            showIcon: hasTarget,
+            animated: !reduceMotion
+        )
+        layoutPullCue(edge: over.edge)
+        let progress = min(1, max(0, (over.amount - 8) / (Self.pullThreshold - 8)))
+        pullCue.alpha = progress
+    }
+
+    private func layoutPullCue(edge: PullEdge) {
+        let maxW = max(120, min(bounds.width - 36, 300))
+        let size = pullCue.preferredSize(maxWidth: maxW)
+        let x = ((bounds.width - size.width) / 2).rounded()
+        let y: CGFloat
+        if edge == .next {
+            let clearance: CGFloat = bottomCapsuleVisible ? 66 : 16
+            y = bounds.height - safeAreaInsets.bottom - clearance - size.height
+        } else {
+            y = safeAreaInsets.top + 14
+        }
+        pullCue.frame = CGRect(x: x, y: y, width: size.width, height: size.height)
+    }
+
+    private func hidePullCue(animated: Bool) {
+        guard pullCue.alpha > 0 else { return }
+        if !animated || reduceMotion {
+            pullCue.alpha = 0
+            return
+        }
+        UIView.animate(withDuration: 0.16, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) {
+            self.pullCue.alpha = 0
+        }
+    }
+
+    private func crossVertically(toSlot j: Int, forward: Bool, pullOffset: CGFloat, animated: Bool, snapEdge: Bool) {
+        guard !verticalTransitioning, let current, let i = slots.firstIndex(where: { $0 === current }),
+              slots.indices.contains(j), slots[j].isReady
+        else { return }
+        let target = slots[j]
+        if snapEdge {
+            let tsv = target.webView.scrollView
+            let tMaxY = max(0, tsv.contentSize.height - tsv.bounds.height)
+            tsv.setContentOffset(CGPoint(x: 0, y: forward ? 0 : tMaxY), animated: false)
+        }
+        let csv = current.webView.scrollView
+        if pullOffset > 0 {
+            csv.isScrollEnabled = false
+            let cMaxY = max(0, csv.contentSize.height - csv.bounds.height)
+            csv.setContentOffset(CGPoint(x: 0, y: forward ? cMaxY : 0), animated: false)
+        }
+        hidePullCue(animated: false)
+        guard animated, !reduceMotion, bounds.height > 0 else {
+            csv.isScrollEnabled = !(mode == .paginated && holding)
+            self.current = target
+            loadNeighbours()
+            moved()
+            return
+        }
+        verticalTransitioning = true
+        let w = bounds.width, h = bounds.height
+        let shift = min(max(0, pullOffset), h * 0.4)
+        target.webView.transform = .identity
+        target.webView.frame = CGRect(x: CGFloat(i) * w, y: 0, width: w, height: h)
+        target.webView.isHidden = false
+        outer.bringSubviewToFront(target.webView)
+        current.webView.transform = CGAffineTransform(translationX: 0, y: forward ? -shift : shift)
+        target.webView.transform = CGAffineTransform(translationX: 0, y: forward ? (h - shift) : -(h - shift))
+        UIView.animate(
+            withDuration: 0.28, delay: 0,
+            usingSpringWithDamping: 1.0, initialSpringVelocity: 0,
+            options: [.curveEaseOut]
+        ) {
+            current.webView.transform = CGAffineTransform(translationX: 0, y: forward ? -h : h)
+            target.webView.transform = .identity
+        } completion: { [weak self] _ in
+            current.webView.transform = .identity
+            target.webView.transform = .identity
+            guard let self else { return }
+            csv.isScrollEnabled = !(self.mode == .paginated && self.holding)
+            self.verticalTransitioning = false
+            guard self.current === current else { return }
+            self.current = target
+            self.loadNeighbours()
+            self.moved()
+        }
+    }
+
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         trackBars(scrollView)
+        if !arranging, !verticalTransitioning, mode == .scrolled, scrollView === current?.webView.scrollView {
+            updateVerticalPull(scrollView)
+            return
+        }
         guard !arranging, mode == .paginated, let current, bounds.width > 0 else { return }
         let inner = current.webView.scrollView
         let base = x(of: current)
@@ -1089,6 +1711,28 @@ extension ReaderPager: UIScrollViewDelegate {
     }
 
     func scrollViewWillEndDragging(_ scrollView: UIScrollView, withVelocity velocity: CGPoint, targetContentOffset: UnsafeMutablePointer<CGPoint>) {
+        if mode == .scrolled, !verticalTransitioning, scrollView === current?.webView.scrollView {
+            let maxY = max(0, scrollView.contentSize.height - scrollView.bounds.height)
+            let activeEdge = pullEdge
+            let wasArmed = pullArmed
+            pullEdge = nil
+            pullArmed = false
+            if let over = Self.verticalOverscroll(y: scrollView.contentOffset.y, maxY: maxY),
+               activeEdge == over.edge,
+               Self.isPullArmed(amount: over.amount, wasArmed: wasArmed) {
+                hidePullCue(animated: false)
+                if let neighbour = neighbourSlot(for: over.edge), neighbour.page.isReady {
+                    targetContentOffset.pointee = CGPoint(x: 0, y: over.edge == .next ? maxY : 0)
+                    crossVertically(toSlot: neighbour.index, forward: over.edge == .next, pullOffset: over.amount, animated: !reduceMotion, snapEdge: true)
+                    return
+                } else if over.edge == .next && neighbourSlot(for: .next) == nil {
+                    delegate?.pagerReachedBookEnd(self)
+                    return
+                }
+            }
+            hidePullCue(animated: true)
+            return
+        }
         guard scrollView === outer, let current else { return }
         let base = x(of: current)
         let target = targetContentOffset.pointee.x
@@ -1098,6 +1742,11 @@ extension ReaderPager: UIScrollViewDelegate {
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if mode == .scrolled, !verticalTransitioning, scrollView === current?.webView.scrollView {
+            pullEdge = nil
+            pullArmed = false
+            hidePullCue(animated: true)
+        }
         if !decelerate { ended(scrollView) }
     }
 
@@ -1130,6 +1779,86 @@ extension ReaderPager: UIScrollViewDelegate {
             loadNeighbours()
         }
         moved()
+    }
+}
+#else
+/// Minimal pill shown on macOS while scrolling past a chapter's vertical boundary.
+private final class MacPullCueView: NSView {
+    private let icon = NSImageView()
+    private let label = NSTextField(labelWithString: "")
+    private var bgColor: NSColor = .windowBackgroundColor
+    private var inkColor: NSColor = .labelColor
+    private var accentColor: NSColor = .controlAccentColor
+    private var isArmed = false
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.borderWidth = 0.5
+        icon.imageScaling = .scaleProportionallyDown
+        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = 1
+        addSubview(icon)
+        addSubview(label)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func applyColors(background: NSColor, ink: NSColor, accent: NSColor) {
+        bgColor = background
+        inkColor = ink
+        accentColor = accent
+        updateLayerColors()
+    }
+
+    func configure(text: String, edge: ReaderPager.PullEdge, armed: Bool, showIcon: Bool, animated: Bool) {
+        isArmed = armed
+        label.stringValue = text
+        icon.isHidden = !showIcon
+        if showIcon {
+            let symbol = edge == .next ? (armed ? "arrow.up" : "arrow.down") : (armed ? "arrow.down" : "arrow.up")
+            let cfg = NSImage.SymbolConfiguration(pointSize: 10.5, weight: .semibold)
+            icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(cfg)
+        }
+        updateLayerColors()
+    }
+
+    private func updateLayerColors() {
+        let fg = isArmed ? accentColor : inkColor.withAlphaComponent(0.72)
+        icon.contentTintColor = fg
+        label.textColor = fg
+        layer?.backgroundColor = bgColor.withAlphaComponent(0.94).cgColor
+        layer?.borderColor = (isArmed ? accentColor.withAlphaComponent(0.42) : inkColor.withAlphaComponent(0.16)).cgColor
+    }
+
+    func preferredSize(maxWidth: CGFloat) -> CGSize {
+        let iconW: CGFloat = icon.isHidden ? 0 : 13
+        let gap: CGFloat = icon.isHidden ? 0 : 6
+        let padX: CGFloat = 13
+        let padY: CGFloat = 6
+        let textMax = max(40, maxWidth - padX * 2 - iconW - gap)
+        let textW = min(textMax, ceil(label.attributedStringValue.size().width) + 2)
+        let textH = ceil(label.fittingSize.height)
+        return CGSize(width: min(maxWidth, textW + padX * 2 + iconW + gap), height: max(28, textH + padY * 2))
+    }
+
+    override func layout() {
+        super.layout()
+        layer?.cornerRadius = bounds.height / 2
+        updateLayerColors()
+        let padX: CGFloat = 13
+        let iconW: CGFloat = icon.isHidden ? 0 : 13
+        let gap: CGFloat = icon.isHidden ? 0 : 6
+        if !icon.isHidden {
+            icon.frame = CGRect(x: padX, y: (bounds.height - 13) / 2, width: iconW, height: 13)
+        }
+        let lh = ceil(label.fittingSize.height)
+        let lx = padX + iconW + gap
+        label.frame = CGRect(x: lx, y: (bounds.height - lh) / 2, width: max(0, bounds.width - lx - padX), height: lh)
     }
 }
 #endif

@@ -118,9 +118,15 @@ struct SectionLayout: Equatable {
 final class ReaderWebView: WKWebView {
     #if os(macOS)
     var onKey: ((NSEvent) -> Bool)?
+    var onScrollWheel: ((NSEvent) -> Void)?
 
     override func keyDown(with event: NSEvent) {
         if onKey?(event) != true { super.keyDown(with: event) }
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        super.scrollWheel(with: event)
+        onScrollWheel?(event)
     }
 
     // In the key window, arrow and page keys can arrive here before `keyDown`, and WebKit

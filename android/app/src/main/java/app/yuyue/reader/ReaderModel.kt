@@ -213,6 +213,9 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         pager.calm = EInk.on
         pager.bubbles = bubbles
         pager.background = paperTokens.bg.toArgb()
+        pager.ink = paperTokens.ink.toArgb()
+        pager.accent = paperTokens.accent.toArgb()
+        pager.chapterTitle = { sec -> detail?.let { chapterTitle(it, sec) } }
         // A few quotes in the first chapters: a book with dialogue.
         kotlinx.coroutines.MainScope().launch {
             val n = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -694,6 +697,8 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         pager.mode = s.mode
         if (modeChanged) barsAway(false)
         pager.background = paperTokens.bg.toArgb()
+        pager.ink = paperTokens.ink.toArgb()
+        pager.accent = paperTokens.accent.toArgb()
         applyImmersive()
         pager.apply(s.script(pager.geometry()))
         if (modeChanged) pager.reload()

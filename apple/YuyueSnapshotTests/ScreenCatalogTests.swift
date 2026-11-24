@@ -350,4 +350,31 @@ final class CoreFlowRegressionTests: XCTestCase {
         XCTAssertEqual(feed.entries[1].format, "M4B")
         XCTAssertEqual(feed.entries[2].format, "EPUB")
     }
+
+    func testScrolledVerticalOverscrollAndArming() {
+        // Inside scroll bounds: no overscroll.
+        XCTAssertNil(ReaderPager.verticalOverscroll(y: 0, maxY: 400))
+        XCTAssertNil(ReaderPager.verticalOverscroll(y: 200, maxY: 400))
+        XCTAssertNil(ReaderPager.verticalOverscroll(y: 400, maxY: 400))
+
+        // Past bottom edge -> .next.
+        let bottom = ReaderPager.verticalOverscroll(y: 472, maxY: 400)
+        XCTAssertEqual(bottom?.edge, .next)
+        XCTAssertEqual(bottom?.amount ?? 0, 72, accuracy: 0.01)
+
+        // Past top edge -> .previous.
+        let top = ReaderPager.verticalOverscroll(y: -68, maxY: 400)
+        XCTAssertEqual(top?.edge, .previous)
+        XCTAssertEqual(top?.amount ?? 0, 68, accuracy: 0.01)
+
+        // Short section (maxY == 0): direction alone selects edge.
+        XCTAssertEqual(ReaderPager.verticalOverscroll(y: 40, maxY: 0)?.edge, .next)
+        XCTAssertEqual(ReaderPager.verticalOverscroll(y: -40, maxY: 0)?.edge, .previous)
+
+        // Hysteresis around pullThreshold (64pt, hysteresis 8pt).
+        XCTAssertFalse(ReaderPager.isPullArmed(amount: 63, wasArmed: false))
+        XCTAssertTrue(ReaderPager.isPullArmed(amount: 64, wasArmed: false))
+        XCTAssertTrue(ReaderPager.isPullArmed(amount: 57, wasArmed: true))
+        XCTAssertFalse(ReaderPager.isPullArmed(amount: 55, wasArmed: true))
+    }
 }
