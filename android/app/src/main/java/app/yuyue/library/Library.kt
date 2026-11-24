@@ -557,9 +557,9 @@ class Library(private val context: Context) {
 
     private fun displayName(uri: Uri): String {
         context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-            if (c.moveToFirst()) c.getString(0)?.let { return it }
+            if (c.moveToFirst()) c.getString(0)?.takeIf { it.isNotBlank() }?.let { return it }
         }
-        return uri.lastPathSegment?.substringAfterLast('/') ?: "book"
+        return uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "book"
     }
 
     fun originalFile(book: BookSummary): File? =

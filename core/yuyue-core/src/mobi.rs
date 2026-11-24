@@ -45,16 +45,40 @@ struct Pdb<'a> {
 impl<'a> Pdb<'a> {
     fn open(bytes: &'a [u8]) -> Result<Self> {
         let n = u16_at(bytes, 76) as usize;
+        if n == 0 || 78 + n * 8 > bytes.len() {
+            return Err(bad("record table"));
+        }
+        let raws: Vec<usize> = (0..n).map(|i| u32_at(bytes, 78 + i * 8) as usize).collect();
         let mut offsets = Vec::with_capacity(n + 1);
-        for i in 0..n {
-            let o = u32_at(bytes, 78 + i * 8) as usize;
-            if o > bytes.len() || offsets.last().is_some_and(|&last| o < last) {
+        for (i, &raw) in raws.iter().enumerate() {
+            if i == 0 && (raw < 78 + n * 8 || raw >= bytes.len()) {
                 return Err(bad("record table"));
             }
+            let last = offsets.last().copied().unwrap_or(0);
+            let o = if raw < last || raw > bytes.len() {
+                if i <= 1 {
+                    return Err(bad("record table"));
+                }
+                // Trailing unused or EOF sentinel entries in third-party PRC/MOBI tools:
+                // anchor at the next valid offset (or EOF) so the preceding record stays intact.
+                raws[i + 1..]
+                    .iter()
+                    .copied()
+                    .find(|&next| next >= last && next <= bytes.len())
+                    .unwrap_or(bytes.len())
+            } else {
+                raw
+            };
             offsets.push(o);
         }
         offsets.push(bytes.len());
         Ok(Pdb { bytes, offsets })
+    }
+
+    fn name(&self) -> &'a [u8] {
+        let head = &self.bytes[..32.min(self.bytes.len())];
+        let end = head.iter().position(|&b| b == 0).unwrap_or(head.len());
+        &head[..end]
     }
 
     fn record(&self, i: usize) -> Option<&'a [u8]> {
@@ -81,7 +105,9 @@ struct Header {
     compression: u32,
     record_count: u32,
     encryption: u32,
+    codepage: u32,
     utf8: bool,
+    palmdoc_only: bool,
     version: u32,
     title: String,
     locale: u32,
@@ -96,17 +122,73 @@ struct Header {
     exth: Exth,
 }
 
-fn header(r0: &[u8]) -> Result<Header> {
-    if r0.get(16..20) != Some(b"MOBI") {
-        return Err(CoreError::Unsupported);
+fn clean_xml(s: &str) -> String {
+    s.chars()
+        .filter(|&c| (c >= '\x20' || matches!(c, '\t' | '\n' | '\r')) && !matches!(c, '\u{FFFE}' | '\u{FFFF}'))
+        .collect()
+}
+
+fn encoding_for(codepage: u32, locale: u32, sample: &[u8]) -> &'static encoding_rs::Encoding {
+    match codepage {
+        65001 => encoding_rs::UTF_8,
+        936 | 54936 => encoding_rs::GB18030,
+        950 => encoding_rs::BIG5,
+        932 => encoding_rs::SHIFT_JIS,
+        949 => encoding_rs::EUC_KR,
+        1251 => encoding_rs::WINDOWS_1251,
+        _ => {
+            if !sample.is_empty() && sample.is_ascii() {
+                return if locale & 0xff == 4 {
+                    let sublang = (locale >> 10) & 0x3f;
+                    if matches!(sublang, 1 | 3 | 5) { encoding_rs::BIG5 } else { encoding_rs::GB18030 }
+                } else {
+                    encoding_rs::WINDOWS_1252
+                };
+            }
+            if !sample.is_empty() && std::str::from_utf8(sample).is_ok() {
+                return encoding_rs::UTF_8;
+            }
+            let tld: Option<&[u8]> = match locale & 0xff {
+                4 => {
+                    let sublang = (locale >> 10) & 0x3f;
+                    if matches!(sublang, 1 | 3 | 5) { Some(b"tw") } else { Some(b"cn") }
+                }
+                17 => Some(b"jp"),
+                18 => Some(b"kr"),
+                25 => Some(b"ru"),
+                _ => None,
+            };
+            let mut detector = chardetng::EncodingDetector::new(chardetng::Iso2022JpDetection::Deny);
+            detector.feed(&sample[..sample.len().min(65536)], true);
+            detector.guess(tld, chardetng::Utf8Detection::Allow)
+        }
+    }
+}
+
+fn decode_bytes(enc: &'static encoding_rs::Encoding, b: &[u8]) -> String {
+    let raw = if enc == encoding_rs::UTF_8 || (!b.is_ascii() && std::str::from_utf8(b).is_ok()) {
+        String::from_utf8_lossy(b).into_owned()
+    } else {
+        enc.decode_without_bom_handling(b).0.into_owned()
+    };
+    clean_xml(&raw)
+}
+
+fn fill_header_meta(r0: &[u8], pdb_name: &[u8], h: &mut Header, enc: &'static encoding_rs::Encoding) {
+    let decode = |b: &[u8]| decode_bytes(enc, b);
+    if h.palmdoc_only {
+        h.title = decode(pdb_name).trim().to_string();
+        return;
     }
     let length = u32_at(r0, 20) as usize;
-    let utf8 = u32_at(r0, 28) == 65001;
-    let decode = |b: &[u8]| -> String {
-        if utf8 { String::from_utf8_lossy(b).into_owned() } else { encoding_rs::WINDOWS_1252.decode(b).0.into_owned() }
-    };
     let (to, tl) = (u32_at(r0, 84) as usize, u32_at(r0, 88) as usize);
-    let title = r0.get(to..to.saturating_add(tl)).map(decode).unwrap_or_default();
+    h.title = r0
+        .get(to..to.saturating_add(tl))
+        .map(&decode)
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| decode(pdb_name))
+        .trim()
+        .to_string();
     let mut exth = Exth::default();
     if u32_at(r0, 128) & 0x40 != 0 {
         let e = 16 + length;
@@ -134,24 +216,68 @@ fn header(r0: &[u8]) -> Result<Header> {
             }
         }
     }
-    Ok(Header {
+    h.exth = exth;
+}
+
+fn header(r0: &[u8], pdb_name: &[u8]) -> Result<Header> {
+    if r0.get(16..20) != Some(b"MOBI") {
+        // Plain 16-byte PalmDOC (`TEXtREAd` or `BOOKMOBI` without a MOBI subheader).
+        if r0.len() < 16 || !matches!(u16_at(r0, 0), 1 | 2) {
+            return Err(CoreError::Unsupported);
+        }
+        let mut h = Header {
+            compression: u16_at(r0, 0),
+            record_count: u16_at(r0, 8),
+            encryption: u16_at(r0, 12),
+            codepage: 0,
+            utf8: false,
+            palmdoc_only: true,
+            version: 1,
+            title: String::new(),
+            locale: 0,
+            resource_start: NONE,
+            huff: NONE,
+            huff_count: 0,
+            trailing: 0,
+            ncx: NONE,
+            fdst: NONE,
+            frag: NONE,
+            skel: NONE,
+            exth: Exth::default(),
+        };
+        let enc = encoding_for(0, 0, pdb_name);
+        fill_header_meta(r0, pdb_name, &mut h, enc);
+        return Ok(h);
+    }
+    let length = u32_at(r0, 20) as usize;
+    let codepage = u32_at(r0, 28);
+    let utf8 = codepage == 65001;
+    let version = u32_at(r0, 36);
+    let locale = u32_at(r0, 92);
+    let mut h = Header {
         compression: u16_at(r0, 0),
         record_count: u16_at(r0, 8),
         encryption: u16_at(r0, 12),
+        codepage,
         utf8,
-        version: u32_at(r0, 36),
-        title,
-        locale: u32_at(r0, 92),
+        palmdoc_only: false,
+        version,
+        title: String::new(),
+        locale,
         resource_start: u32_at(r0, 108),
         huff: u32_at(r0, 112),
         huff_count: u32_at(r0, 116),
-        trailing: if length >= 0xe4 { u32_at(r0, 240) } else { 0 },
+        // Extra record data flags are a uint16 at r0 offset 242 (MOBI header + 226).
+        trailing: if length >= 0xe4 { u16_at(r0, 242) } else { 0 },
         ncx: if length >= 0xe8 { u32_at(r0, 244) } else { NONE },
-        fdst: u32_at(r0, 192),
-        frag: u32_at(r0, 248),
-        skel: u32_at(r0, 252),
-        exth,
-    })
+        fdst: if length >= 0xb4 && version >= 8 { u32_at(r0, 192) } else { NONE },
+        frag: if length >= 0xf0 { u32_at(r0, 248) } else { NONE },
+        skel: if length >= 0xf4 { u32_at(r0, 252) } else { NONE },
+        exth: Exth::default(),
+    };
+    let enc = encoding_for(codepage, locale, r0);
+    fill_header_meta(r0, pdb_name, &mut h, enc);
+    Ok(h)
 }
 
 // MARK: Text
@@ -329,7 +455,12 @@ struct Entry {
 }
 
 /// An INDX table (the skeleton and fragment tables, the NCX), and its strings (CNCX).
-fn index(pdb: &Pdb, start: usize, first: u32) -> Result<(Vec<Entry>, HashMap<u32, String>)> {
+fn index(
+    pdb: &Pdb,
+    start: usize,
+    first: u32,
+    decode: &dyn Fn(&[u8]) -> String,
+) -> Result<(Vec<Entry>, HashMap<u32, String>)> {
     let at = start + first as usize;
     let r = pdb.record(at).filter(|r| r.starts_with(b"INDX")).ok_or_else(|| bad("INDX"))?;
     let (len, records, cncx_count) = (u32_at(r, 4) as usize, u32_at(r, 24) as usize, u32_at(r, 52) as usize);
@@ -349,7 +480,7 @@ fn index(pdb: &Pdb, start: usize, first: u32) -> Result<(Vec<Entry>, HashMap<u32
             let (size, n) = varlen(c, pos);
             pos += n;
             let end = (pos + size as usize).min(c.len());
-            cncx.insert((i as u32) << 16 | here as u32, String::from_utf8_lossy(&c[pos..end]).into_owned());
+            cncx.insert((i as u32) << 16 | here as u32, decode(&c[pos..end]));
             pos = end;
         }
     }
@@ -454,29 +585,46 @@ struct Book {
 pub fn to_epub(bytes: &[u8]) -> Result<Vec<u8>> {
     let pdb = Pdb::open(bytes)?;
     let r0 = pdb.record(0).ok_or_else(|| bad("header"))?;
-    let first = header(r0)?;
+    let pdb_name = pdb.name();
+    let mut first = header(r0, pdb_name)?;
     if first.encryption != 0 {
         return Err(CoreError::Protected);
     }
     // The pictures are numbered from the first header's resources, KF8 half or not.
     let resource_start = first.resource_start as usize;
-    let boundary = first.exth.boundary.filter(|&b| b != NONE && first.version < 8);
+    let boundary = first
+        .exth
+        .boundary
+        .filter(|&b| b != NONE && first.version < 8)
+        .map(|b| b as usize)
+        .or_else(|| {
+            if first.version >= 8 {
+                return None;
+            }
+            let from = (first.record_count as usize).saturating_add(1);
+            let total = pdb.offsets.len().saturating_sub(1);
+            (from..total).find(|&i| pdb.record(i).is_some_and(|r| r.starts_with(b"BOUNDARY")))
+        });
     let kf8 = match boundary {
-        Some(b) => pdb.record(b as usize).and_then(|r| header(r).ok()).map(|h| (b as usize, h)),
-        None if first.version >= 8 => Some((0, header(r0)?)),
+        Some(b) => {
+            let candidate = if pdb.record(b).is_some_and(|r| r.starts_with(b"BOUNDARY")) { b + 1 } else { b };
+            pdb.record(candidate)
+                .and_then(|r| header(r, pdb_name).ok())
+                .filter(|h| !h.palmdoc_only)
+                .map(|h| (candidate, h))
+        }
+        None if first.version >= 8 => Some((0, header(r0, pdb_name)?)),
         None => None,
     };
     let mut book = match kf8 {
-        Some((start, h)) if h.skel != NONE && h.frag != NONE => {
-            let meta = Meta::of(&first, &h);
-            kf8_book(&pdb, &h, start, resource_start, meta)?
+        Some((start, mut h)) if h.skel != NONE && h.frag != NONE => {
+            kf8_book(&pdb, r0, pdb_name, &mut first, &mut h, start, resource_start)?
         }
-        _ => {
-            let meta = Meta::of(&first, &first);
-            mobi6_book(&pdb, &first, resource_start, meta)?
-        }
+        _ => mobi6_book(&pdb, r0, pdb_name, &mut first, resource_start)?,
     };
-    book.cover = first.exth.cover.or(first.exth.thumb).filter(|&c| c != NONE).map(|c| c + 1);
+    if resource_start != NONE as usize {
+        book.cover = first.exth.cover.or(first.exth.thumb).filter(|&c| c != NONE).map(|c| c + 1);
+    }
     write_epub(&pdb, resource_start, &book)
 }
 
@@ -543,7 +691,7 @@ fn book(meta: Meta) -> Book {
 }
 
 /// Puts an empty anchor at each offset, outside any tag; the ids keep the offsets as given.
-fn insert_anchors(text: &mut Vec<u8>, at: &BTreeSet<usize>, id: impl Fn(usize) -> String) {
+fn insert_anchors(text: &mut Vec<u8>, at: &BTreeSet<usize>, utf8: bool, id: impl Fn(usize) -> String) {
     let mut places: Vec<(usize, usize)> = at
         .iter()
         .map(|&offset| {
@@ -554,8 +702,10 @@ fn insert_anchors(text: &mut Vec<u8>, at: &BTreeSet<usize>, id: impl Fn(usize) -
                     p = lt;
                 }
             // Never inside a UTF-8 character.
-            while p > 0 && p < text.len() && text[p] & 0xc0 == 0x80 {
-                p -= 1;
+            if utf8 {
+                while p > 0 && p < text.len() && text[p] & 0xc0 == 0x80 {
+                    p -= 1;
+                }
             }
             (p, offset)
         })
@@ -591,17 +741,66 @@ static FILEPOS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)\bfilepos=[
 static RECINDEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)\b(?:hi|lo)?recindex=['"]?0*(\d+)['"]?"#).unwrap());
 static PAGEBREAK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<mbp:pagebreak[^>]*>").unwrap());
 static BODY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<body[^>]*>").unwrap());
+static HTML_TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<(?:html|body|p|div|br|h[1-6]|span|table|ul|ol|blockquote)\b").unwrap());
 
-fn mobi6_book(pdb: &Pdb, h: &Header, resource_start: usize, meta: Meta) -> Result<Book> {
+fn mobi6_book(
+    pdb: &Pdb,
+    r0: &[u8],
+    pdb_name: &[u8],
+    h: &mut Header,
+    resource_start: usize,
+) -> Result<Book> {
     let mut raw = text(pdb, h, 0)?;
+    let enc = encoding_for(h.codepage, h.locale, &raw);
+    if !h.utf8 && matches!(h.codepage, 0 | 1252) {
+        fill_header_meta(r0, pdb_name, h, enc);
+    }
+    let decode = |b: &[u8]| decode_bytes(enc, b);
+    let meta = Meta::of(h, h);
     let mut out = book(meta);
-    let ncx = if h.ncx != NONE { index(pdb, 0, h.ncx).ok() } else { None };
+
+    if h.palmdoc_only || !HTML_TAG.is_match(&raw[..raw.len().min(32768)]) {
+        let plain = decode(&raw);
+        let headings = crate::txt::Headings::default();
+        let analysis = crate::txt::analyze(plain.as_bytes(), Some(encoding_rs::UTF_8), &headings);
+        if out.language == "und" {
+            out.language = analysis.book.language.to_string();
+        }
+        if out.title.is_empty()
+            && let Some(t) = analysis.book.title {
+                out.title = clean_xml(&t);
+            }
+        if out.authors.is_empty()
+            && let Some(a) = analysis.book.author {
+                out.authors.push(clean_xml(&a));
+            }
+        for (i, ch) in analysis.book.chapters.iter().enumerate() {
+            let mut body = String::new();
+            if let Some(title) = &ch.title {
+                body.push_str(&format!("<h2>{}</h2>", escape(title)));
+                if !ch.continued {
+                    out.toc.push((clean_xml(title), 0, format!("part{i}.html")));
+                }
+            }
+            for p in &ch.paragraphs {
+                body.push_str(&format!("<p>{}</p>", escape(p)));
+            }
+            if !body.is_empty() {
+                out.parts.push(wrap(&body, &out.language, &[]));
+            }
+        }
+        if !out.parts.is_empty() {
+            return Ok(out);
+        }
+    }
+
+    let ncx = if h.ncx != NONE { index(pdb, 0, h.ncx, &decode).ok() } else { None };
 
     let mut targets: BTreeSet<usize> = FILEPOS.captures_iter(&raw).filter_map(|c| num(&c, 1)).map(|n| n as usize).collect();
     if let Some((entries, _)) = &ncx {
         targets.extend(entries.iter().filter_map(|e| e.tags.get(&1).and_then(|v| v.first())).map(|&o| o as usize));
     }
-    insert_anchors(&mut raw, &targets, |o| format!("filepos{o}"));
+    insert_anchors(&mut raw, &targets, enc == encoding_rs::UTF_8, |o| format!("filepos{o}"));
 
     // The body, cut at each page break.
     let body_start = BODY.find(&raw).map(|m| m.end()).unwrap_or(0);
@@ -632,10 +831,12 @@ fn mobi6_book(pdb: &Pdb, h: &Header, resource_start: usize, meta: Meta) -> Resul
         });
         let pictured = RECINDEX.replace_all(&linked, |c: &Captures| {
             let n = num(c, 1).unwrap_or(0);
-            out.images.insert(n);
+            if resource_start != NONE as usize {
+                out.images.insert(n);
+            }
             format!("src=\"{}\"", picture(pdb, resource_start, n)).into_bytes()
         });
-        let text = if h.utf8 { String::from_utf8_lossy(&pictured).into_owned() } else { encoding_rs::WINDOWS_1252.decode(&pictured).0.into_owned() };
+        let text = decode(&pictured);
         out.parts.push(wrap(&text, &out.language, &[]));
     }
 
@@ -644,8 +845,7 @@ fn mobi6_book(pdb: &Pdb, h: &Header, resource_start: usize, meta: Meta) -> Resul
         for (e, depth) in entries.iter().zip(depths) {
             let (Some(&offset), Some(label)) = (e.tags.get(&1).and_then(|v| v.first()), e.tags.get(&3).and_then(|v| v.first()).and_then(|l| cncx.get(l))) else { continue };
             let part = where_is.get(&(offset as usize)).copied().unwrap_or(0);
-            let label = if h.utf8 { label.clone() } else { latin(label) };
-            out.toc.push((label, depth, format!("part{part}.html#filepos{offset}")));
+            out.toc.push((label.clone(), depth, format!("part{part}.html#filepos{offset}")));
         }
     }
     Ok(out)
@@ -662,15 +862,9 @@ fn find_last(hay: &[u8], needle: &[u8]) -> Option<usize> {
     lower.windows(needle.len()).rposition(|w| w == needle)
 }
 
-/// CNCX strings are bytes in the book's code page; read as UTF-8 they came out wrong.
-fn latin(s: &str) -> String {
-    let bytes: Vec<u8> = s.chars().map(|c| if (c as u32) < 256 { c as u8 } else { b'?' }).collect();
-    encoding_rs::WINDOWS_1252.decode(&bytes).0.into_owned()
-}
-
 fn wrap(body: &str, lang: &str, styles: &[String]) -> Vec<u8> {
     let links: String = styles.iter().map(|s| format!("<link rel=\"stylesheet\" type=\"text/css\" href=\"{s}\"/>")).collect();
-    format!("<!DOCTYPE html><html lang=\"{}\"><head><meta charset=\"utf-8\"/>{links}</head><body>{body}</body></html>", escape(lang)).into_bytes()
+    format!("<!DOCTYPE html><html lang=\"{}\"><head><meta charset=\"utf-8\"/>{links}</head><body>{}</body></html>", escape(lang), clean_xml(body)).into_bytes()
 }
 
 // MARK: KF8
@@ -683,8 +877,29 @@ fn base32(c: &Captures, i: usize) -> Option<u32> {
     u32::from_str_radix(std::str::from_utf8(c.get(i)?.as_bytes()).ok()?, 32).ok()
 }
 
-fn kf8_book(pdb: &Pdb, h: &Header, start: usize, resource_start: usize, meta: Meta) -> Result<Book> {
+fn kf8_book(
+    pdb: &Pdb,
+    r0: &[u8],
+    pdb_name: &[u8],
+    first: &mut Header,
+    h: &mut Header,
+    start: usize,
+    resource_start: usize,
+) -> Result<Book> {
     let raw = text(pdb, h, start)?;
+    let enc = encoding_for(h.codepage, h.locale, &raw);
+    if !first.utf8 && matches!(first.codepage, 0 | 1252) {
+        fill_header_meta(r0, pdb_name, first, enc);
+    }
+    if start != 0
+        && !h.utf8
+        && matches!(h.codepage, 0 | 1252)
+        && let Some(kh) = pdb.record(start)
+    {
+        fill_header_meta(kh, pdb_name, h, enc);
+    }
+    let decode = |b: &[u8]| decode_bytes(enc, b);
+    let meta = Meta::of(first, h);
     let mut out = book(meta);
 
     // Flows: 0 is the text; the rest stylesheets and SVG.
@@ -701,8 +916,8 @@ fn kf8_book(pdb: &Pdb, h: &Header, start: usize, resource_start: usize, meta: Me
             }
         }
 
-    let (frags, _) = index(pdb, start, h.frag)?;
-    let (skels, _) = index(pdb, start, h.skel)?;
+    let (frags, _) = index(pdb, start, h.frag, &decode)?;
+    let (skels, _) = index(pdb, start, h.skel, &decode)?;
     struct Frag {
         insert: usize,
         length: usize,
@@ -742,7 +957,7 @@ fn kf8_book(pdb: &Pdb, h: &Header, start: usize, resource_start: usize, meta: Me
         return Err(bad("no files"));
     }
 
-    let ncx = if h.ncx != NONE { index(pdb, start, h.ncx).ok() } else { None };
+    let ncx = if h.ncx != NONE { index(pdb, start, h.ncx, &decode).ok() } else { None };
     // Every place linked to, by part.
     let resolve = |fid: u32, off: u32| -> Option<(usize, usize)> {
         let &(part, at) = frag_at.get(fid as usize)?;
@@ -766,7 +981,7 @@ fn kf8_book(pdb: &Pdb, h: &Header, start: usize, resource_start: usize, meta: Me
         }
     }
     for (p, t) in parts.iter_mut().zip(&targets) {
-        insert_anchors(p, t, |o| format!("pos{o}"));
+        insert_anchors(p, t, enc == encoding_rs::UTF_8, |o| format!("pos{o}"));
     }
     let href = |(part, at): (usize, usize)| format!("part{part}.html#pos{at}");
 
@@ -782,10 +997,12 @@ fn kf8_book(pdb: &Pdb, h: &Header, start: usize, resource_start: usize, meta: Me
         });
         let embedded = KINDLE_EMBED.replace_all(&flowed, |c: &Captures| {
             let n = base32(c, 1).unwrap_or(0);
-            out.images.insert(n);
+            if resource_start != NONE as usize {
+                out.images.insert(n);
+            }
             picture(pdb, resource_start, n).into_bytes()
         });
-        out.parts.push(embedded.into_owned());
+        out.parts.push(decode(&embedded).into_bytes());
     }
     for n in styles_used {
         let Some(&(a, b)) = flows.get(n as usize) else { continue };
@@ -793,7 +1010,9 @@ fn kf8_book(pdb: &Pdb, h: &Header, start: usize, resource_start: usize, meta: Me
         let svg = data.windows(4).take(400).any(|w| w == b"<svg");
         let fixed = KINDLE_EMBED.replace_all(data, |c: &Captures| {
             let n = base32(c, 1).unwrap_or(0);
-            out.images.insert(n);
+            if resource_start != NONE as usize {
+                out.images.insert(n);
+            }
             // Stylesheets sit beside the parts, so the same path holds.
             picture(pdb, resource_start, n).into_bytes()
         });
@@ -818,7 +1037,7 @@ fn flow_name(n: u32, mime: &[u8]) -> String {
 // MARK: The EPUB
 
 fn escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    clean_xml(s).replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
 fn write_epub(pdb: &Pdb, resource_start: usize, book: &Book) -> Result<Vec<u8>> {
@@ -944,7 +1163,7 @@ mod tests {
     #[test]
     fn anchors_go_outside_tags() {
         let mut t = b"<p class=\"x\">hello</p>".to_vec();
-        insert_anchors(&mut t, &BTreeSet::from([3, 15]), |o| format!("a{o}"));
+        insert_anchors(&mut t, &BTreeSet::from([3, 15]), true, |o| format!("a{o}"));
         assert_eq!(String::from_utf8(t).unwrap(), "<a id=\"a3\"></a><p class=\"x\">he<a id=\"a15\"></a>llo</p>");
     }
 
@@ -997,6 +1216,167 @@ mod tests {
         out.clear();
         h.decompress(&[254], &mut out, 0).unwrap();
         assert_eq!(out, b"abc");
+    }
+
+    fn build_pdb(name: &[u8], kind: &[u8; 8], records: &[&[u8]], trailing_zero_record: bool) -> Vec<u8> {
+        let mut out = vec![0u8; 78];
+        let copy_len = name.len().min(31);
+        out[..copy_len].copy_from_slice(&name[..copy_len]);
+        out[60..68].copy_from_slice(kind);
+        let total_records = records.len() + usize::from(trailing_zero_record);
+        out[76..78].copy_from_slice(&(total_records as u16).to_be_bytes());
+        let table_end = 78 + total_records * 8;
+        let mut offset = table_end as u32;
+        for (idx, rec) in records.iter().enumerate() {
+            out.extend_from_slice(&offset.to_be_bytes());
+            out.extend_from_slice(&(idx as u32).to_be_bytes());
+            offset += rec.len() as u32;
+        }
+        if trailing_zero_record {
+            out.extend_from_slice(&0u32.to_be_bytes());
+            out.extend_from_slice(&(records.len() as u32).to_be_bytes());
+        }
+        for rec in records {
+            out.extend_from_slice(rec);
+        }
+        out
+    }
+
+    #[test]
+    fn imports_palmdoc_textread_mobi_with_gbk_chapters() {
+        let (gbk_title, _, _) = encoding_rs::GB18030.encode("星海航行");
+        let (gbk_body, _, _) = encoding_rs::GB18030.encode("第一章 起航\n\n风帆在清晨拉起。\n\n第二章 远海\n\n灯塔渐渐远去。\n");
+        let mut r0 = vec![0u8; 16];
+        r0[0..2].copy_from_slice(&1u16.to_be_bytes()); // uncompressed PalmDOC
+        r0[4..8].copy_from_slice(&(gbk_body.len() as u32).to_be_bytes());
+        r0[8..10].copy_from_slice(&1u16.to_be_bytes()); // 1 text record
+        r0[10..12].copy_from_slice(&4096u16.to_be_bytes());
+        let mobi_bytes = build_pdb(&gbk_title, b"TEXtREAd", &[&r0, &gbk_body], false);
+
+        let dir = std::env::temp_dir().join(format!("yuyue-mobi-palmdoc-{:016x}", getrandom::u64().unwrap_or(1)));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("voyage.mobi");
+        std::fs::write(&src, &mobi_bytes).unwrap();
+        let manifest = crate::book::import(&dir, &src).unwrap();
+        assert_eq!(manifest.title, "星海航行");
+        assert!(manifest.language.starts_with("zh"));
+        assert!(manifest.toc.iter().any(|t| t.title.contains("第一章")));
+        let first_sentences = crate::book::sentences(&dir.join(&manifest.id), manifest.start).unwrap();
+        assert!(first_sentences.iter().any(|s| s.contains("风帆在清晨拉起")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn imports_gbk_mobi6_with_nul_metadata_and_nonzero_offset_240() {
+        let (gbk_title, _, _) = encoding_rs::GB18030.encode("背影\0");
+        let (gbk_author, _, _) = encoding_rs::GB18030.encode("朱自清\0");
+        let (gbk_html, _, _) = encoding_rs::GB18030.encode("<html><body><p>我与父亲不相见已二年余了。</p></body></html>");
+
+        let mobi_len: u32 = 232; // standard MOBI6 header length (16 + 232 = 248)
+        let mut r0 = vec![0u8; (16 + mobi_len) as usize];
+        r0[0..2].copy_from_slice(&1u16.to_be_bytes()); // uncompressed
+        r0[4..8].copy_from_slice(&(gbk_html.len() as u32).to_be_bytes());
+        r0[8..10].copy_from_slice(&1u16.to_be_bytes()); // 1 text record
+        r0[10..12].copy_from_slice(&4096u16.to_be_bytes());
+        r0[16..20].copy_from_slice(b"MOBI");
+        r0[20..24].copy_from_slice(&mobi_len.to_be_bytes());
+        r0[28..32].copy_from_slice(&1252u32.to_be_bytes()); // mislabeled codepage common in CN MOBIs
+        r0[36..40].copy_from_slice(&6u32.to_be_bytes()); // MOBI 6
+        r0[92..96].copy_from_slice(&4u32.to_be_bytes()); // zh locale
+        r0[108..112].copy_from_slice(&NONE.to_be_bytes()); // no image records
+        r0[128..132].copy_from_slice(&0x40u32.to_be_bytes()); // EXTH flag
+        // Non-zero uint16 at 240..242 before uint16 extra_data_flags = 0 at 242..244.
+        r0[240..242].copy_from_slice(&0xffffu16.to_be_bytes());
+        r0[242..244].copy_from_slice(&0u16.to_be_bytes());
+        r0[244..248].copy_from_slice(&NONE.to_be_bytes());
+
+        // EXTH block with author (100) and updated title (503) containing trailing NULs.
+        let mut exth = b"EXTH".to_vec();
+        let rec_author_len = 8 + gbk_author.len();
+        let rec_title_len = 8 + gbk_title.len();
+        let exth_len = 12 + rec_author_len + rec_title_len;
+        exth.extend_from_slice(&(exth_len as u32).to_be_bytes());
+        exth.extend_from_slice(&2u32.to_be_bytes());
+        exth.extend_from_slice(&100u32.to_be_bytes());
+        exth.extend_from_slice(&(rec_author_len as u32).to_be_bytes());
+        exth.extend_from_slice(&gbk_author);
+        exth.extend_from_slice(&503u32.to_be_bytes());
+        exth.extend_from_slice(&(rec_title_len as u32).to_be_bytes());
+        exth.extend_from_slice(&gbk_title);
+        while exth.len() % 4 != 0 {
+            exth.push(0);
+        }
+        r0.extend_from_slice(&exth);
+        let full_name_offset = r0.len() as u32;
+        r0.extend_from_slice(&gbk_title);
+        r0[84..88].copy_from_slice(&full_name_offset.to_be_bytes());
+        r0[88..92].copy_from_slice(&(gbk_title.len() as u32).to_be_bytes());
+
+        let mobi_bytes = build_pdb(b"beiying", b"BOOKMOBI", &[&r0, &gbk_html], true);
+        let dir = std::env::temp_dir().join(format!("yuyue-mobi-gbk-{:016x}", getrandom::u64().unwrap_or(2)));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("beiying.mobi");
+        std::fs::write(&src, &mobi_bytes).unwrap();
+        let manifest = crate::book::import(&dir, &src).unwrap();
+        assert_eq!(manifest.title, "背影");
+        assert_eq!(manifest.authors, vec!["朱自清"]);
+        let sentences = crate::book::sentences(&dir.join(&manifest.id), manifest.start).unwrap();
+        assert!(sentences.iter().any(|s| s.contains("我与父亲不相见已二年余了")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn imports_mobi6_with_oversized_section_exceeding_max_section_chars() {
+        // Regression for #53: an unstyled MOBI6 chapter over 60,000 characters is split by
+        // `epub::split_large`; `Assembled::joinable` must grow alongside `sections` so `final_toc`
+        // never panics with `index out of bounds: the len is N but the index is N` and remaps
+        // trailing chapters cleanly.
+        let mut html = String::from("<html><body><h2>清晨</h2><p>河水静静流淌。</p><mbp:pagebreak/><h2>黄昏</h2>");
+        let para = "<p>森林里的篝火映照着驯鹿的影子，风穿过白桦林，带来远方山峦与河流的气息，夜色缓缓降临在右岸的营地。</p>";
+        for _ in 0..1350 {
+            html.push_str(para);
+        }
+        html.push_str("<mbp:pagebreak/><h2>跋</h2><p>山峦与海洋都在远方。</p></body></html>");
+        let html_bytes = html.into_bytes();
+
+        let mobi_len: u32 = 232;
+        let mut r0 = vec![0u8; (16 + mobi_len) as usize];
+        r0[0..2].copy_from_slice(&1u16.to_be_bytes());
+        r0[4..8].copy_from_slice(&(html_bytes.len() as u32).to_be_bytes());
+        let chunks: Vec<&[u8]> = html_bytes.chunks(4096).collect();
+        r0[8..10].copy_from_slice(&(chunks.len() as u16).to_be_bytes());
+        r0[10..12].copy_from_slice(&4096u16.to_be_bytes());
+        r0[16..20].copy_from_slice(b"MOBI");
+        r0[20..24].copy_from_slice(&mobi_len.to_be_bytes());
+        r0[28..32].copy_from_slice(&65001u32.to_be_bytes());
+        r0[36..40].copy_from_slice(&6u32.to_be_bytes());
+        r0[92..96].copy_from_slice(&4u32.to_be_bytes());
+        r0[108..112].copy_from_slice(&NONE.to_be_bytes());
+        r0[244..248].copy_from_slice(&NONE.to_be_bytes());
+        let title_bytes = "右岸测试".as_bytes();
+        let full_name_offset = r0.len() as u32;
+        r0.extend_from_slice(title_bytes);
+        r0[84..88].copy_from_slice(&full_name_offset.to_be_bytes());
+        r0[88..92].copy_from_slice(&(title_bytes.len() as u32).to_be_bytes());
+
+        let mut records: Vec<&[u8]> = Vec::with_capacity(1 + chunks.len());
+        records.push(&r0);
+        records.extend(chunks);
+        let mobi_bytes = build_pdb(b"youan", b"BOOKMOBI", &records, false);
+
+        let dir = std::env::temp_dir().join(format!("yuyue-mobi-oversized-{:016x}", getrandom::u64().unwrap_or(3)));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("youan.mobi");
+        std::fs::write(&src, &mobi_bytes).unwrap();
+        let manifest = crate::book::import(&dir, &src).unwrap();
+        assert_eq!(manifest.title, "右岸测试");
+        assert!(manifest.sections.len() >= 4, "expected oversized chapter to split: {:?}", manifest.sections.len());
+        assert!(manifest.sections.iter().any(|s| s.continued));
+        assert_eq!(manifest.sections.last().and_then(|s| s.title.as_deref()), Some("跋"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The Gutenberg Kindle files of Pride and Prejudice, when they've been downloaded:

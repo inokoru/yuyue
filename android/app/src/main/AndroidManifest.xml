@@ -54,6 +54,11 @@
                 <data android:mimeType="application/pdf" />
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="application/x-mobipocket-ebook" />
+                <data android:mimeType="application/vnd.amazon.ebook" />
+                <data android:mimeType="application/vnd.amazon.mobi8-ebook" />
+                <data android:mimeType="application/x-mobi8-ebook" />
+                <data android:mimeType="application/vnd.palm" />
+                <data android:mimeType="application/x-palm-database" />
                 <data android:mimeType="application/zip" />
                 <data android:mimeType="application/octet-stream" />
                 <data android:mimeType="audio/*" />

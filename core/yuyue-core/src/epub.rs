@@ -1458,6 +1458,7 @@ fn split_large(a: &mut Assembled) {
     let sections = std::mem::take(&mut a.sections);
     let mut out = Vec::with_capacity(sections.len());
     let mut chars = Vec::with_capacity(sections.len());
+    let mut joinable = Vec::with_capacity(sections.len());
     let mut remap = Vec::with_capacity(sections.len());
     for (i, section) in sections.into_iter().enumerate() {
         remap.push(out.len() as u32);
@@ -1465,6 +1466,7 @@ fn split_large(a: &mut Assembled) {
         if points.is_empty() {
             out.push(section);
             chars.push(a.chars[i]);
+            joinable.push(a.joinable[i]);
             continue;
         }
         let first = out.len();
@@ -1472,7 +1474,9 @@ fn split_large(a: &mut Assembled) {
             if !has_content(&body) {
                 continue;
             }
+            let continued = section.continued || out.len() > first;
             chars.push(count_chars(&body.children));
+            joinable.push(a.joinable[i] && out.len() == first);
             out.push(Section {
                 title: section.title.clone(),
                 body,
@@ -1481,8 +1485,13 @@ fn split_large(a: &mut Assembled) {
                 body_class: section.body_class.clone(),
                 linear: section.linear,
                 kind: section.kind,
-                continued: section.continued || out.len() > first,
+                continued,
             });
+        }
+        if out.len() == first {
+            chars.push(a.chars[i]);
+            joinable.push(a.joinable[i]);
+            out.push(section);
         }
     }
     for s in a.entry_sections.values_mut().chain(a.doc_sections.values_mut()) {
@@ -1490,6 +1499,7 @@ fn split_large(a: &mut Assembled) {
     }
     a.sections = out;
     a.chars = chars;
+    a.joinable = joinable;
 }
 
 fn size_points(body: &Element) -> Vec<Vec<usize>> {
@@ -1561,6 +1571,8 @@ fn final_toc(
     targets: &HashMap<(String, String), (u32, String)>,
     doc_sections: &HashMap<String, u32>,
 ) -> Vec<TocEntry> {
+    debug_assert_eq!(a.sections.len(), a.joinable.len());
+    debug_assert_eq!(a.sections.len(), a.chars.len());
     let dumped: HashSet<&str> = docs.iter().filter(|d| d.text_dump && d.linear).map(|d| d.path.as_str()).collect();
     let mut entries: Vec<(u32, usize, TocEntry)> = Vec::new();
     for (i, e) in raw.iter().enumerate() {
@@ -1578,7 +1590,11 @@ fn final_toc(
                 .or_else(|| doc_sections.get(&e.path).map(|s| (*s, None))),
         };
         if let Some((section, anchor)) = target {
-            let title = if e.title.is_empty() { a.sections[section as usize].title.clone().unwrap_or_default() } else { e.title.clone() };
+            let title = if e.title.is_empty() {
+                a.sections.get(section as usize).and_then(|s| s.title.clone()).unwrap_or_default()
+            } else {
+                e.title.clone()
+            };
             entries.push((section, i, TocEntry { title, depth: e.depth, section, anchor }));
         }
     }
@@ -1586,7 +1602,12 @@ fn final_toc(
         .sections
         .iter()
         .enumerate()
-        .filter(|(i, s)| s.styles.is_empty() && s.body_class.is_none() && !a.joinable[*i] && is_text_chapter(s))
+        .filter(|(i, s)| {
+            s.styles.is_empty()
+                && s.body_class.is_none()
+                && !a.joinable.get(*i).copied().unwrap_or(false)
+                && is_text_chapter(s)
+        })
         .filter_map(|(i, s)| {
             let title = s.title.clone()?;
             Some((i as u32, raw.len() + i, TocEntry { title, depth: 0, section: i as u32, anchor: None }))
@@ -2202,6 +2223,51 @@ mod tests {
         );
         let err = read(&path).err().expect("expected Protected error");
         assert!(matches!(err, CoreError::Protected), "got {err:?}");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn unstyled_oversized_section_splits_without_toc_out_of_bounds() {
+        let container = br#"<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>"#;
+        let opf = r#"<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" unique-identifier="id" xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <metadata><dc:identifier id="id">test</dc:identifier><dc:title>长章切分测试</dc:title><dc:language>zh</dc:language></metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="p0" href="part0.html" media-type="application/xhtml+xml"/>
+    <item id="p1" href="part1.html" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine><itemref idref="p0"/><itemref idref="p1"/></spine>
+</package>"#.as_bytes();
+        let nav = r#"<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><meta charset="utf-8"/></head><body><nav epub:type="toc"><ol><li><a href="part0.html">黄昏</a></li><li><a href="part1.html">跋</a></li></ol></nav></body></html>"#.as_bytes();
+        let mut part0 = String::from("<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"utf-8\"/></head><body><h2>黄昏</h2>");
+        for _ in 0..1350 {
+            part0.push_str("<p>森林里的篝火映照着驯鹿的影子，风穿过白桦林，带来远方山峦与河流的气息，夜色缓缓降临在右岸的营地。</p>");
+        }
+        part0.push_str("</body></html>");
+        let part1 = "<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"utf-8\"/></head><body><h2>跋</h2><p>尾声段落。</p></body></html>".as_bytes();
+
+        let path = write_test_epub(
+            "unstyled-oversized-split",
+            &[
+                ("META-INF/container.xml", container),
+                ("OEBPS/content.opf", opf),
+                ("OEBPS/nav.xhtml", nav),
+                ("OEBPS/part0.html", part0.as_bytes()),
+                ("OEBPS/part1.html", part1),
+            ],
+        );
+        let book = read(&path).unwrap();
+        assert_eq!(book.sections.len(), 3);
+        assert!(!book.sections[0].continued);
+        assert!(book.sections[1].continued);
+        assert!(!book.sections[2].continued);
+        assert_eq!(book.toc.len(), 2);
+        assert_eq!(book.toc[0].section, 0);
+        assert_eq!(book.toc[1].section, 2);
         let _ = std::fs::remove_file(&path);
     }
 
