@@ -125,7 +125,6 @@ struct PhoneRoot: View {
             if now == .active {
                 PaperAppearance.shared.syncFromRoot(scheme: scheme, mode: mode)
                 Task { await library.watched.scan(into: library) }
-                Task { await Feedback.shared.flush() }
             }
         }
         .onChange(of: scheme, initial: true) { _, now in

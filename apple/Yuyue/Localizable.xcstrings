@@ -45876,6 +45876,276 @@
           }
         }
       }
+    },
+    "可附截图，无需注册账号" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Attach screenshots, no account needed"
+          }
+        }
+      }
+    },
+    "主动提交的反馈和截图仅发给开发者，不会公开，也不收集邮箱；应用意外闪退时会在下次启动自动上报匿名崩溃堆栈和基础设备信息，用于排查修复，不关联个人身份。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Feedback and screenshots you submit are sent privately to the developer, never published, and no email is collected. If the app crashes unexpectedly, an anonymous crash stack trace and basic device info are automatically sent on the next launch to help diagnose and fix issues, without being linked to your identity."
+          }
+        }
+      }
+    },
+    "仅发给开发者，不会公开" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sent privately to the developer, never published"
+          }
+        }
+      }
+    },
+    "从相册选图" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose from Photos"
+          }
+        }
+      }
+    },
+    "反馈内容" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Feedback message"
+          }
+        }
+      }
+    },
+    "发送给开发者" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send to Developer"
+          }
+        }
+      }
+    },
+    "只支持图片或截图，不支持上传普通文件。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only images and screenshots are supported; general files cannot be attached."
+          }
+        }
+      }
+    },
+    "图片" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Image"
+          }
+        }
+      }
+    },
+    "图片 %lld/4" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Images %lld/4"
+          }
+        }
+      }
+    },
+    "图片太大，压缩后仍超过 8 MB。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Image is still over 8 MB after compression."
+          }
+        }
+      }
+    },
+    "「%@」太大，压缩后仍超过 8 MB。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” is still over 8 MB after compression."
+          }
+        }
+      }
+    },
+    "如需回复，可发邮件至 " : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Need a reply? Email "
+          }
+        }
+      }
+    },
+    "已发给开发者，谢谢" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sent to the developer, thank you"
+          }
+        }
+      }
+    },
+    "当前没有网络或服务暂时不可用，内容和图片已保存在草稿里，稍后再点发送即可。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No internet connection or service temporarily unavailable. Your text and images are saved in your draft—try sending again later."
+          }
+        }
+      }
+    },
+    "最多 4 张图" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Up to 4 images"
+          }
+        }
+      }
+    },
+    "最多 4 张图片。也可以拖进来，或者 ⌘V 粘贴" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Up to 4 images. You can also drag and drop, or press ⌘V to paste."
+          }
+        }
+      }
+    },
+    "最多添加 4 张图片。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can attach up to 4 images."
+          }
+        }
+      }
+    },
+    "本次不附带" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not included this time"
+          }
+        }
+      }
+    },
+    "松手添加图片" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drop to add images"
+          }
+        }
+      }
+    },
+    "添加图片" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add images"
+          }
+        }
+      }
+    },
+    "粘贴剪贴板图片" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paste from Clipboard"
+          }
+        }
+      }
+    },
+    "这张图片读不出来。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't read this image."
+          }
+        }
+      }
+    },
+    "这条反馈仅开发者可见，不会公开。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only the developer can see this feedback; it will not be published."
+          }
+        }
+      }
+    },
+    "遇到什么问题、想要什么功能，或哪本书打开不对，都可以直接写" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report a bug, request a feature, or mention a book that won't open properly"
+          }
+        }
+      }
+    },
+    "问题反馈与崩溃诊断" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Feedback & Crash Diagnostics"
+          }
+        }
+      }
+    },
+    "问题反馈与崩溃诊断：主动提交的反馈和截图仅发给开发者，不会公开，也不收集邮箱；应用意外闪退时会在下次启动自动上报匿名崩溃堆栈和基础设备信息，用于排查修复，不关联个人身份。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Feedback & Crash Diagnostics: Feedback and screenshots you submit are sent privately to the developer, never published, and no email is collected. If the app crashes unexpectedly, an anonymous crash stack trace and basic device info are automatically sent on the next launch to help diagnose and fix issues, without being linked to your identity."
+          }
+        }
+      }
+    },
+    "需要回复？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Need a reply?"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

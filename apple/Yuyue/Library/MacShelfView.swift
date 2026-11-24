@@ -104,7 +104,6 @@ struct MacShelfView: View {
             Feedback.shared.requested = false
             feedbackShown = true
         }
-        .task { await Feedback.shared.flush() }
         .yyNotice(String(localized: "出了点问题"), message: library.alert ?? "", tone: .warn,
                   isPresented: Binding(get: { library.alert != nil }, set: { if !$0 { library.alert = nil } }))
         .bookBlocked(library) { importerShown = true }
