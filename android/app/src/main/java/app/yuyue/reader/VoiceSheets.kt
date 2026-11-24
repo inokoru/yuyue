@@ -297,7 +297,7 @@ fun VoicePickerSheet(
                             route = PickerSubRoute.List
                         },
                         onDeleted = { deletedId ->
-                            for (lang in listOf("zh", "en", language)) {
+                            for (lang in listOf("zh", "zh-Hans", "zh-Hant", "zh-CN", "zh-TW", "en", "en-US", "en-GB", language)) {
                                 if (Prefs.string("player.voice.$lang") == deletedId) {
                                     Prefs.set("player.voice.$lang", "")
                                 }

@@ -49,9 +49,15 @@ class DramaSynth(private val context: android.content.Context, private val libra
     fun preparing(book: String) = prefs.getBoolean("prepare.$book", false)
     fun setPreparing(book: String, on: Boolean) = prefs.edit().putBoolean("prepare.$book", on).apply()
 
-    /** 广播剧是否对该书启用：显式开启广播剧模式，或开启了后台预合成全书（向后兼容旧状态）。 */
-    fun isDramaActive(book: String): Boolean =
-        runCatching { library.core.dramaEnabled(book) }.getOrDefault(false) || preparing(book)
+    /** 广播剧是否对该书启用：以同步存储的 `dramaEnabled` 为唯一真源；若已关掉广播剧但本机残留预合成标记，自动清理停止。 */
+    fun isDramaActive(book: String): Boolean {
+        val enabled = runCatching { library.core.dramaEnabled(book) }.getOrDefault(false)
+        if (!enabled && preparing(book)) {
+            setPreparing(book, false)
+            stop(book)
+        }
+        return enabled
+    }
 
     fun invalidateCast(book: String? = null) {
         synchronized(planCacheLock) {
@@ -72,7 +78,7 @@ class DramaSynth(private val context: android.content.Context, private val libra
         return withContext(Dispatchers.Default) {
             SystemVoice.Engine.init(context)
             LiveVoiceModel.register(library.core, library.dataDir)
-            val chosenNarrator = narrator ?: app.yuyue.design.Prefs.string("player.voice.$language").ifEmpty { null }
+            val chosenNarrator = narrator ?: Player.savedVoiceId(language).ifEmpty { null }
             val voices = voices(language, chosenNarrator, book)
             if (voices.isEmpty()) return@withContext null
             val liveReady = LiveVoiceModel.canRun(library.dataDir) && CardVoice.speaksLanguage(language)
@@ -176,7 +182,7 @@ class DramaSynth(private val context: android.content.Context, private val libra
         // The system's voices, ready even when nothing has played yet.
         SystemVoice.Engine.init(context)
         LiveVoiceModel.register(library.core, library.dataDir)
-        val chosenNarrator = narrator ?: app.yuyue.design.Prefs.string("player.voice.$language").ifEmpty { null }
+        val chosenNarrator = narrator ?: Player.savedVoiceId(language).ifEmpty { null }
         app.yuyue.reader.DramaWork.synthesizing = true
         app.yuyue.reader.DramaWork.cloudCast = chosenNarrator?.startsWith("cloud.") == true
         app.yuyue.reader.DramaWork.tellCore(library.core)

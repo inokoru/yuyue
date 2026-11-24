@@ -92,6 +92,10 @@ class CloudVoiceTest {
         assertEquals("baidu_zh", CloudVoice.freeOnlineRoute("zh_youdao", "你好，世界。", "zh-CN"))
         assertEquals("baidu_en", CloudVoice.freeOnlineRoute("en_us", "Hello world.", "en-US"))
         assertEquals("baidu_uk", CloudVoice.freeOnlineRoute("en_uk", "Hello world.", "en-GB"))
+        // Chosen speaker stays locked even when a sentence mixes CJK and English.
+        assertEquals("baidu_en", CloudVoice.freeOnlineRoute("en_us", "Hello，孔子说。", "en-US"))
+        assertEquals("baidu_uk", CloudVoice.freeOnlineRoute("en_uk", "Chapter 1 · 序章", "en-GB"))
+        assertEquals("baidu_zh", CloudVoice.freeOnlineRoute("zh_baidu", "Chapter 3", "en-US"))
 
         for (route in listOf("baidu_zh", "baidu_en", "baidu_uk")) {
             val url = CloudVoice.freeOnlineUrl(route, "hello")

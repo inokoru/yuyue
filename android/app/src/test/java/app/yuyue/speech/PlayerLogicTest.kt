@@ -142,4 +142,30 @@ class PlayerLogicTest {
         )
         assertEquals(Player.FocusAction.None, gainedAfterFailed.action)
     }
+
+    @Test
+    fun canonicalVoicePreferenceUnifiesChineseAndEnglishTagVariants() {
+        assertEquals("zh", Player.canonicalLanguage("zh-Hans"))
+        assertEquals("zh", Player.canonicalLanguage("zh_CN"))
+        assertEquals("zh", Player.canonicalLanguage("zh-Hant"))
+        assertEquals("yue", Player.canonicalLanguage("zh-HK"))
+        assertEquals("en", Player.canonicalLanguage("en-US"))
+        assertEquals("en", Player.canonicalLanguage("en-GB"))
+        assertEquals("ja", Player.canonicalLanguage("ja-JP"))
+
+        val store = mutableMapOf<String, String>()
+        Player.saveVoicePreference("zh", "kokoro.zf_001") { k, v ->
+            if (v.isNullOrEmpty()) store.remove(k) else store[k] = v
+        }
+        assertEquals("kokoro.zf_001", Player.savedVoiceId("zh-Hans") { store[it].orEmpty() })
+        assertEquals("kokoro.zf_001", Player.savedVoiceId("zh-CN") { store[it].orEmpty() })
+        assertEquals("", Player.savedVoiceId("zh-HK") { store[it].orEmpty() })
+
+        store["player.voice.zh-CN"] = "stale.voice"
+        Player.saveVoicePreference("zh-Hans", "kokoro.zm_010") { k, v ->
+            if (v.isNullOrEmpty()) store.remove(k) else store[k] = v
+        }
+        assertEquals("kokoro.zm_010", Player.savedVoiceId("zh-CN") { store[it].orEmpty() })
+        assertEquals("kokoro.zm_010", Player.savedVoiceId("zh") { store[it].orEmpty() })
+    }
 }

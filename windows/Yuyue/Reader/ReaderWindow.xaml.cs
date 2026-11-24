@@ -5962,7 +5962,16 @@ public sealed partial class ReaderWindow : Window
             _dramaModeOn = dSw.IsOn;
             _audio.SetSectionContext(_currentSection, _dramaModeOn);
             try { _library.Core.DramaSetEnabled(_bookId, _dramaModeOn); } catch { }
-            if (_dramaModeOn) DramaSynthService.EnsureCastPlan(_library, _bookId, bookLang);
+            if (_dramaModeOn)
+            {
+                DramaSynthService.EnsureCastPlan(_library, _bookId, bookLang);
+            }
+            else
+            {
+                if (DramaSynthService.IsPreparing(_library, _bookId))
+                    DramaSynthService.SetPreparing(_library, _bookId, false);
+                DramaSynthService.StopPreRender(_bookId);
+            }
             RenderSidePanel();
         };
         dRow.Children.Add(dSw);

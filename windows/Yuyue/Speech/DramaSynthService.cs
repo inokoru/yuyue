@@ -50,8 +50,15 @@ public static class DramaSynthService
 
     public static bool IsDramaActive(LibraryService library, string bookId)
     {
-        try { return library.Core.DramaEnabled(bookId) || IsPreparing(library, bookId); }
-        catch { return IsPreparing(library, bookId); }
+        bool enabled;
+        try { enabled = library.Core.DramaEnabled(bookId); }
+        catch { return false; }
+        if (!enabled && IsPreparing(library, bookId))
+        {
+            SetPreparing(library, bookId, false);
+            StopPreRender(bookId);
+        }
+        return enabled;
     }
 
     /// <summary>
@@ -422,7 +429,13 @@ public static class DramaSynthService
             string? voiceId = ResolveVoiceForAsk(ask.Voice, plan.Narrator);
             DramaAct? act = sound.Acting ? ask.Act : null;
 
-            byte[]? wav = await player.SynthesizeClipForDramaAsync(ask.Text, plain, voiceId, act, ct);
+            byte[]? wav;
+            try
+            {
+                wav = await player.SynthesizeClipForDramaAsync(ask.Text, plain, voiceId, act, ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch { wav = null; }
             if (wav is null || wav.Length <= 44)
             {
                 madeClips.Add(new MadeClip(ask.Key, 0.0, []));

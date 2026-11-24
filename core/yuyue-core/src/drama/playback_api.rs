@@ -187,11 +187,21 @@ impl YuyueCore {
             .into_iter()
             .filter_map(|r| r.voice.voice.map(|v| (r.name, v)))
             .collect();
+        let designed_voices: HashMap<String, String> = lock(&self.store)
+            .fields(&format!("drama/{book}/designed"))
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string())))
+            .collect();
         let narrator = user_voices.get("_narrator").cloned().unwrap_or(plan.narrator.clone());
         let dialogue = user_voices.get("_dialogue").cloned().unwrap_or(plan.dialogue.clone());
         let of = |id: u32| -> Option<String> {
             let c = b.cast.get(id)?;
-            c.names.iter().find_map(|n| user_voices.get(n).cloned()).or_else(|| plan.voices.iter().find(|v| v.character == id).map(|v| v.voice.clone()))
+            c.names
+                .iter()
+                .find_map(|n| user_voices.get(n).cloned())
+                .or_else(|| c.names.iter().find_map(|n| designed_voices.get(n).cloned()))
+                .or_else(|| plan.voices.iter().find(|v| v.character == id).map(|v| v.voice.clone()))
         };
         let v = Voices { narrator: &narrator, dialogue: &dialogue, of: &of };
         let mode = lock(&self.store).get(&entity(book), "drama_mode").ok().flatten().and_then(|v| v.as_bool()).unwrap_or(false);
@@ -290,13 +300,28 @@ impl YuyueCore {
                 }
             }
         }
+        let designed: HashMap<String, String> = lock(&self.store)
+            .fields(&format!("drama/{book_id}/designed"))
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string())))
+            .collect();
         let stored: HashMap<String, String> = self
             .book_roles(book_id.clone())
             .unwrap_or_default()
             .into_iter()
             .filter_map(|r| r.voice.voice.map(|v| (r.name, v)))
             .collect();
-        let fixed: HashMap<u32, String> = stored.iter().filter(|(k, _)| !k.starts_with('_')).filter_map(|(k, v)| b.cast.resolve(k).map(|id| (id, v.clone()))).collect();
+        let mut fixed: HashMap<u32, String> = designed
+            .iter()
+            .filter(|(k, _)| !k.starts_with('_'))
+            .filter_map(|(k, v)| b.cast.resolve(k).map(|id| (id, v.clone())))
+            .collect();
+        for (k, v) in stored.iter().filter(|(k, _)| !k.starts_with('_')) {
+            if let Some(id) = b.cast.resolve(k) {
+                fixed.insert(id, v.clone());
+            }
+        }
         let lang = lang_of(&b.sentences);
         // Sex where the model hasn't said: from titles and pronouns, when it's clear.
         let chars: Vec<DramaCharacter> = b.cast.chars.iter().map(|c| DramaCharacter { gender: super::casting::guess_gender(c, &b.sentences), ..c.clone() }).collect();
@@ -787,6 +812,36 @@ mod window_tests {
         let _plan2 = core.drama_cast_voices(book.id.clone(), voices.clone(), "narr".into()).unwrap();
         let rv2 = core.drama_role_voices(book.id.clone()).unwrap();
         assert_ne!(rv2.iter().find(|r| r.name == "寶玉").map(|r| r.voice.as_str()), Some("f1"));
+
+        // 3b. Auto-designed drama voice stays in drama-only storage and never pollutes book_roles.
+        let baoyu_id = core.book_drama(&book.id).unwrap().cast.resolve("寶玉").expect("baoyu character id");
+        core.drama_submit(
+            book.id.clone(),
+            format!("design:{}:{baoyu_id}", book.id),
+            crate::drama::api::DramaResult::Voice {
+                voice: VoiceInfo {
+                    id: "designed-baoyu".into(),
+                    langs: vec!["zh".into()],
+                    gender: CharacterGender::M,
+                    age: crate::drama::CharacterAge::Teen,
+                    tags: vec![],
+                    embedding: vec![0.2, 0.3, 0.5],
+                    acts: true,
+                    narrator_ok: false,
+                    loudness_lufs: -20.0,
+                },
+            },
+        ).unwrap();
+        assert_eq!(
+            core.book_roles(book.id.clone()).unwrap().iter().find(|r| r.name == "寶玉").and_then(|r| r.voice.voice.as_deref()),
+            None,
+            "auto-designed drama voice must not write into manual book_roles"
+        );
+        let rv_designed = core.drama_role_voices(book.id.clone()).unwrap();
+        assert_eq!(rv_designed.iter().find(|r| r.name == "寶玉").map(|r| r.voice.as_str()), Some("designed-baoyu"));
+        let _plan3 = core.drama_cast_voices(book.id.clone(), voices.clone(), "narr".into()).unwrap();
+        let rv_recast = core.drama_role_voices(book.id.clone()).unwrap();
+        assert_eq!(rv_recast.iter().find(|r| r.name == "寶玉").map(|r| r.voice.as_str()), Some("designed-baoyu"));
 
         // 4. drama_live_sentence_asks + drama_live_sentence_window mix through DramaMixer.
         let asks = core.drama_live_sentence_asks(book.id.clone(), sec, mixed_sentence).unwrap();

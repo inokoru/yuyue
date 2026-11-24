@@ -216,6 +216,10 @@ public sealed class CompanionAndCloudVoiceTests : IDisposable
         Assert.Contains(CloudVoiceService.FreeBuiltinVoices, v => v.Id == "zh_baidu");
         Assert.Contains(CloudVoiceService.FreeBuiltinVoices, v => v.Id == "en_us");
         Assert.Contains(CloudVoiceService.FreeBuiltinVoices, v => v.Id == "en_uk");
+        Assert.Equal("zh_baidu", CloudVoiceService.NormalizeFreeVoiceId("zh_baidu", "en-US"));
+        Assert.Equal("zh_baidu", CloudVoiceService.NormalizeFreeVoiceId("zh_female", "en-US"));
+        Assert.Equal("en_us", CloudVoiceService.NormalizeFreeVoiceId("en_us", "zh-CN"));
+        Assert.Equal("en_uk", CloudVoiceService.NormalizeFreeVoiceId("en_uk", "zh-CN"));
 
         // EscapeXml strips illegal XML 1.0 control chars and escapes quotes/entities
         string dirty = "A\u0000B\u0007C\u001FD & <tag attr=\"1\" s='2'>";

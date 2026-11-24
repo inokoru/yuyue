@@ -92,9 +92,17 @@ import UIKit
     }
     #endif
 
-    /// 广播剧是否对该书启用：显式开启广播剧模式，或开启了后台预合成全书（向后兼容旧状态）。
+    /// 广播剧是否对该书启用：以同步存储的 `dramaEnabled` 为唯一真源；
+    /// 若已在其他设备关掉广播剧但本机仍残留 `drama.prepare.<book>`，自动清理停止。
     nonisolated static func isDramaActive(_ core: YuyueCore, _ book: String) -> Bool {
-        core.dramaEnabled(bookId: book) || UserDefaults.standard.bool(forKey: "drama.prepare.\(book)")
+        let enabled = core.dramaEnabled(bookId: book)
+        if !enabled, UserDefaults.standard.bool(forKey: "drama.prepare.\(book)") {
+            UserDefaults.standard.set(false, forKey: "drama.prepare.\(book)")
+            Task { @MainActor in
+                DramaSynth.shared.stop(book)
+            }
+        }
+        return enabled
     }
 
     /// 旁白回退升级：当即时层与声音包就绪且用户未手选非系统声音时，优先使用该语言默认旁白声音卡。

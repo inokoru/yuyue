@@ -1518,21 +1518,22 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { throw Failure.unreadable }
 
-        let hasCJK = clean.unicodeScalars.contains { (0x4E00 ... 0x9FFF).contains($0.value) }
-        let isEnglish = !hasCJK && (
-            language.lowercased().hasPrefix("en")
-                || voiceID.hasPrefix("en_")
-                || voiceID == "0" || voiceID == "1" || voiceID == "2"
-                || voiceID.hasPrefix("af_") || voiceID.hasPrefix("am_") || voiceID.hasPrefix("bf_")
-        )
-
         let chunks = splitFreeChunks(clean, maxChars: 160)
-        // 每个免费音色严格绑定单一线路，避免单句超时后静默切到另一家的不同声线。
+        // 每个免费音色严格绑定单一线路，绝不因句中夹杂汉字或外文而单句切换播音员。
         // dict.youdao.com/dictvoice 仅支持单词词典发音、整句会返回 HTTP 500，统一走百度整句语音线路。
+        let v = voiceID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let l = language.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let route: FreeRoute
-        if isEnglish {
-            let preferUK = voiceID == "en_uk" || voiceID.hasPrefix("bf_")
-            route = preferUK ? .baiduEnUk : .baiduEnUs
+        if v == "zh_baidu" || v.hasPrefix("zh_") || v.hasPrefix("zf_") || v.hasPrefix("zm_") {
+            route = .baiduZh
+        } else if v == "en_uk" || v.hasPrefix("bf_") || v.hasPrefix("bm_") {
+            route = .baiduEnUk
+        } else if v == "en_us" || v.hasPrefix("en_") || v == "0" || v == "1" || v == "2" || v.hasPrefix("af_") || v.hasPrefix("am_") {
+            route = .baiduEnUs
+        } else if l.hasPrefix("en-gb") {
+            route = .baiduEnUk
+        } else if l.hasPrefix("en") {
+            route = .baiduEnUs
         } else {
             route = .baiduZh
         }

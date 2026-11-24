@@ -215,7 +215,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         state = State.Loading
         // speak immediately with SystemVoice while preparing the better voices in the background.
         val langTag = lang(start.section)
-        if (Prefs.string("player.voice.$langTag").isEmpty() && CardVoice.speaksLanguage(langTag)) {
+        if (savedVoiceId(langTag).isEmpty() && CardVoice.speaksLanguage(langTag)) {
             runCatching { app.yuyue.YuyueApp.instance.library }.getOrNull()?.let { lib ->
                 if (!KokoroModel.installed(lib.dataDir) && !KokoroModel.deviceUnsupported) {
                     KokoroModel.onFirstListen(context, core, lib.dataDir)
@@ -356,8 +356,10 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
 
     /** Reads `language` with another voice from now on, starting the sentence again in it. */
     fun choose(voice: BookVoice, language: String) {
-        Prefs.set("player.voice.$language", voice.id)
+        saveVoicePreference(language, voice.id)
         readyOfflineVoice = null
+        val cacheKey = canonicalLanguage(language).ifEmpty { language }
+        voices[cacheKey] = voice
         voices[language] = voice
         restartHere()
     }
@@ -397,7 +399,9 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                 failure = t("下载一个%@声音就能朗读这本书，系统会带你去它的下载页。", name)
                 return@launch
             }
-            Prefs.set("player.voice.$langTag", sys.id)
+            saveVoicePreference(langTag, sys.id)
+            val cacheKey = canonicalLanguage(langTag).ifEmpty { langTag }
+            voices[cacheKey] = sys
             voices[langTag] = sys
             if (resumeAt != null) play(resumeAt.position) else restartHere()
         }
@@ -588,7 +592,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                         chapterLayer = s.section to l
                         l
                     }
-                    val chosenNarrator = Prefs.string("player.voice.$language").ifEmpty { null }
+                    val chosenNarrator = savedVoiceId(language).ifEmpty { null }
                     lastUsingCardVoice = (layer == uniffi.yuyue_core.DramaLayer.LIVE) && LiveVoiceModel.canRun(lib.dataDir)
                     val played: Speech? = when (layer) {
                         uniffi.yuyue_core.DramaLayer.STUDIO -> {
@@ -1020,10 +1024,13 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     }
 
     private suspend fun voice(language: String): BookVoice? {
-        if (voices.containsKey(language)) return voices[language]
-        val chosen = Prefs.string("player.voice.$language").takeIf { it.isNotEmpty() }?.let { Voices.find(it, detail.summary.id) }
+        val cacheKey = canonicalLanguage(language).ifEmpty { language }
+        if (voices.containsKey(cacheKey)) return voices[cacheKey]
+        val chosen = savedVoiceId(language).takeIf { it.isNotEmpty() }
+            ?.let { Voices.find(it, detail.summary.id) }
+            ?.takeIf { it.speaks(language) }
         val v = chosen ?: Voices.best(language)
-        voices[language] = v
+        voices[cacheKey] = v
         return v
     }
 
@@ -1122,6 +1129,50 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
             thermalStatus == THERMAL_SEVERE -> 15.0
             else -> 60.0
         }
+
+        internal fun canonicalLanguage(language: String): String {
+            val t = language.replace('_', '-').trim().lowercase()
+            return when {
+                t == "yue" || t.startsWith("zh-hk") || t.startsWith("zh-mo") -> "yue"
+                t == "zh" || t.startsWith("zh-") || t == "cmn" || t.startsWith("cmn-") -> "zh"
+                t == "en" || t.startsWith("en-") -> "en"
+                else -> t.substringBefore('-')
+            }
+        }
+
+        internal fun savedVoiceId(language: String, lookup: (String) -> String = { Prefs.string(it) }): String {
+            val exact = lookup("player.voice.$language")
+            if (exact.isNotEmpty()) return exact
+            val canon = canonicalLanguage(language)
+            return if (canon.isNotEmpty() && canon != language) lookup("player.voice.$canon") else ""
+        }
+
+        internal fun saveVoicePreference(
+            language: String,
+            voiceId: String,
+            write: (String, String?) -> Unit = { k, v -> Prefs.set(k, v) },
+        ) {
+            val canon = canonicalLanguage(language)
+            if (canon == "zh" || canon == "en") {
+                write("player.voice.$canon", voiceId)
+                val variants = if (canon == "zh") {
+                    listOf("zh-Hans", "zh-Hant", "zh-CN", "zh-TW", "zh-SG", "cmn")
+                } else {
+                    listOf("en-US", "en-GB", "en-AU", "en-CA")
+                }
+                for (v in variants) {
+                    if (v != canon) write("player.voice.$v", null)
+                }
+                if (language != canon && language !in variants) {
+                    write("player.voice.$language", null)
+                }
+            } else {
+                write("player.voice.$language", voiceId)
+                if (canon.isNotEmpty() && canon != language) {
+                    write("player.voice.$canon", voiceId)
+                }
+            }
+        }
     }
 
     init {
@@ -1154,8 +1205,9 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         }
         if (narrator != null) return
         val lang = language
-        if (Prefs.string("player.voice.$lang").isNotEmpty()) return
-        val cur = voices[lang]
+        if (savedVoiceId(lang).isNotEmpty()) return
+        val cacheKey = canonicalLanguage(lang).ifEmpty { lang }
+        val cur = voices[cacheKey] ?: voices[lang]
         if (cur is KokoroVoice || cur is CardVoice) return
         val candidate = Voices.defaultNarrator(lang) ?: return
         readyOfflineVoice = candidate

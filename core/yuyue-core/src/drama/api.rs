@@ -1329,11 +1329,34 @@ impl YuyueCore {
             (Some("design"), DramaResult::Voice { voice }) => {
                 let ch: u32 = parts.get(2).and_then(|x| x.parse().ok()).unwrap_or(0);
                 if let Some(c) = b.cast.get(ch) {
-                    self.set_book_role(
-                        book_id.clone(),
-                        c.key().to_string(),
-                        crate::roles::RoleVoice { voice: Some(voice.id.clone()), rate: 1.0, pitch: 0.0, right: false },
-                    )?;
+                    // Keep auto-designed voices inside drama-only storage rather than `roles/book/{id}`,
+                    // so turning off radio drama returns cleanly to single-narrator reading.
+                    lock(&self.store).set(&format!("drama/{book_id}/designed"), c.key(), json!(voice.id))?;
+                    let plan_entity = format!("drama/{book_id}/plan");
+                    let mut plan: Option<CastingPlan> = lock(&self.store)
+                        .get(&plan_entity, "plan")
+                        .ok()
+                        .flatten()
+                        .and_then(|v| serde_json::from_value(v).ok());
+                    if let Some(ref mut p) = plan {
+                        p.to_design.retain(|d| d.character != ch);
+                        if let Some(slot) = p.voices.iter_mut().find(|v| v.character == ch) {
+                            slot.voice = voice.id.clone();
+                        } else {
+                            p.voices.push(super::casting::CastVoice {
+                                character: ch,
+                                voice: voice.id.clone(),
+                                lead: true,
+                            });
+                        }
+                        lock(&self.store).set(&plan_entity, "plan", serde_json::to_value(p).unwrap_or(Value::Null))?;
+                    }
+                    if voice.acts {
+                        let mut acting = self.acting_voices(&book_id);
+                        if acting.insert(voice.id.clone()) {
+                            lock(&self.store).set(&plan_entity, "acting", json!(acting))?;
+                        }
+                    }
                 }
             }
             _ => {}

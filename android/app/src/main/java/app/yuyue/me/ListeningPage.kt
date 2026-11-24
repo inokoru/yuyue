@@ -282,7 +282,8 @@ private object ListeningFocus {
     }
 
     fun pick(v: BookVoice) {
-        Prefs.set(VoiceBook.entries.first { it == book }.key, v.id)
+        val target = VoiceBook.entries.first { it == book }
+        Player.saveVoicePreference(target.tag, v.id)
         SettingsLog.voiceNames[v.id] = v.name
     }
 
@@ -1143,7 +1144,9 @@ fun VoiceSourceSettings(id: String, back: () -> Unit) {
                         if (p.isFreeOnline) Prefs.set(p.dismissedName, true)
                         if (p == CloudVoice.Provider.Volcengine) Prefs.set(CloudVoice.Provider.VOLC_APP_ID, null)
                         if (p == CloudVoice.Provider.Local) Prefs.set("tts.local.title", null)
-                        for (lang in listOf("zh", "en")) if (Prefs.string("player.voice.$lang").startsWith("cloud.${p.key}.")) Prefs.set("player.voice.$lang", "")
+                        for (lang in listOf("zh", "zh-Hans", "zh-Hant", "zh-CN", "zh-TW", "en", "en-US", "en-GB")) {
+                            if (Prefs.string("player.voice.$lang").startsWith("cloud.${p.key}.")) Prefs.set("player.voice.$lang", "")
+                        }
                         removing = false
                         back()
                         back()

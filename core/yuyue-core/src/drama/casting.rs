@@ -216,8 +216,10 @@ pub fn cast(chars: &[DramaCharacter], voices: &[VoiceInfo], together: &Together,
     }
     let mut to_design = Vec::new();
     for (c, &v) in leads.iter().zip(&pick) {
-        if let Some(u) = usable.get(v) {
-            if fit(c, u) < 0.0 && !fixed.contains_key(&c.id) {
+        if let Some(id) = fixed.get(&c.id) {
+            out.push(CastVoice { character: c.id, voice: id.clone(), lead: true });
+        } else if let Some(u) = usable.get(v) {
+            if fit(c, u) < 0.0 {
                 to_design.push(DesignAsk { character: c.id, description: describe(c) });
             }
             out.push(CastVoice { character: c.id, voice: u.id.clone(), lead: true });

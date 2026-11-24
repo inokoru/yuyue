@@ -625,6 +625,7 @@ public sealed class CloudVoiceService
     {
         string v = (voiceId ?? "").Trim();
         if (string.Equals(v, "zh_baidu", StringComparison.OrdinalIgnoreCase) ||
+            v.StartsWith("zh_", StringComparison.OrdinalIgnoreCase) ||
             v.StartsWith("zf_", StringComparison.OrdinalIgnoreCase) ||
             v.StartsWith("zm_", StringComparison.OrdinalIgnoreCase))
         {
@@ -1741,23 +1742,10 @@ public sealed class CloudVoiceService
         string clean = (text ?? "").Trim();
         if (string.IsNullOrEmpty(clean)) return null;
 
-        bool hasCjk = false;
-        foreach (Rune r in clean.EnumerateRunes())
-        {
-            if (r.Value is >= 0x4E00 and <= 0x9FFF) { hasCjk = true; break; }
-        }
-
+        // Keep chosen free speaker strictly locked across sentences regardless of inline CJK/Latin characters.
         string mappedId = NormalizeFreeVoiceId(voiceId, language);
-        bool isEnglish = !hasCjk && (
-            language.StartsWith("en", StringComparison.OrdinalIgnoreCase)
-            || voiceId.StartsWith("en_", StringComparison.OrdinalIgnoreCase)
-            || voiceId is "0" or "1" or "2"
-            || voiceId.StartsWith("af_", StringComparison.OrdinalIgnoreCase)
-            || voiceId.StartsWith("am_", StringComparison.OrdinalIgnoreCase)
-            || voiceId.StartsWith("bf_", StringComparison.OrdinalIgnoreCase)
-            || voiceId.StartsWith("bm_", StringComparison.OrdinalIgnoreCase));
-
-        string lan = isEnglish ? (mappedId == "en_uk" ? "uk" : "en") : "zh";
+        bool isEnglish = mappedId is "en_us" or "en_uk";
+        string lan = mappedId == "en_uk" ? "uk" : (isEnglish ? "en" : "zh");
         string spd = isEnglish ? "3" : "5";
         var chunks = SplitFreeChunks(clean, maxChars: 160);
 

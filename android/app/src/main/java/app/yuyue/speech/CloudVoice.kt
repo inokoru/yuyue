@@ -874,19 +874,17 @@ class CloudVoice(
             return appId to raw
         }
 
-        internal fun freeOnlineRoute(voiceID: String, text: String, language: String): String {
-            val hasCjk = text.any { it.code in 0x4E00..0x9FFF }
-            val isEn = !hasCjk && (
-                language.lowercase().startsWith("en")
-                    || voiceID.startsWith("en_")
-                    || voiceID.startsWith("af_") || voiceID.startsWith("am_") || voiceID.startsWith("bf_")
-            )
-            return if (isEn) {
-                if (voiceID == "en_uk" || voiceID.startsWith("bf_")) "baidu_uk" else "baidu_en"
-            } else {
-                // dict.youdao.com/dictvoice only serves dictionary headwords and returns HTTP 500 on full sentences;
-                // route all Chinese free voices (including legacy zh_youdao) to Baidu sentence TTS.
-                "baidu_zh"
+        internal fun freeOnlineRoute(voiceID: String, @Suppress("UNUSED_PARAMETER") text: String, language: String): String {
+            val v = voiceID.trim().lowercase()
+            val l = language.trim().lowercase()
+            // 每个免费音色严格绑定所选播音员线路，绝不因句中夹杂汉字或外文而单句切换播音员。
+            return when {
+                v == "zh_baidu" || v.startsWith("zh_") || v.startsWith("zf_") || v.startsWith("zm_") -> "baidu_zh"
+                v == "en_uk" || v.startsWith("bf_") || v.startsWith("bm_") -> "baidu_uk"
+                v == "en_us" || v.startsWith("en_") || v in listOf("0", "1", "2") || v.startsWith("af_") || v.startsWith("am_") -> "baidu_en"
+                l.startsWith("en-gb") -> "baidu_uk"
+                l.startsWith("en") -> "baidu_en"
+                else -> "baidu_zh"
             }
         }
 
