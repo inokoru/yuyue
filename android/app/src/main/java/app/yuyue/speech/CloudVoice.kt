@@ -610,21 +610,27 @@ class CloudVoice(
                 ex.selectTrack(0)
                 val format = ex.getTrackFormat(0)
                 val mime = format.getString(android.media.MediaFormat.KEY_MIME) ?: return null
-                var rate = format.getInteger(android.media.MediaFormat.KEY_SAMPLE_RATE)
-                var channels = format.getInteger(android.media.MediaFormat.KEY_CHANNEL_COUNT)
+                var rate = if (format.containsKey(android.media.MediaFormat.KEY_SAMPLE_RATE)) {
+                    format.getInteger(android.media.MediaFormat.KEY_SAMPLE_RATE)
+                } else 24_000
+                var channels = if (format.containsKey(android.media.MediaFormat.KEY_CHANNEL_COUNT)) {
+                    maxOf(1, format.getInteger(android.media.MediaFormat.KEY_CHANNEL_COUNT))
+                } else 1
                 val codec = android.media.MediaCodec.createDecoderByType(mime)
                 codec.configure(format, null, null, 0)
                 codec.start()
-                var out = ShortArray(rate * 4)
+                var out = ShortArray(maxOf(16_000, rate * 4))
                 var n = 0
                 val info = android.media.MediaCodec.BufferInfo()
                 var inputDone = false
+                var idleAfterEos = 0
                 try {
                     while (true) {
                         if (!inputDone) {
                             val i = codec.dequeueInputBuffer(10_000L)
                             if (i >= 0) {
-                                val size = ex.readSampleData(codec.getInputBuffer(i)!!, 0)
+                                val inBuf = codec.getInputBuffer(i)
+                                val size = if (inBuf != null) ex.readSampleData(inBuf, 0) else -1
                                 if (size < 0) {
                                     codec.queueInputBuffer(i, 0, 0, 0, android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                                     inputDone = true
@@ -638,35 +644,50 @@ class CloudVoice(
                         if (o == android.media.MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                             val f = codec.outputFormat
                             if (f.containsKey(android.media.MediaFormat.KEY_SAMPLE_RATE)) rate = f.getInteger(android.media.MediaFormat.KEY_SAMPLE_RATE)
-                            if (f.containsKey(android.media.MediaFormat.KEY_CHANNEL_COUNT)) channels = f.getInteger(android.media.MediaFormat.KEY_CHANNEL_COUNT)
+                            if (f.containsKey(android.media.MediaFormat.KEY_CHANNEL_COUNT)) channels = maxOf(1, f.getInteger(android.media.MediaFormat.KEY_CHANNEL_COUNT))
+                            idleAfterEos = 0
                         } else if (o >= 0) {
-                            val pcm = codec.getOutputBuffer(o)!!.order(java.nio.ByteOrder.nativeOrder()).asShortBuffer()
-                            pcm.position(info.offset / 2)
-                            val frames = (info.size / 2) / channels
-                            if (n + frames > out.size) out = out.copyOf(maxOf(out.size * 2, n + frames))
-                            if (channels == 1) {
-                                pcm.get(out, n, frames)
-                                n += frames
-                            } else {
-                                for (f in 0 until frames) {
-                                    var sum = 0
-                                    for (c in 0 until channels) sum += pcm.get()
-                                    out[n++] = (sum / channels).toShort()
+                            idleAfterEos = 0
+                            if (info.size > 0) {
+                                val raw = codec.getOutputBuffer(o)
+                                if (raw != null) {
+                                    val start = info.offset.coerceIn(0, raw.capacity())
+                                    val end = (info.offset + info.size).coerceIn(start, raw.capacity())
+                                    raw.position(start)
+                                    raw.limit(end)
+                                    val pcm = raw.slice().order(java.nio.ByteOrder.nativeOrder()).asShortBuffer()
+                                    val ch = maxOf(1, channels)
+                                    val frames = pcm.remaining() / ch
+                                    if (frames > 0) {
+                                        if (n + frames > out.size) out = out.copyOf(maxOf(out.size * 2, n + frames))
+                                        if (ch == 1) {
+                                            pcm.get(out, n, frames)
+                                            n += frames
+                                        } else {
+                                            for (f in 0 until frames) {
+                                                var sum = 0
+                                                for (c in 0 until ch) sum += pcm.get()
+                                                out[n++] = (sum / ch).toShort()
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             codec.releaseOutputBuffer(o, false)
                             if (info.flags and android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                        } else if (inputDone && ++idleAfterEos >= 100) {
+                            break
                         }
                     }
                 } finally {
                     runCatching { codec.stop() }
-                    codec.release()
+                    runCatching { codec.release() }
                 }
                 return if (n > 0 && rate > 0) Speech(out.copyOf(n), rate) else null
-            } catch (_: Exception) {
+            } catch (_: Throwable) {
                 return null
             } finally {
-                ex.release()
+                runCatching { ex.release() }
             }
         }
 
@@ -679,10 +700,9 @@ class CloudVoice(
         data class PresetVoice(val id: String, val name: String, val lang: String?, val gender: String?, val age: String?)
 
         val freeOnlineVoices = listOf(
-            PresetVoice("zh_youdao", "清岚 · 自然女声", "zh-CN", "female", "young"),
             PresetVoice("zh_baidu", "知声 · 清晰播报", "zh-CN", "female", "middle_aged"),
-            PresetVoice("en_uk", "Clara · British", "en-GB", "female", "young"),
             PresetVoice("en_us", "Emma · American", "en-US", "female", "young"),
+            PresetVoice("en_uk", "Clara · British", "en-GB", "female", "young"),
         )
 
         val volcengineVoices = listOf(
@@ -714,6 +734,28 @@ class CloudVoice(
             return appId to raw
         }
 
+        internal fun freeOnlineRoute(voiceID: String, text: String, language: String): String {
+            val hasCjk = text.any { it.code in 0x4E00..0x9FFF }
+            val isEn = !hasCjk && (
+                language.lowercase().startsWith("en")
+                    || voiceID.startsWith("en_")
+                    || voiceID.startsWith("af_") || voiceID.startsWith("am_") || voiceID.startsWith("bf_")
+            )
+            return if (isEn) {
+                if (voiceID == "en_uk" || voiceID.startsWith("bf_")) "baidu_uk" else "baidu_en"
+            } else {
+                // dict.youdao.com/dictvoice only serves dictionary headwords and returns HTTP 500 on full sentences;
+                // route all Chinese free voices (including legacy zh_youdao) to Baidu sentence TTS.
+                "baidu_zh"
+            }
+        }
+
+        internal fun freeOnlineUrl(route: String, encodedChunk: String): String = when (route) {
+            "baidu_zh" -> "https://fanyi.baidu.com/gettts?lan=zh&spd=5&source=web&text=$encodedChunk"
+            "baidu_uk" -> "https://fanyi.baidu.com/gettts?lan=uk&spd=3&source=web&text=$encodedChunk"
+            else -> "https://fanyi.baidu.com/gettts?lan=en&spd=3&source=web&text=$encodedChunk"
+        }
+
         private fun fetchFreeOnline(voiceID: String, text: String, language: String): Pair<ByteArray, String> {
             val customBase = Provider.Free.savedURL
             if (customBase.isNotEmpty()) {
@@ -731,21 +773,9 @@ class CloudVoice(
 
             val clean = text.trim()
             if (clean.isEmpty()) throw Failure(t("声音数据读不出来"))
-            val hasCjk = clean.any { it.code in 0x4E00..0x9FFF }
-            val isEn = !hasCjk && (
-                language.lowercase().startsWith("en")
-                    || voiceID.startsWith("en_")
-                    || voiceID.startsWith("af_") || voiceID.startsWith("am_") || voiceID.startsWith("bf_")
-            )
             val chunks = splitFreeChunks(clean, 160)
             // 每个免费音色严格绑定单一线路，避免单句超时后静默切到另一家的不同声线。
-            val route = if (isEn) {
-                val preferUs = voiceID == "en_us" || voiceID.startsWith("af_") || voiceID.startsWith("am_")
-                if (preferUs) "baidu_en" else "youdao_en"
-            } else {
-                val preferBaidu = voiceID == "zh_baidu" || voiceID == "zm_009" || voiceID == "zm_010"
-                if (preferBaidu) "baidu_zh" else "youdao_zh"
-            }
+            val route = freeOnlineRoute(voiceID, clean, language)
 
             repeat(2) { attempt ->
                 if (attempt > 0) Thread.sleep(250)
@@ -753,21 +783,20 @@ class CloudVoice(
                     val out = java.io.ByteArrayOutputStream()
                     for (chunk in chunks) {
                         val enc = java.net.URLEncoder.encode(chunk, "UTF-8").replace("+", "%20")
-                        val url = when (route) {
-                            "youdao_zh" -> "https://dict.youdao.com/dictvoice?le=zh&audio=$enc"
-                            "youdao_en" -> "https://dict.youdao.com/dictvoice?le=en&type=1&audio=$enc"
-                            "baidu_zh" -> "https://fanyi.baidu.com/gettts?lan=zh&spd=5&source=web&text=$enc"
-                            else -> "https://fanyi.baidu.com/gettts?lan=en&spd=3&source=web&text=$enc"
-                        }
+                        val url = freeOnlineUrl(route, enc)
                         val c = URL(url).openConnection() as HttpURLConnection
-                        c.requestMethod = "GET"
-                        c.connectTimeout = 10_000
-                        c.readTimeout = 12_000
-                        c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
-                        if (c.responseCode !in 200..299) throw IllegalStateException("HTTP ${c.responseCode}")
-                        val bytes = c.inputStream.use { it.readBytes() }
-                        if (!looksLikeAudio(bytes)) throw IllegalStateException("Non-audio response")
-                        out.write(bytes)
+                        try {
+                            c.requestMethod = "GET"
+                            c.connectTimeout = 10_000
+                            c.readTimeout = 12_000
+                            c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+                            if (c.responseCode !in 200..299) throw IllegalStateException("HTTP ${c.responseCode}")
+                            val bytes = c.inputStream.use { it.readBytes() }
+                            if (!looksLikeAudio(bytes)) throw IllegalStateException("Non-audio response")
+                            out.write(bytes)
+                        } finally {
+                            c.disconnect()
+                        }
                     }
                     out.toByteArray()
                 }.getOrNull()
@@ -933,7 +962,7 @@ class CloudVoice(
             }
             when (p) {
                 Provider.Free -> {
-                    fetchFreeOnline("zh_youdao", "你好", "zh-CN")
+                    fetchFreeOnline("zh_baidu", "你好，我来给你读这本书。", "zh-CN")
                     freeOnlineVoices.size
                 }
                 Provider.Volcengine -> {

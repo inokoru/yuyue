@@ -390,7 +390,9 @@ fun VoiceGroupsContent(
             try {
                 val s = withContext(Dispatchers.IO) { v.render(sampleText, language) }
                 if (s != null) SystemVoice.Engine.preview(s)
-            } catch (_: Exception) {
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Throwable) {
             } finally {
                 if (previewingId == v.id) previewingId = null
             }

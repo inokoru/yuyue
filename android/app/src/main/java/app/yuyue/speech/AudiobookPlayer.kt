@@ -948,7 +948,7 @@ class AudiobookPlayer(private val context: Context, private val library: Library
     }
 
     fun startService() {
-        context.startService(Intent(context, PlaybackService::class.java))
+        runCatching { context.startService(Intent(context, PlaybackService::class.java)) }
     }
 
     companion object {

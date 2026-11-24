@@ -105,11 +105,14 @@ object KokoroModel {
             state = State.Unsupported
             return
         }
-        scope.launch(Dispatchers.IO) {
-            if (installed(dataDir)) {
-                runCatching { core.kokoroSetDir(folder(dataDir).path) }
-                if (state !is State.Ready) state = State.Ready
+        scope.launch {
+            val isInstalled = withContext(Dispatchers.IO) {
+                if (installed(dataDir)) {
+                    runCatching { core.kokoroSetDir(folder(dataDir).path) }
+                    true
+                } else false
             }
+            if (isInstalled && state !is State.Ready) state = State.Ready
         }
     }
 
@@ -117,7 +120,13 @@ object KokoroModel {
         if (deviceUnsupported) return
         if (installed(dataDir)) {
             runCatching { core.kokoroSetDir(folder(dataDir).path) }
-            if (state !is State.Ready) state = State.Ready
+            if (state !is State.Ready) {
+                if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                    state = State.Ready
+                } else {
+                    scope.launch { if (state !is State.Ready) state = State.Ready }
+                }
+            }
         }
     }
 
@@ -173,7 +182,8 @@ object KokoroModel {
             try {
                 withContext(Dispatchers.IO) {
                     ensureInstalled(dataDir) { frac ->
-                        state = State.Downloading(frac.coerceIn(0.0, 0.99))
+                        val p = frac.coerceIn(0.0, 0.99)
+                        scope.launch { state = State.Downloading(p) }
                     }
                     register(core, dataDir)
                 }
@@ -182,7 +192,7 @@ object KokoroModel {
             } catch (e: CancellationException) {
                 if (!installed(dataDir)) state = State.Idle
                 throw e
-            } catch (_: Exception) {
+            } catch (_: Throwable) {
                 state = State.Failed
             } finally {
                 downloadJob = null
@@ -295,8 +305,9 @@ class KokoroVoice(val speaker: KokoroSpeaker) : BookVoice {
         val speech = Engine.synthesize(core, dataDir, speaker, text, language)
         if (speech != null) {
             Engine.writeCache(app.cacheDir, speaker.id, language, text, speech)
+            return@withContext speech
         }
-        speech
+        throw IllegalStateException(t("离线语音合成失败，请重试或换一个声音"))
     }
 
     object Engine {

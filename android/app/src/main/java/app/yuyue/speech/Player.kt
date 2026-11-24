@@ -227,7 +227,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         // stop pre-synthesizing ahead immediately on pause.
         rendering?.cancel()
         rendering = null
-        track?.pause()
+        runCatching { track?.pause() }
         state = State.Paused
         report()
         Session.update()
@@ -241,7 +241,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
             return render()
         }
         if (!takeFocus()) return
-        track?.play()
+        runCatching { track?.play() }
         state = State.Playing
         report()
         Session.update()
@@ -321,7 +321,22 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         failure = null
         missingVoice = null
         scope.launch {
-            val sys = Voices.systemBest(langTag) ?: return@launch
+            val sys = try {
+                Voices.systemBest(langTag)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                failedSpot = resumeAt
+                failure = t("朗读出错了（%@）", e.message ?: e.toString())
+                return@launch
+            }
+            if (sys == null) {
+                val name = java.util.Locale.forLanguageTag(langTag).getDisplayLanguage(java.util.Locale.getDefault()).ifEmpty { langTag }
+                failedSpot = resumeAt
+                missingVoice = name
+                failure = t("下载一个%@声音就能朗读这本书，系统会带你去它的下载页。", name)
+                return@launch
+            }
             Prefs.set("player.voice.$langTag", sys.id)
             voices[langTag] = sys
             if (resumeAt != null) play(resumeAt.position) else restartHere()
@@ -355,7 +370,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         stop()
         Session.release(this)
         scope.cancel()
-        track?.release()
+        runCatching { track?.release() }
         track = null
     }
 
@@ -381,7 +396,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
             .getOrNull()?.let { if (it) roles?.reload() }
         track?.let {
             runCatching { it.pause(); it.flush() }
-            it.release()
+            runCatching { it.release() }
         }
         track = null
         scheduled = 0
@@ -438,6 +453,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         val g = generation
         val token = renderToken
         rendering = scope.launch {
+            try {
             while (shouldKeepRendering(g, token)) {
                 val s = nextToRender ?: break
                 val lib = runCatching { app.yuyue.YuyueApp.instance.library }.getOrNull()
@@ -539,7 +555,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                         roles?.renderSegments(segPlan, language)
                     } catch (e: kotlinx.coroutines.CancellationException) {
                         throw e
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         if (generation != g || renderToken != token) return@launch
                         failed(t("朗读出错了（%@）", e.message ?: e.toString()))
                         return@launch
@@ -563,7 +579,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                     voice.render(text(s), language)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     if (generation != g || renderToken != token) return@launch
                     failed(t("朗读出错了（%@）", e.message ?: e.toString()))
                     return@launch
@@ -572,6 +588,13 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                 nextToRender = after(s)
                 // A sentence with nothing to say (a lone dash, say) is skipped.
                 if (speech != null) schedule(Line(s, speech))
+            }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                if (generation != g || renderToken != token) return@launch
+                failed(t("朗读出错了（%@）", e.message ?: e.toString()))
+                return@launch
             }
             if (generation != g || renderToken != token) return@launch
             rendering = null
@@ -600,7 +623,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         feedTrack()
         if (wasEmpty && queued.isNotEmpty() && (state == State.Loading || state == State.Playing)) {
             if (!takeFocus()) return
-            track?.play()
+            runCatching { track?.play() }
             began()
         }
     }
@@ -610,7 +633,10 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
             val next = staged.first()
             if (queued.isNotEmpty() && track != null && trackRate != next.speech.rate) break
             val l = staged.removeFirst()
-            val t = ensureTrack(l.speech.rate) ?: return
+            val t = ensureTrack(l.speech.rate) ?: run {
+                failed(t("音频播放初始化失败，请重试"))
+                return
+            }
             l.startFrame = scheduled
             l.endFrame = scheduled + l.speech.samples.size
             scheduled = l.endFrame
@@ -637,12 +663,13 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                     }
                 }
             } catch (_: InterruptedException) {
-            } catch (_: IllegalStateException) {
+            } catch (_: Throwable) {
             }
         }.apply { isDaemon = true; start() }
     }
 
     private fun ensureTrack(rate: Int): AudioTrack? {
+        if (rate <= 0) return null
         track?.let { if (trackRate == rate) return it }
         // Another voice at another sample rate: stop the old writer and give the new track one of its own.
         writer?.interrupt()
@@ -650,15 +677,20 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         pending = java.util.concurrent.LinkedBlockingQueue()
         track?.let {
             runCatching { it.pause(); it.flush() }
-            it.release()
+            runCatching { it.release() }
         }
+        track = null
         val min = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        val t = AudioTrack.Builder()
-            .setAudioAttributes(attributes)
-            .setAudioFormat(AudioFormat.Builder().setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
-            .setBufferSizeInBytes(maxOf(min, rate)) // half a second
-            .setTransferMode(AudioTrack.MODE_STREAM)
-            .build()
+        if (min <= 0) return null
+        val halfSecEven = (rate + 1) and 1.inv() // 16-bit mono = 2 bytes/frame; keep buffer size frame-aligned
+        val t = runCatching {
+            AudioTrack.Builder()
+                .setAudioAttributes(attributes)
+                .setAudioFormat(AudioFormat.Builder().setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
+                .setBufferSizeInBytes(maxOf(min, halfSecEven)) // half a second
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
+        }.getOrNull() ?: return null
         runCatching { t.playbackParams = PlaybackParams().setSpeed(this.rate).setPitch(1f) }
         track = t
         trackRate = rate
@@ -709,7 +741,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
             queued.isNotEmpty() -> {
                 if (wasEmpty && (state == State.Loading || state == State.Playing)) {
                     if (!takeFocus()) return
-                    track?.play()
+                    runCatching { track?.play() }
                 }
                 began()
             }
@@ -959,7 +991,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     }
 
     fun startService() {
-        context.startService(Intent(context, PlaybackService::class.java))
+        runCatching { context.startService(Intent(context, PlaybackService::class.java)) }
     }
 }
 

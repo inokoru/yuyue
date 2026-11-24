@@ -904,10 +904,9 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
     // MARK: Built-in preset voice tables
 
     static let freeOnlineVoices: [(id: String, name: String, lang: String, gender: String, age: String)] = [
-        ("zh_youdao", "清岚 · 自然女声", "zh-CN", "female", "young"),
         ("zh_baidu", "知声 · 清晰播报", "zh-CN", "female", "middle_aged"),
-        ("en_uk", "Clara · British", "en-GB", "female", "young"),
         ("en_us", "Emma · American", "en-US", "female", "young"),
+        ("en_uk", "Clara · British", "en-GB", "female", "young"),
     ]
 
     static let volcengineVoices: [(id: String, name: String, lang: String, gender: String, age: String)] = [
@@ -1055,7 +1054,7 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
     static func refresh(_ p: Provider) async throws -> Int {
         switch p {
         case .free:
-            _ = try await fetchFreeOnline(text: "你好。", voiceID: "zh_youdao", language: "zh-CN")
+            _ = try await fetchFreeOnline(text: "你好，我来给你读这本书。", voiceID: "zh_baidu", language: "zh-CN")
             return freeOnlineVoices.count
 
         case .volcengine:
@@ -1285,13 +1284,13 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
 
         let chunks = splitFreeChunks(clean, maxChars: 160)
         // 每个免费音色严格绑定单一线路，避免单句超时后静默切到另一家的不同声线。
+        // dict.youdao.com/dictvoice 仅支持单词词典发音、整句会返回 HTTP 500，统一走百度整句语音线路。
         let route: FreeRoute
         if isEnglish {
-            let preferUS = voiceID == "en_us" || voiceID == "0" || voiceID == "1" || voiceID.hasPrefix("af_") || voiceID.hasPrefix("am_")
-            route = preferUS ? .baiduEnUs : .youdaoEnUk
+            let preferUK = voiceID == "en_uk" || voiceID.hasPrefix("bf_")
+            route = preferUK ? .baiduEnUk : .baiduEnUs
         } else {
-            let preferBaidu = voiceID == "zh_baidu" || voiceID == "58" || voiceID == "67" || voiceID == "zm_009" || voiceID == "zm_010"
-            route = preferBaidu ? .baiduZh : .youdaoZh
+            route = .baiduZh
         }
 
         var lastError: Error = Failure.unreachable(.free)

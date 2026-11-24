@@ -198,7 +198,9 @@ private fun VoiceRow(
                         try {
                             val speech = withContext(Dispatchers.IO) { v.render(sample(language), language) }
                             if (speech != null) SystemVoice.Engine.preview(speech)
-                        } catch (e: Exception) {
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
+                        } catch (e: Throwable) {
                             player.failure = t("试听失败（%@）", e.message ?: e.toString())
                         } finally {
                             previewing = false

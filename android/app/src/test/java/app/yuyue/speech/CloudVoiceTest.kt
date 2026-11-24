@@ -68,4 +68,20 @@ class CloudVoiceTest {
         assertTrue(CloudVoice.miniMaxPresets.isNotEmpty())
         assertTrue(CloudVoice.deepgramVoices.all { it.lang == "en-US" })
     }
+
+    @Test
+    fun freeOnlineVoicesRouteAllLanguagesToSentenceCapableEndpoints() {
+        assertEquals(listOf("zh_baidu", "en_us", "en_uk"), CloudVoice.freeOnlineVoices.map { it.id })
+        assertEquals("baidu_zh", CloudVoice.freeOnlineRoute("zh_baidu", "你好，世界。", "zh-CN"))
+        // Legacy saved zh_youdao voice IDs must still resolve to working Chinese sentence TTS.
+        assertEquals("baidu_zh", CloudVoice.freeOnlineRoute("zh_youdao", "你好，世界。", "zh-CN"))
+        assertEquals("baidu_en", CloudVoice.freeOnlineRoute("en_us", "Hello world.", "en-US"))
+        assertEquals("baidu_uk", CloudVoice.freeOnlineRoute("en_uk", "Hello world.", "en-GB"))
+
+        for (route in listOf("baidu_zh", "baidu_en", "baidu_uk")) {
+            val url = CloudVoice.freeOnlineUrl(route, "hello")
+            assertTrue(url.startsWith("https://fanyi.baidu.com/gettts?"))
+            assertTrue(!url.contains("dict.youdao.com"))
+        }
+    }
 }

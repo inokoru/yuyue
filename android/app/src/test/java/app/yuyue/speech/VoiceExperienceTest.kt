@@ -183,4 +183,38 @@ class VoiceExperienceTest {
         assertEquals("鲁迅《野草》", DailyQuote.formatSource("鲁迅", "《野草》"))
         assertEquals("", DailyQuote.formatSource("佚名", "原创"))
     }
+
+    @Test
+    fun systemVoiceWavDownmixesStereoAndRejectsMalformedChunks() {
+        val dir = Files.createTempDirectory("yuyue-wav-test").toFile()
+        try {
+            // Build a 2-channel 16-bit PCM WAV with 2 frames: (1000, 3000) -> 2000, (-4000, 0) -> -2000
+            val pcm = java.nio.ByteBuffer.allocate(8).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                .putShort(1000).putShort(3000)
+                .putShort(-4000).putShort(0)
+                .array()
+            val header = java.nio.ByteBuffer.allocate(44 + pcm.size).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                .put("RIFF".toByteArray()).putInt(36 + pcm.size)
+                .put("WAVEfmt ".toByteArray()).putInt(16).putShort(1).putShort(2) // stereo
+                .putInt(24_000).putInt(24_000 * 4).putShort(4).putShort(16)
+                .put("data".toByteArray()).putInt(pcm.size).put(pcm)
+                .array()
+            val stereoFile = dir.resolve("stereo.wav").apply { writeBytes(header) }
+            val decoded = SystemVoice.Engine.wav(stereoFile)
+            assertEquals(24_000, decoded?.rate)
+            assertEquals(2, decoded?.samples?.size)
+            assertEquals(2000.toShort(), decoded?.samples?.get(0))
+            assertEquals((-2000).toShort(), decoded?.samples?.get(1))
+
+            // Malformed negative chunk size must return null instead of looping forever.
+            val bad = java.nio.ByteBuffer.allocate(44).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                .put("RIFF".toByteArray()).putInt(36)
+                .put("WAVEJUNK".toByteArray()).putInt(-8)
+                .array()
+            val badFile = dir.resolve("bad.wav").apply { writeBytes(bad) }
+            assertNull(SystemVoice.Engine.wav(badFile))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }

@@ -118,36 +118,55 @@ class SystemVoice(private val voice: Voice, number: Int = 0) : BookVoice {
             }
         }
 
+        private suspend fun awaitReady(): Boolean =
+            withTimeoutOrNull(5_000L) { ready.await() } == true
+
         suspend fun voices(): List<SystemVoice> {
-            if (!ready.await()) return emptyList()
+            if (!awaitReady()) return emptyList()
             val engine = tts ?: return emptyList()
-            return (engine.voices ?: emptySet())
-                .filter { !it.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
+            val raw = runCatching { engine.voices }.getOrNull() ?: return emptyList()
+            return raw
+                .filter { v ->
+                    v != null &&
+                        v.locale != null &&
+                        !v.name.isNullOrEmpty() &&
+                        v.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) != true
+                }
                 .sortedWith(compareBy({ it.locale.toLanguageTag() }, { it.isNetworkConnectionRequired }, { -it.quality }))
                 .let { all -> all.mapIndexed { i, v -> SystemVoice(v, all.take(i).count { it.locale == v.locale }) } }
         }
 
         suspend fun render(text: String, voice: Voice, speechRate: Float = 1f, speechPitch: Float = 1f): Speech? = lock.withLock {
-            if (!ready.await()) throw IllegalStateException(t("这台手机的文字转语音没准备好"))
+            if (!awaitReady()) throw IllegalStateException(t("这台手机的文字转语音没准备好"))
             val engine = tts ?: throw IllegalStateException(t("这台手机的文字转语音没准备好"))
             val id = UUID.randomUUID().toString()
             val done = CompletableDeferred<Speech?>()
+            val outLock = Any()
             val out = ByteArrayOutputStream()
             val file = File(cache, "$id.wav")
             var rate = 0
             var format = 0
+            var channels = 1
             engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {}
                 override fun onBeginSynthesis(utteranceId: String?, sampleRateInHz: Int, audioFormat: Int, channelCount: Int) {
-                    rate = sampleRateInHz
-                    format = audioFormat
+                    synchronized(outLock) {
+                        rate = sampleRateInHz
+                        format = audioFormat
+                        channels = maxOf(1, channelCount)
+                    }
                 }
                 override fun onAudioAvailable(utteranceId: String?, audio: ByteArray) {
-                    out.write(audio)
+                    synchronized(outLock) {
+                        out.write(audio)
+                    }
                 }
                 override fun onDone(utteranceId: String?) {
-                    // Engines that don't hand the audio over as it's made still wrote the file.
-                    done.complete(if (out.size() > 0) pcm(out.toByteArray(), rate, format) else wav(file))
+                    // Engines that don't hand the audio over as it's made (or omit onBeginSynthesis) still wrote the file.
+                    val fromStream = synchronized(outLock) {
+                        if (out.size() > 0) pcm(out.toByteArray(), rate, format, channels) else null
+                    }
+                    done.complete(fromStream ?: wav(file))
                 }
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) {
@@ -157,11 +176,11 @@ class SystemVoice(private val voice: Voice, number: Int = 0) : BookVoice {
                     done.completeExceptionally(IllegalStateException(t("系统朗读合成失败（%lld）", errorCode.toLong())))
                 }
             })
-            engine.voice = voice
-            engine.setSpeechRate(speechRate)
-            engine.setPitch(speechPitch)
             var timedOut = true
             val speech = try {
+                engine.voice = voice
+                engine.setSpeechRate(speechRate)
+                engine.setPitch(speechPitch)
                 if (engine.synthesizeToFile(text, Bundle(), file, id) == TextToSpeech.ERROR) {
                     throw IllegalStateException(t("系统朗读启动失败"))
                 }
@@ -171,13 +190,13 @@ class SystemVoice(private val voice: Voice, number: Int = 0) : BookVoice {
                 }
             } finally {
                 file.delete()
-                engine.setOnUtteranceProgressListener(null)
+                runCatching { engine.setOnUtteranceProgressListener(null) }
             }
             if (timedOut) throw IllegalStateException(t("系统朗读超时了"))
             speech
         }
 
-        /** A 16-bit PCM WAV file's samples. */
+        /** A 16-bit PCM WAV file's samples (downmixed to mono if multi-channel). */
         fun wav(file: File): Speech? {
             val b = runCatching { file.readBytes() }.getOrNull() ?: return null
             if (b.size < 44 || String(b, 0, 4) != "RIFF") return null
@@ -185,26 +204,44 @@ class SystemVoice(private val voice: Voice, number: Int = 0) : BookVoice {
             var i = 12
             var rate = 0
             var bits = 16
+            var channels = 1
             while (i + 8 <= b.size) {
                 val tag = String(b, i, 4)
                 val size = buf.getInt(i + 4)
-                if (tag == "fmt ") {
+                if (size < 0) return null
+                if (tag == "fmt " && i + 24 <= b.size) {
+                    channels = maxOf(1, buf.getShort(i + 10).toInt())
                     rate = buf.getInt(i + 12)
                     bits = buf.getShort(i + 22).toInt()
                 } else if (tag == "data" && bits == 16 && rate > 0) {
-                    val n = minOf(size, b.size - i - 8) / 2
-                    val s = ShortArray(n) { buf.getShort(i + 8 + it * 2) }
-                    return if (n > 0) Speech(s, rate) else null
+                    val bytesAvailable = minOf(size, b.size - i - 8)
+                    val totalShorts = bytesAvailable / 2
+                    val frames = totalShorts / channels
+                    if (frames <= 0) return null
+                    val s = if (channels == 1) {
+                        ShortArray(frames) { buf.getShort(i + 8 + it * 2) }
+                    } else {
+                        ShortArray(frames) { f ->
+                            var sum = 0
+                            val base = i + 8 + f * channels * 2
+                            for (c in 0 until channels) sum += buf.getShort(base + c * 2)
+                            (sum / channels).toShort()
+                        }
+                    }
+                    return Speech(s, rate)
                 }
-                i += 8 + size + (size and 1)
+                val step = 8 + size + (size and 1)
+                if (step <= 0) return null
+                i += step
             }
             return null
         }
 
-        /** 16-bit samples; 8-bit and float are converted. */
-        private fun pcm(bytes: ByteArray, rate: Int, format: Int): Speech? {
+        /** 16-bit mono samples; 8-bit, float, and multi-channel streams are converted. */
+        internal fun pcm(bytes: ByteArray, rate: Int, format: Int, channels: Int = 1): Speech? {
             if (rate <= 0 || bytes.isEmpty()) return null
-            val samples = when (format) {
+            val ch = maxOf(1, channels)
+            val interleaved = when (format) {
                 android.media.AudioFormat.ENCODING_PCM_8BIT -> ShortArray(bytes.size) { ((bytes[it].toInt() and 0xff) - 128 shl 8).toShort() }
                 android.media.AudioFormat.ENCODING_PCM_FLOAT -> {
                     val f = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
@@ -215,37 +252,64 @@ class SystemVoice(private val voice: Voice, number: Int = 0) : BookVoice {
                     ShortArray(s.remaining()).also { s.get(it) }
                 }
             }
+            if (interleaved.isEmpty()) return null
+            val samples = if (ch == 1) {
+                interleaved
+            } else {
+                val frames = interleaved.size / ch
+                if (frames <= 0) return null
+                ShortArray(frames) { f ->
+                    var sum = 0
+                    val base = f * ch
+                    for (c in 0 until ch) sum += interleaved[base + c]
+                    (sum / ch).toShort()
+                }
+            }
             return if (samples.isEmpty()) null else Speech(samples, rate)
         }
 
         /** Stops what 试听 is saying. */
         fun stopPreview() {
-            tts?.stop()
+            runCatching { tts?.stop() }
             previewTrack?.runCatching { stop(); release() }
             previewTrack = null
         }
 
         /** Plays a cloud or rendered clip once for 试听. */
-        fun preview(s: Speech) {
+        fun preview(s: Speech): Boolean {
             stopPreview()
-            val track = AudioTrack.Builder()
-                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(s.rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-                .setTransferMode(AudioTrack.MODE_STATIC)
-                .setBufferSizeInBytes(maxOf(2, s.samples.size * 2))
-                .build()
-            track.write(s.samples, 0, s.samples.size)
-            track.play()
+            if (s.samples.isEmpty() || s.rate <= 0) return false
+            val bytes = s.samples.size * 2
+            val track = runCatching {
+                AudioTrack.Builder()
+                    .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                    .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(s.rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                    .setTransferMode(AudioTrack.MODE_STATIC)
+                    .setBufferSizeInBytes(maxOf(2, bytes))
+                    .build()
+            }.getOrNull() ?: return false
+            val started = runCatching {
+                track.write(s.samples, 0, s.samples.size)
+                track.play()
+                true
+            }.getOrDefault(false)
+            if (!started) {
+                runCatching { track.release() }
+                return false
+            }
             previewTrack = track
+            return true
         }
 
         /** Says a few words straight away, for 试听. */
         fun preview(voice: Voice, text: String): Boolean {
             val engine = tts?.takeIf { readyOk == true } ?: return false
             stopPreview()
-            engine.setOnUtteranceProgressListener(null)
-            engine.voice = voice
-            return engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "preview") == TextToSpeech.SUCCESS
+            return runCatching {
+                engine.setOnUtteranceProgressListener(null)
+                engine.voice = voice
+                engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "preview") == TextToSpeech.SUCCESS
+            }.getOrDefault(false)
         }
 
         /** Opens system TTS data download, or falls back to system TTS / general settings. */
@@ -353,7 +417,13 @@ object Voices {
                 }
                 ClonedVoices.find(id)
             }
-            id.startsWith("cloud.") -> CloudVoice.all().firstOrNull { it.id == id }
+            id.startsWith("cloud.") -> {
+                CloudVoice.all().firstOrNull { it.id == id } ?: if (id.startsWith("cloud.free.")) {
+                    val raw = id.removePrefix("cloud.free.")
+                    val isEn = raw.startsWith("en_") || raw.startsWith("af_") || raw.startsWith("am_") || raw.startsWith("bf_")
+                    CloudVoice.all().firstOrNull { it.provider == CloudVoice.Provider.Free && it.speaks(if (isEn) "en" else "zh") }
+                } else null
+            }
             else -> SystemVoice.Engine.voices().firstOrNull { it.id == id }
         }
     }
@@ -372,7 +442,7 @@ object Voices {
         defaultNarrator(tag)?.let { return it }
         val freeList = CloudVoice.all().filter { it.provider == CloudVoice.Provider.Free && it.speaks(tag) }
         if (freeList.isNotEmpty()) {
-            val preferred = if (tag.lowercase().startsWith("en")) "cloud.free.af_heart" else "cloud.free.zf_001"
+            val preferred = if (tag.lowercase().startsWith("en")) "cloud.free.en_us" else "cloud.free.zh_baidu"
             return freeList.firstOrNull { it.id == preferred } ?: freeList.first()
         }
         return systemBest(tag)
