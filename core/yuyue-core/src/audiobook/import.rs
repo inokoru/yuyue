@@ -37,20 +37,24 @@ fn mp4_locked(path: &Path) -> std::io::Result<bool> {
     let mut f = std::fs::File::open(path)?;
     let len = f.metadata()?.len();
     let mut at = 0u64;
-    while at + 8 <= len {
+    while at.checked_add(8).is_some_and(|e| e <= len) {
         f.seek(SeekFrom::Start(at))?;
         let mut head = [0u8; 16];
         f.read_exact(&mut head[..8])?;
         let mut size = u32::from_be_bytes(head[..4].try_into().unwrap()) as u64;
         let mut header = 8;
         if size == 1 {
+            if at.checked_add(16).is_none_or(|e| e > len) {
+                return Ok(false);
+            }
             f.read_exact(&mut head[8..16])?;
             size = u64::from_be_bytes(head[8..16].try_into().unwrap());
             header = 16;
         } else if size == 0 {
             size = len - at;
         }
-        if size < header {
+        let Some(next) = at.checked_add(size) else { return Ok(false) };
+        if size < header || next > len {
             return Ok(false);
         }
         if &head[4..8] == b"moov" {
@@ -60,7 +64,7 @@ fn mp4_locked(path: &Path) -> std::io::Result<bool> {
             // The sample entry of protected sound, or the protection scheme box inside it.
             return Ok(moov.windows(4).any(|w| matches!(w, b"sinf" | b"drms" | b"aavd" | b"adrm" | b"enca")));
         }
-        at += size;
+        at = next;
     }
     Ok(false)
 }
@@ -178,22 +182,28 @@ fn id3_disc_track(data: &[u8]) -> (Option<u32>, Option<u32>) {
     }
     let mut p = 10;
     if data[5] & 0x40 != 0 && p + 4 <= end {
-        let ext = if major == 4 { syncsafe(&data[p..p + 4]) as usize } else { u32::from_be_bytes(data[p..p + 4].try_into().unwrap()) as usize + 4 };
-        p += ext;
+        let ext = if major == 4 {
+            Some(syncsafe(&data[p..p + 4]) as usize)
+        } else {
+            (u32::from_be_bytes(data[p..p + 4].try_into().unwrap()) as usize).checked_add(4)
+        };
+        let Some(next) = ext.and_then(|e| p.checked_add(e)) else { return (disc, track) };
+        p = next;
     }
-    while p + 10 <= end {
+    while p.checked_add(10).is_some_and(|e| e <= end) {
         let id = &data[p..p + 4];
         if id == [0, 0, 0, 0] {
             break;
         }
         let len = if major == 4 { syncsafe(&data[p + 4..p + 8]) } else { u32::from_be_bytes(data[p + 4..p + 8].try_into().unwrap()) } as usize;
-        let body = &data[(p + 10).min(end)..(p + 10 + len).min(end)];
+        let Some(next) = p.checked_add(10).and_then(|x| x.checked_add(len)) else { break };
+        let body = &data[p + 10..next.min(end)];
         if id == b"TPOS" {
             disc = text_frame(body).and_then(|s| parse_tag_index(&s));
         } else if id == b"TRCK" {
             track = text_frame(body).and_then(|s| parse_tag_index(&s));
         }
-        p += 10 + len;
+        p = next;
     }
     (disc, track)
 }
@@ -203,20 +213,24 @@ fn mp4_disc_track(path: &Path) -> Option<(Option<u32>, Option<u32>)> {
     let len = f.metadata().ok()?.len();
     let mut at = 0u64;
     let mut moov: Option<Vec<u8>> = None;
-    while at + 8 <= len {
+    while at.checked_add(8).is_some_and(|e| e <= len) {
         f.seek(SeekFrom::Start(at)).ok()?;
         let mut head = [0u8; 16];
         f.read_exact(&mut head[..8]).ok()?;
         let mut size = u32::from_be_bytes(head[..4].try_into().unwrap()) as u64;
         let mut header = 8u64;
         if size == 1 {
+            if at.checked_add(16).is_none_or(|e| e > len) {
+                break;
+            }
             f.read_exact(&mut head[8..16]).ok()?;
             size = u64::from_be_bytes(head[8..16].try_into().unwrap());
             header = 16;
         } else if size == 0 {
             size = len - at;
         }
-        if size < header || at + size > len {
+        let Some(next) = at.checked_add(size) else { break };
+        if size < header || next > len {
             break;
         }
         if &head[4..8] == b"moov" {
@@ -225,21 +239,22 @@ fn mp4_disc_track(path: &Path) -> Option<(Option<u32>, Option<u32>)> {
             moov = Some(buf);
             break;
         }
-        at += size;
+        at = next;
     }
     let moov = moov?;
     fn sub<'a>(data: &'a [u8], want: &[u8; 4]) -> Option<&'a [u8]> {
-        let mut p = 0;
-        while p + 8 <= data.len() {
+        let mut p = 0usize;
+        while p.checked_add(8).is_some_and(|e| e <= data.len()) {
             let s = u32::from_be_bytes(data[p..p + 4].try_into().unwrap()) as usize;
             let s = if s == 0 { data.len() - p } else { s };
-            if s < 8 || p + s > data.len() {
+            let Some(next) = p.checked_add(s) else { break };
+            if s < 8 || next > data.len() {
                 break;
             }
             if &data[p + 4..p + 8] == want {
-                return Some(&data[p + 8..p + s]);
+                return Some(&data[p + 8..next]);
             }
-            p += s;
+            p = next;
         }
         None
     }
@@ -464,16 +479,22 @@ pub fn id3_chapters(data: &[u8]) -> Vec<AudioMark> {
     let mut p = 10;
     if data[5] & 0x40 != 0 && p + 4 <= end {
         // Extended header.
-        let ext = if major == 4 { syncsafe(&data[p..p + 4]) as usize } else { u32::from_be_bytes(data[p..p + 4].try_into().unwrap()) as usize + 4 };
-        p += ext;
+        let ext = if major == 4 {
+            Some(syncsafe(&data[p..p + 4]) as usize)
+        } else {
+            (u32::from_be_bytes(data[p..p + 4].try_into().unwrap()) as usize).checked_add(4)
+        };
+        let Some(next) = ext.and_then(|e| p.checked_add(e)) else { return out };
+        p = next;
     }
-    while p + 10 <= end {
+    while p.checked_add(10).is_some_and(|e| e <= end) {
         let id = &data[p..p + 4];
         if id == [0, 0, 0, 0] {
             break;
         }
         let len = if major == 4 { syncsafe(&data[p + 4..p + 8]) } else { u32::from_be_bytes(data[p + 4..p + 8].try_into().unwrap()) } as usize;
-        let body = &data[(p + 10).min(end)..(p + 10 + len).min(end)];
+        let Some(next) = p.checked_add(10).and_then(|x| x.checked_add(len)) else { break };
+        let body = &data[p + 10..next.min(end)];
         if id == b"CHAP"
             && let Some(z) = body.iter().position(|&b| b == 0)
                 && body.len() >= z + 1 + 16 {
@@ -482,7 +503,7 @@ pub fn id3_chapters(data: &[u8]) -> Vec<AudioMark> {
                     let title = frames_title(&t[16..], major);
                     out.push(AudioMark { title, start: start_ms as f64 / 1000.0 });
                 }
-        p += 10 + len;
+        p = next;
     }
     out.sort_by(|a, b| a.start.total_cmp(&b.start));
     out
@@ -496,11 +517,12 @@ fn syncsafe(b: &[u8]) -> u32 {
 fn frames_title(mut b: &[u8], major: u8) -> Option<String> {
     while b.len() >= 10 {
         let len = if major == 4 { syncsafe(&b[4..8]) } else { u32::from_be_bytes(b[4..8].try_into().unwrap()) } as usize;
-        let body = b.get(10..10 + len)?;
+        let end = 10usize.checked_add(len)?;
+        let body = b.get(10..end)?;
         if &b[..4] == b"TIT2" {
             return text_frame(body);
         }
-        b = &b[(10 + len).min(b.len())..];
+        b = &b[end..];
     }
     None
 }
@@ -940,5 +962,16 @@ mod lock_tests {
         }
         assert!(unzip_sound(&epubish, &dir.join("out2")).unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn id3_max_frame_size_does_not_overflow() {
+        let malformed = b"ID3\x03\x00\x00\x00\x00\x00\x0aTXXX\xff\xff\xff\xff\x00\x00";
+        assert!(id3_chapters(malformed).is_empty());
+        assert_eq!(id3_disc_track(malformed), (None, None));
+        let malformed_ext = b"ID3\x03\x00\x40\x00\x00\x00\x0a\xff\xff\xff\xff\x00\x00\x00\x00\x00\x00";
+        assert!(id3_chapters(malformed_ext).is_empty());
+        assert_eq!(id3_disc_track(malformed_ext), (None, None));
+        assert_eq!(frames_title(b"TIT2\xff\xff\xff\xff\x00\x00", 3), None);
     }
 }

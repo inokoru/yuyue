@@ -217,30 +217,65 @@ pub struct Mixer {
     pub ceiling: f32,
 }
 
+/// Upper bounds for timeline coordinates (4 hours) and offline `render_all` (30 minutes)
+/// so non-finite or corrupt timestamps cannot overflow `usize` or trigger OOM.
+const MAX_TIMELINE_FRAMES: usize = RATE as usize * 60 * 60 * 4;
+const MAX_RENDER_ALL_FRAMES: usize = RATE as usize * 60 * 30;
+
+fn secs_to_frames(secs: f64, max: usize) -> usize {
+    if !secs.is_finite() || secs <= 0.0 {
+        return 0;
+    }
+    let frames = secs * RATE as f64;
+    if !frames.is_finite() || frames >= max as f64 {
+        max
+    } else {
+        frames as usize
+    }
+}
+
+fn fade_frames(secs: f32) -> usize {
+    if !secs.is_finite() || secs <= 0.0 {
+        return 0;
+    }
+    let frames = secs as f64 * RATE as f64;
+    if !frames.is_finite() || frames >= MAX_TIMELINE_FRAMES as f64 {
+        MAX_TIMELINE_FRAMES
+    } else {
+        frames as usize
+    }
+}
+
 impl Mixer {
     pub fn new(items: Vec<Item>, preset: &str, controls: Arc<Controls>) -> Mixer {
         let voices = items
             .into_iter()
-            .map(|item| {
+            .map(|mut item| {
                 let ch = if item.stereo { 2 } else { 1 };
                 let src = item.samples.len() / ch;
-                let frames = item.len.map(|l| (l * RATE as f64) as usize).unwrap_or(src);
+                let frames = item.len.map(|l| secs_to_frames(l, MAX_TIMELINE_FRAMES)).unwrap_or(src);
                 let filters = match item.filter {
                     Filter::None => vec![],
                     Filter::LowPass(f) => vec![Biquad::new("lp", f, 0.707), Biquad::new("lp", f, 0.707)],
                     Filter::HighPass(f) => vec![Biquad::new("hp", f, 0.707), Biquad::new("hp", f, 0.707)],
                     Filter::BandPass(a, b) => vec![Biquad::new("hp", a, 0.707), Biquad::new("hp", a, 0.707), Biquad::new("lp", b, 0.707), Biquad::new("lp", b, 0.707)],
                 };
-                let p = (item.pan.clamp(-1.0, 1.0) + 1.0) * std::f32::consts::FRAC_PI_4;
-                let g = db(item.gain_db);
-                Voice { start: (item.at * RATE as f64) as usize, frames, filters, l: p.cos() * g, r: p.sin() * g, item }
+                let pan = if item.pan.is_finite() { item.pan.clamp(-1.0, 1.0) } else { 0.0 };
+                let p = (pan + 1.0) * std::f32::consts::FRAC_PI_4;
+                let gain_db = if item.gain_db.is_finite() { item.gain_db } else { 0.0 };
+                let g = db(gain_db);
+                if !item.reverb_send.is_finite() {
+                    item.reverb_send = 0.0;
+                }
+                let start = secs_to_frames(item.at, MAX_TIMELINE_FRAMES);
+                Voice { start, frames, filters, l: p.cos() * g, r: p.sin() * g, item }
             })
             .collect();
         Mixer { voices, reverb: Reverb::new(room(preset)), controls, pos: 0, env: 0.0, limiter_gain: 1.0, duck_db: -3.0, ceiling: db(-1.0) }
     }
 
     pub fn seek(&mut self, seconds: f64) {
-        self.pos = (seconds * RATE as f64) as usize;
+        self.pos = secs_to_frames(seconds, MAX_TIMELINE_FRAMES);
         self.env = 0.0;
     }
 
@@ -249,7 +284,7 @@ impl Mixer {
     }
 
     pub fn duration(&self) -> f64 {
-        self.voices.iter().map(|v| v.start + v.frames).max().unwrap_or(0) as f64 / RATE as f64
+        self.voices.iter().map(|v| v.start.saturating_add(v.frames)).max().unwrap_or(0) as f64 / RATE as f64
     }
 
     fn sample(v: &Voice, f: usize) -> (f32, f32) {
@@ -273,18 +308,19 @@ impl Mixer {
         let release = (-1.0 / (0.3 * RATE as f32)).exp();
         let lim_release = (-1.0 / (0.08 * RATE as f32)).exp();
         for k in 0..frames {
-            let t = self.pos + k;
+            let t = self.pos.saturating_add(k);
             let mut bus = [[0.0f32; 2]; 4];
             let mut send = 0.0f32;
             for v in &mut self.voices {
-                if t < v.start || t >= v.start + v.frames {
+                let end = v.start.saturating_add(v.frames);
+                if t < v.start || t >= end {
                     continue;
                 }
                 let f = t - v.start;
                 let (mut a, mut b) = Self::sample(v, f);
                 // Fades.
-                let fi = (v.item.fade_in * RATE as f32) as usize;
-                let fo = (v.item.fade_out * RATE as f32) as usize;
+                let fi = fade_frames(v.item.fade_in);
+                let fo = fade_frames(v.item.fade_out);
                 let mut g = 1.0;
                 if fi > 0 && f < fi {
                     g *= f as f32 / fi as f32;
@@ -326,13 +362,14 @@ impl Mixer {
             out[2 * k] = l.clamp(-self.ceiling, self.ceiling);
             out[2 * k + 1] = r.clamp(-self.ceiling, self.ceiling);
         }
-        self.pos += frames;
+        self.pos = self.pos.saturating_add(frames);
     }
 
     /// The whole timeline, offline.
     pub fn render_all(&mut self) -> Vec<f32> {
         self.seek(0.0);
-        let n = (self.duration() * RATE as f64) as usize + RATE as usize;
+        let dur_frames = self.voices.iter().map(|v| v.start.saturating_add(v.frames)).max().unwrap_or(0);
+        let n = dur_frames.saturating_add(RATE as usize).min(MAX_RENDER_ALL_FRAMES);
         let mut out = vec![0.0; n * 2];
         for chunk in out.chunks_mut(2048) {
             self.render(chunk);
@@ -452,5 +489,21 @@ mod tests {
         let w = wav(&[0.0, 0.5, -0.5, 1.0]);
         assert_eq!(&w[..4], b"RIFF");
         assert_eq!(w.len(), 44 + 8);
+    }
+
+    #[test]
+    fn non_finite_times_do_not_overflow_or_panic() {
+        let mut inf = item(Bus::Voice, tone(0.1, 440.0, 0.2), f64::INFINITY);
+        inf.len = Some(1.0);
+        inf.fade_in = f32::INFINITY;
+        inf.fade_out = f32::NAN;
+        let mut nan = item(Bus::Voice, tone(0.1, 440.0, 0.2), f64::NAN);
+        nan.len = Some(f64::INFINITY);
+        let mut m = Mixer::new(vec![inf, nan], "room", Arc::new(Controls::default()));
+        assert!(m.duration().is_finite());
+        m.seek(f64::INFINITY);
+        let mut out = vec![0.0; 128];
+        m.render(&mut out);
+        assert!(out.iter().all(|x| x.is_finite()));
     }
 }

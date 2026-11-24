@@ -72,6 +72,9 @@ fn made_sound(id: &str) -> Option<(Arc<Vec<f32>>, bool)> {
     Some((Arc::new(v), false))
 }
 
+/// Cap single offline/span renders at 30 minutes of 48 kHz audio to prevent OOM on bad spans.
+const MAX_RENDER_FRAMES: usize = yuyue_mix::RATE as usize * 60 * 30;
+
 #[uniffi::export]
 impl DramaMixer {
     #[uniffi::constructor]
@@ -95,7 +98,9 @@ impl DramaMixer {
 
     /// The next `frames` frames, stereo interleaved.
     pub fn render(&self, frames: u32) -> Vec<f32> {
-        let mut out = vec![0.0; frames as usize * 2];
+        let count = (frames as usize).min(MAX_RENDER_FRAMES);
+        let Some(samples) = count.checked_mul(2) else { return Vec::new() };
+        let mut out = vec![0.0; samples];
         lock(&self.mixer).render(&mut out);
         out
     }
@@ -104,13 +109,27 @@ impl DramaMixer {
     /// that plays one sentence at a time. Mixed from a second before and that part thrown away,
     /// so the reverb's tail and the room tone are as they'd be had it played through.
     pub fn render_span(&self, from: f64, to: f64) -> Vec<f32> {
+        if !from.is_finite() || !to.is_finite() || to <= from {
+            return Vec::new();
+        }
+        let from = from.max(0.0);
+        if to <= from {
+            return Vec::new();
+        }
         let rate = yuyue_mix::RATE as f64;
-        let mut m = lock(&self.mixer);
+        let span_secs = to - from;
+        if !span_secs.is_finite() || span_secs <= 0.0 {
+            return Vec::new();
+        }
+        let out_frames = (span_secs * rate).min(MAX_RENDER_FRAMES as f64) as usize;
+        let Some(out_samples) = out_frames.checked_mul(2) else { return Vec::new() };
         let pre = from.clamp(0.0, super::api::WINDOW_PREROLL);
+        let pre_frames = (pre * rate).min(MAX_RENDER_FRAMES as f64) as usize;
+        let mut m = lock(&self.mixer);
         m.seek(from - pre);
-        let mut scratch = vec![0.0; (pre * rate) as usize * 2];
+        let mut scratch = vec![0.0; pre_frames * 2];
         m.render(&mut scratch);
-        let mut out = vec![0.0; ((to - from).max(0.0) * rate) as usize * 2];
+        let mut out = vec![0.0; out_samples];
         m.render(&mut out);
         out.chunks_exact(2).map(|c| ((c[0] + c[1]) * std::f32::consts::FRAC_1_SQRT_2).clamp(-1.0, 1.0)).collect()
     }
@@ -156,5 +175,17 @@ mod level_tests {
         }
         assert_eq!(level_to_target(&vec![0.0; 4800]), 0.0);
         assert_eq!(level_to_target(&tone(0.005)), 12.0);
+    }
+
+    #[test]
+    fn render_span_handles_non_finite_and_invalid_bounds() {
+        let tl = DramaTimeline { section: 0, first: 0, last: 0, items: vec![], reverb: "room".into(), duration: 0.0 };
+        let mixer = DramaMixer::new(tl, vec![]);
+        assert!(mixer.render_span(0.0, f64::INFINITY).is_empty());
+        assert!(mixer.render_span(f64::NEG_INFINITY, 0.0).is_empty());
+        assert!(mixer.render_span(f64::NAN, 1.0).is_empty());
+        assert!(mixer.render_span(f64::INFINITY, f64::INFINITY).is_empty());
+        assert!(mixer.render_span(2.0, 1.0).is_empty());
+        assert_eq!(mixer.render(0).len(), 0);
     }
 }

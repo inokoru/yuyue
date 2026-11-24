@@ -207,12 +207,16 @@ pub fn parse_pubdate_ms(raw: &str) -> i64 {
     }
     // ISO 8601: YYYY-MM-DD(THH:MM:SS)?
     if s.len() >= 10 && s.as_bytes()[4] == b'-' && s.as_bytes()[7] == b'-' {
-        if let (Ok(y), Ok(m), Ok(d)) = (s[0..4].parse::<i64>(), s[5..7].parse::<i64>(), s[8..10].parse::<i64>()) {
-            let (hh, mm, ss) = if s.len() >= 19 {
+        if let (Some(Ok(y)), Some(Ok(m)), Some(Ok(d))) = (
+            s.get(0..4).map(str::parse::<i64>),
+            s.get(5..7).map(str::parse::<i64>),
+            s.get(8..10).map(str::parse::<i64>),
+        ) {
+            let (hh, mm, ss) = if s.get(11..19).is_some_and(|t| t.is_ascii() && t.as_bytes()[2] == b':' && t.as_bytes()[5] == b':') {
                 (
-                    s[11..13].parse::<i64>().unwrap_or(0),
-                    s[14..16].parse::<i64>().unwrap_or(0),
-                    s[17..19].parse::<i64>().unwrap_or(0),
+                    s.get(11..13).and_then(|x| x.parse::<i64>().ok()).unwrap_or(0),
+                    s.get(14..16).and_then(|x| x.parse::<i64>().ok()).unwrap_or(0),
+                    s.get(17..19).and_then(|x| x.parse::<i64>().ok()).unwrap_or(0),
                 )
             } else {
                 (0, 0, 0)
@@ -682,4 +686,18 @@ fn find_rss_link_in_html(html: &str) -> Option<String> {
         start = abs + end + 1;
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_pubdate_handles_non_ascii_without_panicking() {
+        // Previously panicked slicing across multibyte UTF-8 characters.
+        assert!(parse_pubdate_ms("2026-11-24 下午3点") > 0);
+        assert!(parse_pubdate_ms("2026-11-24（周二）") > 0);
+        assert_eq!(parse_pubdate_ms("2026-11-一"), 0);
+        assert_eq!(parse_pubdate_ms("2026-11-24T12:34:56Z"), ymd_hms_to_ms(2026, 11, 24, 12, 34, 56));
+    }
 }

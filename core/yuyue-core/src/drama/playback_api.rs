@@ -615,7 +615,7 @@ impl YuyueCore {
             store.attempts.clear();
         }
         let have: HashSet<String> = have.into_iter().collect();
-        for c in m.made.into_iter().filter(|c| have.contains(&c.key)) {
+        for c in m.made.into_iter().filter(|c| have.contains(&c.key) && c.seconds.is_finite() && (0.0..=3600.0).contains(&c.seconds)) {
             store.made.insert(c.key.clone(), c);
         }
         store.fallback.extend(m.fallback);

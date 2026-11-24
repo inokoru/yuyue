@@ -8,8 +8,8 @@
 //!
 //! Only the boxes on the way are read; the audio isn't.
 
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use crate::audio::AudioMark;
@@ -38,15 +38,18 @@ struct Span {
 
 /// The first box called `name` among the boxes in `[at, at + len)` of the file.
 fn find(f: &mut File, at: u64, len: u64, name: &[u8; 4]) -> Result<Option<Span>> {
-    let end = at + len;
+    let Some(end) = at.checked_add(len) else { return Ok(None) };
     let mut pos = at;
-    while pos + 8 <= end {
+    while pos.checked_add(8).is_some_and(|e| e <= end) {
         f.seek(SeekFrom::Start(pos))?;
         let mut head = [0u8; 8];
         f.read_exact(&mut head)?;
         let mut size = u32::from_be_bytes(head[..4].try_into().unwrap()) as u64;
-        let mut header = 8;
+        let mut header = 8u64;
         if size == 1 {
+            if pos.checked_add(16).is_none_or(|e| e > end) {
+                break;
+            }
             let mut big = [0u8; 8];
             f.read_exact(&mut big)?;
             size = u64::from_be_bytes(big);
@@ -54,13 +57,14 @@ fn find(f: &mut File, at: u64, len: u64, name: &[u8; 4]) -> Result<Option<Span>>
         } else if size == 0 {
             size = end - pos;
         }
-        if size < header || pos + size > end {
+        let Some(next) = pos.checked_add(size) else { break };
+        if size < header || next > end {
             break;
         }
         if &head[4..] == name {
             return Ok(Some(Span { at: pos + header, len: size - header }));
         }
-        pos += size;
+        pos = next;
     }
     Ok(None)
 }
@@ -77,22 +81,27 @@ fn read_body(f: &mut File, s: Span) -> Result<Vec<u8>> {
 /// The boxes directly inside `data`, as (name, body).
 fn boxes(data: &[u8]) -> Vec<([u8; 4], &[u8])> {
     let mut out = Vec::new();
-    let mut pos = 0;
-    while pos + 8 <= data.len() {
+    let mut pos = 0usize;
+    while pos.checked_add(8).is_some_and(|e| e <= data.len()) {
         let mut size = u32::from_be_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
         let name: [u8; 4] = data[pos + 4..pos + 8].try_into().unwrap();
-        let mut header = 8;
-        if size == 1 && pos + 16 <= data.len() {
-            size = u64::from_be_bytes(data[pos + 8..pos + 16].try_into().unwrap()) as usize;
+        let mut header = 8usize;
+        if size == 1 {
+            if pos.checked_add(16).is_none_or(|e| e > data.len()) {
+                break;
+            }
+            let Ok(big) = usize::try_from(u64::from_be_bytes(data[pos + 8..pos + 16].try_into().unwrap())) else { break };
+            size = big;
             header = 16;
         } else if size == 0 {
             size = data.len() - pos;
         }
-        if size < header || pos + size > data.len() {
+        let Some(next) = pos.checked_add(size) else { break };
+        if size < header || next > data.len() {
             break;
         }
-        out.push((name, &data[pos + header..pos + size]));
-        pos += size;
+        out.push((name, &data[pos + header..next]));
+        pos = next;
     }
     out
 }
@@ -129,33 +138,52 @@ pub fn add_chapters(path: &Path, marks: &[AudioMark]) -> Result<()> {
 }
 
 /// Writes chapter marks (`chpl` + QuickTime `chap`) and optional iTunes metadata (`©nam`, `©alb`,
-/// `©ART`, `covr`) into an M4A/M4B.
+/// `©ART`, `covr`) into an M4A/M4B. Rewrites only from `moov` onward so large audio `mdat` boxes
+/// are never loaded into memory.
 pub fn add_chapters_and_meta(path: &Path, marks: &[AudioMark], meta: Option<&Meta>) -> Result<()> {
-    let bytes = std::fs::read(path)?;
-    let len = bytes.len();
-    // The top-level boxes, to find moov and see that it's last.
-    let mut at = 0usize;
-    let mut moov: Option<(usize, usize)> = None;
+    let mut f = OpenOptions::new().read(true).write(true).open(path)?;
+    let len = f.metadata()?.len();
+    // Scan top-level boxes via seek to locate moov and verify it's last (handling 64-bit size == 1).
+    let mut at = 0u64;
+    let mut moov: Option<(u64, u64, u64)> = None;
     let mut after_moov: Vec<[u8; 4]> = Vec::new();
-    while at + 8 <= len {
-        let size = u32::from_be_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]) as usize;
-        let size = if size == 0 { len - at } else { size };
-        if size < 8 || at + size > len {
+    while at.checked_add(8).is_some_and(|e| e <= len) {
+        f.seek(SeekFrom::Start(at))?;
+        let mut head = [0u8; 8];
+        f.read_exact(&mut head)?;
+        let mut size = u32::from_be_bytes(head[..4].try_into().unwrap()) as u64;
+        let mut header = 8u64;
+        if size == 1 {
+            if at.checked_add(16).is_none_or(|e| e > len) {
+                break;
+            }
+            let mut big = [0u8; 8];
+            f.read_exact(&mut big)?;
+            size = u64::from_be_bytes(big);
+            header = 16;
+        } else if size == 0 {
+            size = len - at;
+        }
+        let Some(next) = at.checked_add(size) else { break };
+        if size < header || next > len {
             break;
         }
-        if &bytes[at + 4..at + 8] == b"moov" {
-            moov = Some((at, size));
+        if &head[4..8] == b"moov" {
+            moov = Some((at, header, size));
             after_moov.clear();
         } else if moov.is_some() {
-            after_moov.push([bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]]);
+            after_moov.push([head[4], head[5], head[6], head[7]]);
         }
-        at += size;
+        at = next;
     }
-    let Some((m, size)) = moov else { return Err(crate::error::CoreError::Invalid { detail: "no moov".into() }) };
+    let Some((m, m_header, size)) = moov else { return Err(crate::error::CoreError::Invalid { detail: "no moov".into() }) };
     // Only the chapter titles a previous run put after moov may follow it: they're written anew.
     let ours = after_moov == [*b"mdat"];
-    if m + size != len && !ours {
+    if m.checked_add(size) != Some(len) && !ours {
         return Err(crate::error::CoreError::Invalid { detail: "moov isn't last".into() });
+    }
+    if size - m_header > 64 << 20 {
+        return Err(crate::error::CoreError::Invalid { detail: "moov too large".into() });
     }
     let wrap = |name: &[u8; 4], body: &[u8]| -> Vec<u8> {
         let mut v = ((body.len() + 8) as u32).to_be_bytes().to_vec();
@@ -182,10 +210,10 @@ pub fn add_chapters_and_meta(path: &Path, marks: &[AudioMark], meta: Option<&Met
     let chpl = wrap(b"chpl", &chpl);
     let meta_box = meta.and_then(itunes_meta);
     // moov's children, udta rebuilt with the new chpl (and meta, if given) in place of any old one.
-    let body = &bytes[m + 8..m + size];
+    let body = read_body(&mut f, Span { at: m + m_header, len: size - m_header })?;
     let mut out_body = Vec::new();
     let mut had_udta = false;
-    for (name, child_body) in boxes(body) {
+    for (name, child_body) in boxes(&body) {
         if &name == b"udta" {
             had_udta = true;
             let mut u = Vec::new();
@@ -213,17 +241,24 @@ pub fn add_chapters_and_meta(path: &Path, marks: &[AudioMark], meta: Option<&Met
     // And a QuickTime chapter track, which Apple's players read (they don't read chpl): a text
     // track of one sample a chapter, the audio track pointing at it through tref/chap, the titles
     // in a small mdat after moov.
-    let (moov_body, texts) = with_chapter_track(&out_body, marks);
+    let use_co64 = m.saturating_add(out_body.len() as u64).saturating_add(1 << 20) > u32::MAX as u64;
+    let (moov_body, texts) = with_chapter_track(&out_body, marks, use_co64);
     let mut moov = wrap(b"moov", &moov_body);
-    let text_at = (m + moov.len() + 8) as u32;
-    // The chunk offset was written as a placeholder at the end of text_trak's stco; patch the last match.
-    if let Some(i) = find_bytes_last(&moov, b"YYCH") {
-        moov[i..i + 4].copy_from_slice(&text_at.to_be_bytes());
+    let text_at = m.checked_add(moov.len() as u64).and_then(|x| x.checked_add(8)).ok_or_else(|| crate::error::CoreError::Invalid { detail: "m4b offset overflow".into() })?;
+    // The chunk offset was written as a placeholder at the end of text_trak's stco/co64; patch the last match.
+    if use_co64 {
+        if let Some(i) = find_bytes_last(&moov, b"YYCH64!!") {
+            moov[i..i + 8].copy_from_slice(&text_at.to_be_bytes());
+        }
+    } else if let Some(i) = find_bytes_last(&moov, b"YYCH") {
+        moov[i..i + 4].copy_from_slice(&(text_at as u32).to_be_bytes());
     }
-    let mut out = bytes[..m].to_vec();
-    out.extend(moov);
-    out.extend(wrap(b"mdat", &texts));
-    std::fs::write(path, out)?;
+    let mdat = wrap(b"mdat", &texts);
+    f.seek(SeekFrom::Start(m))?;
+    f.write_all(&moov)?;
+    f.write_all(&mdat)?;
+    f.set_len(m + moov.len() as u64 + mdat.len() as u64)?;
+    f.flush()?;
     Ok(())
 }
 
@@ -271,7 +306,7 @@ fn find_bytes_last(h: &[u8], n: &[u8]) -> Option<usize> {
 /// moov's children with a chapter text track added (any earlier one, and the audio track's old
 /// tref, taken out), and the samples' bytes for the mdat after moov. The chunk offset is the
 /// placeholder `YYCH`.
-fn with_chapter_track(moov: &[u8], marks: &[AudioMark]) -> (Vec<u8>, Vec<u8>) {
+fn with_chapter_track(moov: &[u8], marks: &[AudioMark], use_co64: bool) -> (Vec<u8>, Vec<u8>) {
     let wrap = |name: &[u8; 4], body: &[u8]| -> Vec<u8> {
         let mut v = ((body.len() + 8) as u32).to_be_bytes().to_vec();
         v.extend_from_slice(name);
@@ -324,9 +359,16 @@ fn with_chapter_track(moov: &[u8], marks: &[AudioMark]) -> (Vec<u8>, Vec<u8>) {
     stsz.extend(u32s(&sizes));
     let mut stsc = vec![0, 0, 0, 0, 0, 0, 0, 1];
     stsc.extend(u32s(&[1, sizes.len() as u32, 1]));
-    let mut stco = vec![0, 0, 0, 0, 0, 0, 0, 1];
-    stco.extend_from_slice(b"YYCH");
-    let stbl = [wrap(b"stsd", &stsd), wrap(b"stts", &stts), wrap(b"stsz", &stsz), wrap(b"stsc", &stsc), wrap(b"stco", &stco)].concat();
+    let chunk_offsets = if use_co64 {
+        let mut co64 = vec![0, 0, 0, 0, 0, 0, 0, 1];
+        co64.extend_from_slice(b"YYCH64!!");
+        wrap(b"co64", &co64)
+    } else {
+        let mut stco = vec![0, 0, 0, 0, 0, 0, 0, 1];
+        stco.extend_from_slice(b"YYCH");
+        wrap(b"stco", &stco)
+    };
+    let stbl = [wrap(b"stsd", &stsd), wrap(b"stts", &stts), wrap(b"stsz", &stsz), wrap(b"stsc", &stsc), chunk_offsets].concat();
     let mut dref = vec![0, 0, 0, 0, 0, 0, 0, 1];
     dref.extend(wrap(b"url ", &[0, 0, 0, 1]));
     let minf = [wrap(b"nmhd", &[0; 4]), wrap(b"dinf", &wrap(b"dref", &dref)), wrap(b"stbl", &stbl)].concat();
@@ -595,5 +637,54 @@ mod tests {
         assert!(child(ilst, b"covr").is_some());
         assert!(child(ilst, b"\xa9nam").is_some());
         let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn corrupt_64bit_box_sizes_do_not_panic_or_hang() {
+        // 1) Wrap-around in boxes(): size=1, big_size=u64::MAX after an initial 16-byte box.
+        let mut inner = vec![0, 0, 0, 16, b'f', b'r', b'e', b'e', 0, 0, 0, 0, 0, 0, 0, 0];
+        inner.extend_from_slice(&1u32.to_be_bytes());
+        inner.extend_from_slice(b"udta");
+        inner.extend_from_slice(&u64::MAX.to_be_bytes());
+        let file1 = bx(b"moov", &inner);
+        let p1 = temp(&file1);
+        assert!(chapter_marks(&p1).unwrap().is_empty());
+        let _ = std::fs::remove_file(&p1);
+
+        // 2) Wrap-around in find(): pos=16 + size=(u64::MAX - 15) wraps to 0.
+        let mut file2 = vec![0, 0, 0, 16, b'f', b't', b'y', b'p', b'M', b'4', b'B', b' ', 0, 0, 0, 0];
+        file2.extend_from_slice(&1u32.to_be_bytes());
+        file2.extend_from_slice(b"free");
+        file2.extend_from_slice(&(u64::MAX - 15).to_be_bytes());
+        let p2 = temp(&file2);
+        assert!(chapter_marks(&p2).unwrap().is_empty());
+        let _ = std::fs::remove_file(&p2);
+    }
+
+    #[test]
+    fn add_chapters_handles_64bit_mdat_box() {
+        let mut f = bx(b"ftyp", b"M4A \0\0\0\0");
+        // mdat using 64-bit extended size (size == 1).
+        let payload = [0u8; 32];
+        f.extend_from_slice(&1u32.to_be_bytes());
+        f.extend_from_slice(b"mdat");
+        f.extend_from_slice(&((16 + payload.len()) as u64).to_be_bytes());
+        f.extend_from_slice(&payload);
+        let mut mvhd = vec![0u8; 100];
+        mvhd[12..16].copy_from_slice(&1000u32.to_be_bytes());
+        mvhd[16..20].copy_from_slice(&60_000u32.to_be_bytes());
+        mvhd[96..100].copy_from_slice(&2u32.to_be_bytes());
+        let mut hdlr = vec![0u8; 8];
+        hdlr.extend_from_slice(b"soun");
+        hdlr.extend_from_slice(&[0u8; 13]);
+        let trak = bx(b"trak", &[bx(b"tkhd", &[0u8; 84]), bx(b"mdia", &bx(b"hdlr", &hdlr))].concat());
+        f.extend(bx(b"moov", &[bx(b"mvhd", &mvhd), trak].concat()));
+        let p = temp(&f);
+        let marks = vec![AudioMark { title: Some("第一章".into()), start: 0.0 }];
+        add_chapters(&p, &marks).unwrap();
+        let back = chapter_marks(&p).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].title.as_deref(), Some("第一章"));
     }
 }

@@ -48,6 +48,10 @@ fn is_cjk(c: char) -> bool {
     matches!(c, '\u{3040}'..='\u{30ff}' | '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}' | '\u{ac00}'..='\u{d7af}' | '\u{f900}'..='\u{faff}')
 }
 
+/// Upper bounds protecting `SenseVoice::new` against corrupt model metadata or vocab files.
+const MAX_LFR: usize = 64;
+const MAX_TOKENS: usize = 1_000_000;
+
 #[uniffi::export]
 impl SenseVoice {
     /// From the model's metadata (as ONNX Runtime lists it) and its `tokens.txt`.
@@ -57,9 +61,15 @@ impl SenseVoice {
         let (Some(lfr_m), Some(lfr_n)) = (num("lfr_window_size"), num("lfr_window_shift")) else {
             return Err(CoreError::Invalid { detail: "not a SenseVoice model".into() });
         };
+        if lfr_m == 0 || lfr_n == 0 || lfr_m > MAX_LFR || lfr_n > MAX_LFR {
+            return Err(CoreError::Invalid { detail: "invalid SenseVoice LFR parameters".into() });
+        }
+        let Some(dim) = BANDS.checked_mul(lfr_m) else {
+            return Err(CoreError::Invalid { detail: "SenseVoice feature dimension overflow".into() });
+        };
         let neg_mean = meta.get("neg_mean").map(|s| floats(s)).unwrap_or_default();
         let inv_stddev = meta.get("inv_stddev").map(|s| floats(s)).unwrap_or_default();
-        if neg_mean.len() != BANDS * lfr_m || inv_stddev.len() != BANDS * lfr_m {
+        if neg_mean.len() != dim || inv_stddev.len() != dim {
             return Err(CoreError::Invalid { detail: "SenseVoice statistics".into() });
         }
         let mut list: Vec<(usize, String)> = tokens
@@ -70,6 +80,9 @@ impl SenseVoice {
             })
             .collect();
         list.sort_by_key(|x| x.0);
+        if list.last().is_some_and(|x| x.0 >= MAX_TOKENS) {
+            return Err(CoreError::Invalid { detail: "SenseVoice vocabulary too large".into() });
+        }
         let mut toks = vec![String::new(); list.last().map_or(0, |x| x.0 + 1)];
         for (i, t) in list {
             toks[i] = t;
@@ -224,5 +237,23 @@ mod tests {
         assert_eq!(&a.data[BANDS..2 * BANDS], &fb[..BANDS]);
         assert_eq!(&a.data[3 * BANDS..4 * BANDS], &fb[..BANDS]);
         assert_eq!(&a.data[4 * BANDS..5 * BANDS], &fb[BANDS..2 * BANDS]);
+    }
+
+    #[test]
+    fn rejects_zero_lfr_and_huge_token_ids() {
+        let mut meta = HashMap::new();
+        meta.insert("lfr_window_size".into(), "0".into());
+        meta.insert("lfr_window_shift".into(), "6".into());
+        assert!(SenseVoice::new(meta.clone(), String::new()).is_err());
+
+        meta.insert("lfr_window_size".into(), "7".into());
+        meta.insert("lfr_window_shift".into(), "0".into());
+        meta.insert("neg_mean".into(), vec!["0"; 560].join(","));
+        meta.insert("inv_stddev".into(), vec!["1"; 560].join(","));
+        assert!(SenseVoice::new(meta.clone(), String::new()).is_err());
+
+        meta.insert("lfr_window_shift".into(), "6".into());
+        assert!(SenseVoice::new(meta.clone(), format!("bad {}", usize::MAX)).is_err());
+        assert!(SenseVoice::new(meta, "bad 1000000000".into()).is_err());
     }
 }

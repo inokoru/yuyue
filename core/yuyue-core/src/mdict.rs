@@ -210,6 +210,24 @@ fn undouble(s: &str) -> Option<String> {
     (b.len() > 2 && b[b.len() - 1] == b[b.len() - 2]).then(|| s[..s.len() - 1].to_string())
 }
 
+fn strip_prefix_case_insensitive<'a>(line: &'a str, lower_prefix: &str) -> Option<&'a str> {
+    if lower_prefix.is_empty() {
+        return None;
+    }
+    let mut want = lower_prefix.chars();
+    for (idx, ch) in line.char_indices() {
+        for lc in ch.to_lowercase() {
+            if want.next() != Some(lc) {
+                return None;
+            }
+        }
+        if want.as_str().is_empty() {
+            return Some(&line[idx + ch.len_utf8()..]);
+        }
+    }
+    None
+}
+
 /// The entry as one line of text: tags out, the headword and its repeats dropped from the front,
 /// cut at about 80 characters.
 fn summarize(html: &str, headword: &str) -> String {
@@ -230,8 +248,12 @@ fn summarize(html: &str, headword: &str) -> String {
     let text = text.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'");
     let mut line = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let lower = headword.to_lowercase();
-    while line.to_lowercase().starts_with(&lower) && !lower.is_empty() {
-        line = line[headword.len().min(line.len())..].trim_start().to_string();
+    while let Some(rest) = strip_prefix_case_insensitive(&line, &lower) {
+        let trimmed = rest.trim_start();
+        if trimmed.len() >= line.len() {
+            break;
+        }
+        line = trimmed.to_string();
     }
     if line.chars().count() > 80 {
         line = line.chars().take(78).collect::<String>() + "…";
@@ -243,7 +265,7 @@ fn strip_between(s: &str, open: &str, close: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
     loop {
-        let lower = rest.to_lowercase();
+        let lower = rest.to_ascii_lowercase();
         match lower.find(open) {
             Some(i) => {
                 out.push_str(&rest[..i]);
@@ -280,6 +302,11 @@ struct Reader<'a> {
     at: usize,
 }
 
+/// Hard ceiling for a single unpacked MDict block (protects against corrupt headers and zlib bombs).
+const MAX_BLOCK_UNPACKED: usize = 64 << 20;
+const MAX_PREALLOC_BLOCKS: usize = 65_536;
+const MAX_PREALLOC_BYTES: usize = 1 << 20;
+
 impl<'a> Reader<'a> {
     fn take(&mut self, n: usize) -> Result<&'a [u8]> {
         let end = self.at.checked_add(n).filter(|e| *e <= self.data.len()).ok_or_else(|| bad("the file ends too early"))?;
@@ -295,6 +322,10 @@ impl<'a> Reader<'a> {
             u32::from_be_bytes(self.take(4)?.try_into().unwrap()) as u64
         })
     }
+
+    fn number_usize(&mut self, wide: bool) -> Result<usize> {
+        usize::try_from(self.number(wide)?).map_err(|_| bad("size overflows platform address space"))
+    }
 }
 
 fn bad(why: &str) -> CoreError {
@@ -307,7 +338,7 @@ pub(crate) fn read_mdx(path: &Path, mut each: impl FnMut(&str, &str) -> Result<(
     let mut r = Reader { data: &data, at: 0 };
 
     // The header: XML in UTF-16LE.
-    let header_len = r.number(false)? as usize;
+    let header_len = r.number_usize(false)?;
     let header_bytes = r.take(header_len)?;
     r.take(4)?;
     let header_text = String::from_utf16_lossy(&header_bytes.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).collect::<Vec<_>>());
@@ -341,13 +372,13 @@ pub(crate) fn read_mdx(path: &Path, mut each: impl FnMut(&str, &str) -> Result<(
     };
 
     // The keyword section.
-    let num_key_blocks = r.number(wide)?;
+    let num_key_blocks = r.number_usize(wide)?;
     let _num_entries = r.number(wide)?;
     if wide {
         r.number(wide)?; // the block index's size unpacked
     }
-    let info_size = r.number(wide)? as usize;
-    let key_blocks_size = r.number(wide)? as usize;
+    let info_size = r.number_usize(wide)?;
+    let key_blocks_size = r.number_usize(wide)?;
     if wide {
         r.take(4)?;
     }
@@ -364,8 +395,9 @@ pub(crate) fn read_mdx(path: &Path, mut each: impl FnMut(&str, &str) -> Result<(
     let mut keys: Vec<(u64, String)> = Vec::new();
     let mut at = 0usize;
     for (packed, unpacked) in sizes {
-        let block = key_blocks.get(at..at + packed).ok_or_else(|| bad("a key block runs past the end"))?;
-        at += packed;
+        let end = at.checked_add(packed).ok_or_else(|| bad("a key block size overflows"))?;
+        let block = key_blocks.get(at..end).ok_or_else(|| bad("a key block runs past the end"))?;
+        at = end;
         let raw = unpack(block, Some(unpacked))?;
         let mut k = Reader { data: &raw, at: 0 };
         while k.at < raw.len() {
@@ -376,13 +408,17 @@ pub(crate) fn read_mdx(path: &Path, mut each: impl FnMut(&str, &str) -> Result<(
     }
 
     // The record section.
-    let num_record_blocks = r.number(wide)?;
+    let num_record_blocks = r.number_usize(wide)?;
     let _ = r.number(wide)?;
     let _ = r.number(wide)?;
     let _ = r.number(wide)?;
-    let mut blocks = Vec::with_capacity(num_record_blocks as usize);
+    let entry_bytes = if wide { 16 } else { 8 };
+    if num_record_blocks > r.data.len().saturating_sub(r.at) / entry_bytes {
+        return Err(bad("record block count exceeds file size"));
+    }
+    let mut blocks = Vec::with_capacity(num_record_blocks.min(MAX_PREALLOC_BLOCKS));
     for _ in 0..num_record_blocks {
-        blocks.push((r.number(wide)? as usize, r.number(wide)? as usize));
+        blocks.push((r.number_usize(wide)?, r.number_usize(wide)?));
     }
     // The entries' text is one stream across the blocks: walk the keys in order through it.
     let mut key_i = 0usize;
@@ -391,17 +427,19 @@ pub(crate) fn read_mdx(path: &Path, mut each: impl FnMut(&str, &str) -> Result<(
     for (packed, unpacked) in blocks {
         let raw = unpack(r.take(packed)?, Some(unpacked))?;
         let mut buf = std::mem::take(&mut carry);
-        let buf_start = stream_start - buf.len() as u64;
+        let buf_start = stream_start.saturating_sub(buf.len() as u64);
         buf.extend_from_slice(&raw);
-        stream_start += raw.len() as u64;
+        stream_start = stream_start.checked_add(raw.len() as u64).ok_or_else(|| bad("record stream overflows"))?;
         while key_i < keys.len() {
             let (offset, ref word) = keys[key_i];
             let end = keys.get(key_i + 1).map(|k| k.0).unwrap_or(stream_start);
             if end > stream_start {
                 break;
             }
-            let (s, e) = ((offset.saturating_sub(buf_start)) as usize, (end.saturating_sub(buf_start)) as usize);
-            if let Some(bytes) = buf.get(s..e.max(s)) {
+            if let (Ok(s), Ok(e)) = (
+                usize::try_from(offset.saturating_sub(buf_start)),
+                usize::try_from(end.saturating_sub(buf_start)),
+            ) && let Some(bytes) = buf.get(s..e.max(s)) {
                 let body = decode(bytes, encoding);
                 each(word, body.trim_end_matches('\0').trim_end())?;
             }
@@ -409,28 +447,36 @@ pub(crate) fn read_mdx(path: &Path, mut each: impl FnMut(&str, &str) -> Result<(
         }
         // What the next entry has begun in this block goes on into the next.
         if let Some(&(offset, _)) = keys.get(key_i) {
-            let from = (offset.saturating_sub(buf_start)) as usize;
-            carry = buf.get(from..).map(|b| b.to_vec()).unwrap_or_default();
+            carry = usize::try_from(offset.saturating_sub(buf_start))
+                .ok()
+                .and_then(|from| buf.get(from..))
+                .map(|b| b.to_vec())
+                .unwrap_or_default();
         }
     }
     Ok(Header { title: attr("Title") })
 }
 
 /// Each key block's packed and unpacked size, from the block index.
-fn key_block_sizes(info: &[u8], count: u64, wide: bool, encoding: Encoding) -> Result<Vec<(usize, usize)>> {
+fn key_block_sizes(info: &[u8], count: usize, wide: bool, encoding: Encoding) -> Result<Vec<(usize, usize)>> {
     let mut r = Reader { data: info, at: 0 };
     let unit = if encoding == Encoding::Utf16 { 2 } else { 1 };
     let term = if wide { 1 } else { 0 };
-    let mut out = Vec::with_capacity(count as usize);
+    let min_entry = if wide { 8 + 2 + 2 + 16 } else { 4 + 1 + 1 + 8 };
+    if count > info.len() / min_entry {
+        return Err(bad("key block count exceeds index size"));
+    }
+    let mut out = Vec::with_capacity(count.min(MAX_PREALLOC_BLOCKS));
     for _ in 0..count {
         r.number(wide)?; // entries in the block
         for _ in 0..2 {
             // its first and last headword
             let len = if wide { u16::from_be_bytes(r.take(2)?.try_into().unwrap()) as usize } else { r.take(1)?[0] as usize };
-            r.take((len + term) * unit)?;
+            let bytes = len.checked_add(term).and_then(|n| n.checked_mul(unit)).ok_or_else(|| bad("headword length overflows"))?;
+            r.take(bytes)?;
         }
-        let packed = r.number(wide)? as usize;
-        let unpacked = r.number(wide)? as usize;
+        let packed = r.number_usize(wide)?;
+        let unpacked = r.number_usize(wide)?;
         out.push((packed, unpacked));
     }
     Ok(out)
@@ -441,13 +487,31 @@ fn unpack(block: &[u8], unpacked: Option<usize>) -> Result<Vec<u8>> {
     if block.len() < 8 {
         return Err(bad("a block is too short"));
     }
+    if let Some(u) = unpacked && u > MAX_BLOCK_UNPACKED {
+        return Err(bad("a block declares too much unpacked data"));
+    }
     let body = &block[8..];
     match block[0] {
-        0 => Ok(body.to_vec()),
-        1 => lzo1x::decompress(body, unpacked.unwrap_or(body.len() * 8)).map_err(|_| bad("an LZO block didn't unpack")),
+        0 => {
+            if body.len() > MAX_BLOCK_UNPACKED {
+                return Err(bad("a block is too large"));
+            }
+            Ok(body.to_vec())
+        }
+        1 => {
+            let target = unpacked.unwrap_or_else(|| body.len().saturating_mul(8)).min(MAX_BLOCK_UNPACKED);
+            lzo1x::decompress(body, target).map_err(|_| bad("an LZO block didn't unpack"))
+        }
         2 => {
-            let mut out = Vec::with_capacity(unpacked.unwrap_or(body.len() * 4));
-            flate2::read::ZlibDecoder::new(body).read_to_end(&mut out).map_err(|_| bad("a zlib block didn't unpack"))?;
+            let cap = unpacked.unwrap_or_else(|| body.len().saturating_mul(4)).min(MAX_PREALLOC_BYTES);
+            let mut out = Vec::with_capacity(cap);
+            flate2::read::ZlibDecoder::new(body)
+                .take((MAX_BLOCK_UNPACKED as u64).saturating_add(1))
+                .read_to_end(&mut out)
+                .map_err(|_| bad("a zlib block didn't unpack"))?;
+            if out.len() > MAX_BLOCK_UNPACKED {
+                return Err(bad("a zlib block unpacks past the limit"));
+            }
             Ok(out)
         }
         _ => Err(bad("a block is packed in a way this app doesn't know")),
@@ -638,5 +702,39 @@ mod tests {
         assert!(core.look_up("zebra".into()).unwrap().is_none());
         core.remove_dictionary(info.id).unwrap();
         assert!(core.dictionaries().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn summarize_and_strip_between_handle_case_length_changes() {
+        // 'İ' (2B -> 3B) and 'K' (3B -> 1B) previously shifted byte offsets and panicked.
+        assert_eq!(strip_between("İ<style>a</style>中", "<style", "</style>"), "İ中");
+        assert_eq!(strip_between("K中<STYLE>x</STYLE>文", "<style", "</style>"), "K中文");
+        assert_eq!(summarize("k中文", "K"), "中文");
+        assert_eq!(summarize("ß中", "ẞ"), "中");
+        assert_eq!(summarize("i\u{0307} 释义", "İ"), "释义");
+    }
+
+    #[test]
+    fn corrupt_mdx_headers_and_zlib_bombs_return_errors() {
+        // Huge key block count fails cleanly instead of capacity-overflow aborting.
+        assert!(key_block_sizes(&[0u8; 32], usize::MAX / 2, true, Encoding::Utf8).is_err());
+
+        // Huge declared unpacked length fails cleanly.
+        let mut raw_block = vec![2u8, 0, 0, 0, 0, 0, 0, 0];
+        let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(b"hello").unwrap();
+        raw_block.extend_from_slice(&enc.finish().unwrap());
+        assert!(unpack(&raw_block, Some(MAX_BLOCK_UNPACKED + 1)).is_err());
+
+        // Uncapped zlib bomb (66 MiB of zeros compresses to ~66 KB) must fail instead of OOMing.
+        let mut bomb = vec![2u8, 0, 0, 0, 0, 0, 0, 0];
+        let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+        let chunk = vec![0u8; 1 << 20];
+        for _ in 0..66 {
+            enc.write_all(&chunk).unwrap();
+        }
+        bomb.extend_from_slice(&enc.finish().unwrap());
+        assert!(unpack(&bomb, None).is_err());
     }
 }

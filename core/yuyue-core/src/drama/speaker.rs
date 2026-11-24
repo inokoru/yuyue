@@ -26,7 +26,10 @@ pub struct SpeakerFeatures {
 /// Samples at `rate` to 16 kHz, linear in between (low-passed first by averaging when coming
 /// down, enough for a voice's character).
 pub fn to_16k(samples: &[f32], rate: u32) -> Vec<f32> {
-    if rate == RATE || samples.is_empty() {
+    if rate == 0 || samples.is_empty() {
+        return Vec::new();
+    }
+    if rate == RATE {
         return samples.to_vec();
     }
     let step = rate as f64 / RATE as f64;
