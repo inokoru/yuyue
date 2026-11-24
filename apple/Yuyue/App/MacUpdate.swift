@@ -149,6 +149,10 @@ struct MacUpdateSettings: View {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
     }
 
+    private var currentEdition: Int? {
+        UpdateRules.edition(of: UpdateCenter.current, in: releases)
+    }
+
     var body: some View {
         let minTrackHeight = max(400, windowHeight - 110)
         let trackHeight = max(minTrackHeight, rightHeight)
@@ -335,14 +339,22 @@ struct MacUpdateSettings: View {
         let isEn = AppLanguage.running == .en
         return HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("第 \(UpdateCenter.current) 版")
-                        .font(isEn ? .system(size: 17, weight: .semibold, design: .serif) : YYUI.serif(17, .semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(YYColor.t1)
-                    Text(verbatim: "build \(buildNumber)")
-                        .font(.system(size: 11.5, design: .monospaced))
-                        .foregroundStyle(YYColor.t3)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    if let edition = currentEdition {
+                        Text("第 \(edition) 版")
+                            .font(isEn ? .system(size: 17, weight: .semibold, design: .serif) : YYUI.serif(17, .semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(YYColor.t1)
+                        Text(verbatim: "v\(UpdateCenter.current) (\(buildNumber))")
+                            .font(.system(size: 12, design: .monospaced))
+                            .monospacedDigit()
+                            .foregroundStyle(YYColor.t3)
+                    } else {
+                        Text(verbatim: "v\(UpdateCenter.current) (\(buildNumber))")
+                            .font(isEn ? .system(size: 17, weight: .semibold, design: .serif) : YYUI.serif(17, .semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(YYColor.t1)
+                    }
                 }
                 if center.phase != .release {
                     versionStatusLine
@@ -703,12 +715,24 @@ private struct ChangelogSheetContent: View {
     var body: some View {
         let isEn = AppLanguage.running == .en
         if let offer, releases.first?.version != offer.display {
+            let offerEdition = offer.edition ?? (releases.isEmpty ? nil : releases.count + 1)
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("第 \(offer.display) 版")
-                        .font(isEn ? .system(size: 16, weight: .semibold, design: .serif) : YYUI.serif(16, .semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(YYColor.t1)
+                    if let offerEdition {
+                        Text("第 \(offerEdition) 版")
+                            .font(isEn ? .system(size: 16, weight: .semibold, design: .serif) : YYUI.serif(16, .semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(YYColor.t1)
+                        Text(verbatim: "v\(offer.display)")
+                            .font(.system(size: 11.5, design: .monospaced))
+                            .monospacedDigit()
+                            .foregroundStyle(YYColor.t3)
+                    } else {
+                        Text(verbatim: "v\(offer.display)")
+                            .font(isEn ? .system(size: 16, weight: .semibold, design: .serif) : YYUI.serif(16, .semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(YYColor.t1)
+                    }
                     badge(String(localized: "有更新"))
                     Spacer()
                     if let day = UpdateRules.monthDay(offer.publishedAt) {
@@ -718,14 +742,19 @@ private struct ChangelogSheetContent: View {
                 UpdateNotesCard(offer: offer)
             }
         }
-        ForEach(Array(releases.enumerated()), id: \.offset) { _, release in
+        ForEach(Array(releases.enumerated()), id: \.offset) { index, release in
+            let edition = releases.count - index
             let items = MacUpdateSettings.notes(for: release)
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("第 \(release.version) 版")
+                    Text("第 \(edition) 版")
                         .font(isEn ? .system(size: 16, weight: .semibold, design: .serif) : YYUI.serif(16, .semibold))
                         .monospacedDigit()
                         .foregroundStyle(YYColor.t1)
+                    Text(verbatim: "v\(release.version)")
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(YYColor.t3)
                     if release.version == UpdateCenter.current {
                         badge(String(localized: "当前版本"))
                     }

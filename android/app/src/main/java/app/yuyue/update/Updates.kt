@@ -48,7 +48,7 @@ enum class UpdateChannel(val key: String) {
 }
 
 /** A newer version and the notes of every version since this one, newest first. */
-data class UpdateOffer(val info: UpdateInfo, val releases: List<Release>) {
+data class UpdateOffer(val info: UpdateInfo, val releases: List<Release>, val edition: Int? = null) {
     val display get() = info.version
     val size get() = info.size.toLong()
 }
@@ -85,6 +85,7 @@ object Updates {
     private const val AUTO_KEY = "update.auto"
     private const val CHANNEL_KEY = "update.channel"
     private const val CHECKED_KEY = "update.checked"
+    private const val CHECKED_BUILD_KEY = "update.checkedBuild"
     private const val SKIPPED_KEY = "update.skipped"
     private const val REMIND_VERSION_KEY = "update.remindVersion"
     private const val REMIND_UNTIL_KEY = "update.remindUntil"
@@ -96,6 +97,8 @@ object Updates {
     private const val INSTALL_CHANNEL_ID = "yuyue.update.install"
     private const val INSTALL_NOTIFY_ID = 4201
 
+    private val sameBuild = Prefs.long(CHECKED_BUILD_KEY) == BuildConfig.VERSION_CODE.toLong()
+
     var phase by mutableStateOf<UpdatePhase>(UpdatePhase.Idle)
         private set
     var offer by mutableStateOf<UpdateOffer?>(null)
@@ -104,17 +107,28 @@ object Updates {
         private set
     var channel by mutableStateOf(UpdateChannel.entries.firstOrNull { it.key == Prefs.string(CHANNEL_KEY) } ?: UpdateChannel.Stable)
         private set
-    private var skipped by mutableStateOf(Prefs.string(SKIPPED_KEY).ifEmpty { null })
-    private var remindVersion by mutableStateOf(Prefs.string(REMIND_VERSION_KEY).ifEmpty { null })
+    private var skipped by mutableStateOf(Prefs.string(SKIPPED_KEY).takeIf { it.isNotEmpty() && it != BuildConfig.VERSION_NAME })
+    private var remindVersion by mutableStateOf(Prefs.string(REMIND_VERSION_KEY).takeIf { it.isNotEmpty() && it != BuildConfig.VERSION_NAME })
     /** Milliseconds. */
-    var remindUntil by mutableStateOf(Prefs.long(REMIND_UNTIL_KEY))
+    var remindUntil by mutableStateOf(if (remindVersion != null) Prefs.long(REMIND_UNTIL_KEY) else null)
         private set
-    var lastSuccess by mutableStateOf(Prefs.long(LAST_SUCCESS_KEY))
+    var lastSuccess by mutableStateOf(if (sameBuild) Prefs.long(LAST_SUCCESS_KEY) else null)
         private set
-    var lastSuccessAuto by mutableStateOf(Prefs.bool(LAST_AUTO_KEY, false))
+    var lastSuccessAuto by mutableStateOf(sameBuild && Prefs.bool(LAST_AUTO_KEY, false))
         private set
-    var lastWasCurrent by mutableStateOf(Prefs.bool(LAST_CURRENT_KEY, false))
+    var lastWasCurrent by mutableStateOf(sameBuild && Prefs.bool(LAST_CURRENT_KEY, false))
         private set
+
+    init {
+        if (!sameBuild) {
+            listOf(CHECKED_KEY, LAST_SUCCESS_KEY, LAST_AUTO_KEY, LAST_CURRENT_KEY).forEach { Prefs.set(it, null) }
+        }
+        if (skipped == null && Prefs.string(SKIPPED_KEY).isNotEmpty()) Prefs.set(SKIPPED_KEY, null)
+        if (remindVersion == null && Prefs.string(REMIND_VERSION_KEY).isNotEmpty()) {
+            Prefs.set(REMIND_VERSION_KEY, null)
+            Prefs.set(REMIND_UNTIL_KEY, null)
+        }
+    }
     private var apk: File? = null
     private val installing = AtomicBoolean(false)
     private val pendingConfirmRef = AtomicReference<Intent?>(null)
@@ -166,7 +180,11 @@ object Updates {
         if (!byHand) {
             if (!autoOn) return
             val last = Prefs.long(CHECKED_KEY) ?: 0L
-            if (System.currentTimeMillis() - last < DAY) { if (phase == UpdatePhase.Idle && lastSuccess != null) phase = UpdatePhase.Current; return }
+            val staleOffer = lastSuccess != null && !lastWasCurrent
+            if (!staleOffer && System.currentTimeMillis() - last < DAY) {
+                if (phase == UpdatePhase.Idle && lastSuccess != null) phase = UpdatePhase.Current
+                return
+            }
         }
         if (phase is UpdatePhase.Downloading || phase == UpdatePhase.Checking) return
         val before = phase
@@ -180,6 +198,7 @@ object Updates {
             lastSuccess = now
             lastSuccessAuto = !byHand
             lastWasCurrent = found == null
+            Prefs.set(CHECKED_BUILD_KEY, BuildConfig.VERSION_CODE.toLong())
             Prefs.set(LAST_SUCCESS_KEY, now)
             Prefs.set(LAST_AUTO_KEY, !byHand)
             Prefs.set(LAST_CURRENT_KEY, found == null)
@@ -231,11 +250,13 @@ object Updates {
         val info = uniffi.yuyue_core.parseUpdate(json)
         if (info.code.toLong() <= BuildConfig.VERSION_CODE.toLong()) return null
         val log = runCatching { if (info.changelog.isNotEmpty()) get(info.changelog) else "" }.getOrDefault("")
+        val all = if (log.isNotEmpty()) uniffi.yuyue_core.parseChangelog(log) else emptyList()
         val between = uniffi.yuyue_core.releasesAfter(log, BuildConfig.VERSION_NAME)
         val releases = if (between.any { it.version == info.version }) between else listOf(uniffi.yuyue_core.updateRelease(info)) + between
+        val edition = UpdateVerifier.editionOf(info.version, all.map { it.version }) { a, b -> uniffi.yuyue_core.compareVersions(a, b) }
         val file = apkFile(context, info)
         val ready = UpdateVerifier.validateCachedApk(file, info.size.toLong(), info.sha256) { sameSigner(context, it) }
-        return UpdateOffer(info, releases) to file.takeIf { ready }
+        return UpdateOffer(info, releases, edition) to file.takeIf { ready }
     }
 
     fun skip() {
@@ -266,7 +287,7 @@ object Updates {
         val at = lastSuccess ?: return ""
         val whenText = phrase(at)
         if (lastWasCurrent) return t("已是最新 · %s 检查过", whenText)
-        return if (lastSuccessAuto) "$whenText · ${t("自动")}" else whenText
+        return if (lastSuccessAuto) t("上次检查：%@ · 自动", whenText) else t("上次检查：%@", whenText)
     }
 
     fun offlineFine(): String {
@@ -502,6 +523,19 @@ object Updates {
 /** Pure APK integrity & signer verification helpers (kept free of Prefs/Android init for JVM tests). */
 internal object UpdateVerifier {
     enum class InstallCheckResult { Ok, MissingOrCorrupt, WrongSigner }
+
+    /** 1-based release ordinal (oldest = 1) for `version` in a newest-first changelog. */
+    fun editionOf(
+        version: String,
+        changelogVersions: List<String>,
+        compare: (String, String) -> Int,
+    ): Int? {
+        if (changelogVersions.isEmpty()) return null
+        val idx = changelogVersions.indexOfFirst { it == version }
+        if (idx >= 0) return changelogVersions.size - idx
+        if (compare(version, changelogVersions.first()) > 0) return changelogVersions.size + 1
+        return null
+    }
 
     fun sha256(f: File): String {
         val md = MessageDigest.getInstance("SHA-256")

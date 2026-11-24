@@ -142,6 +142,7 @@ public sealed class DevicePrefs
     public string UpdateRemindVersion { get; set; } = "";
     public long UpdateRemindUntilMs { get; set; }
     public long? UpdateLastCheckedMs { get; set; }
+    public ulong? UpdateCheckedBuild { get; set; }
     public string FeedbackDraftText { get; set; } = "";
     public List<string> FeedbackOfflineQueue { get; set; } = [];
     public Dictionary<string, long[]> SleepReturnSpots { get; set; } = new();

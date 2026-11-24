@@ -108,7 +108,11 @@ struct UpdateNotesCard: View {
             UpdateReleaseLink(url: offer.htmlURL)
                 .padding(.top, YYUI.s(12))
             HStack {
-                Text("语阅 · 第 \(offer.display) 版")
+                if let edition = offer.edition {
+                    Text("语阅 · 第 \(edition) 版 · v\(offer.display)")
+                } else {
+                    Text("语阅 · v\(offer.display)")
+                }
                 Spacer()
                 Text(UpdateRules.monthDay(offer.publishedAt) ?? "")
             }

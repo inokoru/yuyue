@@ -150,6 +150,9 @@ public static partial class L10n
         m = RxPageSingle().Match(s);
         if (m.Success) return $"Page {m.Groups[1].Value}";
 
+        m = RxEdition().Match(s);
+        if (m.Success) return $"Edition {m.Groups[1].Value}";
+
         m = RxPagesTotal().Match(s);
         if (m.Success) return m.Groups[1].Value == "1" ? "1 page" : $"{m.Groups[1].Value} pages";
 
@@ -530,6 +533,9 @@ public static partial class L10n
 
     [GeneratedRegex(@"^第\s*(\d+)\s*页$")]
     private static partial Regex RxPageSingle();
+
+    [GeneratedRegex(@"^第\s*(\d+)\s*版$")]
+    private static partial Regex RxEdition();
 
     [GeneratedRegex(@"^(\d+)\s*页$")]
     private static partial Regex RxPagesTotal();

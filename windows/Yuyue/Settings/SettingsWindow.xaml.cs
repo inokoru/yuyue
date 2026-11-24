@@ -6725,15 +6725,17 @@ public sealed partial class SettingsWindow : Window
             return $"{when} 检查过";
         }
 
+        bool checkedCurrentBuild = _library.Prefs.UpdateCheckedBuild == UpdateAndFeedbackService.CurrentBuild &&
+            _library.Prefs.UpdateLastCheckedMs is > 0;
         string initialStatus = _library.Updates.LatestOffer is { } off
             ? $"发现新版本 v{off.Version}"
-            : (_library.Prefs.UpdateLastCheckedMs is > 0 ? $"已是最新 · {FormatLastChecked()}" : "尚未检查更新");
+            : (checkedCurrentBuild ? $"已是最新 · {FormatLastChecked()}" : "尚未检查更新");
 
         var statusLine = new TextBlock
         {
             Text = initialStatus,
             FontSize = 12,
-            Foreground = ThemeHelper.Brush(_library.Updates.LatestOffer is not null ? tint.Accent : (_library.Prefs.UpdateLastCheckedMs is > 0 ? p.Ok : p.T3)),
+            Foreground = ThemeHelper.Brush(_library.Updates.LatestOffer is not null ? tint.Accent : (checkedCurrentBuild ? p.Ok : p.T3)),
         };
         var checkBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "检查更新" };
         checkBtn.Click += async (_, _) =>
@@ -6749,11 +6751,20 @@ public sealed partial class SettingsWindow : Window
             finally { checkBtn.IsEnabled = true; }
         };
 
+        Release[] releases = _library.Updates.LoadBundledChangelog();
+        int? currentEdition = UpdateAndFeedbackService.ResolveEdition(UpdateAndFeedbackService.CurrentVersion, releases);
         var verRow = new Grid { Padding = new Thickness(16, 14, 16, 14) };
         var verLeft = new StackPanel { Spacing = 3 };
-        var verHead = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        verHead.Children.Add(new TextBlock { Text = $"第 {UpdateAndFeedbackService.CurrentVersion} 版", FontFamily = serif, FontSize = 17, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
-        verHead.Children.Add(new TextBlock { Text = $"build {UpdateAndFeedbackService.CurrentBuild}", FontFamily = new FontFamily(YYFontFamily.Mono.WindowsFamily()), FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 2) });
+        var verHead = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        if (currentEdition is int ed)
+        {
+            verHead.Children.Add(new TextBlock { Text = $"第 {ed} 版", FontFamily = serif, FontSize = 17, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
+            verHead.Children.Add(new TextBlock { Text = $"v{UpdateAndFeedbackService.CurrentVersion} ({UpdateAndFeedbackService.CurrentBuild})", FontFamily = new FontFamily(YYFontFamily.Mono.WindowsFamily()), FontSize = 12, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 2) });
+        }
+        else
+        {
+            verHead.Children.Add(new TextBlock { Text = $"v{UpdateAndFeedbackService.CurrentVersion} ({UpdateAndFeedbackService.CurrentBuild})", FontFamily = serif, FontSize = 17, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
+        }
         verLeft.Children.Add(verHead);
         verLeft.Children.Add(statusLine);
         verRow.Children.Add(verLeft);
@@ -6829,9 +6840,6 @@ public sealed partial class SettingsWindow : Window
             return b;
         }
 
-        string changelogPath = Path.Combine(AppContext.BaseDirectory, "Assets", "Shared", "CHANGELOG.md");
-        Release[] releases = [];
-        try { if (File.Exists(changelogPath)) releases = YuyueCoreMethods.ParseChangelog(File.ReadAllText(changelogPath)); } catch { }
         int firstCount = releases.Length > 0 ? Math.Max(1, (releases[0].NotesZh.Length > 0 ? releases[0].NotesZh : releases[0].NotesEn).Length) : 1;
         string logSummary = releases.Length > 0 ? $"{releases[0].Date.Replace('-', '.')} · {firstCount} 项" : "2026.11.23 · 1 项";
 

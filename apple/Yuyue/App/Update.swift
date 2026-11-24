@@ -32,14 +32,17 @@ struct UpdateNotes: Equatable {
 struct UpdateOffer: Equatable, Identifiable {
     var id: String { display }
     var display: String
+    /// 1-based release ordinal from the changelog (e.g. 0.1.0 → 1, 0.1.2 → 3), when known.
+    var edition: Int?
     var publishedAt: String?
     var htmlURL: URL
     var notes: UpdateNotes
     /// Android's; the Mac's comes in Sparkle's appcast.
     var assetSize: Int64
 
-    init(info: UpdateInfo, releases: [Release]) {
+    init(info: UpdateInfo, releases: [Release], edition: Int? = nil) {
         display = info.version
+        self.edition = edition
         publishedAt = info.date.isEmpty ? nil : info.date
         htmlURL = URL(string: info.page) ?? URL(string: "https://github.com/\(UpdateRules.repo)/releases")!
         assetSize = Int64(info.size)
@@ -94,6 +97,18 @@ enum UpdateRules {
         let elapsed = max(0, now.timeIntervalSince(anchor))
         return max(0, Int(signDays / 86_400) - Int(elapsed / 86_400))
     }
+
+    /// 1-based release ordinal (oldest = 1) for `version` in a newest-first changelog.
+    static func edition(of version: String, in releases: [Release]) -> Int? {
+        guard !releases.isEmpty else { return nil }
+        if let idx = releases.firstIndex(where: { $0.version == version }) {
+            return releases.count - idx
+        }
+        if compareVersions(a: version, b: releases[0].version) > 0 {
+            return releases.count + 1
+        }
+        return nil
+    }
 }
 
 private enum UpdateKeys {
@@ -102,6 +117,7 @@ private enum UpdateKeys {
     static let remindVersion = "update.remindVersion"
     static let remindUntil = "update.remindUntil"
     static let checked = "update.checked"
+    static let checkedBuild = "update.checkedBuild"
     static let lastSuccess = "update.lastSuccess"
     static let lastSuccessAuto = "update.lastSuccessAuto"
     static let lastWasCurrent = "update.lastWasCurrent"
@@ -157,12 +173,34 @@ final class UpdateCenter {
         let d = UserDefaults.standard
         autoOn = d.object(forKey: UpdateKeys.auto) as? Bool ?? true
         channel = d.string(forKey: UpdateKeys.channel).flatMap(UpdateChannel.init(rawValue:)) ?? .stable
-        skipped = d.string(forKey: UpdateKeys.skipped)
-        remindVersion = d.string(forKey: UpdateKeys.remindVersion)
-        if let t = d.object(forKey: UpdateKeys.remindUntil) as? Double { remindUntil = Date(timeIntervalSince1970: t) }
-        if let t = d.object(forKey: UpdateKeys.lastSuccess) as? Double, t > 0 { lastSuccess = Date(timeIntervalSince1970: t) }
-        lastSuccessAuto = d.bool(forKey: UpdateKeys.lastSuccessAuto)
-        lastWasCurrent = d.bool(forKey: UpdateKeys.lastWasCurrent)
+        let savedSkipped = d.string(forKey: UpdateKeys.skipped)
+        if savedSkipped == Self.current {
+            d.removeObject(forKey: UpdateKeys.skipped)
+            skipped = nil
+        } else {
+            skipped = savedSkipped
+        }
+        let savedRemind = d.string(forKey: UpdateKeys.remindVersion)
+        if savedRemind == Self.current {
+            d.removeObject(forKey: UpdateKeys.remindVersion)
+            d.removeObject(forKey: UpdateKeys.remindUntil)
+            remindVersion = nil
+            remindUntil = nil
+        } else {
+            remindVersion = savedRemind
+            if let t = d.object(forKey: UpdateKeys.remindUntil) as? Double { remindUntil = Date(timeIntervalSince1970: t) }
+        }
+        let recordedBuild = (d.object(forKey: UpdateKeys.checkedBuild) as? NSNumber)?.int64Value
+        if recordedBuild == Self.build {
+            if let t = d.object(forKey: UpdateKeys.lastSuccess) as? Double, t > 0 { lastSuccess = Date(timeIntervalSince1970: t) }
+            lastSuccessAuto = d.bool(forKey: UpdateKeys.lastSuccessAuto)
+            lastWasCurrent = d.bool(forKey: UpdateKeys.lastWasCurrent)
+        } else {
+            // After an upgrade (or before checkedBuild was tracked), drop the older build's check result.
+            for key in [UpdateKeys.checked, UpdateKeys.lastSuccess, UpdateKeys.lastSuccessAuto, UpdateKeys.lastWasCurrent] {
+                d.removeObject(forKey: key)
+            }
+        }
         if let t = d.object(forKey: UpdateKeys.signAnchor) as? Double { signAnchor = Date(timeIntervalSince1970: t) }
     }
 
@@ -230,7 +268,8 @@ final class UpdateCenter {
         if signAnchor == nil { resignNoted() }
         #endif
         let last = UserDefaults.standard.object(forKey: UpdateKeys.checked) as? Date
-        if autoOn, last.map({ Date().timeIntervalSince($0) >= UpdateRules.checkInterval }) ?? true {
+        let staleOffer = lastSuccess != nil && !lastWasCurrent
+        if autoOn, staleOffer || (last.map({ Date().timeIntervalSince($0) >= UpdateRules.checkInterval }) ?? true) {
             Task { await check(manual: false) }
         } else {
             phase = lastSuccess == nil ? .idle : .current
@@ -268,8 +307,13 @@ final class UpdateCenter {
                 let newer = info.code > 0 ? Int64(info.code) > Self.build : compareVersions(a: info.version, b: Self.current) > 0
                 if newer {
                     let log = info.changelog.isEmpty ? "" : ((try? await text(info.changelog)) ?? "")
+                    let all = log.isEmpty ? [] : parseChangelog(text: log)
                     let between = releasesAfter(text: log, current: Self.current)
-                    offer = UpdateOffer(info: info, releases: between.contains { $0.version == info.version } ? between : [updateRelease(u: info)] + between)
+                    offer = UpdateOffer(
+                        info: info,
+                        releases: between.contains { $0.version == info.version } ? between : [updateRelease(u: info)] + between,
+                        edition: UpdateRules.edition(of: info.version, in: all)
+                    )
                 } else {
                     offer = nil
                 }
@@ -280,6 +324,7 @@ final class UpdateCenter {
             lastSuccessAuto = !manual
             lastWasCurrent = offer == nil
             let d = UserDefaults.standard
+            d.set(Self.build, forKey: UpdateKeys.checkedBuild)
             d.set(now.timeIntervalSince1970, forKey: UpdateKeys.lastSuccess)
             d.set(!manual, forKey: UpdateKeys.lastSuccessAuto)
             d.set(offer == nil, forKey: UpdateKeys.lastWasCurrent)
@@ -334,7 +379,7 @@ final class UpdateCenter {
         guard let lastSuccess else { return "" }
         let when = UpdateWhen.phrase(lastSuccess)
         if lastWasCurrent { return String(localized: "已是最新 · \(when) 检查过") }
-        return lastSuccessAuto ? String(localized: "\(when) · 自动") : when
+        return lastSuccessAuto ? String(localized: "上次检查：\(when) · 自动") : String(localized: "上次检查：\(when)")
     }
 
     func offlineFine() -> String {

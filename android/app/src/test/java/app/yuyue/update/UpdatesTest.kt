@@ -79,4 +79,24 @@ class UpdatesTest {
             dir.deleteRecursively()
         }
     }
+
+    @Test
+    fun editionOfResolvesReleaseOrdinalsFromNewestFirstChangelog() {
+        val versions = listOf("0.1.2", "0.1.1", "0.1.0")
+        val cmp: (String, String) -> Int = { a, b ->
+            val pa = a.split('.').map { it.toIntOrNull() ?: 0 }
+            val pb = b.split('.').map { it.toIntOrNull() ?: 0 }
+            (0 until maxOf(pa.size, pb.size)).firstNotNullOfOrNull { i ->
+                val d = (pa.getOrElse(i) { 0 }).compareTo(pb.getOrElse(i) { 0 })
+                if (d != 0) d else null
+            } ?: 0
+        }
+
+        assertEquals(3, UpdateVerifier.editionOf("0.1.2", versions, cmp))
+        assertEquals(2, UpdateVerifier.editionOf("0.1.1", versions, cmp))
+        assertEquals(1, UpdateVerifier.editionOf("0.1.0", versions, cmp))
+        assertEquals(4, UpdateVerifier.editionOf("0.1.3", versions, cmp))
+        assertEquals(null, UpdateVerifier.editionOf("0.0.9", versions, cmp))
+        assertEquals(null, UpdateVerifier.editionOf("0.1.2", emptyList(), cmp))
+    }
 }

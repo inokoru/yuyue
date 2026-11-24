@@ -212,7 +212,8 @@ public sealed class UpdateAndFeedbackService
         if (!manual && !_library.Prefs.AutoCheckUpdates)
             return (false, null, "自动检查已关闭");
 
-        if (!manual && _library.Prefs.UpdateLastCheckedMs is long lastMs &&
+        if (!manual && _library.Prefs.UpdateCheckedBuild == CurrentBuild &&
+            _library.Prefs.UpdateLastCheckedMs is long lastMs &&
             DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - lastMs < 24L * 3600_000L)
         {
             return (LatestOffer is not null, LatestOffer, "24 小时内已检查过");
@@ -225,6 +226,7 @@ public sealed class UpdateAndFeedbackService
             var info = YuyueCoreMethods.ParseUpdate(updateJson);
 
             _library.Prefs.UpdateLastCheckedMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            _library.Prefs.UpdateCheckedBuild = CurrentBuild;
             _library.SavePrefs();
 
             bool newer = info.Code > 0
@@ -569,6 +571,19 @@ public sealed class UpdateAndFeedbackService
         }
     }
 
+    /// <summary>1-based release ordinal (oldest = 1) for <paramref name="version"/> in a newest-first changelog.</summary>
+    public static int? ResolveEdition(string version, Release[] releases)
+    {
+        if (releases.Length == 0) return null;
+        for (int i = 0; i < releases.Length; i++)
+        {
+            if (releases[i].Version == version) return releases.Length - i;
+        }
+        if (YuyueCoreMethods.CompareVersions(version, releases[0].Version) > 0)
+            return releases.Length + 1;
+        return null;
+    }
+
     public async Task ShowChangelogSheetAsync(XamlRoot xamlRoot)
     {
         bool dark = ThemeHelper.IsDark(xamlRoot.Content is FrameworkElement fe ? fe.ActualTheme : ElementTheme.Light);
@@ -577,11 +592,17 @@ public sealed class UpdateAndFeedbackService
 
         var releases = LoadBundledChangelog();
         var stack = new StackPanel { Spacing = 14, Width = 460 };
-        foreach (var r in releases)
+        var mono = new FontFamily(YYFontFamily.Mono.WindowsFamily());
+        for (int i = 0; i < releases.Length; i++)
         {
+            var r = releases[i];
+            int edition = releases.Length - i;
             var card = new StackPanel { Spacing = 5 };
             var head = new Grid();
-            head.Children.Add(new TextBlock { Text = $"第 {r.Version} 版", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = ThemeHelper.Brush(p.T1) });
+            var titleRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+            titleRow.Children.Add(new TextBlock { Text = L10n.T($"第 {edition} 版"), FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = ThemeHelper.Brush(p.T1) });
+            titleRow.Children.Add(new TextBlock { Text = $"v{r.Version}", FontFamily = mono, FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 1) });
+            head.Children.Add(titleRow);
             head.Children.Add(new TextBlock { Text = r.Date, FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center });
             card.Children.Add(head);
 

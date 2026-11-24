@@ -303,7 +303,8 @@ private fun NotesCard(offer: UpdateOffer) {
             modifier = Modifier.padding(top = YY.s(12)).clickable { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(offer.info.page))) },
         )
         Row(Modifier.padding(top = YY.s(14)).fillMaxWidth()) {
-            Text(t("语阅 · 第 %@ 版", offer.display), fontFamily = YY.serif, fontSize = 11.sp, color = ink2, style = YY.tnum, modifier = Modifier.weight(1f))
+            val footer = offer.edition?.let { t("语阅 · 第 %lld 版 · v%@", it, offer.display) } ?: t("语阅 · v%@", offer.display)
+            Text(footer, fontFamily = YY.serif, fontSize = 11.sp, color = ink2, style = YY.tnum, modifier = Modifier.weight(1f))
             Text(Updates.monthDay(offer.info.date) ?: "", fontFamily = YY.serif, fontSize = 11.sp, color = ink2, style = YY.tnum)
         }
     }
