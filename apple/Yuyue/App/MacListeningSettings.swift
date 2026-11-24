@@ -55,8 +55,19 @@ final class DailyQuote {
     ]
 
     private var entries: [String: Entry] = [:]
+    private var entryDates: [String: String] = [:]
     private var offsets: [String: Int] = [:]
     private(set) var refreshing = false
+
+    init() {
+        let today = Self.todayKey()
+        for lang in ["zh", "en"] {
+            if let saved = Self.savedEntry(lang: lang, today: today) {
+                entries[lang] = saved
+                entryDates[lang] = today
+            }
+        }
+    }
 
     private static func norm(_ tag: String) -> String {
         tag.lowercased().hasPrefix("en") ? "en" : "zh"
@@ -71,6 +82,14 @@ final class DailyQuote {
         return String(format: "%04d-%02d-%02d", comps.year ?? 2026, comps.month ?? 1, comps.day ?? 1)
     }
 
+    private static func savedEntry(lang: String, today: String) -> Entry? {
+        let ud = UserDefaults.standard
+        guard ud.string(forKey: "voice.daily.\(lang).date") == today,
+              let savedText = ud.string(forKey: "voice.daily.\(lang).text")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !savedText.isEmpty else { return nil }
+        return Entry(text: savedText, source: ud.string(forKey: "voice.daily.\(lang).source") ?? "")
+    }
+
     private static func builtinForToday(_ lang: String, offset: Int = 0) -> Entry {
         let list = pool(lang)
         let days = Int(Date().timeIntervalSince1970 / 86_400)
@@ -78,30 +97,29 @@ final class DailyQuote {
         return list[mod]
     }
 
+    /// Pure read-only lookup safe to call from SwiftUI `View.body` without mutating `@Observable` state.
     func current(_ tag: String) -> Entry {
         let lang = Self.norm(tag)
         let today = Self.todayKey()
-        let ud = UserDefaults.standard
-        if let cached = entries[lang], ud.string(forKey: "voice.daily.\(lang).date") == today || offsets[lang] != nil {
+        if let cached = entries[lang], entryDates[lang] == today || offsets[lang] != nil {
             return cached
         }
-        if ud.string(forKey: "voice.daily.\(lang).date") == today,
-           let savedText = ud.string(forKey: "voice.daily.\(lang).text")?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !savedText.isEmpty {
-            let saved = Entry(text: savedText, source: ud.string(forKey: "voice.daily.\(lang).source") ?? "")
-            entries[lang] = saved
+        if let saved = Self.savedEntry(lang: lang, today: today) {
             return saved
         }
-        let fallback = Self.builtinForToday(lang, offset: offsets[lang] ?? 0)
-        entries[lang] = fallback
-        return fallback
+        return Self.builtinForToday(lang, offset: offsets[lang] ?? 0)
     }
 
     func ensureToday(_ tag: String, canUpdateUI: @escaping @MainActor () -> Bool = { true }) async {
         let lang = Self.norm(tag)
-        _ = current(lang)
-        guard lang == "zh" else { return }
         let today = Self.todayKey()
+        if entryDates[lang] != today, let saved = Self.savedEntry(lang: lang, today: today) {
+            entryDates[lang] = today
+            if entries[lang] != saved {
+                entries[lang] = saved
+            }
+        }
+        guard lang == "zh" else { return }
         let ud = UserDefaults.standard
         if ud.string(forKey: "voice.daily.zh.date") == today && ud.bool(forKey: "voice.daily.zh.online") {
             return
@@ -110,6 +128,7 @@ final class DailyQuote {
         save(lang: "zh", today: today, entry: fetched, online: true)
         if canUpdateUI() {
             withAnimation(YYMotion.standard) {
+                entryDates["zh"] = today
                 entries["zh"] = fetched
             }
         }
@@ -135,6 +154,7 @@ final class DailyQuote {
         let chosen = next ?? nextBuiltin(lang: lang, avoid: previous)
         save(lang: lang, today: today, entry: chosen, online: online)
         withAnimation(YYMotion.standard) {
+            entryDates[lang] = today
             entries[lang] = chosen
         }
         return chosen

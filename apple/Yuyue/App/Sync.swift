@@ -933,13 +933,21 @@ nonisolated enum Keychain {
 #else
 nonisolated enum Keychain {
     private static let service = "app.yuyue.Yuyue"
+    /// In-memory cache (storing both hits and `errSecItemNotFound` misses) so SwiftUI render
+    /// passes never storm synchronous `SecItemCopyMatching` IPC on the main thread.
+    private static let cache = Mutex<[String: String?]>([:])
 
     static func read(_ key: String) -> String? {
+        if let hit = cache.withLock({ $0[key] }) { return hit }
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
                                     kSecAttrAccount as String: key, kSecReturnData as String: true]
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return nil }
-        return String(decoding: data, as: UTF8.self)
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        let value: String? = (status == errSecSuccess) ? (item as? Data).map { String(decoding: $0, as: UTF8.self) } : nil
+        if status == errSecSuccess || status == errSecItemNotFound {
+            cache.withLock { $0[key] = value }
+        }
+        return value
     }
 
     static func write(_ key: String, _ value: String) {
@@ -948,13 +956,21 @@ nonisolated enum Keychain {
         SecItemDelete(query as CFDictionary)
         var add = query
         add[kSecValueData as String] = Data(value.utf8)
-        SecItemAdd(add as CFDictionary, nil)
+        let status = SecItemAdd(add as CFDictionary, nil)
+        cache.withLock { store in
+            if status == errSecSuccess {
+                store[key] = value
+            } else {
+                store.removeValue(forKey: key)
+            }
+        }
     }
 
     static func delete(_ key: String) {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
                                     kSecAttrAccount as String: key]
         SecItemDelete(query as CFDictionary)
+        cache.withLock { $0[key] = .some(nil) }
     }
 }
 #endif

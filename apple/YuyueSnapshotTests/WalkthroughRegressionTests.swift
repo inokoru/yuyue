@@ -588,6 +588,36 @@ struct WalkthroughRegressionTests {
         let ranges = CorruptPartFallbackURLProtocol.mock.withLock { $0.observedRanges }
         #expect(ranges == ["bytes=128-", nil])
     }
+
+    // MARK: - #72 DailyQuote.current must stay read-only during SwiftUI body evaluation
+
+    @Test @MainActor func `DailyQuote current does not mutate Observable state or trigger self-invalidation`() {
+        let ud = UserDefaults.standard
+        let keys = ["voice.daily.zh.date", "voice.daily.zh.text", "voice.daily.zh.source", "voice.daily.zh.online",
+                    "voice.daily.en.date", "voice.daily.en.text", "voice.daily.en.source", "voice.daily.en.online"]
+        let saved = Dictionary(uniqueKeysWithValues: keys.map { ($0, ud.object(forKey: $0)) })
+        defer {
+            for (k, v) in saved {
+                if let v { ud.set(v, forKey: k) } else { ud.removeObject(forKey: k) }
+            }
+        }
+        for k in keys { ud.removeObject(forKey: k) }
+
+        let quote = DailyQuote()
+        let invalidated = Mutex(false)
+        withObservationTracking {
+            let zh = quote.current("zh")
+            let en = quote.current("en")
+            #expect(!zh.text.isEmpty)
+            #expect(!en.text.isEmpty)
+        } onChange: {
+            invalidated.withLock { $0 = true }
+        }
+        // Calling current() again from subsequent body passes must not trigger observation invalidation.
+        _ = quote.current("zh")
+        _ = quote.current("en")
+        #expect(!invalidated.withLock { $0 })
+    }
 }
 
 private struct StubPreviewVoice: Voice {

@@ -62,6 +62,7 @@ object DailyQuote {
     )
 
     private val entries = mutableStateMapOf<String, Entry>()
+    private val entryDates = mutableMapOf<String, String>()
     private val offsets = mutableMapOf<String, Int>()
     var refreshing by mutableStateOf(false)
         private set
@@ -77,37 +78,42 @@ object DailyQuote {
         return list[idx]
     }
 
+    private fun savedEntry(lang: String, today: String): Entry? {
+        if (!Prefs.isReady || Prefs.string("voice.daily.$lang.date") != today) return null
+        val savedText = Prefs.string("voice.daily.$lang.text").trim()
+        if (savedText.isEmpty()) return null
+        return Entry(savedText, Prefs.string("voice.daily.$lang.source"))
+    }
+
+    /** Pure read-only lookup safe to invoke during Compose composition without mutating state. */
     fun current(tag: String): Entry {
         val lang = norm(tag)
         val today = LocalDate.now().toString()
         entries[lang]?.let { cached ->
-            if (!Prefs.isReady || Prefs.string("voice.daily.$lang.date") == today || offsets.containsKey(lang)) {
+            if (entryDates[lang] == today || offsets.containsKey(lang)) {
                 return cached
             }
         }
-        if (Prefs.isReady && Prefs.string("voice.daily.$lang.date") == today) {
-            val savedText = Prefs.string("voice.daily.$lang.text").trim()
-            if (savedText.isNotEmpty()) {
-                val saved = Entry(savedText, Prefs.string("voice.daily.$lang.source"))
-                entries[lang] = saved
-                return saved
-            }
-        }
-        val fallback = builtinForToday(lang, offsets[lang] ?: 0)
-        entries[lang] = fallback
-        return fallback
+        savedEntry(lang, today)?.let { return it }
+        return builtinForToday(lang, offsets[lang] ?: 0)
     }
 
     /** Pulls today's online Hitokoto quote once per calendar day if not yet cached. */
     suspend fun ensureToday(tag: String, canUpdateUi: () -> Boolean = { true }) {
         val lang = norm(tag)
-        current(lang)
-        if (lang != "zh" || !Prefs.isReady) return
         val today = LocalDate.now().toString()
+        if (entryDates[lang] != today) {
+            savedEntry(lang, today)?.let { saved ->
+                entryDates[lang] = today
+                if (entries[lang] != saved) entries[lang] = saved
+            }
+        }
+        if (lang != "zh" || !Prefs.isReady) return
         if (Prefs.string("voice.daily.zh.date") == today && Prefs.bool("voice.daily.zh.online", false)) return
         val fetched = withContext(Dispatchers.IO) { fetchHitokoto(timeoutMs = 3000) } ?: return
         save("zh", today, fetched, online = true)
         if (canUpdateUi()) {
+            entryDates["zh"] = today
             entries["zh"] = fetched
         }
     }
@@ -130,6 +136,7 @@ object DailyQuote {
             }
             val chosen = next ?: nextBuiltin(lang, avoid = previous)
             save(lang, today, chosen, online = online)
+            entryDates[lang] = today
             entries[lang] = chosen
             chosen
         } finally {
