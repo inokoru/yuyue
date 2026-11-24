@@ -89,9 +89,10 @@
         <span class="i18n-en">Free, ad-free, and no sign-in needed. Mac and Android take just a moment to set up.</span>
       </p>
       <div style="margin-top:18px;display:flex;flex-wrap:wrap;gap:10px">
-        <a class="btn btn-primary" href="https://github.com/inokoru/yuyue/releases" target="_blank" rel="noopener">
-          <span class="i18n-zh">获取最新版安装包</span><span class="i18n-en">Get Latest Installer</span>
-        </a>
+        <a class="btn btn-primary i18n-zh" href="https://cnb.cool/inokoru/yuyue/-/releases" target="_blank" rel="noopener">国内高速下载（CNB 镜像）</a>
+        <a class="btn btn-ghost i18n-zh" href="https://github.com/inokoru/yuyue/releases" target="_blank" rel="noopener">GitHub 下载</a>
+        <a class="btn btn-primary i18n-en" href="https://github.com/inokoru/yuyue/releases" target="_blank" rel="noopener">Get Latest Installer (GitHub)</a>
+        <a class="btn btn-ghost i18n-en" href="https://cnb.cool/inokoru/yuyue/-/releases" target="_blank" rel="noopener">China Mirror (CNB)</a>
         <a class="btn btn-ghost" href="/changelog/">
           <span class="i18n-zh">看看更新了什么</span><span class="i18n-en">What’s New</span>
         </a>
@@ -153,7 +154,12 @@
           <p class="i18n-en">Requires Rust, Node, and pnpm; Apple builds require Xcode &amp; XcodeGen; Android requires Android SDK &amp; NDK.</p>
           <div class="code-box">
             <button type="button" class="copy-btn" data-copy><span class="i18n-zh">复制</span><span class="i18n-en">Copy</span></button>
-<pre>git clone https://github.com/inokoru/yuyue.git
+<pre class="i18n-zh">git clone https://cnb.cool/inokoru/yuyue.git
+cd yuyue
+(cd reader &amp;&amp; pnpm install &amp;&amp; pnpm build)
+apple/build-core.sh &amp;&amp; (cd apple &amp;&amp; xcodegen)
+android/build-core.sh &amp;&amp; (cd android &amp;&amp; ./gradlew assembleDebug)</pre>
+<pre class="i18n-en">git clone https://github.com/inokoru/yuyue.git
 cd yuyue
 (cd reader &amp;&amp; pnpm install &amp;&amp; pnpm build)
 apple/build-core.sh &amp;&amp; (cd apple &amp;&amp; xcodegen)

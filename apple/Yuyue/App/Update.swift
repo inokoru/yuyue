@@ -136,6 +136,7 @@ enum UpdatePhase: Equatable {
 final class UpdateCenter {
     static let shared = UpdateCenter()
     nonisolated static let latest = "https://github.com/inokoru/yuyue/releases/latest/download/"
+    nonisolated static let mirrorLatest = "https://cnb.cool/inokoru/yuyue/-/releases/latest/download/"
 
     private(set) var phase: UpdatePhase = .idle
     private(set) var offer: UpdateOffer?
@@ -204,13 +205,30 @@ final class UpdateCenter {
         if let t = d.object(forKey: UpdateKeys.signAnchor) as? Double { signAnchor = Date(timeIntervalSince1970: t) }
     }
 
-    /// The release folder to read: the newest release, or on 测试版 the newest with an `update.json`.
-    private func feedBase() async throws -> String {
+    /// Ordered candidate release folders: China mirror (CNB) first on mainland locales, with GitHub fallback.
+    private func candidateBases() async -> [String] {
         #if DEBUG
-        if let own = UserDefaults.standard.string(forKey: "YYUpdateBase") { return own.hasSuffix("/") ? own : own + "/" }
+        if let own = UserDefaults.standard.string(forKey: "YYUpdateBase") {
+            return [own.hasSuffix("/") ? own : own + "/"]
+        }
         #endif
-        guard channel == .beta else { return Self.latest }
-        return try await Self.newestBase() ?? Self.latest
+        let preferCN = ModelDownload.prefersChinaMirror
+        if channel != .beta {
+            return preferCN ? [Self.mirrorLatest, Self.latest] : [Self.latest, Self.mirrorLatest]
+        }
+        var bases: [String] = []
+        if preferCN {
+            if let cn = try? await Self.newestMirrorBase() { bases.append(cn) }
+            if let gh = try? await Self.newestBase() { bases.append(gh) }
+            bases.append(contentsOf: [Self.mirrorLatest, Self.latest])
+        } else {
+            if let gh = try? await Self.newestBase() { bases.append(gh) }
+            if let cn = try? await Self.newestMirrorBase() { bases.append(cn) }
+            bases.append(contentsOf: [Self.latest, Self.mirrorLatest])
+        }
+        var unique: [String] = []
+        for b in bases where !unique.contains(b) { unique.append(b) }
+        return unique
     }
 
     /// GitHub's list is newest first; drafts aren't shown to anyone else, `models-1` has no `update.json`.
@@ -224,6 +242,22 @@ final class UpdateCenter {
         let newest = try JSONDecoder().decode([Release].self, from: data)
             .first { !$0.draft && $0.assets.contains { $0.name == "update.json" } }
         return newest.map { "https://github.com/\(UpdateRules.repo)/releases/download/\($0.tag_name)/" }
+    }
+
+    /// CNB public web JSON release list for beta channel discovery without token.
+    private static func newestMirrorBase() async throws -> String? {
+        struct Asset: Decodable { let name: String }
+        struct Release: Decodable { let tag_ref: String; let is_draft: Bool?; let assets: [Asset]? }
+        struct Wrapper: Decodable { let releases: [Release] }
+        var request = URLRequest(url: URL(string: "https://cnb.cool/\(UpdateRules.repo)/-/releases?page=1&page_size=20")!)
+        request.setValue("application/vnd.cnb.web+json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+        let newest = try JSONDecoder().decode(Wrapper.self, from: data).releases
+            .first { !($0.is_draft ?? false) && ($0.assets ?? []).contains { $0.name == "update.json" } }
+        guard let rawTag = newest?.tag_ref else { return nil }
+        let tag = rawTag.hasPrefix("refs/tags/") ? String(rawTag.dropFirst("refs/tags/".count)) : rawTag
+        return "https://cnb.cool/\(UpdateRules.repo)/-/releases/download/\(tag)/"
     }
 
     static var current: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0" }
@@ -300,9 +334,26 @@ final class UpdateCenter {
         let now = Date()
         UserDefaults.standard.set(now, forKey: UpdateKeys.checked)
         do {
-            let base = try await feedBase()
-            UserDefaults.standard.set(base, forKey: UpdateKeys.feedBase)
-            if let json = try await optionalText(base + "update.json") {
+            let bases = await candidateBases()
+            var chosenBase: String?
+            var loadedJson: String?
+            var lastError: Error?
+            for base in bases {
+                do {
+                    if let json = try await optionalText(base + "update.json") {
+                        chosenBase = base
+                        loadedJson = json
+                        break
+                    } else if chosenBase == nil {
+                        chosenBase = base
+                    }
+                } catch {
+                    lastError = error
+                }
+            }
+            if chosenBase == nil, let lastError { throw lastError }
+            if let chosenBase { UserDefaults.standard.set(chosenBase, forKey: UpdateKeys.feedBase) }
+            if let json = loadedJson {
                 let info = try parseUpdate(json: json)
                 let newer = info.code > 0 ? Int64(info.code) > Self.build : compareVersions(a: info.version, b: Self.current) > 0
                 if newer {

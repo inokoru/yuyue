@@ -5,6 +5,7 @@
 # 用法：scripts/publish-release.sh            打包、生成，建草稿 Release
 #       scripts/publish-release.sh --beta 2   测试版：标签 v<版本>-beta.2，Release 标成预发布。
 #           只有“更新渠道”选了测试版的 App 查得到它。编号照样要加一，正式版的编号要比它所有测试版都大。
+#       scripts/publish-release.sh --cnb      同时把代码与草稿 Release 同步到 CNB.cool（国内高速镜像）
 #       scripts/publish-release.sh --local    只生成到 dist/release-<版本>/，不碰 GitHub；本机试更新用：
 #           RELEASE_BASE=http://localhost:8000 scripts/publish-release.sh --local
 #           (cd dist/release-<版本> && python3 -m http.server 8000)
@@ -22,10 +23,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$ROOT/dist"
 REPO="inokoru/yuyue"
 LOCAL=0
+SYNC_CNB=0
 BETA=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --local) LOCAL=1 ;;
+    --cnb) SYNC_CNB=1 ;;
     --beta) BETA="${2:?--beta 后面要写第几个测试版}"; shift ;;
     *) echo "不认识的参数：$1" >&2; exit 1 ;;
   esac
@@ -167,3 +170,9 @@ fi
 gh release create "$TAG" --repo "$REPO" --draft ${BETA:+--prerelease} --target main \
   --title "语阅 $VERSION${BETA:+ 测试版 $BETA}" --notes-file "$DIST/release-$VERSION-notes.md" "$OUT"/*
 echo "草稿 Release 建好了：${TAG}。在 GitHub 上点“发布”之前，App 都查不到它。"
+if [ "$SYNC_CNB" = 1 ]; then
+  "$ROOT/scripts/sync-cnb.py" "$VERSION" ${BETA:+--beta "$BETA"} --draft
+  echo "CNB 草稿也同步好了；确认无误后运行 scripts/sync-cnb.py $VERSION ${BETA:+--beta $BETA} 即可正式公开。"
+else
+  echo "确认发布后，运行 scripts/sync-cnb.py $VERSION ${BETA:+--beta $BETA} 同步到 CNB 国内高速镜像。"
+fi

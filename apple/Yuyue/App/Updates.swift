@@ -36,7 +36,8 @@ final class Updates: NSObject, SPUUpdaterDelegate {
             return (own.hasSuffix("/") ? own : own + "/") + Self.appcast
         }
         #endif
-        let base = d.string(forKey: "update.feedBase") ?? UpdateCenter.latest
+        let fallback = ModelDownload.prefersChinaMirror ? UpdateCenter.mirrorLatest : UpdateCenter.latest
+        let base = d.string(forKey: "update.feedBase") ?? fallback
         return base + Self.appcast
     }
 }

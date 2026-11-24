@@ -10,7 +10,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/inokoru/yuyue/releases">下载安装包</a> ·
+  <a href="https://cnb.cool/inokoru/yuyue/-/releases">国内高速下载</a> ·
+  <a href="https://github.com/inokoru/yuyue/releases">GitHub 下载</a> ·
   <a href="#能做什么">功能一览</a> ·
   <a href="#下载与安装">安装说明</a> ·
   <a href="#给开发者">参与与构建</a> ·
@@ -68,7 +69,7 @@
 
 ## 下载与安装
 
-从 [GitHub Releases](https://github.com/inokoru/yuyue/releases) 下载。语阅目前不上架应用商店，也没有购买 Apple 开发者签名证书，安装时会多几步。现阶段 **Mac 和 Android 最容易装上**（均支持应用内检查更新），iPhone 与 iPad 仅适合愿意自行签名的进阶用户，**Windows 端正在开发中**。
+从 [CNB 国内高速镜像](https://cnb.cool/inokoru/yuyue/-/releases)（无需登录、大陆直连）或 [GitHub Releases](https://github.com/inokoru/yuyue/releases) 下载。语阅目前不上架应用商店，也没有购买 Apple 开发者签名证书，安装时会多几步。现阶段 **Mac 和 Android 最容易装上**（均支持应用内检查更新，国内网络优先走镜像源），iPhone 与 iPad 仅适合愿意自行签名的进阶用户，**Windows 端正在开发中**。
 
 ### Mac（Apple 芯片 / Intel，macOS 14 及以上）
 

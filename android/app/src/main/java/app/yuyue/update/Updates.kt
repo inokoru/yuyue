@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import app.yuyue.BuildConfig
 import app.yuyue.R
 import app.yuyue.design.Prefs
+import app.yuyue.speech.ModelDownload
 import app.yuyue.t
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -81,6 +82,7 @@ sealed interface UpdatePhase {
  */
 object Updates {
     const val LATEST = "https://github.com/inokoru/yuyue/releases/latest/download/"
+    const val MIRROR_LATEST = "https://cnb.cool/inokoru/yuyue/-/releases/latest/download/"
     const val BASE_KEY = "update.base"
     private const val AUTO_KEY = "update.auto"
     private const val CHANNEL_KEY = "update.channel"
@@ -153,11 +155,24 @@ object Updates {
 
     private val http by lazy { OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build() }
 
-    /** The release folder to read: the newest release, or on 测试版 the newest with an `update.json`. */
-    private fun feedBase(): String {
-        Prefs.string(BASE_KEY).takeIf { it.isNotEmpty() }?.let { return if (it.endsWith("/")) it else "$it/" }
-        if (channel != UpdateChannel.Beta) return LATEST
-        return newestBase() ?: LATEST
+    /** Ordered candidate release folders: China mirror (CNB) first on mainland locales, with GitHub fallback. */
+    private fun candidateBases(): List<String> {
+        Prefs.string(BASE_KEY).takeIf { it.isNotEmpty() }?.let { return listOf(if (it.endsWith("/")) it else "$it/") }
+        val preferCN = ModelDownload.prefersChinaMirror()
+        if (channel != UpdateChannel.Beta) {
+            return if (preferCN) listOf(MIRROR_LATEST, LATEST) else listOf(LATEST, MIRROR_LATEST)
+        }
+        val bases = mutableListOf<String>()
+        if (preferCN) {
+            runCatching { newestMirrorBase() }.getOrNull()?.let { bases += it }
+            runCatching { newestBase() }.getOrNull()?.let { bases += it }
+            bases += listOf(MIRROR_LATEST, LATEST)
+        } else {
+            runCatching { newestBase() }.getOrNull()?.let { bases += it }
+            runCatching { newestMirrorBase() }.getOrNull()?.let { bases += it }
+            bases += listOf(LATEST, MIRROR_LATEST)
+        }
+        return bases.distinct()
     }
 
     /** GitHub's list is newest first; drafts aren't shown to anyone else, `models-1` has no `update.json`. */
@@ -169,6 +184,29 @@ object Updates {
             val assets = r.optJSONArray("assets") ?: continue
             if ((0 until assets.length()).any { assets.getJSONObject(it).optString("name") == "update.json" }) {
                 return "https://github.com/inokoru/yuyue/releases/download/${r.getString("tag_name")}/"
+            }
+        }
+        return null
+    }
+
+    /** CNB public web JSON release list for beta channel discovery without token. */
+    private fun newestMirrorBase(): String? {
+        val req = Request.Builder()
+            .url("https://cnb.cool/inokoru/yuyue/-/releases?page=1&page_size=20")
+            .header("Accept", "application/vnd.cnb.web+json")
+            .build()
+        val body = http.newCall(req).execute().use { r ->
+            if (!r.isSuccessful) return null
+            r.body?.string() ?: return null
+        }
+        val list = org.json.JSONObject(body).optJSONArray("releases") ?: return null
+        for (i in 0 until list.length()) {
+            val r = list.getJSONObject(i)
+            if (r.optBoolean("is_draft")) continue
+            val assets = r.optJSONArray("assets") ?: continue
+            if ((0 until assets.length()).any { assets.getJSONObject(it).optString("name") == "update.json" }) {
+                val tag = r.optString("tag_ref").removePrefix("refs/tags/")
+                if (tag.isNotEmpty()) return "https://cnb.cool/inokoru/yuyue/-/releases/download/$tag/"
             }
         }
         return null
@@ -246,7 +284,23 @@ object Updates {
 
     /** A newer version, and its APK when an earlier visit downloaded it already. */
     private fun fetch(context: Context): Pair<UpdateOffer, File?>? {
-        val json = getOrNull(feedBase() + "update.json") ?: return null
+        var json: String? = null
+        var anyReachable = false
+        var lastErr: Exception? = null
+        for (base in candidateBases()) {
+            try {
+                val got = getOrNull(base + "update.json")
+                anyReachable = true
+                if (got != null) {
+                    json = got
+                    break
+                }
+            } catch (e: Exception) {
+                lastErr = e
+            }
+        }
+        if (!anyReachable && lastErr != null) throw lastErr
+        if (json == null) return null
         val info = uniffi.yuyue_core.parseUpdate(json)
         if (info.code.toLong() <= BuildConfig.VERSION_CODE.toLong()) return null
         val log = runCatching { if (info.changelog.isNotEmpty()) get(info.changelog) else "" }.getOrDefault("")
@@ -298,6 +352,17 @@ object Updates {
 
     private fun apkFile(context: Context, info: UpdateInfo) = File(File(context.cacheDir, "updates").apply { mkdirs() }, "yuyue-${info.version}.apk")
 
+    private fun apkCandidates(primaryUrl: String): List<String> {
+        val ghPrefix = "https://github.com/inokoru/yuyue/releases/download/"
+        val cnbPrefix = "https://cnb.cool/inokoru/yuyue/-/releases/download/"
+        val alt = when {
+            primaryUrl.startsWith(cnbPrefix) -> ghPrefix + primaryUrl.removePrefix(cnbPrefix)
+            primaryUrl.startsWith(ghPrefix) -> cnbPrefix + primaryUrl.removePrefix(ghPrefix)
+            else -> null
+        }
+        return listOfNotNull(primaryUrl, alt).distinct()
+    }
+
     /** 下载并安装: downloaded here, checked, then handed to the system's installer. */
     suspend fun download(context: Context) {
         val o = offer ?: return
@@ -311,29 +376,43 @@ object Updates {
                 out.parentFile?.listFiles()?.forEach { it.delete() }
                 val part = File(out.path + ".part")
                 try {
-                    http.newCall(Request.Builder().url(info.apk).build()).execute().use { r ->
-                        if (!r.isSuccessful) error("HTTP ${r.code}")
-                        val body = r.body!!
-                        val total = body.contentLength().takeIf { it > 0 } ?: info.size.toLong()
-                        body.byteStream().use { input ->
-                            part.outputStream().use { output ->
-                                val buf = ByteArray(64 * 1024)
-                                var got = 0L
-                                var shown = 0f
-                                while (true) {
-                                    val n = input.read(buf)
-                                    if (n < 0) break
-                                    output.write(buf, 0, n)
-                                    got += n
-                                    val f = if (total > 0) (got.toFloat() / total).coerceIn(0f, 1f) else 0f
-                                    if (f - shown >= 0.01f) {
-                                        shown = f
-                                        withContext(Dispatchers.Main) { phase = UpdatePhase.Downloading(f) }
+                    var lastErr: Throwable? = null
+                    var downloaded = false
+                    for (apkUrl in apkCandidates(info.apk)) {
+                        try {
+                            part.delete()
+                            http.newCall(Request.Builder().url(apkUrl).build()).execute().use { r ->
+                                if (!r.isSuccessful) error("HTTP ${r.code}")
+                                val body = r.body!!
+                                val total = body.contentLength().takeIf { it > 0 } ?: info.size.toLong()
+                                body.byteStream().use { input ->
+                                    part.outputStream().use { output ->
+                                        val buf = ByteArray(64 * 1024)
+                                        var got = 0L
+                                        var shown = 0f
+                                        while (true) {
+                                            val n = input.read(buf)
+                                            if (n < 0) break
+                                            output.write(buf, 0, n)
+                                            got += n
+                                            val f = if (total > 0) (got.toFloat() / total).coerceIn(0f, 1f) else 0f
+                                            if (f - shown >= 0.01f) {
+                                                shown = f
+                                                withContext(Dispatchers.Main) { phase = UpdatePhase.Downloading(f) }
+                                            }
+                                        }
                                     }
                                 }
                             }
+                            downloaded = true
+                            break
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Throwable) {
+                            lastErr = e
                         }
                     }
+                    if (!downloaded && lastErr != null) throw lastErr
                     check(part.length() == info.size.toLong() && sha256(part) == info.sha256.lowercase()) { t("安装包不完整，请重新下载") }
                     check(sameSigner(context, part)) { t("安装包签名不对，不能安装") }
                     check((!out.exists() || out.delete()) && part.renameTo(out)) { t("读写文件时出了问题，再试一次") }

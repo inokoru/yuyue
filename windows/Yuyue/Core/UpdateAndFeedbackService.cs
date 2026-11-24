@@ -221,8 +221,27 @@ public sealed class UpdateAndFeedbackService
 
         try
         {
-            string baseFeed = await ResolveFeedBaseAsync(_library.Prefs.UpdateChannel == "beta", ct);
-            string updateJson = await Http.GetStringAsync(baseFeed + "update.json", ct);
+            var candidateBases = await ResolveCandidateFeedBasesAsync(_library.Prefs.UpdateChannel == "beta", ct);
+            string? updateJson = null;
+            Exception? lastErr = null;
+            foreach (string baseFeed in candidateBases)
+            {
+                try
+                {
+                    updateJson = await Http.GetStringAsync(baseFeed + "update.json", ct);
+                    if (!string.IsNullOrWhiteSpace(updateJson)) break;
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    lastErr = ex;
+                }
+            }
+            if (string.IsNullOrWhiteSpace(updateJson))
+                throw lastErr ?? new HttpRequestException("未能读取 update.json");
             var info = YuyueCoreMethods.ParseUpdate(updateJson);
 
             _library.Prefs.UpdateLastCheckedMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -272,31 +291,90 @@ public sealed class UpdateAndFeedbackService
         }
     }
 
-    private static async Task<string> ResolveFeedBaseAsync(bool beta, CancellationToken ct)
+    private static async Task<List<string>> ResolveCandidateFeedBasesAsync(bool beta, CancellationToken ct)
     {
         string? overrideBase = Environment.GetEnvironmentVariable("YYUpdateBase");
         if (!string.IsNullOrWhiteSpace(overrideBase))
-            return overrideBase.EndsWith('/') ? overrideBase : overrideBase + "/";
+            return [overrideBase.EndsWith('/') ? overrideBase : overrideBase + "/"];
+
+        string ghLatest = $"https://github.com/{RepoSlug}/releases/latest/download/";
+        string cnbLatest = $"https://cnb.cool/{RepoSlug}/-/releases/latest/download/";
+        bool preferCN = Yuyue.Speech.ModelDownload.PrefersChinaMirror();
 
         if (!beta)
-            return $"https://github.com/{RepoSlug}/releases/latest/download/";
+            return preferCN ? [cnbLatest, ghLatest] : [ghLatest, cnbLatest];
 
-        string json = await Http.GetStringAsync($"https://api.github.com/repos/{RepoSlug}/releases?per_page=20", ct);
-        using var doc = JsonDocument.Parse(json);
-        foreach (var rel in doc.RootElement.EnumerateArray())
+        var list = new List<string>();
+        if (preferCN)
         {
-            if (rel.TryGetProperty("draft", out var d) && d.GetBoolean()) continue;
-            string tag = rel.TryGetProperty("tag_name", out var tp) ? tp.GetString() ?? "" : "";
-            if (string.IsNullOrEmpty(tag)) continue;
-            if (rel.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
+            if (await TryNewestCnbBaseAsync(ct) is string cb) list.Add(cb);
+            if (await TryNewestGitHubBaseAsync(ct) is string gb) list.Add(gb);
+            list.Add(cnbLatest);
+            list.Add(ghLatest);
+        }
+        else
+        {
+            if (await TryNewestGitHubBaseAsync(ct) is string gb) list.Add(gb);
+            if (await TryNewestCnbBaseAsync(ct) is string cb) list.Add(cb);
+            list.Add(ghLatest);
+            list.Add(cnbLatest);
+        }
+        return list.Distinct().ToList();
+    }
+
+    private static async Task<string?> TryNewestGitHubBaseAsync(CancellationToken ct)
+    {
+        try
+        {
+            string json = await Http.GetStringAsync($"https://api.github.com/repos/{RepoSlug}/releases?per_page=20", ct);
+            using var doc = JsonDocument.Parse(json);
+            foreach (var rel in doc.RootElement.EnumerateArray())
             {
-                bool hasManifest = assets.EnumerateArray().Any(a =>
-                    a.TryGetProperty("name", out var np) && np.GetString() == "update.json");
-                if (hasManifest)
-                    return $"https://github.com/{RepoSlug}/releases/download/{tag}/";
+                if (rel.TryGetProperty("draft", out var d) && d.GetBoolean()) continue;
+                string tag = rel.TryGetProperty("tag_name", out var tp) ? tp.GetString() ?? "" : "";
+                if (string.IsNullOrEmpty(tag)) continue;
+                if (rel.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
+                {
+                    bool hasManifest = assets.EnumerateArray().Any(a =>
+                        a.TryGetProperty("name", out var np) && np.GetString() == "update.json");
+                    if (hasManifest)
+                        return $"https://github.com/{RepoSlug}/releases/download/{tag}/";
+                }
             }
         }
-        return $"https://github.com/{RepoSlug}/releases/latest/download/";
+        catch { }
+        return null;
+    }
+
+    private static async Task<string?> TryNewestCnbBaseAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"https://cnb.cool/{RepoSlug}/-/releases?page=1&page_size=20");
+            req.Headers.TryAddWithoutValidation("Accept", "application/vnd.cnb.web+json");
+            using var resp = await Http.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) return null;
+            string json = await resp.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("releases", out var rels) || rels.ValueKind != JsonValueKind.Array)
+                return null;
+            foreach (var rel in rels.EnumerateArray())
+            {
+                if (rel.TryGetProperty("is_draft", out var d) && d.ValueKind == JsonValueKind.True) continue;
+                string rawTag = rel.TryGetProperty("tag_ref", out var tp) ? tp.GetString() ?? "" : "";
+                string tag = rawTag.StartsWith("refs/tags/", StringComparison.Ordinal) ? rawTag["refs/tags/".Length..] : rawTag;
+                if (string.IsNullOrEmpty(tag)) continue;
+                if (rel.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
+                {
+                    bool hasManifest = assets.EnumerateArray().Any(a =>
+                        a.TryGetProperty("name", out var np) && np.GetString() == "update.json");
+                    if (hasManifest)
+                        return $"https://cnb.cool/{RepoSlug}/-/releases/download/{tag}/";
+                }
+            }
+        }
+        catch { }
+        return null;
     }
 
     private static string OsDisplayVersion()
