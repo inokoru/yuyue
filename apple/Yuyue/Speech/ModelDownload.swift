@@ -277,19 +277,23 @@ nonisolated enum ModelDownload {
                 return
             }
 
-            let isPartial = http.statusCode == 206 && initialOffset > 0
+            let isPartial = http.statusCode == 206
             let contentLength = http.expectedContentLength > 0 ? http.expectedContentLength : 0
             let totalBytes: Int64
             if isPartial {
-                if let rangeHeader = http.value(forHTTPHeaderField: "Content-Range"),
-                   let slash = rangeHeader.lastIndex(of: "/"),
-                   let parsedTotal = Int64(rangeHeader[rangeHeader.index(after: slash)...]),
-                   parsedTotal > 0 {
+                guard initialOffset > 0,
+                      let parsed = ModelDownload.parseContentRange(http.value(forHTTPHeaderField: "Content-Range")),
+                      parsed.start == initialOffset else {
+                    fail(URLError(.badServerResponse))
+                    completionHandler(.cancel)
+                    return
+                }
+                if let parsedTotal = parsed.total {
                     totalBytes = parsedTotal
                 } else if contentLength > 0 {
                     totalBytes = initialOffset + contentLength
                 } else {
-                    totalBytes = expectedBytes ?? initialOffset
+                    totalBytes = max(expectedBytes ?? 0, parsed.end + 1)
                 }
             } else {
                 totalBytes = contentLength > 0 ? contentLength : (expectedBytes ?? 0)
@@ -297,13 +301,22 @@ nonisolated enum ModelDownload {
 
             do {
                 let path = partFile.path(percentEncoded: false)
-                if !isPartial || !FileManager.default.fileExists(atPath: path) {
+                if isPartial {
+                    guard FileManager.default.fileExists(atPath: path) else {
+                        throw URLError(.badServerResponse)
+                    }
+                } else if !FileManager.default.fileExists(atPath: path) {
                     FileManager.default.createFile(atPath: path, contents: nil)
                 }
                 let handle = try FileHandle(forWritingTo: partFile)
+                var transferred = false
+                defer { if !transferred { try? handle.close() } }
                 let startPos: Int64
                 if isPartial {
-                    try handle.seekToEnd()
+                    let endOffset = try handle.seekToEnd()
+                    guard endOffset == UInt64(initialOffset) else {
+                        throw URLError(.badServerResponse)
+                    }
                     startPos = initialOffset
                 } else {
                     try handle.truncate(atOffset: 0)
@@ -317,6 +330,7 @@ nonisolated enum ModelDownload {
                     st.lastReported = startPos
                     st.lastReportTime = startPos > 0 ? now : nil
                 }
+                transferred = true
                 if startPos > 0 {
                     progress(startPos, max(totalBytes, startPos))
                 }
@@ -405,6 +419,41 @@ nonisolated enum ModelDownload {
                 if st.failedError == nil { st.failedError = error }
             }
         }
+    }
+
+    struct ByteContentRange: Equatable, Sendable {
+        let start: Int64
+        let end: Int64
+        let total: Int64?
+    }
+
+    /// Parses an HTTP `Content-Range` header of the form `bytes <start>-<end>/<total|*>`.
+    static func parseContentRange(_ raw: String?) -> ByteContentRange? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 6, trimmed.prefix(5).lowercased() == "bytes" else { return nil }
+        let restStart = trimmed.index(trimmed.startIndex, offsetBy: 5)
+        guard trimmed[restStart].isWhitespace else { return nil }
+        let rest = trimmed[restStart...].trimmingCharacters(in: .whitespaces)
+        guard let slash = rest.firstIndex(of: "/"),
+              let dash = rest[..<slash].firstIndex(of: "-") else { return nil }
+        let startStr = rest[..<dash].trimmingCharacters(in: .whitespaces)
+        let endStr = rest[rest.index(after: dash) ..< slash].trimmingCharacters(in: .whitespaces)
+        let totalStr = rest[rest.index(after: slash)...].trimmingCharacters(in: .whitespaces)
+        guard let start = Int64(startStr),
+              let end = Int64(endStr),
+              start >= 0,
+              end >= start,
+              end < Int64.max else { return nil }
+        let total: Int64?
+        if totalStr == "*" {
+            total = nil
+        } else if let parsedTotal = Int64(totalStr), parsedTotal > end {
+            total = parsedTotal
+        } else {
+            return nil
+        }
+        return ByteContentRange(start: start, end: end, total: total)
     }
 
     static func fileSize(_ url: URL) -> Int64? {

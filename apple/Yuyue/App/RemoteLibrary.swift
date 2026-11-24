@@ -714,6 +714,11 @@ nonisolated struct ShareFile: Codable, Hashable, Sendable {
     func want(_ id: String, file: Int, core: YuyueCore) {
         guard jobs[id] != nil else { return }
         wanted[id] = file
+        // Going back to listen to a cleared/passed file fetches it again from `file` onward.
+        var passed = passedFiles(id)
+        let before = passed.count
+        for k in Array(passed.keys) where (Int(k) ?? -1) >= file { passed.removeValue(forKey: k) }
+        if passed.count != before { UserDefaults.standard.set(passed, forKey: passedKey(id)) }
         run(id, core: core)
     }
 
@@ -722,9 +727,17 @@ nonisolated struct ShareFile: Codable, Hashable, Sendable {
         for id in jobs.keys { run(id, core: core) }
     }
 
+    private func passedKey(_ id: String) -> String { "shareStream.passed.\(id)" }
+
+    private func passedFiles(_ id: String) -> [String: Double] {
+        UserDefaults.standard.dictionary(forKey: passedKey(id)) as? [String: Double] ?? [:]
+    }
+
     private func missing(_ id: String, core: YuyueCore) -> [Int] {
         guard let rec = try? core.audioRecording(bookId: id) else { return [] }
-        return rec.files.indices.filter { !FileManager.default.fileExists(atPath: rec.files[$0].path) }
+        // When 「听过的自动清掉」 is enabled, never re-download files already passed/cleaned by `tidy`.
+        let skip: Set<Int> = clears(id) ? Set(passedFiles(id).keys.compactMap(Int.init)) : []
+        return rec.files.indices.filter { !skip.contains($0) && !FileManager.default.fileExists(atPath: rec.files[$0].path) }
     }
 
     private func run(_ id: String, core: YuyueCore) {
@@ -736,9 +749,10 @@ nonisolated struct ShareFile: Codable, Hashable, Sendable {
             while let self, !Task.isCancelled {
                 let left = self.missing(id, core: core)
                 guard !left.isEmpty else { break }
-                // The one being listened to, else the first after it still missing, else the first.
+                // The one being listened to, else the first after it still missing; only wrap back
+                // to earlier files when 「听过的自动清掉」 is off so cleared files aren't re-fetched.
                 let w = self.wanted[id] ?? 0
-                let n = left.first { $0 >= w } ?? left[0]
+                guard let n = left.first(where: { $0 >= w }) ?? (self.clears(id) ? nil : left.first) else { break }
                 let f = job.files[n]
                 let temp = FileManager.default.temporaryDirectory.appending(path: "stream-\(id)-\(n).\((f.name as NSString).pathExtension)")
                 self.fetching[id] = (n, 0)
@@ -786,13 +800,12 @@ nonisolated struct ShareFile: Codable, Hashable, Sendable {
     /// share keeps them); listening back to one fetches it again.
     func tidy(_ id: String, at file: Int, core: YuyueCore) {
         guard jobs[id] != nil, let rec = try? core.audioRecording(bookId: id) else { return }
-        let key = "shareStream.passed.\(id)"
-        var passed = UserDefaults.standard.dictionary(forKey: key) as? [String: Double] ?? [:]
+        var passed = passedFiles(id)
         let now = Date.now.timeIntervalSince1970
         for i in rec.files.indices where i < file && passed["\(i)"] == nil { passed["\(i)"] = now }
         // Gone back to: listened to again, not passed.
         for i in rec.files.indices where i >= file { passed["\(i)"] = nil }
-        UserDefaults.standard.set(passed, forKey: key)
+        UserDefaults.standard.set(passed, forKey: passedKey(id))
         guard clears(id) else { return }
         for (k, at) in passed where now - at >= 86_400 {
             guard let i = Int(k), rec.files.indices.contains(i), i < file else { continue }

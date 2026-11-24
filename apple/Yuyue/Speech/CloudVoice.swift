@@ -390,19 +390,18 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
         Self.cacheDir.appending(path: provider.rawValue).appending(path: "\(hashKey(text)).wav")
     }
 
+    private static let cacheExtensions = ["mp3", "wav", "flac", "ogg"]
+
     private func hasCached(_ text: String) -> Bool {
         let fm = FileManager.default
-        return fm.fileExists(atPath: cacheFile(text, ext: "mp3").path)
-            || fm.fileExists(atPath: cacheFile(text, ext: "wav").path)
+        return Self.cacheExtensions.contains { fm.fileExists(atPath: cacheFile(text, ext: $0).path) }
             || fm.fileExists(atPath: legacyCacheFile(text).path)
     }
 
     private func readCached(_ text: String) -> Speech? {
-        for (url, ext) in [
-            (cacheFile(text, ext: "mp3"), "mp3"),
-            (cacheFile(text, ext: "wav"), "wav"),
-            (legacyCacheFile(text), "wav"),
-        ] {
+        let candidates = Self.cacheExtensions.map { (cacheFile(text, ext: $0), $0) }
+            + [(legacyCacheFile(text), "wav")]
+        for (url, ext) in candidates {
             if let data = try? Data(contentsOf: url), let speech = try? Self.decode(data, ext: ext) {
                 try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
                 return speech
@@ -669,7 +668,12 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
                 throw Failure.unreadable
             }
             if audioStr.hasPrefix("http"), let audioURL = URL(string: audioStr) {
-                let (audioData, _) = try await URLSession.shared.data(from: audioURL)
+                var audioReq = URLRequest(url: audioURL)
+                audioReq.timeoutInterval = 35
+                let (audioData, audioResp) = try await URLSession.shared.data(for: audioReq)
+                let aCode = (audioResp as? HTTPURLResponse)?.statusCode ?? 0
+                guard (200 ..< 300).contains(aCode) else { throw Self.failure(provider, aCode, audioData) }
+                guard !audioData.isEmpty else { throw Failure.unreadable }
                 return (audioData, Self.sniffExt(audioData, fallback: "mp3"))
             }
             guard let audioData = Self.decodeHex(audioStr), !audioData.isEmpty else {
@@ -706,17 +710,14 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
             request.setValue("audio-24khz-48kbitrate-mono-mp3", forHTTPHeaderField: "X-Microsoft-OutputFormat")
             request.setValue("Yuyue", forHTTPHeaderField: "User-Agent")
             let lang = self.language ?? SpokenLanguage.voiceLanguages(for: language).first ?? "en-US"
-            func escape(_ t: String) -> String {
-                t.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
-            }
             var inner = (parts ?? [SpokenPart(text: text, reading: nil)]).map { p in
-                guard let r = p.reading, lang.hasPrefix("zh") else { return escape(p.text) }
-                return "<phoneme alphabet='sapi' ph='\(Self.sapi(r))'>\(escape(p.text))</phoneme>"
+                guard let r = p.reading, lang.hasPrefix("zh") else { return Self.escapeXML(p.text) }
+                return "<phoneme alphabet='sapi' ph='\(Self.escapeXML(Self.sapi(r)))'>\(Self.escapeXML(p.text))</phoneme>"
             }.joined()
             if let style = acting?.style {
-                inner = "<mstts:express-as style='\(style)' styledegree='\(String(format: "%.1f", acting?.degree ?? 1))'>\(inner)</mstts:express-as>"
+                inner = "<mstts:express-as style='\(Self.escapeXML(style))' styledegree='\(String(format: "%.1f", acting?.degree ?? 1))'>\(inner)</mstts:express-as>"
             }
-            request.httpBody = Data("<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='\(lang)'><voice name='\(voiceID)'>\(inner)</voice></speak>".utf8)
+            request.httpBody = Data("<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='\(Self.escapeXML(lang))'><voice name='\(Self.escapeXML(voiceID))'>\(inner)</voice></speak>".utf8)
             let (data, response) = try await URLSession.shared.data(for: request)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard (200 ..< 300).contains(code) else { throw Self.failure(provider, code, data) }
@@ -853,6 +854,29 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
             guard let hi = val(chars[i]), let lo = val(chars[i + 1]) else { return nil }
             out.append((hi << 4) | lo)
             i += 2
+        }
+        return out
+    }
+
+    /// Escapes XML text and attribute values and strips XML 1.0 illegal control characters.
+    static func escapeXML(_ text: String) -> String {
+        var out = ""
+        out.reserveCapacity(text.utf8.count)
+        for scalar in text.unicodeScalars {
+            let v = scalar.value
+            let valid = v == 0x09 || v == 0x0A || v == 0x0D
+                || (0x20 ... 0xD7FF).contains(v)
+                || (0xE000 ... 0xFFFD).contains(v)
+                || (0x10000 ... 0x10FFFF).contains(v)
+            guard valid else { continue }
+            switch scalar {
+            case "&": out += "&amp;"
+            case "<": out += "&lt;"
+            case ">": out += "&gt;"
+            case "'": out += "&apos;"
+            case "\"": out += "&quot;"
+            default: out.unicodeScalars.append(scalar)
+            }
         }
         return out
     }
@@ -1376,7 +1400,8 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
                 try await Task.sleep(for: .milliseconds(250))
             }
             do {
-                var combined = Data()
+                var parts: [Data] = []
+                parts.reserveCapacity(chunks.count)
                 for chunk in chunks {
                     try Task.checkCancellation()
                     guard let url = freeRouteURL(route, text: chunk) else { throw Failure.unreadable }
@@ -1388,10 +1413,10 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
                     guard (200 ..< 300).contains(code), looksLikeAudio(data) else {
                         throw Failure.server(.free, code, nil)
                     }
-                    combined.append(data)
+                    parts.append(data)
                 }
-                if !combined.isEmpty {
-                    return (combined, sniffExt(combined, fallback: "mp3"))
+                if !parts.isEmpty {
+                    return try combineAudioChunks(parts)
                 }
             } catch is CancellationError {
                 throw CancellationError()
@@ -1474,15 +1499,160 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
         return chunks.isEmpty ? [text] : chunks
     }
 
+    /// Combines multiple synthesized audio chunks cleanly.
+    /// For MP3 chunks, strips ID3v2 headers, trailing ID3v1 tags, and Xing/Info/VBRI header
+    /// frames so the concatenated stream has no mid-stream tags or single-chunk frame counts.
+    /// For non-MP3 multi-chunk responses, decodes and joins PCM into a single WAV.
+    static func combineAudioChunks(_ parts: [Data]) throws -> (Data, String) {
+        guard !parts.isEmpty else { throw Failure.unreadable }
+        if parts.count == 1 {
+            return (parts[0], sniffExt(parts[0], fallback: "mp3"))
+        }
+        if parts.allSatisfy({ sniffExt($0, fallback: "mp3") == "mp3" }) {
+            var combined = Data()
+            combined.reserveCapacity(parts.reduce(0) { $0 + $1.count })
+            for part in parts {
+                combined.append(stripMP3Metadata(part))
+            }
+            guard !combined.isEmpty else { throw Failure.unreadable }
+            return (combined, "mp3")
+        }
+        return try combineDecodedPCM(parts)
+    }
+
+    /// Strips leading ID3v2 tags, trailing ID3v1 tags, and leading Xing/Info/VBRI VBR info
+    /// frames from an MP3 buffer, leaving raw MPEG audio frames safe to concatenate.
+    static func stripMP3Metadata(_ data: Data) -> Data {
+        var start = data.startIndex
+        var end = data.endIndex
+
+        // 1. Strip one or more leading ID3v2 headers ("ID3" + 2B version + 1B flags + 4B synchsafe size).
+        while end - start >= 10,
+              data[start] == 0x49, data[start + 1] == 0x44, data[start + 2] == 0x33,
+              data[start + 3] < 0xFF, data[start + 4] < 0xFF,
+              data[start + 6] < 0x80, data[start + 7] < 0x80,
+              data[start + 8] < 0x80, data[start + 9] < 0x80 {
+            let tagSize = (Int(data[start + 6]) << 21)
+                | (Int(data[start + 7]) << 14)
+                | (Int(data[start + 8]) << 7)
+                | Int(data[start + 9])
+            let footerSize = (data[start + 5] & 0x10) != 0 ? 10 : 0
+            let skip = 10 + tagSize + footerSize
+            guard skip > 0, start + skip <= end else { break }
+            start += skip
+        }
+
+        // 2. Strip trailing 128-byte ID3v1 tag ("TAG...").
+        if end - start >= 128,
+           data[end - 128] == 0x54, data[end - 127] == 0x41, data[end - 126] == 0x47 {
+            end -= 128
+        }
+
+        // 3. Sync to first valid MPEG audio frame and skip an optional Xing/Info/VBRI metadata frame.
+        var i = start
+        while i + 4 <= end {
+            let b0 = data[i], b1 = data[i + 1], b2 = data[i + 2], b3 = data[i + 3]
+            let version = (b1 >> 3) & 0x03
+            let layer = (b1 >> 1) & 0x03
+            let bitrateIdx = Int((b2 >> 4) & 0x0F)
+            let srIdx = Int((b2 >> 2) & 0x03)
+            if b0 == 0xFF, (b1 & 0xE0) == 0xE0,
+               version != 1, layer != 0,
+               (1 ... 14).contains(bitrateIdx), srIdx < 3 {
+                start = i
+                if layer == 1 {
+                    let padding = Int((b2 >> 1) & 0x01)
+                    let channelMode = (b3 >> 6) & 0x03
+                    let frameLen: Int
+                    let xingOffset: Int
+                    if version == 3 {
+                        let bitrates = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0]
+                        let sampleRates = [44100, 48000, 32000]
+                        frameLen = (144 * bitrates[bitrateIdx] * 1000) / sampleRates[srIdx] + padding
+                        xingOffset = i + 4 + (channelMode == 3 ? 17 : 32)
+                    } else {
+                        let bitrates = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0]
+                        let sampleRates = version == 2 ? [22050, 24000, 16000] : [11025, 12000, 8000]
+                        frameLen = (72 * bitrates[bitrateIdx] * 1000) / sampleRates[srIdx] + padding
+                        xingOffset = i + 4 + (channelMode == 3 ? 9 : 17)
+                    }
+                    let frameEnd = i + frameLen
+                    if frameLen >= 4, frameEnd <= end {
+                        let isXingOrInfo = xingOffset + 4 <= frameEnd && (
+                            (data[xingOffset] == 0x58 && data[xingOffset + 1] == 0x69 && data[xingOffset + 2] == 0x6E && data[xingOffset + 3] == 0x67)
+                            || (data[xingOffset] == 0x49 && data[xingOffset + 1] == 0x6E && data[xingOffset + 2] == 0x66 && data[xingOffset + 3] == 0x6F)
+                        )
+                        let isVBRI = i + 40 <= frameEnd
+                            && data[i + 36] == 0x56 && data[i + 37] == 0x42 && data[i + 38] == 0x52 && data[i + 39] == 0x49
+                        if isXingOrInfo || isVBRI {
+                            start = frameEnd
+                        }
+                    }
+                }
+                break
+            }
+            i += 1
+        }
+
+        return start < end ? Data(data[start ..< end]) : data
+    }
+
+    private static func combineDecodedPCM(_ parts: [Data]) throws -> (Data, String) {
+        var pcm = Data()
+        var targetRate: Double = 0
+        for part in parts {
+            let ext = sniffExt(part, fallback: "wav")
+            let tmp = FileManager.default.temporaryDirectory.appending(path: "voice-chunk-\(UUID().uuidString).\(ext)")
+            try part.write(to: tmp)
+            defer { try? FileManager.default.removeItem(at: tmp) }
+            let file = try AVAudioFile(forReading: tmp)
+            guard file.length > 0,
+                  let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)) else {
+                throw Failure.unreadable
+            }
+            try file.read(into: buffer)
+            if targetRate == 0 { targetRate = file.processingFormat.sampleRate }
+            guard let outFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: targetRate, channels: 1, interleaved: true),
+                  let converter = AVAudioConverter(from: buffer.format, to: outFormat) else {
+                throw Failure.unreadable
+            }
+            let ratio = targetRate / max(1, buffer.format.sampleRate)
+            let cap = AVAudioFrameCount(ceil(Double(buffer.frameLength) * ratio)) + 64
+            guard let outBuffer = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: cap) else {
+                throw Failure.unreadable
+            }
+            var consumed = false
+            var convError: NSError?
+            let status = converter.convert(to: outBuffer, error: &convError) { _, outStatus in
+                if consumed {
+                    outStatus.pointee = .endOfStream
+                    return nil
+                }
+                consumed = true
+                outStatus.pointee = .haveData
+                return buffer
+            }
+            guard status != .error, convError == nil,
+                  outBuffer.frameLength > 0,
+                  let ch = outBuffer.int16ChannelData?[0] else {
+                throw Failure.unreadable
+            }
+            pcm.append(UnsafeBufferPointer(start: ch, count: Int(outBuffer.frameLength)))
+        }
+        guard !pcm.isEmpty, targetRate > 0 else { throw Failure.unreadable }
+        return (wav(pcm: pcm, rate: Int(targetRate)), "wav")
+    }
+
     private static func looksLikeAudio(_ data: Data) -> Bool {
         guard data.count > 256 else { return false }
         let b0 = data[0], b1 = data[1], b2 = data[2], b3 = data[3]
         // MP3 frame sync (0xFF 0xE0..0xFF) or ID3 tag
         if b0 == 0xFF && (b1 & 0xE0) == 0xE0 { return true }
         if b0 == 0x49 && b1 == 0x44 && b2 == 0x33 { return true }
-        // RIFF WAV / OggS / fLaC / M4A
+        // RIFF WAV / OggS / fLaC
         if b0 == 0x52 && b1 == 0x49 && b2 == 0x46 && b3 == 0x46 { return true }
         if b0 == 0x4F && b1 == 0x67 && b2 == 0x67 && b3 == 0x53 { return true }
+        if b0 == 0x66 && b1 == 0x4C && b2 == 0x61 && b3 == 0x43 { return true }
         return false
     }
 }

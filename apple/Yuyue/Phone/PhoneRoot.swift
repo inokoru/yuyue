@@ -75,6 +75,23 @@ struct PhoneRoot: View {
         // One place for every tab: 书架, 我的 › 书库来源, 数据快照….
         .yyNotice(String(localized: "出了点问题"), message: library.alert ?? "", tone: .warn,
                   isPresented: Binding(get: { library.alert != nil }, set: { if !$0 { library.alert = nil } }))
+        // Background read-aloud / audiobook failure while the reader is closed and playing in 播放条.
+        .yyNotice(String(localized: "朗读停下了"),
+                  message: library.nowPlaying?.player?.failure ?? "",
+                  isPresented: Binding(
+                      get: { library.presented == nil && library.nowPlaying?.player?.failure != nil },
+                      set: { if !$0 { library.nowPlaying?.player?.failure = nil } }
+                  ),
+                  secondaryTitle: String(localized: "关上"),
+                  primaryTitle: String(localized: "换成系统声音"),
+                  onPrimary: { library.nowPlaying?.player?.useSystemVoice() })
+        .yyNotice(String(localized: "出了点问题"),
+                  message: (library.nowPlaying as? AudiobookPlayer)?.failure ?? "",
+                  tone: .warn,
+                  isPresented: Binding(
+                      get: { library.presented == nil && (library.nowPlaying as? AudiobookPlayer)?.failure != nil },
+                      set: { if !$0 { (library.nowPlaying as? AudiobookPlayer)?.failure = nil } }
+                  ))
         .bookBlocked(library) { importing = true }
         .fileImporter(isPresented: $importing, allowedContentTypes: Library.importTypes, allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { Task { await library.importFiles(urls) } }

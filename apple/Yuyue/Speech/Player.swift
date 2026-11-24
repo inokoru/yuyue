@@ -121,6 +121,8 @@ final class Player {
     @ObservationIgnored var onSleep: ((Spot) -> Void)?
     /// 双击耳机 (下一曲 to the headphones): the sentence just heard, to highlight.
     @ObservationIgnored var onMarkHeard: ((Spot) -> Void)?
+    /// The listener explicitly jumped to another sentence (skip / skipExtra).
+    @ObservationIgnored var onSkip: (() -> Void)?
 
     @ObservationIgnored private let detail: BookDetail
     /// 《书名》, for the 换声音 panel's 试听 line.
@@ -168,6 +170,9 @@ final class Player {
     @ObservationIgnored private var artwork: MPMediaItemArtwork?
     @ObservationIgnored private var observers: [any NSObjectProtocol] = []
     @ObservationIgnored private var remoteTargets: [(MPRemoteCommand, Any)] = []
+    #if os(iOS)
+    @ObservationIgnored private var resumeAfterInterruption = false
+    #endif
     private static weak var remoteOwner: Player?
     private static let ahead = 2
     private static let nodeAhead = 2
@@ -227,9 +232,19 @@ final class Player {
             let type = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
             let options = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             let began = type == AVAudioSession.InterruptionType.began.rawValue
-            let resume = AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume)
+            let ended = type == AVAudioSession.InterruptionType.ended.rawValue
+            let shouldResume = AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume)
             MainActor.assumeIsolated {
-                if began { self?.pause() } else if resume { self?.resume() }
+                guard let self else { return }
+                if began {
+                    let wasActive = self.state == .playing || self.state == .loading
+                    if wasActive { self.pause() }
+                    self.resumeAfterInterruption = wasActive
+                } else if ended {
+                    let resume = self.resumeAfterInterruption && shouldResume
+                    self.resumeAfterInterruption = false
+                    if resume, self.state == .paused { self.resume() }
+                }
             }
         })
         observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
@@ -250,18 +265,24 @@ final class Player {
     /// Starts reading at `position`, or at the first sentence after it with something to read.
     /// `word`: in the narrator's voice, the first sentence starts at this moment of the recording
     /// (a word found by 搜索), not at its own start.
-    func play(from position: Position, word: Double? = nil) {
+    func play(from position: Position, word: Double? = nil, paused: Bool = false) {
+        #if os(iOS)
+        resumeAfterInterruption = false
+        #endif
         failure = nil
         failedSpot = nil
+        if case .until(let date, _) = sleep, date <= Date() { sleep = .off }
         reset()
         startWord = word.map { (Spot(section: position.section, sentence: Int(position.sentence)), $0) }
         guard let start = first(from: Spot(section: position.section, sentence: Int(position.sentence))) else {
             return stop()
         }
-        let startLang = language(of: start.section)
-        if !narrated {
-            KokoroDownload.shared.startIfWifi(for: startLang)
-            LiveVoiceDownload.shared.startIfWifi(for: startLang)
+        if !paused {
+            let startLang = language(of: start.section)
+            if !narrated {
+                KokoroDownload.shared.startIfWifi(for: startLang)
+                LiveVoiceDownload.shared.startIfWifi(for: startLang)
+            }
         }
         if let hotSec = thermalFallbackSection, hotSec != start.section, thermalState != .critical {
             thermalFallbackSection = nil
@@ -269,6 +290,15 @@ final class Player {
         }
         spot = start
         nextToRender = start
+        if paused {
+            clearFadeIfNeeded()
+            state = .paused
+            claimRemote()
+            loadArtwork()
+            report()
+            updateNowPlaying()
+            return
+        }
         state = .loading
         claimRemote()
         loadArtwork()
@@ -277,21 +307,30 @@ final class Player {
     }
 
     func pause() {
+        #if os(iOS)
+        resumeAfterInterruption = false
+        #endif
         guard state == .playing || state == .loading else { return }
-        // 暂停即停预合成，不继续在后台占算力与电量。
+        // 暂停即停预合成与云端预取，不继续在后台占算力、电量或额度。
         rendering?.cancel()
         rendering = nil
+        cancelFetchAhead()
         RecordingFetch.shared.stopReadingDrama(bookID: detail.summary.id)
         heard = heardNow()
         resumedAt = nil
         node.pause()
         state = .paused
+        clearFadeIfNeeded()
         report()
         updateNowPlaying()
     }
 
     func resume() {
+        #if os(iOS)
+        resumeAfterInterruption = false
+        #endif
         guard state == .paused else { return }
+        clearFadeIfNeeded()
         if !narrated, let current = spot, DramaSynth.isDramaActive(core, detail.summary.id) {
             RecordingFetch.shared.readingDrama(bookID: detail.summary.id, section: current.section, core: core)
         }
@@ -314,9 +353,11 @@ final class Player {
     }
 
     func stop() {
+        #if os(iOS)
+        resumeAfterInterruption = false
+        #endif
         let wasStopped = state == .stopped
-        fetchingAhead?.task.cancel()
-        fetchingAhead = nil
+        cancelFetchAhead()
         RecordingFetch.shared.stopReadingDrama(bookID: detail.summary.id)
         reset()
         sectionLayers.removeAll()
@@ -324,6 +365,7 @@ final class Player {
         thermalFallbackSection = nil
         thermalNotice = nil
         state = .stopped
+        clearFadeIfNeeded()
         spot = nil
         engine.stop()
         #if os(iOS)
@@ -359,9 +401,8 @@ final class Player {
         guard let line = queued.first, line.extra != nil else { return }
         let next = line.extra?.place == .head ? line.spot : after(line.spot)
         guard let next else { return stop() }
-        let paused = state == .paused
-        play(from: next.position)
-        if paused { pause() }
+        onSkip?()
+        play(from: next.position, paused: state == .paused)
     }
 
     /// 点这里听: the 片头 just passed, then on from the first sentence.
@@ -375,16 +416,21 @@ final class Player {
     /// The 片头 offer is over.
     func dismissHead() { skippedHead = nil }
 
-    /// Moves on, or back, by one sentence.
-    func skip(forward: Bool) {
-        guard let spot, var target = forward ? after(spot) : before(spot) else { return }
+    /// Moves on, or back, by one sentence — from `origin` when given, else from `spot`.
+    func skip(forward: Bool, from origin: Position? = nil) {
+        let base: Spot?
+        if let origin {
+            base = Spot(section: origin.section, sentence: Int(origin.sentence))
+        } else {
+            base = spot
+        }
+        guard let base, var target = forward ? after(base) : before(base) else { return }
         // Past the sentences the recording doesn't read, or going back would land here again.
         if narrated, let guide {
             while guide.skips(target.section, target.sentence), let t = forward ? after(target) : before(target) { target = t }
         }
-        let paused = state == .paused
-        play(from: target.position)
-        if paused { pause() }
+        onSkip?()
+        play(from: target.position, paused: state == .paused)
     }
 
     /// Stops reading and lets go of the lock screen. The player can't be used afterwards.
@@ -397,12 +443,18 @@ final class Player {
 
     // MARK: The queue
 
+    private func cancelFetchAhead() {
+        fetchingAhead?.task.cancel()
+        fetchingAhead = nil
+    }
+
     private func reset() {
         generation += 1
         renderToken += 1
         extraPlaying = nil
         rendering?.cancel()
         rendering = nil
+        cancelFetchAhead()
         node.stop()
         queued = []
         staged = []
@@ -418,6 +470,7 @@ final class Player {
         renderToken += 1
         rendering?.cancel()
         rendering = nil
+        cancelFetchAhead()
         staged = []
         if let last = queued.last {
             nextToRender = last.extra?.place == .head ? last.spot : after(last.spot)
@@ -675,6 +728,10 @@ final class Player {
     }
 
     private func schedule(_ line: Line) {
+        if queued.isEmpty, case .until(let date, _) = sleep, Date() >= date {
+            fallAsleep(at: line.spot)
+            return
+        }
         let line = line.extra == nil ? Line(spot: line.spot, speech: paced(line.speech), extra: nil) : line
         staged.append(line)
         let wasEmpty = queued.isEmpty
@@ -744,6 +801,15 @@ final class Player {
         }
     }
 
+    private func clearFadeIfNeeded() {
+        if case .until(let date, _) = sleep, date <= Date() {
+            sleep = .off
+        } else if fading || engine.mainMixerNode.outputVolume < 1 {
+            fading = false
+            engine.mainMixerNode.outputVolume = 1
+        }
+    }
+
     private func sleepChanged(from old: Sleep) {
         if old == .off { sleepFrom = spot }
         fadeTask?.cancel()
@@ -759,13 +825,29 @@ final class Player {
                     // Paused: nothing fades, and no key is taken for 续 10 分钟; the time passing
                     // meanwhile ends the timer, so playing again doesn't stop a moment later.
                     if left <= 0 { self.sleep = .off; return }
-                    if self.fading { self.fading = false; self.engine.mainMixerNode.outputVolume = 1 }
+                    if self.fading || self.engine.mainMixerNode.outputVolume < 1 {
+                        self.fading = false
+                        self.engine.mainMixerNode.outputVolume = 1
+                    }
                     try? await Task.sleep(for: .milliseconds(500))
+                    continue
+                }
+                if left <= 0 {
+                    if self.state == .loading {
+                        if let at = self.spot ?? self.nextToRender {
+                            self.fallAsleep(at: at)
+                        } else {
+                            self.sleep = .off
+                        }
+                        return
+                    }
+                    if !self.fading { self.fading = true }
+                    self.engine.mainMixerNode.outputVolume = 0
+                    try? await Task.sleep(for: .milliseconds(200))
                     continue
                 }
                 if !self.fading { self.fading = true }
                 self.engine.mainMixerNode.outputVolume = Float(max(0, min(1, left / Self.fadeSeconds)))
-                if left <= 0 { break }
                 try? await Task.sleep(for: .milliseconds(200))
             }
         }
@@ -788,6 +870,7 @@ final class Player {
         self.spot = spot
         nextToRender = spot
         state = .paused
+        report()
         updateNowPlaying()
         onSleep?(spot)
     }
@@ -835,9 +918,13 @@ final class Player {
      }
 
     private func report() {
-        guard started, let line = queued.first, line.extra == nil else { return }
-        let rate = Double(rate)
-        onSentence?(line.spot, line.speech.seconds / rate * 1000, heardNow() / rate * 1000, state == .playing)
+        if started, let line = queued.first {
+            guard line.extra == nil else { return }
+            let rate = Double(rate)
+            onSentence?(line.spot, line.speech.seconds / rate * 1000, heardNow() / rate * 1000, state == .playing)
+        } else if state == .paused, let spot, extraPlaying == nil {
+            onSentence?(spot, 0, 0, false)
+        }
     }
 
     private func rateChanged(from old: Float) {
@@ -871,9 +958,7 @@ final class Player {
 
     private func restartHere() {
         guard let spot, state != .stopped else { return }
-        let paused = state == .paused
-        play(from: spot.position)
-        if paused { pause() }
+        play(from: spot.position, paused: state == .paused)
     }
 
     private func startEngine() -> Bool {
@@ -903,6 +988,7 @@ final class Player {
     /// The words changed (替换规则): sentences not yet rendered are read anew.
     func textsChanged() {
         texts = [:]
+        cancelFetchAhead()
     }
 
     private func sentences(_ section: UInt32) -> [String] {

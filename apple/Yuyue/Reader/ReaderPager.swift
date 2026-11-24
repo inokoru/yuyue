@@ -69,6 +69,8 @@ final class ReaderPager: PlatformView {
     private var barsLastY: CGFloat = 0
     private var barsTravel: CGFloat = 0
     private var arranging = false
+    /// Paginated mode temporarily locks scrolling while a text selection is active.
+    private var holding = false
     #endif
 
     init(core: YuyueCore, bookID: String, mode: LayoutMode, background: PlatformColor) {
@@ -137,6 +139,9 @@ final class ReaderPager: PlatformView {
             }
             return
         }
+        #if os(iOS)
+        holdStill(false)
+        #endif
         for slot in slots { recycle(slot) }
         let page = makePage()
         page.load(bookID: bookID, section: section, target: target)
@@ -189,7 +194,13 @@ final class ReaderPager: PlatformView {
     }
 
     private func makePage() -> SectionPage {
-        if let page = spare.popLast() { return page }
+        if let page = spare.popLast() {
+            page.setBackground(background)
+            #if os(iOS)
+            configure(page.webView.scrollView)
+            #endif
+            return page
+        }
         let page = SectionPage(configuration: configuration, background: background)
         #if os(iOS)
         page.webView.scrollView.delegate = self
@@ -209,7 +220,9 @@ final class ReaderPager: PlatformView {
 
     private func recycle(_ page: SectionPage) {
         page.clear()
-        #if os(macOS)
+        #if os(iOS)
+        page.webView.scrollView.isScrollEnabled = true
+        #else
         page.webView.isHidden = true
         #endif
         if !spare.contains(where: { $0 === page }) { spare.append(page) }
@@ -586,12 +599,20 @@ final class ReaderPager: PlatformView {
     }
 
     #if os(iOS)
-    /// While words are chosen the page stays put: dragging a handle near the edge would
-    /// otherwise turn it.
+    /// While words are chosen in paginated mode the page stays put: dragging a handle near the
+    /// edge would otherwise turn it. Releasing the hold always restores scrolling even if the
+    /// layout mode changed while text was selected.
     private func holdStill(_ on: Bool) {
-        guard mode == .paginated else { return }
-        outer.isScrollEnabled = !on
-        for page in slots { page.webView.scrollView.isScrollEnabled = !on }
+        if on {
+            guard mode == .paginated else { return }
+            holding = true
+            outer.isScrollEnabled = false
+            for page in slots { page.webView.scrollView.isScrollEnabled = false }
+        } else {
+            holding = false
+            outer.isScrollEnabled = mode == .paginated
+            for page in slots + spare { page.webView.scrollView.isScrollEnabled = true }
+        }
     }
     #endif
 
@@ -877,6 +898,7 @@ final class ReaderPager: PlatformView {
         // what it shows, as the reader does.
         position = nil
         #if os(iOS)
+        holding = false
         for page in slots + spare { configure(page.webView.scrollView) }
         outer.isScrollEnabled = mode == .paginated
         delegate?.pager(self, barsAway: false)
@@ -999,6 +1021,7 @@ extension ReaderPager: UIScrollViewDelegate {
         scroll.bounces = !paged
         scroll.alwaysBounceHorizontal = false
         scroll.alwaysBounceVertical = !paged
+        scroll.isScrollEnabled = !(paged && holding)
     }
 
     private func x(of page: SectionPage) -> CGFloat {

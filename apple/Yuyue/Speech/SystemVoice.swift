@@ -30,34 +30,38 @@ nonisolated final class SystemVoice: Voice, Sendable {
     }
 
     func render(_ text: String, language: String) async throws -> Speech? {
+        try Task.checkCancellation()
         // Text with nothing to pronounce never produces audio, or even the closing callback.
         guard text.unicodeScalars.contains(where: { CharacterSet.alphanumerics.contains($0) }) else { return nil }
         let collector = Collector()
+        let token = UUID()
         let timeout = 20 + Double(text.count) * 0.3
         // A sentence that never finishes must not stall the book.
         let watchdog = Task {
             try? await Task.sleep(for: .seconds(timeout))
             guard !Task.isCancelled else { return }
-            await Self.synthesizer.stopSpeaking()
+            await Self.synthesizer.stopSpeaking(token: token)
             collector.finish()
         }
         defer { watchdog.cancel() }
         let voiceID = id
-        return await withTaskCancellationHandler {
+        let speech = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 guard collector.start(continuation) else { return }
                 Task {
-                    guard !Task.isCancelled else {
-                        collector.finish()
-                        return
-                    }
-                    await Self.synthesizer.write(text: text, voiceID: voiceID, collector: collector)
+                    guard !collector.isFinished else { return }
+                    await Self.synthesizer.write(token: token, text: text, voiceID: voiceID, collector: collector)
                 }
             }
         } onCancel: {
-            collector.finish()
-            Task { await Self.synthesizer.stopSpeaking() }
+            collector.cancel()
+            Task { await Self.synthesizer.stopSpeaking(token: token) }
         }
+        if !Task.isCancelled {
+            await Self.synthesizer.finished(token: token)
+        }
+        try Task.checkCancellation()
+        return speech
     }
 
     /// The system voices worth offering, best first within each language. Asking the system is
@@ -100,6 +104,10 @@ nonisolated final class SystemVoice: Voice, Sendable {
 
     /// Plays a few words straight through the system, for 试听.
     @MainActor static func preview(_ voice: SystemVoice, text: String) {
+        #if os(iOS)
+        Voices.activatePreviewSession()
+        previewer.usesApplicationAudioSession = true
+        #endif
         previewer.stopSpeaking(at: .immediate)
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(identifier: voice.id)
@@ -153,10 +161,22 @@ private nonisolated final class PreviewWatcher: NSObject, AVSpeechSynthesizerDel
 
 /// Serializes `AVSpeechSynthesizer.write` and `stopSpeaking` off the main actor.
 private actor SynthesizerGate {
-    private let synthesizer = AVSpeechSynthesizer()
+    private var synthesizer = AVSpeechSynthesizer()
+    private var activeToken: UUID?
+    private weak var activeCollector: Collector?
 
-    func write(text: String, voiceID: String, collector: Collector) {
+    func write(token: UUID, text: String, voiceID: String, collector: Collector) {
         guard !collector.isFinished else { return }
+        // If an earlier utterance was still in flight (e.g. cancelled right before this write entered
+        // the actor), stop it on the old synthesizer and switch to a fresh instance so its async
+        // teardown cannot abort or truncate the new utterance.
+        if activeToken != nil {
+            activeCollector?.cancel()
+            synthesizer.stopSpeaking(at: .immediate)
+            synthesizer = AVSpeechSynthesizer()
+        }
+        activeToken = token
+        activeCollector = collector
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(identifier: voiceID)
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
@@ -164,8 +184,18 @@ private actor SynthesizerGate {
         synthesizer.write(utterance, toBufferCallback: Self.makeCallback(collector))
     }
 
-    func stopSpeaking() {
+    func stopSpeaking(token: UUID) {
+        guard activeToken == token else { return }
+        activeToken = nil
+        activeCollector = nil
         synthesizer.stopSpeaking(at: .immediate)
+        synthesizer = AVSpeechSynthesizer()
+    }
+
+    func finished(token: UUID) {
+        guard activeToken == token else { return }
+        activeToken = nil
+        activeCollector = nil
     }
 
     private nonisolated static func makeCallback(_ collector: Collector) -> AVSpeechSynthesizer.BufferCallback {
@@ -205,6 +235,16 @@ private nonisolated final class Collector: @unchecked Sendable {
             guard !finished else { return }
             buffers.append(pcm)
         }
+    }
+
+    func cancel() {
+        let continuation = lock.withLock { () -> CheckedContinuation<Speech?, Never>? in
+            guard !finished else { return nil }
+            finished = true
+            defer { self.continuation = nil; self.buffers = [] }
+            return self.continuation
+        }
+        continuation?.resume(returning: nil)
     }
 
     func finish() {

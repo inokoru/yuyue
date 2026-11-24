@@ -192,10 +192,23 @@ enum Voices {
         [v.name, v.qualityName].compactMap { $0 }.joined(separator: " · ")
     }
 
+    #if os(iOS)
+    /// Configures and activates the audio session so 试听 plays even with the hardware mute switch on.
+    @MainActor static func activatePreviewSession() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .spokenAudio, options: [.allowAirPlay, .allowBluetoothA2DP])
+        try? session.setActive(true)
+    }
+    #endif
+
     /// 试听: system voices speak straight away; a cloud voice is fetched, then played.
     @MainActor static func preview(_ voice: any Voice, text: String, failed: @escaping (String) -> Void = { _ in }) {
-        if let v = voice as? SystemVoice { return SystemVoice.preview(v, text: text) }
         previewing?.cancel()
+        if let v = voice as? SystemVoice {
+            Previewer.shared.stop()
+            return SystemVoice.preview(v, text: text)
+        }
+        SystemVoice.stopPreview()
         PreviewState.shared.began(voice.id, seconds: nil)
         let lang = (voice as? CloudVoice)?.language
             ?? (voice as? KokoroVoice)?.speaker.lang
@@ -292,9 +305,7 @@ final class PreviewState {
 
     func play(_ speech: Speech, id: String) {
         #if os(iOS)
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .spokenAudio, options: [.allowAirPlay, .allowBluetoothA2DP])
-        try? session.setActive(true)
+        Voices.activatePreviewSession()
         #endif
         node.stop()
         if !engine.isRunning {

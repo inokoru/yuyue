@@ -1121,29 +1121,31 @@ struct YYDialogCard: View {
                     .onAppear { focused = true }
                     .onSubmit(onPrimary)
             }
-            HStack(spacing: YYUI.s(8)) {
-                if wide {
-                    Button(primaryTitle, action: onPrimary)
-                        .buttonStyle(YYButtonStyle(kind: .main, wide: true, height: 34))
-                        .keyboardShortcut(.defaultAction)
-                } else {
-                    #if os(macOS)
-                    Spacer(minLength: 0)
-                    #endif
+            if wide {
+                Button(primaryTitle, action: onPrimary)
+                    .buttonStyle(YYButtonStyle(kind: .main, wide: true, height: 34))
+                    .minimumScaleFactor(0.85)
+                    .keyboardShortcut(.defaultAction)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, YYUI.s(16))
+            } else {
+                YYDialogButtonLayout(gap: YYUI.s(8), spread: phoneWide) {
                     if let secondaryTitle {
                         // 取消 beside a name being typed is red, as the phone's own prompts have it.
                         Button(secondaryTitle, action: onSecondary)
                             .buttonStyle(YYButtonStyle(kind: field != nil ? .danger : .plain, wide: phoneWide))
+                            .minimumScaleFactor(0.85)
                             .keyboardShortcut(.cancelAction)
                     }
                     // Return in the field submits it; a default shortcut would run the action twice.
                     Button(primaryTitle, action: onPrimary)
                         .buttonStyle(YYButtonStyle(kind: destructive ? .danger : .main, wide: phoneWide))
+                        .minimumScaleFactor(0.85)
                         .modifier(DefaultShortcut(on: field == nil && !destructive))
                 }
+                .frame(maxWidth: .infinity)
+                .padding(.top, YYUI.s(16))
             }
-            .frame(maxWidth: .infinity)
-            .padding(.top, YYUI.s(16))
         }
         .padding(.horizontal, YYUI.s(20))
         .padding(.top, YYUI.s(22))
@@ -1163,6 +1165,107 @@ struct YYDialogCard: View {
                     .overlay(RoundedRectangle(cornerRadius: YYUI.s(18)).strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5))
                     .shadow(color: .black.opacity(0.28), radius: YYUI.s(30), y: YYUI.s(16))
             }
+        }
+    }
+}
+
+/// Dialog action row: splits 50/50 when both labels fit half the row (iOS), gives a longer
+/// label the room it needs when both still fit on one line, and stacks vertically (primary on
+/// top) when one row is too narrow (e.g. large Dynamic Type or two long localized labels).
+private struct YYDialogButtonLayout: Layout {
+    var gap: CGFloat
+    var spread: Bool
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard !subviews.isEmpty else { return .zero }
+        if subviews.count == 1 {
+            let ideal = subviews[0].sizeThatFits(.unspecified)
+            guard let w = proposal.width, w.isFinite else { return ideal }
+            return CGSize(width: max(0, w), height: ideal.height)
+        }
+        let s0 = subviews[0].sizeThatFits(.unspecified)
+        let s1 = subviews[1].sizeThatFits(.unspecified)
+        let rowW = s0.width + gap + s1.width
+        let rowH = max(s0.height, s1.height)
+        guard let w = proposal.width, w.isFinite else {
+            return CGSize(width: rowW, height: rowH)
+        }
+        if rowW <= w {
+            return CGSize(width: max(0, w), height: rowH)
+        }
+        return CGSize(width: max(0, w), height: s1.height + gap + s0.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard !subviews.isEmpty else { return }
+        if subviews.count == 1 {
+            let ideal = subviews[0].sizeThatFits(.unspecified)
+            if spread {
+                subviews[0].place(
+                    at: CGPoint(x: bounds.minX, y: bounds.midY),
+                    anchor: .leading,
+                    proposal: .init(width: bounds.width, height: bounds.height)
+                )
+            } else {
+                subviews[0].place(
+                    at: CGPoint(x: bounds.maxX, y: bounds.midY),
+                    anchor: .trailing,
+                    proposal: .init(width: min(ideal.width, bounds.width), height: bounds.height)
+                )
+            }
+            return
+        }
+        let s0 = subviews[0].sizeThatFits(.unspecified)
+        let s1 = subviews[1].sizeThatFits(.unspecified)
+        let avail = bounds.width
+        if s0.width + gap + s1.width <= avail {
+            if spread {
+                let usable = max(0, avail - gap)
+                let half = usable / 2
+                let w0: CGFloat
+                let w1: CGFloat
+                if s0.width <= half && s1.width <= half {
+                    w0 = half
+                    w1 = half
+                } else {
+                    let extra = max(0, usable - s0.width - s1.width)
+                    w0 = s0.width + extra / 2
+                    w1 = max(0, usable - w0)
+                }
+                subviews[0].place(
+                    at: CGPoint(x: bounds.minX, y: bounds.midY),
+                    anchor: .leading,
+                    proposal: .init(width: w0, height: bounds.height)
+                )
+                subviews[1].place(
+                    at: CGPoint(x: bounds.maxX, y: bounds.midY),
+                    anchor: .trailing,
+                    proposal: .init(width: w1, height: bounds.height)
+                )
+            } else {
+                subviews[1].place(
+                    at: CGPoint(x: bounds.maxX, y: bounds.midY),
+                    anchor: .trailing,
+                    proposal: .init(width: s1.width, height: bounds.height)
+                )
+                subviews[0].place(
+                    at: CGPoint(x: bounds.maxX - s1.width - gap, y: bounds.midY),
+                    anchor: .trailing,
+                    proposal: .init(width: s0.width, height: bounds.height)
+                )
+            }
+        } else {
+            // Stack vertically with the primary action on top and secondary/cancel below.
+            subviews[1].place(
+                at: CGPoint(x: bounds.midX, y: bounds.minY),
+                anchor: .top,
+                proposal: .init(width: avail, height: s1.height)
+            )
+            subviews[0].place(
+                at: CGPoint(x: bounds.midX, y: bounds.minY + s1.height + gap),
+                anchor: .top,
+                proposal: .init(width: avail, height: s0.height)
+            )
         }
     }
 }

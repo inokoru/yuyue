@@ -338,8 +338,8 @@ struct PhoneReaderChrome: View {
     }
 
     private func step(forward: Bool) {
-        if let player = model.player, player.spot != nil {
-            player.skip(forward: forward)
+        if model.player?.spot != nil {
+            model.stepSentence(forward: forward)
         } else {
             model.turn(forward: forward)
         }

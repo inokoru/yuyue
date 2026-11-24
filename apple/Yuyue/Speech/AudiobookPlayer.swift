@@ -104,9 +104,14 @@ final class AudiobookPlayer {
     /// Where each file starts in the whole recording.
     @ObservationIgnored private var starts: [Double] = []
     @ObservationIgnored private var items: [AVPlayerItem] = []
+    /// File index of `items[0]` within `recording.files`.
+    @ObservationIgnored private var itemsStart = 0
     @ObservationIgnored private var ticker: Any?
     @ObservationIgnored private var observers: [any NSObjectProtocol] = []
     @ObservationIgnored private var remoteTargets: [(MPRemoteCommand, Any)] = []
+    #if os(iOS)
+    @ObservationIgnored private var resumeAfterInterruption = false
+    #endif
     @ObservationIgnored private var artwork: MPMediaItemArtwork?
     @ObservationIgnored private var pausedAt: Date?
     @ObservationIgnored private var listenSince: Date?
@@ -206,9 +211,19 @@ final class AudiobookPlayer {
             let type = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
             let options = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             let began = type == AVAudioSession.InterruptionType.began.rawValue
-            let resume = AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume)
+            let ended = type == AVAudioSession.InterruptionType.ended.rawValue
+            let shouldResume = AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume)
             MainActor.assumeIsolated {
-                if began { self?.pause() } else if resume { self?.play() }
+                guard let self else { return }
+                if began {
+                    let wasPlaying = self.isPlaying
+                    if wasPlaying { self.pause() }
+                    self.resumeAfterInterruption = wasPlaying
+                } else if ended {
+                    let resume = self.resumeAfterInterruption && shouldResume
+                    self.resumeAfterInterruption = false
+                    if resume, !self.isPlaying { self.play() }
+                }
             }
         })
         observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
@@ -341,6 +356,9 @@ final class AudiobookPlayer {
     func togglePlay() { isPlaying ? pause() : play() }
 
     func play() {
+        #if os(iOS)
+        resumeAfterInterruption = false
+        #endif
         guard let recording, !recording.files.isEmpty, !isPlaying else { return }
         #if os(iOS)
         do {
@@ -373,7 +391,7 @@ final class AudiobookPlayer {
         UserDefaults.standard.removeObject(forKey: Self.sleepKey(bookID))
         sleepReturn = nil
         // Heard to the end: from the start again.
-        if time >= total - 0.5 {
+        if waiting == nil, total > 0, time >= total - 0.5, recording.files.last.map({ $0.seconds > 0 }) ?? true {
             time = 0
             moved = true
         }
@@ -393,6 +411,9 @@ final class AudiobookPlayer {
     }
 
     func pause() {
+        #if os(iOS)
+        resumeAfterInterruption = false
+        #endif
         guard isPlaying else { return }
         // Paused while the voice reads what the recording leaves out: back to just before
         // them, so playing on reads them again rather than passing them by.
@@ -468,6 +489,9 @@ final class AudiobookPlayer {
     }
 
     func close() {
+        #if os(iOS)
+        resumeAfterInterruption = false
+        #endif
         stopFilling()
         if isPlaying {
             readTime()
@@ -486,9 +510,13 @@ final class AudiobookPlayer {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         queue.removeAllItems()
         items = []
+        itemsStart = 0
     }
 
     func abandon() {
+        #if os(iOS)
+        resumeAfterInterruption = false
+        #endif
         guard !abandoned else { return }
         abandoned = true
         stopFilling()
@@ -504,6 +532,7 @@ final class AudiobookPlayer {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         queue.removeAllItems()
         items = []
+        itemsStart = 0
     }
 
     /// 长按改名: a chapter's own name, or empty to have it called 第 n 集.
@@ -575,7 +604,10 @@ final class AudiobookPlayer {
     /// The file chapter `i` starts in.
     func file(ofChapter i: Int) -> Int {
         guard chapters.indices.contains(i) else { return 0 }
-        return max(0, starts.lastIndex { $0 <= chapters[i].start + 0.01 } ?? 0)
+        if let recording, chapters.count == recording.files.count, recording.files[i].seconds <= 0 {
+            return i
+        }
+        return fileIndex(at: chapters[i].start + 0.01)
     }
 
     /// Files here, of all.
@@ -621,7 +653,23 @@ final class AudiobookPlayer {
     private var clearsTick = 0
 
     /// The file being listened to.
-    var currentFile: Int { max(0, starts.lastIndex { $0 <= time } ?? 0) }
+    var currentFile: Int { waiting ?? fileIndex(at: time) }
+
+    /// Resolves which file index covers `t`. When unarrived trailing files have zero duration and
+    /// therefore share `starts[k] == ... == starts[n-1] == total`, returns the first such file `k`
+    /// rather than jumping to the last file `n - 1`.
+    private func fileIndex(at t: Double) -> Int {
+        guard let recording, !starts.isEmpty else { return 0 }
+        let count = min(starts.count, recording.files.count)
+        let clamped = min(max(0, t), total)
+        for i in 0 ..< count {
+            let s = starts[i]
+            let d = recording.files[i].seconds
+            if clamped < s + d { return i }
+            if d <= 0 && clamped <= s { return i }
+        }
+        return max(0, count - 1)
+    }
 
     /// The recording again from the core: a file that came from the share may know its length now.
     private func reloadRecording() {
@@ -647,21 +695,30 @@ final class AudiobookPlayer {
         reloadRecording()
         guard let w = waiting, w == file else { return }
         waiting = nil
-        load(at: time)
+        let into = starts.indices.contains(file) ? max(0, time - starts[file]) : 0
+        load(file: file, into: into)
         if isPlaying { queue.playImmediately(atRate: rate) }
     }
 
     /// The queue from the file `t` falls in, sought to `t` — up to the first file not here yet.
     private func load(at t: Double) {
-        guard let recording else { return }
-        let i = max(0, (starts.lastIndex { $0 <= t }) ?? 0)
+        let i = fileIndex(at: t)
+        let into = starts.indices.contains(i) ? max(0, t - starts[i]) : 0
+        load(file: i, into: into)
+    }
+
+    private func load(file i: Int, into: Double) {
+        guard let recording, recording.files.indices.contains(i) else { return }
         queue.removeAllItems()
         let here = recording.files[i...].prefix { FileManager.default.fileExists(atPath: $0.path) }
         if here.isEmpty {
             items = []
+            itemsStart = 0
             wait(for: i)
             return
         }
+        waiting = nil
+        itemsStart = i
         items = here.map { f in
             let item = AVPlayerItem(url: URL(filePath: f.path))
             item.audioTimePitchAlgorithm = .timeDomain
@@ -673,7 +730,6 @@ final class AudiobookPlayer {
             return item
         }
         for item in items { queue.insert(item, after: nil) }
-        let into = t - starts[i]
         if into > 0.05 {
             queue.seek(to: CMTime(seconds: into, preferredTimescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero)
         }
@@ -681,12 +737,19 @@ final class AudiobookPlayer {
 
     private func finished(_ item: AVPlayerItem?) {
         guard let item, item === items.last else { return }
-        // 边下边听: more of the book, not here yet.
-        if let recording, let i = starts.indices.last(where: { $0 < recording.files.count && starts[$0] <= time }) {
-            let next = recording.files.indices.first { $0 > i - 1 + items.count && !FileManager.default.fileExists(atPath: recording.files[$0].path) }
-            if let next, next < recording.files.count {
-                time = starts.indices.contains(next) ? starts[next] : time
-                wait(for: next)
+        // 边下边听: continue into the next file after the loaded contiguous segment.
+        if let recording {
+            let next = itemsStart + items.count
+            if next < recording.files.count {
+                time = starts.indices.contains(next) ? starts[next] : total
+                if FileManager.default.fileExists(atPath: recording.files[next].path) {
+                    load(file: next, into: 0)
+                    if isPlaying { queue.playImmediately(atRate: rate) }
+                } else {
+                    items = []
+                    itemsStart = 0
+                    wait(for: next)
+                }
                 return
             }
         }
@@ -705,9 +768,9 @@ final class AudiobookPlayer {
     /// queue from its file.
     private func jump(to t: Double) {
         time = min(max(0, t), max(0, total - 0.1))
-        let i = max(0, (starts.lastIndex { $0 <= time }) ?? 0)
-        let offset = starts.count - items.count
-        if let item = queue.currentItem, let k = items.firstIndex(where: { $0 === item }), offset + k == i {
+        let i = fileIndex(at: time)
+        if let item = queue.currentItem, let k = items.firstIndex(where: { $0 === item }),
+           itemsStart + k == i, starts.indices.contains(i) {
             item.seek(to: CMTime(seconds: time - starts[i], preferredTimescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: nil)
         } else {
             load(at: time)
@@ -743,10 +806,11 @@ final class AudiobookPlayer {
     /// `time` from the file playing and how far into it.
     private func readTime() {
         guard let item = queue.currentItem, let i = items.firstIndex(where: { $0 === item }) else { return }
-        let offset = starts.count - items.count
+        let fileIndex = itemsStart + i
+        guard starts.indices.contains(fileIndex) else { return }
         let at = CMTimeGetSeconds(item.currentTime())
         guard at.isFinite else { return }
-        time = min(total, starts[offset + i] + max(0, at))
+        time = min(total, starts[fileIndex] + max(0, at))
     }
 
     /// What the map says about the moment: pass it, cut it short, say what it is. True when

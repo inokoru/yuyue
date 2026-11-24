@@ -171,6 +171,11 @@ final class ReaderModel {
     /// After a page is turned by hand the pages stop following the voice for a while, so the
     /// reader can look back without being pulled along.
     @ObservationIgnored var followFrom = Date.distantPast
+    /// True after the reader manually turned or scrolled away while paused, so the capsule and
+    /// sentence stepping follow what is now on screen rather than the old paused `player.spot`.
+    @ObservationIgnored private var pausedOffSpot = false
+    /// The last sentence reported by `player`, so pause/rate updates don't re-scroll in scrolled mode.
+    @ObservationIgnored private var lastSpokenSpot: Player.Spot?
     @ObservationIgnored private var saved: Position?
     /// Opening a book only shows where it was; the position is written once the reader moves,
     /// so a glance on one device doesn't bury further reading on another.
@@ -226,12 +231,19 @@ final class ReaderModel {
                 self?.setListening(playing)
             }
             player.onStop = { [weak self] in
+                self?.lastSpokenSpot = nil
+                self?.pausedOffSpot = false
                 self?.flush()
                 self?.pager.clearInk()
                 self?.setListening(false)
             }
             player.onSleep = { [weak self] spot in self?.fellAsleep(at: spot) }
             player.onMarkHeard = { [weak self] spot in self?.markHeard(spot) }
+            player.onSkip = { [weak self] in
+                self?.followFrom = .distantPast
+                self?.pausedOffSpot = false
+                self?.lastSpokenSpot = nil
+            }
         }
         // 我的 › 沉浸阅读 on: every book opens with only its words.
         immersive = ImmersivePrefs.always
@@ -524,6 +536,7 @@ final class ReaderModel {
 
     private func turnedByHand() {
         followFrom = Date().addingTimeInterval(8)
+        if player?.state == .paused { pausedOffSpot = true }
         clock.lastTurn = Date()
     }
 
@@ -582,13 +595,30 @@ final class ReaderModel {
         switch player.state {
         case .playing, .loading:
             player.pause()
-        case .paused where player.spot.map(isOnScreen) == true:
+        case .paused where !pausedOffSpot && player.spot.map(isOnScreen) == true:
             followFrom = .distantPast
+            pausedOffSpot = false
             player.resume()
         case .paused, .stopped:
             guard let position = pager.position else { return }
             followFrom = .distantPast
+            pausedOffSpot = false
             player.play(from: narratedStart(position))
+        }
+    }
+
+    /// Steps one sentence forward or backward; when paused after manually moving to another
+    /// page or scroll position, steps from what is currently on screen.
+    func stepSentence(forward: Bool) {
+        guard let player, let spot = player.spot else { return }
+        let useScreen = player.state == .paused && (pausedOffSpot || !isOnScreen(spot))
+        followFrom = .distantPast
+        pausedOffSpot = false
+        lastSpokenSpot = nil
+        if useScreen, let position = pager.position {
+            player.skip(forward: forward, from: position)
+        } else {
+            player.skip(forward: forward)
         }
     }
 
@@ -632,6 +662,9 @@ final class ReaderModel {
     }
 
     private func reading(_ spot: Player.Spot, durationMs: Double, elapsedMs: Double, playing: Bool) {
+        let spotChanged = spot != lastSpokenSpot
+        lastSpokenSpot = spot
+        if spotChanged || playing { pausedOffSpot = false }
         if playing { sleepHeard() }
         if spot.section == section, sentence != spot.sentence { sentence = spot.sentence }
         let spoken = Position(section: spot.section, sentence: UInt32(max(0, spot.sentence)))
@@ -646,16 +679,32 @@ final class ReaderModel {
         // still keeps up with the sentence it's about at.
         if let player, player.narrated, player.guide?.chapterOnly(spot.section) == true {
             pager.clearInk()
-            if following, !isOnScreen(spot) {
-                pager.show(section: spot.section, target: .sentence(spot.sentence, align: .third), animated: !pager.reduceMotion)
-            }
+            followSpoken(spot, spotChanged: spotChanged)
             return
         }
         pager.setInk(section: spot.section, sentence: spot.sentence, durationMs: durationMs, elapsedMs: elapsedMs, playing: playing, words: wordTimes(spot))
-        // Into the next chapter with the voice. Within a section the reader says when the ink
-        // reaches another page (`inkReachedPage`).
-        if following, spot.section != pager.current?.section {
+        followSpoken(spot, spotChanged: spotChanged)
+    }
+
+    /// Brings `spot` into view when following the voice: crosses chapters, turns pages in paginated
+    /// mode, and scrolls to the sentence in scrolled mode.
+    private func followSpoken(_ spot: Player.Spot, spotChanged: Bool) {
+        guard following else { return }
+        if spot.section != pager.current?.section {
             pager.show(section: spot.section, target: .sentence(spot.sentence, align: .third), animated: !pager.reduceMotion)
+        } else if settings.mode == .scrolled, spotChanged, let current = pager.current {
+            let section = spot.section
+            let target = spot.sentence
+            let animated = !pager.reduceMotion
+            Task { [weak self] in
+                guard self?.pager.current === current, current.section == section else { return }
+                await current.go(to: .sentence(target, align: .third), animated: animated)
+            }
+        } else if settings.mode == .paginated, let current = pager.current, let layout = current.layout {
+            let targetPage = layout.page(of: spot.sentence)
+            if targetPage != current.page {
+                pager.turn(to: targetPage, animated: !pager.reduceMotion)
+            }
         }
     }
 
@@ -824,7 +873,11 @@ extension ReaderModel: ReaderPagerDelegate {
         pageCount = layout.pageCount
         if let position = pager.position {
             if opened { save(position) } else { opened = true; saved = position }
-            if player?.spot?.section != current.section || !isPlaying { sentence = Int(position.sentence) }
+            if let spot = player?.spot, spot.section == current.section, isPlaying || !pausedOffSpot {
+                sentence = spot.sentence
+            } else {
+                sentence = Int(position.sentence)
+            }
         }
     }
 
@@ -1065,7 +1118,7 @@ extension ReaderSettings {
             "paperStyle": js(r.custom.map { paperStyle(paper: $0) }),
             "texture": js(r.custom?.texture.css),
             "mode": mode == .paginated ? "paginated" : "scrolled",
-            "font": js(font?.name),
+            "font": js(cssFont),
             "fontSize": fontSize,
             "lineHeight": js(lineHeight),
             "paragraphSpacing": js(paragraphSpacing),
@@ -1073,6 +1126,43 @@ extension ReaderSettings {
             "indent": js(indent),
             "compress": compress,
         ]
+    }
+
+    /// Matches `document.rs` + `fonts.rs`: `fontFace` CSS family first (when set), followed by the
+    /// built-in fallback stack, or the built-in keyword alone.
+    var cssFont: String? {
+        if let raw = fontFace, let family = Self.cssFamily(for: raw) {
+            let fallback = switch font {
+            case .sans?: "sans"
+            case .serif?: "serif"
+            case .kai?: "kaiti"
+            case .wenKai?: "wenkai"
+            case nil: "p-font"
+            }
+            return "\(family), var(--yy-\(fallback))"
+        }
+        return font?.name
+    }
+
+    private static func cssFamily(for face: String) -> String? {
+        func quote(_ s: String) -> String {
+            let cleaned = s.filter { !["\"", "\\", "<", ">", ";", "{", "}"].contains($0) }
+            return "\"\(cleaned)\""
+        }
+        if face.hasPrefix("local:") {
+            let family = face.dropFirst(6).trimmingCharacters(in: .whitespaces)
+            return family.isEmpty ? nil : quote(family)
+        }
+        if face.hasPrefix("file:") {
+            let name = String(face.dropFirst(5))
+            guard !name.isEmpty, !name.contains(where: { ["/", "\\", "\"", "'"].contains($0) }),
+                  !name.hasPrefix("."), FontShelf.isFontFile(name) else { return nil }
+            return quote("yy-\(face)")
+        }
+        if FontShelf.shared.catalog.contains(where: { $0.id == face && $0.id != "wenkai" }) {
+            return quote("yy-\(face)")
+        }
+        return nil
     }
 }
 
