@@ -1,5 +1,11 @@
+import CoreText
 import SwiftUI
 import YuyueCore
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 /// Podcast Episode Listening-Reading View ("访谈书页"):
 /// - Top bar: `返回收听台` back button on the left; right tools with `26pt` recessed
@@ -1105,6 +1111,42 @@ struct PodcastReaderView: View {
                 composedText.textRenderer(PodcastDottedTextRenderer(dotColor: tint.accent))
             } else {
                 composedText
+                    .background {
+                        ZStack(alignment: .topLeading) {
+                            ForEach(matches, id: \.entry.id) { m in
+                                let vocabKey = "\(sent.id):\(m.entry.word.lowercased())"
+                                let isActive: Bool = {
+                                    if hoveredVocabID == vocabKey { return true }
+                                    guard let pop = activePopover, pop.sentenceID == sent.id else { return false }
+                                    if case .vocab(let e) = pop.kind {
+                                        return e.word.caseInsensitiveCompare(m.entry.word) == .orderedSame
+                                    }
+                                    return false
+                                }()
+                                if isActive {
+                                    ForEach(Array(wordRectStore.hitRects(for: vocabKey).enumerated()), id: \.offset) { _, r in
+                                        let bgRect = r.insetBy(dx: -3, dy: -1)
+                                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                            .fill(tint.accent.opacity(0.12))
+                                            .frame(width: bgRect.width, height: bgRect.height)
+                                            .offset(x: bgRect.minX, y: bgRect.minY)
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .allowsHitTesting(false)
+                    }
+                    .modifier(
+                        PodcastLegacyWordLayoutModifier(
+                            text: text,
+                            isLatin: isLatinText,
+                            fontSize: 16.5 * TextScale.shared.factor,
+                            lineSpacing: 10,
+                            spans: matches.map { ("\(sent.id):\($0.entry.word.lowercased())", NSRange($0.range, in: text)) },
+                            store: wordRectStore
+                        )
+                    )
             }
         }
         return renderedText
@@ -1115,10 +1157,7 @@ struct PodcastReaderView: View {
                 case .active(let loc):
                     let hit = matches.first { m in
                         let k = "\(sent.id):\(m.entry.word.lowercased())"
-                        if let r = wordRectStore.rects[k] {
-                            return r.insetBy(dx: -8, dy: -6).contains(loc)
-                        }
-                        return false
+                        return wordRectStore.hitRects(for: k).contains { $0.insetBy(dx: -8, dy: -6).contains(loc) }
                     }
                     let nextID = hit.map { "\(sent.id):\($0.entry.word.lowercased())" }
                     if hoveredVocabID != nextID {
@@ -1136,13 +1175,12 @@ struct PodcastReaderView: View {
                     let loc = value.location
                     if let hit = matches.first(where: { m in
                         let k = "\(sent.id):\(m.entry.word.lowercased())"
-                        if let r = wordRectStore.rects[k] {
-                            return r.insetBy(dx: -12, dy: -10).contains(loc)
-                        }
-                        return false
+                        return wordRectStore.hitRects(for: k).contains { $0.insetBy(dx: -12, dy: -10).contains(loc) }
                     }) {
                         let k = "\(sent.id):\(hit.entry.word.lowercased())"
-                        let localRect = wordRectStore.rects[k] ?? CGRect(x: loc.x - 30, y: loc.y - 10, width: 60, height: 20)
+                        let localRect = wordRectStore.hitRects(for: k).first(where: { $0.insetBy(dx: -12, dy: -10).contains(loc) })
+                            ?? wordRectStore.rects[k]
+                            ?? CGRect(x: loc.x - 30, y: loc.y - 10, width: 60, height: 20)
                         let baseRect = sentenceFrames[sent.id] ?? .zero
                         let wordSheetRect = CGRect(
                             x: baseRect.minX + localRect.minX,
@@ -2439,6 +2477,140 @@ struct PodcastReaderView: View {
 /// Shared mutable cache of rendered vocabulary run bounding boxes inside each sentence's `Text` view.
 private final class PodcastWordRectStore: @unchecked Sendable {
     var rects: [String: CGRect] = [:]
+    /// Per-line bounding boxes for wrapped multi-word phrases (populated on macOS 14 / iOS 17 via CoreText).
+    var segments: [String: [CGRect]] = [:]
+
+    func hitRects(for key: String) -> [CGRect] {
+        if let segs = segments[key], !segs.isEmpty {
+            return segs
+        }
+        if let rect = rects[key] {
+            return [rect]
+        }
+        return []
+    }
+}
+
+/// Computes local SwiftUI bounding boxes for matched vocabulary spans via CoreText on macOS 14 / iOS 17
+/// where `TextRenderer` is unavailable, so both tap lookup and hover highlighting stay functional.
+private struct PodcastLegacyWordLayoutModifier: ViewModifier {
+    let text: String
+    let isLatin: Bool
+    let fontSize: CGFloat
+    let lineSpacing: CGFloat
+    let spans: [(key: String, range: NSRange)]
+    let store: PodcastWordRectStore
+    @State private var measuredSize: CGSize = .zero
+
+    private var layoutKey: String {
+        "\(text)|\(isLatin)|\(fontSize)|\(spans.map { "\($0.key):\($0.range.location),\($0.range.length)" }.joined(separator: ";"))"
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { newSize in
+                measuredSize = newSize
+                recompute(for: newSize)
+            }
+            .onChange(of: layoutKey) { _, _ in
+                if measuredSize.width > 1 {
+                    recompute(for: measuredSize)
+                }
+            }
+    }
+
+    private func recompute(for size: CGSize) {
+        guard !spans.isEmpty, size.width > 1 else { return }
+        let font = Self.makeCTFont(isLatin: isLatin, size: fontSize)
+        var spacing = lineSpacing
+        var alignment: CTTextAlignment = .left
+        var lineBreak: CTLineBreakMode = .byWordWrapping
+        let paraStyle: CTParagraphStyle = withUnsafePointer(to: &spacing) { spPtr in
+            withUnsafePointer(to: &alignment) { alignPtr in
+                withUnsafePointer(to: &lineBreak) { breakPtr in
+                    let settings = [
+                        CTParagraphStyleSetting(spec: .lineSpacingAdjustment, valueSize: MemoryLayout<CGFloat>.size, value: spPtr),
+                        CTParagraphStyleSetting(spec: .alignment, valueSize: MemoryLayout<CTTextAlignment>.size, value: alignPtr),
+                        CTParagraphStyleSetting(spec: .lineBreakMode, valueSize: MemoryLayout<CTLineBreakMode>.size, value: breakPtr),
+                    ]
+                    return CTParagraphStyleCreate(settings, settings.count)
+                }
+            }
+        }
+        let attrString = NSAttributedString(
+            string: text,
+            attributes: [
+                NSAttributedString.Key(kCTFontAttributeName as String): font,
+                NSAttributedString.Key(kCTParagraphStyleAttributeName as String): paraStyle,
+            ]
+        )
+        let framesetter = CTFramesetterCreateWithAttributedString(attrString as CFAttributedString)
+        let fullRange = CFRange(location: 0, length: attrString.length)
+        let suggested = CTFramesetterSuggestFrameSizeWithConstraints(
+            framesetter,
+            fullRange,
+            nil,
+            CGSize(width: size.width, height: .greatestFiniteMagnitude),
+            nil
+        )
+        let frameHeight = max(suggested.height, size.height, 1)
+        let path = CGPath(rect: CGRect(x: 0, y: 0, width: size.width, height: frameHeight), transform: nil)
+        let frame = CTFramesetterCreateFrame(framesetter, fullRange, path, nil)
+        guard let lines = CTFrameGetLines(frame) as? [CTLine], !lines.isEmpty else { return }
+        var origins = [CGPoint](repeating: .zero, count: lines.count)
+        CTFrameGetLineOrigins(frame, CFRange(location: 0, length: 0), &origins)
+
+        for span in spans {
+            let matchStart = span.range.location
+            let matchEnd = span.range.location + span.range.length
+            var rects: [CGRect] = []
+            for (i, line) in lines.enumerated() {
+                let lineRange = CTLineGetStringRange(line)
+                let lineStart = lineRange.location
+                let lineEnd = lineRange.location + lineRange.length
+                let segStart = max(matchStart, lineStart)
+                let segEnd = min(matchEnd, lineEnd)
+                guard segStart < segEnd else { continue }
+                var ascent: CGFloat = 0
+                var descent: CGFloat = 0
+                var leading: CGFloat = 0
+                CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
+                let x1 = CTLineGetOffsetForStringIndex(line, segStart, nil)
+                let x2 = CTLineGetOffsetForStringIndex(line, segEnd, nil)
+                let minX = origins[i].x + min(x1, x2)
+                let maxX = origins[i].x + max(x1, x2)
+                let topY = frameHeight - origins[i].y - ascent
+                let height = max(1, ascent + descent)
+                rects.append(CGRect(x: minX, y: topY, width: max(1, maxX - minX), height: height))
+            }
+            if let first = rects.first {
+                store.segments[span.key] = rects
+                store.rects[span.key] = first
+            }
+        }
+    }
+
+    private static func makeCTFont(isLatin: Bool, size: CGFloat) -> CTFont {
+        if isLatin {
+            #if os(macOS)
+            if let f = NSFont(name: "Georgia", size: size) { return f as CTFont }
+            #else
+            if let f = UIFont(name: "Georgia", size: size) { return f as CTFont }
+            #endif
+        } else {
+            #if os(macOS)
+            if let f = NSFont(name: "STSongti-SC-Regular", size: size) ?? NSFont(name: "Songti SC", size: size) {
+                return f as CTFont
+            }
+            #else
+            if let f = UIFont(name: "STSongti-SC-Regular", size: size) ?? UIFont(name: "Songti SC", size: size) {
+                return f as CTFont
+            }
+            #endif
+        }
+        let desc = CTFontDescriptorCreateWithAttributes([kCTFontSizeAttribute: size] as CFDictionary)
+        return CTFontCreateWithFontDescriptor(desc, size, nil)
+    }
 }
 
 /// Custom `TextAttribute` marking inline vocabulary words for `1.6pt` dotted accent underlining (`.vocab-w`).

@@ -295,6 +295,15 @@ private struct ReaderContent: View {
                     model.show(Library.Toast(icon: "thermometer.high", title: notice, detail: ""))
                 }
             }
+            .onChange(of: model.player?.readyOfflineVoice?.id) { _, id in
+                if id != nil, let ready = model.player?.readyOfflineVoice {
+                    model.show(Library.Toast(
+                        icon: "checkmark.circle.fill",
+                        title: String(localized: "离线旁白「\(Voices.title(ready))」已下好"),
+                        detail: String(localized: "打开听书面板可确认切换")
+                    ))
+                }
+            }
             .bookFailure($model.failure, opened: model.detail != nil)
             .yyNotice(String(localized: "朗读停下了"),
                       message: model.player?.failure ?? "",
@@ -414,7 +423,7 @@ private struct ReaderContent: View {
             GeometryReader { g in
                 SelectionCard(model: model, current: nil, thought: {
                     if let mark = model.mark() { thought = mark }
-                }, translate: { translate(selection.text) }, ask: { askCompanion(selection.text) },
+                }, translate: Translator.supportsSystemPresentation ? { translate(selection.text) } : nil, ask: { askCompanion(selection.text) },
                 share: { share(selection.text, note: nil, section: selection.section) })
                 .fixedSize()
                 .modifier(Above(rect: selection.rect, in: g.size))
@@ -425,7 +434,7 @@ private struct ReaderContent: View {
                 SelectionCard(model: model, current: open.mark, thought: {
                     thought = open.mark
                     model.dismissCards()
-                }, translate: { translate(open.mark.text) }, ask: { askCompanion(open.mark.text) },
+                }, translate: Translator.supportsSystemPresentation ? { translate(open.mark.text) } : nil, ask: { askCompanion(open.mark.text) },
                 share: { share(open.mark.text, note: open.mark.note, section: open.mark.section) })
                 .fixedSize()
                 .modifier(Above(rect: CGRect(x: open.at.x - 1, y: open.at.y - 12, width: 2, height: 24), in: g.size))

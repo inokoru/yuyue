@@ -90,7 +90,9 @@ struct YYPage<Content: View>: View {
                 .padding(.horizontal, YYUI.s(16))
                 .padding(.bottom, YYUI.s(20))
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .background(alignment: .top) { YYScrollOffsetAnchor() }
         }
+        .yyScrollOffsetContainer()
         .scrollBounceBehavior(.basedOnSize)
         .background(background)
     }
@@ -201,19 +203,8 @@ struct YYGroup<Content: View>: View {
     @State private var fieldLabelWidth: CGFloat = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if #available(macOS 15.0, iOS 18.0, *) {
-                Group(subviews: content) { rows in
-                    ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
-                        if i > 0 { Rectangle().fill(YYColor.line).frame(height: 0.5) }
-                        row
-                    }
-                }
-            } else {
-                content
-            }
-        }
-        .environment(\.yyFieldLabelWidth, fieldLabelWidth)
+        YYDividedVStack(inset: 0) { content }
+            .environment(\.yyFieldLabelWidth, fieldLabelWidth)
         .onPreferenceChange(YYFieldLabelWidthKey.self) { new in
             if abs(new - fieldLabelWidth) > 0.5 { fieldLabelWidth = new }
         }

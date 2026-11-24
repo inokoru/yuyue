@@ -243,7 +243,9 @@ struct PhoneShelf: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
                 .padding(.bottom, 24)
+                .background(alignment: .top) { YYScrollOffsetAnchor() }
             }
+            .yyScrollOffsetContainer()
             .onChange(of: scrollTopTick) {
                 scrollProxy.scrollTo("shelf-top", anchor: .top)
             }
@@ -566,19 +568,23 @@ struct PhoneShelf: View {
     }
 
     /// 反馈, 导入 (加书 in 进度) and 选择, at the top right, staying there as the shelf scrolls.
+    /// In 播客, only 反馈 stays in the top pill; podcast creation/subscription/refresh live in
+    /// PhonePodcasts' accent `+` menu beside the search bar.
     private var topButtons: some View {
         TopButtons {
             TopButton(title: "反馈", symbol: "exclamationmark.bubble") { feedbackShown = true }
-            if library.importing > 0 {
-                ProgressView().frame(width: 40, height: 40)
-            } else {
-                TopButton(title: kind == .books ? "加书" : "导入", symbol: "plus") {
-                    if kind == .books { addingBook = true } else { importShown = true }
+            if kind != .podcasts {
+                if library.importing > 0 {
+                    ProgressView().frame(width: 40, height: 40)
+                } else {
+                    TopButton(title: kind == .books ? "加书" : "导入", symbol: "plus") {
+                        if kind == .books { addingBook = true } else { importShown = true }
+                    }
                 }
+                TopButton(title: "选择", symbol: "checkmark.circle") { withAnimation(YYMotion.layout) { selecting = true } }
+                    .disabled(shown.isEmpty)
+                    .opacity(shown.isEmpty ? 0.35 : 1)
             }
-            TopButton(title: "选择", symbol: "checkmark.circle") { withAnimation(YYMotion.layout) { selecting = true } }
-                .disabled(shown.isEmpty)
-                .opacity(shown.isEmpty ? 0.35 : 1)
         }
         // 导入 turns into its spinner and back, not in a blink.
         .animation(YYMotion.quick, value: library.importing > 0)

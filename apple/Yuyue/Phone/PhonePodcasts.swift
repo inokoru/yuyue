@@ -218,6 +218,14 @@ struct PhonePodcasts: View {
                 } label: {
                     Label(String(localized: "声音卡与本机状态"), systemImage: "waveform")
                 }
+                if !library.podcastHub.channels.isEmpty {
+                    Divider()
+                    Button {
+                        Task { await library.podcastHub.refreshAllChannels() }
+                    } label: {
+                        Label(String(localized: "刷新订阅节目"), systemImage: "arrow.clockwise")
+                    }
+                }
             } label: {
                 PodcastGlyphView(glyph: .plus, size: 16, lineWidth: 1.55)
                     .foregroundStyle(tint.accent)

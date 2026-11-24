@@ -32,7 +32,7 @@ struct LiveVoicePrepBanner: View {
                     }
                     .frame(width: 88, height: 3)
                 }
-                .help(String(localized: "下好后从下一章换上"))
+                .help(String(localized: "下好后会提示你切换"))
 
             case .idle where alwaysShowIdle || download.isExpensive || !LiveVoiceModel.isInstalled:
                 line {
@@ -311,6 +311,7 @@ struct VoiceCatalogSections: View {
     private func clonedRow(_ entry: ClonedEntry) -> some View {
         let resolved = ClonedVoices.resolveVoice(entry.id, bookID: bookID)
         let selected = (selectedID == entry.id)
+        let failedHere = PreviewState.shared.failedID == entry.id
         return HStack(spacing: YYUI.s(10)) {
             Button {
                 if let resolved, entry.isPlayable { onPreview(resolved) }
@@ -341,6 +342,13 @@ struct VoiceCatalogSections: View {
                             .font(YYUI.font(10.5))
                             .foregroundStyle(entry.needsRerecord ? YYColor.warn : YYColor.t3)
                             .lineLimit(1)
+                        if failedHere {
+                            Text(PreviewState.shared.failedMessage ?? String(localized: "试听暂不可用，请检查网络或稍后再试"))
+                                .font(YYUI.font(10))
+                                .foregroundStyle(YYColor.danger)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     Spacer()
                     if selected {
@@ -374,6 +382,7 @@ struct VoiceCatalogSections: View {
     /// 首字 · 名字 [标] / 一行说明 · ✓. The initial plays a line; the rest picks it.
     private func row(voice: any Voice, badge: String?, green: Bool = false, detail: String) -> some View {
         let selected = (selectedID == voice.id)
+        let failedHere = PreviewState.shared.failedID == voice.id
         return HStack(spacing: YYUI.s(10)) {
             Button {
                 onPreview(voice)
@@ -399,6 +408,13 @@ struct VoiceCatalogSections: View {
                                 .font(YYUI.font(10.5))
                                 .foregroundStyle(YYColor.t3)
                                 .lineLimit(1)
+                        }
+                        if failedHere {
+                            Text(PreviewState.shared.failedMessage ?? String(localized: "试听暂不可用，请检查网络或稍后再试"))
+                                .font(YYUI.font(10))
+                                .foregroundStyle(YYColor.danger)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     Spacer()

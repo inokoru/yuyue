@@ -250,16 +250,42 @@ struct PhoneRoot: View {
 
     /// 我的, with a red dot when a new version is waiting. The shelf itself stays clear of it.
     private var meTab: some View {
-        Label {
+        let selected = tab == .me
+        let name = selected ? "tab-me-fill" : "tab-me"
+        return Label {
             Text("我的")
         } icon: {
-            Image(tab == .me ? "tab-me-fill" : "tab-me")
-                .overlay(alignment: .topTrailing) {
-                    if UpdateCenter.shared.showsBadge {
-                        Circle().fill(YYColor.danger).frame(width: 7, height: 7).offset(x: 2, y: -2)
-                    }
+            if UpdateCenter.shared.showsBadge {
+                if #available(iOS 18.0, *) {
+                    Image(name)
+                        .overlay(alignment: .topTrailing) {
+                            Circle().fill(YYColor.danger).frame(width: 7, height: 7).offset(x: 2, y: -2)
+                        }
+                } else {
+                    Self.badgedTabIcon(name, ink: selected ? tint.accent : Color(uiColor: .secondaryLabel), scheme: scheme)
                 }
+            } else {
+                Image(name)
+            }
         }
+    }
+
+    /// Pre-renders a tab icon with an update red dot into a single `.alwaysOriginal` UIImage so
+    /// iOS 17 `.tabItem` displays the dot instead of stripping SwiftUI `.overlay` modifiers.
+    private static func badgedTabIcon(_ name: String, ink: Color, scheme: ColorScheme) -> Image {
+        let renderer = ImageRenderer(content:
+            Image(name)
+                .renderingMode(.template)
+                .foregroundStyle(ink)
+                .frame(width: 24, height: 24)
+                .overlay(alignment: .topTrailing) {
+                    Circle().fill(YYColor.danger).frame(width: 7, height: 7).offset(x: 2, y: -2)
+                }
+                .padding(2)
+                .environment(\.colorScheme, scheme)
+        )
+        renderer.scale = 3
+        return renderer.uiImage.map { Image(uiImage: $0.withRenderingMode(.alwaysOriginal)) } ?? Image(name)
     }
 
     @available(iOS 18.0, *)

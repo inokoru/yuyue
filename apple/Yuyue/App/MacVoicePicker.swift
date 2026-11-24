@@ -734,7 +734,9 @@ struct VoiceSourcePage: View {
                         }
                     }
                     .padding(.top, 6).padding(.bottom, 6)
+                    .background(alignment: .top) { YYScrollOffsetAnchor() }
                 }
+                .yyScrollOffsetContainer()
                 .scrollIndicators(.never)
                 .id(source)
                 .yyOnScrollOffsetPast(2) { scrolled = $0 }
@@ -854,6 +856,16 @@ struct VoiceSourcePage: View {
         }
     }
 
+    private var gearLabel: String {
+        switch source {
+        case .neural: String(localized: "离线语音设置与下载")
+        case .mac: String(localized: "系统语音说明")
+        case .cloud(let p) where p.isFreeOnline: String(localized: "\(p.title)设置")
+        case .cloud(let p) where p.isLocal: String(localized: "\(p.title)连接与地址")
+        case .cloud(let p): String(localized: "\(p.title) 的 Key 和连接")
+        }
+    }
+
     @ViewBuilder private var gear: some View {
         let on: Bool = { if case .cloud(let p) = source { focus.page == p } else { focus.macPanel } }()
         Button {
@@ -869,7 +881,8 @@ struct VoiceSourcePage: View {
             .frame(width: 28, height: 28).contentShape(.rect)
         }
         .buttonStyle(HoverSquareStyle(on: on))
-        .help(Text("\(source.title) 的 Key 和连接"))
+        .help(gearLabel)
+        .accessibilityLabel(gearLabel)
     }
 
     private func send(_ text: String) {
@@ -1011,6 +1024,7 @@ struct ReadyLinesToggle: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        .accessibilityLabel(help)
     }
 }
 
@@ -1032,6 +1046,7 @@ struct ComposerSendButton: View {
         .compositingGroup()
         .opacity(ready ? 1 : 0.25)
         .help(help)
+        .accessibilityLabel(help)
     }
 }
 
@@ -1622,8 +1637,16 @@ private struct Shimmer: View {
 struct ChooseButton: View {
     let chosen: Bool
     var small = false
+    var voiceName: String? = nil
     let action: () -> Void
     @State private var hovering = false
+
+    private var accessibilityTitle: String {
+        if let voiceName, !voiceName.isEmpty {
+            return chosen ? String(localized: "已选择 \(voiceName)") : String(localized: "选择 \(voiceName)")
+        }
+        return chosen ? String(localized: "已选择") : String(localized: "选择")
+    }
 
     var body: some View {
         Button(action: action) {
@@ -1649,6 +1672,8 @@ struct ChooseButton: View {
         // Not .disabled: that would pale the green it's meant to show.
         .allowsHitTesting(!chosen)
         .onHover { hovering = $0 }
+        .accessibilityLabel(accessibilityTitle)
+        .accessibilityAddTraits(chosen ? .isSelected : [])
     }
 }
 
@@ -1747,10 +1772,11 @@ private struct VoiceMessage: View {
                         if !focus.heard.contains(voice.id) {
                             Circle().fill(Color(yy: YYRGBA(229, 72, 59))).frame(width: 6, height: 6)
                         }
-                        ChooseButton(chosen: false, small: true) { focus.pick(voice, book: book) }
+                        ChooseButton(chosen: false, small: true, voiceName: voice.name) { focus.pick(voice, book: book) }
                             .padding(.leading, 4)
                             .opacity(open ? 1 : 0)
                             .allowsHitTesting(open)
+                            .accessibilityHidden(!open)
                             .animation(YYMotion.quick, value: open)
                         if let onDetail {
                             Button(action: onDetail) {
@@ -1764,7 +1790,9 @@ private struct VoiceMessage: View {
                             .buttonStyle(.plain)
                             .opacity(open ? 1 : 0)
                             .allowsHitTesting(open)
+                            .accessibilityHidden(!open)
                             .help(Text("管理克隆声音"))
+                            .accessibilityLabel(Text("管理克隆声音"))
                         }
                     }
                 }
@@ -1782,6 +1810,34 @@ private struct VoiceMessage: View {
         .contentShape(.rect)
         .onHover { hovering = $0 }
         .onTapGesture { focus.listen(voice, text: focus.line(book)) }
+        .modifier(VoiceRowAccessibilityActions(
+            canChoose: !kokoroUninstalled,
+            voiceName: voice.name,
+            onChoose: { focus.pick(voice, book: book) },
+            onDetail: onDetail
+        ))
+    }
+}
+
+private struct VoiceRowAccessibilityActions: ViewModifier {
+    let canChoose: Bool
+    let voiceName: String
+    let onChoose: () -> Void
+    let onDetail: (() -> Void)?
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if canChoose {
+            if let onDetail {
+                content
+                    .accessibilityAction(named: Text("选择 \(voiceName)"), onChoose)
+                    .accessibilityAction(named: Text("管理克隆声音"), onDetail)
+            } else {
+                content
+                    .accessibilityAction(named: Text("选择 \(voiceName)"), onChoose)
+            }
+        } else {
+            content
+        }
     }
 }
 
@@ -1800,29 +1856,40 @@ private struct PinnedVoice: View {
 
     var body: some View {
         let c = VoiceColors.of(voice.id)
-        HStack(spacing: 8) {
-            VoiceAvatar(voice: voice, size: 28, pinned: true)
-            Text(voice.name).font(.yy(size: 12.5, weight: .semibold)).foregroundStyle(YYColor.t1).lineLimit(1)
-                .padding(.trailing, 2)
-            #if os(macOS)
-            VoiceBubble(voice: voice, text: focus.line(book), dark: true, height: 30)
-            #else
-            // Shorter on a phone, so 念你的中文书 fits beside it.
-            VoiceBubble(voice: voice, text: focus.line(book), dark: true, height: 30, widest: 118)
-            #endif
-            Spacer(minLength: 8)
-            // 念你的中文书 with a pin big enough to read as one; on a narrow phone, the pin alone.
-            ViewThatFits(in: .horizontal) {
-                Label(pinWords, systemImage: "pin.fill").labelStyle(PinLabelStyle(size: 13)).fixedSize()
-                PinGlyph(size: 15)
+        let failedHere = PreviewState.shared.failedID == voice.id
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                VoiceAvatar(voice: voice, size: 28, pinned: true)
+                Text(voice.name).font(.yy(size: 12.5, weight: .semibold)).foregroundStyle(YYColor.t1).lineLimit(1)
+                    .padding(.trailing, 2)
+                #if os(macOS)
+                VoiceBubble(voice: voice, text: focus.line(book), dark: true, height: 30)
+                #else
+                // Shorter on a phone, so 念你的中文书 fits beside it.
+                VoiceBubble(voice: voice, text: focus.line(book), dark: true, height: 30, widest: 118)
+                #endif
+                Spacer(minLength: 8)
+                // 念你的中文书 with a pin big enough to read as one; on a narrow phone, the pin alone.
+                ViewThatFits(in: .horizontal) {
+                    Label(pinWords, systemImage: "pin.fill").labelStyle(PinLabelStyle(size: 13)).fixedSize()
+                    PinGlyph(size: 15)
+                }
+                .accessibilityLabel(Text("念你的\(book.title)"))
+                    .font(.yy(size: 11, weight: .medium))
+                    .foregroundStyle(scheme == .dark ? YYColor.t2 : c.ink.yyMix(with: YYColor.t2, by: 0.2))
+                    .lineLimit(1)
             }
-            .accessibilityLabel(Text("念你的\(book.title)"))
-                .font(.yy(size: 11, weight: .medium))
-                .foregroundStyle(scheme == .dark ? YYColor.t2 : c.ink.yyMix(with: YYColor.t2, by: 0.2))
-                .lineLimit(1)
+            .frame(minHeight: 44)
+            if failedHere {
+                Text(PreviewState.shared.failedMessage ?? String(localized: "试听暂不可用，请检查网络或稍后再试"))
+                    .font(.yy(size: 10.5))
+                    .foregroundStyle(YYColor.danger)
+                    .lineLimit(2)
+                    .padding(.leading, 36)
+                    .padding(.bottom, 6)
+            }
         }
         .padding(.leading, 8).padding(.trailing, 10)
-        .frame(height: 44)
         .background(scheme == .dark ? c.ground.opacity(0.12) : c.ground.opacity(0.34), in: .rect(cornerRadius: 14))
         .background(YYColor.card, in: .rect(cornerRadius: 14))
         .ring(scheme == .dark ? YYColor.line : c.ink.opacity(0.16), radius: 14)
@@ -1902,7 +1969,7 @@ struct ListeningVoiceCard: View {
                         Text(VoiceSource.of(voice).title).font(.yy(size: 11)).foregroundStyle(YYColor.t3).lineLimit(1)
                     }
                     Spacer(minLength: 6)
-                    ChooseButton(chosen: chosen) { focus.pick(voice, book: book) }
+                    ChooseButton(chosen: chosen, voiceName: voice.name) { focus.pick(voice, book: book) }
                     .fixedSize()
                 }
                 .frame(minHeight: 38.2)
@@ -1974,6 +2041,7 @@ private struct VoicePlayer: View {
                     }
                     .buttonStyle(.plain)
                     .help(Text(playing ? "停下" : "听\(voice.name)念"))
+                    .accessibilityLabel(Text(playing ? "停下" : "听\(voice.name)念"))
                     HStack(spacing: 2) {
                         ForEach(Array(waveHeights(seed: voice.id, bars: Self.bars, tallest: 24, taper: 0.6).enumerated()), id: \.offset) { i, h in
                             RoundedRectangle(cornerRadius: 1)
@@ -1989,6 +2057,13 @@ private struct VoicePlayer: View {
                     .font(.custom("Songti SC", size: 13)).lineSpacing(6.3)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 2).padding(.vertical, 3)
+                if state.failedID == voice.id {
+                    Text(state.failedMessage ?? String(localized: "试听暂不可用，请检查网络或稍后再试"))
+                        .font(.yy(size: 10.5))
+                        .foregroundStyle(YYColor.danger)
+                        .lineLimit(2)
+                        .padding(.horizontal, 2)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 9).padding(.top, 9).padding(.bottom, 7)

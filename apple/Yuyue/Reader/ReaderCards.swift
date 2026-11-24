@@ -54,7 +54,7 @@ struct SelectionCard: View {
     /// The highlight clicked, or nil for a fresh selection.
     let current: Mark?
     let thought: () -> Void
-    let translate: () -> Void
+    var translate: (() -> Void)? = nil
     /// 问 and 分享, where the device has them.
     var ask: (() -> Void)?
     var share: (() -> Void)?
@@ -154,7 +154,7 @@ struct SelectionCard: View {
                     action(String(localized: "对准"), "scope") { model.pinHere(section: sel.section, sentence: sel.start.s) }
                 }
                 if let ask { action(String(localized: "问"), "sparkle", ask, accent: true) }
-                action(String(localized: "翻译"), "translate", translate)
+                if let translate { action(String(localized: "翻译"), "translate", translate) }
                 action(String(localized: "复制"), "doc.on.doc") { model.copySelection() }
                 if let share { action(String(localized: "分享"), "square.and.arrow.up", share) }
             }

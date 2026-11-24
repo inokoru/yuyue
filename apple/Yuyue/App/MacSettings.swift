@@ -564,19 +564,8 @@ struct SettingsCard<Content: View>: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if #available(macOS 15.0, iOS 18.0, *) {
-                Group(subviews: content) { rows in
-                    ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
-                        if i > 0 { Rectangle().fill(YYColor.line).frame(height: 0.5).padding(.horizontal, 16) }
-                        row
-                    }
-                }
-            } else {
-                content
-            }
-        }
-        .background(YYColor.card, in: .rect(cornerRadius: 12))
+        YYDividedVStack(inset: 16) { content }
+            .background(YYColor.card, in: .rect(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(scheme == .dark ? Color(yy: YYRGBA(255, 255, 255, 0.06)) : YYColor.line, lineWidth: 0.5))
         .shadow(color: scheme == .dark ? .clear : Color(yy: YYRGBA(51, 46, 41, 0.04)), radius: 1, y: 1)
     }

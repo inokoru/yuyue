@@ -251,6 +251,15 @@ struct MacReaderView: View {
             }
         }
         .onChange(of: model.rulesShown) { _, shown in if shown { typesetShown = false } }
+        .onChange(of: model.player?.readyOfflineVoice?.id) { _, id in
+            if id != nil, let ready = model.player?.readyOfflineVoice {
+                model.show(Library.Toast(
+                    icon: "checkmark.circle.fill",
+                    title: String(localized: "离线旁白「\(Voices.title(ready))」已下好"),
+                    detail: String(localized: "打开听书面板可确认切换")
+                ))
+            }
+        }
         .onChange(of: model.txtShown) { _, shown in if shown { typesetShown = false } }
         .onChange(of: model.fontBookShown) { _, shown in if shown { typesetShown = false } }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { note in
@@ -650,7 +659,7 @@ struct MacReaderView: View {
                 .background(listenShown ? paper.line.opacity(0.8) : .clear, in: .rect(cornerRadius: 12))
                 .contentShape(.rect)
             }
-            .help("听书：声音、速度、睡眠定时")
+            .help(model.capsuleAlert?.note ?? String(localized: "听书：声音、速度、睡眠定时"))
             .popover(isPresented: $listenShown, arrowEdge: .top) {
                 ListenCard(model: model)
                     .presentationBackground(YYColor.card)
@@ -712,14 +721,14 @@ struct MacReaderView: View {
     @ViewBuilder private var cards: some View {
         if let selection = model.selection {
             GeometryReader { g in
-                SelectionCard(model: model, current: nil, thought: { startThought() }, translate: { translate(selection.text) }, ask: { ask(selection.text) })
+                SelectionCard(model: model, current: nil, thought: { startThought() }, translate: Translator.supportsSystemPresentation ? { translate(selection.text) } : nil, ask: { ask(selection.text) })
                     .fixedSize()
                     .modifier(Above(rect: selection.rect, in: g.size))
             }
             .transition(.opacity)
         } else if let open = model.openMark {
             GeometryReader { g in
-                SelectionCard(model: model, current: open.mark, thought: { thought = open.mark; model.dismissCards() }, translate: { translate(open.mark.text) }, ask: { ask(open.mark.text) })
+                SelectionCard(model: model, current: open.mark, thought: { thought = open.mark; model.dismissCards() }, translate: Translator.supportsSystemPresentation ? { translate(open.mark.text) } : nil, ask: { ask(open.mark.text) })
                     .fixedSize()
                     .modifier(Above(rect: CGRect(x: open.at.x - 1, y: open.at.y - 12, width: 2, height: 24), in: g.size))
             }
@@ -802,7 +811,9 @@ struct MacReaderView: View {
                 items.append(ActionMenuItem(String(localized: "从这里对准"), symbol: "scope") { model.pinHere(section: selection.section, sentence: selection.start.s) })
             }
             items.append(ActionMenuItem(String(localized: "问书伴"), symbol: "sparkle") { ask(selection.text) })
-            items.append(ActionMenuItem(String(localized: "翻译"), symbol: "translate") { translate(selection.text) })
+            if Translator.supportsSystemPresentation {
+                items.append(ActionMenuItem(String(localized: "翻译"), symbol: "translate") { translate(selection.text) })
+            }
             items.append(ActionMenuItem(String(localized: "复制"), symbol: "doc.on.doc", key: "c", modifiers: .command) { model.copySelection() })
             // Not on the card (it has five); here instead.
             items.append(ActionMenuItem(String(localized: "分享…"), symbol: "square.and.arrow.up") { share(selection.text, note: nil, section: selection.section) })

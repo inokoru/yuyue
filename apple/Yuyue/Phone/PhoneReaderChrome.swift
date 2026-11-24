@@ -320,6 +320,7 @@ struct PhoneReaderChrome: View {
             title: model.capsuleAlert?.title ?? (reading && n > 0 ? String(localized: "第 \(min(model.sentence + 1, n)) / \(n) 句") : (model.chapterTitle ?? model.detail?.summary.title ?? "")),
             note: model.capsuleAlert?.note ?? model.capsuleNote,
             noteAccent: model.capsuleAlert != nil,
+            centerHint: model.capsuleAlert?.note ?? String(localized: "听书：声音、速度、睡眠定时"),
             playing: model.isPlaying,
             progress: model.chapterProgress,
             playEnabled: model.player != nil,
@@ -655,6 +656,7 @@ struct PhoneReaderCapsule: View {
     var title: String
     var note: String
     var noteAccent: Bool
+    var centerHint: String = String(localized: "听书：声音、速度、睡眠定时")
     var playing: Bool
     var progress: Double
     var playEnabled: Bool
@@ -686,7 +688,7 @@ struct PhoneReaderCapsule: View {
                 .frame(minHeight: 40)
                 .contentShape(.rect)
             }
-            .accessibilityHint("听书：声音、速度、睡眠定时")
+            .accessibilityHint(centerHint)
             Button(action: onPrevious) { capButton("chevron.left") }
                 .buttonStyle(YYPressStyle(scale: 0.92))
                 .accessibilityLabel(sentenceStep ? String(localized: "上一句") : String(localized: "上一页"))

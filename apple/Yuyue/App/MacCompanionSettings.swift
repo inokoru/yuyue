@@ -1314,19 +1314,8 @@ struct PanelCard<Content: View>: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if #available(macOS 15.0, iOS 18.0, *) {
-                Group(subviews: content) { rows in
-                    ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
-                        if i > 0 { Rectangle().fill(YYColor.line).frame(height: 0.5).padding(.horizontal, 10) }
-                        row
-                    }
-                }
-            } else {
-                content
-            }
-        }
-        .padding(3)
+        YYDividedVStack(inset: 10) { content }
+            .padding(3)
         .background(YYColor.card, in: .rect(cornerRadius: 11))
         .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(scheme == .dark ? Color(yy: YYRGBA(255, 255, 255, 0.06)) : YYColor.line, lineWidth: 0.5))
     }

@@ -210,6 +210,11 @@ final class Translator {
 
     static let target = Locale.Language(identifier: "zh-Hans")
 
+    /// System translation sheet (`translationPresentation`) is available from macOS 14.4 / iOS 17.4.
+    static var supportsSystemPresentation: Bool {
+        if #available(macOS 14.4, iOS 17.4, *) { true } else { false }
+    }
+
     init() {
         if #available(macOS 15.0, iOS 18.0, *) {
             system = SystemTranslator()
@@ -299,7 +304,9 @@ extension View {
                     text: text.wrappedValue ?? ""
                 )
             } else {
-                self
+                self.onChange(of: text.wrappedValue, initial: true) { _, newValue in
+                    if newValue != nil { text.wrappedValue = nil }
+                }
             }
         }
         if #available(macOS 15.0, iOS 18.0, *), let impl = translator.system as? SystemTranslator {
