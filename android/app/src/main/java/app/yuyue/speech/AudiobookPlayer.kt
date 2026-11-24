@@ -220,6 +220,44 @@ class AudiobookPlayer(private val context: Context, private val library: Library
         }
     }
 
+    /** Waiting for this file to come from the share: shown on the play button (a ring filling)
+     *  and a line under it. */
+    var waitingFor by mutableStateOf<Int?>(null)
+        private set
+
+    /** 听过的自动清掉, for this recording. */
+    var clearsListened by mutableStateOf(library.shareStream.clears(bookID))
+        private set
+
+    private val sleepAt = Runnable { fallAsleep() }
+
+    /** The last 20 seconds of a timer fade out; a key or a shake in them gives 10 minutes more. */
+    private val fade = object : Runnable {
+        override fun run() {
+            val s = sleep as? Player.Sleep.Until ?: return
+            val left = s.at - System.currentTimeMillis()
+            if (!fading) {
+                fading = true
+                shake = ShakeWatch(context) { extendSleep() }.also { it.start() }
+            }
+            exo.volume = (left.toFloat() / Player.FADE_MS).coerceIn(0f, 1f) * (if (gain in 0.01f..0.999f) gain else 1f)
+            if (left > 0) main.postDelayed(this, 200)
+        }
+    }
+
+    private val arrivals = library.scope.launch {
+        library.shareStream.arrived.collect { (id, n) ->
+            if (id != bookID || closed) return@collect
+            recording = runCatching { core.audioRecording(bookID) }.getOrNull() ?: recording
+            if (waitingFor == n) {
+                waitingFor = null
+                exo.prepare()
+                seekExo(time)
+                if (isPlaying) exo.play()
+            }
+        }
+    }
+
     init {
         recording?.let { r ->
             val mine = runCatching { core.progress(bookID) }.getOrNull()
@@ -246,12 +284,10 @@ class AudiobookPlayer(private val context: Context, private val library: Library
         }
     }
 
-    // MARK: 边下边听
+    @Suppress("unused")
+    private val initCompleted = true
 
-    /** Waiting for this file to come from the share: shown on the play button (a ring filling)
-     *  and a line under it. */
-    var waitingFor by mutableStateOf<Int?>(null)
-        private set
+    // MARK: 边下边听
 
     /** 边下边听's fetching, for the screen. */
     val stream get() = library.shareStream
@@ -306,10 +342,6 @@ class AudiobookPlayer(private val context: Context, private val library: Library
     /** The file being listened to. */
     val currentFile: Int get() = maxOf(0, starts.indexOfLast { it <= time })
 
-    /** 听过的自动清掉, for this recording. */
-    var clearsListened by mutableStateOf(library.shareStream.clears(bookID))
-        private set
-
     fun changeClearsListened(on: Boolean) {
         clearsListened = on
         library.shareStream.setClears(bookID, on, currentFile)
@@ -324,19 +356,6 @@ class AudiobookPlayer(private val context: Context, private val library: Library
         waitingFor = i
         exo.pause()
         library.shareStream.want(bookID, i)
-    }
-
-    private val arrivals = library.scope.launch {
-        library.shareStream.arrived.collect { (id, n) ->
-            if (id != bookID || closed) return@collect
-            recording = runCatching { core.audioRecording(bookID) }.getOrNull() ?: recording
-            if (waitingFor == n) {
-                waitingFor = null
-                exo.prepare()
-                seekExo(time)
-                if (isPlaying) exo.play()
-            }
-        }
     }
 
     // MARK: 这本录音
@@ -896,22 +915,6 @@ class AudiobookPlayer(private val context: Context, private val library: Library
     }
 
     // MARK: 定时
-
-    private val sleepAt = Runnable { fallAsleep() }
-
-    /** The last 20 seconds of a timer fade out; a key or a shake in them gives 10 minutes more. */
-    private val fade = object : Runnable {
-        override fun run() {
-            val s = sleep as? Player.Sleep.Until ?: return
-            val left = s.at - System.currentTimeMillis()
-            if (!fading) {
-                fading = true
-                shake = ShakeWatch(context) { extendSleep() }.also { it.start() }
-            }
-            exo.volume = (left.toFloat() / Player.FADE_MS).coerceIn(0f, 1f) * (if (gain in 0.01f..0.999f) gain else 1f)
-            if (left > 0) main.postDelayed(this, 200)
-        }
-    }
 
     private fun armSleep() {
         main.removeCallbacks(sleepAt)

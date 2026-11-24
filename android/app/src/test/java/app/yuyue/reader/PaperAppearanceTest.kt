@@ -132,4 +132,26 @@ class PaperAppearanceTest {
         s = s.copy(fontFace = "file:我的字.ttf", font = uniffi.yuyue_core.Font.SERIF)
         assertEquals("\"yy-file:我的字.ttf\", var(--yy-serif)", s.cssFont())
     }
+
+    @Test
+    fun readerAndAudiobookModelsDeclareAllBackingFieldsBeforeInit() {
+        val guarded = listOf(
+            ReaderModel::class.java,
+            app.yuyue.speech.AudiobookPlayer::class.java,
+            app.yuyue.speech.Recordings::class.java,
+            app.yuyue.pdf.PdfModel::class.java,
+            app.yuyue.library.Library::class.java,
+        )
+        for (cls in guarded) {
+            val instanceFields = cls.declaredFields.filter { !java.lang.reflect.Modifier.isStatic(it.modifiers) }
+            val sentinelIndex = instanceFields.indexOfFirst { it.name == "initCompleted" }
+            assertTrue("Missing initCompleted sentinel on ${cls.simpleName}", sentinelIndex >= 0)
+            val afterInit = instanceFields.drop(sentinelIndex + 1).map { it.name }
+            assertEquals(
+                "Instance backing fields declared after init {} in ${cls.simpleName} risk NPE during init (#52): $afterInit",
+                emptyList<String>(),
+                afterInit,
+            )
+        }
+    }
 }

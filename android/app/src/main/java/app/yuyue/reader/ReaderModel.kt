@@ -178,6 +178,28 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
     /** 计时: when time was last added, and when a page was last turned. */
     private var since = System.currentTimeMillis()
     private var lastTurn = System.currentTimeMillis()
+    /** 文字版: made from a recording's words; the page says so. */
+    val textVersion: Boolean by lazy { runCatching { core.audiobookIsTextVersion(bookID) }.getOrDefault(false) }
+    /** 逐词跟读's word times, by section and sentence. */
+    private val wordCache = HashMap<Pair<Int, Int>, List<Double>?>()
+    /** 简繁: this book shown in the other script, or (null) as it is. Synced with the book. */
+    var script by mutableStateOf(runCatching { core.bookScript(bookID) }.getOrNull())
+        private set
+    /** The paper 调纸 shows, over the one in the settings. */
+    var previewing by mutableStateOf<app.yuyue.design.YYPaper?>(null)
+        private set
+    /** 微调 / 校准一句: `(section, sentence)` open in `TimingAdjustSheet`. */
+    var adjustingSentence by mutableStateOf<Pair<Int, Int>?>(null)
+    var narrationFlag by mutableStateOf<Flag?>(null)
+        private set
+    private val flagsLetBe = HashSet<String>()
+    /** 局域网传录音: this book's recording, laid out on another device but not here, and a Mac
+     *  nearby that has it. */
+    var missingRecording by mutableStateOf<String?>(null)
+    var recordingOffer by mutableStateOf<app.yuyue.speech.RecordingFetch.Offer?>(null)
+    /** 正文模式: the quote the chosen words are in, for 谁说的. */
+    var contextLine: SpeakerPick? = null
+        private set
 
     init {
         PaperAppearance.syncFromContext(context)
@@ -241,6 +263,10 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
             lookForRecording()
         }
     }
+
+    /** Guarded in unit tests: no backing field or Compose delegate may be declared below `init`. */
+    @Suppress("unused")
+    private val initCompleted = true
 
     /** Opens 书伴 with a question. */
 
@@ -315,12 +341,6 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         if (playing) { if (library.listening != bookID) library.listening = bookID }
         else if (library.listening == bookID) library.listening = null
     }
-
-    /** 文字版: made from a recording's words; the page says so. */
-    val textVersion: Boolean by lazy { runCatching { core.audiobookIsTextVersion(bookID) }.getOrDefault(false) }
-
-    /** 逐词跟读's word times, by section and sentence. */
-    private val wordCache = HashMap<Pair<Int, Int>, List<Double>?>()
 
     /** When each word of the sentence is said, from its start, as [character, ms] pairs — in the
      *  narrator's voice, with the setting on, where the recording's lay-out knows. */
@@ -600,10 +620,6 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         apply(new)
     }
 
-    /** 简繁: this book shown in the other script, or (null) as it is. Synced with the book. */
-    var script by mutableStateOf(runCatching { core.bookScript(bookID) }.getOrNull())
-        private set
-
     /** A Chinese book, which 简繁 can be shown for. */
     val isChinese: Boolean get() = detail?.summary?.language?.startsWith("zh") == true
 
@@ -648,9 +664,6 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         PaperAppearance.pick(mine, settings) { update(it) }
     }
 
-    /** The paper 调纸 shows, over the one in the settings. */
-    var previewing by mutableStateOf<app.yuyue.design.YYPaper?>(null)
-        private set
     /** The paper the page and the controls over it are drawn on. */
     val paperTokens: app.yuyue.design.YYPaper get() = if (EInk.on) EInk.paper else (previewing ?: PaperAppearance.resolve(settings).tokens)
 
@@ -829,17 +842,11 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
             return p.guide?.chapterOnly(section) == true
         }
 
-    /** 微调 / 校准一句: `(section, sentence)` open in `TimingAdjustSheet`. */
-    var adjustingSentence by mutableStateOf<Pair<Int, Int>?>(null)
-
     /** 这一段对得不太准: `(section, firstSentence, count)` while the narrator reads an unsure stretch. */
     data class Flag(val section: Int, val first: Int, val last: Int, val number: Int, val total: Int) {
         val count: Int get() = last - first + 1
         val key: String get() = "$section:$first"
     }
-    var narrationFlag by mutableStateOf<Flag?>(null)
-        private set
-    private val flagsLetBe = HashSet<String>()
 
     private fun checkFlag(spot: app.yuyue.speech.Player.Spot) {
         val p = player
@@ -902,12 +909,6 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         val g = player?.guide?.takeIf { player.narrator != null } ?: return p
         return Position(p.section, g.stretchStart(p.section.toInt(), p.sentence.toInt()).toUInt())
     }
-
-    /** The capsule's message about the recording's own talk: 片头 passed (点这里听), or talk not in the book (跳过). */
-    /** 局域网传录音: this book's recording, laid out on another device but not here, and a Mac
-     *  nearby that has it. */
-    var missingRecording by mutableStateOf<String?>(null)
-    var recordingOffer by mutableStateOf<app.yuyue.speech.RecordingFetch.Offer?>(null)
 
     /** On opening the book: whether its recording is missing here and a Mac nearby has it. */
     fun lookForRecording() {
@@ -1129,10 +1130,6 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         selection = if (start != null && end != null && !text.isNullOrBlank()) TextSelection(section, start, end, text, m.rect) else null
         if (selection != null) openMark = null
     }
-
-    /** 正文模式: the quote the chosen words are in, for 谁说的. */
-    var contextLine: SpeakerPick? = null
-        private set
 
     /** 循环到这: from the sentence being read to this one, over and over. */
     fun loopTo(section: Int, sentence: Int) {

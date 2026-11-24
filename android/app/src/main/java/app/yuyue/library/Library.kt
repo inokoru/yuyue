@@ -74,6 +74,13 @@ class Library(private val context: Context) {
     val watched = WatchedFolder(context)
     /** A 数据快照 opened from another app, waiting to be looked at before it's brought back. */
     var openedSnapshot by mutableStateOf<Pair<File, uniffi.yuyue_core.SnapshotInfo>?>(null)
+    /** Where a book stands chapter by chapter, worked out once per position. */
+    private val chapterCache = mutableMapOf<String, Pair<Double, List<ChapterRow>>>()
+    /** Bumped when highlights change outside the book, so 笔记 loads again. */
+    var notesVersion by mutableIntStateOf(0)
+        private set
+    private var toastJob: Job? = null
+    var pendingRecording by mutableStateOf<PendingRecording?>(null)
 
     init {
         app.yuyue.speech.ClonedVoices.init(context)
@@ -86,6 +93,7 @@ class Library(private val context: Context) {
             runCatching { core.purgeDeleted(30L * 24 * 3600 * 1000) }
         }
     }
+    private val initCompleted = true
 
     fun reload() {
         try {
@@ -152,8 +160,6 @@ class Library(private val context: Context) {
     /** 只删文件，留下记录. */
     fun keepRecordOnly(book: BookSummary) = run { core.keepRecordOnly(book.id) }
 
-    /** Where a book stands chapter by chapter, worked out once per position. */
-    private val chapterCache = mutableMapOf<String, Pair<Double, List<ChapterRow>>>()
     fun chapters(book: BookSummary): List<ChapterRow> {
         if (!book.available || book.record || book.format == uniffi.yuyue_core.BookFormat.AUDIO || book.format == uniffi.yuyue_core.BookFormat.PODCAST) return emptyList()
         chapterCache[book.id]?.let { (at, rows) -> if (at == book.progress) return rows }
@@ -235,10 +241,6 @@ class Library(private val context: Context) {
         notesChanged()
     }
 
-    /** Bumped when highlights change outside the book, so 笔记 loads again. */
-    var notesVersion by mutableIntStateOf(0)
-        private set
-
     fun notesChanged() {
         notesVersion++
     }
@@ -289,8 +291,6 @@ class Library(private val context: Context) {
     }
 
     fun note(icon: Toast.Icon, title: String, detail: String) = show(Toast(icon, title, detail))
-
-    private var toastJob: Job? = null
 
     fun show(t: Toast) {
         toast = t
@@ -428,8 +428,6 @@ class Library(private val context: Context) {
      *  and the order of its files can be changed before it goes onto the shelf. Its files sit in
      *  `scratch` till then. */
     data class PendingRecording(val audio: uniffi.yuyue_core.AudioImport, val scratch: File, val names: List<String>)
-
-    var pendingRecording by mutableStateOf<PendingRecording?>(null)
 
     /** A recording's files copied next to the library and read. */
     private fun readRecording(files: List<Pair<Uri, String>>): PendingRecording {

@@ -117,6 +117,8 @@ class Recordings(private val context: Context, private val library: Library) {
     private fun folder(ebook: String) = File(dir, ebook)
 
     private val cache = mutableMapOf<String, Map<Pair<Int, Int>, Timing>>()
+    /** 听写、精修 in the background, toward each recording's map. */
+    val work by lazy { AudiobookWork(context, library) }
 
     init {
         adopt()
@@ -126,6 +128,7 @@ class Recordings(private val context: Context, private val library: Library) {
             for (ebook in dir.list().orEmpty()) audioFor(ebook)?.let { workOn(it, null) }
         }
     }
+    private val initCompleted = true
 
     /** The 有声书 laid against `ebook`, when there is one. */
     fun audioFor(ebook: String): String? = File(folder(ebook), "audio").takeIf { it.isFile }?.readText()?.trim()
@@ -198,9 +201,6 @@ class Recordings(private val context: Context, private val library: Library) {
         making?.job?.cancel()
         making = null
     }
-
-    /** 听写、精修 in the background, toward each recording's map. */
-    val work by lazy { AudiobookWork(context, library) }
 
     /** Toward the map of 有声书 `audio`, nearest `at` seconds first, once it's been 合成 here. */
     fun workOn(audio: String, at: Double?) {

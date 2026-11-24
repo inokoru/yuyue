@@ -118,6 +118,7 @@ class PdfModel(private val library: Library, val bookID: String, private val con
     private var since = System.currentTimeMillis()
     private var lastTurn = System.currentTimeMillis()
 
+    private var guessed: String? = null
     /** The page text the system can give: from Android 15. */
     val canListen = Build.VERSION.SDK_INT >= 35
     val player: Player? = detail?.takeIf { canListen }?.let {
@@ -151,6 +152,7 @@ class PdfModel(private val library: Library, val bookID: String, private val con
         player?.onSentence = { spot, _, _, _ -> if (spot.section != page) { page = spot.section; target = spot.section } }
         player?.onStop = { if (library.listening == bookID) library.listening = null }
     }
+    private val initCompleted = true
 
     fun aspect(i: Int): Double = aspects.getOrElse(i) { 0.7 }
 
@@ -183,8 +185,6 @@ class PdfModel(private val library: Library, val bookID: String, private val con
         if (app.yuyue.BuildConfig.DEBUG) android.util.Log.d("yuyue-pdf", "page $p: ${text.length} chars, ${out.size} sentences")
         out
     }
-
-    private var guessed: String? = null
 
     /** The book's language, or else the one its words are in: Chinese when they are mostly Han characters. */
     private fun language(p: Int): String {
