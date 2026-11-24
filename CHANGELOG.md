@@ -4,6 +4,20 @@
 
 Each version has a section, newest first. The app's changelog page and update notices come from here.
 
+## 0.1.3 · 2026-11-24
+
+### zh
+- 上下滚动拉动切章：在 Mac、iPhone / iPad 与 Android 的上下滚动阅读模式下，滑到章首或章末继续上拉/下拉即可顺滑切换上一章或下一章（支持触觉反馈、纸面拉动提示，以及读至全书末尾时的读完提示），并在滚动模式下统一纵向翻章动效。
+- 国内更新与下载加速：新增国内高速更新镜像（CNB），中文环境下检查更新与下载安装包将优先走国内线路，网络不可用时自动回退至 GitHub。
+- Mac 与 iPhone / iPad 性能优化：修复 macOS 设置页从“外观”切到“通用”时的卡顿，将语音合成、云同步与监听文件夹扫描等耗时操作移出主线程，并优化阅读目录缓存、纸张纹理渲染、PDF 内存回收与播客阅读页滚动流畅度。
+- 版本号与更新状态修复：区分版本版次与显示版本号，升级到新版本后自动清理旧的更新检查残留状态。
+
+### en
+- Pull-to-cross chapters in scrolled mode: on Mac, iPhone / iPad, and Android, pull past the top or bottom of a chapter in vertical scrolled mode to cross smoothly into the previous or next chapter (with haptic arming, edge pull cues, vertical chapter transitions, and a finished-book prompt at book end).
+- Faster China update mirror: added a China mirror (CNB) for release downloads and in-app updates, prioritized automatically for mainland Chinese locales with seamless fallback to GitHub.
+- Mac & iOS performance improvements: fixed stutter when switching from Appearance to General in macOS Settings, moved speech synthesis, sync, and watched-folder scanning off the main thread, and optimized reader TOC caching, paper textures, PDF memory cleanup, and podcast reading scroll smoothness.
+- Update state & version display fixes: separated release edition ordinal from the display version string and cleared stale update-check state after upgrading.
+
 ## 0.1.2 · 2026-11-24
 
 ### zh
