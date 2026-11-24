@@ -33,11 +33,14 @@ struct WebDAVCheckCard: View {
             Text(step.title)
                 .font(YYUI.font(11.5, step.mark == .bad ? .semibold : .medium))
                 .foregroundStyle(step.mark == .bad ? YYColor.danger : step.mark == .untested ? YYColor.t3 : YYColor.t1)
+                .lineLimit(1)
+                .layoutPriority(1)
             Spacer(minLength: YYUI.s(8))
-            Text(step.note)
+            Text(verbatim: step.note)
                 .font(step.code ? YYUI.font(10, design: .monospaced) : YYUI.font(10).monospacedDigit())
                 .foregroundStyle(YYColor.t3)
                 .lineLimit(1)
+                .truncationMode(.middle)
         }
         .frame(height: YYUI.s(38))
     }
@@ -72,7 +75,7 @@ struct WebDAVCheckCard: View {
         VStack(alignment: .leading, spacing: YYUI.s(2)) {
             Text(fix.headline).fontWeight(.semibold).foregroundStyle(YYColor.t1)
             if !fix.before.isEmpty || fix.path != nil {
-                Text("\(fix.before)\(Text(fix.path ?? "").foregroundStyle(YYColor.t1))\(fix.after)")
+                Text("\(Text(verbatim: fix.before))\(Text(verbatim: fix.path ?? "").foregroundStyle(YYColor.t1))\(Text(verbatim: fix.after))")
             }
             if let link = fix.link, let url = fix.url {
                 Button { openURL(url) } label: {

@@ -194,6 +194,9 @@ struct SettingsInspector: View {
                         } else if page == .notes {
                             NotesInspector()
                             divider
+                        } else if page == .sync {
+                            SyncInspector(library: library)
+                            divider
                         } else if page == .data {
                             section(String(localized: "上次快照"), trailing: "") { SnapshotCard(library: library) }
                             divider

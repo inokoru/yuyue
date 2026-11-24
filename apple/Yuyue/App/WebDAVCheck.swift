@@ -48,8 +48,9 @@ struct WebDAVCheck: Equatable {
         let clock = ContinuousClock()
         let started = clock.now
         let folder = WebDAVFolder(account)
-        let host = account.url.host() ?? ""
-        let jianguo = host.contains("jianguoyun")
+        let baseURL = folder.normalizedBase
+        let host = baseURL.host() ?? ""
+        let jianguo = host.localizedCaseInsensitiveContains("jianguoyun")
 
         func done() -> WebDAVCheck {
             c.finished = Date()
@@ -74,7 +75,7 @@ struct WebDAVCheck: Equatable {
         c.steps[0].mark = .running
         update(c)
         let peek = TrustPeek()
-        var probe = URLRequest(url: account.url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        var probe = URLRequest(url: baseURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
         probe.httpMethod = "OPTIONS"
         let t0 = clock.now
         do {
@@ -101,7 +102,7 @@ struct WebDAVCheck: Equatable {
         }
         c.steps[0].mark = .ok
         c.steps[0].note = "\(Self.ms(clock.now - t0)) ms"
-        if account.url.scheme == "http" {
+        if baseURL.scheme?.lowercased() == "http" {
             c.steps[1].title = String(localized: "没有加密")
             c.steps[1].note = String(localized: "http，密码明着传")
             c.steps[1].mark = .warn
@@ -113,7 +114,7 @@ struct WebDAVCheck: Equatable {
         update(c)
 
         // 3: the account.
-        var login = folder.request(account.url, "PROPFIND")
+        var login = folder.request(baseURL, "PROPFIND")
         login.setValue("0", forHTTPHeaderField: "Depth")
         login.timeoutInterval = 20
         let code: Int
@@ -151,7 +152,7 @@ struct WebDAVCheck: Equatable {
             try await folder.prepare()
             let name = ".yuyue-check-\(UUID().uuidString.prefix(8))"
             try await folder.write(name, Data("ok".utf8))
-            _ = try? await URLSession.shared.data(for: folder.request(folder.dir.appending(path: name), "DELETE"))
+            _ = try? await URLSession.shared.data(for: folder.request(folder.dir.appending(path: name, directoryHint: .notDirectory), "DELETE"))
         } catch SyncError.status(let code) {
             return stop(at: 3, code == 507 ? String(localized: "网盘满了") : String(localized: "文件夹写不进去"), "HTTP \(code)", code: true, Fix(
                 headline: code == 507 ? String(localized: "腾出点空间再试。") : String(localized: "这个账号对这个文件夹没有写的权限。"),

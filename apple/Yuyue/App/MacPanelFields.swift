@@ -31,6 +31,7 @@ struct PanelField: View {
     @Binding var text: String
     var prompt = ""
     var secure = false
+    var revealable = false
     var mono = true
     var bad = false
     var autofocus = false
@@ -38,6 +39,7 @@ struct PanelField: View {
     var cancel: (() -> Void)?
     var blur: (() -> Void)?
     @FocusState private var focused: Bool
+    @State private var revealed = false
     #if os(macOS)
     @State private var secretFocused = false
     @Environment(\.colorScheme) private var scheme
@@ -45,9 +47,11 @@ struct PanelField: View {
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
     #endif
 
+    private var masked: Bool { secure && !revealed }
+
     private var isFocused: Bool {
         #if os(macOS)
-        secure ? secretFocused : focused
+        masked ? secretFocused : focused
         #else
         focused
         #endif
@@ -60,9 +64,9 @@ struct PanelField: View {
             let shown = !isFocused && !secure && !text.isEmpty
             ZStack(alignment: .trailing) {
                 #if os(macOS)
-                if secure {
+                if masked {
                     if text.isEmpty {
-                        Text(prompt)
+                        Text(verbatim: prompt)
                             .foregroundStyle(YYColor.t3)
                             .lineLimit(1)
                             .allowsHitTesting(false)
@@ -78,7 +82,7 @@ struct PanelField: View {
                     )
                     .frame(height: ceil(YYUI.s(12) * 1.45) + 4)
                 } else {
-                    TextField("", text: $text, prompt: Text(prompt).foregroundStyle(YYColor.t3))
+                    TextField("", text: $text, prompt: Text(verbatim: prompt).foregroundStyle(YYColor.t3))
                         .textFieldStyle(.plain)
                         .multilineTextAlignment(.trailing)
                         .autocorrectionDisabled()
@@ -93,10 +97,10 @@ struct PanelField: View {
                 }
                 #else
                 Group {
-                    if secure {
-                        SecureField("", text: $text, prompt: Text(prompt).foregroundStyle(YYColor.t3))
+                    if masked {
+                        SecureField("", text: $text, prompt: Text(verbatim: prompt).foregroundStyle(YYColor.t3))
                     } else {
-                        TextField("", text: $text, prompt: Text(prompt).foregroundStyle(YYColor.t3))
+                        TextField("", text: $text, prompt: Text(verbatim: prompt).foregroundStyle(YYColor.t3))
                     }
                 }
                 .textFieldStyle(.plain)
@@ -113,11 +117,33 @@ struct PanelField: View {
                 .opacity(shown ? 0 : 1)
                 #endif
                 if shown {
-                    Text(text).lineLimit(1).truncationMode(.middle).allowsHitTesting(false)
+                    Text(verbatim: text).lineLimit(1).truncationMode(.middle).allowsHitTesting(false)
                 }
             }
             .font(mono ? .yy(size: PanelScale.k * 12, design: .monospaced) : .yy(size: PanelScale.k * 12.5))
             .foregroundStyle(YYColor.t1)
+            if secure && revealable {
+                Button {
+                    let wasFocused = isFocused
+                    revealed.toggle()
+                    if wasFocused {
+                        #if os(macOS)
+                        if masked { secretFocused = true } else { focused = true }
+                        #else
+                        focused = true
+                        #endif
+                    }
+                } label: {
+                    Image(systemName: revealed ? "eye.slash" : "eye")
+                        .font(.yy(size: PanelScale.k * 11))
+                        .foregroundStyle(YYColor.t3)
+                        .frame(width: 20, height: 20)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help(revealed ? String(localized: "藏起密码") : String(localized: "显示密码"))
+                .accessibilityLabel(revealed ? String(localized: "藏起密码") : String(localized: "显示密码"))
+            }
         }
         .padding(.horizontal, 10)
         .frame(minHeight: 38 * PanelScale.k)
@@ -126,7 +152,7 @@ struct PanelField: View {
         .contentShape(.rect)
         .onTapGesture {
             #if os(macOS)
-            if secure { secretFocused = true } else { focused = true }
+            if masked { secretFocused = true } else { focused = true }
             #else
             focused = true
             #endif
@@ -139,7 +165,7 @@ struct PanelField: View {
             guard autofocus else { return }
             try? await Task.sleep(for: .milliseconds(250))
             #if os(macOS)
-            if secure { secretFocused = true } else { focused = true }
+            if masked { secretFocused = true } else { focused = true }
             #else
             focused = true
             #endif

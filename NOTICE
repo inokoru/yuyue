@@ -33,7 +33,7 @@ Third-party components keep their own licences:
   ONNX Runtime                                MIT
   PdfPig                                      Apache-2.0
   Windows App SDK, WebView2                   MIT / Microsoft Software License
-  Simple Icons (Notion, Obsidian logos)       CC0 1.0
+  Simple Icons (Notion, Obsidian, Synology, Nextcloud logos)  CC0 1.0
 
 The Meta MMS alignment model is not part of this repository or covered by the
 GPL. The apps download it separately when it is first needed. It is licensed

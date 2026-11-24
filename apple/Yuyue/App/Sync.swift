@@ -41,6 +41,8 @@ final class Sync {
     private(set) var state = State.idle
     private(set) var lastSynced: Date?
     private(set) var devices: [DeviceInfo] = []
+    /// Bumped whenever the sync target changes so views observing computed settings (`webdav`, `chosenFolder`) refresh.
+    private(set) var targetRevision = 0
     var method: Method {
         didSet { UserDefaults.standard.set(method.rawValue, forKey: Keys.method) }
     }
@@ -231,7 +233,11 @@ final class Sync {
             throw error
         }
         UserDefaults.standard.set(await folder.email(), forKey: Keys.googleEmail)
+        running?.cancel()
+        running = nil
+        resetRemoteCache()
         method = .googleDrive
+        targetRevision &+= 1
         now()
     }
 
@@ -246,6 +252,7 @@ final class Sync {
     }
 
     var webdav: WebDAVAccount? {
+        _ = targetRevision
         let d = UserDefaults.standard
         guard let s = d.string(forKey: Keys.webdavURL), let url = URL(string: s) else { return nil }
         return WebDAVAccount(url: url, user: d.string(forKey: Keys.webdavUser) ?? "", password: Keychain.read(Keys.webdavPassword) ?? "",
@@ -260,11 +267,26 @@ final class Sync {
 
     /// Keeps an account 连接检查 has passed, and syncs with it.
     func keep(_ account: WebDAVAccount) {
-        UserDefaults.standard.set(account.url.absoluteString, forKey: Keys.webdavURL)
-        UserDefaults.standard.set(account.user, forKey: Keys.webdavUser)
-        UserDefaults.standard.set(account.folder, forKey: Keys.webdavFolder)
-        Keychain.write(Keys.webdavPassword, account.password)
+        let normalized = WebDAVAccount(
+            url: WebDAVFolder.normalizeBase(account.url),
+            user: account.user,
+            password: account.password,
+            folder: account.folder
+        )
+        let previous = webdav
+        let targetChanged = method != .webdav
+            || previous.map { WebDAVFolder.normalizeBase($0.url) != normalized.url || $0.user != normalized.user || $0.folder != normalized.folder } ?? true
+        UserDefaults.standard.set(normalized.url.absoluteString, forKey: Keys.webdavURL)
+        UserDefaults.standard.set(normalized.user, forKey: Keys.webdavUser)
+        UserDefaults.standard.set(normalized.folder, forKey: Keys.webdavFolder)
+        Keychain.write(Keys.webdavPassword, normalized.password)
+        if targetChanged {
+            running?.cancel()
+            running = nil
+            resetRemoteCache()
+        }
         method = .webdav
+        targetRevision &+= 1
         now()
     }
 
@@ -294,6 +316,7 @@ final class Sync {
     }
 
     func choose(folder url: URL) throws {
+        let previousFolder = Self.chosenFolder?.standardizedFileURL
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         #if os(macOS)
@@ -301,8 +324,15 @@ final class Sync {
         #else
         let data = try url.bookmarkData()
         #endif
+        let targetChanged = method != .icloud || previousFolder != url.standardizedFileURL
         UserDefaults.standard.set(data, forKey: Keys.folder)
+        if targetChanged {
+            running?.cancel()
+            running = nil
+            resetRemoteCache()
+        }
         method = .icloud
+        targetRevision &+= 1
         now()
     }
 
@@ -317,6 +347,17 @@ final class Sync {
         }
         method = .none
         state = .idle
+        targetRevision &+= 1
+    }
+
+    /// Clears cached remote file tags and write stamps when switching sync backend or folder.
+    private func resetRemoteCache() {
+        let d = UserDefaults.standard
+        for key in ["sync.seen", "sync.written", "sync.leftOut.done",
+                    "sync.companion.seen", "sync.companion.sent",
+                    "sync.audio.seen", "sync.audio.sent"] {
+            d.removeObject(forKey: key)
+        }
     }
 
     private enum Keys {
@@ -719,18 +760,44 @@ nonisolated struct WebDAVFolder: SyncFolder {
         folder = account.folder
     }
 
+    /// Guarantees a trailing slash on a WebDAV base URL so collection requests don't hit 301 redirects that drop auth.
+    static func normalizeBase(_ url: URL) -> URL {
+        guard !url.absoluteString.hasSuffix("/") else { return url }
+        guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: true) else { return url }
+        let path = comps.percentEncodedPath
+        comps.percentEncodedPath = path.isEmpty ? "/" : path + "/"
+        return comps.url ?? url
+    }
+
+    var normalizedBase: URL { Self.normalizeBase(base) }
+
+    var folderSegments: [String] {
+        folder.split(separator: "/").map(String.init).filter { !$0.isEmpty }
+    }
+
     var dir: URL {
-        let path = folder.split(separator: "/").joined(separator: "/")
-        return path.isEmpty ? base : base.appending(path: path, directoryHint: .isDirectory)
+        folderSegments.reduce(normalizedBase) { current, seg in
+            current.appending(path: seg, directoryHint: .isDirectory)
+        }
     }
 
     func prepare() async throws {
-        var r = request(dir, "MKCOL")
-        r.timeoutInterval = 20
-        let (_, response) = try await URLSession.shared.data(for: r)
-        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-        // 405: there already.
-        guard (200 ..< 300).contains(code) || code == 405 else { throw SyncError.status(code) }
+        let segments = folderSegments
+        guard !segments.isEmpty else { return }
+        var current = normalizedBase
+        for (index, seg) in segments.enumerated() {
+            current = current.appending(path: seg, directoryHint: .isDirectory)
+            var r = request(current, "MKCOL")
+            r.timeoutInterval = 20
+            let (_, response) = try await URLSession.shared.data(for: r)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            // 405: collection already exists.
+            if (200 ..< 300).contains(code) || code == 405 { continue }
+            // Read-only parent mounts may answer 301/403 even when the parent already exists; let the final segment decide.
+            let isLast = index == segments.count - 1
+            if !isLast && (code == 301 || code == 403) { continue }
+            throw SyncError.status(code)
+        }
     }
 
     func list() async throws -> [String: String] {
@@ -739,25 +806,25 @@ nonisolated struct WebDAVFolder: SyncFolder {
         r.setValue("application/xml", forHTTPHeaderField: "Content-Type")
         r.httpBody = Data("""
         <?xml version="1.0" encoding="utf-8"?>
-        <d:propfind xmlns:d="DAV:"><d:prop><d:getetag/><d:getlastmodified/><d:getcontentlength/></d:prop></d:propfind>
+        <d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getetag/><d:getlastmodified/><d:getcontentlength/></d:prop></d:propfind>
         """.utf8)
         let data = try await send(r)
-        return PropfindParser.parse(data)
+        return PropfindParser.parse(data, baseDir: dir)
     }
 
     func read(_ name: String) async throws -> Data {
-        try await send(request(dir.appending(path: name), "GET"))
+        try await send(request(dir.appending(path: name, directoryHint: .notDirectory), "GET"))
     }
 
     func write(_ name: String, _ data: Data) async throws {
-        var r = request(dir.appending(path: name), "PUT")
-        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var r = request(dir.appending(path: name, directoryHint: .notDirectory), "PUT")
+        r.setValue(Self.type(of: name), forHTTPHeaderField: "Content-Type")
         r.httpBody = data
         _ = try await send(r)
     }
 
     func upload(_ name: String, from file: URL) async throws {
-        var r = request(dir.appending(path: name), "PUT")
+        var r = request(dir.appending(path: name, directoryHint: .notDirectory), "PUT")
         r.setValue(Self.type(of: name), forHTTPHeaderField: "Content-Type")
         r.timeoutInterval = 600
         let (_, response) = try await URLSession.shared.upload(for: r, fromFile: file)
@@ -765,7 +832,7 @@ nonisolated struct WebDAVFolder: SyncFolder {
     }
 
     func download(_ name: String, to file: URL) async throws {
-        var r = request(dir.appending(path: name), "GET")
+        var r = request(dir.appending(path: name, directoryHint: .notDirectory), "GET")
         r.timeoutInterval = 600
         let (temp, response) = try await URLSession.shared.download(for: r)
         try Self.check(response)
@@ -797,14 +864,23 @@ nonisolated struct WebDAVFolder: SyncFolder {
 
 /// The file names and tags in a PROPFIND answer.
 private nonisolated final class PropfindParser: NSObject, XMLParserDelegate {
+    private let baseDir: URL
+    private let basePath: String
     private var out: [String: String] = [:]
     private var href = ""
     private var tag = ""
     private var modified = ""
+    private var length = ""
+    private var isCollection = false
     private var text = ""
 
-    static func parse(_ data: Data) -> [String: String] {
-        let p = PropfindParser()
+    private init(baseDir: URL) {
+        self.baseDir = baseDir
+        self.basePath = Self.normalizedPath(baseDir.path(percentEncoded: false))
+    }
+
+    static func parse(_ data: Data, baseDir: URL) -> [String: String] {
+        let p = PropfindParser(baseDir: baseDir)
         let parser = XMLParser(data: data)
         parser.shouldProcessNamespaces = true
         parser.delegate = p
@@ -812,9 +888,29 @@ private nonisolated final class PropfindParser: NSObject, XMLParserDelegate {
         return p.out
     }
 
+    private static func normalizedPath(_ raw: String) -> String {
+        "/" + raw.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private func resolvedPath(for rawHref: String) -> String {
+        let url = URL(string: rawHref, relativeTo: baseDir)
+            ?? rawHref.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed.union(CharacterSet(charactersIn: "%")))
+                .flatMap { URL(string: $0, relativeTo: baseDir) }
+        let decoded = url?.path(percentEncoded: false) ?? (rawHref.removingPercentEncoding ?? rawHref)
+        return Self.normalizedPath(decoded)
+    }
+
     func parser(_ parser: XMLParser, didStartElement name: String, namespaceURI: String?, qualifiedName: String?, attributes: [String: String] = [:]) {
         text = ""
-        if name == "response" { href = ""; tag = ""; modified = "" }
+        if name == "response" {
+            href = ""
+            tag = ""
+            modified = ""
+            length = ""
+            isCollection = false
+        } else if name == "collection" {
+            isCollection = true
+        }
     }
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
@@ -827,9 +923,15 @@ private nonisolated final class PropfindParser: NSObject, XMLParserDelegate {
         case "href": href = value
         case "getetag": tag = value
         case "getlastmodified": modified = value
+        case "getcontentlength": length = value
         case "response":
-            let file = (href.removingPercentEncoding ?? href).split(separator: "/").last.map(String.init) ?? ""
-            if !file.isEmpty, !href.hasSuffix("/") { out[file] = tag.isEmpty ? modified : tag }
+            guard !isCollection, !href.isEmpty, !href.hasSuffix("/") else { return }
+            let itemPath = resolvedPath(for: href)
+            guard itemPath != basePath else { return }
+            let file = itemPath.split(separator: "/").last.map(String.init) ?? ""
+            if !file.isEmpty {
+                out[file] = "\(tag)|\(modified)|\(length)"
+            }
         default: break
         }
     }

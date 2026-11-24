@@ -242,7 +242,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
     /// Whether the right column has anything for this page (a sample, a card); without, it isn't shown.
     var hasInspector: Bool {
         switch self {
-        case .general, .appearance, .sync, .update: false
+        case .general, .appearance, .update: false
         default: true
         }
     }

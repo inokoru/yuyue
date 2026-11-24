@@ -282,16 +282,22 @@ private struct PhoneWebDAV: View {
     @State private var checking = false
 
     private var account: Sync.WebDAVAccount? {
-        guard let u = URL(string: url.trimmingCharacters(in: .whitespaces)), u.scheme?.hasPrefix("http") == true, u.host() != nil else { return nil }
-        return Sync.WebDAVAccount(url: u, user: user.trimmingCharacters(in: .whitespaces), password: password,
-                                  folder: folder.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")))
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let u = URL(string: trimmed),
+              let scheme = u.scheme?.lowercased(),
+              (scheme == "http" || scheme == "https"),
+              let host = u.host(), !host.isEmpty else { return nil }
+        return Sync.WebDAVAccount(url: WebDAVFolder.normalizeBase(u),
+                                  user: user.trimmingCharacters(in: .whitespacesAndNewlines),
+                                  password: password,
+                                  folder: folder.trimmingCharacters(in: CharacterSet(charactersIn: "/ \t\n\r")))
     }
 
     var body: some View {
         YYPage {
             YYGroup {
                 YYField(label: String(localized: "地址"), labelWidth: 44) {
-                    TextField("", text: $url, prompt: Text("https://dav.jianguoyun.com/dav/"))
+                    TextField("", text: $url, prompt: Text(verbatim: "https://dav.jianguoyun.com/dav/").foregroundStyle(YYColor.t3))
                         .font(YYUI.font(11, design: .monospaced))
                         .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                 }

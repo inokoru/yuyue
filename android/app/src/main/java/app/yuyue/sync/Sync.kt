@@ -27,6 +27,7 @@ import java.io.File
 import java.io.IOException
 import java.net.ConnectException
 import java.net.SocketTimeoutException
+import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.net.UnknownHostException
@@ -107,11 +108,28 @@ class Sync(private val context: Context, private val core: YuyueCore, private va
 
     /** Checks the account can be reached and written, then keeps it and syncs. */
     suspend fun connect(account: WebDAVAccount) {
-        WebDAVFolder(account).prepare()
-        Prefs.set(URL_KEY, account.url)
-        Prefs.set(USER, account.user)
-        Prefs.set(FOLDER, account.folder)
-        Keys.write(PASSWORD, account.password)
+        val normalizedUrl = account.url.trim().trimEnd('/') + "/"
+        val normalized = account.copy(
+            url = normalizedUrl,
+            user = account.user.trim(),
+            folder = account.folder.trim('/', ' ', '\t', '\n', '\r'),
+        )
+        WebDAVFolder(normalized).prepare()
+        val previous = webdav
+        val targetChanged = method != "webdav" ||
+            previous == null ||
+            previous.url.trimEnd('/') != normalized.url.trimEnd('/') ||
+            previous.user != normalized.user ||
+            previous.folder != normalized.folder
+        Prefs.set(URL_KEY, normalized.url)
+        Prefs.set(USER, normalized.user)
+        Prefs.set(FOLDER, normalized.folder)
+        Keys.write(PASSWORD, normalized.password)
+        if (targetChanged) {
+            running?.cancel()
+            running = null
+            resetRemoteCache()
+        }
         Prefs.set(METHOD, "webdav")
         method = "webdav"
         now()
@@ -125,9 +143,20 @@ class Sync(private val context: Context, private val core: YuyueCore, private va
         folder.list()
         driveEmail = folder.email()
         Prefs.set(DriveAuth.EMAIL, driveEmail ?: "")
+        running?.cancel()
+        running = null
+        resetRemoteCache()
         Prefs.set(METHOD, "drive")
         method = "drive"
         now()
+    }
+
+    private fun resetRemoteCache() {
+        Prefs.set(SEEN, "{}")
+        Prefs.set(WRITTEN, "")
+        Prefs.set(LEFT_OUT_DONE, "\u0000")
+        Prefs.set("sync.companion.seen", "{}")
+        Prefs.set("sync.companion.sent", "{}")
     }
 
     private fun folder(): SyncFolder? = when (method) {
@@ -411,11 +440,16 @@ class Sync(private val context: Context, private val core: YuyueCore, private va
 
 /** A folder on a WebDAV share: file name → a tag that changes when the file does. */
 class WebDAVFolder(private val account: Sync.WebDAVAccount) : SyncFolder {
+    private val baseUrl: String
+        get() = account.url.trim().trimEnd('/')
+
+    private val segments: List<String>
+        get() = account.folder.split('/').filter { it.isNotEmpty() }
+
     private val dir: String
         get() {
-            val base = account.url.trimEnd('/')
-            val path = account.folder.split('/').filter { it.isNotEmpty() }.joinToString("/") { enc(it) }
-            return if (path.isEmpty()) "$base/" else "$base/$path/"
+            val path = segments.joinToString("/") { enc(it) }
+            return if (path.isEmpty()) "$baseUrl/" else "$baseUrl/$path/"
         }
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
@@ -436,21 +470,33 @@ class WebDAVFolder(private val account: Sync.WebDAVAccount) : SyncFolder {
     }
 
     override fun prepare() {
-        // 405: there already.
-        send(request(dir, "MKCOL")) { it in 200..299 || it == 405 }.close()
+        val segs = segments
+        if (segs.isEmpty()) return
+        var current = baseUrl
+        for ((index, seg) in segs.withIndex()) {
+            current = "$current/${enc(seg)}"
+            val isLast = index == segs.lastIndex
+            // 405: collection already exists; non-final parent mounts may answer 301/403.
+            send(request("$current/", "MKCOL")) { code ->
+                code in 200..299 || code == 405 || (!isLast && (code == 301 || code == 403))
+            }.close()
+        }
     }
 
     override fun list(): Map<String, String> {
-        val body = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag/><d:getlastmodified/><d:getcontentlength/></d:prop></d:propfind>"""
+        val body = """<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getetag/><d:getlastmodified/><d:getcontentlength/></d:prop></d:propfind>"""
             .toRequestBody("application/xml".toMediaType())
-        val r = request(dir, "PROPFIND", body).newBuilder().header("Depth", "1").build()
-        return send(r).use { parse(it.body!!.byteStream()) }
+        val dirUrl = dir
+        val r = request(dirUrl, "PROPFIND", body).newBuilder().header("Depth", "1").build()
+        val basePath = normalizePath(runCatching { URI(dirUrl).path ?: "" }.getOrDefault(""))
+        return send(r).use { parse(it.body!!.byteStream(), basePath) }
     }
 
     override fun read(name: String): ByteArray = send(request(dir + enc(name), "GET")).use { it.body!!.bytes() }
 
     override fun write(name: String, data: ByteArray) {
-        send(request(dir + enc(name), "PUT", data.toRequestBody("application/json".toMediaType()))).close()
+        val mediaType = if (name.endsWith(".json")) "application/json" else "application/octet-stream"
+        send(request(dir + enc(name), "PUT", data.toRequestBody(mediaType.toMediaType()))).close()
     }
 
     override fun upload(name: String, file: File) {
@@ -463,8 +509,17 @@ class WebDAVFolder(private val account: Sync.WebDAVAccount) : SyncFolder {
         if (!part.renameTo(to)) throw IOException("rename")
     }
 
+    private fun normalizePath(raw: String): String = "/" + raw.trim('/')
+
+    private fun resolvedPath(rawHref: String): String {
+        val safe = rawHref.replace(" ", "%20")
+        val path = runCatching { URI(safe).rawPath ?: safe }.getOrDefault(safe)
+        val decoded = runCatching { URLDecoder.decode(path.replace("+", "%2B"), "UTF-8") }.getOrDefault(path)
+        return normalizePath(decoded)
+    }
+
     /** The file names and tags in a PROPFIND answer. */
-    private fun parse(input: java.io.InputStream): Map<String, String> {
+    private fun parse(input: java.io.InputStream, basePath: String): Map<String, String> {
         val out = mutableMapOf<String, String>()
         val p = Xml.newPullParser()
         p.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
@@ -472,12 +527,23 @@ class WebDAVFolder(private val account: Sync.WebDAVAccount) : SyncFolder {
         var href = ""
         var tag = ""
         var modified = ""
+        var length = ""
+        var isCollection = false
         var text = StringBuilder()
         while (p.next() != XmlPullParser.END_DOCUMENT) {
             when (p.eventType) {
                 XmlPullParser.START_TAG -> {
                     text = StringBuilder()
-                    if (p.name == "response") { href = ""; tag = ""; modified = "" }
+                    when (p.name) {
+                        "response" -> {
+                            href = ""
+                            tag = ""
+                            modified = ""
+                            length = ""
+                            isCollection = false
+                        }
+                        "collection" -> isCollection = true
+                    }
                 }
                 XmlPullParser.TEXT -> text.append(p.text)
                 XmlPullParser.END_TAG -> {
@@ -486,9 +552,15 @@ class WebDAVFolder(private val account: Sync.WebDAVAccount) : SyncFolder {
                         "href" -> href = v
                         "getetag" -> tag = v
                         "getlastmodified" -> modified = v
+                        "getcontentlength" -> length = v
                         "response" -> {
-                            val file = runCatching { URLDecoder.decode(href.replace("+", "%2B"), "UTF-8") }.getOrDefault(href).split('/').lastOrNull() ?: ""
-                            if (file.isNotEmpty() && !href.endsWith("/")) out[file] = tag.ifEmpty { modified }
+                            if (!isCollection && href.isNotEmpty() && !href.endsWith("/")) {
+                                val itemPath = resolvedPath(href)
+                                if (itemPath != basePath) {
+                                    val file = itemPath.substringAfterLast('/')
+                                    if (file.isNotEmpty()) out[file] = "$tag|$modified|$length"
+                                }
+                            }
                         }
                     }
                 }

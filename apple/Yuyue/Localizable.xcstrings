@@ -45776,6 +45776,416 @@
           }
         }
       }
+    },
+    "Alist / 其他" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alist & others"
+          }
+        }
+      }
+    },
+    "DSM 账号" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DSM account"
+          }
+        }
+      }
+    },
+    "WebDAV · 填好后逐项检查连通" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WebDAV · Tested step by step"
+          }
+        }
+      }
+    },
+    "WebDAV · 已连上" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WebDAV · Connected"
+          }
+        }
+      }
+    },
+    "WebDAV（%@）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WebDAV (%@)"
+          }
+        }
+      }
+    },
+    "位置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Location"
+          }
+        }
+      }
+    },
+    "使用 iCloud 云盘同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sync with iCloud Drive"
+          }
+        }
+      }
+    },
+    "先填地址" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter URL"
+          }
+        }
+      }
+    },
+    "在 iCloud 云盘里选一个文件夹（比如新建一个“语阅”），每台 Apple 设备选同一个即可自动同步。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick a folder in iCloud Drive (e.g. a new “Yuyue” folder), and choose the same one on each Apple device."
+          }
+        }
+      }
+    },
+    "坚果云请使用第三方「应用密码」，而非登录密码。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use a Nutstore third-party app password rather than your login password."
+          }
+        }
+      }
+    },
+    "密码仅保存在这台 Mac 上，不同步、不上传。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your password stays on this Mac and is never synced or uploaded."
+          }
+        }
+      }
+    },
+    "密码或应用密码" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Password or app password"
+          }
+        }
+      }
+    },
+    "密码（可不填）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Password (optional)"
+          }
+        }
+      }
+    },
+    "已连上并开始同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connected and syncing"
+          }
+        }
+      }
+    },
+    "已连接 · 重新检查" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connected · Re-check"
+          }
+        }
+      }
+    },
+    "应用专属目录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App data folder"
+          }
+        }
+      }
+    },
+    "当前使用中" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Active"
+          }
+        }
+      }
+    },
+    "支持任意标准 WebDAV 服务（Alist、InfiniCLOUD 等）。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Works with any standard WebDAV server (Alist, InfiniCLOUD, etc.)."
+          }
+        }
+      }
+    },
+    "数据存放在你自己的 Google Drive 应用专属目录，方便在 Mac 与 Android 间同步。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Data is stored in your own Google Drive app folder for syncing between Mac and Android."
+          }
+        }
+      }
+    },
+    "数据存放在你自己的 Google Drive 隐藏应用目录里，语阅看不到其他文件。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Data stays in a hidden app folder in your Google Drive; Yuyue cannot see other files."
+          }
+        }
+      }
+    },
+    "更换文件夹…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change Folder…"
+          }
+        }
+      }
+    },
+    "检查并连接" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Test & Connect"
+          }
+        }
+      }
+    },
+    "正在检查连接…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Testing connection…"
+          }
+        }
+      }
+    },
+    "每台 Apple 设备选同一个 iCloud 云盘文件夹即可自动同步。点左侧「WebDAV」可切换到坚果云、群晖或 Nextcloud。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose the same iCloud Drive folder on each Apple device to sync automatically. Select WebDAV on the left to switch to Nutstore, Synology, or Nextcloud."
+          }
+        }
+      }
+    },
+    "注册邮箱" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Account email"
+          }
+        }
+      }
+    },
+    "登录 Google 账号" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign in with Google"
+          }
+        }
+      }
+    },
+    "群晖" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synology"
+          }
+        }
+      }
+    },
+    "群晖 NAS" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synology NAS"
+          }
+        }
+      }
+    },
+    "自定义 WebDAV" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom WebDAV"
+          }
+        }
+      }
+    },
+    "自建云盘" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Self-hosted"
+          }
+        }
+      }
+    },
+    "获取应用密码" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Get app password"
+          }
+        }
+      }
+    },
+    "请先在群晖套件中心启用 WebDAV Server，默认 HTTPS 端口 5006。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable WebDAV Server in Synology Package Center first (default HTTPS port 5006)."
+          }
+        }
+      }
+    },
+    "账号（可不填）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Username (optional)"
+          }
+        }
+      }
+    },
+    "路径需以 /remote.php/dav/files/用户名/ 结尾；开启两步验证请用应用密码。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Path should end with /remote.php/dav/files/<user>/; use an app password if 2FA is enabled."
+          }
+        }
+      }
+    },
+    "连接 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect %@"
+          }
+        }
+      }
+    },
+    "这个版本还没开通 Google Drive，敬请期待。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Google Drive sync is coming soon in a future release."
+          }
+        }
+      }
+    },
+    "退出并停止同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign Out & Stop Sync"
+          }
+        }
+      }
+    },
+    "适合跨 Android · 即将支持" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cross-Android · Coming soon"
+          }
+        }
+      }
+    },
+    "适合跨 Android 同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Best for syncing with Android"
+          }
+        }
+      }
+    },
+    "配置中" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Setting up"
+          }
+        }
+      }
+    },
+    "重试连接" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retry Connection"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
