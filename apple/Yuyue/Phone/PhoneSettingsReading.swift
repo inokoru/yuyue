@@ -1,17 +1,25 @@
 #if os(iOS)
 import SwiftUI
 @preconcurrency import Translation
+import UIKit
 import YuyueCore
 
 // MARK: - 外观
 
-/// 外观: light, dark or the system's; 墨蓝 or 墨黑; and a look at both.
+/// 外观: light, dark or the system's; 墨蓝 or 墨黑; app icon; and a look at both.
 struct PhoneAppearance: View {
     @AppStorage(AppAppearance.key) private var mode = AppAppearance.system
     @AppStorage("shelf.showProgress") private var showProgress = true
     @AppStorage("shelf.coverSize") private var coverSize = 100.0
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
     @AppStorage(LiquidGlass.key) private var liquid = false
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var activeIcon = AppIconChoice.currentIOS
+    @State private var switchingTo: AppIconChoice?
+    @State private var iconError = false
+    @State private var iconErrorDismissTask: Task<Void, Never>?
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
 
     var body: some View {
@@ -38,6 +46,10 @@ struct PhoneAppearance: View {
                     HStack(spacing: YYUI.s(6)) { ForEach(YYTint.all) { t in tintChoice(t) } }
                 }
                 .padding(.vertical, YYUI.s(12))
+            }
+            if UIApplication.shared.supportsAlternateIcons {
+                appIconCard
+                    .padding(.top, YYUI.s(12))
             }
             YYGroup {
                 VStack(alignment: .leading, spacing: YYUI.s(8)) {
@@ -82,8 +94,160 @@ struct PhoneAppearance: View {
         }
         .navigationTitle("外观")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if switchingTo == nil {
+                activeIcon = AppIconChoice.currentIOS
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, switchingTo == nil {
+                activeIcon = AppIconChoice.currentIOS
+            }
+        }
+        .onDisappear {
+            iconErrorDismissTask?.cancel()
+            iconErrorDismissTask = nil
+        }
         .animation(YYMotion.quick, value: tintID)
+        .animation(YYMotion.quick, value: activeIcon)
+        .animation(YYMotion.quick, value: iconError)
+        .animation(YYMotion.quick, value: switchingTo)
         .animation(YYMotion.standard, value: mode)
+    }
+
+    private var appIconCard: some View {
+        let columnCount = horizontalSizeClass == .regular ? 6 : 3
+        let columns = Array(repeating: GridItem(.flexible(), spacing: YYUI.s(10)), count: columnCount)
+
+        return YYGroup {
+            VStack(alignment: .leading, spacing: YYUI.s(12)) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: YYUI.s(2)) {
+                        Text("应用图标")
+                            .font(YYUI.font(11.5, .medium))
+                            .foregroundStyle(YYColor.t1)
+                        Text("点击即可更换主屏幕图标")
+                            .font(YYUI.font(10))
+                            .foregroundStyle(YYColor.t2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: YYUI.s(8))
+                    Text(activeIcon.title)
+                        .font(YYUI.font(10.5, .medium))
+                        .foregroundStyle(YYColor.t2)
+                        .lineLimit(1)
+                }
+
+                LazyVGrid(columns: columns, spacing: YYUI.s(12)) {
+                    ForEach(AppIconChoice.allCases) { option in
+                        iconTile(option)
+                    }
+                }
+
+                if iconError {
+                    HStack(spacing: YYUI.s(5)) {
+                        Image(systemName: "exclamationmark.circle")
+                        Text("暂时无法更换图标，请稍后再试")
+                    }
+                    .font(YYUI.font(10.5))
+                    .foregroundStyle(YYColor.danger)
+                    .transition(.opacity)
+                }
+            }
+            .padding(.vertical, YYUI.s(12))
+        }
+    }
+
+    private func iconTile(_ option: AppIconChoice) -> some View {
+        let on = activeIcon == option
+        let loading = switchingTo == option
+        let iconSize = YYUI.s(48)
+        let iconRadius = iconSize * 0.2237
+        let rimColor = scheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08)
+
+        return Button { selectIcon(option) } label: {
+            VStack(spacing: YYUI.s(5)) {
+                ZStack {
+                    Image(option.previewAssetName)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(1, contentMode: .fit)
+                        .frame(width: iconSize, height: iconSize)
+                        .clipShape(.rect(cornerRadius: iconRadius, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: iconRadius, style: .continuous)
+                                .strokeBorder(rimColor, lineWidth: 0.5)
+                        )
+                        .overlay {
+                            if loading {
+                                RoundedRectangle(cornerRadius: iconRadius, style: .continuous)
+                                    .fill(Color.black.opacity(0.32))
+                                ProgressView()
+                                    .controlSize(.mini)
+                                    .tint(.white)
+                                    .accessibilityLabel(Text("正在更换图标"))
+                            }
+                        }
+                }
+                .padding(YYUI.s(3))
+                .overlay {
+                    if on {
+                        RoundedRectangle(cornerRadius: iconRadius + YYUI.s(3.5), style: .continuous)
+                            .strokeBorder(tint.accentSoft, lineWidth: YYUI.s(2.5))
+                        RoundedRectangle(cornerRadius: iconRadius + YYUI.s(2), style: .continuous)
+                            .strokeBorder(tint.accent, lineWidth: 2)
+                            .padding(YYUI.s(1.5))
+                    }
+                }
+                Text(option.title)
+                    .font(YYUI.font(10.5, on ? .semibold : .regular))
+                    .foregroundStyle(on ? YYColor.t1 : YYColor.t2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .frame(maxWidth: .infinity, minHeight: YYUI.s(74))
+            .contentShape(.rect)
+        }
+        .buttonStyle(YYPressStyle(scale: 0.96))
+        .disabled(switchingTo != nil)
+        .accessibilityLabel(option.title)
+        .accessibilityHint(on ? String(localized: "当前正在使用的应用图标") : String(localized: "轻点切换应用图标"))
+        .accessibilityAddTraits(on ? .isSelected : [])
+        .accessibilityIdentifier("appearance.icon.\(option.id)")
+    }
+
+    private func selectIcon(_ target: AppIconChoice) {
+        guard switchingTo == nil else { return }
+        let current = AppIconChoice.currentIOS
+        if current != activeIcon {
+            activeIcon = current
+        }
+        guard target != activeIcon else { return }
+
+        iconErrorDismissTask?.cancel()
+        iconErrorDismissTask = nil
+        iconError = false
+        switchingTo = target
+
+        Task { @MainActor in
+            do {
+                try await UIApplication.shared.setAlternateIconName(target.alternateIconName)
+                switchingTo = nil
+                activeIcon = AppIconChoice.currentIOS
+                UISelectionFeedbackGenerator().selectionChanged()
+            } catch {
+                switchingTo = nil
+                activeIcon = AppIconChoice.currentIOS
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                iconError = true
+                iconErrorDismissTask?.cancel()
+                iconErrorDismissTask = Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(4))
+                    guard !Task.isCancelled else { return }
+                    iconError = false
+                }
+            }
+        }
     }
 
     /// `.gl`: the small grey name over a group.

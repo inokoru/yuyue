@@ -220,6 +220,7 @@ final class PaperAppearance {
     func refreshAppearance() {
         ensureMacObserver()
         setIsDark(Self.currentEffectiveDark())
+        AppIconChoice.applyMacDockIcon()
     }
     #else
     func syncFromRoot(scheme: ColorScheme, mode: AppAppearance) {
