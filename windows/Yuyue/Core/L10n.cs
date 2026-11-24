@@ -441,13 +441,19 @@ public static partial class L10n
     private static string GetOrStoreOriginal(object target, string prop, string current)
     {
         var map = Originals.GetOrCreateValue(target);
-        if (!map.TryGetValue(prop, out var orig))
+        if (string.IsNullOrEmpty(current))
+        {
+            map.Remove(prop);
+            return "";
+        }
+        if (!map.TryGetValue(prop, out var orig) || string.IsNullOrEmpty(orig))
         {
             map[prop] = current;
             return current;
         }
-        // If code explicitly wrote a brand-new Chinese string to this reused element, update stored original
-        if (ContainsCjk(current) && current != orig)
+        // If code explicitly wrote a brand-new Chinese string OR updated a non-CJK counter/symbol ("5", "2 ›"),
+        // treat the live value as authoritative instead of reverting to a stale cached value.
+        if ((ContainsCjk(current) && current != orig) || (!ContainsCjk(orig) && !ContainsCjk(current) && current != orig))
         {
             map[prop] = current;
             return current;

@@ -72,7 +72,8 @@ public sealed partial class ShelfWindow : Window
         ThemeHelper.ResizeWindow(this, 1040, 720);
         SetTitleBar(TopDragBar);
         ThemeHelper.ApplyElevation(PaperSheet, DeskShadowReceiver, 20f);
-        ThemeHelper.ApplyElevation(ToastBanner, PaperInnerGrid, 12f);
+        ThemeHelper.ApplyElevation(ToastBanner, PaperInnerGrid, 14f);
+        ThemeHelper.ApplyElevation(QuickSearchCard, DeskShadowReceiver, 32f);
 
         if (!_sidebarVisible)
         {
@@ -1416,20 +1417,20 @@ public sealed partial class ShelfWindow : Window
             ? palette.Inset
             : (isPaper
                 ? PaperClothColor(book.Title, dark)
-                : (dark ? Color.FromArgb(255, 44, 42, 39) : Color.FromArgb(255, 238, 234, 226)));
+                : (dark ? Color.FromArgb(255, 44, 40, 36) : Color.FromArgb(255, 235, 230, 221)));
 
         var inner = new Border
         {
             Width = width,
             Height = actualH,
             VerticalAlignment = isAudio ? VerticalAlignment.Bottom : VerticalAlignment.Stretch,
-            CornerRadius = new CornerRadius(isAudio ? Math.Max(5, width * 0.08) : 4),
-            BorderBrush = ThemeHelper.Brush(dark ? Color.FromArgb(26, 255, 255, 255) : Color.FromArgb(24, 0, 0, 0)),
+            CornerRadius = new CornerRadius(isAudio ? Math.Max(5, width * 0.08) : 5),
+            BorderBrush = ThemeHelper.Brush(dark ? Color.FromArgb(20, 255, 255, 255) : Color.FromArgb(14, 42, 43, 46)),
             BorderThickness = new Thickness(0.5),
             Background = ThemeHelper.Brush(placeholderBg),
             Opacity = book.Available || isPaper ? 1.0 : 0.45,
         };
-        if (elevated) ThemeHelper.ApplyElevation(inner, PaperInnerGrid, 10f);
+        if (elevated && !_library.Prefs.GlobalEinkMode) ThemeHelper.ApplyElevation(inner, PaperInnerGrid, 12f);
 
         var layer = new Grid();
 
@@ -1561,15 +1562,19 @@ public sealed partial class ShelfWindow : Window
     /// </summary>
     public Flyout BuildBookMenuFlyout(BookSummary book)
     {
-        var flyout = new Flyout();
+        var flyout = new Flyout
+        {
+            FlyoutPresenterStyle = (Style)Application.Current.Resources["YYFloatFlyoutPresenterStyle"],
+            ShouldConstrainToRootBounds = true,
+        };
         bool dark = ThemeHelper.IsDark(RootGrid.ActualTheme);
         var palette = ThemeHelper.Palette(dark);
         var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
 
-        var root = new StackPanel { Width = 214, Spacing = 4 };
+        var root = new StackPanel { Width = 214, Spacing = 0, Padding = new Thickness(0, 0, 0, 4) };
 
-        // Header（无小封面、无三宫格方块，1:1 BookMenu.swift:122-150）
-        var head = new StackPanel { Spacing = 4, Padding = new Thickness(8, 4, 8, 6) };
+        // Header（1:1 BookMenu.swift:147-184 & shelf-menu/1.png）
+        var head = new StackPanel { Spacing = 5, Padding = new Thickness(14, 11, 14, 10) };
         head.Children.Add(new TextBlock
         {
             Text = book.Title,
@@ -1631,7 +1636,7 @@ public sealed partial class ShelfWindow : Window
         }
         root.Children.Add(head);
 
-        Border Hairline() => new() { Height = 0.5, Background = ThemeHelper.Brush(palette.Line), Margin = new Thickness(8, 2, 8, 2) };
+        Border Hairline() => new() { Height = 0.5, Background = ThemeHelper.Brush(palette.Line), Margin = new Thickness(14, 3, 14, 3) };
 
         Button MenuRow(string label, string rightIcon, Action onClick, bool accent = false, bool danger = false)
         {
@@ -1640,7 +1645,7 @@ public sealed partial class ShelfWindow : Window
                 : ThemeHelper.Brush(palette.T1);
             var iconBrush = danger ? ThemeHelper.Brush(palette.Danger)
                 : accent ? ThemeHelper.Brush(tint.Accent)
-                : ThemeHelper.Brush(palette.T3);
+                : ThemeHelper.Brush(palette.T1);
 
             var g = new Grid { ColumnSpacing = 8 };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1648,12 +1653,12 @@ public sealed partial class ShelfWindow : Window
             g.Children.Add(new TextBlock
             {
                 Text = label,
-                FontSize = 12,
+                FontSize = 12.5,
                 FontWeight = accent ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
                 Foreground = fg,
                 VerticalAlignment = VerticalAlignment.Center,
             });
-            var ic = YYIcons.Make(rightIcon, 12.5, iconBrush);
+            var ic = YYIcons.Make(rightIcon, 13, iconBrush);
             Grid.SetColumn(ic, 1);
             g.Children.Add(ic);
 
@@ -1666,10 +1671,13 @@ public sealed partial class ShelfWindow : Window
                 Background = new SolidColorBrush(Colors.Transparent),
                 BorderThickness = new Thickness(0),
                 CornerRadius = new CornerRadius(7),
-                Padding = new Thickness(8, 0, 8, 0),
+                Margin = new Thickness(5, 0, 5, 0),
+                Padding = new Thickness(9, 0, 9, 0),
                 UseSystemFocusVisuals = false,
                 Content = g,
             };
+            b.PointerEntered += (_, _) => b.Background = ThemeHelper.Brush(palette.Inset);
+            b.PointerExited += (_, _) => b.Background = new SolidColorBrush(Colors.Transparent);
             b.Click += (_, _) => { flyout.Hide(); onClick(); };
             return b;
         }
@@ -4242,7 +4250,13 @@ public sealed partial class ShelfWindow : Window
                 });
             }
 
-            var rightPills = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, HorizontalAlignment = HorizontalAlignment.Right };
+            var rightPills = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 4,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Opacity = 0,
+            };
             string pinTargetId = col.Id;
             bool curPinned = isPinned;
             var pinPill = new Button
@@ -4375,6 +4389,12 @@ public sealed partial class ShelfWindow : Window
                 Child = cardRoot,
             };
             if (!eink && !dark) ThemeHelper.ApplyElevation(cardBorder, PaperInnerGrid, 6f);
+
+            bool menuOpen = false;
+            ctx.Opened += (_, _) => { menuOpen = true; rightPills.Opacity = 1; };
+            ctx.Closed += (_, _) => { menuOpen = false; rightPills.Opacity = 0; };
+            cardBorder.PointerEntered += (_, _) => rightPills.Opacity = 1;
+            cardBorder.PointerExited += (_, _) => { if (!menuOpen) rightPills.Opacity = 0; };
 
             cardBorder.DragOver += (_, de) =>
             {

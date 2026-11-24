@@ -477,7 +477,7 @@ public sealed class BookRecordPageBuilder
             CornerRadius = new CornerRadius(14),
             Background = ThemeHelper.Brush(cardBg),
             BorderBrush = ThemeHelper.Brush(cardBorder),
-            BorderThickness = new Thickness(book.Record ? 0.75 : 1),
+            BorderThickness = new Thickness(0.5),
             Child = outer,
         };
     }
@@ -1500,11 +1500,11 @@ public sealed class BookRecordPageBuilder
             Padding = new Thickness(14, 0, 14, 0),
             CornerRadius = new CornerRadius(10),
             FontSize = 12.5,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = ThemeHelper.Brush(main ? Colors.White : p.T1),
-            Background = ThemeHelper.Brush(main ? tint.Fill : p.Card),
-            BorderBrush = main ? new SolidColorBrush(Colors.Transparent) : ThemeHelper.Brush(p.Line),
-            BorderThickness = new Thickness(main ? 0 : 1),
+            FontWeight = main ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
+            Foreground = ThemeHelper.Brush(main ? tint.Accent : p.T1),
+            Background = ThemeHelper.Brush(main ? tint.Soft : p.Card),
+            BorderBrush = ThemeHelper.Brush(main ? tint.Edge : p.Line),
+            BorderThickness = new Thickness(0.5),
             UseSystemFocusVisuals = false,
         };
     }
@@ -1519,10 +1519,11 @@ public sealed class BookRecordPageBuilder
             Padding = new Thickness(9, 0, 9, 0),
             CornerRadius = new CornerRadius(7),
             FontSize = 11,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = ThemeHelper.Brush(main ? Colors.White : p.T1),
-            Background = ThemeHelper.Brush(main ? tint.Fill : p.Inset),
-            BorderThickness = new Thickness(0),
+            FontWeight = main ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Medium,
+            Foreground = ThemeHelper.Brush(main ? tint.Accent : p.T2),
+            Background = ThemeHelper.Brush(main ? tint.Soft : p.Card),
+            BorderBrush = ThemeHelper.Brush(main ? tint.Edge : p.Line),
+            BorderThickness = new Thickness(0.5),
             UseSystemFocusVisuals = false,
         };
     }

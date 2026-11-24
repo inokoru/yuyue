@@ -433,8 +433,8 @@ public sealed partial class ReaderWindow : Window
         Color bgCol = einkOn ? Colors.White : paper.Bg;
         Color inkCol = einkOn ? Colors.Black : paper.Ink;
         Color ink2Col = einkOn ? Color.FromArgb(255, 72, 72, 72) : paper.Ink2;
-        Color glassCol = einkOn ? Colors.White : paper.Glass;
-        Color lineCol = einkOn ? Color.FromArgb(255, 200, 200, 200) : paper.Line;
+        Color glassCol = einkOn ? Colors.White : (isDark ? Color.FromArgb(224, 30, 31, 34) : Color.FromArgb(242, 255, 255, 255));
+        Color lineCol = einkOn ? Color.FromArgb(255, 200, 200, 200) : (isDark ? Color.FromArgb(28, 255, 255, 255) : Color.FromArgb(22, 42, 43, 46));
 
         if (!einkOn && custom is not null)
         {
@@ -5250,6 +5250,12 @@ public sealed partial class ReaderWindow : Window
             welcomeStack.Children.Add(cfgBtn);
         }
 
+        // Refresh Companion inline model pill label
+        string provName = CompanionClient.Presets.FirstOrDefault(x => x.Id == _library.Prefs.AiProvider)?.Name ?? _library.Prefs.AiProvider;
+        string modelShort = string.IsNullOrWhiteSpace(_library.Prefs.AiModel) ? provName : _library.Prefs.AiModel.Split('/').Last();
+        L10n.Skip(CompanionModelPillText);
+        CompanionModelPillText.Text = modelShort;
+
         CompanionMessages.Children.Add(new Border
         {
             CornerRadius = new CornerRadius(14),
@@ -5257,6 +5263,7 @@ public sealed partial class ReaderWindow : Window
             Padding = new Thickness(14),
             Child = welcomeStack,
         });
+        CompanionSuggestionsCard.Visibility = Visibility.Visible;
         L10n.ApplyTree(CompanionMessages);
     }
 
@@ -5272,7 +5279,11 @@ public sealed partial class ReaderWindow : Window
 
     private void CompanionInput_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Key == VirtualKey.Enter) { CompanionSend_Click(sender, e); e.Handled = true; }
+        if (e.Key == VirtualKey.Enter)
+        {
+            var shift = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(CoreVirtualKeyStates.Down);
+            if (!shift) { CompanionSend_Click(sender, e); e.Handled = true; }
+        }
     }
 
     private async void CompanionSend_Click(object sender, RoutedEventArgs e)
@@ -5280,6 +5291,7 @@ public sealed partial class ReaderWindow : Window
         var q = CompanionInputBox.Text.Trim();
         if (string.IsNullOrEmpty(q)) return;
 
+        CompanionSuggestionsCard.Visibility = Visibility.Collapsed;
         var quote = _companionQuote;
         CompanionInputBox.Text = "";
         CompanionInputBox.PlaceholderText = L10n.T("继续问…");

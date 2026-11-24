@@ -511,8 +511,20 @@
                             <StackPanel x:Name="CompanionMessages" Spacing="10" />
                         </ScrollViewer>
 
-                        <!-- 底部引用条 + 输入框（左侧 “ 推荐问题胶囊菜单 + 输入框 + 30x30 ↑ 发送键） -->
-                        <StackPanel Grid.Row="2" Spacing="6" Margin="0,8,0,0">
+                        <!-- 底部：空对话快捷推荐卡 + 引用条 + macOS 白底多行输入框（1:1 reader-companion-lines/1.png） -->
+                        <StackPanel Grid.Row="2" Spacing="8" Margin="0,8,0,0">
+                            <Border x:Name="CompanionSuggestionsCard" CornerRadius="14" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.5" Padding="6,4">
+                                <StackPanel Spacing="0">
+                                    <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" CornerRadius="8" Padding="8,7" UseSystemFocusVisuals="False" Tag="请帮我简要回顾到当前位置为止前面发生了什么，不要剧透后面的内容。" Click="CompanionQuickPrompt_Click">
+                                        <TextBlock Text="前面发生了什么？" FontSize="12.5" Foreground="{ThemeResource YYText1Brush}" />
+                                    </Button>
+                                    <Border Height="0.5" Background="{ThemeResource YYLineBrush}" Margin="8,0" />
+                                    <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" CornerRadius="8" Padding="8,7" UseSystemFocusVisuals="False" Tag="结合当前章节已读内容，这一章讲了什么？不要剧透未读部分。" Click="CompanionQuickPrompt_Click">
+                                        <TextBlock Text="这一章讲了什么？" FontSize="12.5" Foreground="{ThemeResource YYText1Brush}" />
+                                    </Button>
+                                </StackPanel>
+                            </Border>
+
                             <Border x:Name="CompanionQuoteBanner" Visibility="Collapsed" CornerRadius="8" Background="{ThemeResource YYInsetBrush}" Padding="8,6">
                                 <Grid ColumnSpacing="8">
                                     <Grid.ColumnDefinitions>
@@ -528,29 +540,47 @@
                                 </Grid>
                             </Border>
 
-                            <Border CornerRadius="14" Background="{ThemeResource YYInsetBrush}" Padding="6,5,6,5">
-                                <Grid ColumnSpacing="6">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Button Width="28" Height="28" Padding="0" CornerRadius="9" Background="{ThemeResource YYCardBrush}" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="启发提问">
-                                        <TextBlock Text="“" FontFamily="Georgia" FontSize="16" FontWeight="Bold" Margin="0,2,0,-4" />
-                                        <Button.Flyout>
-                                            <MenuFlyout Placement="TopEdgeAlignedLeft">
-                                                <MenuFlyoutItem Text="前情提要：回顾到当前章节为止发生了什么" Tag="请帮我简要回顾到当前章节为止的前情提要，不要剧透后面的内容。" Click="CompanionQuickPrompt_Click" />
-                                                <MenuFlyoutItem Text="人物关系：梳理目前已出场的主要人物" Tag="请梳理目前已出场的主要人物及其关系，不要剧透后续情节。" Click="CompanionQuickPrompt_Click" />
-                                                <MenuFlyoutItem Text="本章主旨：分析这一章的核心意象与手法" Tag="结合当前章节已读内容，分析这一节的核心主旨与写作手法。" Click="CompanionQuickPrompt_Click" />
-                                                <MenuFlyoutItem Text="背景补充：介绍这本书的时代背景与作者意图" Tag="请简要介绍这本书的创作背景与时代语境，避免剧透结局。" Click="CompanionQuickPrompt_Click" />
-                                            </MenuFlyout>
-                                        </Button.Flyout>
-                                    </Button>
-                                    <TextBox x:Name="CompanionInputBox" Grid.Column="1" PlaceholderText="问这本书…" BorderThickness="0" Background="Transparent" FontSize="12.5" VerticalAlignment="Center" KeyDown="CompanionInput_KeyDown" />
-                                    <Button x:Name="CompanionSendBtn" Grid.Column="2" Width="30" Height="30" Padding="0" CornerRadius="10" Background="{ThemeResource YYText1Brush}" Foreground="{ThemeResource YYCardBrush}" BorderThickness="0" UseSystemFocusVisuals="False" Click="CompanionSend_Click">
-                                        <TextBlock Text="↑" FontSize="13" FontWeight="Bold" />
-                                    </Button>
-                                </Grid>
+                            <Border CornerRadius="14" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.75" Padding="10,8,8,7">
+                                <StackPanel Spacing="6">
+                                    <TextBox x:Name="CompanionInputBox" PlaceholderText="问这本书，或输入 / …" BorderThickness="0" Background="Transparent" FontSize="12.5" Padding="2,2" TextWrapping="Wrap" MaxHeight="84" KeyDown="CompanionInput_KeyDown" />
+                                    <Grid>
+                                        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                            <Button Width="24" Height="24" Padding="0" CornerRadius="7" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="启发提问">
+                                                <TextBlock Text="“" FontFamily="Georgia" FontSize="15" FontWeight="Bold" Foreground="{ThemeResource YYText2Brush}" Margin="0,2,0,-4" />
+                                                <Button.Flyout>
+                                                    <MenuFlyout Placement="TopEdgeAlignedLeft">
+                                                        <MenuFlyoutItem Text="前情提要：回顾到当前章节为止发生了什么" Tag="请帮我简要回顾到当前章节为止的前情提要，不要剧透后面的内容。" Click="CompanionQuickPrompt_Click" />
+                                                        <MenuFlyoutItem Text="人物关系：梳理目前已出场的主要人物" Tag="请梳理目前已出场的主要人物及其关系，不要剧透后续情节。" Click="CompanionQuickPrompt_Click" />
+                                                        <MenuFlyoutItem Text="本章主旨：分析这一章的核心意象与手法" Tag="结合当前章节已读内容，分析这一节的核心主旨与写作手法。" Click="CompanionQuickPrompt_Click" />
+                                                        <MenuFlyoutItem Text="背景补充：介绍这本书的时代背景与作者意图" Tag="请简要介绍这本书的创作背景与时代语境，避免剧透结局。" Click="CompanionQuickPrompt_Click" />
+                                                    </MenuFlyout>
+                                                </Button.Flyout>
+                                            </Button>
+                                            <Button Width="24" Height="24" Padding="0" CornerRadius="7" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="快捷指令">
+                                                <TextBlock Text="/" FontSize="12.5" FontWeight="SemiBold" Foreground="{ThemeResource YYText2Brush}" />
+                                                <Button.Flyout>
+                                                    <MenuFlyout Placement="TopEdgeAlignedLeft">
+                                                        <MenuFlyoutItem Text="/recap  生成前情提要" Click="CompanionRecap_Click" />
+                                                        <MenuFlyoutItem Text="/clear  清空当前对话" Click="CompanionClear_Click" />
+                                                        <MenuFlyoutItem Text="/settings  切换模型或配置 Key…" Click="CompanionSettings_Click" />
+                                                    </MenuFlyout>
+                                                </Button.Flyout>
+                                            </Button>
+                                            <Button x:Name="CompanionModelPillBtn" Height="24" MinHeight="24" Padding="8,0" CornerRadius="12" Background="{ThemeResource YYInsetBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.5" UseSystemFocusVisuals="False" ToolTipService.ToolTip="书伴模型设置" Click="CompanionSettings_Click">
+                                                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                                    <TextBlock x:Name="CompanionModelPillText" Text="" FontSize="11" Foreground="{ThemeResource YYText2Brush}" MaxWidth="112" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="⇕" FontSize="9.5" Foreground="{ThemeResource YYText3Brush}" />
+                                                </StackPanel>
+                                            </Button>
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                            <TextBlock Text="⇧↵ 换行" FontSize="10" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                                            <Button x:Name="CompanionSendBtn" Width="26" Height="26" Padding="0" CornerRadius="13" Background="{ThemeResource YYInsetBrush}" Foreground="{ThemeResource YYText2Brush}" BorderThickness="0" UseSystemFocusVisuals="False" Click="CompanionSend_Click">
+                                                <TextBlock Text="↑" FontSize="12.5" FontWeight="Bold" />
+                                            </Button>
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
                             </Border>
                         </StackPanel>
                     </Grid>
@@ -566,10 +596,10 @@
             <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Left" VerticalAlignment="Center">
                 <Button
                     x:Name="BackToShelfBtn"
-                    Height="32"
-                    CornerRadius="16"
-                    Padding="9,0,12,0"
-                    BorderThickness="1"
+                    Height="30"
+                    CornerRadius="15"
+                    Padding="8,0,12,0"
+                    BorderThickness="0.5"
                     UseSystemFocusVisuals="False"
                     ToolTipService.ToolTip="回到书架"
                     Click="BackToShelf_Click">
@@ -640,7 +670,7 @@
                 VerticalAlignment="Center"
                 Height="32"
                 CornerRadius="16"
-                BorderThickness="1"
+                BorderThickness="0.5"
                 Padding="4,0">
                 <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
                     <Button x:Name="ListenBtn" Width="30" Height="26" Padding="0" CornerRadius="13" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="朗读 (空格)" Click="ToggleListen_Click" />

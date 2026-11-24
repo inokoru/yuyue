@@ -125,9 +125,9 @@
                 HorizontalScrollMode="Disabled"
                 HorizontalScrollBarVisibility="Disabled">
                 <StackPanel Spacing="12" HorizontalAlignment="Stretch">
-                    <!-- 外观页（1:1 对齐 Mac AppearanceSettings） -->
+                    <!-- 外观页（1:1 对齐 Mac AppearanceSettings & settings-appearance/1.png） -->
                     <StackPanel x:Name="AppearancePage" Visibility="Collapsed" Spacing="12">
-                        <Border CornerRadius="12" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="1" Padding="16,14">
+                        <Border CornerRadius="12" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.5" Padding="16,14">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -200,7 +200,7 @@
                         </Border>
 
                         <!-- 主题色：暖纸 / 草木 / 烟雨 / 海棠 -->
-                        <Border CornerRadius="12" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="1" Padding="16">
+                        <Border CornerRadius="12" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.5" Padding="16">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -249,7 +249,7 @@
                         </Border>
 
                         <!-- 书架封面大小 & 封面下显示进度 -->
-                        <Border CornerRadius="12" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="1" Padding="16,12">
+                        <Border CornerRadius="12" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.5" Padding="16,12">
                             <StackPanel Spacing="10">
                                 <Grid ColumnSpacing="10" MinHeight="38">
                                     <Grid.ColumnDefinitions>
@@ -262,7 +262,7 @@
                                         <TextBlock Text="书架封面大小" FontSize="12.5" FontWeight="Medium" Foreground="{ThemeResource YYText1Brush}" />
                                         <TextBlock Text="每行本数随窗口宽度自动排布" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" />
                                     </StackPanel>
-                                    <Border Grid.Column="1" Width="8" Height="11" CornerRadius="2" Background="{ThemeResource YYAccentBrush}" Opacity="0.72" VerticalAlignment="Center" />
+                                    <Border Grid.Column="1" Width="8" Height="11" CornerRadius="2" Background="{ThemeResource YYText3Brush}" Opacity="0.62" VerticalAlignment="Center" />
                                     <Grid Grid.Column="2" VerticalAlignment="Center">
                                         <Slider
                                             x:Name="CoverSizeSlider"
@@ -271,7 +271,7 @@
                                             StepFrequency="4"
                                             VerticalAlignment="Center"
                                             ValueChanged="CoverSizeSlider_ValueChanged" />
-                                        <Grid Margin="9,24,9,0" VerticalAlignment="Top" IsHitTestVisible="False">
+                                        <Grid Margin="8,24,8,0" VerticalAlignment="Top" IsHitTestVisible="False">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="*" />
@@ -285,10 +285,10 @@
                                             <Ellipse Grid.Column="3" Width="2.5" Height="2.5" Fill="{ThemeResource YYText3Brush}" Opacity="0.45" HorizontalAlignment="Right" />
                                         </Grid>
                                     </Grid>
-                                    <Border Grid.Column="3" Width="11" Height="16" CornerRadius="2.5" Background="{ThemeResource YYAccentBrush}" Opacity="0.85" VerticalAlignment="Center" />
+                                    <Border Grid.Column="3" Width="11" Height="16" CornerRadius="2.5" Background="{ThemeResource YYText3Brush}" Opacity="0.68" VerticalAlignment="Center" />
                                 </Grid>
 
-                                <Border Height="1" Background="{ThemeResource YYLineBrush}" />
+                                <Border Height="0.5" Background="{ThemeResource YYLineBrush}" />
 
                                 <Grid MinHeight="38">
                                     <StackPanel Spacing="2" VerticalAlignment="Center">

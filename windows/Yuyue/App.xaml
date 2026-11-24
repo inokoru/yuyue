@@ -74,13 +74,13 @@
                     <SolidColorBrush x:Key="ToggleSwitchStrokeOnDisabled" Color="Transparent" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOnDisabled" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ToggleSwitchFillOff" Color="#DDDAD4" />
-                    <Color x:Key="ToggleSwitchFillOffPointerOver">#D2CEC7</Color>
-                    <Color x:Key="ToggleSwitchFillOffPressed">#C7C2BA</Color>
-                    <Color x:Key="ToggleSwitchFillOffDisabled">#E4E2DC</Color>
+                    <SolidColorBrush x:Key="ToggleSwitchFillOffPointerOver" Color="#D2CEC7" />
+                    <SolidColorBrush x:Key="ToggleSwitchFillOffPressed" Color="#C7C2BA" />
+                    <SolidColorBrush x:Key="ToggleSwitchFillOffDisabled" Color="#E4E2DC" />
                     <SolidColorBrush x:Key="ToggleSwitchStrokeOff" Color="Transparent" />
-                    <Color x:Key="ToggleSwitchStrokeOffPointerOver">#00000000</Color>
-                    <Color x:Key="ToggleSwitchStrokeOffPressed">#00000000</Color>
-                    <Color x:Key="ToggleSwitchStrokeOffDisabled">#00000000</Color>
+                    <SolidColorBrush x:Key="ToggleSwitchStrokeOffPointerOver" Color="Transparent" />
+                    <SolidColorBrush x:Key="ToggleSwitchStrokeOffPressed" Color="Transparent" />
+                    <SolidColorBrush x:Key="ToggleSwitchStrokeOffDisabled" Color="Transparent" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOff" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPointerOver" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPressed" Color="#FFFFFF" />
@@ -143,13 +143,13 @@
                     <SolidColorBrush x:Key="ToggleSwitchStrokeOnDisabled" Color="Transparent" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOnDisabled" Color="#7E7C79" />
                     <SolidColorBrush x:Key="ToggleSwitchFillOff" Color="#38393D" />
-                    <Color x:Key="ToggleSwitchFillOffPointerOver">#434449</Color>
-                    <Color x:Key="ToggleSwitchFillOffPressed">#4D4E54</Color>
-                    <Color x:Key="ToggleSwitchFillOffDisabled">#2C2D30</Color>
+                    <SolidColorBrush x:Key="ToggleSwitchFillOffPointerOver" Color="#434449" />
+                    <SolidColorBrush x:Key="ToggleSwitchFillOffPressed" Color="#4D4E54" />
+                    <SolidColorBrush x:Key="ToggleSwitchFillOffDisabled" Color="#2C2D30" />
                     <SolidColorBrush x:Key="ToggleSwitchStrokeOff" Color="Transparent" />
-                    <Color x:Key="ToggleSwitchStrokeOffPointerOver">#00000000</Color>
-                    <Color x:Key="ToggleSwitchStrokeOffPressed">#00000000</Color>
-                    <Color x:Key="ToggleSwitchStrokeOffDisabled">#00000000</Color>
+                    <SolidColorBrush x:Key="ToggleSwitchStrokeOffPointerOver" Color="Transparent" />
+                    <SolidColorBrush x:Key="ToggleSwitchStrokeOffPressed" Color="Transparent" />
+                    <SolidColorBrush x:Key="ToggleSwitchStrokeOffDisabled" Color="Transparent" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOff" Color="#EDEDEE" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPointerOver" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPressed" Color="#FFFFFF" />
@@ -195,27 +195,239 @@
             <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="#FFFFFF" />
             <SolidColorBrush x:Key="ToggleSwitchKnobFillOnDisabled" Color="#FFFFFF" />
             <SolidColorBrush x:Key="ToggleSwitchFillOff" Color="#DDDAD4" />
-            <Color x:Key="ToggleSwitchFillOffPointerOver">#D2CEC7</Color>
-            <Color x:Key="ToggleSwitchFillOffPressed">#C7C2BA</Color>
-            <Color x:Key="ToggleSwitchFillOffDisabled">#E4E2DC</Color>
+            <SolidColorBrush x:Key="ToggleSwitchFillOffPointerOver" Color="#D2CEC7" />
+            <SolidColorBrush x:Key="ToggleSwitchFillOffPressed" Color="#C7C2BA" />
+            <SolidColorBrush x:Key="ToggleSwitchFillOffDisabled" Color="#E4E2DC" />
             <SolidColorBrush x:Key="ToggleSwitchStrokeOff" Color="Transparent" />
-            <Color x:Key="ToggleSwitchStrokeOffPointerOver">#00000000</Color>
-            <Color x:Key="ToggleSwitchStrokeOffPressed">#00000000</Color>
-            <Color x:Key="ToggleSwitchStrokeOffDisabled">#00000000</Color>
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOffPointerOver" Color="Transparent" />
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOffPressed" Color="Transparent" />
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOffDisabled" Color="Transparent" />
             <SolidColorBrush x:Key="ToggleSwitchKnobFillOff" Color="#FFFFFF" />
             <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPointerOver" Color="#FFFFFF" />
             <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPressed" Color="#FFFFFF" />
             <SolidColorBrush x:Key="ToggleSwitchKnobFillOffDisabled" Color="#FFFFFF" />
 
-            <!-- 紧凑齐右 ToggleSwitch：去掉 WinUI 默认右侧空白内容栏，与 macOS 设置页右缘严格对齐 -->
+            <!-- macOS 风格紧凑胶囊 ToggleSwitch（38×21 无框轨道 + 21×17 药丸滑块，对齐 macOS Tahoe/Sequoia） -->
             <Style TargetType="ToggleSwitch">
-                <Setter Property="MinWidth" Value="40" />
-                <Setter Property="Width" Value="40" />
+                <Setter Property="MinWidth" Value="38" />
+                <Setter Property="Width" Value="38" />
+                <Setter Property="Height" Value="21" />
                 <Setter Property="Padding" Value="0" />
                 <Setter Property="HorizontalAlignment" Value="Right" />
                 <Setter Property="VerticalAlignment" Value="Center" />
                 <Setter Property="OnContent" Value="" />
                 <Setter Property="OffContent" Value="" />
+                <Setter Property="UseSystemFocusVisuals" Value="False" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ToggleSwitch">
+                            <Grid x:Name="LayoutRoot" Background="Transparent" Width="38" Height="21">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="OuterBorder" Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ToggleSwitchFillOffPointerOver}" />
+                                                </ObjectAnimationUsingKeyFrames>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="SwitchKnobBoundsOn" Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ToggleSwitchFillOnPointerOver}" />
+                                                </ObjectAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="OuterBorder" Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ToggleSwitchFillOffPressed}" />
+                                                </ObjectAnimationUsingKeyFrames>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="SwitchKnobBoundsOn" Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ToggleSwitchFillOnPressed}" />
+                                                </ObjectAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="LayoutRoot" Storyboard.TargetProperty="Opacity" To="0.48" Duration="0" />
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                    <VisualStateGroup x:Name="ToggleStates">
+                                        <VisualStateGroup.Transitions>
+                                            <VisualTransition x:Name="DraggingToOnTransition" From="Dragging" To="On" GeneratedDuration="0">
+                                                <Storyboard>
+                                                    <RepositionThemeAnimation TargetName="SwitchKnob" FromHorizontalOffset="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=TemplateSettings.KnobCurrentToOnOffset}" />
+                                                </Storyboard>
+                                            </VisualTransition>
+                                            <VisualTransition x:Name="DraggingToOffTransition" From="Dragging" To="Off" GeneratedDuration="0">
+                                                <Storyboard>
+                                                    <RepositionThemeAnimation TargetName="SwitchKnob" FromHorizontalOffset="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=TemplateSettings.KnobCurrentToOffOffset}" />
+                                                </Storyboard>
+                                            </VisualTransition>
+                                            <VisualTransition x:Name="OnToOffTransition" From="On" To="Off" GeneratedDuration="0">
+                                                <Storyboard>
+                                                    <RepositionThemeAnimation TargetName="SwitchKnob" FromHorizontalOffset="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=TemplateSettings.KnobOnToOffOffset}" />
+                                                </Storyboard>
+                                            </VisualTransition>
+                                            <VisualTransition x:Name="OffToOnTransition" From="Off" To="On" GeneratedDuration="0">
+                                                <Storyboard>
+                                                    <RepositionThemeAnimation TargetName="SwitchKnob" FromHorizontalOffset="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=TemplateSettings.KnobOffToOnOffset}" />
+                                                </Storyboard>
+                                            </VisualTransition>
+                                        </VisualStateGroup.Transitions>
+                                        <VisualState x:Name="Dragging" />
+                                        <VisualState x:Name="Off">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="SwitchKnobBoundsOn" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.12" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="On">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="KnobTranslateTransform" Storyboard.TargetProperty="X" To="13" Duration="0" />
+                                                <DoubleAnimation Storyboard.TargetName="SwitchKnobBoundsOn" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.12" />
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                    <VisualStateGroup x:Name="ContentStates">
+                                        <VisualState x:Name="OffContent" />
+                                        <VisualState x:Name="OnContent" />
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Grid x:Name="SwitchAreaGrid" Background="Transparent">
+                                    <Border
+                                        x:Name="OuterBorder"
+                                        Width="38"
+                                        Height="21"
+                                        CornerRadius="10.5"
+                                        Background="{ThemeResource ToggleSwitchFillOff}" />
+                                    <Border
+                                        x:Name="SwitchKnobBoundsOn"
+                                        Width="38"
+                                        Height="21"
+                                        CornerRadius="10.5"
+                                        Opacity="0"
+                                        Background="{ThemeResource ToggleSwitchFillOn}" />
+                                    <Grid x:Name="SwitchKnobBounds" Margin="2,0,2,0" Height="21">
+                                        <Grid x:Name="SwitchKnob" HorizontalAlignment="Left" VerticalAlignment="Center" Width="21" Height="17">
+                                            <Grid.RenderTransform>
+                                                <TranslateTransform x:Name="KnobTranslateTransform" />
+                                            </Grid.RenderTransform>
+                                            <Border
+                                                x:Name="SwitchKnobOff"
+                                                Width="21"
+                                                Height="17"
+                                                CornerRadius="8.5"
+                                                Background="{ThemeResource ToggleSwitchKnobFillOff}"
+                                                BorderBrush="#1A000000"
+                                                BorderThickness="0.5" />
+                                            <Border
+                                                x:Name="SwitchKnobOn"
+                                                Width="21"
+                                                Height="17"
+                                                CornerRadius="8.5"
+                                                Opacity="0"
+                                                Background="{ThemeResource ToggleSwitchKnobFillOn}"
+                                                BorderBrush="#18000000"
+                                                BorderThickness="0.5" />
+                                        </Grid>
+                                    </Grid>
+                                    <Thumb x:Name="SwitchThumb" AutomationProperties.AccessibilityView="Raw">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Rectangle Fill="Transparent" />
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Grid>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- macOS 风格细轨道圆形滑块 Slider（4px 圆润轨道 + 16px 纯白圆柄轻细边） -->
+            <Style TargetType="Slider">
+                <Setter Property="MinHeight" Value="24" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Foreground" Value="{ThemeResource SliderTrackValueFill}" />
+                <Setter Property="Background" Value="{ThemeResource SliderTrackFill}" />
+                <Setter Property="UseSystemFocusVisuals" Value="False" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Slider">
+                            <Grid Margin="{TemplateBinding Padding}">
+                                <Grid x:Name="SliderContainer" Background="Transparent" Control.IsTemplateFocusTarget="True" MinHeight="24">
+                                    <Grid x:Name="HorizontalTemplate" MinHeight="24">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Rectangle
+                                            x:Name="HorizontalTrackRect"
+                                            Grid.ColumnSpan="3"
+                                            Height="4"
+                                            RadiusX="2"
+                                            RadiusY="2"
+                                            VerticalAlignment="Center"
+                                            Fill="{TemplateBinding Background}" />
+                                        <Rectangle
+                                            x:Name="HorizontalDecreaseRect"
+                                            Grid.Column="0"
+                                            Height="4"
+                                            RadiusX="2"
+                                            RadiusY="2"
+                                            VerticalAlignment="Center"
+                                            Fill="{TemplateBinding Foreground}" />
+                                        <Thumb
+                                            x:Name="HorizontalThumb"
+                                            Grid.Column="1"
+                                            Width="16"
+                                            Height="16"
+                                            VerticalAlignment="Center"
+                                            AutomationProperties.AccessibilityView="Raw">
+                                            <Thumb.Template>
+                                                <ControlTemplate TargetType="Thumb">
+                                                    <Border
+                                                        Width="16"
+                                                        Height="16"
+                                                        CornerRadius="8"
+                                                        Background="{ThemeResource SliderThumbBackground}"
+                                                        BorderBrush="{ThemeResource SliderThumbBorderBrush}"
+                                                        BorderThickness="0.75" />
+                                                </ControlTemplate>
+                                            </Thumb.Template>
+                                        </Thumb>
+                                    </Grid>
+                                </Grid>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- macOS 风格无内边距悬浮卡片 FlyoutPresenter（BookMenu / Popover 共用） -->
+            <Style x:Key="YYFloatFlyoutPresenterStyle" TargetType="FlyoutPresenter">
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="CornerRadius" Value="14" />
+                <Setter Property="Background" Value="{ThemeResource YYCardBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource YYLineBrush}" />
+                <Setter Property="BorderThickness" Value="0.75" />
+                <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+                <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+            </Style>
+
+            <!-- macOS SettingsActionStyle：纯文字次要操作（无胶囊框） -->
+            <Style x:Key="YYTextActionButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Foreground" Value="{ThemeResource YYText1Brush}" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="Padding" Value="6,4" />
+                <Setter Property="MinHeight" Value="24" />
+                <Setter Property="FontSize" Value="12.5" />
+                <Setter Property="FontWeight" Value="Medium" />
                 <Setter Property="UseSystemFocusVisuals" Value="False" />
             </Style>
 
@@ -224,7 +436,7 @@
                 <Setter Property="Background" Value="{ThemeResource YYPillBrush}" />
                 <Setter Property="Foreground" Value="{ThemeResource YYText1Brush}" />
                 <Setter Property="BorderBrush" Value="{ThemeResource YYPillLineBrush}" />
-                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="BorderThickness" Value="0.75" />
                 <Setter Property="CornerRadius" Value="14" />
                 <Setter Property="Padding" Value="13,0" />
                 <Setter Property="FontSize" Value="12" />
@@ -238,7 +450,7 @@
                 <Setter Property="Background" Value="{ThemeResource YYAccentSoftBrush}" />
                 <Setter Property="Foreground" Value="{ThemeResource YYAccentBrush}" />
                 <Setter Property="BorderBrush" Value="{ThemeResource YYAccentEdgeBrush}" />
-                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="BorderThickness" Value="0.75" />
                 <Setter Property="CornerRadius" Value="14" />
                 <Setter Property="Padding" Value="13,0" />
                 <Setter Property="FontSize" Value="12" />
@@ -253,24 +465,24 @@
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="Foreground" Value="{ThemeResource YYText2Brush}" />
                 <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="CornerRadius" Value="7" />
                 <Setter Property="Padding" Value="6,4" />
                 <Setter Property="MinWidth" Value="26" />
                 <Setter Property="MinHeight" Value="26" />
                 <Setter Property="UseSystemFocusVisuals" Value="False" />
             </Style>
 
-            <!-- 侧栏行按钮（对照 Mac SidebarRow：高度 28，圆角 7，字号 12） -->
+            <!-- 侧栏行按钮（对照 Mac SidebarRow / SettingsSidebar：高度 30，圆角 8，字号 12.5） -->
             <Style x:Key="YYSidebarItemStyle" TargetType="Button">
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="Foreground" Value="{ThemeResource YYText1Brush}" />
                 <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="CornerRadius" Value="7" />
+                <Setter Property="CornerRadius" Value="8" />
                 <Setter Property="HorizontalAlignment" Value="Stretch" />
                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                 <Setter Property="Padding" Value="8,0" />
-                <Setter Property="Height" Value="29" />
-                <Setter Property="MinHeight" Value="29" />
+                <Setter Property="Height" Value="30" />
+                <Setter Property="MinHeight" Value="30" />
                 <Setter Property="FontSize" Value="12.5" />
                 <Setter Property="UseSystemFocusVisuals" Value="False" />
             </Style>

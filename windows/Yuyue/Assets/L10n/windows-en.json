@@ -284,5 +284,11 @@
   "还没有合集": "No Collections Yet",
   "按主题、心境或阅读计划建几个书匣，把书放进去慢慢读。": "Create bookcases by theme, mood, or reading plan to gather books you want to read.",
   "筛选模型 ID 或厂商…": "Filter model ID or maker…",
-  "已收藏": "Starred"
+  "已收藏": "Starred",
+  "/clear  清空当前对话": "/clear  Clear Conversation",
+  "/recap  生成前情提要": "/recap  Generate Story Recap",
+  "/settings  切换模型或配置 Key…": "/settings  Switch Model or Configure Key…",
+  "⇧↵ 换行": "⇧↵ Newline",
+  "书伴模型": "Companion Model",
+  "书伴模型设置": "Companion Model Settings"
 }

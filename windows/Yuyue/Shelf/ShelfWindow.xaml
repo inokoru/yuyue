@@ -15,7 +15,7 @@
         Drop="RootGrid_Drop"
         KeyDown="RootGrid_KeyDown">
         <Grid.RowDefinitions>
-            <RowDefinition Height="32" />
+            <RowDefinition Height="28" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
@@ -26,11 +26,11 @@
         <!-- 阴影接收面（铺满整个书桌底层，让纸页与封面投出柔和阴影） -->
         <Grid x:Name="DeskShadowReceiver" Grid.RowSpan="2" Grid.ColumnSpan="2" Background="Transparent" />
 
-        <!-- 顶部 32px 极简窗头拖动区：右上角 Windows 窗控键安静落在书桌上，绝不破坏纸页完整圆角 -->
-        <Grid x:Name="TopDragBar" Grid.Row="0" Grid.ColumnSpan="2" Background="Transparent" />
+        <!-- 顶部极简窗头拖动区：右上角 Windows 窗控键安静落在 28px 顶部区内，纸页贴顶 8px 完整浮起（1:1 macOS ShelfDesk.margin = 8） -->
+        <Grid x:Name="TopDragBar" Grid.Row="0" Grid.ColumnSpan="2" Background="Transparent" Canvas.ZIndex="10" />
 
         <!-- 左侧栏：无卡片，直接写在书桌上 -->
-        <Grid x:Name="SidebarPanel" Grid.Row="1" Grid.Column="0" Padding="10,0,10,10">
+        <Grid x:Name="SidebarPanel" Grid.Row="0" Grid.RowSpan="2" Grid.Column="0" Padding="10,40,10,10">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
@@ -215,24 +215,25 @@
             </Grid>
         </Grid>
 
-        <!-- 右侧浮起的暖白纸页（完整四圆角 + ThemeShadow 柔和投影，+ 导入与下方排序精准右对齐） -->
+        <!-- 右侧浮起的暖白纸页（完整四圆角 + 贴顶 8px 书桌边距 + ThemeShadow 柔和投影，标题与 + 导入自然避开右上角 28px Windows 窗控键） -->
         <Border
             x:Name="PaperSheet"
-            Grid.Row="1"
+            Grid.Row="0"
+            Grid.RowSpan="2"
             Grid.Column="1"
-            Margin="0,0,8,8"
+            Margin="0,8,8,8"
             CornerRadius="12"
             Background="{ThemeResource YYBgBrush}"
             BorderBrush="{ThemeResource YYPaperBorderBrush}"
-            BorderThickness="1">
+            BorderThickness="0.5">
             <Grid x:Name="PaperInnerGrid">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="58" />
+                    <RowDefinition Height="66" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
                 <!-- 纸页标题行：左 侧栏开关 + 动态自定义区（播客托盘 / 返回按钮）或 22px 标题 + 副标题，右 动态页头操作区 -->
-                <Grid Grid.Row="0" Padding="18,4,28,0">
+                <Grid Grid.Row="0" Padding="18,22,28,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
@@ -487,20 +488,21 @@
             Background="#32000000"
             PointerPressed="QuickSearchBackdrop_Pressed">
             <Border
-                Width="640"
-                MaxHeight="530"
+                x:Name="QuickSearchCard"
+                Width="580"
+                MaxHeight="520"
                 VerticalAlignment="Top"
-                Margin="0,54,0,0"
-                CornerRadius="18"
+                Margin="0,68,0,0"
+                CornerRadius="16"
                 Background="{ThemeResource YYCardBrush}"
                 BorderBrush="{ThemeResource YYLineBrush}"
-                BorderThickness="1">
+                BorderThickness="0.5">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="52" />
-                        <RowDefinition Height="1" />
+                        <RowDefinition Height="0.5" />
                         <RowDefinition Height="*" />
-                        <RowDefinition Height="1" />
+                        <RowDefinition Height="0.5" />
                         <RowDefinition Height="36" />
                     </Grid.RowDefinitions>
 
@@ -522,21 +524,29 @@
                             Padding="4,6"
                             TextChanged="QuickSearchBox_TextChanged"
                             KeyDown="QuickSearchBox_KeyDown" />
-                        <Border Grid.Column="2" CornerRadius="5" Background="{ThemeResource YYInsetBrush}" Padding="7,2" VerticalAlignment="Center">
-                            <TextBlock Text="esc" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" />
+                        <Border Grid.Column="2" CornerRadius="5" Background="{ThemeResource YYInsetBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.5" Padding="7,2" VerticalAlignment="Center">
+                            <TextBlock Text="esc" FontSize="10.5" Foreground="{ThemeResource YYText2Brush}" />
                         </Border>
                     </Grid>
 
                     <Border Grid.Row="1" Background="{ThemeResource YYLineBrush}" />
 
-                    <ScrollViewer Grid.Row="2" MaxHeight="420" Padding="10,8" VerticalScrollBarVisibility="Auto">
+                    <ScrollViewer Grid.Row="2" MaxHeight="410" Padding="10,8" VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="QuickSearchResults" Spacing="3" />
                     </ScrollViewer>
 
                     <Border Grid.Row="3" Background="{ThemeResource YYLineBrush}" />
 
-                    <Grid Grid.Row="4" Padding="16,0" Background="{ThemeResource YYBgBrush}" CornerRadius="0,0,18,18">
-                        <TextBlock Text="↑↓ 选择  ·  ↵ 打开  ·  Ctrl+↵ 问书伴" FontSize="11" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                    <Grid Grid.Row="4" Padding="14,0" Background="{ThemeResource YYCardBrush}" CornerRadius="0,0,16,16">
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <Border CornerRadius="4" Background="{ThemeResource YYInsetBrush}" Padding="5,1"><TextBlock Text="↑" FontSize="10" Foreground="{ThemeResource YYText2Brush}" /></Border>
+                            <Border CornerRadius="4" Background="{ThemeResource YYInsetBrush}" Padding="5,1"><TextBlock Text="↓" FontSize="10" Foreground="{ThemeResource YYText2Brush}" /></Border>
+                            <TextBlock Text="选择" FontSize="11" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                            <Border CornerRadius="4" Background="{ThemeResource YYInsetBrush}" Padding="5,1"><TextBlock Text="↵" FontSize="10" Foreground="{ThemeResource YYText2Brush}" /></Border>
+                            <TextBlock Text="打开" FontSize="11" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                            <Border CornerRadius="4" Background="{ThemeResource YYInsetBrush}" Padding="5,1"><TextBlock Text="Ctrl+↵" FontSize="10" Foreground="{ThemeResource YYText2Brush}" /></Border>
+                            <TextBlock Text="问书伴" FontSize="11" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                        </StackPanel>
                         <TextBlock x:Name="QuickSearchScopeText" FontSize="11" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
                     </Grid>
                 </Grid>

@@ -110,13 +110,13 @@ public static class ThemeHelper
         SetBrush("ToggleSwitchKnobFillOnDisabled", dark ? Color.FromArgb(255, 126, 124, 121) : Colors.White);
 
         SetBrush("ToggleSwitchFillOff", dark ? Color.FromArgb(255, 56, 57, 61) : Color.FromArgb(255, 221, 218, 212));
-        SetColor("ToggleSwitchFillOffPointerOver", dark ? Color.FromArgb(255, 67, 68, 73) : Color.FromArgb(255, 210, 206, 199));
-        SetColor("ToggleSwitchFillOffPressed", dark ? Color.FromArgb(255, 77, 78, 84) : Color.FromArgb(255, 199, 194, 186));
-        SetColor("ToggleSwitchFillOffDisabled", dark ? Color.FromArgb(255, 44, 45, 48) : Color.FromArgb(255, 228, 226, 220));
+        SetBrush("ToggleSwitchFillOffPointerOver", dark ? Color.FromArgb(255, 67, 68, 73) : Color.FromArgb(255, 210, 206, 199));
+        SetBrush("ToggleSwitchFillOffPressed", dark ? Color.FromArgb(255, 77, 78, 84) : Color.FromArgb(255, 199, 194, 186));
+        SetBrush("ToggleSwitchFillOffDisabled", dark ? Color.FromArgb(255, 44, 45, 48) : Color.FromArgb(255, 228, 226, 220));
         SetBrush("ToggleSwitchStrokeOff", transparent);
-        SetColor("ToggleSwitchStrokeOffPointerOver", transparent);
-        SetColor("ToggleSwitchStrokeOffPressed", transparent);
-        SetColor("ToggleSwitchStrokeOffDisabled", transparent);
+        SetBrush("ToggleSwitchStrokeOffPointerOver", transparent);
+        SetBrush("ToggleSwitchStrokeOffPressed", transparent);
+        SetBrush("ToggleSwitchStrokeOffDisabled", transparent);
         SetBrush("ToggleSwitchKnobFillOff", dark ? Color.FromArgb(255, 237, 237, 238) : Colors.White);
         SetBrush("ToggleSwitchKnobFillOffPointerOver", Colors.White);
         SetBrush("ToggleSwitchKnobFillOffPressed", Colors.White);
