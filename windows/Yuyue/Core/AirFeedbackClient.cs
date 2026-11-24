@@ -38,7 +38,7 @@ public static class AirFeedbackClient
 
     private static HttpClient CreateDefaultHttpClient()
     {
-        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        var client = new HttpClient { Timeout = System.TimeSpan.FromSeconds(60) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Yuyue-Windows");
         return client;
     }
