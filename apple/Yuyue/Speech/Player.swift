@@ -19,11 +19,18 @@ final class Player {
     enum State { case stopped, loading, playing, paused }
 
     /// A sentence of the book.
-    struct Spot: Equatable {
+    nonisolated struct Spot: Equatable, Sendable {
         var section: UInt32
         var sentence: Int
 
         var position: Position { Position(section: section, sentence: UInt32(max(0, sentence))) }
+    }
+
+    /// 几句一起循环的范围（同一章节内）。
+    nonisolated struct LoopRange: Equatable, Sendable {
+        var section: UInt32
+        var first: Int
+        var last: Int
     }
 
     private(set) var state = State.stopped
@@ -36,6 +43,8 @@ final class Player {
     var failure: String?
     /// 设备过热（`.critical`）回退系统声音时在朗读面板顶部温和告知，进下一章恢复后自动消失。
     private(set) var thermalNotice: String?
+    /// 离线默认旁白在播放/暂停期间下载完成后，提供给用户确认切换的候选声音（不自动静默切声）。
+    private(set) var readyOfflineVoice: (any Voice)?
     /// 睡眠定时: when to stop on its own. It always stops between sentences.
     var sleep = Sleep.off {
         didSet { if sleep != oldValue { sleepChanged(from: oldValue) } }
@@ -51,7 +60,7 @@ final class Player {
         didSet { if !loop { loopRange = nil } }
     }
     /// 几句一起循环: the first and last sentence read over and over (in one section).
-    private(set) var loopRange: (section: UInt32, first: Int, last: Int)?
+    private(set) var loopRange: LoopRange?
     /// 念完停一下: quiet after each sentence, to say it after the voice.
     enum PauseAfter: Equatable { case off, seconds(Double), asLong }
     var pauseAfter = PauseAfter.off
@@ -101,7 +110,7 @@ final class Player {
         }
     }
 
-    enum Sleep: Equatable {
+    nonisolated enum Sleep: Equatable, Sendable {
         case off
         /// 本句读完
         case sentence
@@ -109,6 +118,12 @@ final class Player {
         case chapter
         /// After some minutes: the moment to stop.
         case until(Date, minutes: Int)
+    }
+
+    nonisolated enum PlayedAction: Equatable, Sendable {
+        case sleepAt(Spot)
+        case loopTo(Spot)
+        case advance
     }
 
     /// The ink line: the sentence, its length and how much of it has been read (both in ms at
@@ -331,12 +346,14 @@ final class Player {
         #endif
         guard state == .paused else { return }
         clearFadeIfNeeded()
+        claimRemote()
         if !narrated, let current = spot, DramaSynth.isDramaActive(core, detail.summary.id) {
             RecordingFetch.shared.readingDrama(bookID: detail.summary.id, section: current.section, core: core)
         }
         if queued.isEmpty { feedNode() }
         guard !queued.isEmpty else {
             state = .loading
+            updateNowPlaying()
             return render()
         }
         guard startEngine() else { return }
@@ -362,6 +379,7 @@ final class Player {
         reset()
         sectionLayers.removeAll()
         voices.removeAll()
+        readyOfflineVoice = nil
         thermalFallbackSection = nil
         thermalNotice = nil
         state = .stopped
@@ -526,10 +544,35 @@ final class Player {
     }
 
     private func liveVoiceBecameReady() {
-        // 正在听或暂停在半路时不静默切声，等完全停下后下一次新开朗读再启用刚下好的离线语音。
+        // 正在听或暂停时不自动切声：停下状态仅清缓存供下次新开朗读使用；
+        // 播放/暂停中则提示刚下好的离线默认旁白，由用户主动确认后再切换。
         if state == .stopped {
+            readyOfflineVoice = nil
             voices.removeAll()
+            return
         }
+        guard !narrated else { return }
+        let lang = language
+        guard !hasSavedVoice(for: lang) else { return }
+        let current = voices[lang].flatMap { $0 }
+        if current is KokoroVoice || current is CardVoice { return }
+        let candidate: (any Voice)? = (KokoroModel.isInstalled ? KokoroModel.defaultNarrator(for: lang) : nil)
+            ?? (LiveVoiceModel.isInstalled ? VoicePack.defaultNarrator(for: lang) : nil)
+        if let candidate {
+            readyOfflineVoice = candidate
+        }
+    }
+
+    /// 用户确认切换到刚下载完成的离线默认旁白。
+    func acceptReadyOfflineVoice() {
+        guard let next = readyOfflineVoice else { return }
+        readyOfflineVoice = nil
+        choose(next, for: language)
+    }
+
+    /// 用户暂不切换，收起就绪提示并继续使用当前声音。
+    func dismissReadyOfflineVoice() {
+        readyOfflineVoice = nil
     }
 
     private func dramaLayer(for section: UInt32) -> DramaLayer {
@@ -550,7 +593,8 @@ final class Player {
         let generation = generation
         let token = renderToken
         rendering = Task { [weak self] in
-            while let self, self.generation == generation, self.renderToken == token, let spot = self.nextToRender, self.wantsMoreBuffered(at: spot) {
+            while let self, self.generation == generation, self.renderToken == token, let spot = self.nextToRender {
+                guard self.wantsMoreBuffered(at: spot) else { break }
                 let language = self.language(of: spot.section)
                 if self.thermalState == .critical {
                     self.thermalFallbackSection = spot.section
@@ -694,9 +738,10 @@ final class Player {
     func preview(from start: Double, to end: Double) {
         guard let recording else { return }
         if state == .playing || state == .loading { pause() }
+        let token = Self.previewing.beginClaim()
         Task {
             guard let speech = await Self.clip(recording, start, end) else { return }
-            Self.previewing.play(speech)
+            Self.previewing.play(speech, ifCurrent: token)
         }
     }
 
@@ -710,7 +755,7 @@ final class Player {
     /// over; the same section only.
     func loopTo(section: UInt32, sentence: Int) {
         guard let here = spot, here.section == section else { return }
-        loopRange = (section, min(here.sentence, sentence), max(here.sentence, sentence))
+        loopRange = LoopRange(section: section, first: min(here.sentence, sentence), last: max(here.sentence, sentence))
         loop = true
     }
 
@@ -755,18 +800,14 @@ final class Player {
     private func played(_ generation: Int) {
         guard generation == self.generation, !queued.isEmpty else { return }
         let done = queued[0].spot
-        if let r = loopRange, loop {
-            // A few sentences: at the last (or once outside them), back to the first.
-            if done.section != r.section || done.sentence >= r.last || done.sentence < r.first {
-                return play(from: Spot(section: r.section, sentence: r.first).position)
-            }
-        } else if loop {
-            // Throws away what was rendered ahead and starts this sentence again.
-            return play(from: done.position)
-        }
         let next = queued.count > 1 ? queued[1].spot : (staged.first?.spot ?? nextToRender)
-        if shouldSleep(after: done, next: next) {
-            return fallAsleep(at: next ?? done)
+        switch Self.nextActionAfterPlayed(done: done, next: next, sleep: sleep, loop: loop, loopRange: loopRange) {
+        case .sleepAt(let target):
+            return fallAsleep(at: target)
+        case .loopTo(let target):
+            return play(from: target.position)
+        case .advance:
+            break
         }
         queued.removeFirst()
         let wasEmpty = queued.isEmpty
@@ -792,13 +833,39 @@ final class Player {
         render()
     }
 
-    private func shouldSleep(after done: Spot, next: Spot?) -> Bool {
+    nonisolated static func shouldSleep(after done: Spot, next: Spot?, sleep: Sleep, now: Date = Date()) -> Bool {
         switch sleep {
         case .off: false
         case .sentence: true
         case .chapter: next == nil || next?.section != done.section
-        case .until(let date, _): Date() >= date
+        case .until(let date, _): now >= date
         }
+    }
+
+    nonisolated static func nextActionAfterPlayed(
+        done: Spot,
+        next: Spot?,
+        sleep: Sleep,
+        loop: Bool,
+        loopRange: LoopRange?,
+        now: Date = Date()
+    ) -> PlayedAction {
+        let loopTarget: Spot? = if let r = loopRange, loop {
+            (done.section != r.section || done.sentence >= r.last || done.sentence < r.first)
+                ? Spot(section: r.section, sentence: r.first)
+                : nil
+        } else if loop {
+            done
+        } else {
+            nil
+        }
+        if shouldSleep(after: done, next: next, sleep: sleep, now: now) {
+            return .sleepAt(loopTarget ?? next ?? done)
+        }
+        if let target = loopTarget {
+            return .loopTo(target)
+        }
+        return .advance
     }
 
     private func clearFadeIfNeeded() {
@@ -1016,6 +1083,13 @@ final class Player {
         (spot ?? failedSpot).map { language(of: $0.section) } ?? detail.summary.language
     }
 
+    /// Whether the user has explicitly saved a voice override for `language`.
+    func hasSavedVoice(for language: String) -> Bool {
+        let canon = CardVoice.canonicalLanguage(language)
+        return UserDefaults.standard.string(forKey: Self.voiceKey(language)) != nil
+            || UserDefaults.standard.string(forKey: Self.voiceKey(canon)) != nil
+    }
+
     /// The voice reading `language` now.
     func currentVoice(for language: String) -> (any Voice)? {
         voice(for: language, section: spot?.section)
@@ -1024,6 +1098,7 @@ final class Player {
     /// Reads `language` with another voice from now on, starting the sentence again in it.
     func choose(_ voice: any Voice, for language: String) {
         UserDefaults.standard.set(voice.id, forKey: Self.voiceKey(language))
+        readyOfflineVoice = nil
         voices[language] = voice
         restartHere()
     }
@@ -1232,13 +1307,36 @@ final class Player {
 final class ClipPlayer {
     private let engine = AVAudioEngine()
     private let node = AVAudioPlayerNode()
+    private var requestID = 0
+    nonisolated(unsafe) private var claimObserver: (any NSObjectProtocol)?
 
     init() {
         engine.attach(node)
         engine.connect(node, to: engine.mainMixerNode, format: Speech.format)
+        claimObserver = NotificationCenter.default.addObserver(forName: .yyAudioClaimed, object: nil, queue: .main) { [weak self] note in
+            let isOther = (note.object as AnyObject?) !== self
+            MainActor.assumeIsolated {
+                guard let self, isOther else { return }
+                self.stop()
+            }
+        }
     }
 
-    func play(_ speech: Speech) {
+    deinit {
+        if let claimObserver { NotificationCenter.default.removeObserver(claimObserver) }
+    }
+
+    func beginClaim() -> Int {
+        stop()
+        NotificationCenter.default.post(name: .yyAudioClaimed, object: self)
+        return requestID
+    }
+
+    func play(_ speech: Speech, ifCurrent token: Int? = nil) {
+        if let token, token != requestID { return }
+        if token == nil {
+            NotificationCenter.default.post(name: .yyAudioClaimed, object: self)
+        }
         node.stop()
         if !engine.isRunning {
             engine.prepare()
@@ -1248,7 +1346,10 @@ final class ClipPlayer {
         node.play()
     }
 
-    func stop() { node.stop() }
+    func stop() {
+        requestID &+= 1
+        node.stop()
+    }
 }
 
 #if os(iOS)

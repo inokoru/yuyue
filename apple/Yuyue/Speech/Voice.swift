@@ -201,6 +201,27 @@ enum Voices {
     }
     #endif
 
+    nonisolated final class PreviewAudioOwner: Sendable {}
+
+    /// Token posted with `.yyAudioClaimed` by voice 试听 so `Voices` ignores its own claim
+    /// while stopping active previews when another player claims audio.
+    nonisolated static let previewAudioOwner = PreviewAudioOwner()
+
+    @MainActor private static let audioClaimObserver: NSObjectProtocol = NotificationCenter.default.addObserver(
+        forName: .yyAudioClaimed, object: nil, queue: .main
+    ) { note in
+        let isOther = (note.object as AnyObject?) !== Voices.previewAudioOwner
+        MainActor.assumeIsolated {
+            guard isOther else { return }
+            Voices.stopPreview()
+        }
+    }
+
+    @MainActor static func claimPreviewAudio() {
+        _ = audioClaimObserver
+        NotificationCenter.default.post(name: .yyAudioClaimed, object: previewAudioOwner)
+    }
+
     /// 试听: system voices speak straight away; a cloud voice is fetched, then played.
     @MainActor static func preview(_ voice: any Voice, text: String, failed: @escaping (String) -> Void = { _ in }) {
         previewing?.cancel()
@@ -208,6 +229,7 @@ enum Voices {
             Previewer.shared.stop()
             return SystemVoice.preview(v, text: text)
         }
+        claimPreviewAudio()
         SystemVoice.stopPreview()
         PreviewState.shared.began(voice.id, seconds: nil)
         let lang = (voice as? CloudVoice)?.language

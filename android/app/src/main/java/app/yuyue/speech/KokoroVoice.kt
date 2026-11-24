@@ -32,6 +32,7 @@ import java.nio.FloatBuffer
 import java.nio.LongBuffer
 import java.nio.channels.FileChannel
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.coroutineContext
 
 /**
@@ -83,6 +84,26 @@ object KokoroModel {
 
     private val scope: CoroutineScope = MainScope()
     private var downloadJob: Job? = null
+    private val downloadRunId = AtomicLong(0L)
+
+    internal fun applyDownloadProgress(runId: Long, frac: Double): Boolean {
+        if (downloadRunId.get() != runId) return false
+        if (state !is State.Downloading) return false
+        if (frac >= 1.0) return false
+        state = State.Downloading(frac.coerceIn(0.0, 0.99))
+        return true
+    }
+
+    internal fun beginDownloadRun(): Long {
+        val runId = downloadRunId.incrementAndGet()
+        state = State.Downloading(0.0)
+        return runId
+    }
+
+    internal fun finishDownloadRun(runId: Long, terminalState: State) {
+        downloadRunId.compareAndSet(runId, runId + 1)
+        state = terminalState
+    }
 
     fun folder(dataDir: File) = File(dataDir, "models/$NAME")
 
@@ -129,10 +150,12 @@ object KokoroModel {
 
     fun refresh(dataDir: File) {
         if (deviceUnsupported) {
+            downloadRunId.incrementAndGet()
             state = State.Unsupported
             return
         }
         if (state is State.Downloading) return
+        downloadRunId.incrementAndGet()
         state = if (installed(dataDir)) State.Ready else State.Idle
     }
 
@@ -170,27 +193,30 @@ object KokoroModel {
     fun startDownload(core: YuyueCore, dataDir: File) {
         if (deviceUnsupported || downloadJob != null) return
         if (installed(dataDir)) {
+            downloadRunId.incrementAndGet()
             register(core, dataDir)
             state = State.Ready
             return
         }
-        state = State.Downloading(0.0)
+        val runId = beginDownloadRun()
         downloadJob = scope.launch {
             try {
                 withContext(Dispatchers.IO) {
                     ensureInstalled(dataDir) { frac ->
-                        val p = frac.coerceIn(0.0, 0.99)
-                        scope.launch { state = State.Downloading(p) }
+                        if (frac < 1.0 && downloadRunId.get() == runId) {
+                            scope.launch { applyDownloadProgress(runId, frac) }
+                        }
                     }
                     register(core, dataDir)
                 }
-                state = State.Ready
+                finishDownloadRun(runId, State.Ready)
                 readyEvents.tryEmit(Unit)
             } catch (e: CancellationException) {
+                downloadRunId.incrementAndGet()
                 if (!installed(dataDir)) state = State.Idle
                 throw e
             } catch (_: Throwable) {
-                state = State.Failed
+                finishDownloadRun(runId, State.Failed)
             } finally {
                 downloadJob = null
             }

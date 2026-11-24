@@ -234,4 +234,39 @@ class VoiceExperienceTest {
             dir.deleteRecursively()
         }
     }
+
+    @Test
+    fun kokoroDownloadProgressCannotOverwriteTerminalOrNewerState() {
+        val run1 = KokoroModel.beginDownloadRun()
+        assertEquals(KokoroModel.State.Downloading(0.0), KokoroModel.state)
+
+        // Normal progress update for active run succeeds.
+        assertTrue(KokoroModel.applyDownloadProgress(run1, 0.45))
+        assertEquals(KokoroModel.State.Downloading(0.45), KokoroModel.state)
+
+        // 1.0 progress is ignored so it never leaves Downloading(0.99).
+        assertFalse(KokoroModel.applyDownloadProgress(run1, 1.0))
+        assertEquals(KokoroModel.State.Downloading(0.45), KokoroModel.state)
+
+        // Transitioning to Ready invalidates run1: stale progress cannot regress Ready -> Downloading(0.99).
+        KokoroModel.finishDownloadRun(run1, KokoroModel.State.Ready)
+        assertEquals(KokoroModel.State.Ready, KokoroModel.state)
+        assertFalse(KokoroModel.applyDownloadProgress(run1, 0.99))
+        assertEquals(KokoroModel.State.Ready, KokoroModel.state)
+
+        // Same for Idle and Failed terminal states.
+        val run2 = KokoroModel.beginDownloadRun()
+        KokoroModel.finishDownloadRun(run2, KokoroModel.State.Failed)
+        assertFalse(KokoroModel.applyDownloadProgress(run2, 0.8))
+        assertEquals(KokoroModel.State.Failed, KokoroModel.state)
+
+        val run3 = KokoroModel.beginDownloadRun()
+        val run4 = KokoroModel.beginDownloadRun()
+        assertFalse(KokoroModel.applyDownloadProgress(run3, 0.7))
+        assertTrue(KokoroModel.applyDownloadProgress(run4, 0.25))
+        assertEquals(KokoroModel.State.Downloading(0.25), KokoroModel.state)
+
+        KokoroModel.finishDownloadRun(run4, KokoroModel.State.Idle)
+        assertEquals(KokoroModel.State.Idle, KokoroModel.state)
+    }
 }

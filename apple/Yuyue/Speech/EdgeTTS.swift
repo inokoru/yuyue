@@ -151,45 +151,62 @@ nonisolated enum EdgeTTS {
                 throw error
             }
 
-            var audio = Data()
-            while true {
-                try Task.checkCancellation()
-                let msg: URLSessionWebSocketTask.Message
-                do {
-                    msg = try await ws.receive()
-                } catch {
-                    if let http = ws.response as? HTTPURLResponse, http.statusCode != 101 {
-                        throw EdgeError.httpStatus(http.statusCode, parseHTTPDate(http.value(forHTTPHeaderField: "Date")))
-                    }
-                    if !audio.isEmpty { break }
-                    throw error
-                }
-
-                switch msg {
-                case .string(let textFrame):
-                    if textFrame.contains("Path:turn.end") {
-                        return audio
-                    }
-                case .data(let frame):
-                    guard frame.count >= 2 else { continue }
-                    let headerLen = (Int(frame[frame.startIndex]) << 8) | Int(frame[frame.startIndex + 1])
-                    let bodyStart = 2 + headerLen
-                    guard bodyStart <= frame.count else { continue }
-                    let headerBytes = frame.subdata(in: 2 ..< bodyStart)
-                    if let header = String(data: headerBytes, encoding: .utf8),
-                       header.contains("Path:audio"),
-                       bodyStart < frame.count {
-                        audio.append(frame[bodyStart...])
-                    }
-                @unknown default:
-                    break
-                }
-            }
-            return audio
+            return try await collectAudioFrames(
+                receive: { try await ws.receive() },
+                httpResponse: { ws.response as? HTTPURLResponse }
+            )
         } onCancel: {
             ws.cancel(with: .goingAway, reason: nil)
             session.invalidateAndCancel()
         }
+    }
+
+    static func collectAudioFrames(
+        receive: () async throws -> URLSessionWebSocketTask.Message,
+        httpResponse: () -> HTTPURLResponse? = { nil }
+    ) async throws -> Data {
+        var audio = Data()
+        var turnEnded = false
+        while true {
+            try Task.checkCancellation()
+            let msg: URLSessionWebSocketTask.Message
+            do {
+                msg = try await receive()
+            } catch {
+                if Task.isCancelled { throw CancellationError() }
+                if let http = httpResponse(), http.statusCode != 101 {
+                    throw EdgeError.httpStatus(http.statusCode, parseHTTPDate(http.value(forHTTPHeaderField: "Date")))
+                }
+                throw error
+            }
+
+            switch msg {
+            case .string(let textFrame):
+                if textFrame.contains("Path:turn.end") {
+                    turnEnded = true
+                    break
+                }
+            case .data(let frame):
+                guard frame.count >= 2 else { continue }
+                let headerLen = (Int(frame[frame.startIndex]) << 8) | Int(frame[frame.startIndex + 1])
+                let bodyStart = 2 + headerLen
+                guard bodyStart <= frame.count else { continue }
+                let headerBytes = frame.subdata(in: 2 ..< bodyStart)
+                if let header = String(data: headerBytes, encoding: .utf8),
+                   header.contains("Path:audio"),
+                   bodyStart < frame.count {
+                    audio.append(frame[bodyStart...])
+                }
+            @unknown default:
+                break
+            }
+            if turnEnded { break }
+        }
+        try Task.checkCancellation()
+        guard turnEnded && !audio.isEmpty else {
+            throw turnEnded ? EdgeError.emptyAudio : EdgeError.protocolError("Stream ended before Path:turn.end")
+        }
+        return audio
     }
 
     // MARK: - Formatting & Sanitization

@@ -84,6 +84,9 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     var spot by mutableStateOf<Spot?>(null)
         private set
     var failure by mutableStateOf<String?>(null)
+    /** 离线默认旁白在播放/暂停期间下好后提供给用户确认切换的候选音色（不自动静默切声）。 */
+    var readyOfflineVoice by mutableStateOf<BookVoice?>(null)
+        private set
     /** The failure is that no voice reads this language, named as people say it (中文): the
      *  system's voice data can be downloaded. */
     var missingVoice by mutableStateOf<String?>(null)
@@ -274,7 +277,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
             }
             return render()
         }
-        if (!takeFocus()) return
+        if (!acquireFocusOrPause()) return
         if (!fading) runCatching { track?.setVolume(1f) }
         runCatching { track?.play() }
         if (wasEmpty) {
@@ -301,6 +304,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         fetching = null
         thermalNotice = null
         thermalFallbackSection = null
+        readyOfflineVoice = null
         voices.clear()
         pausedForFocus = false
         stopFade(restoreVolume = false)
@@ -353,8 +357,21 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     /** Reads `language` with another voice from now on, starting the sentence again in it. */
     fun choose(voice: BookVoice, language: String) {
         Prefs.set("player.voice.$language", voice.id)
+        readyOfflineVoice = null
         voices[language] = voice
         restartHere()
+    }
+
+    /** 用户确认切换到刚下载完成的离线默认旁白。 */
+    fun acceptReadyOfflineVoice() {
+        val next = readyOfflineVoice ?: return
+        readyOfflineVoice = null
+        choose(next, language)
+    }
+
+    /** 用户暂不切换，收起就绪提示并继续使用当前声音。 */
+    fun dismissReadyOfflineVoice() {
+        readyOfflineVoice = null
     }
 
     /** Switches to a local system voice and resumes from where playback failed. */
@@ -665,7 +682,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         val wasEmpty = queued.isEmpty()
         feedTrack()
         if (wasEmpty && queued.isNotEmpty() && (state == State.Loading || state == State.Playing)) {
-            if (!takeFocus()) return
+            if (!acquireFocusOrPause()) return
             runCatching { track?.play() }
             began()
         }
@@ -784,7 +801,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         when {
             queued.isNotEmpty() -> {
                 if (wasEmpty && (state == State.Loading || state == State.Playing)) {
-                    if (!takeFocus()) return
+                    if (!acquireFocusOrPause()) return
                     runCatching { track?.play() }
                 }
                 began()
@@ -922,12 +939,34 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     }
     private var pausedForFocus = false
 
-    private fun takeFocus(): Boolean {
+    private fun takeFocus(): Int {
         val req = focus ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(attributes)
+            .setAcceptsDelayedFocusGain(true)
             .setOnAudioFocusChangeListener(focusChange, main)
             .build().also { focus = it }
-        return audio.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        return audio.requestAudioFocus(req)
+    }
+
+    private fun acquireFocusOrPause(): Boolean {
+        val t = focusRequestTransition(takeFocus(), state)
+        return when (t.action) {
+            FocusRequestAction.Play -> {
+                pausedForFocus = t.pausedForFocus
+                true
+            }
+            FocusRequestAction.PauseKeepFocus -> {
+                pauseInternal(keepFocus = true)
+                pausedForFocus = t.pausedForFocus
+                false
+            }
+            FocusRequestAction.PauseReleaseFocus -> {
+                pauseInternal(keepFocus = false)
+                pausedForFocus = t.pausedForFocus
+                releaseFocus()
+                false
+            }
+        }
     }
 
     private fun releaseFocus() {
@@ -998,6 +1037,10 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
 
     internal data class FocusTransition(val action: FocusAction, val pausedForFocus: Boolean)
 
+    internal enum class FocusRequestAction { Play, PauseKeepFocus, PauseReleaseFocus }
+
+    internal data class FocusRequestTransition(val action: FocusRequestAction, val pausedForFocus: Boolean)
+
     companion object {
         /** [pauseAfter]: as long as the sentence took. */
         const val PAUSE_AS_LONG = -1.0
@@ -1041,6 +1084,12 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
             return PlayedAction.Advance
         }
 
+        internal fun focusRequestTransition(result: Int, @Suppress("UNUSED_PARAMETER") state: State): FocusRequestTransition = when (result) {
+            AudioManager.AUDIOFOCUS_REQUEST_GRANTED -> FocusRequestTransition(FocusRequestAction.Play, pausedForFocus = false)
+            AudioManager.AUDIOFOCUS_REQUEST_DELAYED -> FocusRequestTransition(FocusRequestAction.PauseKeepFocus, pausedForFocus = true)
+            else -> FocusRequestTransition(FocusRequestAction.PauseReleaseFocus, pausedForFocus = false)
+        }
+
         internal fun focusTransition(change: Int, state: State, pausedForFocus: Boolean): FocusTransition = when (change) {
             AudioManager.AUDIOFOCUS_LOSS -> {
                 val active = state == State.Playing || state == State.Loading
@@ -1080,13 +1129,12 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         ClonedVoices.init(context)
         scope.launch {
             KokoroModel.readyEvents.collect {
-                // 正在听或暂停时不中途静默切声，等完全停下后下一次新开朗读再启用。
-                if (state == State.Stopped) voices.clear()
+                onOfflineVoiceReady()
             }
         }
         scope.launch {
             LiveVoiceModel.readyEvents.collect {
-                if (state == State.Stopped) voices.clear()
+                onOfflineVoiceReady()
             }
         }
         scope.launch {
@@ -1095,6 +1143,22 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                 if (book == detail.summary.id) rolesChanged()
             }
         }
+    }
+
+    /** 离线模型就绪：停下时清缓存供下次使用；播放或暂停中绝不自动切声，仅提示候选音色由用户确认。 */
+    private fun onOfflineVoiceReady() {
+        if (state == State.Stopped) {
+            readyOfflineVoice = null
+            voices.clear()
+            return
+        }
+        if (narrator != null) return
+        val lang = language
+        if (Prefs.string("player.voice.$lang").isNotEmpty()) return
+        val cur = voices[lang]
+        if (cur is KokoroVoice || cur is CardVoice) return
+        val candidate = Voices.defaultNarrator(lang) ?: return
+        readyOfflineVoice = candidate
     }
 
     /** 分角色: who says a line changed; committed sentences finish, later ones use whoever says them now. */

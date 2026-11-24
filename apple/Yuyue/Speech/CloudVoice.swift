@@ -308,21 +308,135 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
         var key: String { "\(instruction)|\(head)|\(tail)|\(style ?? "")|\(degree)" }
     }
 
+    /// Coalesces concurrent fetches for the same `(voiceID, cacheKey)` across `CloudVoice`
+    /// instances so `render()` and `prefetch()` share a single network call and disk write.
+    /// Cancelling one waiter immediately cancels only that waiter while keeping the underlying
+    /// fetch alive until the last waiter cancels.
+    nonisolated final class InFlightDeduplicator<Value: Sendable>: @unchecked Sendable {
+        private struct Entry {
+            let id = UUID()
+            var waiters: [UUID: CheckedContinuation<Value, Error>] = [:]
+            var task: Task<Void, Never>?
+        }
+
+        private struct State {
+            var entries: [String: Entry] = [:]
+            var preCancelled: Set<UUID> = []
+        }
+
+        private enum StartAction {
+            case cancelledImmediately
+            case joined
+            case startNew(UUID)
+        }
+
+        private let state = Mutex(State())
+
+        func run(
+            key: String,
+            operation: @escaping @Sendable () async throws -> Value
+        ) async throws -> Value {
+            try Task.checkCancellation()
+            let waiterID = UUID()
+            defer { state.withLock { _ = $0.preCancelled.remove(waiterID) } }
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    let action: StartAction = state.withLock { st in
+                        if st.preCancelled.remove(waiterID) != nil || Task.isCancelled {
+                            return .cancelledImmediately
+                        }
+                        if var entry = st.entries[key] {
+                            entry.waiters[waiterID] = continuation
+                            st.entries[key] = entry
+                            return .joined
+                        } else {
+                            var entry = Entry()
+                            let entryID = entry.id
+                            entry.waiters[waiterID] = continuation
+                            st.entries[key] = entry
+                            return .startNew(entryID)
+                        }
+                    }
+                    switch action {
+                    case .cancelledImmediately:
+                        continuation.resume(throwing: CancellationError())
+                        return
+                    case .joined:
+                        return
+                    case .startNew(let entryID):
+                        let task = Task<Void, Never> {
+                            let result: Result<Value, Error>
+                            do {
+                                result = .success(try await operation())
+                            } catch {
+                                result = .failure(error)
+                            }
+                            let waiters = self.state.withLock { st -> [CheckedContinuation<Value, Error>] in
+                                guard st.entries[key]?.id == entryID,
+                                      let entry = st.entries.removeValue(forKey: key) else {
+                                    return []
+                                }
+                                return Array(entry.waiters.values)
+                            }
+                            for waiter in waiters {
+                                waiter.resume(with: result)
+                            }
+                        }
+                        let shouldCancel = state.withLock { st -> Bool in
+                            guard var entry = st.entries[key], entry.id == entryID else {
+                                return true
+                            }
+                            if entry.waiters.isEmpty {
+                                st.entries.removeValue(forKey: key)
+                                return true
+                            }
+                            entry.task = task
+                            st.entries[key] = entry
+                            return false
+                        }
+                        if shouldCancel {
+                            task.cancel()
+                        }
+                    }
+                }
+            } onCancel: {
+                let (removed, taskToCancel) = state.withLock { st -> (CheckedContinuation<Value, Error>?, Task<Void, Never>?) in
+                    if var entry = st.entries[key], let cont = entry.waiters.removeValue(forKey: waiterID) {
+                        if entry.waiters.isEmpty {
+                            st.entries.removeValue(forKey: key)
+                            return (cont, entry.task)
+                        } else {
+                            st.entries[key] = entry
+                            return (cont, nil)
+                        }
+                    }
+                    st.preCancelled.insert(waiterID)
+                    return (nil, nil)
+                }
+                removed?.resume(throwing: CancellationError())
+                taskToCancel?.cancel()
+            }
+        }
+
+        func waiterCount(for key: String) -> Int {
+            state.withLock { $0.entries[key]?.waiters.count ?? 0 }
+        }
+    }
+
+    private static let inFlight = InFlightDeduplicator<Speech?>()
+    @TaskLocal static var testFetchOverride: (@Sendable (CloudVoice, String, String) async throws -> (Data, String))?
+
+    static func inFlightWaiterCount(voiceID: String, cacheKey: String) -> Int {
+        inFlight.waiterCount(for: "\(voiceID)\u{1}\(cacheKey)")
+    }
+
     func render(parts: [SpokenPart], language: String, acting: Acting?) async throws -> Speech? {
         let text = parts.map(\.text).joined()
         guard text.unicodeScalars.contains(where: { CharacterSet.alphanumerics.contains($0) }) else { return nil }
         let readings = provider == .azure ? parts.compactMap { p in p.reading.map { "\(p.text)=\($0)" } }.joined(separator: ",") : ""
         let acted = acting.flatMap { $0.isFlat ? nil : $0 }
         let cacheKey = acted == nil && readings.isEmpty ? text : text + "\u{2}" + (acted?.key ?? "") + "\u{2}" + readings
-        if let cached = readCached(cacheKey) {
-            if provider.isPaidCloud { CompanionUsage.recordTts(chars: text.count, cached: true) }
-            return cached
-        }
-        if provider.isPaidCloud { try CompanionUsage.checkTtsBudget(chars: text.count) }
-        let (data, ext) = try await fetch(text, language: language, parts: parts, acting: acted)
-        if provider.isPaidCloud { CompanionUsage.recordTts(chars: text.count, cached: false) }
-        writeCached(data, key: cacheKey, ext: ext)
-        return try Self.decode(data, ext: ext)
+        return try await renderCoalesced(text: text, cacheKey: cacheKey, language: language, parts: parts, acting: acted)
     }
 
     var qualityName: String? { provider.title }
@@ -334,15 +448,32 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
 
     func render(_ text: String, language: String) async throws -> Speech? {
         guard text.unicodeScalars.contains(where: { CharacterSet.alphanumerics.contains($0) }) else { return nil }
-        if let cached = readCached(text) {
+        return try await renderCoalesced(text: text, cacheKey: text, language: language, parts: nil, acting: nil)
+    }
+
+    private func renderCoalesced(
+        text: String,
+        cacheKey: String,
+        language: String,
+        parts: [SpokenPart]?,
+        acting: Acting?
+    ) async throws -> Speech? {
+        if let cached = readCached(cacheKey) {
             if provider.isPaidCloud { CompanionUsage.recordTts(chars: text.count, cached: true) }
             return cached
         }
-        if provider.isPaidCloud { try CompanionUsage.checkTtsBudget(chars: text.count) }
-        let (data, ext) = try await fetch(text, language: language)
-        if provider.isPaidCloud { CompanionUsage.recordTts(chars: text.count, cached: false) }
-        writeCached(data, key: text, ext: ext)
-        return try Self.decode(data, ext: ext)
+        let flightKey = "\(id)\u{1}\(cacheKey)"
+        return try await Self.inFlight.run(key: flightKey) { [self] in
+            if let cached = self.readCached(cacheKey) {
+                if self.provider.isPaidCloud { CompanionUsage.recordTts(chars: text.count, cached: true) }
+                return cached
+            }
+            if self.provider.isPaidCloud { try CompanionUsage.checkTtsBudget(chars: text.count) }
+            let (data, ext) = try await self.fetch(text, language: language, parts: parts, acting: acting)
+            if self.provider.isPaidCloud { CompanionUsage.recordTts(chars: text.count, cached: false) }
+            self.writeCached(data, key: cacheKey, ext: ext)
+            return try Self.decode(data, ext: ext)
+        }
     }
 
     /// Renders the sentences not kept yet, two at a time, so the chapter plays on without the
@@ -381,7 +512,7 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
         SHA256.hash(data: Data((id + "\u{1}" + text).utf8)).prefix(16).map { String(format: "%02x", $0) }.joined()
     }
 
-    private func cacheFile(_ text: String, ext: String = "mp3") -> URL {
+    func cacheFile(_ text: String, ext: String = "mp3") -> URL {
         Self.persistentCacheDir.appending(path: provider.rawValue).appending(path: "\(hashKey(text)).\(ext)")
     }
 
@@ -484,6 +615,9 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
     }
 
     private func fetch(_ text: String, language: String, parts: [SpokenPart]? = nil, acting: Acting? = nil) async throws -> (Data, String) {
+        if let override = Self.testFetchOverride {
+            return try await override(self, text, language)
+        }
         switch provider {
         case .edge:
             return try await Self.fetchEdge(text: text, voiceID: voiceID, language: language)

@@ -308,4 +308,373 @@ struct WalkthroughRegressionTests {
         #expect(KokoroVoice(speaker: zhDefault).isDefaultNarrator == true)
         #expect(KokoroVoice(speaker: enDefault).isDefaultNarrator == true)
     }
+
+    // MARK: - #58 EdgeTTS truncated stream rejection
+
+    @Test func `EdgeTTS rejects truncated stream without Path turn.end and accepts complete stream`() async throws {
+        func makeAudioFrame(_ payload: Data) -> URLSessionWebSocketTask.Message {
+            let header = Data("X-RequestId:test\r\nContent-Type:audio/mpeg\r\nPath:audio\r\n".utf8)
+            var frame = Data([UInt8((header.count >> 8) & 0xFF), UInt8(header.count & 0xFF)])
+            frame.append(header)
+            frame.append(payload)
+            return .data(frame)
+        }
+
+        // Partial audio followed by disconnect (no Path:turn.end) must throw, never return partial bytes.
+        let partialFrames: [Result<URLSessionWebSocketTask.Message, Error>] = [
+            .success(makeAudioFrame(Data([0xFF, 0xFB, 0x10, 0x20]))),
+            .failure(URLError(.networkConnectionLost)),
+        ]
+        var partialIdx = 0
+        await #expect(throws: URLError.self) {
+            _ = try await EdgeTTS.collectAudioFrames {
+                defer { partialIdx += 1 }
+                return try partialFrames[partialIdx].get()
+            }
+        }
+
+        // Complete stream ending with Path:turn.end returns concatenated audio bytes.
+        let partA = Data([0xFF, 0xFB, 0x01, 0x02])
+        let partB = Data([0x03, 0x04, 0x05])
+        let completeFrames: [URLSessionWebSocketTask.Message] = [
+            makeAudioFrame(partA),
+            makeAudioFrame(partB),
+            .string("X-RequestId:test\r\nPath:turn.end\r\n"),
+        ]
+        var completeIdx = 0
+        let audio = try await EdgeTTS.collectAudioFrames {
+            defer { completeIdx += 1 }
+            return completeFrames[completeIdx]
+        }
+        #expect(audio == partA + partB)
+
+        // Path:turn.end with zero audio bytes throws emptyAudio.
+        var emptySent = false
+        await #expect(throws: EdgeTTS.EdgeError.self) {
+            _ = try await EdgeTTS.collectAudioFrames {
+                if !emptySent {
+                    emptySent = true
+                    return .string("X-RequestId:test\r\nPath:turn.end\r\n")
+                }
+                throw URLError(.networkConnectionLost)
+            }
+        }
+
+        // Cancelled task throws CancellationError even if receive fails.
+        let cancelTask = Task {
+            try await EdgeTTS.collectAudioFrames {
+                try await Task.sleep(for: .seconds(5))
+                return .string("Path:turn.end")
+            }
+        }
+        cancelTask.cancel()
+        await #expect(throws: CancellationError.self) {
+            _ = try await cancelTask.value
+        }
+    }
+
+    // MARK: - #59 Sleep timer precedence over single and range loop
+
+    @Test func `Player sleep timer takes precedence over single and range loops`() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let expired = now.addingTimeInterval(-1)
+        let future = now.addingTimeInterval(60)
+        let done = Player.Spot(section: 1, sentence: 5)
+        let nextSameSection = Player.Spot(section: 1, sentence: 6)
+        let nextChapter = Player.Spot(section: 2, sentence: 0)
+        let range = Player.LoopRange(section: 1, first: 2, last: 5)
+        let rangeStart = Player.Spot(section: 1, sentence: 2)
+
+        // Single loop + sleep
+        #expect(Player.nextActionAfterPlayed(done: done, next: nextSameSection, sleep: .sentence, loop: true, loopRange: nil, now: now) == .sleepAt(done))
+        #expect(Player.nextActionAfterPlayed(done: done, next: nextSameSection, sleep: .until(expired, minutes: 10), loop: true, loopRange: nil, now: now) == .sleepAt(done))
+        #expect(Player.nextActionAfterPlayed(done: done, next: nextSameSection, sleep: .until(future, minutes: 10), loop: true, loopRange: nil, now: now) == .loopTo(done))
+        #expect(Player.nextActionAfterPlayed(done: done, next: nextChapter, sleep: .chapter, loop: true, loopRange: nil, now: now) == .sleepAt(done))
+        #expect(Player.nextActionAfterPlayed(done: done, next: nextSameSection, sleep: .chapter, loop: true, loopRange: nil, now: now) == .loopTo(done))
+
+        // Range loop at boundary + sleep
+        #expect(Player.nextActionAfterPlayed(done: done, next: nextSameSection, sleep: .sentence, loop: true, loopRange: range, now: now) == .sleepAt(rangeStart))
+        #expect(Player.nextActionAfterPlayed(done: done, next: nextSameSection, sleep: .until(expired, minutes: 10), loop: true, loopRange: range, now: now) == .sleepAt(rangeStart))
+        #expect(Player.nextActionAfterPlayed(done: done, next: nextChapter, sleep: .chapter, loop: true, loopRange: range, now: now) == .sleepAt(rangeStart))
+        #expect(Player.nextActionAfterPlayed(done: done, next: nextSameSection, sleep: .off, loop: true, loopRange: range, now: now) == .loopTo(rangeStart))
+
+        // Range loop mid-range
+        let mid = Player.Spot(section: 1, sentence: 3)
+        let midNext = Player.Spot(section: 1, sentence: 4)
+        #expect(Player.nextActionAfterPlayed(done: mid, next: midNext, sleep: .off, loop: true, loopRange: range, now: now) == .advance)
+        #expect(Player.nextActionAfterPlayed(done: mid, next: midNext, sleep: .sentence, loop: true, loopRange: range, now: now) == .sleepAt(midNext))
+
+        // No loop + chapter sleep at book end
+        #expect(Player.nextActionAfterPlayed(done: done, next: nil, sleep: .chapter, loop: false, loopRange: nil, now: now) == .sleepAt(done))
+        #expect(Player.nextActionAfterPlayed(done: done, next: nextSameSection, sleep: .off, loop: false, loopRange: nil, now: now) == .advance)
+    }
+
+    // MARK: - #60 Audio claim notification on voice preview
+
+    @MainActor @Test func `voice preview posts yyAudioClaimed and stops when another player claims audio`() async throws {
+        let previewClaims = Mutex(0)
+        let observer = NotificationCenter.default.addObserver(forName: .yyAudioClaimed, object: nil, queue: nil) { note in
+            if (note.object as AnyObject?) === Voices.previewAudioOwner {
+                previewClaims.withLock { $0 += 1 }
+            }
+        }
+        defer {
+            Voices.stopPreview()
+            NotificationCenter.default.removeObserver(observer)
+        }
+
+        let stub = StubPreviewVoice()
+        Voices.preview(stub, text: "试听测试")
+        #expect(previewClaims.withLock { $0 } == 1)
+        #expect(PreviewState.shared.voiceID == stub.id)
+
+        // Another player claiming audio must stop the active preview.
+        let otherPlayer = NSObject()
+        NotificationCenter.default.post(name: .yyAudioClaimed, object: otherPlayer)
+        for _ in 0 ..< 50 where PreviewState.shared.voiceID != nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(PreviewState.shared.voiceID == nil)
+
+        // Direct SystemVoice.preview also posts .yyAudioClaimed when a system voice exists.
+        if let sys = SystemVoice.best(for: "zh") ?? SystemVoice.all().first {
+            let before = previewClaims.withLock { $0 }
+            SystemVoice.preview(sys, text: "测试")
+            #expect(previewClaims.withLock { $0 } == before + 1)
+            Voices.stopPreview()
+        }
+    }
+
+    // MARK: - #61 CloudVoice in-flight deduplication and cancellation safety
+
+    @Test func `CloudVoice deduplicates concurrent fetches and isolates per-waiter cancellation`() async throws {
+        let voiceA = CloudVoice(provider: .edge, voiceID: "zh-CN-XiaoxiaoNeural", name: "晓晓", language: "zh-CN")
+        let voiceB = CloudVoice(provider: .edge, voiceID: "zh-CN-XiaoxiaoNeural", name: "晓晓", language: "zh-CN")
+        let sampleWAV = CloudVoice.wav(pcm: Data(repeating: 0, count: 4_800), rate: 24_000)
+
+        // 1. Concurrent render() + prefetch() across separate instances share one fetch & disk write.
+        let text1 = "dedup-share-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(at: voiceA.cacheFile(text1, ext: "wav")) }
+
+        let fetchCount1 = Mutex(0)
+        let entered1 = TestAsyncGate()
+        let release1 = TestAsyncGate()
+
+        try await CloudVoice.$testFetchOverride.withValue({ _, _, _ in
+            fetchCount1.withLock { $0 += 1 }
+            entered1.open()
+            await release1.wait()
+            return (sampleWAV, "wav")
+        }) {
+            let renderTask = Task { try await voiceA.render(text1, language: "zh-CN") }
+            await entered1.wait()
+            let voiceID = await voiceA.id
+            let prefetchTask = Task { await voiceB.prefetch([text1], language: "zh-CN") }
+            while CloudVoice.inFlightWaiterCount(voiceID: voiceID, cacheKey: text1) < 2 {
+                await Task.yield()
+            }
+            release1.open()
+
+            let speech = try await renderTask.value
+            await prefetchTask.value
+            #expect(speech != nil)
+            #expect(fetchCount1.withLock { $0 } == 1)
+            #expect(FileManager.default.fileExists(atPath: voiceA.cacheFile(text1, ext: "wav").path))
+        }
+
+        // 2. Cancelling one waiter does NOT cancel the shared fetch for remaining waiters.
+        let text2 = "dedup-cancel-one-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(at: voiceA.cacheFile(text2, ext: "wav")) }
+
+        let fetchCount2 = Mutex(0)
+        let entered2 = TestAsyncGate()
+        let release2 = TestAsyncGate()
+
+        try await CloudVoice.$testFetchOverride.withValue({ _, _, _ in
+            fetchCount2.withLock { $0 += 1 }
+            entered2.open()
+            await release2.wait()
+            try Task.checkCancellation()
+            return (sampleWAV, "wav")
+        }) {
+            let waiter1 = Task { try await voiceA.render(text2, language: "zh-CN") }
+            await entered2.wait()
+            let voiceID = await voiceA.id
+            let waiter2 = Task { try await voiceB.render(text2, language: "zh-CN") }
+            while CloudVoice.inFlightWaiterCount(voiceID: voiceID, cacheKey: text2) < 2 {
+                await Task.yield()
+            }
+
+            waiter1.cancel()
+            await #expect(throws: CancellationError.self) {
+                _ = try await waiter1.value
+            }
+
+            release2.open()
+            let speech = try await waiter2.value
+            #expect(speech != nil)
+            #expect(fetchCount2.withLock { $0 } == 1)
+        }
+
+        // 3. Cancelling the last remaining waiter cancels the underlying fetch.
+        let text3 = "dedup-cancel-all-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(at: voiceA.cacheFile(text3, ext: "wav")) }
+
+        let entered3 = TestAsyncGate()
+        let cancelled3 = TestAsyncGate()
+        let sawCancel = Mutex(false)
+
+        try await CloudVoice.$testFetchOverride.withValue({ _, _, _ in
+            entered3.open()
+            do {
+                try await Task.sleep(for: .seconds(30))
+                cancelled3.open()
+                return (sampleWAV, "wav")
+            } catch is CancellationError {
+                sawCancel.withLock { $0 = true }
+                cancelled3.open()
+                throw CancellationError()
+            }
+        }) {
+            let solo = Task { try await voiceA.render(text3, language: "zh-CN") }
+            await entered3.wait()
+            solo.cancel()
+            await #expect(throws: CancellationError.self) {
+                _ = try await solo.value
+            }
+            await cancelled3.wait()
+            #expect(sawCancel.withLock { $0 } == true)
+        }
+    }
+
+    // MARK: - #66 ModelDownload corrupt .part retry from byte 0 on last healthy fallback
+
+    @Test func `ModelDownload retries healthy fallback source from byte 0 after corrupt part digest mismatch`() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "yuyue-download-retry-test-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // Build deterministic valid payload and compute its real BLAKE3 digest.
+        let payload = Data((0 ..< 1024).map { UInt8($0 & 0xFF) })
+        let refFile = root.appending(path: "reference.bin")
+        try payload.write(to: refFile)
+        let expectedDigest = try fileDigest(path: refFile.path(percentEncoded: false))
+
+        // Pre-seed .part with a 128-byte corrupt prefix (simulating corruption from an earlier failed mirror).
+        let partFile = root.appending(path: "model.bin.part")
+        try Data(repeating: 0xEE, count: 128).write(to: partFile)
+
+        let url = URL(string: "https://yuyue-test-66.local/model.bin")!
+        CorruptPartFallbackURLProtocol.mock.withLock { st in
+            st.payload = payload
+            st.observedRanges = []
+        }
+
+        try await ModelDownload.downloadWithResume(
+            urls: [url],
+            to: partFile,
+            expectedBytes: Int64(payload.count),
+            expectedBlake3: expectedDigest,
+            sessionConfig: {
+                let cfg = URLSessionConfiguration.ephemeral
+                cfg.protocolClasses = [CorruptPartFallbackURLProtocol.self]
+                return cfg
+            }
+        ) { _, _ in }
+
+        let downloaded = try Data(contentsOf: partFile)
+        #expect(downloaded == payload)
+        let ranges = CorruptPartFallbackURLProtocol.mock.withLock { $0.observedRanges }
+        #expect(ranges == ["bytes=128-", nil])
+    }
+}
+
+private struct StubPreviewVoice: Voice {
+    let id = "stub.preview.voice"
+    let name = "Stub"
+    let qualityName: String? = nil
+    let isOffline = true
+    func speaks(_ language: String) -> Bool { true }
+    func render(_ text: String, language: String) async throws -> Speech? {
+        try await Task.sleep(for: .seconds(5))
+        return nil
+    }
+}
+
+private final class TestAsyncGate: @unchecked Sendable {
+    private let state = Mutex<(opened: Bool, waiters: [CheckedContinuation<Void, Never>])>((false, []))
+
+    func open() {
+        let waiters = state.withLock { st -> [CheckedContinuation<Void, Never>] in
+            st.opened = true
+            let list = st.waiters
+            st.waiters.removeAll()
+            return list
+        }
+        for waiter in waiters { waiter.resume() }
+    }
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            let resumeNow = state.withLock { st -> Bool in
+                if st.opened { return true }
+                st.waiters.append(continuation)
+                return false
+            }
+            if resumeNow { continuation.resume() }
+        }
+    }
+}
+
+private final class CorruptPartFallbackURLProtocol: URLProtocol, @unchecked Sendable {
+    struct MockState {
+        var payload = Data()
+        var observedRanges: [String?] = []
+    }
+
+    static let mock = Mutex(MockState())
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.host == "yuyue-test-66.local"
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+        let rangeHeader = request.value(forHTTPHeaderField: "Range")
+        let payload = Self.mock.withLock { st -> Data in
+            st.observedRanges.append(rangeHeader)
+            return st.payload
+        }
+        if let rangeHeader, rangeHeader.hasPrefix("bytes="),
+           let dash = rangeHeader.firstIndex(of: "-"),
+           let start = Int(rangeHeader[rangeHeader.index(rangeHeader.startIndex, offsetBy: 6) ..< dash]),
+           start >= 0, start < payload.count {
+            let slice = payload[start...]
+            let end = payload.count - 1
+            let headers = [
+                "Content-Range": "bytes \(start)-\(end)/\(payload.count)",
+                "Content-Length": "\(slice.count)",
+            ]
+            let response = HTTPURLResponse(url: url, statusCode: 206, httpVersion: "HTTP/1.1", headerFields: headers)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(slice))
+            client?.urlProtocolDidFinishLoading(self)
+        } else {
+            let headers = ["Content-Length": "\(payload.count)"]
+            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: headers)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: payload)
+            client?.urlProtocolDidFinishLoading(self)
+        }
+    }
+
+    override func stopLoading() {}
 }

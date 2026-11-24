@@ -55,6 +55,7 @@ nonisolated enum ModelDownload {
         to partFile: URL,
         expectedBytes: Int64? = nil,
         expectedBlake3: String? = nil,
+        sessionConfig: (@Sendable () -> URLSessionConfiguration)? = nil,
         progress: @escaping @Sendable (Int64, Int64) -> Void
     ) async throws {
         guard !urls.isEmpty else { throw URLError(.badURL) }
@@ -90,19 +91,36 @@ nonisolated enum ModelDownload {
                 return
             }
 
+            let hadExistingPart = (fileSize(partFile) ?? 0) > 0
             do {
                 try await streamOneSource(
                     url: url,
                     to: partFile,
                     expectedBytes: expectedBytes,
                     expectedBlake3: expectedBlake3,
+                    sessionConfig: sessionConfig,
                     progress: progress
                 )
                 if try verifyDigest(of: partFile, blake3: expectedBlake3) {
                     return
                 }
-                // 校验失败：说明文件损坏或被劫持，删掉 .part 换下一个源从头重下。
+                // 校验失败：先删掉损坏的 .part；若是续传拼接了损坏前缀，在同一源上从头重试一次。
                 try? FileManager.default.removeItem(at: partFile)
+                if hadExistingPart {
+                    try Task.checkCancellation()
+                    try await streamOneSource(
+                        url: url,
+                        to: partFile,
+                        expectedBytes: expectedBytes,
+                        expectedBlake3: expectedBlake3,
+                        sessionConfig: sessionConfig,
+                        progress: progress
+                    )
+                    if try verifyDigest(of: partFile, blake3: expectedBlake3) {
+                        return
+                    }
+                    try? FileManager.default.removeItem(at: partFile)
+                }
                 lastError = URLError(.cannotDecodeContentData)
             } catch is CancellationError {
                 // 暂停或取消时保留 .part，方便下次断点续传。
@@ -120,6 +138,7 @@ nonisolated enum ModelDownload {
         to partFile: URL,
         expectedBytes: Int64?,
         expectedBlake3: String?,
+        sessionConfig: (@Sendable () -> URLSessionConfiguration)?,
         progress: @escaping @Sendable (Int64, Int64) -> Void
     ) async throws {
         let offset = fileSize(partFile) ?? 0
@@ -128,6 +147,7 @@ nonisolated enum ModelDownload {
             partFile: partFile,
             offset: offset,
             expectedBytes: expectedBytes,
+            sessionConfig: sessionConfig,
             progress: progress
         )
         if outcome == .rangeNotSatisfiable {
@@ -145,6 +165,7 @@ nonisolated enum ModelDownload {
                 partFile: partFile,
                 offset: 0,
                 expectedBytes: expectedBytes,
+                sessionConfig: sessionConfig,
                 progress: progress
             )
             if retry != .ok {
@@ -163,6 +184,7 @@ nonisolated enum ModelDownload {
         partFile: URL,
         offset: Int64,
         expectedBytes: Int64?,
+        sessionConfig: (@Sendable () -> URLSessionConfiguration)?,
         progress: @escaping @Sendable (Int64, Int64) -> Void
     ) async throws -> StreamOutcome {
         var request = URLRequest(url: url)
@@ -171,10 +193,16 @@ nonisolated enum ModelDownload {
             request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range")
         }
 
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 60 * 60
-        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        let config: URLSessionConfiguration
+        if let sessionConfig {
+            config = sessionConfig()
+        } else {
+            let cfg = URLSessionConfiguration.default
+            cfg.timeoutIntervalForRequest = 30
+            cfg.timeoutIntervalForResource = 60 * 60
+            cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
+            config = cfg
+        }
 
         let state = Mutex<StreamTaskBox>(StreamTaskBox())
 
@@ -456,9 +484,9 @@ nonisolated enum ModelDownload {
     }
 
     static func fileSize(_ url: URL) -> Int64? {
-        guard let vals = try? url.resourceValues(forKeys: [.fileSizeKey]),
-              let size = vals.fileSize else { return nil }
-        return Int64(size)
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path(percentEncoded: false)),
+              let size = attrs[.size] as? NSNumber else { return nil }
+        return size.int64Value
     }
 
     static func verifyDigest(of file: URL, blake3: String?) throws -> Bool {

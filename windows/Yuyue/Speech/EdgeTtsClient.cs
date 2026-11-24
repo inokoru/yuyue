@@ -189,6 +189,7 @@ public static class EdgeTtsClient
         using var audioOut = new MemoryStream();
         using var frameBuf = new MemoryStream();
         byte[] recvBuf = new byte[16 * 1024];
+        bool turnEnded = false;
 
         while (ws.State == WebSocketState.Open)
         {
@@ -198,18 +199,24 @@ public static class EdgeTtsClient
             {
                 res = await ws.ReceiveAsync(new ArraySegment<byte>(recvBuf), token);
                 if (res.MessageType == WebSocketMessageType.Close)
-                    return audioOut.ToArray();
+                    break;
                 if (res.Count > 0)
                     frameBuf.Write(recvBuf, 0, res.Count);
             }
             while (!res.EndOfMessage);
+
+            if (res.MessageType == WebSocketMessageType.Close)
+                break;
 
             byte[] frame = frameBuf.ToArray();
             if (res.MessageType == WebSocketMessageType.Text)
             {
                 string txt = Encoding.UTF8.GetString(frame);
                 if (txt.Contains("Path:turn.end", StringComparison.Ordinal))
+                {
+                    turnEnded = true;
                     break;
+                }
             }
             else if (res.MessageType == WebSocketMessageType.Binary && frame.Length >= 2)
             {
@@ -232,6 +239,10 @@ public static class EdgeTtsClient
                 await ws.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
         }
         catch { }
+
+        token.ThrowIfCancellationRequested();
+        if (!turnEnded)
+            throw new IOException("Edge TTS closed before Path:turn.end.");
 
         return audioOut.ToArray();
     }

@@ -5,10 +5,20 @@ import app.yuyue.YuyueApp
 import app.yuyue.design.Prefs
 import app.yuyue.library.Keys
 import app.yuyue.t
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -220,41 +230,58 @@ class CloudVoice(
     override val isOffline: Boolean get() = provider.isLocal
     override fun speaks(tag: String) = language?.let { SpokenLanguage.matches(it, tag) } ?: true
 
-    suspend fun render(parts: List<uniffi.yuyue_core.SpokenPart>, language: String, acting: Acting?): Speech? = withContext(Dispatchers.IO) {
+    suspend fun render(parts: List<uniffi.yuyue_core.SpokenPart>, language: String, acting: Acting?): Speech? {
         val text = parts.joinToString("") { it.text }
-        if (text.none { it.isLetterOrDigit() }) return@withContext null
+        if (text.none { it.isLetterOrDigit() }) return null
         val readings = if (provider == Provider.Azure) parts.mapNotNull { p -> p.reading?.let { "${p.text}=$it" } }.joinToString(",") else ""
         val acted = acting?.takeIf { !it.isFlat }
         val cacheKey = if (acted == null && readings.isEmpty()) text else text + "\u0002" + (acted?.key ?: "") + "\u0002" + readings
+        return renderWithCacheAndDedup(text, cacheKey, language, parts, acted)
+    }
+
+    override suspend fun render(text: String, language: String): Speech? {
+        if (text.none { it.isLetterOrDigit() }) return null
+        return renderWithCacheAndDedup(text, text, language)
+    }
+
+    private suspend fun renderWithCacheAndDedup(
+        text: String,
+        cacheKey: String,
+        language: String,
+        parts: List<uniffi.yuyue_core.SpokenPart>? = null,
+        acting: Acting? = null,
+    ): Speech = withContext(Dispatchers.IO) {
         readCached(cacheKey)?.let {
             if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.recordTts(text.length, cached = true)
             return@withContext it
         }
-        if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.checkTtsBudget(text.length)
-        val (data, ext) = fetch(text, language, parts, acted)
-        if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.recordTts(text.length, cached = false)
-        val file = writeCached(data, cacheKey, ext)
-        decodeFile(file, ext) ?: throw Failure(t("声音数据读不出来"))
-    }
-
-    override suspend fun render(text: String, language: String): Speech? = withContext(Dispatchers.IO) {
-        if (text.none { it.isLetterOrDigit() }) return@withContext null
-        readCached(text)?.let {
-            if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.recordTts(text.length, cached = true)
-            return@withContext it
+        val inflightKey = "$id\u0001$cacheKey"
+        inFlightDeduplicator.awaitOrLaunch(inflightKey) {
+            readCached(cacheKey)?.let { return@awaitOrLaunch it }
+            if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.checkTtsBudget(text.length)
+            val (data, ext) = fetch(text, language, parts, acting)
+            if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.recordTts(text.length, cached = false)
+            val file = writeCached(data, cacheKey, ext)
+            decodeFile(file, ext) ?: throw Failure(t("声音数据读不出来"))
         }
-        if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.checkTtsBudget(text.length)
-        val (data, ext) = fetch(text, language)
-        if (provider.isPaidCloud) app.yuyue.companion.CompanionUsage.recordTts(text.length, cached = false)
-        val file = writeCached(data, text, ext)
-        decodeFile(file, ext) ?: throw Failure(t("声音数据读不出来"))
     }
 
     suspend fun prefetch(texts: List<String>, language: String) = coroutineScope {
         val missing = texts.filter { t -> t.any { it.isLetterOrDigit() } && !hasCached(t) }
         for (pair in missing.chunked(2)) {
             if (!isActive) return@coroutineScope
-            val ok = pair.map { async { runCatching { render(it, language) }.isSuccess } }.all { it.await() }
+            val ok = pair.map {
+                async {
+                    try {
+                        render(it, language)
+                        true
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Throwable) {
+                        false
+                    }
+                }
+            }.all { it.await() }
             if (!ok) return@coroutineScope
         }
     }
@@ -269,14 +296,10 @@ class CloudVoice(
         File(cacheDir, "${provider.key}/${hashKey(text)}.wav")
 
     private fun hasCached(text: String): Boolean =
-        cacheFile(text, "mp3").exists() || cacheFile(text, "wav").exists() || legacyCacheFile(text).exists()
+        cacheCandidates(persistentCacheDir, cacheDir, provider.key, hashKey(text)).any { (file, _) -> file.exists() }
 
     private fun readCached(text: String): Speech? {
-        for ((file, ext) in listOf(
-            cacheFile(text, "mp3") to "mp3",
-            cacheFile(text, "wav") to "wav",
-            legacyCacheFile(text) to "wav",
-        )) {
+        for ((file, ext) in cacheCandidates(persistentCacheDir, cacheDir, provider.key, hashKey(text))) {
             if (file.exists()) {
                 val decoded = decodeFile(file, ext)
                 if (decoded != null) {
@@ -290,20 +313,14 @@ class CloudVoice(
 
     private fun writeCached(data: ByteArray, key: String, ext: String): File {
         val file = cacheFile(key, ext)
-        file.parentFile?.mkdirs()
-        val tmp = File(file.parentFile, ".${file.name}.tmp")
-        tmp.writeBytes(data)
-        if (!tmp.renameTo(file)) {
-            file.writeBytes(data)
-            tmp.delete()
-        }
+        writeFileAtomically(file, data)
         trimPersistentCacheIfNeeded()
         return file
     }
 
     class Failure(message: String) : Exception(message)
 
-    private fun fetch(text: String, language: String, parts: List<uniffi.yuyue_core.SpokenPart>? = null, acting: Acting? = null): Pair<ByteArray, String> {
+    private suspend fun fetch(text: String, language: String, parts: List<uniffi.yuyue_core.SpokenPart>? = null, acting: Acting? = null): Pair<ByteArray, String> {
         return when (provider) {
             Provider.Edge -> fetchEdge(voiceID, text, language)
             Provider.Free -> fetchFreeOnline(voiceID, text, language)
@@ -487,6 +504,8 @@ class CloudVoice(
                 provider.apiKey?.let { headers += "Authorization" to "Bearer $it" }
                 val audio = try {
                     postJSON(provider, endpoint, o.toString().toByteArray(), *headers.toTypedArray(), readTimeoutMs = 90_000)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Failure) {
                     throw e
                 } catch (_: Exception) {
@@ -497,11 +516,101 @@ class CloudVoice(
         }
     }
 
+    internal class InFlightDeduplicator<T>(
+        private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    ) {
+        private class Entry<T>(val deferred: CompletableDeferred<T>) {
+            lateinit var job: Job
+            var waiters: Int = 1
+        }
+
+        private val lock = Any()
+        private val active = HashMap<String, Entry<T>>()
+
+        internal fun activeCount(): Int = synchronized(lock) { active.size }
+
+        suspend fun awaitOrLaunch(key: String, block: suspend () -> T): T {
+            currentCoroutineContext().ensureActive()
+            val entry: Entry<T>
+            val isOwner: Boolean
+            synchronized(lock) {
+                val existing = active[key]
+                if (existing != null) {
+                    existing.waiters++
+                    entry = existing
+                    isOwner = false
+                } else {
+                    val created = Entry(CompletableDeferred<T>())
+                    created.job = scope.launch(start = CoroutineStart.LAZY) {
+                        try {
+                            val result = block()
+                            created.deferred.complete(result)
+                        } catch (t: Throwable) {
+                            created.deferred.completeExceptionally(t)
+                        } finally {
+                            synchronized(lock) {
+                                if (active[key] === created) active.remove(key)
+                            }
+                        }
+                    }
+                    active[key] = created
+                    entry = created
+                    isOwner = true
+                }
+            }
+            try {
+                if (isOwner) {
+                    entry.job.start()
+                }
+                return entry.deferred.await()
+            } finally {
+                var jobToCancel: Job? = null
+                synchronized(lock) {
+                    entry.waiters--
+                    if (entry.waiters <= 0) {
+                        if (active[key] === entry) active.remove(key)
+                        if (!entry.deferred.isCompleted) {
+                            jobToCancel = entry.job
+                        }
+                    }
+                }
+                jobToCancel?.cancel()
+            }
+        }
+    }
+
     companion object {
         private val cacheDir: File get() = File(YuyueApp.instance.cacheDir, "yuyue-voices")
         private val persistentCacheDir: File get() = File(YuyueApp.instance.filesDir, "cloud-voices")
+        internal val cacheExtensions = listOf("mp3", "wav", "flac", "ogg")
         private const val MAX_PERSISTENT_CACHE_BYTES = 300_000_000L
         private val trimCount = java.util.concurrent.atomic.AtomicInteger(0)
+        private val inFlightDeduplicator = InFlightDeduplicator<Speech>()
+
+        internal fun cacheCandidates(
+            persistentRoot: File,
+            legacyRoot: File,
+            providerKey: String,
+            hash: String,
+        ): List<Pair<File, String>> =
+            cacheExtensions.map { ext -> File(persistentRoot, "$providerKey/$hash.$ext") to ext } +
+                (File(legacyRoot, "$providerKey/$hash.wav") to "wav")
+
+        internal fun writeFileAtomically(file: File, data: ByteArray): File {
+            file.parentFile?.mkdirs()
+            val tmp = File(file.parentFile, ".${file.name}.${java.util.UUID.randomUUID()}.tmp")
+            var renamed = false
+            try {
+                tmp.writeBytes(data)
+                renamed = tmp.renameTo(file)
+                if (!renamed) {
+                    throw java.io.IOException("Failed to atomically rename ${tmp.name} to ${file.name}")
+                }
+            } finally {
+                if (!renamed) tmp.delete()
+            }
+            return file
+        }
 
         private fun postJSON(p: Provider, url: String, body: ByteArray, vararg headers: Pair<String, String>, readTimeoutMs: Int = 35_000): ByteArray {
             val c = URL(url).openConnection() as HttpURLConnection
@@ -787,7 +896,7 @@ class CloudVoice(
             else -> "https://fanyi.baidu.com/gettts?lan=en&spd=3&source=web&text=$encodedChunk"
         }
 
-        private fun fetchEdge(voiceID: String, text: String, language: String): Pair<ByteArray, String> {
+        private suspend fun fetchEdge(voiceID: String, text: String, language: String): Pair<ByteArray, String> {
             val customBase = Provider.Edge.savedURL
             if (customBase.isNotEmpty()) {
                 val ep = speechEndpoint(customBase)
@@ -803,6 +912,8 @@ class CloudVoice(
             }
             val audio = try {
                 EdgeTTS.synthesize(text = text, voiceID = voiceID, language = language)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: EdgeTTS.EdgeHttpException) {
                 throw Failure("${Provider.Edge.title} (${e.code})")
             } catch (e: Exception) {
@@ -812,7 +923,7 @@ class CloudVoice(
             return audio to sniffExt(audio, "mp3")
         }
 
-        private fun fetchFreeOnline(voiceID: String, text: String, language: String): Pair<ByteArray, String> {
+        private suspend fun fetchFreeOnline(voiceID: String, text: String, language: String): Pair<ByteArray, String> {
             val customBase = Provider.Free.savedURL
             if (customBase.isNotEmpty()) {
                 val ep = speechEndpoint(customBase)
@@ -834,10 +945,12 @@ class CloudVoice(
             val route = freeOnlineRoute(voiceID, clean, language)
 
             repeat(2) { attempt ->
-                if (attempt > 0) Thread.sleep(250)
-                val combined = runCatching {
+                currentCoroutineContext().ensureActive()
+                if (attempt > 0) delay(250)
+                val combined = try {
                     val out = java.io.ByteArrayOutputStream()
                     for (chunk in chunks) {
+                        currentCoroutineContext().ensureActive()
                         val enc = java.net.URLEncoder.encode(chunk, "UTF-8").replace("+", "%20")
                         val url = freeOnlineUrl(route, enc)
                         val c = URL(url).openConnection() as HttpURLConnection
@@ -855,7 +968,11 @@ class CloudVoice(
                         }
                     }
                     out.toByteArray()
-                }.getOrNull()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Throwable) {
+                    null
+                }
                 if (combined != null && combined.size > 256) {
                     return combined to sniffExt(combined, "mp3")
                 }
@@ -881,7 +998,7 @@ class CloudVoice(
             return chunks.ifEmpty { listOf(text) }
         }
 
-        private fun looksLikeAudio(bytes: ByteArray): Boolean {
+        internal fun looksLikeAudio(bytes: ByteArray): Boolean {
             if (bytes.size <= 256) return false
             val b0 = bytes[0].toInt() and 0xFF
             val b1 = bytes[1].toInt() and 0xFF
@@ -890,6 +1007,7 @@ class CloudVoice(
             if (b0 == 0xFF && (b1 and 0xE0) == 0xE0) return true
             if (b0 == 0x49 && b1 == 0x44 && b2 == 0x33) return true
             if (b0 == 0x52 && b1 == 0x49 && b2 == 0x46 && b3 == 0x46) return true
+            if (b0 == 0x66 && b1 == 0x4C && b2 == 0x61 && b3 == 0x43) return true
             if (b0 == 0x4F && b1 == 0x67 && b2 == 0x67 && b3 == 0x53) return true
             return false
         }

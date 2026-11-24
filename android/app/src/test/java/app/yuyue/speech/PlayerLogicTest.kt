@@ -110,4 +110,36 @@ class PlayerLogicTest {
         assertEquals(0f, Player.fadeVolume(expired, fading = true, nowMs = 15_000L), 0.0001f)
         assertEquals(1f, Player.fadeVolume(Player.Sleep.Off, fading = true, nowMs = 15_000L), 0.0001f)
     }
+
+    @Test
+    fun focusRequestDelayedArmsAutoResumeAndFailedPausesWithoutFocus() {
+        val granted = Player.focusRequestTransition(AudioManager.AUDIOFOCUS_REQUEST_GRANTED, Player.State.Loading)
+        assertEquals(Player.FocusRequestAction.Play, granted.action)
+        assertFalse(granted.pausedForFocus)
+
+        val delayed = Player.focusRequestTransition(AudioManager.AUDIOFOCUS_REQUEST_DELAYED, Player.State.Loading)
+        assertEquals(Player.FocusRequestAction.PauseKeepFocus, delayed.action)
+        assertTrue(delayed.pausedForFocus)
+
+        // When delayed focus is later granted, playback resumes automatically.
+        val gainedAfterDelayed = Player.focusTransition(
+            AudioManager.AUDIOFOCUS_GAIN,
+            Player.State.Paused,
+            pausedForFocus = delayed.pausedForFocus,
+        )
+        assertEquals(Player.FocusAction.Resume, gainedAfterDelayed.action)
+        assertFalse(gainedAfterDelayed.pausedForFocus)
+
+        val failed = Player.focusRequestTransition(AudioManager.AUDIOFOCUS_REQUEST_FAILED, Player.State.Loading)
+        assertEquals(Player.FocusRequestAction.PauseReleaseFocus, failed.action)
+        assertFalse(failed.pausedForFocus)
+
+        // After focus failure, a later unrelated AUDIOFOCUS_GAIN does not unexpectedly resume.
+        val gainedAfterFailed = Player.focusTransition(
+            AudioManager.AUDIOFOCUS_GAIN,
+            Player.State.Paused,
+            pausedForFocus = failed.pausedForFocus,
+        )
+        assertEquals(Player.FocusAction.None, gainedAfterFailed.action)
+    }
 }

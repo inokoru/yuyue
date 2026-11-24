@@ -1,9 +1,21 @@
 package app.yuyue.speech
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
+import java.io.File
+import java.io.IOException
+import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicInteger
 
 class CloudVoiceTest {
 
@@ -109,5 +121,135 @@ class CloudVoiceTest {
         assertEquals(22, CloudVoice.edgeVoices.size)
         assertTrue(CloudVoice.edgeVoices.any { it.id == "zh-CN-XiaoxiaoNeural" && it.lang == "zh-CN" })
         assertTrue(CloudVoice.edgeVoices.any { it.id == "en-US-AvaMultilingualNeural" && it.lang == "en-US" })
+    }
+
+    @Test
+    fun inFlightDeduplicatorSharesSingleFetchAndRespectsIndependentCancellation() = runBlocking {
+        val dedup = CloudVoice.InFlightDeduplicator<String>()
+        val fetchCount = AtomicInteger(0)
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<String>()
+
+        val w1 = async(Dispatchers.IO) {
+            dedup.awaitOrLaunch("cloud.openai.alloy\u0001hello") {
+                fetchCount.incrementAndGet()
+                started.complete(Unit)
+                release.await()
+            }
+        }
+        started.await()
+        val w2 = async(Dispatchers.IO) {
+            dedup.awaitOrLaunch("cloud.openai.alloy\u0001hello") {
+                fetchCount.incrementAndGet()
+                "should-not-run"
+            }
+        }
+
+        // Give w2 a moment to join the in-flight entry, then cancel w1 only.
+        kotlinx.coroutines.delay(30)
+        w1.cancel()
+        try {
+            w1.await()
+            fail("Expected w1 to cancel")
+        } catch (_: CancellationException) {
+            // expected
+        }
+
+        // Underlying fetch must stay alive for w2.
+        assertEquals(1, fetchCount.get())
+        release.complete("audio-ok")
+        assertEquals("audio-ok", w2.await())
+        assertEquals(1, fetchCount.get())
+        assertEquals(0, dedup.activeCount())
+    }
+
+    @Test
+    fun inFlightDeduplicatorCancelsUnderlyingFetchWhenAllWaitersCancel() = runBlocking {
+        val dedup = CloudVoice.InFlightDeduplicator<String>()
+        val started = CompletableDeferred<Unit>()
+        val underlyingCancelled = CompletableDeferred<Unit>()
+
+        val w1 = async(Dispatchers.IO) {
+            dedup.awaitOrLaunch("cloud.edge.v1\u0001cancel-all") {
+                started.complete(Unit)
+                try {
+                    kotlinx.coroutines.awaitCancellation()
+                } finally {
+                    underlyingCancelled.complete(Unit)
+                }
+            }
+        }
+        started.await()
+        w1.cancel()
+        underlyingCancelled.await()
+        assertEquals(0, dedup.activeCount())
+    }
+
+    @Test
+    fun writeFileAtomicallyUsesUniqueTempAndCleansUpOnFailure() {
+        val dir = Files.createTempDirectory("yuyue-atomic-cache").toFile()
+        try {
+            val target = File(dir, "clip.mp3")
+            val first = byteArrayOf(1, 2, 3, 4)
+            CloudVoice.writeFileAtomically(target, first)
+            assertArrayEquals(first, target.readBytes())
+            assertTrue(dir.listFiles().orEmpty().none { it.name.endsWith(".tmp") })
+
+            val updated = byteArrayOf(5, 6, 7, 8, 9)
+            CloudVoice.writeFileAtomically(target, updated)
+            assertArrayEquals(updated, target.readBytes())
+            assertTrue(dir.listFiles().orEmpty().none { it.name.endsWith(".tmp") })
+
+            // Target is a directory -> renameTo fails; temp file must be removed and not leaked.
+            val badTarget = File(dir, "not-a-file.mp3").apply { mkdirs() }
+            try {
+                CloudVoice.writeFileAtomically(badTarget, updated)
+                fail("Expected IOException when rename target is a directory")
+            } catch (_: IOException) {
+                // expected
+            }
+            assertTrue(badTarget.isDirectory)
+            assertTrue(dir.listFiles().orEmpty().none { it.name.endsWith(".tmp") })
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun cacheExtensionsAndLooksLikeAudioSupportFlacAndOgg() {
+        assertEquals(listOf("mp3", "wav", "flac", "ogg"), CloudVoice.cacheExtensions)
+
+        val flac = ByteArray(300).apply {
+            this[0] = 0x66; this[1] = 0x4C; this[2] = 0x61; this[3] = 0x43 // fLaC
+        }
+        val ogg = ByteArray(300).apply {
+            this[0] = 0x4F; this[1] = 0x67; this[2] = 0x67; this[3] = 0x53 // OggS
+        }
+        val garbage = ByteArray(300) { 0x20 }
+        assertTrue(CloudVoice.looksLikeAudio(flac))
+        assertTrue(CloudVoice.looksLikeAudio(ogg))
+        assertFalse(CloudVoice.looksLikeAudio(garbage))
+        assertFalse(CloudVoice.looksLikeAudio(byteArrayOf(0x66, 0x4C, 0x61, 0x43))) // too short
+
+        val persistent = Files.createTempDirectory("yuyue-persist").toFile()
+        val legacy = Files.createTempDirectory("yuyue-legacy").toFile()
+        try {
+            val flacFile = File(persistent, "local/abc123.flac").apply {
+                parentFile?.mkdirs()
+                writeBytes(flac)
+            }
+            val candidates = CloudVoice.cacheCandidates(persistent, legacy, "local", "abc123")
+            val hit = candidates.firstOrNull { (file, _) -> file.exists() }
+            assertEquals(flacFile to "flac", hit)
+
+            flacFile.delete()
+            val oggFile = File(persistent, "local/abc123.ogg").apply { writeBytes(ogg) }
+            val hitOgg = CloudVoice.cacheCandidates(persistent, legacy, "local", "abc123")
+                .firstOrNull { (file, _) -> file.exists() }
+            assertEquals(oggFile to "ogg", hitOgg)
+        } finally {
+            persistent.deleteRecursively()
+            legacy.deleteRecursively()
+        }
     }
 }

@@ -1,5 +1,12 @@
 package app.yuyue.speech
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -12,9 +19,11 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlin.math.floor
 
 /**
@@ -53,7 +62,18 @@ object EdgeTTS {
 
     class EdgeHttpException(val code: Int, val serverDateHeader: String?, message: String) : Exception(message)
 
-    fun synthesize(text: String, voiceID: String, language: String): ByteArray {
+    internal const val CHUNK_TIMEOUT_MS = 25_000L
+
+    suspend fun synthesize(text: String, voiceID: String, language: String): ByteArray =
+        synthesize(text, voiceID, language, CHUNK_TIMEOUT_MS) { req, listener -> client.newWebSocket(req, listener) }
+
+    internal suspend fun synthesize(
+        text: String,
+        voiceID: String,
+        language: String,
+        timeoutMs: Long = CHUNK_TIMEOUT_MS,
+        openWebSocket: (Request, WebSocketListener) -> WebSocket,
+    ): ByteArray {
         val cleaned = sanitizeText(text)
         if (cleaned.isEmpty()) throw IllegalStateException("Empty text")
 
@@ -63,7 +83,8 @@ object EdgeTTS {
 
         val combined = ByteArrayOutputStream()
         for (chunk in chunks) {
-            val mp3 = synthesizeChunkWithRetry(chunk, fullVoice, xmlLang)
+            currentCoroutineContext().ensureActive()
+            val mp3 = synthesizeChunkWithRetry(chunk, fullVoice, xmlLang, timeoutMs, openWebSocket)
             combined.write(mp3)
         }
         val out = combined.toByteArray()
@@ -71,11 +92,20 @@ object EdgeTTS {
         return out
     }
 
-    private fun synthesizeChunkWithRetry(text: String, fullVoice: String, xmlLang: String): ByteArray {
+    private suspend fun synthesizeChunkWithRetry(
+        text: String,
+        fullVoice: String,
+        xmlLang: String,
+        timeoutMs: Long,
+        openWebSocket: (Request, WebSocketListener) -> WebSocket,
+    ): ByteArray {
         var lastError: Throwable? = null
         for (attempt in 0 until 2) {
+            currentCoroutineContext().ensureActive()
             try {
-                return synthesizeSingleChunk(text, fullVoice, xmlLang)
+                return synthesizeSingleChunk(text, fullVoice, xmlLang, timeoutMs, openWebSocket)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: EdgeHttpException) {
                 lastError = e
                 if (e.code == 403 && !e.serverDateHeader.isNullOrBlank() && attempt == 0) {
@@ -83,13 +113,13 @@ object EdgeTTS {
                     continue
                 }
                 if (attempt == 0) {
-                    Thread.sleep(250)
+                    delay(250)
                     continue
                 }
             } catch (e: Throwable) {
                 lastError = e
                 if (attempt == 0) {
-                    Thread.sleep(250)
+                    delay(250)
                     continue
                 }
             }
@@ -97,7 +127,13 @@ object EdgeTTS {
         throw lastError ?: IllegalStateException("Edge TTS synthesis failed")
     }
 
-    private fun synthesizeSingleChunk(text: String, fullVoice: String, xmlLang: String): ByteArray {
+    private suspend fun synthesizeSingleChunk(
+        text: String,
+        fullVoice: String,
+        xmlLang: String,
+        timeoutMs: Long,
+        openWebSocket: (Request, WebSocketListener) -> WebSocket,
+    ): ByteArray {
         val connId = randomHex32()
         val gec = generateSecMsGecV2()
         val url =
@@ -113,10 +149,6 @@ object EdgeTTS {
             .header("Accept-Language", "en-US,en;q=0.9")
             .header("Cookie", "muid=${randomHex32().uppercase(Locale.US)};")
             .build()
-
-        val audio = ByteArrayOutputStream()
-        val failure = AtomicReference<Throwable?>(null)
-        val latch = CountDownLatch(1)
 
         val timestamp = jsDateString()
         val configPayload =
@@ -139,67 +171,95 @@ object EdgeTTS {
                 "Path:ssml\r\n\r\n" +
                 ssml
 
-        val ws = client.newWebSocket(
-            request,
-            object : WebSocketListener() {
-                override fun onOpen(webSocket: WebSocket, response: Response) {
-                    webSocket.send(configPayload)
-                    webSocket.send(ssmlPayload)
-                }
+        return try {
+            withTimeout(timeoutMs) {
+                suspendCancellableCoroutine { cont ->
+                    val audio = ByteArrayOutputStream()
+                    val failure = AtomicReference<Throwable?>(null)
+                    val turnEnd = AtomicBoolean(false)
+                    val resumed = AtomicBoolean(false)
 
-                override fun onMessage(webSocket: WebSocket, text: String) {
-                    if (text.contains("Path:turn.end")) {
-                        webSocket.close(1000, "done")
-                        latch.countDown()
-                    }
-                }
-
-                override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                    val raw = bytes.toByteArray()
-                    if (raw.size < 2) return
-                    val headerLen = ((raw[0].toInt() and 0xFF) shl 8) or (raw[1].toInt() and 0xFF)
-                    val bodyStart = 2 + headerLen
-                    if (bodyStart > raw.size) return
-                    val header = String(raw, 2, headerLen, Charsets.UTF_8)
-                    if (header.contains("Path:audio") && bodyStart < raw.size) {
-                        synchronized(audio) {
-                            audio.write(raw, bodyStart, raw.size - bodyStart)
+                    fun finish() {
+                        if (!resumed.compareAndSet(false, true)) return
+                        if (!cont.isActive) return
+                        val err = failure.get()
+                        val bytes = synchronized(audio) { audio.toByteArray() }
+                        if (turnEnd.get() && err == null && bytes.isNotEmpty()) {
+                            cont.resume(bytes)
+                        } else {
+                            cont.resumeWithException(
+                                err ?: if (!turnEnd.get()) {
+                                    IllegalStateException("Edge TTS closed before turn.end")
+                                } else {
+                                    IllegalStateException("No audio returned from Edge TTS")
+                                },
+                            )
                         }
                     }
-                }
 
-                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                    webSocket.close(1000, null)
-                    latch.countDown()
-                }
+                    val ws = openWebSocket(
+                        request,
+                        object : WebSocketListener() {
+                            override fun onOpen(webSocket: WebSocket, response: Response) {
+                                webSocket.send(configPayload)
+                                webSocket.send(ssmlPayload)
+                            }
 
-                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    latch.countDown()
-                }
+                            override fun onMessage(webSocket: WebSocket, text: String) {
+                                if (text.contains("Path:turn.end")) {
+                                    turnEnd.set(true)
+                                    webSocket.close(1000, "done")
+                                    finish()
+                                }
+                            }
 
-                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    if (response != null && response.code != 101) {
-                        failure.compareAndSet(
-                            null,
-                            EdgeHttpException(response.code, response.header("Date"), "HTTP ${response.code}"),
-                        )
-                    } else {
-                        failure.compareAndSet(null, t)
+                            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                                val raw = bytes.toByteArray()
+                                if (raw.size < 2) return
+                                val headerLen = ((raw[0].toInt() and 0xFF) shl 8) or (raw[1].toInt() and 0xFF)
+                                val bodyStart = 2 + headerLen
+                                if (bodyStart > raw.size) return
+                                val header = String(raw, 2, headerLen, Charsets.UTF_8)
+                                if (header.contains("Path:audio") && bodyStart < raw.size) {
+                                    synchronized(audio) {
+                                        audio.write(raw, bodyStart, raw.size - bodyStart)
+                                    }
+                                }
+                            }
+
+                            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                                webSocket.close(1000, null)
+                                finish()
+                            }
+
+                            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                                finish()
+                            }
+
+                            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                                if (response != null && response.code != 101) {
+                                    failure.compareAndSet(
+                                        null,
+                                        EdgeHttpException(response.code, response.header("Date"), "HTTP ${response.code}"),
+                                    )
+                                } else {
+                                    failure.compareAndSet(null, t)
+                                }
+                                finish()
+                            }
+                        },
+                    )
+
+                    cont.invokeOnCancellation {
+                        resumed.set(true)
+                        ws.cancel()
                     }
-                    latch.countDown()
                 }
-            },
-        )
-
-        val completed = latch.await(25, TimeUnit.SECONDS)
-        if (!completed) {
-            ws.cancel()
-            throw IllegalStateException("Edge TTS timed out")
+            }
+        } catch (e: TimeoutCancellationException) {
+            currentCoroutineContext().ensureActive()
+            throw IllegalStateException("Edge TTS timed out", e)
         }
-        val bytes = synchronized(audio) { audio.toByteArray() }
-        if (bytes.isNotEmpty()) return bytes
-        failure.get()?.let { throw it }
-        throw IllegalStateException("No audio returned from Edge TTS")
     }
 
     // MARK: - Formatting & Sanitization

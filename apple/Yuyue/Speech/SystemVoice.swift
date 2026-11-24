@@ -103,6 +103,7 @@ nonisolated final class SystemVoice: Voice, Sendable {
 
     /// Plays a few words straight through the system, for 试听.
     @MainActor static func preview(_ voice: SystemVoice, text: String) {
+        Voices.claimPreviewAudio()
         #if os(iOS)
         Voices.activatePreviewSession()
         previewer.usesApplicationAudioSession = true
