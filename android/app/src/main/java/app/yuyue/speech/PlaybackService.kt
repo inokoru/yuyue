@@ -1,8 +1,10 @@
 package app.yuyue.speech
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.os.Looper
+import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.SimpleBasePlayer
@@ -34,15 +36,17 @@ object Session {
 
     /** This player is the one the notification controls now. */
     fun claim(p: Player) {
-        if (current !== p) current?.stop()
-        audio?.pause()
-        podcast?.pause()
+        val prev = current
+        val prevAudio = audio
+        val prevPodcast = podcast
+        val switched = prevAudio != null || prevPodcast != null
         current = p
-        if (audio != null || podcast != null) {
-            audio = null
-            podcast = null
-            onPlayerChanged?.invoke()
-        }
+        audio = null
+        podcast = null
+        if (prev !== p) prev?.stop()
+        prevAudio?.pause()
+        prevPodcast?.pause()
+        if (switched) onPlayerChanged?.invoke()
         player.refresh()
         p.startService()
     }
@@ -51,6 +55,7 @@ object Session {
         if (current === p) {
             current = null
             player.refresh()
+            stopServiceIfIdle()
         }
     }
 
@@ -65,13 +70,26 @@ object Session {
         private set
     /** Set while the service runs, to hand the session the player that's playing. */
     internal var onPlayerChanged: (() -> Unit)? = null
+    internal var onStopService: (() -> Unit)? = null
+    @Volatile
+    internal var isServiceRunning: Boolean = false
+
+    internal val hasOwner: Boolean get() = current != null || audio != null || podcast != null
+
+    private fun stopServiceIfIdle() {
+        if (!hasOwner) onStopService?.invoke()
+    }
 
     fun claimAudio(p: AudiobookPlayer) {
-        current?.stop()
-        podcast?.pause()
+        val prev = current
+        val prevAudio = audio
+        val prevPodcast = podcast
+        current = null
         podcast = null
-        if (audio !== p) audio?.pause()
         audio = p
+        prev?.stop()
+        prevPodcast?.pause()
+        if (prevAudio !== p) prevAudio?.pause()
         onPlayerChanged?.invoke()
         p.startService()
     }
@@ -80,23 +98,28 @@ object Session {
         if (audio !== p) return
         audio = null
         onPlayerChanged?.invoke()
+        stopServiceIfIdle()
     }
 
     fun claimPodcast(hub: app.yuyue.podcast.PodcastHub) {
-        current?.stop()
+        val prev = current
+        val prevAudio = audio
+        val prevPodcast = podcast
         current = null
-        audio?.pause()
         audio = null
-        if (podcast !== hub) podcast?.pause()
         podcast = hub
+        prev?.stop()
+        prevAudio?.pause()
+        if (prevPodcast !== hub) prevPodcast?.pause()
         onPlayerChanged?.invoke()
-        hub.startService()
+        runCatching { PlaybackService.start(app.yuyue.YuyueApp.instance) }.onFailure { hub.startService() }
     }
 
     fun releasePodcast(hub: app.yuyue.podcast.PodcastHub) {
         if (podcast !== hub) return
         podcast = null
         onPlayerChanged?.invoke()
+        stopServiceIfIdle()
     }
 
     /** What the session should hold now. */
@@ -124,7 +147,7 @@ object Session {
             val book = p.detail.summary
             if (artBook != book.id) {
                 artBook = book.id
-                art = book.coverPath?.let { runCatching { File(it).readBytes() }.getOrNull() }
+                art = book.coverPath?.let(::boundedArtwork)
             }
             val chapter = p.sectionTitle
             val meta = MediaMetadata.Builder()
@@ -168,6 +191,28 @@ object Session {
             current?.stop()
             return Futures.immediateVoidFuture()
         }
+
+        /** Keeps notification artwork under Binder limits so high-res EPUB covers cannot throw TransactionTooLargeException. */
+        private fun boundedArtwork(path: String): ByteArray? = runCatching {
+            val f = File(path)
+            if (!f.isFile) return@runCatching null
+            if (f.length() in 1..256_000L) return@runCatching f.readBytes()
+            val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeFile(path, opts)
+            var sample = 1
+            while (maxOf(opts.outWidth, opts.outHeight) / sample > 512) sample *= 2
+            val bitmap = android.graphics.BitmapFactory.decodeFile(
+                path,
+                android.graphics.BitmapFactory.Options().apply { inSampleSize = sample },
+            ) ?: return@runCatching null
+            try {
+                java.io.ByteArrayOutputStream().also {
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, it)
+                }.toByteArray().takeIf { it.isNotEmpty() }
+            } finally {
+                bitmap.recycle()
+            }
+        }.getOrNull()
     }
 }
 
@@ -185,6 +230,16 @@ class PlaybackService : MediaLibraryService() {
             addSession(it)
         }
         Session.onPlayerChanged = { session?.let { if (it.player !== Session.sessionPlayer) it.player = Session.sessionPlayer } }
+        Session.onStopService = { stopSelf() }
+        Session.isServiceRunning = true
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val result = super.onStartCommand(intent, flags, startId)
+        if (intent?.action == null && !Session.hasOwner) {
+            stopSelf(startId)
+        }
+        return result
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
@@ -217,9 +272,26 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        Session.isServiceRunning = false
+        Session.onStopService = null
         Session.onPlayerChanged = null
         session?.release()
         session = null
         super.onDestroy()
+    }
+
+    companion object {
+        /** Starts PlaybackService safely from either foreground or background (API 26+). */
+        fun start(context: Context) {
+            if (Session.isServiceRunning) return
+            val appCtx = context.applicationContext
+            val intent = Intent(appCtx, PlaybackService::class.java)
+            try {
+                appCtx.startService(intent)
+            } catch (_: IllegalStateException) {
+                runCatching { ContextCompat.startForegroundService(appCtx, intent) }
+            } catch (_: Throwable) {
+            }
+        }
     }
 }

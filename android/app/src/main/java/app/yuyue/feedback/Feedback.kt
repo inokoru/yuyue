@@ -66,7 +66,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.yuyue.BuildConfig
@@ -607,11 +609,21 @@ fun FeedbackPage(close: () -> Unit) {
                 AnimatedVisibility(withInfo, enter = androidx.compose.animation.fadeIn(app.yuyue.design.YYMotion.standard()) + androidx.compose.animation.expandVertically(app.yuyue.design.YYMotion.layout()), exit = androidx.compose.animation.fadeOut(app.yuyue.design.YYMotion.exit()) + androidx.compose.animation.shrinkVertically(app.yuyue.design.YYMotion.layout())) {
                     Column {
                         Box(Modifier.fillMaxWidth().height(0.5.dp).background(YY.c.line))
+                        val info = Feedback.info
+                        val infoStyle = YY.font(10.5f)
+                        val measurer = rememberTextMeasurer()
+                        val density = LocalDensity.current
+                        val labelWidth = remember(info, density, measurer) {
+                            val maxPx = info.maxOfOrNull { (label, _) ->
+                                measurer.measure(label, style = infoStyle, maxLines = 1, softWrap = false).size.width
+                            } ?: 0
+                            maxOf(YY.s(24), with(density) { maxPx.toDp() } + 2.dp)
+                        }
                         Column(Modifier.padding(vertical = YY.s(9)), verticalArrangement = Arrangement.spacedBy(YY.s(5))) {
-                            Feedback.info.forEach { (label, value) ->
-                                Row {
-                                    Text(label, style = YY.font(10.5f), color = YY.c.t3, modifier = Modifier.width(YY.s(34)))
-                                    Text(value, style = YY.font(10.5f), color = YY.c.t2)
+                            info.forEach { (label, value) ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(YY.s(10))) {
+                                    Text(label, style = infoStyle, color = YY.c.t3, maxLines = 1, softWrap = false, modifier = Modifier.width(labelWidth))
+                                    Text(value, style = infoStyle, color = YY.c.t2, modifier = Modifier.weight(1f))
                                 }
                             }
                         }

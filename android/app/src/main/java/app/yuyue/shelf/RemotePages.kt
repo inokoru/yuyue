@@ -38,8 +38,10 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -79,6 +81,7 @@ import app.yuyue.me.SubPage
 import app.yuyue.t
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -210,42 +213,87 @@ fun RemoteBrowser(library: Library, source: RemoteSource, back: () -> Unit) {
     val stack = remember(source.id) { mutableStateListOf(Level(null, source.name)) }
     val here = stack.last()
     var feed by remember(source.id, here) { mutableStateOf<RemoteFeed?>(null) }
+    var rootSearch by remember(source.id) { mutableStateOf<String?>(null) }
+    var searchTemplate by remember(source.id, here) { mutableStateOf<String?>(null) }
     var chips by remember(source.id) { mutableStateOf<List<RemoteEntry>>(emptyList()) }
     var chip by remember(source.id) { mutableStateOf<RemoteEntry?>(null) }
-    var problem by remember(here) { mutableStateOf<String?>(null) }
-    var query by remember { mutableStateOf("") }
-    var searching by remember { mutableStateOf(false) }
-    var loadingMore by remember { mutableStateOf(false) }
-    var reload by remember { mutableStateOf(0) }
+    var problem by remember(source.id, here) { mutableStateOf<String?>(null) }
+    var query by remember(source.id, here) { mutableStateOf("") }
+    var searching by remember(source.id, here) { mutableStateOf(false) }
+    var loadingMore by remember(source.id, here) { mutableStateOf(false) }
+    var reload by remember(source.id, here) { mutableIntStateOf(0) }
+    var requestJob by remember(source.id, here) { mutableStateOf<Job?>(null) }
+    var requestToken by remember(source.id, here) { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
     val client = remember(source) { RemoteClient(source) }
     fun goBack() = if (stack.size > 1) { stack.removeAt(stack.lastIndex); Unit } else back()
     BackHandler { goBack() }
 
-    LaunchedEffect(here, reload) {
+    DisposableEffect(source.id, here) {
+        onDispose { requestJob?.cancel() }
+    }
+
+    fun startSearch() {
+        val template = feed?.search ?: searchTemplate ?: (if (here.url == null) rootSearch else null) ?: return
+        val words = query.trim().ifEmpty { return }
+        requestJob?.cancel()
+        val token = ++requestToken
+        searching = true
+        loadingMore = false
         problem = null
+        feed = null
+        requestJob = scope.launch {
+            try {
+                val found = client.feed(client.search(template, words))
+                if (token == requestToken) {
+                    feed = found.copy(search = found.search ?: template)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (token == requestToken) problem = e.message
+            }
+        }
+    }
+
+    LaunchedEffect(here, reload) {
+        requestJob?.cancel()
+        val token = ++requestToken
+        loadingMore = false
+        problem = null
+        feed = null
         try {
             val page = client.feed(here.url)
+            if (token != requestToken) return@LaunchedEffect
             // At the start, a catalogue of only ways in shows them as chips, the first one open.
             if (here.url == null && page.entries.isNotEmpty() && page.entries.none { it.isBook } && source.kind == RemoteSource.Kind.OPDS) {
+                rootSearch = page.search
+                searchTemplate = page.search
                 chips = page.entries
                 val first = chip?.let { c -> chips.firstOrNull { it.id == c.id } } ?: chips[0]
                 chip = first
                 val opened = client.feed(first.folder)
-                feed = opened.copy(search = opened.search ?: page.search)
+                if (token == requestToken) {
+                    val search = opened.search ?: page.search
+                    if (search != null) searchTemplate = search
+                    feed = opened.copy(search = search)
+                }
             } else {
+                if (here.url == null) rootSearch = page.search
+                searchTemplate = page.search
                 feed = page
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            problem = e.message
+            if (token == requestToken) problem = e.message
         }
     }
 
     SubPage(here.title, { goBack() }) {
         Column(Modifier.fillMaxSize()) {
-            if (feed?.search != null || searching) {
+            val activeSearch = feed?.search ?: searchTemplate ?: if (here.url == null) rootSearch else null
+            if (activeSearch != null || searching) {
                 Row(
                     Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().height(40.dp).background(YY.c.inset, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -255,22 +303,23 @@ fun RemoteBrowser(library: Library, source: RemoteSource, back: () -> Unit) {
                         query, { query = it }, singleLine = true, modifier = Modifier.weight(1f),
                         textStyle = YY.font(11.5f).copy(color = YY.c.t1), cursorBrush = SolidColor(YY.tint.accent),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = {
-                            val template = feed?.search ?: return@KeyboardActions
-                            val words = query.trim().ifEmpty { return@KeyboardActions }
-                            searching = true
-                            feed = null
-                            scope.launch {
-                                try {
-                                    val found = client.feed(client.search(template, words))
-                                    feed = found.copy(search = found.search ?: template)
-                                } catch (e: Exception) { problem = e.message }
-                            }
-                        }),
+                        keyboardActions = KeyboardActions(onSearch = { startSearch() }),
                         decorationBox = { inner -> if (query.isEmpty()) Text(t("搜书名、作者"), style = YY.font(11.5f), color = YY.c.t3); inner() },
                     )
                     if (searching) {
-                        Box(Modifier.size(40.dp).clip(CircleShape).clickable(onClickLabel = t("清空")) { query = ""; searching = false; reload++ }, contentAlignment = Alignment.Center) {
+                        Box(
+                            Modifier.size(40.dp).clip(CircleShape).clickable(onClickLabel = t("清空")) {
+                                requestJob?.cancel()
+                                requestToken++
+                                query = ""
+                                searching = false
+                                loadingMore = false
+                                problem = null
+                                feed = null
+                                reload++
+                            },
+                            contentAlignment = Alignment.Center,
+                        ) {
                             Icon(Icons.xmarkCircleFill, t("清空"), tint = YY.c.t3, modifier = Modifier.size(16.dp))
                         }
                     }
@@ -284,10 +333,28 @@ fun RemoteBrowser(library: Library, source: RemoteSource, back: () -> Unit) {
                             c.title, style = YY.font(10.5f, if (on) FontWeight.SemiBold else FontWeight.Normal), color = if (on) YY.tint.onBlack else YY.c.t2,
                             modifier = Modifier.heightIn(min = YY.s(28)).background(if (on) YY.tint.black else YY.c.card, CircleShape).border(0.5.dp, if (on) YY.tint.black else YY.c.line, CircleShape)
                                 .clickable {
+                                    requestJob?.cancel()
+                                    val token = ++requestToken
                                     chip = c
+                                    query = ""
+                                    searching = false
+                                    loadingMore = false
+                                    problem = null
+                                    searchTemplate = rootSearch
                                     feed = null
-                                    scope.launch {
-                                        try { val o = client.feed(c.folder); if (chip?.id == c.id) feed = o.copy(search = o.search ?: feed?.search) } catch (e: Exception) { problem = e.message }
+                                    requestJob = scope.launch {
+                                        try {
+                                            val o = client.feed(c.folder)
+                                            if (token == requestToken) {
+                                                val search = o.search ?: rootSearch
+                                                searchTemplate = search
+                                                feed = o.copy(search = search)
+                                            }
+                                        } catch (e: CancellationException) {
+                                            throw e
+                                        } catch (e: Exception) {
+                                            if (token == requestToken) problem = e.message
+                                        }
                                     }
                                 }.padding(horizontal = YY.s(11), vertical = YY.s(6)),
                         )
@@ -299,7 +366,9 @@ fun RemoteBrowser(library: Library, source: RemoteSource, back: () -> Unit) {
                 problem != null -> Column(Modifier.fillMaxWidth().padding(30.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Icon(Icons.warning, null, tint = YY.c.t3, modifier = Modifier.size(30.dp))
                     Text(problem ?: "", style = YY.font(11.5f), color = YY.c.t2, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    YYButton(t("再试一次"), ButtonKind.Raised) { reload++ }
+                    YYButton(t("再试一次"), ButtonKind.Raised) {
+                        if (searching && query.isNotBlank()) startSearch() else reload++
+                    }
                 }
                 f == null -> Box(Modifier.fillMaxWidth().height(300.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = YY.c.t3) }
                 f.entries.isEmpty() -> Text(if (searching) t("没有找到") else t("这里没有书"), style = YY.font(11.5f), color = YY.c.t3, modifier = Modifier.fillMaxWidth().padding(top = 80.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
@@ -315,12 +384,18 @@ fun RemoteBrowser(library: Library, source: RemoteSource, back: () -> Unit) {
                             }
                         }
                         if (i == f.entries.lastIndex && f.next != null && !loadingMore) LaunchedEffect(f.next) {
+                            val token = requestToken
                             loadingMore = true
-                            runCatching { client.feed(f.next) }.getOrNull()?.let { page ->
-                                val known = f.entries.map { it.id }.toSet()
-                                feed = f.copy(entries = f.entries + page.entries.filter { it.id !in known }, next = page.next)
+                            try {
+                                runCatching { client.feed(f.next) }.getOrNull()?.let { page ->
+                                    if (token == requestToken) {
+                                        val known = f.entries.map { it.id }.toSet()
+                                        feed = f.copy(entries = f.entries + page.entries.filter { it.id !in known }, next = page.next)
+                                    }
+                                }
+                            } finally {
+                                if (token == requestToken) loadingMore = false
                             }
-                            loadingMore = false
                         }
                     }
                     if (loadingMore) item { Box(Modifier.fillMaxWidth().padding(10.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = YY.c.t3) } }

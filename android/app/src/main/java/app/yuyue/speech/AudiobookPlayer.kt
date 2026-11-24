@@ -1,7 +1,6 @@
 package app.yuyue.speech
 
 import android.content.Context
-import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.getValue
@@ -948,7 +947,7 @@ class AudiobookPlayer(private val context: Context, private val library: Library
     }
 
     fun startService() {
-        runCatching { context.startService(Intent(context, PlaybackService::class.java)) }
+        PlaybackService.start(context)
     }
 
     companion object {

@@ -260,42 +260,53 @@ object Updates {
         val o = offer ?: return
         if (phase is UpdatePhase.Downloading) return
         val info = o.info
+        apk = null
         phase = UpdatePhase.Downloading(0f)
-        phase = runCatching {
+        phase = try {
             withContext(Dispatchers.IO) {
                 val out = apkFile(context, info)
-                out.parentFile?.listFiles()?.filter { it != out }?.forEach { it.delete() }
+                out.parentFile?.listFiles()?.forEach { it.delete() }
                 val part = File(out.path + ".part")
-                http.newCall(Request.Builder().url(info.apk).build()).execute().use { r ->
-                    if (!r.isSuccessful) error("HTTP ${r.code}")
-                    val body = r.body!!
-                    val total = body.contentLength().takeIf { it > 0 } ?: info.size.toLong()
-                    body.byteStream().use { input ->
-                        part.outputStream().use { output ->
-                            val buf = ByteArray(64 * 1024)
-                            var got = 0L
-                            var shown = 0f
-                            while (true) {
-                                val n = input.read(buf)
-                                if (n < 0) break
-                                output.write(buf, 0, n)
-                                got += n
-                                val f = if (total > 0) (got.toFloat() / total).coerceIn(0f, 1f) else 0f
-                                if (f - shown >= 0.01f) {
-                                    shown = f
-                                    withContext(Dispatchers.Main) { phase = UpdatePhase.Downloading(f) }
+                try {
+                    http.newCall(Request.Builder().url(info.apk).build()).execute().use { r ->
+                        if (!r.isSuccessful) error("HTTP ${r.code}")
+                        val body = r.body!!
+                        val total = body.contentLength().takeIf { it > 0 } ?: info.size.toLong()
+                        body.byteStream().use { input ->
+                            part.outputStream().use { output ->
+                                val buf = ByteArray(64 * 1024)
+                                var got = 0L
+                                var shown = 0f
+                                while (true) {
+                                    val n = input.read(buf)
+                                    if (n < 0) break
+                                    output.write(buf, 0, n)
+                                    got += n
+                                    val f = if (total > 0) (got.toFloat() / total).coerceIn(0f, 1f) else 0f
+                                    if (f - shown >= 0.01f) {
+                                        shown = f
+                                        withContext(Dispatchers.Main) { phase = UpdatePhase.Downloading(f) }
+                                    }
                                 }
                             }
                         }
                     }
+                    check(part.length() == info.size.toLong() && sha256(part) == info.sha256.lowercase()) { t("安装包不完整，请重新下载") }
+                    check(sameSigner(context, part)) { t("安装包签名不对，不能安装") }
+                    check((!out.exists() || out.delete()) && part.renameTo(out)) { t("读写文件时出了问题，再试一次") }
+                } catch (e: Throwable) {
+                    part.delete()
+                    throw e
                 }
-                check(part.length() == info.size.toLong() && sha256(part) == info.sha256.lowercase()) { t("安装包不完整，请重新下载") }
-                check(sameSigner(context, part)) { t("安装包签名不对，不能安装") }
-                part.renameTo(out)
                 apk = out
                 if (mayInstall(context)) UpdatePhase.Ready else UpdatePhase.NeedPermission
             }
-        }.getOrElse { UpdatePhase.DownloadFailed(it.message ?: t("网络断了。书和笔记不受影响。")) }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            phase = UpdatePhase.Release
+            throw e
+        } catch (e: Exception) {
+            UpdatePhase.DownloadFailed(e.message ?: t("网络断了。书和笔记不受影响。"))
+        }
         if (phase == UpdatePhase.Ready) install(context)
     }
 
@@ -319,24 +330,34 @@ object Updates {
     /** Hands the APK to the system's installer, which asks the user and then replaces the app. */
     fun install(context: Context) {
         val file = apk ?: return
+        if (!file.isFile) {
+            apk = null
+            phase = UpdatePhase.DownloadFailed(t("安装包不完整，请重新下载"))
+            return
+        }
         if (!mayInstall(context)) { phase = UpdatePhase.NeedPermission; return }
         phase = UpdatePhase.Ready
-        val installer = context.packageManager.packageInstaller
-        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
-            setAppPackageName(context.packageName)
-            if (Build.VERSION.SDK_INT >= 31) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
-        }
-        val id = installer.createSession(params)
-        installer.openSession(id).use { session ->
-            file.inputStream().use { input ->
-                session.openWrite("yuyue.apk", 0, file.length()).use { out ->
-                    input.copyTo(out)
-                    session.fsync(out)
-                }
+        try {
+            val installer = context.packageManager.packageInstaller
+            val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+                setAppPackageName(context.packageName)
+                if (Build.VERSION.SDK_INT >= 31) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
             }
-            val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
-            val pending = PendingIntent.getBroadcast(context, id, Intent(context, InstallResult::class.java), flags)
-            session.commit(pending.intentSender)
+            val id = installer.createSession(params)
+            installer.openSession(id).use { session ->
+                file.inputStream().use { input ->
+                    session.openWrite("yuyue.apk", 0, file.length()).use { out ->
+                        input.copyTo(out)
+                        session.fsync(out)
+                    }
+                }
+                val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
+                val pending = PendingIntent.getBroadcast(context, id, Intent(context, InstallResult::class.java), flags)
+                session.commit(pending.intentSender)
+            }
+        } catch (e: Exception) {
+            if (!file.isFile) apk = null
+            phase = UpdatePhase.DownloadFailed(e.message ?: t("读写文件时出了问题，再试一次"))
         }
     }
 

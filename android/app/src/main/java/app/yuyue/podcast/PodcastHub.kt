@@ -454,7 +454,7 @@ class PodcastHub(
     }
 
     fun startService() {
-        runCatching { context.startService(Intent(context, PlaybackService::class.java)) }
+        PlaybackService.start(context)
     }
 
     // MARK: - Reload & Queries

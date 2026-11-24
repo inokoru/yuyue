@@ -6,6 +6,8 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
@@ -97,12 +99,25 @@ class SystemVoice(private val voice: Voice, number: Int = 0) : BookVoice {
         private var tts: TextToSpeech? = null
         private var ready = CompletableDeferred<Boolean>()
         @Volatile private var readyOk: Boolean? = null
+        private var appContext: Context? = null
+        /** Dedicated TTS client for 试听 so previewing never cancels or clears active synthesis on [tts]. */
+        private var previewTts: TextToSpeech? = null
+        @Volatile private var previewReadyOk: Boolean? = null
+        private val previewLock = Any()
+        private val previewMain by lazy { Handler(Looper.getMainLooper()) }
+        private var previewToken = 0L
+        private var previewOnDone: (() -> Unit)? = null
+        private var pendingTtsPreview: PendingPreview? = null
         private var previewTrack: AudioTrack? = null
+        private var previewEndWatch: Runnable? = null
         private val lock = Mutex()
         private lateinit var cache: File
 
+        private data class PendingPreview(val token: Long, val voice: Voice, val text: String)
+
         @Synchronized
         fun init(context: Context) {
+            appContext = context.applicationContext
             if (tts != null) {
                 if (readyOk != false) return
                 runCatching { tts?.shutdown() }
@@ -150,6 +165,7 @@ class SystemVoice(private val voice: Voice, number: Int = 0) : BookVoice {
             engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {}
                 override fun onBeginSynthesis(utteranceId: String?, sampleRateInHz: Int, audioFormat: Int, channelCount: Int) {
+                    if (utteranceId != id) return
                     synchronized(outLock) {
                         rate = sampleRateInHz
                         format = audioFormat
@@ -157,11 +173,13 @@ class SystemVoice(private val voice: Voice, number: Int = 0) : BookVoice {
                     }
                 }
                 override fun onAudioAvailable(utteranceId: String?, audio: ByteArray) {
+                    if (utteranceId != id) return
                     synchronized(outLock) {
                         out.write(audio)
                     }
                 }
                 override fun onDone(utteranceId: String?) {
+                    if (utteranceId != id) return
                     // Engines that don't hand the audio over as it's made (or omit onBeginSynthesis) still wrote the file.
                     val fromStream = synchronized(outLock) {
                         if (out.size() > 0) pcm(out.toByteArray(), rate, format, channels) else null
@@ -170,10 +188,17 @@ class SystemVoice(private val voice: Voice, number: Int = 0) : BookVoice {
                 }
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) {
+                    if (utteranceId != id) return
                     done.completeExceptionally(IllegalStateException(t("系统朗读合成失败")))
                 }
                 override fun onError(utteranceId: String?, errorCode: Int) {
+                    if (utteranceId != id) return
                     done.completeExceptionally(IllegalStateException(t("系统朗读合成失败（%lld）", errorCode.toLong())))
+                }
+                override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                    if (utteranceId == id && !done.isCompleted) {
+                        done.completeExceptionally(IllegalStateException(t("系统朗读合成失败")))
+                    }
                 }
             })
             var timedOut = true
@@ -189,6 +214,7 @@ class SystemVoice(private val voice: Voice, number: Int = 0) : BookVoice {
                     done.await().also { timedOut = false }
                 }
             } finally {
+                if (!done.isCompleted) runCatching { engine.stop() }
                 file.delete()
                 runCatching { engine.setOnUtteranceProgressListener(null) }
             }
@@ -268,15 +294,55 @@ class SystemVoice(private val voice: Voice, number: Int = 0) : BookVoice {
             return if (samples.isEmpty()) null else Speech(samples, rate)
         }
 
-        /** Stops what 试听 is saying. */
+        private fun finishPreview(token: Long) {
+            val done: (() -> Unit)?
+            synchronized(previewLock) {
+                if (previewToken != token) return
+                previewToken++
+                pendingTtsPreview = null
+                previewEndWatch?.let { previewMain.removeCallbacks(it) }
+                previewEndWatch = null
+                done = previewOnDone
+                previewOnDone = null
+                previewTrack?.runCatching {
+                    setPlaybackPositionUpdateListener(null)
+                    stop()
+                    release()
+                }
+                previewTrack = null
+            }
+            done?.let { cb ->
+                if (Looper.myLooper() == Looper.getMainLooper()) cb()
+                else previewMain.post(cb)
+            }
+        }
+
+        /** Stops what 试听 is saying without touching the synthesis TTS engine used by playback. */
         fun stopPreview() {
-            runCatching { tts?.stop() }
-            previewTrack?.runCatching { stop(); release() }
-            previewTrack = null
+            val done: (() -> Unit)?
+            synchronized(previewLock) {
+                previewToken++
+                pendingTtsPreview = null
+                previewEndWatch?.let { previewMain.removeCallbacks(it) }
+                previewEndWatch = null
+                done = previewOnDone
+                previewOnDone = null
+                runCatching { previewTts?.stop() }
+                previewTrack?.runCatching {
+                    setPlaybackPositionUpdateListener(null)
+                    stop()
+                    release()
+                }
+                previewTrack = null
+            }
+            done?.let { cb ->
+                if (Looper.myLooper() == Looper.getMainLooper()) cb()
+                else previewMain.post(cb)
+            }
         }
 
         /** Plays a cloud or rendered clip once for 试听. */
-        fun preview(s: Speech): Boolean {
+        fun preview(s: Speech, onComplete: (() -> Unit)? = null): Boolean {
             stopPreview()
             if (s.samples.isEmpty() || s.rate <= 0) return false
             val bytes = s.samples.size * 2
@@ -288,28 +354,131 @@ class SystemVoice(private val voice: Voice, number: Int = 0) : BookVoice {
                     .setBufferSizeInBytes(maxOf(2, bytes))
                     .build()
             }.getOrNull() ?: return false
+            val token: Long
+            synchronized(previewLock) {
+                token = previewToken
+                previewOnDone = onComplete
+                previewTrack = track
+            }
+            val durationMs = maxOf(100L, (s.samples.size.toLong() * 1000L) / s.rate)
+            val endWatch = Runnable { finishPreview(token) }
             val started = runCatching {
                 track.write(s.samples, 0, s.samples.size)
+                track.setNotificationMarkerPosition(s.samples.size)
+                track.setPlaybackPositionUpdateListener(
+                    object : AudioTrack.OnPlaybackPositionUpdateListener {
+                        override fun onMarkerReached(t: AudioTrack?) = finishPreview(token)
+                        override fun onPeriodicNotification(t: AudioTrack?) {}
+                    },
+                    previewMain,
+                )
+                synchronized(previewLock) {
+                    if (previewToken == token) {
+                        previewEndWatch = endWatch
+                        previewMain.postDelayed(endWatch, durationMs + 350L)
+                    }
+                }
                 track.play()
                 true
             }.getOrDefault(false)
             if (!started) {
-                runCatching { track.release() }
+                synchronized(previewLock) {
+                    if (previewToken == token) {
+                        previewEndWatch?.let { previewMain.removeCallbacks(it) }
+                        previewEndWatch = null
+                        previewTrack = null
+                        previewOnDone = null
+                    }
+                }
+                runCatching { track.setPlaybackPositionUpdateListener(null); track.release() }
                 return false
             }
-            previewTrack = track
             return true
         }
 
-        /** Says a few words straight away, for 试听. */
-        fun preview(voice: Voice, text: String): Boolean {
-            val engine = tts?.takeIf { readyOk == true } ?: return false
-            stopPreview()
+        private fun speakPreview(engine: TextToSpeech, token: Long, voice: Voice, text: String): Boolean {
+            synchronized(previewLock) {
+                if (previewToken != token) return false
+            }
+            val utteranceId = "preview-$token"
             return runCatching {
-                engine.setOnUtteranceProgressListener(null)
+                engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(id: String?) {}
+                    override fun onDone(id: String?) {
+                        if (id == utteranceId) finishPreview(token)
+                    }
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(id: String?) {
+                        if (id == utteranceId) finishPreview(token)
+                    }
+                    override fun onError(id: String?, errorCode: Int) {
+                        if (id == utteranceId) finishPreview(token)
+                    }
+                    override fun onStop(id: String?, interrupted: Boolean) {
+                        if (id == utteranceId) finishPreview(token)
+                    }
+                })
                 engine.voice = voice
-                engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "preview") == TextToSpeech.SUCCESS
+                engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId) == TextToSpeech.SUCCESS
             }.getOrDefault(false)
+        }
+
+        /** Says a few words straight away, for 试听, on a dedicated TTS engine so active playback is never interrupted. */
+        fun preview(voice: Voice, text: String, onComplete: (() -> Unit)? = null): Boolean {
+            stopPreview()
+            val ctx = appContext ?: return false
+            if (readyOk == false) return false
+            val token: Long
+            val readyEngine: TextToSpeech?
+            synchronized(previewLock) {
+                token = previewToken
+                previewOnDone = onComplete
+                val existing = previewTts
+                if (existing != null && previewReadyOk == true) {
+                    readyEngine = existing
+                } else {
+                    readyEngine = null
+                    pendingTtsPreview = PendingPreview(token, voice, text)
+                    if (existing == null || previewReadyOk == false) {
+                        runCatching { existing?.shutdown() }
+                        previewTts = null
+                        previewReadyOk = null
+                        var created: TextToSpeech? = null
+                        created = TextToSpeech(ctx) { status ->
+                            val ok = status == TextToSpeech.SUCCESS
+                            var pending: PendingPreview? = null
+                            var engineToUse: TextToSpeech? = null
+                            synchronized(previewLock) {
+                                if (previewTts != null && previewTts !== created) {
+                                    runCatching { created?.shutdown() }
+                                    return@TextToSpeech
+                                }
+                                previewReadyOk = ok
+                                pending = pendingTtsPreview
+                                pendingTtsPreview = null
+                                engineToUse = created
+                            }
+                            val req = pending ?: return@TextToSpeech
+                            if (ok && engineToUse != null) {
+                                if (!speakPreview(engineToUse, req.token, req.voice, req.text)) {
+                                    finishPreview(req.token)
+                                }
+                            } else {
+                                finishPreview(req.token)
+                            }
+                        }
+                        previewTts = created
+                    }
+                }
+            }
+            if (readyEngine != null) {
+                val ok = speakPreview(readyEngine, token, voice, text)
+                if (!ok) {
+                    finishPreview(token)
+                    return false
+                }
+            }
+            return true
         }
 
         /** Opens system TTS data download, or falls back to system TTS / general settings. */
@@ -323,7 +492,7 @@ class SystemVoice(private val voice: Voice, number: Int = 0) : BookVoice {
         }
     }
 
-    fun preview(text: String): Boolean = Engine.preview(voice, text)
+    fun preview(text: String, onComplete: (() -> Unit)? = null): Boolean = Engine.preview(voice, text, onComplete)
 }
 
 /** Every voice to choose from: built-in & book cards, cloned voices, cloud voices, and system voices. */

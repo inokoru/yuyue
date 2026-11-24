@@ -79,11 +79,18 @@ fun AudiobookScreen(library: Library, bookID: String, close: () -> Unit) {
     val context = LocalContext.current
     val player = remember(bookID) {
         // Still playing with the page closed: picked up as it is.
-        (library.nowPlaying as? AudiobookPlayer)?.takeIf { it.bookID == bookID }?.also { library.nowPlaying = null } ?: run {
+        (library.nowPlaying as? AudiobookPlayer)?.takeIf { it.bookID == bookID }?.also { p ->
+            library.nowPlaying = null
+            when (library.takeIntent(bookID)) {
+                Library.OpenIntent.Listen -> if (!p.isPlaying) p.play()
+                Library.OpenIntent.ListenFromStart -> { p.seekTo(0.0); p.play() }
+                else -> {}
+            }
+        } ?: run {
+            val book = library.books.firstOrNull { it.id == bookID } ?: return@run null
             (library.nowPlaying as? AudiobookPlayer)?.close()
             (library.nowPlaying as? app.yuyue.reader.ReaderModel)?.close()
             library.nowPlaying = null
-            val book = library.books.first { it.id == bookID }
             AudiobookPlayer(context, library, book).also { p ->
                 when (library.takeIntent(bookID)) {
                     Library.OpenIntent.Listen -> p.play()
@@ -93,10 +100,15 @@ fun AudiobookScreen(library: Library, bookID: String, close: () -> Unit) {
             }
         }
     }
+    if (player == null) {
+        androidx.compose.runtime.LaunchedEffect(bookID) { close() }
+        return
+    }
     DisposableEffect(player) {
         onDispose {
             // Closed while it plays: it goes on, with the 播放条 over the tabs.
-            if (player.isPlaying || player.waiting) library.nowPlaying = player else player.close()
+            val stillInLibrary = library.books.any { it.id == player.bookID }
+            if (stillInLibrary && (player.isPlaying || player.waiting)) library.nowPlaying = player else player.close()
         }
     }
     BackHandler(onBack = close)

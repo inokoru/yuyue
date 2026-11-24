@@ -18,7 +18,7 @@ class WatchedFolder(private val context: Context) {
     /** The folder's name, while there is one. */
     var name by mutableStateOf(Prefs.string(NAME).ifEmpty { null })
         private set
-    private var scanning = false
+    @Volatile private var scanning = false
 
     /** Starts watching the folder the system's picker gave, and takes in what is there already. */
     suspend fun choose(uri: Uri, library: Library) {
@@ -43,29 +43,42 @@ class WatchedFolder(private val context: Context) {
     /** Takes in the books put in the folder since last time. */
     suspend fun scan(library: Library) {
         if (scanning) return
-        val tree = Prefs.shared.getString(TREE, null)?.let(Uri::parse) ?: return
+        val treeString = Prefs.shared.getString(TREE, null) ?: return
+        val tree = Uri.parse(treeString)
         scanning = true
+        var handedOff = false
         try {
             val seen = Prefs.string(SEEN).split('\n').filter { it.isNotEmpty() }.toMutableSet()
             val fresh = withContext(Dispatchers.IO) {
                 val root = DocumentFile.fromTreeUri(context, tree) ?: return@withContext emptyList()
-                val out = mutableListOf<Uri>()
+                val out = mutableListOf<Pair<Uri, String>>()
+                val planned = HashSet<String>()
                 fun walk(dir: DocumentFile, depth: Int) {
                     for (f in dir.listFiles()) {
                         val n = f.name ?: continue
                         if (n.startsWith(".")) continue
                         if (f.isDirectory) { if (depth < 4) walk(f, depth + 1); continue }
                         if (n.substringAfterLast('.', "").lowercase() !in EXTENSIONS) continue
-                        if (seen.add("$n|${f.length()}|${f.lastModified() / 1000}")) out += f.uri
+                        val key = "$n|${f.length()}|${f.lastModified() / 1000}"
+                        if (key !in seen && planned.add(key)) out += f.uri to key
                     }
                 }
                 walk(root, 0)
                 out
             }
-            Prefs.set(SEEN, seen.joinToString("\n"))
-            if (fresh.isNotEmpty()) library.importUris(fresh, folder = name)
+            if (fresh.isNotEmpty()) {
+                val keysByUri = fresh.associate { it.first to it.second }
+                val job = library.importUrisJob(fresh.map { it.first }, folder = name) { uri ->
+                    if (Prefs.shared.getString(TREE, null) != treeString) return@importUrisJob
+                    val key = keysByUri[uri] ?: return@importUrisJob
+                    if (seen.add(key)) Prefs.set(SEEN, seen.joinToString("\n"))
+                }
+                handedOff = true
+                job.invokeOnCompletion { scanning = false }
+                job.join()
+            }
         } finally {
-            scanning = false
+            if (!handedOff) scanning = false
         }
     }
 

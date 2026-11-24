@@ -1,7 +1,6 @@
 package app.yuyue.speech
 
 import android.content.Context
-import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioFormat
@@ -203,6 +202,8 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         missingVoice = null
         thermalNotice = null
         thermalFallbackSection = null
+        pausedForFocus = false
+        (sleep as? Sleep.Until)?.let { if (System.currentTimeMillis() >= it.at) sleep = Sleep.Off }
         reset()
         startWord = word?.let { Spot(from.section.toInt(), from.sentence.toInt()) to it }
         val start = first(Spot(from.section.toInt(), from.sentence.toInt())) ?: return stop()
@@ -222,29 +223,73 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         render()
     }
 
-    fun pause() {
+    /** Moves the paused cursor to `from` without starting playback, notifying the reader immediately. */
+    private fun seekPaused(from: Position) {
+        failure = null
+        failedSpot = null
+        missingVoice = null
+        thermalNotice = null
+        thermalFallbackSection = null
+        reset()
+        startWord = null
+        val start = first(Spot(from.section.toInt(), from.sentence.toInt())) ?: return stop()
+        spot = start
+        nextToRender = start
+        state = State.Paused
+        report()
+        Session.update()
+    }
+
+    fun pause() = pauseInternal(keepFocus = false)
+
+    private fun pauseInternal(keepFocus: Boolean) {
         if (state != State.Playing && state != State.Loading) return
         // stop pre-synthesizing ahead immediately on pause.
         rendering?.cancel()
         rendering = null
+        main.removeCallbacks(watch)
         runCatching { track?.pause() }
         state = State.Paused
+        if (!keepFocus) {
+            pausedForFocus = false
+            releaseFocus()
+        }
+        stopFade(restoreVolume = true)
+        (sleep as? Sleep.Until)?.let { if (System.currentTimeMillis() >= it.at) sleep = Sleep.Off }
         report()
         Session.update()
     }
 
     fun resume() {
         if (state != State.Paused) return
-        if (queued.isEmpty()) feedTrack()
+        pausedForFocus = false
+        (sleep as? Sleep.Until)?.let { if (System.currentTimeMillis() >= it.at) sleep = Sleep.Off }
+        val wasEmpty = queued.isEmpty()
+        if (wasEmpty) feedTrack()
         if (queued.isEmpty()) {
             state = State.Loading
+            if (Session.current !== this) Session.claim(this) else {
+                Session.update()
+                startService()
+            }
             return render()
         }
         if (!takeFocus()) return
+        if (!fading) runCatching { track?.setVolume(1f) }
         runCatching { track?.play() }
-        state = State.Playing
-        report()
-        Session.update()
+        if (wasEmpty) {
+            began()
+            if (Session.current !== this) Session.claim(this) else startService()
+        } else {
+            state = State.Playing
+            report()
+            if (Session.current !== this) Session.claim(this) else {
+                Session.update()
+                startService()
+            }
+            main.removeCallbacks(watch)
+            main.postDelayed(watch, 40)
+        }
         render()
     }
 
@@ -257,11 +302,13 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         thermalNotice = null
         thermalFallbackSection = null
         voices.clear()
+        pausedForFocus = false
+        stopFade(restoreVolume = false)
         reset()
         state = State.Stopped
         spot = null
         releaseFocus()
-        Session.update()
+        Session.release(this)
         if (was != State.Stopped) onStop?.invoke()
     }
 
@@ -270,9 +317,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         val l = queued.firstOrNull() ?: return
         val e = l.extra ?: return
         val next = (if (e.place == uniffi.yuyue_core.ExtraPlace.HEAD) l.spot else after(l.spot)) ?: return stop()
-        val paused = state == State.Paused
-        play(next.position)
-        if (paused) pause()
+        if (state == State.Paused) seekPaused(next.position) else play(next.position)
     }
 
     /** 点这里听: the 片头 just passed, then on from the first sentence. */
@@ -295,9 +340,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         if (narrator != null && g != null) {
             while (g.skips(target.section, target.sentence)) target = (if (forward) after(target) else before(target)) ?: break
         }
-        val paused = state == State.Paused
-        play(target.position)
-        if (paused) pause()
+        if (state == State.Paused) seekPaused(target.position) else play(target.position)
     }
 
     fun changeRate(r: Float) {
@@ -692,6 +735,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                 .build()
         }.getOrNull() ?: return null
         runCatching { t.playbackParams = PlaybackParams().setSpeed(this.rate).setPitch(1f) }
+        if (fading) runCatching { t.setVolume(fadeVolume(sleep, fading, System.currentTimeMillis())) }
         track = t
         trackRate = rate
         scheduled = 0
@@ -714,6 +758,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     /** Watches the track's head: when it passes a sentence's end, the next one has begun. */
     private val watch: Runnable = object : Runnable {
         override fun run() {
+            if (state != State.Playing && state != State.Loading) return
             val t = track ?: return
             val head = runCatching { t.playbackHeadPosition.toLong() and 0xffffffffL }.getOrDefault(0)
             val first = queued.firstOrNull()
@@ -727,13 +772,12 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
 
     private fun played() {
         val done = queued.firstOrNull()?.spot ?: return
-        val range = loopRange
-        if (loop && range != null) {
-            // A few sentences: at the last (or once outside them), back to the first.
-            if (done.section != range.first || done.sentence >= range.third || done.sentence < range.second) return play(Spot(range.first, range.second).position)
-        } else if (loop) return play(done.position)
         val next = queued.getOrNull(1)?.spot ?: staged.firstOrNull()?.spot ?: nextToRender
-        if (shouldSleep(done, next)) return fallAsleep(next ?: done)
+        when (val action = nextActionAfterPlayed(done, next, sleep, loop, loopRange, System.currentTimeMillis())) {
+            is PlayedAction.SleepAt -> return fallAsleep(action.spot)
+            is PlayedAction.LoopTo -> return play(action.spot.position)
+            PlayedAction.Advance -> Unit
+        }
         queued.removeFirst()
         val wasEmpty = queued.isEmpty()
         feedTrack()
@@ -755,33 +799,34 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         render()
     }
 
-    private fun shouldSleep(done: Spot, next: Spot?): Boolean = when (val s = sleep) {
-        Sleep.Off -> false
-        Sleep.Sentence -> true
-        Sleep.Chapter -> next == null || next.section != done.section
-        is Sleep.Until -> System.currentTimeMillis() >= s.at
-    }
-
     /** Stops between sentences for the sleep timer, paused where it would have gone on. */
     private fun fallAsleep(at: Spot) {
         reset()
+        pausedForFocus = false
+        releaseFocus()
         val from = sleepFrom
         sleep = Sleep.Off
         sleepFrom = from
         spot = at
         nextToRender = at
         state = State.Paused
+        report()
         Session.update()
         onSleep?.invoke(at)
+    }
+
+    private fun stopFade(restoreVolume: Boolean = true) {
+        if (fading) fading = false
+        shake?.stop()
+        shake = null
+        if (restoreVolume) runCatching { track?.setVolume(1f) }
     }
 
     private fun sleepChanged(old: Sleep) {
         if (old == Sleep.Off) sleepFrom = spot
         fadeJob?.cancel()
-        fading = false
-        shake?.stop()
-        shake = null
-        runCatching { track?.setVolume(1f) }
+        fadeJob = null
+        stopFade(restoreVolume = true)
         val s = sleep as? Sleep.Until ?: return
         fadeJob = scope.launch {
             val lead = s.at - System.currentTimeMillis() - FADE_MS
@@ -790,24 +835,24 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
             while (sleep == s) {
                 val left = s.at - System.currentTimeMillis()
                 if (state != State.Playing && state != State.Loading) {
-                    // Paused: nothing fades, and no key is taken for 续 10 分钟; the time passing
+                    // Paused/Stopped: nothing fades, and no key is taken for 续 10 分钟; the time passing
                     // meanwhile ends the timer, so playing again doesn't stop a moment later.
                     if (left <= 0) { sleep = Sleep.Off; return@launch }
-                    if (fading) {
-                        fading = false
-                        shake?.stop()
-                        shake = null
-                        runCatching { track?.setVolume(1f) }
-                    }
+                    stopFade(restoreVolume = true)
                     kotlinx.coroutines.delay(500)
                     continue
+                }
+                if (left <= 0 && queued.isEmpty()) {
+                    // Expired while loading with no sentence playing: stop now instead of starting a muted sentence.
+                    val at = spot ?: nextToRender
+                    if (at != null) fallAsleep(at) else sleep = Sleep.Off
+                    return@launch
                 }
                 if (!fading) {
                     fading = true
                     shake = ShakeWatch(context) { extendSleep() }.also { it.start() }
                 }
                 runCatching { track?.setVolume((left.toFloat() / FADE_MS).coerceIn(0f, 1f)) }
-                if (left <= 0) break
                 kotlinx.coroutines.delay(200)
             }
         }
@@ -838,19 +883,27 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     }
 
     private fun report() {
-        val l = queued.firstOrNull()?.takeIf { it.extra == null } ?: return
-        val t = track ?: return
-        val head = runCatching { t.playbackHeadPosition.toLong() and 0xffffffffL }.getOrDefault(0)
-        val heard = ((head - l.startFrame).coerceIn(0, l.speech.samples.size.toLong())).toDouble() / l.speech.rate
-        onSentence?.invoke(l.spot, l.speech.seconds / rate * 1000, heard / rate * 1000, state == State.Playing)
+        val l = queued.firstOrNull()
+        if (l != null) {
+            if (l.extra != null) return
+            val t = track
+            if (t != null) {
+                val head = runCatching { t.playbackHeadPosition.toLong() and 0xffffffffL }.getOrDefault(0)
+                val heard = ((head - l.startFrame).coerceIn(0, l.speech.samples.size.toLong())).toDouble() / l.speech.rate
+                onSentence?.invoke(l.spot, l.speech.seconds / rate * 1000, heard / rate * 1000, state == State.Playing)
+                return
+            }
+        }
+        val s = spot ?: return
+        if (state == State.Paused) {
+            onSentence?.invoke(s, 0.0, 0.0, false)
+        }
     }
 
     private fun restartHere() {
         val s = spot ?: return
         if (state == State.Stopped) return
-        val paused = state == State.Paused
-        play(s.position)
-        if (paused) pause()
+        if (state == State.Paused) seekPaused(s.position) else play(s.position)
     }
 
     // MARK: Audio focus
@@ -858,16 +911,22 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     private val attributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
 
     private val focusChange = AudioManager.OnAudioFocusChangeListener { change ->
-        when (change) {
-            AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> pause()
-            AudioManager.AUDIOFOCUS_GAIN -> if (state == State.Paused && pausedForFocus) resume()
+        val t = focusTransition(change, state, pausedForFocus)
+        pausedForFocus = t.pausedForFocus
+        when (t.action) {
+            FocusAction.PauseReleaseFocus -> pauseInternal(keepFocus = false)
+            FocusAction.PauseKeepFocus -> pauseInternal(keepFocus = true)
+            FocusAction.Resume -> resume()
+            FocusAction.None -> if (change == AudioManager.AUDIOFOCUS_LOSS) releaseFocus()
         }
-        pausedForFocus = change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
     }
     private var pausedForFocus = false
 
     private fun takeFocus(): Boolean {
-        val req = focus ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).setAudioAttributes(attributes).setOnAudioFocusChangeListener(focusChange).build().also { focus = it }
+        val req = focus ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(attributes)
+            .setOnAudioFocusChangeListener(focusChange, main)
+            .build().also { focus = it }
         return audio.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
     }
 
@@ -929,6 +988,16 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         return v
     }
 
+    internal sealed interface PlayedAction {
+        data class SleepAt(val spot: Spot) : PlayedAction
+        data class LoopTo(val spot: Spot) : PlayedAction
+        data object Advance : PlayedAction
+    }
+
+    internal enum class FocusAction { None, PauseReleaseFocus, PauseKeepFocus, Resume }
+
+    internal data class FocusTransition(val action: FocusAction, val pausedForFocus: Boolean)
+
     companion object {
         /** [pauseAfter]: as long as the sentence took. */
         const val PAUSE_AS_LONG = -1.0
@@ -939,6 +1008,64 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         private const val NODE_AHEAD = 2
         internal const val THERMAL_SEVERE = 3
         internal const val THERMAL_CRITICAL = 4
+
+        internal fun shouldSleepAt(done: Spot, next: Spot?, sleep: Sleep, nowMs: Long): Boolean = when (sleep) {
+            Sleep.Off -> false
+            Sleep.Sentence -> true
+            Sleep.Chapter -> next == null || next.section != done.section
+            is Sleep.Until -> nowMs >= sleep.at
+        }
+
+        internal fun nextActionAfterPlayed(
+            done: Spot,
+            next: Spot?,
+            sleep: Sleep,
+            loop: Boolean,
+            loopRange: Triple<Int, Int, Int>?,
+            nowMs: Long,
+        ): PlayedAction {
+            val loopTarget = when {
+                loop && loopRange != null ->
+                    if (done.section != loopRange.first || done.sentence >= loopRange.third || done.sentence < loopRange.second) {
+                        Spot(loopRange.first, loopRange.second)
+                    } else null
+                loop -> done
+                else -> null
+            }
+            if (shouldSleepAt(done, next, sleep, nowMs)) {
+                return PlayedAction.SleepAt(loopTarget ?: next ?: done)
+            }
+            if (loopTarget != null) {
+                return PlayedAction.LoopTo(loopTarget)
+            }
+            return PlayedAction.Advance
+        }
+
+        internal fun focusTransition(change: Int, state: State, pausedForFocus: Boolean): FocusTransition = when (change) {
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                val active = state == State.Playing || state == State.Loading
+                FocusTransition(
+                    action = if (active) FocusAction.PauseReleaseFocus else FocusAction.None,
+                    pausedForFocus = false,
+                )
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                val active = state == State.Playing || state == State.Loading
+                if (active) FocusTransition(FocusAction.PauseKeepFocus, pausedForFocus = true)
+                else FocusTransition(FocusAction.None, pausedForFocus = pausedForFocus)
+            }
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                if (state == State.Paused && pausedForFocus) FocusTransition(FocusAction.Resume, pausedForFocus = false)
+                else FocusTransition(FocusAction.None, pausedForFocus = false)
+            }
+            else -> FocusTransition(FocusAction.None, pausedForFocus = pausedForFocus)
+        }
+
+        internal fun fadeVolume(sleep: Sleep, fading: Boolean, nowMs: Long): Float {
+            if (!fading) return 1f
+            val s = sleep as? Sleep.Until ?: return 1f
+            return ((s.at - nowMs).toFloat() / FADE_MS).coerceIn(0f, 1f)
+        }
 
         /** pre-synthesis duration budget (seconds) by `PowerManager` thermal status. */
         internal fun targetAheadSeconds(thermalStatus: Int): Double = when {
@@ -991,7 +1118,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     }
 
     fun startService() {
-        runCatching { context.startService(Intent(context, PlaybackService::class.java)) }
+        PlaybackService.start(context)
     }
 }
 

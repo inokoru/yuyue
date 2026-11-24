@@ -63,6 +63,7 @@ import app.yuyue.speech.SystemVoice
 import app.yuyue.speech.Voices
 import app.yuyue.t
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.yuyue_core.CharacterAge
@@ -349,6 +350,18 @@ fun VoiceGroupsContent(
     var cloudVoices by remember { mutableStateOf<List<CloudVoice>>(emptyList()) }
     var systemVoices by remember { mutableStateOf<List<SystemVoice>>(emptyList()) }
     var previewingId by remember { mutableStateOf<String?>(null) }
+    var previewLoading by remember { mutableStateOf(false) }
+    var previewJob by remember { mutableStateOf<Job?>(null) }
+
+    fun stopLocalPreview() {
+        previewJob?.cancel()
+        previewJob = null
+        previewingId = null
+        previewLoading = false
+        SystemVoice.Engine.stopPreview()
+    }
+
+    DisposableEffect(Unit) { onDispose { stopLocalPreview() } }
 
     LaunchedEffect(language, bookID, refreshKey, kokoroState, liveState) {
         SystemVoice.Engine.init(context)
@@ -374,35 +387,68 @@ fun VoiceGroupsContent(
         }
     }
 
-    fun playPreview(v: BookVoice) {
-        if (previewingId == v.id) {
-            SystemVoice.Engine.stopPreview()
-            previewingId = null
+    fun playPreview(v: BookVoice, key: String = v.id) {
+        if (previewingId == key) {
+            stopLocalPreview()
             return
         }
-        SystemVoice.Engine.stopPreview()
+        stopLocalPreview()
+        previewingId = key
         if (v is SystemVoice) {
-            v.preview(sampleText)
+            previewLoading = false
+            val started = v.preview(sampleText) {
+                if (previewingId == key) {
+                    previewingId = null
+                    previewLoading = false
+                }
+            }
+            if (!started && previewingId == key) {
+                previewingId = null
+            }
             return
         }
-        previewingId = v.id
-        scope.launch {
+        previewLoading = true
+        previewJob = scope.launch {
             try {
                 val s = withContext(Dispatchers.IO) { v.render(sampleText, language) }
-                if (s != null) SystemVoice.Engine.preview(s)
+                if (previewingId != key) return@launch
+                if (s != null) {
+                    previewLoading = false
+                    val started = SystemVoice.Engine.preview(s) {
+                        if (previewingId == key) {
+                            previewingId = null
+                            previewLoading = false
+                        }
+                    }
+                    if (!started && previewingId == key) {
+                        previewingId = null
+                    }
+                } else if (previewingId == key) {
+                    previewingId = null
+                    previewLoading = false
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (_: Throwable) {
-            } finally {
-                if (previewingId == v.id) previewingId = null
+                if (previewingId == key) {
+                    previewingId = null
+                    previewLoading = false
+                }
             }
         }
+    }
+
+    fun previewStateOf(key: String): PreviewState = when {
+        previewingId != key -> PreviewState.Idle
+        previewLoading -> PreviewState.Loading
+        else -> PreviewState.Playing
     }
 
     val hasFollowRow = roleName != null && onPickFollowNarrator != null
     val showRecommended = CardVoice.speaksLanguage(language)
 
     if (roleName != null && onPickFollowNarrator != null) {
+        val followKey = "__follow__"
         YYGroup(Modifier.padding(top = 4.dp)) {
             row {
                 VoiceChoiceRow(
@@ -412,8 +458,8 @@ fun VoiceGroupsContent(
                     badgeAccent = false,
                     subtitle = followSubtitle ?: t("现在旁白是%@，旁白换了%@也跟着换", narratorVoice?.name ?: "", roleName),
                     selected = selectedId == null,
-                    previewing = false,
-                    onPreview = narratorVoice?.let { nv -> { playPreview(nv) } },
+                    previewState = if (narratorVoice != null) previewStateOf(followKey) else PreviewState.Idle,
+                    onPreview = narratorVoice?.let { nv -> { playPreview(nv, key = followKey) } },
                     onMore = null,
                     onClick = onPickFollowNarrator,
                 )
@@ -502,7 +548,7 @@ fun VoiceGroupsContent(
                                 badgeAccent = isDef,
                                 subtitle = sub,
                                 selected = selectedId == kv.id,
-                                previewing = previewingId == kv.id,
+                                previewState = previewStateOf(kv.id),
                                 onPreview = { playPreview(kv) },
                                 onMore = null,
                                 onClick = { onPickVoice(kv) },
@@ -530,7 +576,7 @@ fun VoiceGroupsContent(
                                 badgeAccent = card.id == primaryNarratorId,
                                 subtitle = sub,
                                 selected = selectedId == card.id,
-                                previewing = previewingId == card.id,
+                                previewState = previewStateOf(card.id),
                                 onPreview = { playPreview(v) },
                                 onMore = null,
                                 onClick = { onPickVoice(v) },
@@ -567,7 +613,7 @@ fun VoiceGroupsContent(
                     badgeAccent = false,
                     subtitle = sub,
                     selected = selectedId == card.id,
-                    previewing = previewingId == card.id,
+                    previewState = previewStateOf(card.id),
                     onPreview = if (LiveVoiceModel.canRun(dataDir) || (v as? ClonedVoice)?.isReady == true) ({ playPreview(v) }) else null,
                     onMore = { onOpenDetail(card.id) },
                     onClick = { onPickVoice(v) },
@@ -589,7 +635,7 @@ fun VoiceGroupsContent(
                     badgeAccent = false,
                     subtitle = sub,
                     selected = selectedId == card.id,
-                    previewing = previewingId == card.id,
+                    previewState = previewStateOf(card.id),
                     onPreview = if (LiveVoiceModel.canRun(dataDir)) ({ playPreview(v) }) else null,
                     onMore = null,
                     onClick = { onPickVoice(v) },
@@ -634,7 +680,7 @@ fun VoiceGroupsContent(
                         badgeAccent = false,
                         subtitle = if (used.isNotEmpty()) t("%@在用", used.joinToString(t("、"))) else t("云端"),
                         selected = selectedId == v.id,
-                        previewing = previewingId == v.id,
+                        previewState = previewStateOf(v.id),
                         onPreview = { playPreview(v) },
                         onMore = null,
                         onClick = { onPickVoice(v) },
@@ -677,7 +723,7 @@ fun VoiceGroupsContent(
                         badgeAccent = false,
                         subtitle = sub,
                         selected = selectedId == v.id,
-                        previewing = false,
+                        previewState = previewStateOf(v.id),
                         onPreview = { playPreview(v) },
                         onMore = null,
                         onClick = { onPickVoice(v) },
@@ -688,6 +734,8 @@ fun VoiceGroupsContent(
     }
 }
 
+private enum class PreviewState { Idle, Loading, Playing }
+
 @Composable
 private fun VoiceChoiceRow(
     avatar: String,
@@ -696,7 +744,7 @@ private fun VoiceChoiceRow(
     badgeAccent: Boolean,
     subtitle: String,
     selected: Boolean,
-    previewing: Boolean,
+    previewState: PreviewState,
     onPreview: (() -> Unit)?,
     onMore: (() -> Unit)?,
     onClick: () -> Unit,
@@ -712,16 +760,23 @@ private fun VoiceChoiceRow(
             Modifier
                 .size(28.dp)
                 .clip(CircleShape)
-                .background(if (selected) YY.tint.accentSoft else YY.c.inset)
+                .background(if (selected || previewState != PreviewState.Idle) YY.tint.accentSoft else YY.c.inset)
                 .then(if (onPreview != null) Modifier.clickable(onClick = onPreview) else Modifier),
             contentAlignment = Alignment.Center,
         ) {
-            if (previewing) {
-                CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = YY.tint.accent)
-            } else if (onPreview != null) {
-                Icon(Icons.play, t("试听"), tint = if (selected) YY.tint.accent else YY.c.t2, modifier = Modifier.size(12.dp))
-            } else {
-                Text(avatar, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = if (selected) YY.tint.accent else YY.c.t2)
+            when {
+                previewState == PreviewState.Loading -> {
+                    CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = YY.tint.accent)
+                }
+                previewState == PreviewState.Playing -> {
+                    Icon(Icons.stop, t("停止试听"), tint = YY.tint.accent, modifier = Modifier.size(11.dp))
+                }
+                onPreview != null -> {
+                    Icon(Icons.play, t("试听"), tint = if (selected) YY.tint.accent else YY.c.t2, modifier = Modifier.size(12.dp))
+                }
+                else -> {
+                    Text(avatar, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = if (selected) YY.tint.accent else YY.c.t2)
+                }
             }
         }
         Column(

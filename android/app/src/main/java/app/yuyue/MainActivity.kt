@@ -90,6 +90,7 @@ class MainActivity : ComponentActivity() {
     private val library: Library get() = (application as YuyueApp).library
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        AppLanguage.apply(this)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
@@ -109,6 +110,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        AppLanguage.apply(this)
     }
 
     /** 音量键翻页: volume down turns on, up turns back; held down, the pages keep turning. */
@@ -284,9 +290,20 @@ fun Root(library: Library) {
         // A book opens with a quick fade up from a touch smaller (or slides up like a sheet for
         // 有声书 matching its 收起 chevron), and closes the same way back; the last one stays drawn while it goes.
         var shownBook by remember { mutableStateOf<String?>(null) }
-        if (library.presented != null) shownBook = library.presented
+        var shownFormat by remember { mutableStateOf<uniffi.yuyue_core.BookFormat?>(null) }
+        val presentedBook = library.presented?.let { id -> library.books.firstOrNull { it.id == id } }
+        if (presentedBook != null) {
+            shownBook = presentedBook.id
+            shownFormat = presentedBook.format
+        }
+        LaunchedEffect(library.presented, presentedBook) {
+            if (library.presented != null && presentedBook == null) {
+                library.presented = null
+                lastBook = ""
+            }
+        }
         val reduceBook = app.yuyue.design.YYMotion.isReduceMotion()
-        val isAudioBook = shownBook?.let { id -> library.books.firstOrNull { it.id == id }?.format == uniffi.yuyue_core.BookFormat.AUDIO } == true
+        val isAudioBook = shownFormat == uniffi.yuyue_core.BookFormat.AUDIO
         val bookEnter = when {
             reduceBook -> androidx.compose.animation.fadeIn(app.yuyue.design.YYMotion.standard())
             isAudioBook -> androidx.compose.animation.fadeIn(app.yuyue.design.YYMotion.standard()) +
@@ -302,7 +319,7 @@ fun Root(library: Library) {
                 androidx.compose.animation.scaleOut(app.yuyue.design.YYMotion.exit(), targetScale = 0.98f)
         }
         androidx.compose.animation.AnimatedVisibility(
-            library.presented != null,
+            presentedBook != null,
             enter = bookEnter,
             exit = bookExit,
         ) {
@@ -312,9 +329,10 @@ fun Root(library: Library) {
                     library.presented = null
                     lastBook = ""
                 }
-                when (library.books.firstOrNull { it.id == id }?.format) {
+                when (shownFormat) {
                     uniffi.yuyue_core.BookFormat.PDF -> app.yuyue.pdf.PdfScreen(library, id, closeBook)
                     uniffi.yuyue_core.BookFormat.AUDIO -> app.yuyue.shelf.AudiobookScreen(library, id, closeBook)
+                    null -> Unit
                     else -> ReaderScreen(library, id, closeBook)
                 }
             }

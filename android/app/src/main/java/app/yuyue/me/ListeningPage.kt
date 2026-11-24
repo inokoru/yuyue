@@ -137,6 +137,7 @@ private fun SourceBadgePill(text: String, tone: Int) {
         style = YY.font(9.5f, FontWeight.SemiBold),
         color = fg,
         maxLines = 1,
+        softWrap = false,
         modifier = Modifier
             .background(bg, RoundedCornerShape(YY.s(4)))
             .padding(horizontal = YY.s(5), vertical = YY.s(1)),
@@ -388,8 +389,8 @@ fun ListeningPage(open: (String) -> Unit) {
                 Row(Modifier.fillMaxWidth().clickable { open(id) }.padding(vertical = YY.s(9)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(10))) {
                     SourceTile(id, 30f)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(YY.s(1))) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(6))) {
-                            Text(voiceSourceTitle(id), style = YY.font(11.5f, FontWeight.Medium), color = if (id == SYSTEM) YY.c.t2 else YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(6))) {
+                            Text(voiceSourceTitle(id), style = YY.font(11.5f, FontWeight.Medium), color = if (id == SYSTEM) YY.c.t2 else YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                             when {
                                 id == NEURAL -> SourceBadgePill(t("推荐"), 0)
                                 id == SYSTEM -> SourceBadgePill(t("不推荐"), 1)
@@ -410,7 +411,7 @@ fun ListeningPage(open: (String) -> Unit) {
                                 p != null -> t("%lld 个音色 · 已连接", CloudVoice.all().count { it.provider == p })
                                 else -> ""
                             },
-                            style = YY.font(10f), color = YY.c.t3, maxLines = 1,
+                            style = YY.font(10f), color = YY.c.t3, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
                         for ((b, v) in reading.entries.sortedBy { it.key.ordinal }) if (sourceOf(v) == id) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(3)), modifier = Modifier.padding(top = YY.s(1))) {
@@ -946,19 +947,44 @@ private fun VoiceMessage(v: BookVoice, book: VoiceBook, scope: kotlinx.coroutine
 @Composable
 private fun PinnedVoice(v: BookVoice, book: VoiceBook, elsewhere: Boolean, scope: kotlinx.coroutines.CoroutineScope) {
     val (ground, ink) = colorsOf(v.id)
+    val pinTint = if (YY.dark) YY.c.t2 else ink
     Row(
-        Modifier.fillMaxWidth().height(YY.s(44)).shadow(6.dp, RoundedCornerShape(YY.s(14)), ambientColor = Color(0x22332E29), spotColor = Color(0x33332E29))
+        Modifier.fillMaxWidth().heightIn(min = YY.s(44)).shadow(6.dp, RoundedCornerShape(YY.s(14)), ambientColor = Color(0x22332E29), spotColor = Color(0x33332E29))
             .clip(RoundedCornerShape(YY.s(14))).background(YY.c.card).background(if (YY.dark) ground.copy(alpha = 0.12f) else ground.copy(alpha = 0.34f))
-            .border(0.5.dp, if (YY.dark) YY.c.line else ink.copy(alpha = 0.16f), RoundedCornerShape(YY.s(14))).padding(start = YY.s(8), end = YY.s(10)),
+            .border(0.5.dp, if (YY.dark) YY.c.line else ink.copy(alpha = 0.16f), RoundedCornerShape(YY.s(14)))
+            .padding(horizontal = YY.s(10), vertical = YY.s(7)),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(8)),
     ) {
         VoiceAvatar(v, 28f, pinned = true)
-        // A system voice's name leads with its language; pinned on a narrow row, only 声音 A.
-        Text(if (v is SystemVoice) v.name.substringAfterLast(" · ") else v.name, style = YY.font(11.5f, FontWeight.SemiBold), color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-        VoiceBubble(v, book, scope, dark = true, height = 30f, widest = 118f)
-        Spacer(Modifier.weight(1f))
-        Icon(Icons.pin, t("念你的%@", book.title), tint = if (YY.dark) YY.c.t2 else ink, modifier = Modifier.size(YY.s(14)))
-        if (elsewhere) Text(voiceSourceTitle(sourceOf(v)), style = YY.font(10f, FontWeight.Medium), color = if (YY.dark) YY.c.t2 else ink, maxLines = 1)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(YY.s(1))) {
+            // A system voice's name leads with its language; pinned on a narrow row, only 声音 A.
+            Text(
+                if (v is SystemVoice) v.name.substringAfterLast(" · ") else v.name,
+                style = YY.font(11.5f, FontWeight.SemiBold),
+                color = YY.c.t1,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (elsewhere) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(YY.s(3)),
+                ) {
+                    Icon(Icons.pin, t("念你的%@", book.title), tint = pinTint, modifier = Modifier.size(YY.s(9.5f)))
+                    Text(
+                        voiceSourceTitle(sourceOf(v)),
+                        style = YY.font(9.5f, FontWeight.Medium),
+                        color = pinTint,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        VoiceBubble(v, book, scope, dark = true, height = 30f, widest = 108f)
+        if (!elsewhere) {
+            Icon(Icons.pin, t("念你的%@", book.title), tint = pinTint, modifier = Modifier.size(YY.s(14)))
+        }
     }
 }
 

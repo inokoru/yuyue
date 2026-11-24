@@ -48,8 +48,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -179,16 +183,59 @@ fun LazyGridScope.progressItems(
 /** The five, each with how many: the name, a grey count, a faint ink under the one shown. */
 @Composable
 private fun StatusTabs(status: ReadingStatus, counts: Map<ReadingStatus, Int>, set: (ReadingStatus) -> Unit) {
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-        for (s in shelfOrder) {
-            val on = s == status
-            val ground by androidx.compose.animation.animateColorAsState(if (on) chosenInk else chosenInk.copy(alpha = 0f), app.yuyue.design.YYMotion.quick(), label = "statusTab")
-            Row(
-                Modifier.heightIn(min = 28.dp).clip(RoundedCornerShape(8.dp)).background(ground).clickable { set(s) }.padding(horizontal = 10.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text(s.title, fontSize = 13.5.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, color = YY.c.t1)
-                Text("${counts[s] ?: 0}", fontSize = 10.5.sp, color = YY.c.t3, style = YY.tnum)
+    val scroll = rememberScrollState()
+    val bg = YY.c.bg
+    val fadeLeft by androidx.compose.animation.core.animateFloatAsState(
+        if (scroll.canScrollBackward) 1f else 0f,
+        app.yuyue.design.YYMotion.quick(),
+        label = "statusFadeLeft",
+    )
+    val fadeRight by androidx.compose.animation.core.animateFloatAsState(
+        if (scroll.canScrollForward) 1f else 0f,
+        app.yuyue.design.YYMotion.quick(),
+        label = "statusFadeRight",
+    )
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .drawWithContent {
+                drawContent()
+                val edge = 24.dp.toPx().coerceAtMost(size.width / 4f)
+                if (fadeLeft > 0.01f) {
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(bg.copy(alpha = fadeLeft), Color.Transparent),
+                            startX = 0f,
+                            endX = edge,
+                        ),
+                        topLeft = Offset.Zero,
+                        size = Size(edge, size.height),
+                    )
+                }
+                if (fadeRight > 0.01f) {
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(Color.Transparent, bg.copy(alpha = fadeRight)),
+                            startX = size.width - edge,
+                            endX = size.width,
+                        ),
+                        topLeft = Offset(size.width - edge, 0f),
+                        size = Size(edge, size.height),
+                    )
+                }
+            },
+    ) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            for (s in shelfOrder) {
+                val on = s == status
+                val ground by androidx.compose.animation.animateColorAsState(if (on) chosenInk else chosenInk.copy(alpha = 0f), app.yuyue.design.YYMotion.quick(), label = "statusTab")
+                Row(
+                    Modifier.heightIn(min = 28.dp).clip(RoundedCornerShape(8.dp)).background(ground).clickable { set(s) }.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(s.title, fontSize = 13.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, color = YY.c.t1, maxLines = 1, softWrap = false)
+                    Text("${counts[s] ?: 0}", fontSize = 10.5.sp, color = YY.c.t3, style = YY.tnum, maxLines = 1, softWrap = false)
+                }
             }
         }
     }

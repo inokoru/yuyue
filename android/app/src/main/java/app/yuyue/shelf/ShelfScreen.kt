@@ -232,7 +232,7 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
                     Welcome(onFiles = { picker.launch(importTypes) }, onWifi = openWifi, onRemote = openRemote)
                 }
             } else if (shown.isEmpty()) {
-                item(span = { GridItemSpan(maxLineSpan) }) { Empty(library, collection != null) { picker.launch(importTypes) } }
+                item(span = { GridItemSpan(maxLineSpan) }) { Empty(library, place) { picker.launch(importTypes) } }
             } else {
                 // 全部, how many, and their order — as 在读's own row above.
                 item(span = { GridItemSpan(maxLineSpan) }) {
@@ -521,16 +521,19 @@ private fun Way(icon: ImageVector, title: String, detail: String, modifier: Modi
 }
 
 @Composable
-private fun Empty(library: Library, inCollection: Boolean, import: () -> Unit) {
+private fun Empty(library: Library, place: ShelfPlace, import: () -> Unit) {
+    val audio = place == ShelfPlace.Audio
     val (icon, text) = when {
+        audio -> Icons.headphones to t("还没有有声书。点右上角的加号，导入 M4B、MP3 或 M4A 音频文件")
         library.books.isEmpty() -> Icons.books to t("书架是空的。点右上角的加号，导入 EPUB、PDF、MOBI 或 TXT")
-        inCollection -> Icons.inbox to t("这个合集里还没有书。长按一本书，点「加入合集」")
+        place is ShelfPlace.Collection -> Icons.inbox to t("这个合集里还没有书。长按一本书，点「加入合集」")
         else -> Icons.book to t("这里还没有书")
     }
     Column(Modifier.fillMaxWidth().heightIn(min = 300.dp).padding(horizontal = 40.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically)) {
         Icon(icon, null, tint = YY.c.t3, modifier = Modifier.size(40.dp))
         Text(text, fontSize = 15.sp, color = YY.c.t2, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-        if (library.books.isEmpty()) YYButton(t("导入书"), ButtonKind.Main, onClick = import)
+        if (audio) YYButton(t("导入有声书"), ButtonKind.Main, onClick = import)
+        else if (library.books.isEmpty()) YYButton(t("导入书"), ButtonKind.Main, onClick = import)
     }
 }
 

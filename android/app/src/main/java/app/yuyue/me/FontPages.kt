@@ -48,6 +48,8 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.yuyue.design.Icons
@@ -81,7 +83,7 @@ internal fun FontTiles(selected: String, titled: Boolean = true, onMore: (() -> 
         if (titled) Text(t("字体"), style = YY.font(11.5f, FontWeight.Medium), color = YY.c.t1)
         val cells: List<String?> = ids + listOf(null)
         Column(verticalArrangement = Arrangement.spacedBy(YY.s(6))) {
-            for (line in cells.chunked(5)) Row(horizontalArrangement = Arrangement.spacedBy(YY.s(6))) {
+            for (line in cells.chunked(4)) Row(horizontalArrangement = Arrangement.spacedBy(YY.s(6))) {
                 for (id in line) {
                     if (id == null) MoreTile(Modifier.weight(1f)) { if (onMore != null) onMore() else more = true }
                     else FontTile(id, id == selected, Modifier.weight(1f), choose, remove = {
@@ -96,7 +98,7 @@ internal fun FontTiles(selected: String, titled: Boolean = true, onMore: (() -> 
                         }
                     })
                 }
-                repeat(5 - line.size) { Spacer(Modifier.weight(1f)) }
+                repeat(4 - line.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
@@ -146,15 +148,18 @@ private fun FontTile(id: String, on: Boolean, modifier: Modifier, choose: (Strin
                 },
         ) {
             Column(
-                Modifier.fillMaxWidth().padding(horizontal = YY.s(3), vertical = YY.s(8)),
+                Modifier.fillMaxWidth().padding(horizontal = YY.s(4), vertical = YY.s(8)),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(YY.s(4)),
             ) {
                 InkGlyph(id, 20f)
                 Text(
                     p?.let { "${(it * 100).toInt()}%" } ?: if (failed) t("重试") else FontShelf.name(id),
-                    style = YY.font(9f, if (on) FontWeight.SemiBold else FontWeight.Normal),
+                    style = YY.font(9f, if (on) FontWeight.SemiBold else FontWeight.Normal, tnum = true),
                     color = when { failed -> YY.c.danger; on -> YY.c.t1; else -> YY.c.t2 },
                     maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
                 )
             }
             if (needsDownload) {
@@ -177,7 +182,7 @@ private fun MoreTile(modifier: Modifier, open: () -> Unit) {
     Column(
         modifier.heightIn(min = YY.s(58)).clip(RoundedCornerShape(YY.s(10))).background(YY.c.card)
             .border(0.8.dp, YY.c.line, RoundedCornerShape(YY.s(10)))
-            .clickable(onClick = open).padding(vertical = YY.s(8)),
+            .clickable(onClick = open).padding(horizontal = YY.s(4), vertical = YY.s(8)),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(YY.s(4)),
     ) {
         Box(Modifier.height(YY.s(24)), contentAlignment = Alignment.Center) {
@@ -185,7 +190,7 @@ private fun MoreTile(modifier: Modifier, open: () -> Unit) {
             MoreCard(FontFamily.SansSerif, Modifier.offset(x = 4.5.dp).rotate(8f))
             MoreCard(FontFamily.Serif)
         }
-        Text(t("更多"), style = YY.font(9f), color = YY.c.t2, maxLines = 1)
+        Text(t("更多"), style = YY.font(9f), color = YY.c.t2, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
     }
 }
 

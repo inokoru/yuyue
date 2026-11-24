@@ -312,15 +312,25 @@ class Library(private val context: Context) {
     /** Imports the files the system picker or another app handed over, into the collection when given. */
     fun importUris(uris: List<Uri>, collection: String? = null, folder: String? = null) {
         if (uris.isEmpty()) return
-        scope.launch {
-            importing++
-            val failures = mutableListOf<String>()
-            val imported = mutableListOf<BookSummary>()
-            // Sound files picked together are one 有声书; an M4B is one on its own.
-            val named = uris.map { it to displayName(it) }
-            val (sounds, files) = named.partition { AudioImporter.isAudio(it.second) }
-            val (m4b, loose) = sounds.partition { it.second.endsWith(".m4b", ignoreCase = true) }
-            val zippedRecordings = mutableListOf<PendingRecording>()
+        importUrisJob(uris, collection, folder)
+    }
+
+    internal fun importUrisJob(
+        uris: List<Uri>,
+        collection: String? = null,
+        folder: String? = null,
+        onHandled: ((Uri) -> Unit)? = null,
+    ): Job = scope.launch {
+        importing++
+        val failures = mutableListOf<String>()
+        val imported = mutableListOf<BookSummary>()
+        var skippedExisting = false
+        // Sound files picked together are one 有声书; an M4B is one on its own.
+        val named = uris.map { it to displayName(it) }
+        val (sounds, files) = named.partition { AudioImporter.isAudio(it.second) }
+        val (m4b, loose) = sounds.partition { it.second.endsWith(".m4b", ignoreCase = true) }
+        val zippedRecordings = mutableListOf<PendingRecording>()
+        try {
             for ((uri, name) in files) {
                 // A zip of sound files is a recording, brought in as a folder would be.
                 if (name.endsWith(".zip", ignoreCase = true)) {
@@ -328,8 +338,11 @@ class Library(private val context: Context) {
                         val unzipped = withContext(Dispatchers.IO) { unzipRecording(uri, name) }
                         if (unzipped != null) {
                             zippedRecordings += unzipped
+                            onHandled?.invoke(uri)
                             continue
                         }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         failures += "$name：${message(e)}"
                         continue
@@ -337,69 +350,78 @@ class Library(private val context: Context) {
                 }
                 if (name.endsWith(".yuyue", ignoreCase = true)) {
                     try {
-                        openedSnapshot = withContext(Dispatchers.IO) { app.yuyue.me.copyIn(uri)?.let { it to core.readSnapshot(it.path) } }
+                        val snapshot = withContext(Dispatchers.IO) { app.yuyue.me.copyIn(uri)?.let { it to core.readSnapshot(it.path) } }
+                        openedSnapshot = snapshot
+                        if (snapshot != null) onHandled?.invoke(uri)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         failures += "$name：${message(e)}"
                     }
                     continue
                 }
-                val had = books.map { it.id }.toSet()
+                val had = books.filter { it.available }.map { it.id }.toSet()
                 try {
                     val book = withContext(Dispatchers.IO) { importOne(uri, name) }
                     if (book.id !in had) {
                         imported += book
                         if (collection != null) runCatching { core.setInCollection(collection, book.id, true) }
+                    } else {
+                        skippedExisting = true
                     }
+                    onHandled?.invoke(uri)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     failures += "$name：${message(e)}"
                 }
                 reload()
             }
+        } finally {
             importing--
-            when {
-                failures.isNotEmpty() -> alert = failures.joinToString("\n")
-                imported.isNotEmpty() -> {
-                    val first = imported[0]
-                    val title = when {
-                        folder != null -> t("导入了 %lld 本", imported.size)
-                        imported.size == 1 -> t("已导入《%@》", first.title)
-                        else -> t("已导入 %lld 本书", imported.size)
-                    }
-                    show(Toast(if (folder != null) Toast.Icon.Folder else Toast.Icon.Add, title, folder?.let { t("来自“%@”文件夹", it) } ?: t("在书架最前面")) {
-                        for (b in imported) runCatching { core.deleteBook(b.id) }
-                        reload()
-                    })
+        }
+        when {
+            failures.isNotEmpty() -> alert = failures.joinToString("\n")
+            imported.isNotEmpty() -> {
+                val first = imported[0]
+                val title = when {
+                    folder != null -> t("导入了 %lld 本", imported.size)
+                    imported.size == 1 -> t("已导入《%@》", first.title)
+                    else -> t("已导入 %lld 本书", imported.size)
                 }
-                openedSnapshot != null && uris.size == 1 -> {}
-                // Recordings wait on 导入有声书; the note comes when they go in.
-                files.isEmpty() -> {}
-                else -> note(Toast.Icon.Check, t("书库中已存在此书，已自动跳过"), "")
+                show(Toast(if (folder != null) Toast.Icon.Folder else Toast.Icon.Add, title, folder?.let { t("来自“%@”文件夹", it) } ?: t("在书架最前面")) {
+                    for (b in imported) runCatching { core.deleteBook(b.id) }
+                    reload()
+                })
             }
-            // Recordings after the books: their sheet waits on the reader, and the books
-            // shouldn't wait on it.
-            val recordingFailures = mutableListOf<String>()
-            for (recording in m4b.map { listOf(it) } + listOfNotNull(loose.takeIf { it.isNotEmpty() })) {
-                importing++
-                val pending = try {
-                    withContext(Dispatchers.IO) { readRecording(recording) }
-                } catch (e: Exception) {
-                    recordingFailures += "${recording.first().second}：${message(e)}"
-                    null
-                } finally {
-                    importing--
-                }
-                if (pending != null) {
-                    // Several brought in at once: one sheet after another.
-                    while (pendingRecording != null) delay(200)
-                    pendingRecording = pending
-                }
+            skippedExisting -> note(Toast.Icon.Check, t("书库中已存在此书，已自动跳过"), "")
+        }
+        // Recordings after the books: their sheet waits on the reader, and the books
+        // shouldn't wait on it.
+        val recordingFailures = mutableListOf<String>()
+        for (recording in m4b.map { listOf(it) } + listOfNotNull(loose.takeIf { it.isNotEmpty() })) {
+            importing++
+            val pending = try {
+                withContext(Dispatchers.IO) { readRecording(recording) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                recordingFailures += "${recording.first().second}：${message(e)}"
+                null
+            } finally {
+                importing--
             }
-            for (pending in zippedRecordings) {
+            if (pending != null) {
+                // Several brought in at once: one sheet after another.
                 while (pendingRecording != null) delay(200)
                 pendingRecording = pending
             }
-            if (recordingFailures.isNotEmpty()) alert = (listOfNotNull(alert) + recordingFailures).joinToString("\n")
         }
+        for (pending in zippedRecordings) {
+            while (pendingRecording != null) delay(200)
+            pendingRecording = pending
+        }
+        if (recordingFailures.isNotEmpty()) alert = (listOfNotNull(alert) + recordingFailures).joinToString("\n")
     }
 
     /** A recording read and waiting on 导入有声书: its name, author, cover
@@ -452,7 +474,7 @@ class Library(private val context: Context) {
     fun finishRecording(p: PendingRecording) {
         pendingRecording = null
         scope.launch {
-            val had = books.map { it.id }.toSet()
+            val had = books.filter { it.available }.map { it.id }.toSet()
             try {
                 val book = withContext(Dispatchers.IO) { core.importAudiobook(p.audio) }
                 reload()

@@ -3,10 +3,12 @@ package app.yuyue
 import android.app.Activity
 import android.app.LocaleManager
 import android.content.Context
+import android.content.res.Configuration
 import android.content.res.Resources
 import android.os.Build
 import android.os.LocaleList
 import app.yuyue.design.Prefs
+import java.util.Locale
 
 /**
  * 通用 › 语言: 跟随系统, 简体中文 or English, for 语阅 alone. From Android 13 it is the system's own
@@ -40,11 +42,48 @@ object AppLanguage {
     }
 
     /** The language the words are in: what was chosen, or the system's. */
-    fun chinese(context: Context): Boolean = when (if (Build.VERSION.SDK_INT >= 33) SYSTEM else Prefs.string(KEY, SYSTEM)) {
-        ZH -> true
-        EN -> false
-        // From 13 the process's own locale is already the app language.
-        else -> (LocaleList.getDefault()[0]?.language ?: "zh") == "zh"
+    fun chinese(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT >= 33) {
+            // From 13 the process's own locale is already the app language.
+            return (LocaleList.getDefault()[0]?.language ?: "zh") == "zh"
+        }
+        apply(context)
+        return when (Prefs.string(KEY, SYSTEM)) {
+            ZH -> true
+            EN -> false
+            else -> systemChinese(context)
+        }
+    }
+
+    /** On Android 12 and below, keep Locale.getDefault() and Resources locales aligned with the chosen app language. */
+    fun apply(context: Context) {
+        if (Build.VERSION.SDK_INT >= 33) return
+        val locales = when (Prefs.string(KEY, SYSTEM)) {
+            ZH -> LocaleList(Locale.SIMPLIFIED_CHINESE)
+            EN -> LocaleList(Locale.ENGLISH)
+            else -> {
+                val sys = Resources.getSystem().configuration.locales
+                if (!sys.isEmpty) sys else LocaleList(Locale.getDefault())
+            }
+        }
+        val primary = locales[0]
+        if (LocaleList.getDefault() != locales) LocaleList.setDefault(locales)
+        if (Locale.getDefault() != primary ||
+            Locale.getDefault(Locale.Category.DISPLAY) != primary ||
+            Locale.getDefault(Locale.Category.FORMAT) != primary
+        ) {
+            Locale.setDefault(primary)
+        }
+        applyConfiguration(context, locales)
+        context.applicationContext?.takeIf { it !== context }?.let { applyConfiguration(it, locales) }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun applyConfiguration(context: Context, locales: LocaleList) {
+        val res = context.resources ?: return
+        if (res.configuration.locales == locales) return
+        val config = Configuration(res.configuration).apply { setLocales(locales) }
+        res.updateConfiguration(config, res.displayMetrics)
     }
 
     fun choose(activity: Activity, value: String) {
@@ -60,6 +99,7 @@ object AppLanguage {
             if (after != before) { sweepPending = true; reopenGeneral = true }
         } else {
             Prefs.set(KEY, value)
+            apply(activity)
             val after = if (value == SYSTEM) systemChinese(activity) else value == ZH
             if (after != before) {
                 sweepPending = true

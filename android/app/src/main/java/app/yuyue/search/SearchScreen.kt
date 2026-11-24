@@ -273,11 +273,12 @@ private fun open(library: Library, h: TitleHit) {
 
 /** The book 书伴 answers from: one whose name was typed, else the one read last or hit. */
 private fun askBook(library: Library, titles: List<TitleHit>, lines: List<LineHit>): BookSummary? {
-    fun can(b: BookSummary) = b.format != BookFormat.PDF
+    fun can(b: BookSummary) = b.available && !b.record &&
+        b.format != BookFormat.PDF && b.format != BookFormat.AUDIO && b.format != BookFormat.PODCAST
     titles.firstOrNull { it.chapter == null && can(it.book) }?.let { return it.book }
-    library.books.filter { it.available && can(it) && it.openedAt != null }.maxByOrNull { it.openedAt ?: 0 }?.let { return it }
+    library.books.filter { can(it) && it.openedAt != null }.maxByOrNull { it.openedAt ?: 0 }?.let { return it }
     lines.map { it.book }.distinctBy { it.id }.singleOrNull { can(it) }?.let { return it }
-    return library.books.filter { it.available && can(it) }.maxByOrNull { it.addedAt }
+    return library.books.filter { can(it) }.maxByOrNull { it.addedAt }
 }
 
 /** Matches `core/yuyue-core/src/notes.rs` (`MAX_HITS`). */
