@@ -27,8 +27,8 @@ packages:
 
 settings:
   base:
-    MARKETING_VERSION: 0.1.0
-    CURRENT_PROJECT_VERSION: 2
+    MARKETING_VERSION: 0.1.1
+    CURRENT_PROJECT_VERSION: 3
     SWIFT_VERSION: "6.0"
     # 英文界面: every Chinese string is a key in Yuyue/Localizable.xcstrings.
     SWIFT_EMIT_LOC_STRINGS: YES

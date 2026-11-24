@@ -4,6 +4,20 @@
 
 Each version has a section, newest first. The app's changelog page and update notices come from here.
 
+## 0.1.1 · 2026-11-24
+
+### zh
+- Intel Mac 与旧系统支持：新增 Mac Intel（`x86_64`）安装包与独立更新通道；Mac 最低系统要求下调至 macOS 14（Sonoma），iPhone / iPad 下调至 iOS / iPadOS 17。
+- 朗读声音增强：Mac、iPhone / iPad 与 Android 新增免 Key 的 Microsoft Edge 在线神经朗读来源（内置 22 个精选音色）；修复 Android 正式包下本机离线语音（Kokoro / 声音卡）闪退以及部分免费在线语音不可用的问题。
+- EPUB 字体与外观跟随：修复部分 EPUB 书籍因内联字体规则或错误语言标记导致切换字体不生效、以及含空格/中文名导入字体无法加载的问题；阅读纸张支持随应用深浅外观自动切换。
+- 稳定性与交互修复：修复 Mac 下载本机离线语音模型时的界面卡顿，修复各端听读切句与睡眠定时音量恢复、系统声音试听、有声书播放、OPDS / WebDAV 远程书库、应用内更新安装以及多处英文界面截断问题。
+
+### en
+- Intel Mac & broader Apple OS support: added Intel (`x86_64`) Mac builds with a dedicated Sparkle feed, and lowered minimum requirements to macOS 14 (Sonoma) and iOS / iPadOS 17.
+- Read-aloud voices: added a keyless Microsoft Edge neural TTS provider (22 curated voices) on Mac, iOS and Android; fixed release-build crashes for offline ONNX voices (Kokoro / voice cards) on Android and broken free online routes.
+- Reliable EPUB fonts & appearance matching: fixed publisher inline font rules and mislabeled language tags overriding reader font choices, fixed URL-encoded custom font filenames, and added automatic reading-paper matching with app light/dark appearance.
+- Stability & UI fixes: eliminated macOS UI freezes during offline voice downloads, and fixed playback/sleep-timer volume recovery, system voice previews, audiobook streaming, OPDS / WebDAV remote libraries, in-app update handling, and English UI truncation across platforms.
+
 ## 0.1.0 · 2026-11-23
 
 ### zh
