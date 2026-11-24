@@ -302,7 +302,7 @@ struct MacUpdateSettings: View {
 
             AboutCard {
                 AboutRow(String(localized: "问题与建议"),
-                         detail: String(localized: "可附截图或文件，无需注册账号")) {
+                         detail: String(localized: "可附截图，无需注册账号")) {
                     HStack(spacing: 10) {
                         AboutLinkButton(title: "GitHub", prominent: false) {
                             NSWorkspace.shared.open(Self.issues)
@@ -830,8 +830,8 @@ private struct PrivacySheetContent: View {
              String(localized: "免费在线语音会把当前要读的句子发给在线语音服务；自行配置的云端声音和笔记导出（Notion、flomo、新枝）只在你选用并填了 Key 或链接时联网，要读的句子或要发的笔记直接发给你选的服务。读过的声音存在这台设备上。")),
             (String(localized: "离线翻译与本地语音"),
              String(localized: "外文查词与翻译使用系统离线翻译；按需从 GitHub Releases、魔搭（ModelScope）或 Hugging Face 下载的对齐模型、声音包、开源字体与本地语音模型都在设备上离线运行（字体预览样字按需从 Google Fonts 加载），原文与录音不出本机。")),
-            (String(localized: "问题反馈"),
-             String(localized: "只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；正文与附件均会公开展示，不收集邮箱。")),
+            (String(localized: "问题反馈与崩溃诊断"),
+             String(localized: "主动提交的反馈和截图仅发给开发者，不会公开，也不收集邮箱；应用意外闪退时会在下次启动自动上报匿名崩溃堆栈和基础设备信息，用于排查修复，不关联个人身份。")),
             (String(localized: "匿名检查更新与签名校验"),
              String(localized: "自动检查更新每天只从 GitHub 读取一次版本号文件，不带任何关于你和设备的信息（可在「关于」页关闭）；安装包经 Sparkle EdDSA 签名校验后才会替换。")),
         ]

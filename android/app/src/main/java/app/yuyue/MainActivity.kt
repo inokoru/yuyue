@@ -246,8 +246,6 @@ fun Root(library: Library) {
     var lastBook by rememberPref("phone.lastBook", "")
     var reopened by rememberSaveable { mutableStateOf(false) }
 
-    // 没网时留下的反馈，打开 App 时再试一次.
-    LaunchedEffect(Unit) { app.yuyue.feedback.Feedback.flush() }
     // 检查更新: once a day at most (the APK from GitHub only).
     val context = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) { app.yuyue.update.Updates.checkNow(context) }

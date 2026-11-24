@@ -83,6 +83,8 @@ targets:
         LSApplicationCategoryType: public.app-category.books
         # 同步 · Google Drive: the iOS OAuth client of 语阅's Google Cloud project, once registered.
         YYGoogleClientID: $(GOOGLE_CLIENT_ID)
+        # AirFeedback App Attest (iOS): 10-char Apple Team ID from DEVELOPMENT_TEAM when signed.
+        YuyueAppleTeamID: $(DEVELOPMENT_TEAM)
         # 反馈: empty until Feedback.local.xcconfig fills it in. Not committed.
         YuyueFeedbackTopic: $(YUYUE_FEEDBACK_TOPIC)
         ITSAppUsesNonExemptEncryption: false

@@ -9,6 +9,7 @@ struct YuyueApp: App {
 
     init() {
         AirTraffic.start()
+        AirCrashReports.start(apiKey: Feedback.appKey, endpoint: Feedback.crashEndpoint, teamID: Feedback.teamID)
     }
 
     var body: some Scene {

@@ -213,6 +213,8 @@
 	</array>
 	<key>YYGoogleClientID</key>
 	<string>$(GOOGLE_CLIENT_ID)</string>
+	<key>YuyueAppleTeamID</key>
+	<string>$(DEVELOPMENT_TEAM)</string>
 	<key>YuyueFeedbackTopic</key>
 	<string>$(YUYUE_FEEDBACK_TOPIC)</string>
 </dict>

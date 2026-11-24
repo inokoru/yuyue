@@ -30,7 +30,7 @@ namespace Yuyue.Core;
 /// - Stable &amp; Beta GitHub Releases update feed check via <see cref="YuyueCoreMethods.ParseUpdate"/> / <see cref="YuyueCoreMethods.CompareVersions"/>
 /// - Optional in-app Windows installer download with SHA-256 verification and progress dialog
 /// - Bundled <c>CHANGELOG.md</c> viewer via <see cref="YuyueCoreMethods.ParseChangelog"/>, Privacy sheet, and Open-Source Licenses sheet
-/// - Full Feedback composer with persisted draft, title field (≤ 60 chars, never truncated), log attachment, drag-and-drop, Ctrl+V screenshot paste, up to 3 public attachments (any file ≤ 1.5 MB), EXIF-stripping JPEG, <see cref="YuyueCoreMethods.FeedbackMessage"/> ntfy.sh delivery, FIFO offline queue, and post-send confirmation.
+/// - Single-channel AirFeedback frameless sheet composer with persisted draft, up to 4 EXIF-stripped JPEG images (≤ 2048 px, ≤ 8 MB), drag-and-drop &amp; Ctrl+V paste, collapsible device info card, inline error retry, and in-sheet thanks view.
 /// </summary>
 public sealed class UpdateAndFeedbackService
 {
@@ -813,7 +813,7 @@ public sealed class UpdateAndFeedbackService
             ("没有账号，也没有广告", "语阅没有注册登录、广告或跨应用追踪。你的书库、阅读进度、划线想法与生词全部保存在本机目录中。为了解功能使用情况，应用默认开启匿名使用统计，仅记录功能使用形态，不关联个人身份，绝不收集书名、笔记、划线或搜索词，可随时在「关于」页关闭。"),
             ("连接外部服务时直连服务商", "使用免费在线语音时，当前要读的句子会直接发给在线语音服务；当你主动配置 WebDAV 云盘、AI 书伴（DeepSeek / OpenAI / Claude / Ollama 等）、云端语音或 Notion / flomo / 新枝笔记导出时，客户端直接向你指定的服务地址发起请求，API Key 使用 Windows DPAPI 加密存储在本机，从不经过语阅中转，也从不写入跨端同步包。"),
             ("检查更新与模型下载", "检查更新与按需下载开源字体、离线语音模型、声音包时，仅向 GitHub Releases、魔搭（ModelScope）或 Hugging Face 发起普通 HTTPS GET 请求（字体预览按需访问 Google Fonts），不携带任何书库或设备标识。"),
-            ("问题反馈", "只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；正文与附件均会公开展示，不收集邮箱。"),
+            ("问题反馈", "只有在你主动提交反馈时才会联网，正文和截图仅发给开发者，不会公开，也不收集邮箱。"),
         ];
 
         var groupStack = new StackPanel { Spacing = 0 };
@@ -975,78 +975,66 @@ public sealed class UpdateAndFeedbackService
         await dlgRef.ShowSafeAsync(tint);
     }
 
-    // ---------- 1:1 Feedback.swift Composer (500px sheet + draft persistence + DnD/Ctrl+V + attachments + EXIF-stripping JPEG + ntfy/GitHub) ----------
-
-    private string? FindLocalLogFile()
-    {
-        string[] candidates =
-        [
-            Path.Combine(_library.DataDir, "yuyue.log"),
-            Path.Combine(_library.DataDir, "logs", "yuyue.log"),
-        ];
-        return candidates.FirstOrDefault(File.Exists);
-    }
-
-    private byte[]? ReadLocalLogTailBytes(int maxBytes = 65536)
-    {
-        string? logPath = FindLocalLogFile();
-        if (logPath is null) return null;
-        try
-        {
-            using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            long len = fs.Length;
-            if (len <= 0) return null;
-            int toRead = (int)Math.Min(len, maxBytes);
-            fs.Seek(len - toRead, SeekOrigin.Begin);
-            byte[] buf = new byte[toRead];
-            int r = fs.Read(buf, 0, toRead);
-            return r > 0 ? buf[..r] : null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
+    // ---------- Single-Channel AirFeedback Frameless Sheet (v6 spec: text + up to 4 EXIF-stripped JPEG images + collapsible device info) ----------
 
     public async Task ShowFeedbackComposerAsync(Window ownerWindow, XamlRoot xamlRoot)
     {
         _library.Analytics.TrackScreen("Feedback");
-        await FlushOfflineFeedbackQueueAsync();
 
         bool dark = ThemeHelper.IsDark(xamlRoot.Content is FrameworkElement fe ? fe.ActualTheme : ElementTheme.Light);
         var p = ThemeHelper.Palette(dark);
-        var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
-
-        string category = _library.Prefs.FeedbackDraftCategory is "idea" or "other" ? _library.Prefs.FeedbackDraftCategory : "bug";
-        bool withDeviceInfo = _library.Prefs.FeedbackAttachInfo;
-        bool withLogs = _library.Prefs.FeedbackAttachLogs;
-        var attachments = new List<(string Name, byte[] Data, bool IsImage, string? SourcePath)>();
 
         string draftTempDir = Path.Combine(_library.DataDir, "cache", "feedback-drafts");
         Directory.CreateDirectory(draftTempDir);
         string fullDraftTempPrefix = Path.GetFullPath(draftTempDir).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
 
+        string osDisplay = OsDisplayVersion();
+        string deviceModelStr = $"Windows ({System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture})";
+        string versionDetailStr = $"{CurrentVersion} ({CurrentBuild})";
+        string localeStr = System.Globalization.CultureInfo.CurrentUICulture.Name;
+        if (string.IsNullOrWhiteSpace(localeStr)) localeStr = "zh-CN";
+
         string SaveTempDraftAttachment(string fileName, byte[] data)
         {
             Directory.CreateDirectory(draftTempDir);
             string safe = string.Concat(fileName.Split(Path.GetInvalidFileNameChars())).Trim();
-            if (string.IsNullOrEmpty(safe)) safe = "attachment.jpg";
+            if (string.IsNullOrEmpty(safe)) safe = "image.jpg";
             string dst = Path.Combine(draftTempDir, $"{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}-{Guid.NewGuid().ToString("N")[..6]}-{safe}");
             File.WriteAllBytes(dst, data);
             return dst;
         }
 
-        void DeleteOwnedDraftTempIfAny(string? path)
+        void DeleteOwnedDraftTempIfAny(string? filePath)
         {
-            if (string.IsNullOrWhiteSpace(path)) return;
+            if (string.IsNullOrWhiteSpace(filePath)) return;
             try
             {
-                string full = Path.GetFullPath(path);
+                string full = Path.GetFullPath(filePath);
                 if (full.StartsWith(fullDraftTempPrefix, StringComparison.OrdinalIgnoreCase) && File.Exists(full))
                     File.Delete(full);
             }
             catch { }
         }
+
+        static async Task LoadThumbnailAsync(Image target, byte[] jpegBytes)
+        {
+            try
+            {
+                using var ms = new InMemoryRandomAccessStream();
+                await ms.WriteAsync(jpegBytes.AsBuffer());
+                ms.Seek(0);
+                var bmp = new BitmapImage { DecodePixelWidth = 128 };
+                await bmp.SetSourceAsync(ms);
+                target.Source = bmp;
+            }
+            catch { }
+        }
+
+        bool withDeviceInfo = _library.Prefs.FeedbackAttachInfo;
+        bool deviceExpanded = false;
+        bool isSending = false;
+        bool captureRequested = false;
+        var attachments = new List<(string Name, byte[] Data, string? SourcePath)>();
 
         void ClearPersistedDraft()
         {
@@ -1054,100 +1042,67 @@ public sealed class UpdateAndFeedbackService
                 DeleteOwnedDraftTempIfAny(saved);
             foreach (var att in attachments)
                 DeleteOwnedDraftTempIfAny(att.SourcePath);
-            _library.Prefs.FeedbackDraftTitle = "";
             _library.Prefs.FeedbackDraftText = "";
             _library.Prefs.FeedbackDraftFiles.Clear();
             _library.SavePrefs();
         }
 
-        // Restore persisted draft attachment files if still present on disk
-        foreach (string savedPath in _library.Prefs.FeedbackDraftFiles.Take(3).ToArray())
+        // Restore persisted draft images if still present on disk
+        foreach (string savedPath in _library.Prefs.FeedbackDraftFiles.Take(AirFeedbackClient.MaxImages).ToArray())
         {
             if (!File.Exists(savedPath)) continue;
             try
             {
                 var fi = new FileInfo(savedPath);
-                if (fi.Length == 0 || fi.Length > 1_500_000) continue;
                 string ext = fi.Extension.ToLowerInvariant();
-                bool isImg = ext is ".png" or ".jpg" or ".jpeg" or ".bmp" or ".webp";
+                if (ext is not (".png" or ".jpg" or ".jpeg" or ".webp" or ".bmp")) continue;
+                if (fi.Length == 0 || fi.Length > 32_000_000) continue;
+
                 byte[] raw = await File.ReadAllBytesAsync(savedPath);
-                if (isImg) raw = await SanitizeImageBytesToJpegAsync(raw, raw);
-                if (raw.Length <= 1_500_000)
+                bool isOwnedTemp = Path.GetFullPath(savedPath).StartsWith(fullDraftTempPrefix, StringComparison.OrdinalIgnoreCase);
+                bool alreadyValidJpeg = isOwnedTemp
+                    && raw.Length > 2 && raw[0] == 0xFF && raw[1] == 0xD8
+                    && raw.Length <= AirFeedbackClient.MaxImageBytes;
+                byte[] jpeg = alreadyValidJpeg ? raw : await SanitizeImageBytesToJpegAsync(raw);
+                if (jpeg.Length is > 0 and <= AirFeedbackClient.MaxImageBytes)
                 {
                     string displayName = fi.Name;
-                    // Strip internal timestamp-guid prefix from draft temp filenames for clean UI display
-                    if (Path.GetFullPath(savedPath).StartsWith(fullDraftTempPrefix, StringComparison.OrdinalIgnoreCase))
+                    if (isOwnedTemp)
                     {
                         string[] parts = fi.Name.Split('-', 3);
                         if (parts.Length == 3 && long.TryParse(parts[0], out _) && parts[1].Length == 6)
                             displayName = parts[2];
                     }
-                    attachments.Add((isImg ? Path.ChangeExtension(displayName, ".jpg") : displayName, raw, isImg, savedPath));
+                    attachments.Add((Path.ChangeExtension(displayName, ".jpg"), jpeg, savedPath));
                 }
             }
             catch { }
         }
 
+        TextBox? bodyBoxHolder = null;
+        string CurrentBodyText() => bodyBoxHolder?.Text ?? _library.Prefs.FeedbackDraftText;
+
         void SaveDraftState()
         {
-            _library.Prefs.FeedbackDraftCategory = category;
             _library.Prefs.FeedbackAttachInfo = withDeviceInfo;
-            _library.Prefs.FeedbackAttachLogs = withLogs;
-            _library.Prefs.FeedbackDraftTitle = titleBoxRefText();
-            _library.Prefs.FeedbackDraftText = bodyBoxRefText();
+            _library.Prefs.FeedbackDraftText = CurrentBodyText();
             _library.Prefs.FeedbackDraftFiles = attachments
                 .Where(a => !string.IsNullOrEmpty(a.SourcePath))
                 .Select(a => a.SourcePath!)
-                .Take(3)
+                .Take(AirFeedbackClient.MaxImages)
                 .ToList();
             _library.SavePrefs();
         }
 
-        TextBox? titleBoxHolder = null;
-        TextBox? bodyBoxHolder = null;
-        string titleBoxRefText() => titleBoxHolder?.Text ?? _library.Prefs.FeedbackDraftTitle;
-        string bodyBoxRefText() => bodyBoxHolder?.Text ?? _library.Prefs.FeedbackDraftText;
-
-        var segHost = new ContentControl { HorizontalAlignment = HorizontalAlignment.Left };
-        (string Id, string Label, string TitleHint, string BodyHint)[] catDefs =
-        [
-            ("bug", "问题", "一句话概括遇到的问题（最多 60 字）", "哪本书、哪一页，做了什么，结果怎样"),
-            ("idea", "建议", "一句话概括你的建议（最多 60 字）", "想要什么功能，或者哪里可以更顺手"),
-            ("other", "其他", "一句话标题（最多 60 字）", "想说的都可以"),
-        ];
-
-        var titleBox = new TextBox
-        {
-            Text = _library.Prefs.FeedbackDraftTitle,
-            PlaceholderText = "一句话概括遇到的问题（最多 60 字）",
-            AcceptsReturn = false,
-            MaxLength = 60,
-            BorderThickness = new Thickness(0),
-            Background = new SolidColorBrush(Colors.Transparent),
-            FontSize = 13.5,
-            Padding = new Thickness(0, 6, 0, 6),
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        YYChrome.StripTextBoxChrome(titleBox);
-        AutomationProperties.SetName(titleBox, L10n.T("反馈标题"));
-        titleBoxHolder = titleBox;
-        var titleCounterText = new TextBlock
-        {
-            Text = titleBox.Text.Length >= 45 ? $"{titleBox.Text.Length} / 60" : "",
-            FontSize = 11,
-            Foreground = ThemeHelper.Brush(p.T3),
-            VerticalAlignment = VerticalAlignment.Center,
-            Visibility = titleBox.Text.Length >= 45 ? Visibility.Visible : Visibility.Collapsed,
-        };
-
+        string initialBody = AirFeedbackClient.ClipMessage(_library.Prefs.FeedbackDraftText);
         var bodyBox = new TextBox
         {
-            Text = _library.Prefs.FeedbackDraftText,
-            PlaceholderText = "哪本书、哪一页，做了什么，结果怎样",
+            Text = initialBody,
+            PlaceholderText = L10n.T("遇到什么问题、想要什么功能，或哪本书打开不对，都可以直接写"),
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
-            MinHeight = 112,
-            MaxLength = 800,
+            MinHeight = 128,
+            MaxHeight = 220,
             BorderThickness = new Thickness(0),
             Background = new SolidColorBrush(Colors.Transparent),
             FontSize = 13.5,
@@ -1156,177 +1111,234 @@ public sealed class UpdateAndFeedbackService
         YYChrome.StripTextBoxChrome(bodyBox);
         AutomationProperties.SetName(bodyBox, L10n.T("反馈正文"));
         bodyBoxHolder = bodyBox;
-        var counterText = new TextBlock
+
+        var counterText = L10n.Skip(new TextBlock
         {
-            Text = bodyBox.Text.Length >= 500 ? $"{bodyBox.Text.Length} / 800" : "",
+            FontSize = 11,
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed,
+        });
+
+        var imageHintText = L10n.Skip(new TextBlock
+        {
             FontSize = 11,
             Foreground = ThemeHelper.Brush(p.T3),
             VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Right,
+        });
+
+        var attachList = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            Visibility = Visibility.Collapsed,
         };
 
-        ContentDialog? activeDlg = null;
-        Button? sendBtn = null;
-        bool isSending = false;
-
-        void SyncSendEnabled()
+        var errorBannerText = L10n.Skip(new TextBlock
         {
-            bool ok = !isSending && !string.IsNullOrWhiteSpace(titleBox.Text) && !string.IsNullOrWhiteSpace(bodyBox.Text);
-            if (sendBtn is not null)
-            {
-                sendBtn.IsEnabled = ok;
-                sendBtn.Opacity = ok ? 1.0 : 0.42;
-            }
-        }
-
-        titleBox.TextChanged += (_, _) =>
+            FontSize = 11.5,
+            Foreground = ThemeHelper.Brush(p.Danger),
+            TextWrapping = TextWrapping.Wrap,
+        });
+        var errorBanner = new Border
         {
-            string flat = titleBox.Text.Replace('\r', ' ').Replace('\n', ' ');
-            if (flat != titleBox.Text)
-            {
-                titleBox.Text = flat;
-                titleBox.SelectionStart = flat.Length;
-            }
-            _library.Prefs.FeedbackDraftTitle = titleBox.Text;
-            bool showCount = titleBox.Text.Length >= 45;
-            titleCounterText.Text = showCount ? $"{titleBox.Text.Length} / 60" : "";
-            titleCounterText.Visibility = showCount ? Visibility.Visible : Visibility.Collapsed;
-            SyncSendEnabled();
-        };
-        bodyBox.TextChanged += (_, _) =>
-        {
-            _library.Prefs.FeedbackDraftText = bodyBox.Text;
-            counterText.Text = bodyBox.Text.Length >= 500 ? $"{bodyBox.Text.Length} / 800" : "";
-            SyncSendEnabled();
+            CornerRadius = new CornerRadius(10),
+            Background = ThemeHelper.Brush(Windows.UI.Color.FromArgb(dark ? (byte)36 : (byte)22, p.Danger.R, p.Danger.G, p.Danger.B)),
+            BorderBrush = ThemeHelper.Brush(Windows.UI.Color.FromArgb(72, p.Danger.R, p.Danger.G, p.Danger.B)),
+            BorderThickness = new Thickness(0.5),
+            Padding = new Thickness(12, 8, 12, 8),
+            Visibility = Visibility.Collapsed,
+            Child = errorBannerText,
         };
 
-        void SyncCatVisuals()
-        {
-            var curDef = catDefs.FirstOrDefault(c => c.Id == category);
-            if (!string.IsNullOrEmpty(curDef.Id))
-            {
-                titleBox.PlaceholderText = L10n.T(curDef.TitleHint);
-                bodyBox.PlaceholderText = L10n.T(curDef.BodyHint);
-            }
-            segHost.Content = YYChrome.MakeSegmentedBar(
-                catDefs.Select(c => (c.Id, L10n.T(c.Label))).ToArray(),
-                category,
-                nextCat =>
-                {
-                    category = nextCat;
-                    SyncCatVisuals();
-                    SaveDraftState();
-                },
-                dark,
-                fontSize: 12.5,
-                height: 32);
-            L10n.ApplyTree(segHost);
-        }
-        SyncCatVisuals();
-
-        var attachList = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Visibility = Visibility.Collapsed };
-        var attachErrorText = new TextBlock { FontSize = 11.5, Foreground = ThemeHelper.Brush(p.Danger), Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
-
-        void ShowAttachError(string? err)
+        void ShowError(string? err)
         {
             if (string.IsNullOrWhiteSpace(err))
             {
-                attachErrorText.Text = "";
-                attachErrorText.Visibility = Visibility.Collapsed;
+                errorBannerText.Text = "";
+                errorBanner.Visibility = Visibility.Collapsed;
             }
             else
             {
-                attachErrorText.Text = L10n.T(err);
-                attachErrorText.Visibility = Visibility.Visible;
+                errorBannerText.Text = err;
+                errorBanner.Visibility = Visibility.Visible;
             }
+        }
+
+        ContentDialog? activeDlg = null;
+        Button? sendBtn = null;
+        Button? cancelBtn = null;
+        Button? addImageBtn = null;
+        Button? snapWindowBtn = null;
+        StackPanel? draftBar = null;
+
+        void SyncButtonsAndDraftBar()
+        {
+            bool canSend = AirFeedbackClient.CanSubmit(bodyBox.Text, attachments.Count, isSending);
+            if (sendBtn is not null)
+            {
+                sendBtn.IsEnabled = canSend;
+                sendBtn.Opacity = canSend ? 1.0 : 0.42;
+            }
+            if (cancelBtn is not null)
+            {
+                cancelBtn.IsEnabled = !isSending;
+                cancelBtn.Opacity = isSending ? 0.5 : 1.0;
+            }
+            if (addImageBtn is not null)
+            {
+                bool canAdd = !isSending && attachments.Count < AirFeedbackClient.MaxImages;
+                addImageBtn.IsEnabled = canAdd;
+                addImageBtn.Opacity = canAdd ? 1.0 : 0.45;
+            }
+            if (snapWindowBtn is not null)
+            {
+                bool canSnap = !isSending && attachments.Count < AirFeedbackClient.MaxImages;
+                snapWindowBtn.IsEnabled = canSnap;
+                snapWindowBtn.Opacity = canSnap ? 1.0 : 0.45;
+            }
+            if (draftBar is not null)
+            {
+                bool hasDraft = !isSending && (!string.IsNullOrWhiteSpace(bodyBox.Text) || attachments.Count > 0);
+                draftBar.Visibility = hasDraft ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
+
+        void SyncCounter()
+        {
+            int count = AirFeedbackClient.CodePointLength(bodyBox.Text);
+            if (count >= 3600)
+            {
+                counterText.Text = $"{count} / {AirFeedbackClient.MaxMessageLength}";
+                counterText.Foreground = ThemeHelper.Brush(count >= 3900 ? p.Danger : p.T3);
+                counterText.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                counterText.Text = "";
+                counterText.Visibility = Visibility.Collapsed;
+            }
+            SyncButtonsAndDraftBar();
         }
 
         void RebuildAttachments()
         {
             attachList.Children.Clear();
             attachList.Visibility = attachments.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            imageHintText.Text = attachments.Count == 0
+                ? L10n.T("最多 4 张图")
+                : L10n.T($"图片 {attachments.Count}/4");
+
             for (int i = 0; i < attachments.Count; i++)
             {
                 int idx = i;
                 var att = attachments[i];
-                var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
-                chip.Children.Add(YYIcons.Make(att.IsImage ? "photo" : "note-card", 11, ThemeHelper.Brush(tint.Accent)));
-                chip.Children.Add(L10n.Skip(new TextBlock
+
+                var img = new Image
                 {
-                    Text = $"{att.Name} · {Math.Max(1, att.Data.Length / 1024)} KB",
-                    FontSize = 11,
-                    Foreground = ThemeHelper.Brush(p.T1),
-                    VerticalAlignment = VerticalAlignment.Center,
-                    MaxWidth = 136,
-                    MaxLines = 1,
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                }));
-                var rm = new Button
+                    Width = 56,
+                    Height = 56,
+                    Stretch = Stretch.UniformToFill,
+                };
+                _ = LoadThumbnailAsync(img, att.Data);
+
+                var thumbBorder = new Border
+                {
+                    Width = 56,
+                    Height = 56,
+                    CornerRadius = new CornerRadius(10),
+                    BorderBrush = ThemeHelper.Brush(p.Line),
+                    BorderThickness = new Thickness(0.5),
+                    Background = ThemeHelper.Brush(p.Inset),
+                    Child = img,
+                };
+
+                var removeBtn = new Button
                 {
                     Content = "×",
-                    Padding = new Thickness(4, 0, 4, 0),
+                    Width = 18,
+                    Height = 18,
                     MinWidth = 0,
                     MinHeight = 0,
+                    Padding = new Thickness(0),
+                    CornerRadius = new CornerRadius(9),
                     FontSize = 11,
-                    Foreground = ThemeHelper.Brush(p.T2),
-                    Background = new SolidColorBrush(Colors.Transparent),
+                    Foreground = new SolidColorBrush(Colors.White),
+                    Background = new SolidColorBrush(Windows.UI.Color.FromArgb(185, 24, 24, 24)),
                     BorderThickness = new Thickness(0),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(0, -5, -5, 0),
+                    IsEnabled = !isSending,
                     UseSystemFocusVisuals = false,
                 };
-                AutomationProperties.SetName(rm, L10n.T("移除附件"));
-                rm.Click += (_, _) =>
+                ToolTipService.SetToolTip(removeBtn, L10n.T("移除图片"));
+                AutomationProperties.SetName(removeBtn, L10n.T("移除图片"));
+                removeBtn.Click += (_, _) =>
                 {
+                    if (isSending) return;
                     DeleteOwnedDraftTempIfAny(attachments[idx].SourcePath);
                     attachments.RemoveAt(idx);
-                    ShowAttachError(null);
+                    ShowError(null);
                     RebuildAttachments();
                     SaveDraftState();
                 };
-                chip.Children.Add(rm);
-                attachList.Children.Add(new Border
-                {
-                    CornerRadius = new CornerRadius(12),
-                    Background = ThemeHelper.Brush(p.Inset),
-                    BorderBrush = ThemeHelper.Brush(p.Line),
-                    BorderThickness = new Thickness(0.5),
-                    Padding = new Thickness(9, 3, 5, 3),
-                    Child = chip,
-                });
+
+                var tile = new Grid { Width = 62, Height = 62, Padding = new Thickness(0, 5, 5, 0) };
+                tile.Children.Add(thumbBorder);
+                tile.Children.Add(removeBtn);
+                attachList.Children.Add(tile);
             }
+
             L10n.ApplyTree(attachList);
+            SyncButtonsAndDraftBar();
         }
 
-        async Task TryAttachFileAsync(StorageFile f)
+        async Task TryAttachImageFileAsync(StorageFile f)
         {
-            if (attachments.Count >= 3)
+            if (isSending) return;
+            if (attachments.Count >= AirFeedbackClient.MaxImages)
             {
-                ShowAttachError("最多只能添加 3 个附件。");
+                ShowError(L10n.T("最多只能添加 4 张图片。"));
                 return;
             }
             string ext = Path.GetExtension(f.Name).ToLowerInvariant();
-            bool isImg = ext is ".png" or ".jpg" or ".jpeg" or ".bmp" or ".webp";
-            byte[] raw;
-            try { raw = await File.ReadAllBytesAsync(f.Path); }
-            catch (Exception ex) { ShowAttachError($"无法读取「{f.Name}」：{ex.Message}"); return; }
+            if (ext is not (".png" or ".jpg" or ".jpeg" or ".bmp" or ".webp"))
+            {
+                ShowError(L10n.T("只支持图片或截图，不支持上传普通文件。"));
+                return;
+            }
 
-            if (isImg) raw = await SanitizeImageToJpegAsync(f, raw);
-            if (raw.Length == 0)
+            byte[] jpeg = await SanitizeImageToJpegAsync(f);
+            if (jpeg.Length == 0)
             {
-                ShowAttachError($"「{f.Name}」读不出来或为空文件。");
+                ShowError(L10n.T("无法读取该图片，请换一张常见格式的图片。"));
                 return;
             }
-            if (raw.Length > 1_500_000)
+            if (jpeg.Length > AirFeedbackClient.MaxImageBytes)
             {
-                ShowAttachError($"「{f.Name}」太大了，一个附件最多 1.5 MB（当前 {raw.Length / 1048576.0:0.1} MB）。");
+                ShowError(L10n.T("图片压缩后仍超过 8 MB 上限。"));
                 return;
             }
-            ShowAttachError(null);
-            attachments.Add((isImg ? Path.ChangeExtension(f.Name, ".jpg") : f.Name, raw, isImg, f.Path));
+
+            string cleanName = Path.ChangeExtension(f.Name, ".jpg");
+            string draftPath = SaveTempDraftAttachment(cleanName, jpeg);
+            ShowError(null);
+            attachments.Add((cleanName, jpeg, draftPath));
             RebuildAttachments();
             SaveDraftState();
         }
 
-        bool captureRequested = false;
+        bodyBox.TextChanged += (_, _) =>
+        {
+            string clipped = AirFeedbackClient.ClipMessage(bodyBox.Text);
+            if (!string.Equals(clipped, bodyBox.Text, StringComparison.Ordinal))
+            {
+                bodyBox.Text = clipped;
+                bodyBox.SelectionStart = clipped.Length;
+            }
+            _library.Prefs.FeedbackDraftText = bodyBox.Text;
+            SyncCounter();
+        };
 
         StackPanel MakeAttachIconLabel(string iconKey, string text)
         {
@@ -1336,26 +1348,36 @@ public sealed class UpdateAndFeedbackService
             return sp;
         }
 
-        var addFileBtn = YYChrome.MakeSheetPillButton(MakeAttachIconLabel("paperclip", "附件"), async () =>
+        addImageBtn = YYChrome.MakeSheetPillButton(MakeAttachIconLabel("photo", "图片"), async () =>
         {
-            if (attachments.Count >= 3)
+            if (isSending) return;
+            if (attachments.Count >= AirFeedbackClient.MaxImages)
             {
-                ShowAttachError("最多只能添加 3 个附件。");
+                ShowError(L10n.T("最多只能添加 4 张图片。"));
                 return;
             }
             var picker = new FileOpenPicker();
-            picker.FileTypeFilter.Add("*");
+            picker.FileTypeFilter.Add(".png");
+            picker.FileTypeFilter.Add(".jpg");
+            picker.FileTypeFilter.Add(".jpeg");
+            picker.FileTypeFilter.Add(".webp");
+            picker.FileTypeFilter.Add(".bmp");
             InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(ownerWindow));
-            var f = await picker.PickSingleFileAsync();
-            if (f is null) return;
-            await TryAttachFileAsync(f);
+            var pickedFiles = await picker.PickMultipleFilesAsync();
+            if (pickedFiles is null || pickedFiles.Count == 0) return;
+            foreach (var f in pickedFiles)
+            {
+                if (attachments.Count >= AirFeedbackClient.MaxImages) break;
+                await TryAttachImageFileAsync(f);
+            }
         }, dark, _library.Prefs.Tint, "secondary", height: 26, horizontalPadding: 10);
 
-        var snapWindowBtn = YYChrome.MakeSheetPillButton(MakeAttachIconLabel("camera", "截图"), () =>
+        snapWindowBtn = YYChrome.MakeSheetPillButton(MakeAttachIconLabel("camera", "截图"), () =>
         {
-            if (attachments.Count >= 3)
+            if (isSending) return;
+            if (attachments.Count >= AirFeedbackClient.MaxImages)
             {
-                ShowAttachError("最多只能添加 3 个附件。");
+                ShowError(L10n.T("最多只能添加 4 张图片。"));
                 return;
             }
             if (ownerWindow.Content is not UIElement) return;
@@ -1364,37 +1386,22 @@ public sealed class UpdateAndFeedbackService
             activeDlg?.Hide();
         }, dark, _library.Prefs.Tint, "secondary", height: 26, horizontalPadding: 10);
 
-        // YYGroup single-line title card
-        var titleRowGrid = new Grid { ColumnSpacing = 8, Padding = new Thickness(13, 3, 12, 3), MinHeight = 40 };
-        titleRowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        titleRowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        titleRowGrid.Children.Add(titleBox);
-        Grid.SetColumn(titleCounterText, 1);
-        titleRowGrid.Children.Add(titleCounterText);
-        var titleGroupCard = new Border
-        {
-            CornerRadius = new CornerRadius(14),
-            Background = ThemeHelper.Brush(p.Card),
-            BorderBrush = ThemeHelper.Brush(p.Line),
-            BorderThickness = new Thickness(0.5),
-            Child = titleRowGrid,
-        };
-
-        // YYGroup multiline body + attachments + bottom toolbar card
+        // Unified multiline editor + thumbnail strip + bottom image toolbar card
         var bodyToolbar = new Grid { Padding = new Thickness(0, 8, 0, 2) };
+        bodyToolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        bodyToolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        bodyToolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
         var leftTools = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
-        leftTools.Children.Add(addFileBtn);
+        leftTools.Children.Add(addImageBtn);
         leftTools.Children.Add(snapWindowBtn);
-        leftTools.Children.Add(new TextBlock
-        {
-            Text = L10n.T("支持 Ctrl+V 粘图 · 拖入文件"),
-            FontSize = 11,
-            Foreground = ThemeHelper.Brush(p.T3),
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(4, 0, 0, 0),
-        });
         bodyToolbar.Children.Add(leftTools);
-        bodyToolbar.Children.Add(counterText);
+
+        var rightMeta = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        rightMeta.Children.Add(imageHintText);
+        rightMeta.Children.Add(counterText);
+        Grid.SetColumn(rightMeta, 2);
+        bodyToolbar.Children.Add(rightMeta);
 
         var bodyStack = new StackPanel { Spacing = 8, Padding = new Thickness(13, 8, 13, 8) };
         bodyStack.Children.Add(bodyBox);
@@ -1410,67 +1417,76 @@ public sealed class UpdateAndFeedbackService
             Child = bodyStack,
         };
 
-        // Collapsible 附带设备信息 YYGroup card (Feedback.swift)
-        bool deviceExpanded = false;
+        // Collapsible 附带设备信息 card (default ON, collapsed by default)
+        string summaryOnText = $"{L10n.T("语阅")} {CurrentVersion} · {osDisplay} · Windows";
         var chevronPresenter = new ContentControl
         {
             VerticalAlignment = VerticalAlignment.Center,
+            Visibility = withDeviceInfo ? Visibility.Visible : Visibility.Collapsed,
             Content = YYIcons.Make("chevron-down", 10, ThemeHelper.Brush(p.T3)),
         };
+        var infoSubText = L10n.Skip(new TextBlock
+        {
+            Text = withDeviceInfo ? summaryOnText : L10n.T("本次不附带"),
+            FontSize = 11,
+            Foreground = ThemeHelper.Brush(p.T3),
+            MaxLines = 1,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
         var deviceToggle = new ToggleSwitch
         {
             IsOn = withDeviceInfo,
+            OnContent = "",
+            OffContent = "",
             MinWidth = 0,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
         };
         AutomationProperties.SetName(deviceToggle, L10n.T("附带设备信息"));
-        var logsCheck = new CheckBox
-        {
-            Content = FindLocalLogFile() is not null ? L10n.T("附带最近运行日志（末尾 64 KB，随反馈公开）") : L10n.T("附带最近运行日志（如有，随反馈公开）"),
-            IsChecked = withLogs,
-            FontSize = 11.5,
-        };
-        logsCheck.Checked += (_, _) => { withLogs = true; SaveDraftState(); };
-        logsCheck.Unchecked += (_, _) => { withLogs = false; SaveDraftState(); };
 
-        var detailGrid = new Grid { ColumnSpacing = 12 };
+        var detailGrid = new Grid { ColumnSpacing = 14, RowSpacing = 8 };
         detailGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         detailGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        detailGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        detailGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        detailGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         (string Key, string Val)[] envSpecs =
         [
-            ("版本", $"v{CurrentVersion} ({CurrentBuild})"),
-            ("系统", OsDisplayVersion()),
-            ("设备", $"Windows · {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}"),
+            ("版本", versionDetailStr),
+            ("系统", osDisplay),
+            ("设备", deviceModelStr),
+            ("语言", localeStr),
         ];
         for (int i = 0; i < envSpecs.Length; i++)
         {
             var sp = new StackPanel { Spacing = 2 };
             sp.Children.Add(new TextBlock { Text = L10n.T(envSpecs[i].Key), FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3) });
-            sp.Children.Add(new TextBlock { Text = envSpecs[i].Val, FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T1), TextTrimming = TextTrimming.CharacterEllipsis });
-            Grid.SetColumn(sp, i);
+            var vTb = new TextBlock { Text = envSpecs[i].Val, FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T1), TextTrimming = TextTrimming.CharacterEllipsis, IsTextSelectionEnabled = true };
+            L10n.Skip(vTb);
+            sp.Children.Add(vTb);
+            Grid.SetRow(sp, i / 2);
+            Grid.SetColumn(sp, i % 2);
             detailGrid.Children.Add(sp);
         }
 
         var deviceDetailPanel = new StackPanel
         {
-            Spacing = 8,
+            Spacing = 6,
             Padding = new Thickness(13, 0, 13, 10),
             Visibility = Visibility.Collapsed,
             Children =
             {
                 new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(0, 0, 0, 4) },
                 detailGrid,
-                logsCheck,
             },
         };
-        deviceToggle.Toggled += (_, _) => { withDeviceInfo = deviceToggle.IsOn; SaveDraftState(); };
 
-        var devHeadLeft = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7, VerticalAlignment = VerticalAlignment.Center };
-        devHeadLeft.Children.Add(new TextBlock { Text = L10n.T("附带设备信息"), FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) });
-        devHeadLeft.Children.Add(new TextBlock { Text = $"语阅 {CurrentVersion} · {OsDisplayVersion()}", FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
-        devHeadLeft.Children.Add(chevronPresenter);
+        var devHeadTitleRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, VerticalAlignment = VerticalAlignment.Center };
+        devHeadTitleRow.Children.Add(new TextBlock { Text = L10n.T("附带设备信息"), FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) });
+        devHeadTitleRow.Children.Add(chevronPresenter);
+
+        var devHeadStack = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        devHeadStack.Children.Add(devHeadTitleRow);
+        devHeadStack.Children.Add(infoSubText);
 
         var expandBtn = new Button
         {
@@ -1479,15 +1495,31 @@ public sealed class UpdateAndFeedbackService
             Background = new SolidColorBrush(Colors.Transparent),
             BorderThickness = new Thickness(0),
             Padding = new Thickness(13, 8, 8, 8),
-            MinHeight = 40,
+            MinHeight = 44,
+            IsEnabled = withDeviceInfo,
             UseSystemFocusVisuals = false,
-            Content = devHeadLeft,
+            Content = devHeadStack,
         };
         expandBtn.Click += (_, _) =>
         {
+            if (!withDeviceInfo) return;
             deviceExpanded = !deviceExpanded;
             deviceDetailPanel.Visibility = deviceExpanded ? Visibility.Visible : Visibility.Collapsed;
             chevronPresenter.Content = YYIcons.Make(deviceExpanded ? "chevron-up" : "chevron-down", 10, ThemeHelper.Brush(p.T3));
+        };
+        deviceToggle.Toggled += (_, _) =>
+        {
+            withDeviceInfo = deviceToggle.IsOn;
+            if (!withDeviceInfo)
+            {
+                deviceExpanded = false;
+                deviceDetailPanel.Visibility = Visibility.Collapsed;
+                chevronPresenter.Content = YYIcons.Make("chevron-down", 10, ThemeHelper.Brush(p.T3));
+            }
+            expandBtn.IsEnabled = withDeviceInfo;
+            chevronPresenter.Visibility = withDeviceInfo ? Visibility.Visible : Visibility.Collapsed;
+            infoSubText.Text = withDeviceInfo ? summaryOnText : L10n.T("本次不附带");
+            SaveDraftState();
         };
 
         var devHeaderGrid = new Grid();
@@ -1507,10 +1539,10 @@ public sealed class UpdateAndFeedbackService
             Child = new StackPanel { Children = { devHeaderGrid, deviceDetailPanel } },
         };
 
-        // Mail hint + public issue disclosure
-        var infoMetaRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
-        infoMetaRow.Children.Add(new TextBlock { Text = L10n.T("需要回复或不想公开？"), FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center });
-        infoMetaRow.Children.Add(new HyperlinkButton
+        // Direct mail row (no email input collected in form)
+        var mailRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+        mailRow.Children.Add(new TextBlock { Text = L10n.T("需要回复？"), FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center });
+        mailRow.Children.Add(new HyperlinkButton
         {
             Content = L10n.T("直接发邮件 ↗"),
             NavigateUri = new Uri("mailto:yuyue.app@icloud.com"),
@@ -1519,40 +1551,51 @@ public sealed class UpdateAndFeedbackService
             MinHeight = 0,
             MinWidth = 0,
         });
-        infoMetaRow.Children.Add(new TextBlock { Text = "·", FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center });
-        bool preferCn = Yuyue.Speech.ModelDownload.PrefersChinaMirror();
-        var openGhDirectBtn = YYChrome.MakeSettingsActionButton(preferCn ? "在 CNB 打开 Issue ↗" : "在 GitHub 打开 Issue ↗", () =>
+
+        // Privacy indicator row (green lock + private notice)
+        var privacyRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        privacyRow.Children.Add(YYIcons.Make("lock", 12, ThemeHelper.Brush(p.Ok)));
+        privacyRow.Children.Add(new TextBlock
         {
-            string t0 = titleBox.Text.Trim();
-            string b0 = bodyBox.Text.Trim();
-            SaveDraftState();
-            activeDlg?.Hide();
-            OpenGitHubIssue(category, t0, b0, withDeviceInfo);
-        }, dark);
-        openGhDirectBtn.FontSize = 11.5;
-        infoMetaRow.Children.Add(openGhDirectBtn);
+            Text = L10n.T("仅发给开发者，不会公开"),
+            FontSize = 11.5,
+            Foreground = ThemeHelper.Brush(p.T3),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
 
         void ResetComposerToEmpty()
         {
-            category = "bug";
-            SyncCatVisuals();
-            titleBox.Text = "";
+            if (isSending) return;
             bodyBox.Text = "";
             ClearPersistedDraft();
             attachments.Clear();
-            ShowAttachError(null);
+            ShowError(null);
             RebuildAttachments();
+            SyncCounter();
             SaveDraftState();
-            SyncSendEnabled();
         }
 
-        var clearDraftBtn = YYChrome.MakeSettingsActionButton("清空草稿", ResetComposerToEmpty, dark);
+        var clearDraftBtn = YYChrome.MakeSettingsActionButton(L10n.T("清空"), ResetComposerToEmpty, dark);
         clearDraftBtn.FontSize = 11.5;
+
+        draftBar = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed,
+            Children =
+            {
+                new TextBlock { Text = L10n.T("草稿已自动保存"), FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center },
+                new TextBlock { Text = "·", FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center },
+                clearDraftBtn,
+            },
+        };
 
         var outerSwitchHost = new ContentControl { HorizontalAlignment = HorizontalAlignment.Stretch };
         StackPanel? composerRoot = null;
 
-        StackPanel BuildThanksView(bool queuedOffline)
+        StackPanel BuildThanksView()
         {
             var checkCircle = new Border
             {
@@ -1571,7 +1614,7 @@ public sealed class UpdateAndFeedbackService
                 ResetComposerToEmpty();
                 outerSwitchHost.Content = composerRoot;
                 L10n.ApplyTree(outerSwitchHost);
-                titleBox.Focus(FocusState.Programmatic);
+                bodyBox.Focus(FocusState.Programmatic);
             }, dark, _library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 18));
             thanksBtns.Children.Add(YYChrome.MakeSheetPillButton("完成", () => activeDlg?.Hide(), dark, _library.Prefs.Tint, "dark", height: 36, horizontalPadding: 22));
 
@@ -1585,7 +1628,7 @@ public sealed class UpdateAndFeedbackService
                     checkCircle,
                     new TextBlock
                     {
-                        Text = L10n.T(queuedOffline ? "已暂存离线队列" : "收到了，谢谢"),
+                        Text = L10n.T("已发给开发者，谢谢"),
                         FontSize = 19,
                         FontWeight = Microsoft.UI.Text.FontWeights.Bold,
                         Foreground = ThemeHelper.Brush(p.T1),
@@ -1593,9 +1636,7 @@ public sealed class UpdateAndFeedbackService
                     },
                     new TextBlock
                     {
-                        Text = L10n.T(queuedOffline
-                            ? "当前网络或服务暂时繁忙，内容已安全保存在本机，联网后将自动补发。"
-                            : "稍后会出现在 GitHub 问题板上。"),
+                        Text = L10n.T("这条反馈仅开发者可见，不会公开。"),
                         FontSize = 13,
                         Foreground = ThemeHelper.Brush(p.T2),
                         TextWrapping = TextWrapping.Wrap,
@@ -1604,7 +1645,7 @@ public sealed class UpdateAndFeedbackService
                     },
                     new HyperlinkButton
                     {
-                        Content = L10n.T("需要补充或私信？直接发邮件 ↗"),
+                        Content = L10n.T("如需回复，可发邮件至 yuyue.app@icloud.com"),
                         NavigateUri = new Uri("mailto:yuyue.app@icloud.com"),
                         FontSize = 12,
                         HorizontalAlignment = HorizontalAlignment.Center,
@@ -1616,84 +1657,70 @@ public sealed class UpdateAndFeedbackService
             return thanksStack;
         }
 
-        var uploadFailRow = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-            Visibility = Visibility.Collapsed,
-        };
-        var fallbackGhBtn = YYChrome.MakeSheetPillButton(preferCn ? "改为在 CNB 打开 Issue ↗" : "改为在 GitHub 打开 Issue ↗", () =>
-        {
-            string t0 = titleBox.Text.Trim();
-            string b0 = bodyBox.Text.Trim();
-            SaveDraftState();
-            activeDlg?.Hide();
-            OpenGitHubIssue(category, t0, b0, withDeviceInfo);
-        }, dark, _library.Prefs.Tint, "secondary", height: 30, horizontalPadding: 12);
-        uploadFailRow.Children.Add(fallbackGhBtn);
-
         async Task SubmitFeedbackNowAsync()
         {
-            if (isSending) return;
-            string title = titleBox.Text.Trim();
-            string text = bodyBox.Text.Trim();
-            if (string.IsNullOrEmpty(title) || string.IsNullOrEmpty(text)) return;
+            if (!AirFeedbackClient.CanSubmit(bodyBox.Text, attachments.Count, isSending)) return;
 
             isSending = true;
-            ShowAttachError(null);
-            uploadFailRow.Visibility = Visibility.Collapsed;
-            if (sendBtn?.Content is TextBlock stb) stb.Text = L10n.T("发送中…");
-            SyncSendEnabled();
+            ShowError(null);
+            if (sendBtn?.Content is TextBlock stb) stb.Text = L10n.T("正在发送…");
+            bodyBox.IsEnabled = false;
+            deviceToggle.IsEnabled = false;
+            RebuildAttachments();
+            SaveDraftState();
 
             try
             {
-                SaveDraftState();
-                var finalAttachments = attachments.Select(a => (a.Name, a.Data, a.IsImage)).ToList();
-                if (withLogs && finalAttachments.Count < 3 && ReadLocalLogTailBytes() is { Length: > 0 } logBytes)
-                    finalAttachments.Add(("yuyue.log", logBytes, false));
+                AirFeedbackClient.DeviceInfo? deviceInfo = withDeviceInfo
+                    ? new AirFeedbackClient.DeviceInfo(
+                        AppVersion: CurrentVersion,
+                        AppBuild: CurrentBuild.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        DeviceModel: deviceModelStr,
+                        OsVersion: osDisplay,
+                        Locale: localeStr)
+                    : null;
 
-                var relayStatus = await TrySubmitViaRelayAsync(category, title, text, withDeviceInfo, finalAttachments);
-                if (relayStatus == RelaySubmitOutcome.Sent)
+                var imageBytes = attachments.Select(a => a.Data).ToList();
+                var sendResult = await AirFeedbackClient.SendAsync(bodyBox.Text, deviceInfo, imageBytes);
+
+                if (sendResult.Success)
                 {
-                    _library.Analytics.TrackFeedbackSubmitted(finalAttachments.Count(a => a.IsImage), withDeviceInfo);
+                    _library.Analytics.TrackFeedbackSubmitted(Math.Min(imageBytes.Count, AirFeedbackClient.MaxImages), withDeviceInfo);
                     ClearPersistedDraft();
-                    outerSwitchHost.Content = BuildThanksView(queuedOffline: false);
-                }
-                else if (relayStatus == RelaySubmitOutcome.QueuedOffline)
-                {
-                    outerSwitchHost.Content = BuildThanksView(queuedOffline: true);
-                }
-                else if (relayStatus == RelaySubmitOutcome.UploadFailed)
-                {
-                    // NEVER clear saved draft when network upload throws!
-                    ShowAttachError("网络上传未成功，你填写的文字与截图已保存在草稿中，可稍后再试或直接打开 GitHub Issue。");
-                    uploadFailRow.Visibility = Visibility.Visible;
+                    attachments.Clear();
+                    bodyBox.Text = "";
+                    outerSwitchHost.Content = BuildThanksView();
                 }
                 else
                 {
-                    // YuyueFeedbackTopic unconfigured: NEVER clear saved draft!
-                    activeDlg?.Hide();
-                    OpenGitHubIssue(category, title, text, withDeviceInfo);
+                    ShowError(L10n.T(sendResult.ErrorMessage ?? AirFeedbackClient.OfflineRetryMessage));
                 }
+            }
+            catch
+            {
+                ShowError(L10n.T(AirFeedbackClient.OfflineRetryMessage));
             }
             finally
             {
                 isSending = false;
-                if (sendBtn?.Content is TextBlock stb2) stb2.Text = L10n.T("发送");
-                SyncSendEnabled();
+                if (sendBtn?.Content is TextBlock stb2) stb2.Text = L10n.T("发送给开发者");
+                bodyBox.IsEnabled = true;
+                deviceToggle.IsEnabled = true;
+                RebuildAttachments();
+                SyncCounter();
             }
         }
 
-        sendBtn = YYChrome.MakeSheetPillButton("发送", () => _ = SubmitFeedbackNowAsync(), dark, _library.Prefs.Tint, "dark", height: 36, horizontalPadding: 20);
-        SyncSendEnabled();
+        sendBtn = YYChrome.MakeSheetPillButton("发送给开发者", () => _ = SubmitFeedbackNowAsync(), dark, _library.Prefs.Tint, "dark", height: 36, horizontalPadding: 20);
+        cancelBtn = YYChrome.MakeSheetPillButton("取消", () => { if (!isSending) { SaveDraftState(); activeDlg?.Hide(); } }, dark, _library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 16);
 
         var footerGrid = new Grid { Margin = new Thickness(0, 2, 0, 0) };
         footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        footerGrid.Children.Add(clearDraftBtn);
+        footerGrid.Children.Add(draftBar);
         var rightFootBtns = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        rightFootBtns.Children.Add(YYChrome.MakeSheetPillButton("取消", () => { SaveDraftState(); activeDlg?.Hide(); }, dark, _library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 16));
+        rightFootBtns.Children.Add(cancelBtn);
         rightFootBtns.Children.Add(sendBtn);
         Grid.SetColumn(rightFootBtns, 2);
         footerGrid.Children.Add(rightFootBtns);
@@ -1705,29 +1732,20 @@ public sealed class UpdateAndFeedbackService
             AllowDrop = true,
             Children =
             {
-                YYChrome.MakeSheetHeader("反馈", "语阅还在早期，哪里不对、想要什么，直接写。", () => { SaveDraftState(); activeDlg?.Hide(); }, dark, titleSize: 17),
-                segHost,
-                titleGroupCard,
+                YYChrome.MakeSheetHeader("反馈", L10n.T("语阅还在早期，哪里不对、想要什么，直接写。"), () => { if (!isSending) { SaveDraftState(); activeDlg?.Hide(); } }, dark, titleSize: 17),
                 bodyGroupCard,
-                attachErrorText,
-                uploadFailRow,
+                errorBanner,
                 deviceCard,
-                infoMetaRow,
-                new TextBlock
-                {
-                    Text = L10n.T("正文和附件都会公开在 GitHub Issue 中，方便社区一起排查；不收集邮箱，请勿上传个人隐私或完整版权书。"),
-                    FontSize = 11,
-                    Foreground = ThemeHelper.Brush(p.T3),
-                    TextWrapping = TextWrapping.Wrap,
-                },
+                mailRow,
+                privacyRow,
                 footerGrid,
             },
         };
 
-        // Drag-and-drop files onto feedback dialog
+        // Drag-and-drop image files onto feedback sheet
         composerRoot.DragOver += (_, e) =>
         {
-            if (e.DataView.Contains(StandardDataFormats.StorageItems))
+            if (!isSending && e.DataView.Contains(StandardDataFormats.StorageItems))
             {
                 e.AcceptedOperation = DataPackageOperation.Copy;
                 e.Handled = true;
@@ -1735,18 +1753,65 @@ public sealed class UpdateAndFeedbackService
         };
         composerRoot.Drop += async (_, e) =>
         {
-            if (!e.DataView.Contains(StandardDataFormats.StorageItems)) return;
+            if (isSending || !e.DataView.Contains(StandardDataFormats.StorageItems)) return;
             var items = await e.DataView.GetStorageItemsAsync();
             foreach (var item in items)
             {
+                if (attachments.Count >= AirFeedbackClient.MaxImages) break;
                 if (item is StorageFile sf)
-                    await TryAttachFileAsync(sf);
+                    await TryAttachImageFileAsync(sf);
             }
         };
 
-        // Ctrl+V clipboard image paste & Ctrl+Enter quick submit
-        async Task HandleComposerKeysAsync(KeyRoutedEventArgs e)
+        // Clipboard bitmap paste (tunneling PreviewKeyDown so TextBox doesn't swallow Ctrl+V + right-click Paste + Ctrl+Enter submit)
+        async Task AttachClipboardBitmapAsync(DataPackageView content)
         {
+            try
+            {
+                if (attachments.Count >= AirFeedbackClient.MaxImages)
+                {
+                    ShowError(L10n.T("最多只能添加 4 张图片。"));
+                    return;
+                }
+                var bmpRef = await content.GetBitmapAsync();
+                using var inStream = await bmpRef.OpenReadAsync();
+                byte[] jpeg = await SanitizeStreamToJpegAsync(inStream);
+                if (jpeg.Length == 0)
+                {
+                    ShowError(L10n.T("无法读取剪贴板中的图片。"));
+                    return;
+                }
+                if (jpeg.Length > AirFeedbackClient.MaxImageBytes)
+                {
+                    ShowError(L10n.T("剪贴板图片压缩后仍超过 8 MB 上限。"));
+                    return;
+                }
+                string pasteName = $"paste-{attachments.Count + 1}.jpg";
+                string draftPath = SaveTempDraftAttachment(pasteName, jpeg);
+                ShowError(null);
+                attachments.Add((pasteName, jpeg, draftPath));
+                RebuildAttachments();
+                SaveDraftState();
+            }
+            catch { }
+        }
+
+        bodyBox.Paste += async (_, e) =>
+        {
+            if (isSending) return;
+            try
+            {
+                var content = Clipboard.GetContent();
+                if (content.Contains(StandardDataFormats.Text) || !content.Contains(StandardDataFormats.Bitmap)) return;
+                e.Handled = true;
+                await AttachClipboardBitmapAsync(content);
+            }
+            catch { }
+        };
+
+        composerRoot.PreviewKeyDown += async (_, e) =>
+        {
+            if (isSending) return;
             bool ctrl = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(CoreVirtualKeyStates.Down);
             if (!ctrl) return;
             if (e.Key == VirtualKey.Enter)
@@ -1760,38 +1825,16 @@ public sealed class UpdateAndFeedbackService
             {
                 var content = Clipboard.GetContent();
                 if (!content.Contains(StandardDataFormats.Bitmap)) return;
+                bool focusInBody = ReferenceEquals(e.OriginalSource, bodyBox)
+                    || ReferenceEquals(FocusManager.GetFocusedElement(xamlRoot), bodyBox);
+                if (focusInBody && content.Contains(StandardDataFormats.Text)) return;
                 e.Handled = true;
-                if (attachments.Count >= 3)
-                {
-                    ShowAttachError("最多只能添加 3 个附件。");
-                    return;
-                }
-                var bmpRef = await content.GetBitmapAsync();
-                using var inStream = await bmpRef.OpenReadAsync();
-                byte[] jpeg = await SanitizeStreamToJpegAsync(inStream);
-                if (jpeg.Length == 0)
-                {
-                    ShowAttachError("无法读取剪贴板中的图片。");
-                    return;
-                }
-                if (jpeg.Length > 1_500_000)
-                {
-                    ShowAttachError("剪贴板图片压缩后仍超过 1.5 MB 上限。");
-                    return;
-                }
-                string pasteName = $"paste-{attachments.Count + 1}.jpg";
-                string draftPath = SaveTempDraftAttachment(pasteName, jpeg);
-                ShowAttachError(null);
-                attachments.Add((pasteName, jpeg, true, draftPath));
-                RebuildAttachments();
-                SaveDraftState();
+                await AttachClipboardBitmapAsync(content);
             }
             catch { }
-        }
-        titleBox.KeyDown += async (_, e) => await HandleComposerKeysAsync(e);
-        bodyBox.KeyDown += async (_, e) => await HandleComposerKeysAsync(e);
-        composerRoot.KeyDown += async (_, e) => await HandleComposerKeysAsync(e);
+        };
 
+        SyncCounter();
         RebuildAttachments();
         outerSwitchHost.Content = composerRoot;
         L10n.ApplyTree(outerSwitchHost);
@@ -1799,6 +1842,10 @@ public sealed class UpdateAndFeedbackService
         while (true)
         {
             activeDlg = YYChrome.CreateMacSheet(xamlRoot, dark, 500, outerSwitchHost, maxHeight: 780, tint: _library.Prefs.Tint);
+            activeDlg.Closing += (_, closeArgs) =>
+            {
+                if (isSending) closeArgs.Cancel = true;
+            };
             await activeDlg.ShowSafeAsync(_library.Prefs.Tint);
             if (activeDlg.Content is Border surf) surf.Child = null;
             activeDlg.Content = null;
@@ -1813,221 +1860,100 @@ public sealed class UpdateAndFeedbackService
                     var rtb = new RenderTargetBitmap();
                     await rtb.RenderAsync(rootEl);
                     var pix = await rtb.GetPixelsAsync();
-                    using var ms = new InMemoryRandomAccessStream();
-                    var enc = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, ms);
-                    enc.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, (uint)rtb.PixelWidth, (uint)rtb.PixelHeight, 96, 96, pix.ToArray());
-                    await enc.FlushAsync();
-                    ms.Seek(0);
-                    var rawBytes = new byte[ms.Size];
-                    await ms.ReadAsync(rawBytes.AsBuffer(), (uint)rawBytes.Length, InputStreamOptions.None);
-                    byte[] jpeg = await SanitizeImageBytesToJpegAsync(rawBytes, rawBytes);
-                    if (jpeg.Length > 1_500_000)
+                    byte[] jpeg = await SanitizeBgraPixelsToJpegAsync(pix.ToArray(), (uint)rtb.PixelWidth, (uint)rtb.PixelHeight);
+                    if (jpeg.Length == 0)
                     {
-                        ShowAttachError("窗口截图压缩后仍超过 1.5 MB 上限。");
+                        ShowError(L10n.T("截屏失败，请重试。"));
+                    }
+                    else if (jpeg.Length > AirFeedbackClient.MaxImageBytes)
+                    {
+                        ShowError(L10n.T("窗口截图压缩后仍超过 8 MB 上限。"));
                     }
                     else
                     {
                         string shotName = $"shot-{attachments.Count + 1}.jpg";
                         string draftPath = SaveTempDraftAttachment(shotName, jpeg);
-                        ShowAttachError(null);
-                        attachments.Add((shotName, jpeg, true, draftPath));
+                        ShowError(null);
+                        attachments.Add((shotName, jpeg, draftPath));
                         RebuildAttachments();
                         SaveDraftState();
                     }
                 }
-                catch (Exception ex)
+                catch
                 {
-                    ShowAttachError($"截屏失败：{ex.Message}");
+                    ShowError(L10n.T("截屏失败，请重试。"));
                 }
             }
         }
+
+        SaveDraftState();
     }
 
-    private enum RelaySubmitOutcome { Unconfigured, Sent, QueuedOffline, UploadFailed }
-
-    internal static string? ResolveFeedbackTopic()
-    {
-        string? topic = Environment.GetEnvironmentVariable("YuyueFeedbackTopic");
-        if (string.IsNullOrWhiteSpace(topic))
-        {
-            try
-            {
-                var attrs = Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>();
-                foreach (var a in attrs)
-                {
-                    if (a.Key == "YuyueFeedbackTopic" && !string.IsNullOrWhiteSpace(a.Value))
-                    {
-                        topic = a.Value.Trim();
-                        break;
-                    }
-                }
-            }
-            catch { }
-        }
-        return string.IsNullOrWhiteSpace(topic) ? null : topic;
-    }
-
-    private static string SafeFileExt(string name)
-    {
-        string ext = Path.GetExtension(name).TrimStart('.').ToLowerInvariant();
-        if (ext.Length is >= 1 and <= 10 && ext.All(c => (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')))
-            return "." + ext;
-        return ".bin";
-    }
-
-    private static string EncodeHeaderName(string name)
-    {
-        string baseName = Path.GetFileName(name ?? "").Trim();
-        if (string.IsNullOrEmpty(baseName)) return "";
-        if (baseName.Length > 80) baseName = baseName[..80];
-        return Uri.EscapeDataString(baseName);
-    }
-
-    private async Task<RelaySubmitOutcome> TrySubmitViaRelayAsync(
-        string category, string title, string text, bool withInfo,
-        List<(string Name, byte[] Data, bool IsImage)> attachments)
-    {
-        string? topic = ResolveFeedbackTopic();
-        if (string.IsNullOrWhiteSpace(topic))
-            return RelaySubmitOutcome.Unconfigured;
-
-        try
-        {
-            var fileIds = new List<string>();
-            for (int i = 0; i < attachments.Count; i++)
-            {
-                var att = attachments[i];
-                using var putReq = new HttpRequestMessage(HttpMethod.Put, $"https://ntfy.sh/{topic}")
-                {
-                    Content = new ByteArrayContent(att.Data),
-                };
-                putReq.Headers.Add("X-Firebase", "no");
-                if (att.IsImage)
-                {
-                    putReq.Headers.Add("Filename", $"shot-{i + 1}.jpg");
-                    putReq.Headers.Add("X-Message", "v2shot");
-                }
-                else
-                {
-                    string encoded = EncodeHeaderName(att.Name);
-                    putReq.Headers.Add("Filename", $"file-{i + 1}{SafeFileExt(att.Name)}");
-                    putReq.Headers.Add("X-Message", string.IsNullOrEmpty(encoded) ? "v2file" : $"v2file {encoded}");
-                }
-                using var putResp = await Http.SendAsync(putReq);
-                putResp.EnsureSuccessStatusCode();
-                using var doc = JsonDocument.Parse(await putResp.Content.ReadAsStringAsync());
-                if (doc.RootElement.TryGetProperty("id", out var idProp) && idProp.GetString() is string fid)
-                    fileIds.Add(fid);
-            }
-
-            var draft = new FeedbackDraft(
-                Category: category,
-                Title: title,
-                Text: text,
-                AppVersion: withInfo ? $"{CurrentVersion} ({CurrentBuild})" : "",
-                Platform: withInfo ? "windows" : "",
-                OsVersion: withInfo ? OsDisplayVersion() : "",
-                Files: fileIds.ToArray());
-
-            string sealedJson = YuyueCoreMethods.FeedbackMessage(draft);
-            using var postReq = new HttpRequestMessage(HttpMethod.Post, $"https://ntfy.sh/{topic}")
-            {
-                Content = new StringContent(sealedJson, Encoding.UTF8, "application/json"),
-            };
-            postReq.Headers.Add("X-Firebase", "no");
-            using var postResp = await Http.SendAsync(postReq);
-            if ((int)postResp.StatusCode == 429 || !postResp.IsSuccessStatusCode)
-            {
-                if (attachments.Count == 0)
-                {
-                    EnqueueOfflineFeedback(topic, sealedJson);
-                    return RelaySubmitOutcome.QueuedOffline;
-                }
-                return RelaySubmitOutcome.UploadFailed;
-            }
-            return RelaySubmitOutcome.Sent;
-        }
-        catch
-        {
-            return RelaySubmitOutcome.UploadFailed;
-        }
-    }
-
-    private void EnqueueOfflineFeedback(string topic, string body)
-    {
-        _library.Prefs.FeedbackOfflineQueue.Add($"{topic}\n{body}");
-        while (_library.Prefs.FeedbackOfflineQueue.Count > 10)
-            _library.Prefs.FeedbackOfflineQueue.RemoveAt(0);
-        _library.SavePrefs();
-    }
-
-    public async Task FlushOfflineFeedbackQueueAsync()
-    {
-        if (_library.Prefs.FeedbackOfflineQueue.Count == 0) return;
-        var remaining = new List<string>();
-        foreach (var entry in _library.Prefs.FeedbackOfflineQueue.ToArray())
-        {
-            int nl = entry.IndexOf('\n');
-            if (nl <= 0) continue;
-            string topic = entry[..nl];
-            string body = entry[(nl + 1)..];
-            try
-            {
-                using var req = new HttpRequestMessage(HttpMethod.Post, $"https://ntfy.sh/{topic}")
-                {
-                    Content = new StringContent(body, Encoding.UTF8, "application/json"),
-                };
-                req.Headers.Add("X-Firebase", "no");
-                using var resp = await Http.SendAsync(req);
-                if (!resp.IsSuccessStatusCode) remaining.Add(entry);
-            }
-            catch
-            {
-                remaining.Add(entry);
-            }
-        }
-        _library.Prefs.FeedbackOfflineQueue = remaining;
-        _library.SavePrefs();
-    }
-
-    private static void OpenGitHubIssue(string category, string title, string text, bool withInfo)
-    {
-        string cleanTitle = title.Replace('\r', ' ').Replace('\n', ' ').Trim();
-        string tag = category switch { "idea" => "[建议] ", "other" => "[其他] ", _ => "[问题] " };
-        string body = withInfo
-            ? $"{text}\n\n---\n- 平台：Windows ({OsDisplayVersion()})\n- 版本：语阅 {CurrentVersion} ({CurrentBuild})"
-            : text;
-        string url = Yuyue.Speech.ModelDownload.PrefersChinaMirror()
-            ? $"https://cnb.cool/{RepoSlug}/-/issues"
-            : $"https://github.com/{RepoSlug}/issues/new?title={Uri.EscapeDataString(tag + cleanTitle)}&body={Uri.EscapeDataString(body)}";
-        _ = Launcher.LaunchUriAsync(new Uri(url));
-    }
-
-    // Strips EXIF metadata and downscales to <= 1600px JPEG <= 1 MB (1:1 Feedback.swift)
-    private static async Task<byte[]> SanitizeImageToJpegAsync(StorageFile file, byte[] fallback)
+    // Strips EXIF metadata and downscales to <= 2048px JPEG <= 8 MB
+    private static async Task<byte[]> SanitizeImageToJpegAsync(StorageFile file)
     {
         try
         {
             using var inStream = await file.OpenReadAsync();
-            var bytes = await SanitizeStreamToJpegAsync(inStream);
-            return bytes.Length > 0 ? bytes : fallback;
+            return await SanitizeStreamToJpegAsync(inStream);
         }
         catch { }
-        return fallback;
+        return Array.Empty<byte>();
     }
 
-    private static async Task<byte[]> SanitizeImageBytesToJpegAsync(byte[] raw, byte[] fallback)
+    private static async Task<byte[]> SanitizeImageBytesToJpegAsync(byte[] raw)
     {
         try
         {
             using var ms = new InMemoryRandomAccessStream();
             await ms.WriteAsync(raw.AsBuffer());
             ms.Seek(0);
-            var bytes = await SanitizeStreamToJpegAsync(ms);
-            return bytes.Length > 0 ? bytes : fallback;
+            return await SanitizeStreamToJpegAsync(ms);
         }
         catch { }
-        return fallback;
+        return Array.Empty<byte>();
+    }
+
+    private static async Task<byte[]> SanitizeBgraPixelsToJpegAsync(byte[] bgra, uint w, uint h)
+    {
+        if (w == 0 || h == 0 || bgra.Length == 0) return Array.Empty<byte>();
+        try
+        {
+            foreach (var (maxSide, quality) in new (uint, float)[]
+            {
+                (AirFeedbackClient.MaxImageLongSide, 0.80f),
+                (AirFeedbackClient.MaxImageLongSide, 0.65f),
+                (1600u, 0.65f),
+                (1200u, 0.55f),
+            })
+            {
+                double scale = Math.Min(1.0, (double)maxSide / Math.Max(w, h));
+                uint tw = Math.Max(1, (uint)Math.Round(w * scale));
+                uint th = Math.Max(1, (uint)Math.Round(h * scale));
+
+                using var outStream = new InMemoryRandomAccessStream();
+                var props = new BitmapPropertySet { { "ImageQuality", new BitmapTypedValue(quality, Windows.Foundation.PropertyType.Single) } };
+                var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, outStream, props);
+                encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore, w, h, 96, 96, bgra);
+                if (tw != w || th != h)
+                {
+                    encoder.BitmapTransform.ScaledWidth = tw;
+                    encoder.BitmapTransform.ScaledHeight = th;
+                    encoder.BitmapTransform.InterpolationMode = BitmapInterpolationMode.Linear;
+                }
+                await encoder.FlushAsync();
+
+                if (outStream.Size <= (ulong)AirFeedbackClient.MaxImageBytes || maxSide == 1200u)
+                {
+                    outStream.Seek(0);
+                    var bytes = new byte[outStream.Size];
+                    await outStream.ReadAsync(bytes.AsBuffer(), (uint)bytes.Length, InputStreamOptions.None);
+                    return bytes;
+                }
+            }
+        }
+        catch { }
+        return Array.Empty<byte>();
     }
 
     private static async Task<byte[]> SanitizeStreamToJpegAsync(IRandomAccessStream inStream)
@@ -2036,12 +1962,22 @@ public sealed class UpdateAndFeedbackService
         {
             var decoder = await BitmapDecoder.CreateAsync(inStream);
             uint w = decoder.PixelWidth, h = decoder.PixelHeight;
+            if (w == 0 || h == 0) return Array.Empty<byte>();
+            bool swapped = decoder.OrientedPixelWidth != decoder.PixelWidth;
 
-            foreach (var (maxSide, quality) in new[] { (1600u, 0.78), (1600u, 0.60), (1200u, 0.60), (900u, 0.50) })
+            foreach (var (maxSide, quality) in new (uint, float)[]
+            {
+                (AirFeedbackClient.MaxImageLongSide, 0.80f),
+                (AirFeedbackClient.MaxImageLongSide, 0.65f),
+                (1600u, 0.65f),
+                (1200u, 0.55f),
+            })
             {
                 double scale = Math.Min(1.0, (double)maxSide / Math.Max(w, h));
                 uint tw = Math.Max(1, (uint)Math.Round(w * scale));
                 uint th = Math.Max(1, (uint)Math.Round(h * scale));
+                uint outW = swapped ? th : tw;
+                uint outH = swapped ? tw : th;
 
                 var transform = new BitmapTransform { ScaledWidth = tw, ScaledHeight = th, InterpolationMode = BitmapInterpolationMode.Linear };
                 var pixelData = await decoder.GetPixelDataAsync(
@@ -2051,10 +1987,10 @@ public sealed class UpdateAndFeedbackService
                 using var outStream = new InMemoryRandomAccessStream();
                 var props = new BitmapPropertySet { { "ImageQuality", new BitmapTypedValue(quality, Windows.Foundation.PropertyType.Single) } };
                 var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, outStream, props);
-                encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, tw, th, 96, 96, pixelData.DetachPixelData());
+                encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore, outW, outH, 96, 96, pixelData.DetachPixelData());
                 await encoder.FlushAsync();
 
-                if (outStream.Size <= 1_000_000 || maxSide == 900u)
+                if (outStream.Size <= (ulong)AirFeedbackClient.MaxImageBytes || maxSide == 1200u)
                 {
                     outStream.Seek(0);
                     var bytes = new byte[outStream.Size];
