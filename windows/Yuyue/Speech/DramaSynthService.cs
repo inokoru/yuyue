@@ -577,7 +577,7 @@ public static class DramaSynthService
             synthPlayer.SetBookContext(bookId, language);
             try
             {
-                UpdateDramaCaps(library, bookId, language, narrator, ttsActive: true);
+                UpdateDramaCaps(library, bookId, language, narrator, ttsActive: true, allowLlm: false);
                 SoundLibraryService.Register(library.Core, library.DataDir);
                 var plan = EnsureCastPlan(library, bookId, language, narrator);
                 if (plan is null) return;
@@ -640,7 +640,7 @@ public static class DramaSynthService
             finally
             {
                 PreRenderLoops.TryRemove(bookId, out _);
-                UpdateDramaCaps(library, bookId, language, narrator, ttsActive: false);
+                UpdateDramaCaps(library, bookId, language, narrator, ttsActive: false, allowLlm: VoiceCloneAndDramaDialogs.IsDramaWorkerRunning(bookId));
                 SectionMade?.Invoke(bookId);
                 onSectionMade?.Invoke();
             }
@@ -913,23 +913,39 @@ public static class DramaSynthService
         }
     }
 
-    public static void UpdateDramaCaps(LibraryService library, string bookId, string language, string? narrator, bool ttsActive)
+    public static DramaCaps BuildCaps(
+        LibraryService library,
+        string language,
+        string? narrator,
+        bool ttsActive,
+        bool allowLlm = false)
+    {
+        string? effNarr = EffectiveNarrator(library, language, narrator);
+        bool castsCloud = effNarr is not null && effNarr.StartsWith("cloud.", StringComparison.Ordinal);
+        bool canTts = ttsActive || library.LiveVoice.IsReady || library.Kokoro.IsInstalled || castsCloud;
+        return new DramaCaps(
+            Llm: allowLlm && library.Companion.IsConfigured,
+            VerifyDistinct: false,
+            ContextTokens: 120_000,
+            Tts: canTts,
+            DesignVoice: false,
+            Sfx: SoundLibraryService.IsSfxMakerAvailable,
+            Combo: $"{library.Prefs.AiProvider}/{library.Prefs.AiModel}",
+            Engine: castsCloud ? effNarr! : (library.LiveVoice.IsReady ? "zipvoice-1" : (library.Kokoro.IsInstalled ? "kokoro-1" : "sapi")),
+            TtsSameEachTime: !castsCloud);
+    }
+
+    public static void UpdateDramaCaps(
+        LibraryService library,
+        string bookId,
+        string language,
+        string? narrator,
+        bool ttsActive,
+        bool allowLlm = false)
     {
         try
         {
-            string? effNarr = EffectiveNarrator(library, language, narrator);
-            bool castsCloud = effNarr is not null && effNarr.StartsWith("cloud.", StringComparison.Ordinal);
-            bool canTts = ttsActive || library.LiveVoice.IsReady || castsCloud;
-            library.Core.DramaSetCaps(new DramaCaps(
-                Llm: library.Companion.IsConfigured,
-                VerifyDistinct: false,
-                ContextTokens: 120_000,
-                Tts: canTts,
-                DesignVoice: false,
-                Sfx: SoundLibraryService.IsSfxMakerAvailable,
-                Combo: $"{library.Prefs.AiProvider}/{library.Prefs.AiModel}",
-                Engine: castsCloud ? effNarr! : (library.LiveVoice.IsReady ? "zipvoice-1" : "sapi"),
-                TtsSameEachTime: !castsCloud));
+            library.Core.DramaSetCaps(BuildCaps(library, language, narrator, ttsActive, allowLlm));
         }
         catch { }
     }

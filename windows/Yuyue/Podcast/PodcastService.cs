@@ -1,8 +1,11 @@
 using System.Net.Http;
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text;
 using System.Text.Json;
 using Windows.Media.Core;
+using Windows.Media.SpeechSynthesis;
 using Windows.Storage;
+using Windows.Storage.Streams;
 using Yuyue.Core;
 using Yuyue.Speech;
 
@@ -354,8 +357,31 @@ public sealed class PodcastService
         }
         catch { }
 
+        string storedPath = filePath;
+        try
+        {
+            string localDir = Path.Combine(_library.DataDir, "podcasts", "local");
+            Directory.CreateDirectory(localDir);
+            string fullSrc = Path.GetFullPath(filePath);
+            string fullLocalDir = Path.GetFullPath(localDir);
+            if (!fullSrc.StartsWith(fullLocalDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                string ext = Path.GetExtension(filePath);
+                if (string.IsNullOrWhiteSpace(ext)) ext = ".mp3";
+                string rawBase = Path.GetFileNameWithoutExtension(filePath);
+                var invalid = Path.GetInvalidFileNameChars();
+                string safeBase = new string(rawBase.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray()).Trim();
+                if (string.IsNullOrWhiteSpace(safeBase)) safeBase = "audio";
+                if (safeBase.Length > 48) safeBase = safeBase[..48];
+                string dst = Path.Combine(localDir, $"{safeBase}-{Guid.NewGuid().ToString("N")[..8]}{ext}");
+                await Task.Run(() => File.Copy(fullSrc, dst, overwrite: true));
+                if (File.Exists(dst)) storedPath = dst;
+            }
+        }
+        catch { }
+
         return await Task.Run(() => _library.Core.PodcastImportSingleIssue(
-            title, author, "从本机音频文件直接放入收听台", "", null, filePath, null, durSec, "zh-CN", PodcastSourceKind.LocalAudio));
+            title, author, "从本机音频文件直接放入收听台", "", null, storedPath, null, durSec, "zh-CN", PodcastSourceKind.LocalAudio));
     }
 
     /// <summary>
@@ -397,34 +423,168 @@ public sealed class PodcastService
     /// <summary>
     /// Slices <c>[t0, t1]</c> from a local/cached podcast audio file into a standalone WAV inside <c>Core.PodcastClipsDir()</c>
     /// so saved <see cref="PodcastClip"/> items can replay original audio offline even if the feed disappears.
+    /// For Studio TTS episodes without an audio stream, synthesizes the turn's audio directly into the WAV clip.
     /// </summary>
-    public async Task<string?> SliceLocalAudioClipAsync(PodcastIssue issue, double t0, double t1, CancellationToken ct = default)
+    public async Task<string?> SliceLocalAudioClipAsync(
+        PodcastIssue issue,
+        double t0,
+        double t1,
+        CancellationToken ct = default,
+        string? fallbackText = null,
+        string? voiceId = null)
     {
         try
         {
-            string? localPath = await EnsureLocalAudioPathAsync(issue, downloadIfRemote: false, ct);
-            if (string.IsNullOrWhiteSpace(localPath) || !File.Exists(localPath)) return null;
-
             double start = Math.Max(0, t0);
             double end = Math.Max(start + 1.0, t1);
             string clipsDir = _library.Core.PodcastClipsDir();
             Directory.CreateDirectory(clipsDir);
-            string scratchDir = Path.Combine(CacheDir, "pcm-work", issue.Id);
-            Directory.CreateDirectory(scratchDir);
-
-            string wavPath = await Aligner.EnsurePcm16kWavAsync(localPath, scratchDir, 0, ct);
-            if (!Aligner.TryReadWavInfo(wavPath, out var info) || info.SampleCount <= 0)
-                return null;
-
             string relName = $"clip-{issue.Id[..Math.Min(8, issue.Id.Length)]}-{(int)start}-{Guid.NewGuid().ToString("N")[..6]}.wav";
             string dstPath = Path.Combine(clipsDir, relName);
-            await Task.Run(() => WindowsTranscriber.WriteWavSlice(wavPath, info, start, end, dstPath), ct);
-            return File.Exists(dstPath) && new FileInfo(dstPath).Length > 64 ? relName : null;
+
+            string? localPath = await EnsureLocalAudioPathAsync(issue, downloadIfRemote: true, ct);
+            if (!string.IsNullOrWhiteSpace(localPath) && File.Exists(localPath))
+            {
+                string scratchDir = Path.Combine(CacheDir, "pcm-work", issue.Id);
+                Directory.CreateDirectory(scratchDir);
+
+                string wavPath = await Aligner.EnsurePcm16kWavAsync(localPath, scratchDir, 0, ct);
+                if (Aligner.TryReadWavInfo(wavPath, out var info) && info.SampleCount > 0)
+                {
+                    await Task.Run(() => WindowsTranscriber.WriteWavSlice(wavPath, info, start, end, dstPath), ct);
+                    if (File.Exists(dstPath) && new FileInfo(dstPath).Length > 64)
+                        return relName;
+                }
+            }
+
+            string textToSpeak = fallbackText?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(textToSpeak))
+            {
+                try
+                {
+                    var sents = _library.Core.PodcastTranscript(issue.Id);
+                    var matched = sents.Where(s => s.T1 > start + 0.05 && s.T0 < end - 0.05).ToArray();
+                    if (matched.Length > 0)
+                    {
+                        textToSpeak = string.Join(" ", matched.Select(s => s.TextOrig)).Trim();
+                    }
+                    else if (sents.Length > 0)
+                    {
+                        var nearest = sents.OrderBy(s => Math.Abs(s.T0 - start)).First();
+                        textToSpeak = nearest.TextOrig.Trim();
+                    }
+                }
+                catch { }
+            }
+
+            if (!string.IsNullOrWhiteSpace(textToSpeak))
+            {
+                byte[]? synthWav = await SynthesizeClipWavBytesAsync(textToSpeak, voiceId, issue.Language, ct);
+                if (synthWav is { Length: > 64 })
+                {
+                    await File.WriteAllBytesAsync(dstPath, synthWav, ct);
+                    return File.Exists(dstPath) && new FileInfo(dstPath).Length > 64 ? relName : null;
+                }
+            }
+
+            return null;
         }
         catch
         {
             return null;
         }
+    }
+
+    private async Task<byte[]?> SynthesizeClipWavBytesAsync(string text, string? voiceId, string? issueLang, CancellationToken ct)
+    {
+        string plain = CardVoiceEngine.PlainSpokenText(text);
+        if (string.IsNullOrWhiteSpace(plain)) return null;
+
+        bool isEn = (issueLang ?? "").StartsWith("en", StringComparison.OrdinalIgnoreCase);
+        string lang = isEn ? "en-US" : "zh-Hans";
+        string langPrefix = isEn ? "en" : "zh";
+        string? norm = DramaSynthService.NormalizeVoiceId(voiceId);
+
+        if (string.IsNullOrWhiteSpace(norm))
+        {
+            if (_library.LiveVoice.IsReady)
+            {
+                var card = _library.LiveVoice.GetBuiltinCards().FirstOrDefault(c => c.Lang.StartsWith(langPrefix, StringComparison.OrdinalIgnoreCase));
+                if (card is not null) norm = card.Id;
+            }
+            if (string.IsNullOrWhiteSpace(norm) && _library.Kokoro.IsInstalled)
+            {
+                var spk = _library.Kokoro.GetSpeakers(langPrefix).FirstOrDefault();
+                if (spk is not null) norm = spk.Id;
+            }
+            if (string.IsNullOrWhiteSpace(norm) && _library.CloudVoices.IsConfigured(CloudTtsProvider.Edge))
+            {
+                norm = isEn ? "cloud.edge.en-US-AndrewMultilingualNeural" : "cloud.edge.zh-CN-YunxiNeural";
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(norm))
+        {
+            if (norm.StartsWith("kokoro.", StringComparison.Ordinal) && _library.Kokoro.IsInstalled)
+            {
+                var spk = _library.Kokoro.FindSpeaker(norm);
+                if (spk is not null)
+                {
+                    try
+                    {
+                        var wav = await KokoroEngine.Instance.SynthesizeWavAsync(
+                            _library.Core, _library.Kokoro, _library.DataDir, spk, text, lang, ct);
+                        if (wav is { Length: > 64 }) return wav;
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch { }
+                }
+            }
+            else if (CloudVoiceService.TryParseFullId(norm, out _, out _))
+            {
+                try
+                {
+                    var wav = await _library.CloudVoices.SynthesizeWavAsync(norm, text, lang, null, ct);
+                    if (wav is { Length: > 64 }) return wav;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch { }
+            }
+            else if ((norm.StartsWith("card.", StringComparison.Ordinal) || norm.StartsWith("cloned.", StringComparison.Ordinal))
+                     && _library.LiveVoice.IsReady)
+            {
+                var card = _library.LiveVoice.GetClonedCards().FirstOrDefault(c => c.Id == norm)
+                    ?? _library.LiveVoice.GetBuiltinCards().FirstOrDefault(c => c.Id == norm);
+                if (card is not null)
+                {
+                    try
+                    {
+                        var wav = await CardVoiceEngine.Instance.SynthesizeWavAsync(
+                            _library.Core, _library.LiveVoice, _library.DataDir, card, null, text, lang, CardStyle.Neutral, ct);
+                        if (wav is { Length: > 64 }) return wav;
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch { }
+                }
+            }
+        }
+
+        try
+        {
+            using var synth = new SpeechSynthesizer();
+            string? sysId = norm is not null && norm.StartsWith("sys:", StringComparison.Ordinal) ? norm[4..] : null;
+            var voices = AudioPlayer.GetSystemVoicesForLanguage(lang);
+            var matchedVoice = sysId is not null
+                ? SpeechSynthesizer.AllVoices.FirstOrDefault(v => v.Id == sysId)
+                : voices.FirstOrDefault();
+            if (matchedVoice is not null) synth.Voice = matchedVoice;
+            using var stream = await synth.SynthesizeTextToStreamAsync(plain).AsTask(ct);
+            var bytes = new byte[stream.Size];
+            await stream.ReadAsync(bytes.AsBuffer(), (uint)bytes.Length, InputStreamOptions.None).AsTask(ct);
+            return bytes.Length > 64 ? bytes : null;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return null; }
     }
 
     /// <summary>

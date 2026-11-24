@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -144,6 +146,9 @@ public static class AlignCheckAndPolishService
 
         var previewPlayer = new MediaPlayer { AutoPlay = false };
         var stopPreviewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(80) };
+        var windowCts = new CancellationTokenSource();
+        var decodingTracks = new ConcurrentDictionary<int, byte>();
+        string pcmScratchDir = Path.Combine(library.DataDir, "audiobooks", audioBookId, "pcm-cache");
         double previewEndInTrackSec = double.MaxValue;
         stopPreviewTimer.Tick += (_, _) =>
         {
@@ -159,9 +164,13 @@ public static class AlignCheckAndPolishService
         };
         win.Closed += (_, _) =>
         {
+            try { windowCts.Cancel(); windowCts.Dispose(); } catch { }
             stopPreviewTimer.Stop();
             try { previewPlayer.Pause(); previewPlayer.Dispose(); } catch { }
         };
+
+        string ResolveTrackPath(string rawPath) =>
+            Path.IsPathRooted(rawPath) ? rawPath : Path.Combine(library.DataDir, rawPath);
 
         void PlayAroundRow(SyncRow row)
         {
@@ -175,10 +184,11 @@ public static class AlignCheckAndPolishService
                 double next = accum + Math.Max(0.1, f.Seconds);
                 if (globalStart < next || fi == recording.Files.Length - 1)
                 {
-                    if (!File.Exists(f.Path)) return;
+                    string trackPath = ResolveTrackPath(f.Path);
+                    if (!File.Exists(trackPath)) return;
                     double inTrackStart = Math.Max(0, globalStart - accum);
                     previewEndInTrackSec = Math.Min(f.Seconds, globalEnd - accum);
-                    previewPlayer.Source = MediaSource.CreateFromUri(new Uri(f.Path));
+                    previewPlayer.Source = MediaSource.CreateFromUri(new Uri(trackPath));
                     previewPlayer.PlaybackSession.Position = TimeSpan.FromSeconds(inTrackStart);
                     previewPlayer.Play();
                     stopPreviewTimer.Start();
@@ -406,14 +416,73 @@ public static class AlignCheckAndPolishService
             }
             tlStack.Children.Add(blocksRow);
 
-            // Waveform bars deterministic from row times
-            var wavePanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Height = 26, VerticalAlignment = VerticalAlignment.Center };
-            for (int b = 0; b < 84; b++)
+            // Real PCM amplitude peak waveform bars around [winLo, winHi]
+            const int barCount = 84;
+            var peaks = new float[barCount];
+            bool hasRealPeaks = false;
+            double trackAccum = 0;
+            for (int fi = 0; fi < recording.Files.Length; fi++)
             {
-                double t = winLo + (winHi - winLo) * b / 84.0;
+                var f = recording.Files[fi];
+                double dur = Math.Max(0.05, f.Seconds);
+                double trackLo = trackAccum;
+                double trackHi = trackAccum + dur;
+                trackAccum = trackHi;
+
+                if (trackHi <= winLo || trackLo >= winHi)
+                    continue;
+
+                double ovLo = Math.Max(winLo, trackLo);
+                double ovHi = Math.Min(winHi, trackHi);
+                string srcPath = ResolveTrackPath(f.Path);
+                string cachedWav1 = Path.Combine(pcmScratchDir, $"pcm16k-{fi}.wav");
+                string cachedWav2 = Path.Combine(library.DataDir, "audiobook-work", audioBookId, $"pcm16k-{fi}.wav");
+
+                string? readableWav = null;
+                if (File.Exists(cachedWav1)) readableWav = cachedWav1;
+                else if (File.Exists(cachedWav2)) readableWav = cachedWav2;
+                else if (srcPath.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) && File.Exists(srcPath)) readableWav = srcPath;
+
+                if (readableWav is not null &&
+                    TrySampleWavSpanPeaks(readableWav, ovLo - trackLo, ovHi - trackLo, trackLo, winLo, winHi, peaks))
+                {
+                    hasRealPeaks = true;
+                }
+                else if (File.Exists(srcPath) && decodingTracks.TryAdd(fi, 1))
+                {
+                    int idxCap = fi;
+                    string srcCap = srcPath;
+                    var ct = windowCts.Token;
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await Aligner.EnsurePcm16kWavAsync(srcCap, pcmScratchDir, idxCap, ct);
+                            if (!ct.IsCancellationRequested)
+                                win.DispatcherQueue.TryEnqueue(RenderAll);
+                        }
+                        catch { }
+                        finally
+                        {
+                            decodingTracks.TryRemove(idxCap, out _);
+                        }
+                    }, ct);
+                }
+            }
+
+            float maxPeak = 0f;
+            for (int b = 0; b < barCount; b++)
+                if (peaks[b] > maxPeak) maxPeak = peaks[b];
+            float normPeak = Math.Max(0.08f, maxPeak);
+
+            var wavePanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Height = 26, VerticalAlignment = VerticalAlignment.Center };
+            for (int b = 0; b < barCount; b++)
+            {
+                double t = winLo + (winHi - winLo) * (b + 0.5) / barCount;
                 bool insideCur = t >= cur.T0Ms / 1000.0 && t <= cur.T1Ms / 1000.0;
-                int hash = Math.Abs((int)(BitConverter.DoubleToInt64Bits(Math.Round(t, 2)) * 2654435761L));
-                double barH = 4 + (hash % 20);
+                double barH = hasRealPeaks
+                    ? Math.Clamp(3.0 + Math.Pow(Math.Clamp(peaks[b] / normPeak, 0f, 1f), 0.72) * 21.0, 3.0, 24.0)
+                    : (insideCur ? 6.0 : 3.5);
                 wavePanel.Children.Add(new Border
                 {
                     Width = 3,
@@ -591,6 +660,99 @@ public static class AlignCheckAndPolishService
 
         RenderAll();
         win.Activate();
+    }
+
+    private static bool TrySampleWavSpanPeaks(
+        string wavPath,
+        double localLoSec,
+        double localHiSec,
+        double trackGlobalLoSec,
+        double winLoSec,
+        double winHiSec,
+        float[] bins)
+    {
+        if (bins.Length == 0 || winHiSec <= winLoSec) return false;
+        if (!Aligner.TryReadWavInfo(wavPath, out var info)) return false;
+        if (info.SampleRate <= 0 || info.Channels <= 0 || info.DataOffset <= 0 || info.DataBytes <= 0)
+            return false;
+
+        bool validPcm = info.AudioFormat == 1 && info.BitsPerSample is 8 or 16 or 24 or 32;
+        bool validFloat = info.AudioFormat == 3 && info.BitsPerSample == 32;
+        if (!validPcm && !validFloat) return false;
+
+        int bytesPerSample = info.BitsPerSample / 8;
+        int frameBytes = info.Channels * bytesPerSample;
+        if (frameBytes <= 0) return false;
+
+        long totalFrames = info.DataBytes / frameBytes;
+        if (totalFrames <= 0) return false;
+
+        long startFrame = Math.Clamp((long)Math.Floor(Math.Max(0, localLoSec) * info.SampleRate), 0, totalFrames);
+        long endFrame = Math.Clamp((long)Math.Ceiling(Math.Max(localLoSec, localHiSec) * info.SampleRate), startFrame, totalFrames);
+        long spanFrames = endFrame - startFrame;
+        if (spanFrames <= 0) return false;
+
+        try
+        {
+            using var fs = new FileStream(wavPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            long byteStart = info.DataOffset + startFrame * frameBytes;
+            if (byteStart >= fs.Length) return false;
+            fs.Seek(byteStart, SeekOrigin.Begin);
+
+            int stride = Math.Max(1, (int)(spanFrames / (bins.Length * 160L)));
+            int chunkFrames = Math.Max(256, 65536 / frameBytes);
+            byte[] buf = new byte[chunkFrames * frameBytes];
+            long frameCursor = startFrame;
+            double invRate = 1.0 / info.SampleRate;
+            double winSpan = winHiSec - winLoSec;
+            bool sampledAny = false;
+
+            while (frameCursor < endFrame)
+            {
+                int wantFrames = (int)Math.Min(chunkFrames, endFrame - frameCursor);
+                int readBytes = fs.Read(buf, 0, wantFrames * frameBytes);
+                if (readBytes < frameBytes) break;
+                int gotFrames = readBytes / frameBytes;
+
+                for (int i = 0; i < gotFrames; i += stride)
+                {
+                    double globalSec = trackGlobalLoSec + (frameCursor + i) * invRate;
+                    int bin = (int)((globalSec - winLoSec) / winSpan * bins.Length);
+                    if ((uint)bin >= (uint)bins.Length) continue;
+
+                    int baseOff = i * frameBytes;
+                    float framePeak = 0f;
+                    for (int ch = 0; ch < info.Channels; ch++)
+                    {
+                        int sOff = baseOff + ch * bytesPerSample;
+                        float amp = info.AudioFormat == 3
+                            ? Math.Abs(BitConverter.ToSingle(buf, sOff))
+                            : info.BitsPerSample switch
+                            {
+                                8 => Math.Abs((buf[sOff] - 128) / 128f),
+                                16 => Math.Abs(BinaryPrimitives.ReadInt16LittleEndian(buf.AsSpan(sOff, 2)) / 32768f),
+                                24 => Math.Abs(((buf[sOff] | (buf[sOff + 1] << 8) | ((sbyte)buf[sOff + 2] << 16))) / 8388608f),
+                                32 => Math.Abs(BinaryPrimitives.ReadInt32LittleEndian(buf.AsSpan(sOff, 4)) / 2147483648f),
+                                _ => 0f,
+                            };
+                        if (float.IsFinite(amp) && amp > framePeak)
+                            framePeak = amp;
+                    }
+
+                    if (framePeak > bins[bin])
+                        bins[bin] = Math.Min(1f, framePeak);
+                    sampledAny = true;
+                }
+
+                frameCursor += gotFrames;
+            }
+
+            return sampledAny;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private sealed class PolishJobState

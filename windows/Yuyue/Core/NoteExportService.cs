@@ -50,10 +50,16 @@ public sealed class NoteExportService
         return string.IsNullOrEmpty(s) ? "未命名书籍" : s;
     }
 
+    private static BookDetail? TryGetBookDetail(LibraryService library, string bookId)
+    {
+        try { return library.GetBookDetail(bookId); }
+        catch { return null; }
+    }
+
     public static string BuildObsidianBookMarkdown(LibraryService library, BookSummary book)
     {
         var marks = library.GetMarks(book.Id);
-        var detail = library.GetBookDetail(book.Id);
+        BookDetail? detail = book.Record ? null : TryGetBookDetail(library, book.Id);
         var sb = new StringBuilder();
 
         // YAML frontmatter (1:1 NoteExport.swift)
@@ -71,9 +77,9 @@ public sealed class NoteExportService
 
         foreach (var group in marks.GroupBy(m => m.Section).OrderBy(g => g.Key))
         {
-            string chapter = group.Key < detail.Sections.Length && !string.IsNullOrWhiteSpace(detail.Sections[group.Key].Title)
+            string chapter = detail is not null && group.Key < detail.Sections.Length && !string.IsNullOrWhiteSpace(detail.Sections[group.Key].Title)
                 ? detail.Sections[group.Key].Title!
-                : $"第 {group.Key + 1} 节";
+                : (detail is null && group.Key == 0 ? "笔记" : $"第 {group.Key + 1} 节");
             sb.AppendLine($"## {chapter}");
             sb.AppendLine();
 
@@ -216,7 +222,7 @@ public sealed class NoteExportService
             var unsent = allMarks.Where(m => !sentMap.TryGetValue(m.Id, out int h) || h != ComputeMarkHash(m)).ToArray();
             if (unsent.Length == 0) continue;
 
-            var detail = _library.GetBookDetail(b.Id);
+            BookDetail? detail = b.Record ? null : TryGetBookDetail(_library, b.Id);
             var blocks = BuildNotionBlocks(detail, unsent);
             if (blocks.Count == 0) continue;
 
@@ -414,10 +420,13 @@ public sealed class NoteExportService
 
     private void RecordLast(string target, string? bookTitle, int books, int count)
     {
-        if (count <= 0) return;
-        string summary = bookTitle is not null
-            ? $"上次发送《{bookTitle}》{count} 条 · {DateTime.Now:M/d HH:mm}"
-            : $"上次发送 {books} 本书共 {count} 条 · {DateTime.Now:M/d HH:mm}";
+        string summary = count <= 0
+            ? (bookTitle is not null
+                ? $"《{bookTitle}》已是最新 · {DateTime.Now:M/d HH:mm}"
+                : $"已是最新 · {DateTime.Now:M/d HH:mm}")
+            : (bookTitle is not null
+                ? $"上次发送《{bookTitle}》{count} 条 · {DateTime.Now:M/d HH:mm}"
+                : $"上次发送 {books} 本书共 {count} 条 · {DateTime.Now:M/d HH:mm}");
         _library.Prefs.ExportLastSummary[target] = summary;
         _library.SavePrefs();
     }
@@ -457,7 +466,7 @@ public sealed class NoteExportService
         return null;
     }
 
-    private static List<object> BuildNotionBlocks(BookDetail detail, IReadOnlyList<Mark> marks)
+    private static List<object> BuildNotionBlocks(BookDetail? detail, IReadOnlyList<Mark> marks)
     {
         static object[] RichTextChunks(string text)
         {
@@ -474,9 +483,9 @@ public sealed class NoteExportService
         var blocks = new List<object>();
         foreach (var grp in marks.GroupBy(m => m.Section).OrderBy(g => g.Key))
         {
-            string chapter = grp.Key < detail.Sections.Length && !string.IsNullOrWhiteSpace(detail.Sections[grp.Key].Title)
+            string chapter = detail is not null && grp.Key < detail.Sections.Length && !string.IsNullOrWhiteSpace(detail.Sections[grp.Key].Title)
                 ? detail.Sections[grp.Key].Title!
-                : $"第 {grp.Key + 1} 节";
+                : (detail is null && grp.Key == 0 ? "笔记" : $"第 {grp.Key + 1} 节");
             blocks.Add(new
             {
                 @object = "block",
@@ -509,7 +518,7 @@ public sealed class NoteExportService
     private static async Task<string> CreateNotionBookSubpageAsync(
         string token, string parentPageId, BookSummary book, object[] initialBlocks, CancellationToken ct)
     {
-        string titleLine = book.Authors.Length > 0 ? $"《{book.Title}》 · {book.Authors[0]}" : $"《{book.Title}》";
+        string titleLine = book.Title.Length > 2000 ? book.Title[..2000] : book.Title;
         var payload = new
         {
             parent = new { page_id = parentPageId },

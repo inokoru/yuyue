@@ -7,10 +7,16 @@ namespace Yuyue.Core;
 /// </summary>
 public static class NoteExporter
 {
+    private static BookDetail? TryGetBookDetail(LibraryService library, string bookId)
+    {
+        try { return library.GetBookDetail(bookId); }
+        catch { return null; }
+    }
+
     public static string BuildBookMarkdown(LibraryService library, BookSummary book)
     {
         var marks = library.GetMarks(book.Id);
-        var detail = library.GetBookDetail(book.Id);
+        BookDetail? detail = book.Record ? null : TryGetBookDetail(library, book.Id);
 
         var sb = new StringBuilder();
         sb.AppendLine($"# {book.Title}");
@@ -19,9 +25,9 @@ public static class NoteExporter
 
         foreach (var group in marks.GroupBy(m => m.Section).OrderBy(g => g.Key))
         {
-            string chapter = group.Key < detail.Sections.Length && !string.IsNullOrWhiteSpace(detail.Sections[group.Key].Title)
+            string chapter = detail is not null && group.Key < detail.Sections.Length && !string.IsNullOrWhiteSpace(detail.Sections[group.Key].Title)
                 ? detail.Sections[group.Key].Title!
-                : $"第 {group.Key + 1} 节";
+                : (detail is null && group.Key == 0 ? "笔记" : $"第 {group.Key + 1} 节");
             sb.AppendLine($"## {chapter}\n");
 
             foreach (var m in group)

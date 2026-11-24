@@ -22,7 +22,16 @@ public sealed record SleepReturnInfo(uint Section, int Sentence, string When, st
 /// </summary>
 public static class ReaderRecapAndSleepHelper
 {
-    private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions WriteJsonOpts = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
+
+    private static readonly JsonSerializerOptions ReadJsonOpts = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
 
     // ---------- 1. 前情提要 (ReaderRecap.swift) ----------
 
@@ -38,8 +47,37 @@ public static class ReaderRecapAndSleepHelper
         try
         {
             string path = GetRecapCachePath(library, bookId);
-            if (File.Exists(path))
-                return JsonSerializer.Deserialize<Dictionary<string, RecapDto>>(File.ReadAllText(path)) ?? new();
+            if (!File.Exists(path)) return new();
+            string raw = File.ReadAllText(path);
+            using var doc = JsonDocument.Parse(raw);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return new();
+
+            var result = new Dictionary<string, RecapDto>(StringComparer.Ordinal);
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (prop.Value.ValueKind != JsonValueKind.Object) continue;
+                JsonElement linesEl = default;
+                bool hasLines = prop.Value.TryGetProperty("lines", out linesEl)
+                    || prop.Value.TryGetProperty("Lines", out linesEl);
+                if (!hasLines || linesEl.ValueKind != JsonValueKind.Array) continue;
+
+                var lines = linesEl.EnumerateArray()
+                    .Where(x => x.ValueKind == JsonValueKind.String)
+                    .Select(x => x.GetString() ?? "")
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .ToArray();
+
+                int days = 1;
+                if ((prop.Value.TryGetProperty("days", out var daysEl) || prop.Value.TryGetProperty("Days", out daysEl))
+                    && daysEl.TryGetInt32(out int parsedDays))
+                {
+                    days = parsedDays;
+                }
+
+                result[prop.Name] = new RecapDto(lines, days);
+            }
+            if (result.Count > 0) return result;
+            return JsonSerializer.Deserialize<Dictionary<string, RecapDto>>(raw, ReadJsonOpts) ?? new();
         }
         catch { }
         return new();
@@ -50,7 +88,7 @@ public static class ReaderRecapAndSleepHelper
         try
         {
             string path = GetRecapCachePath(library, bookId);
-            File.WriteAllText(path, JsonSerializer.Serialize(cache, JsonOpts));
+            File.WriteAllText(path, JsonSerializer.Serialize(cache, WriteJsonOpts));
         }
         catch { }
     }
@@ -561,7 +599,7 @@ public static class ReaderRecapAndSleepHelper
         hLeft.Children.Add(YYIcons.Make("laptop", 12, ThemeHelper.Brush(p.T2)));
         hLeft.Children.Add(new TextBlock
         {
-            Text = $"{devName} 上读到了更后面",
+            Text = latest.Fraction >= hereFraction ? $"{devName} 上读到了更后面" : $"{devName} 上改到了更前面",
             FontSize = 12,
             FontWeight = FontWeights.SemiBold,
             Foreground = ThemeHelper.Brush(p.T1),

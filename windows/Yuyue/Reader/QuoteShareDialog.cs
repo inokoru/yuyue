@@ -1,6 +1,9 @@
+using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Foundation;
 using Windows.Graphics.Imaging;
+using Windows.Storage;
 using Windows.Storage.Pickers;
 using Windows.Storage.Streams;
 using Windows.UI;
@@ -9,6 +12,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using WinRT;
 using WinRT.Interop;
 using Yuyue.Core;
 using Yuyue.Design;
@@ -19,10 +23,22 @@ namespace Yuyue.Reader;
 /// 1:1 port of <c>apple/Yuyue/Library/QuoteShare.swift</c>:
 /// 4 color looks (<c>封面色 / 纸本 / 素白 / 暗黑</c>), 3 aspect shapes (<c>竖图 / 方图 / 横图</c>),
 /// <c>带上想法</c> switch, chapter subtitle, persisted preferences, long-quote scaling,
-/// mini book cover in footer, and 3 actions (<c>纯文字 / 存图 / 复制图片</c>).
+/// mini book cover in footer, high-DPI crisp PNG export, and native Windows system Share sheet.
 /// </summary>
 public static class QuoteShareDialog
 {
+    private const double ExportScale = 3.0;
+
+    [ComImport]
+    [Guid("3A3DCD6C-3EAB-43DC-BCDE-45671CE800C8")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IDataTransferManagerInterop
+    {
+        IntPtr GetForWindow([In] IntPtr appWindow, [In] ref Guid riid);
+        void ShowShareUIForWindow([In] IntPtr appWindow);
+    }
+
+    private static readonly Guid DataTransferManagerIid = new("A5CAEE9B-8708-49D1-8D36-67D25A8DA00C");
     public static async Task ShowAsync(
         Window ownerWindow, XamlRoot xamlRoot,
         string quote, string? thought, string bookTitle, string? author, string? coverPath = null,
@@ -47,11 +63,11 @@ public static class QuoteShareDialog
         }
 
         var previewHost = new Grid { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var exportCanvas = new Canvas { Width = 0, Height = 0, Opacity = 0.004, IsHitTestVisible = false };
         Border currentCard = new();
 
-        void RebuildCard()
+        Border BuildCardElement()
         {
-            previewHost.Children.Clear();
             (double w, double minH) = shape switch
             {
                 "square" => (336.0, 336.0),
@@ -209,7 +225,7 @@ public static class QuoteShareDialog
                 Child = grid,
             };
 
-            var card = new Border
+            return new Border
             {
                 Width = w,
                 MinHeight = minH,
@@ -218,9 +234,43 @@ public static class QuoteShareDialog
                 Padding = new Thickness(9),
                 Child = innerBorder,
             };
+        }
 
-            currentCard = card;
-            previewHost.Children.Add(card);
+        void RebuildCard()
+        {
+            previewHost.Children.Clear();
+            exportCanvas.Children.Clear();
+            currentCard = BuildCardElement();
+            previewHost.Children.Add(exportCanvas);
+            previewHost.Children.Add(currentCard);
+        }
+
+        async Task<InMemoryRandomAccessStream> RenderHighResCardStreamAsync()
+        {
+            double baseW = currentCard.ActualWidth > 0 ? currentCard.ActualWidth : currentCard.Width;
+            double scaledW = Math.Round(baseW * ExportScale);
+            var hiResCard = BuildCardElement();
+            var vb = new Viewbox
+            {
+                Width = scaledW,
+                Stretch = Stretch.Uniform,
+                Child = hiResCard,
+            };
+            exportCanvas.Children.Clear();
+            exportCanvas.Children.Add(vb);
+            try
+            {
+                vb.UpdateLayout();
+                await Task.Delay(24);
+                var stream = await RenderElementToPngStreamAsync(vb, dpi: 96.0 * ExportScale);
+                if (stream.Size > 0) return stream;
+            }
+            catch { }
+            finally
+            {
+                exportCanvas.Children.Clear();
+            }
+            return await RenderElementToPngStreamAsync(currentCard, dpi: 144.0);
         }
 
         // 1:1 notes-quote/1.png: centered 4 color circles + active color name label, then full-width 3-segment shape bar
@@ -371,15 +421,19 @@ public static class QuoteShareDialog
             return sp;
         }
 
+        string BuildPlainShareText()
+        {
+            string cite = string.IsNullOrWhiteSpace(author) ? $"——《{bookTitle}》" : $"——《{bookTitle}》 {author}";
+            return includeThought && !string.IsNullOrWhiteSpace(thought)
+                ? $"“{quote.Trim()}”\n{thought.Trim()}\n{cite}"
+                : $"“{quote.Trim()}”\n{cite}";
+        }
+
         var tc = ThemeHelper.TintColors(tint, darkUi);
         var textBtn = YYChrome.MakeSheetPillButton(MakeActionLabel("doc-lines", "纯文字", uiPalette.T1), () =>
         {
-            string cite = string.IsNullOrWhiteSpace(author) ? $"——《{bookTitle}》" : $"——《{bookTitle}》 {author}";
-            string txt = includeThought && !string.IsNullOrWhiteSpace(thought)
-                ? $"“{quote.Trim()}”\n{thought.Trim()}\n{cite}"
-                : $"“{quote.Trim()}”\n{cite}";
             var dp = new DataPackage();
-            dp.SetText(txt);
+            dp.SetText(BuildPlainShareText());
             Clipboard.SetContent(dp);
             statusText.Text = "✓ 已复制纯文字书摘";
             statusText.Visibility = Visibility.Visible;
@@ -389,13 +443,13 @@ public static class QuoteShareDialog
         {
             try
             {
-                var picker = new FileSavePicker { SuggestedFileName = $"{bookTitle}-书摘" };
+                var picker = new FileSavePicker { SuggestedFileName = $"{SanitizeFileName(bookTitle)}-书摘" };
                 picker.FileTypeChoices.Add("PNG 图片", [".png"]);
                 InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(ownerWindow));
                 var file = await picker.PickSaveFileAsync();
                 if (file is null) return;
 
-                using var pngStream = await RenderElementToPngStreamAsync(currentCard);
+                using var pngStream = await RenderHighResCardStreamAsync();
                 pngStream.Seek(0);
                 byte[] bytes = new byte[pngStream.Size];
                 await pngStream.ReadAsync(bytes.AsBuffer(), (uint)bytes.Length, InputStreamOptions.None);
@@ -410,14 +464,34 @@ public static class QuoteShareDialog
         {
             try
             {
-                var stream = await RenderElementToPngStreamAsync(currentCard);
-                var dp = new DataPackage();
-                dp.SetBitmap(RandomAccessStreamReference.CreateFromStream(stream));
-                Clipboard.SetContent(dp);
-                statusText.Text = "✓ 已复制书摘卡片图片，可直接粘贴分享";
-                statusText.Visibility = Visibility.Visible;
+                var stream = await RenderHighResCardStreamAsync();
+                stream.Seek(0);
+                byte[] pngBytes = new byte[stream.Size];
+                await stream.ReadAsync(pngBytes.AsBuffer(), (uint)pngBytes.Length, InputStreamOptions.None);
+                stream.Seek(0);
+
+                string shareTitle = $"《{bookTitle}》书摘";
+                string shareText = BuildPlainShareText();
+                bool shownNative = await TryShowNativeShareSheetAsync(ownerWindow, shareTitle, shareText, bookTitle, pngBytes);
+                if (!shownNative)
+                {
+                    var dp = new DataPackage();
+                    dp.SetBitmap(RandomAccessStreamReference.CreateFromStream(stream));
+                    Clipboard.SetContent(dp);
+                    statusText.Text = "✓ 已复制书摘卡片图片，可直接粘贴分享";
+                    statusText.Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    // Also place bitmap on clipboard as convenience alongside system Share sheet
+                    var dp = new DataPackage();
+                    dp.SetBitmap(RandomAccessStreamReference.CreateFromStream(stream));
+                    try { Clipboard.SetContent(dp); } catch { }
+                    statusText.Text = "✓ 已唤起系统分享面板（同时已复制到剪贴板）";
+                    statusText.Visibility = Visibility.Visible;
+                }
             }
-            catch (Exception ex) { statusText.Text = $"复制失败：{ex.Message}"; statusText.Visibility = Visibility.Visible; }
+            catch (Exception ex) { statusText.Text = $"分享失败：{ex.Message}"; statusText.Visibility = Visibility.Visible; }
         }, darkUi, tint, "warm", height: 40, stretch: true);
 
         var actionGrid = new Grid { ColumnSpacing = 10, Margin = new Thickness(0, 2, 0, 0) };
@@ -438,6 +512,76 @@ public static class QuoteShareDialog
         await dlgRef.ShowAsync();
     }
 
+    private static string SanitizeFileName(string raw)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        string cleaned = new string(raw.Where(c => !invalid.Contains(c)).ToArray()).Trim();
+        return string.IsNullOrWhiteSpace(cleaned) ? "语阅" : cleaned;
+    }
+
+    private static async Task<bool> TryShowNativeShareSheetAsync(
+        Window ownerWindow,
+        string title,
+        string plainText,
+        string bookTitle,
+        byte[] pngBytes)
+    {
+        try
+        {
+            IntPtr hwnd = WindowNative.GetWindowHandle(ownerWindow);
+            if (hwnd == IntPtr.Zero) return false;
+
+            string tempDir = Path.Combine(Path.GetTempPath(), "YuyueShare");
+            Directory.CreateDirectory(tempDir);
+            string tempFilePath = Path.Combine(tempDir, $"{SanitizeFileName(bookTitle)}-书摘.png");
+            await File.WriteAllBytesAsync(tempFilePath, pngBytes);
+            StorageFile? storageFile = null;
+            try { storageFile = await StorageFile.GetFileFromPathAsync(tempFilePath); } catch { }
+
+            var interop = DataTransferManager.As<IDataTransferManagerInterop>();
+            Guid iid = DataTransferManagerIid;
+            IntPtr dtmPtr = interop.GetForWindow(hwnd, ref iid);
+            if (dtmPtr == IntPtr.Zero) return false;
+
+            var dtm = MarshalInterface<DataTransferManager>.FromAbi(dtmPtr);
+            Marshal.Release(dtmPtr);
+
+            TypedEventHandler<DataTransferManager, DataRequestedEventArgs>? handler = null;
+            handler = async (sender, args) =>
+            {
+                if (handler is not null) sender.DataRequested -= handler;
+                var deferral = args.Request.GetDeferral();
+                try
+                {
+                    var data = args.Request.Data;
+                    data.Properties.Title = title;
+                    data.Properties.Description = bookTitle;
+                    data.SetText(plainText);
+
+                    var mem = new InMemoryRandomAccessStream();
+                    await mem.WriteAsync(pngBytes.AsBuffer());
+                    mem.Seek(0);
+                    data.SetBitmap(RandomAccessStreamReference.CreateFromStream(mem));
+
+                    if (storageFile is not null)
+                        data.SetStorageItems([storageFile]);
+                }
+                catch { }
+                finally
+                {
+                    deferral.Complete();
+                }
+            };
+            dtm.DataRequested += handler;
+            interop.ShowShareUIForWindow(hwnd);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     internal static async Task SaveElementPngAsync(UIElement element, string filePath)
     {
         using var stream = await RenderElementToPngStreamAsync(element);
@@ -446,7 +590,7 @@ public static class QuoteShareDialog
         await File.WriteAllBytesAsync(filePath, bytes);
     }
 
-    private static async Task<InMemoryRandomAccessStream> RenderElementToPngStreamAsync(UIElement element)
+    private static async Task<InMemoryRandomAccessStream> RenderElementToPngStreamAsync(UIElement element, double dpi = 144.0)
     {
         var rtb = new RenderTargetBitmap();
         await rtb.RenderAsync(element);
@@ -460,7 +604,7 @@ public static class QuoteShareDialog
             BitmapAlphaMode.Premultiplied,
             (uint)rtb.PixelWidth,
             (uint)rtb.PixelHeight,
-            144, 144,
+            dpi, dpi,
             pixels);
         await encoder.FlushAsync();
         outStream.Seek(0);

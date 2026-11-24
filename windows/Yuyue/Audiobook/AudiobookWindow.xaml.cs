@@ -1,4 +1,5 @@
 using Microsoft.UI;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -15,6 +16,7 @@ using WinRT.Interop;
 using Yuyue.Core;
 using Yuyue.Design;
 using Yuyue.Reader;
+using Yuyue.Shelf;
 using Yuyue.Speech;
 using TimeSpan = System.TimeSpan;
 
@@ -46,13 +48,15 @@ public sealed partial class AudiobookWindow : Window
     private double _rate = 1.0;
     private readonly bool _startFromBeginning;
 
-    // Sleep timer: 0 = off, -1 = end of chapter, -2 = end of sentence, >0 = timed (pause-aware + 20s fade)
+    // Sleep timer: 0 = off, -1 = end of chapter, -2 = end of sentence, >0 = timed (wall-clock deadline + 20s fade)
     private int _sleepMode;
     private double _sleepRemainingSec;
+    private DateTime? _sleepDeadlineUtc;
     private DateTime _sleepLastTickUtc = DateTime.UtcNow;
     private bool _isSleepFading;
     private double _sleepSentenceEndSec = -1;
     private (uint Chapter, int SecMs)? _sleepArmedSpot;
+    private readonly CancellationTokenSource _windowCts = new();
 
     // Alignment, VoiceTapDsp, ResumeAt, ExtraSpan notice & exact listening time
     private DateTime? _pausedUtc;
@@ -209,13 +213,7 @@ public sealed partial class AudiobookWindow : Window
             return;
         }
 
-        _fileStartOffsets = new double[_recording.Files.Length];
-        double acc = 0;
-        for (int i = 0; i < _recording.Files.Length; i++)
-        {
-            _fileStartOffsets[i] = acc;
-            acc += _recording.Files[i].Seconds;
-        }
+        RebuildFileOffsets();
 
         double totalSec = Math.Max(1.0, _recording.Seconds);
         var saved = _library.GetProgress(_bookId);
@@ -271,10 +269,29 @@ public sealed partial class AudiobookWindow : Window
         }
     }
 
+    private void RebuildFileOffsets()
+    {
+        if (_recording is null)
+        {
+            _fileStartOffsets = [];
+            return;
+        }
+        _fileStartOffsets = new double[_recording.Files.Length];
+        double acc = 0;
+        for (int i = 0; i < _recording.Files.Length; i++)
+        {
+            _fileStartOffsets[i] = acc;
+            acc += _recording.Files[i].Seconds;
+        }
+    }
+
+    private string ResolveTrackPath(string rawPath) =>
+        Path.IsPathRooted(rawPath) ? rawPath : Path.Combine(_library.DataDir, rawPath);
+
     private async Task MeasureBookLoudnessInBackgroundAsync()
     {
         if (_recording is null || _recording.Files.Length == 0) return;
-        string firstPath = _recording.Files[0].Path;
+        string firstPath = ResolveTrackPath(_recording.Files[0].Path);
         if (!File.Exists(firstPath)) return;
         try
         {
@@ -328,27 +345,71 @@ public sealed partial class AudiobookWindow : Window
         return (ch.Start, Math.Max(1.0, ch.Seconds));
     }
 
-    private async Task SeekGlobalAsync(double targetSec, bool startPlaying, bool forceReload = false)
+    private async Task SeekGlobalAsync(double targetSec, bool startPlaying, bool forceReload = false, int? explicitFileIndex = null)
     {
         if (_recording is null || _recording.Files.Length == 0) return;
         double clamped = Math.Clamp(targetSec, 0, Math.Max(0, _recording.Seconds - 0.1));
         _globalPosSec = clamped;
 
         int fileIdx = 0;
-        for (int i = 0; i < _fileStartOffsets.Length; i++)
+        if (explicitFileIndex is int expIdx && expIdx >= 0 && expIdx < _recording.Files.Length)
         {
-            if (clamped >= _fileStartOffsets[i]) fileIdx = i;
-            else break;
+            fileIdx = expIdx;
+        }
+        else
+        {
+            for (int i = 0; i < _fileStartOffsets.Length; i++)
+            {
+                if (i > 0 && _recording.Files[i].Seconds <= 0) break;
+                if (clamped >= _fileStartOffsets[i]) fileIdx = i;
+                else break;
+            }
         }
 
         bool wantClearer = false;
         try { wantClearer = _library.Core.AudiobookSkipSettings(_bookId).ClearerVoice; } catch { }
 
-        double localSec = Math.Max(0, clamped - _fileStartOffsets[fileIdx]);
+        double localSec = fileIdx < _fileStartOffsets.Length ? Math.Max(0, clamped - _fileStartOffsets[fileIdx]) : 0;
         if (fileIdx != _currentFileIndex || forceReload || wantClearer != _loadedFileIsClearer)
         {
-            string filePath = _recording.Files[fileIdx].Path;
-            if (!File.Exists(filePath)) return;
+            string filePath = ResolveTrackPath(_recording.Files[fileIdx].Path);
+            if (!File.Exists(filePath))
+            {
+                ShowToast($"正在缓冲第 {fileIdx + 1} 轨…");
+                bool fetched = false;
+                try
+                {
+                    fetched = await _library.RemoteLibraries.EnsureStreamTrackAsync(_bookId, fileIdx, _windowCts.Token);
+                }
+                catch (OperationCanceledException) { return; }
+                catch { fetched = false; }
+
+                if (fetched)
+                {
+                    try
+                    {
+                        _recording = _library.Core.AudioRecording(_bookId);
+                        RebuildFileOffsets();
+                    }
+                    catch { }
+                    if (_recording is not null && fileIdx < _recording.Files.Length)
+                        filePath = ResolveTrackPath(_recording.Files[fileIdx].Path);
+                    if (explicitFileIndex is not null && fileIdx < _fileStartOffsets.Length)
+                    {
+                        clamped = _fileStartOffsets[fileIdx];
+                        _globalPosSec = clamped;
+                    }
+                    localSec = fileIdx < _fileStartOffsets.Length ? Math.Max(0, clamped - _fileStartOffsets[fileIdx]) : 0;
+                }
+
+                if (!File.Exists(filePath))
+                {
+                    ShowToast("无法缓冲该音轨，请检查网络连接");
+                    return;
+                }
+
+                RenderChaptersAndBookmarks();
+            }
 
             string playPath = filePath;
             bool usedClearer = false;
@@ -370,7 +431,7 @@ public sealed partial class AudiobookWindow : Window
                         try
                         {
                             string scratch = Path.Combine(_library.DataDir, "audiobooks", _bookId, "pcm-cache");
-                            string pcm = await Aligner.EnsurePcm16kWavAsync(srcCap, scratch, idxCap, CancellationToken.None);
+                            string pcm = await Aligner.EnsurePcm16kWavAsync(srcCap, scratch, idxCap, _windowCts.Token);
                             float gain = _library.Prefs.AudiobookLoudnessGain.TryGetValue(_bookId, out var g) ? g : VoiceTapDsp.MeasureLoudnessFromWav(pcm);
                             if (VoiceTapDsp.ProcessWavFile(pcm, dspPath, gain, clearer: true))
                             {
@@ -386,7 +447,7 @@ public sealed partial class AudiobookWindow : Window
                 }
             }
 
-            var sf = await StorageFile.GetFileFromPathAsync(playPath);
+            var sf = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(playPath));
             var ms = MediaSource.CreateFromStorageFile(sf);
             await ms.OpenAsync();
             _player.Source = ms;
@@ -417,9 +478,12 @@ public sealed partial class AudiobookWindow : Window
         DispatcherQueue.TryEnqueue(async () =>
         {
             if (_recording is null) return;
-            if (_currentFileIndex + 1 < _recording.Files.Length)
+            try { _library.RemoteLibraries.MarkStreamTrackPassed(_bookId, _currentFileIndex); } catch { }
+            int nextIdx = _currentFileIndex + 1;
+            if (nextIdx < _recording.Files.Length)
             {
-                await SeekGlobalAsync(_fileStartOffsets[_currentFileIndex + 1], startPlaying: true);
+                double nextOffset = nextIdx < _fileStartOffsets.Length ? _fileStartOffsets[nextIdx] : _globalPosSec;
+                await SeekGlobalAsync(nextOffset, startPlaying: true, explicitFileIndex: nextIdx);
                 RenderChaptersAndBookmarks();
             }
             else
@@ -503,14 +567,18 @@ public sealed partial class AudiobookWindow : Window
             RenderChaptersAndBookmarks();
         }
 
-        // Pause-aware sleep countdown + 20s linear volume fade (1:1 AudiobookPlayer.swift:864-925)
+        // Wall-clock sleep countdown (#28: expires even while paused) + 20s linear volume fade
         if (_sleepMode > 0)
         {
             var now = DateTime.UtcNow;
+            if (_sleepDeadlineUtc is DateTime deadline)
+                _sleepRemainingSec = Math.Max(0, (deadline - now).TotalSeconds);
+            else
+                _sleepDeadlineUtc = now.AddSeconds(_sleepRemainingSec);
+            _sleepLastTickUtc = now;
+
             if (_playing)
             {
-                double dt = Math.Clamp((now - _sleepLastTickUtc).TotalSeconds, 0, 2.0);
-                _sleepRemainingSec = Math.Max(0, _sleepRemainingSec - dt);
                 if (_sleepRemainingSec <= 20.0 && _sleepRemainingSec > 0)
                 {
                     _isSleepFading = true;
@@ -522,7 +590,21 @@ public sealed partial class AudiobookWindow : Window
                     return;
                 }
             }
-            _sleepLastTickUtc = now;
+            else if (_sleepRemainingSec <= 0)
+            {
+                _sleepMode = 0;
+                _sleepRemainingSec = 0;
+                _sleepDeadlineUtc = null;
+                _isSleepFading = false;
+                _sleepSentenceEndSec = -1;
+                _sleepArmedSpot = null;
+                _player.Volume = _baseVolume;
+                SleepCountdownText.Text = "";
+                ApplyAppearance();
+                SyncChapterUi();
+                return;
+            }
+
             var remSpan = TimeSpan.FromSeconds(Math.Ceiling(_sleepRemainingSec));
             SleepCountdownText.Text = _isSleepFading
                 ? $"即将渐弱暂停 {remSpan.Seconds:D2}s（按空格延 10 分）"
@@ -538,6 +620,7 @@ public sealed partial class AudiobookWindow : Window
         PausePlayback();
         _sleepMode = 0;
         _sleepRemainingSec = 0;
+        _sleepDeadlineUtc = null;
         _isSleepFading = false;
         _sleepSentenceEndSec = -1;
         _sleepArmedSpot = null;
@@ -551,9 +634,12 @@ public sealed partial class AudiobookWindow : Window
 
     private void ExtendSleepTenMin()
     {
+        var now = DateTime.UtcNow;
+        double baseRem = _sleepDeadlineUtc is DateTime dl ? Math.Max(0, (dl - now).TotalSeconds) : Math.Max(0, _sleepRemainingSec);
         _sleepMode = 10;
-        _sleepRemainingSec = Math.Max(0, _sleepRemainingSec) + 600.0;
-        _sleepLastTickUtc = DateTime.UtcNow;
+        _sleepRemainingSec = baseRem + 600.0;
+        _sleepDeadlineUtc = now.AddSeconds(_sleepRemainingSec);
+        _sleepLastTickUtc = now;
         _isSleepFading = false;
         _player.Volume = _baseVolume;
         ShowToast("已延长睡眠定时 10 分钟");
@@ -765,7 +851,8 @@ public sealed partial class AudiobookWindow : Window
             };
             itemBtn.Click += async (_, _) =>
             {
-                await SeekGlobalAsync(ch.Start, startPlaying: true);
+                int? explicitTrack = _recording is not null && _recording.Chapters.Length == _recording.Files.Length ? idx : null;
+                await SeekGlobalAsync(ch.Start, startPlaying: true, explicitFileIndex: explicitTrack);
                 RenderChaptersAndBookmarks();
             };
             ChapterListPanel.Children.Add(itemBtn);
@@ -1595,11 +1682,13 @@ public sealed partial class AudiobookWindow : Window
                 if (mode > 0)
                 {
                     _sleepRemainingSec = mode * 60.0;
+                    _sleepDeadlineUtc = DateTime.UtcNow.AddSeconds(_sleepRemainingSec);
                     _sleepLastTickUtc = DateTime.UtcNow;
                 }
                 else if (mode == -2)
                 {
                     _sleepRemainingSec = 0;
+                    _sleepDeadlineUtc = null;
                     try
                     {
                         var b = _library.Core.AudiobookSentenceBounds(_bookId, _globalPosSec);
@@ -1611,6 +1700,7 @@ public sealed partial class AudiobookWindow : Window
                 else
                 {
                     _sleepRemainingSec = 0;
+                    _sleepDeadlineUtc = null;
                     SleepCountdownText.Text = mode == -1 ? "本集播完自动停止" : "";
                 }
                 ApplyAppearance();
@@ -1702,12 +1792,55 @@ public sealed partial class AudiobookWindow : Window
         try { act?.Invoke(); } catch { }
     }
 
+    private void ToggleFullScreen()
+    {
+        try
+        {
+            var aw = AppWindow;
+            if (aw is null) return;
+            if (aw.Presenter.Kind == AppWindowPresenterKind.FullScreen)
+                aw.SetPresenter(AppWindowPresenterKind.Default);
+            else
+                aw.SetPresenter(AppWindowPresenterKind.FullScreen);
+        }
+        catch { }
+    }
+
     private void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         bool ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control)
             .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
         bool shift = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
             .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+
+        if (e.Key == VirtualKey.F11)
+        {
+            ToggleFullScreen();
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == VirtualKey.Escape && AppWindow?.Presenter.Kind == AppWindowPresenterKind.FullScreen)
+        {
+            try { AppWindow.SetPresenter(AppWindowPresenterKind.Default); } catch { }
+            e.Handled = true;
+            return;
+        }
+        if (ctrl && e.Key == VirtualKey.K)
+        {
+            _ = QuickSearchDialog.ShowAsync(RootGrid.XamlRoot, _library, _bookId);
+            e.Handled = true;
+            return;
+        }
+        if (ctrl && e.Key == (VirtualKey)188)
+        {
+            App.CurrentApp.OpenSettings();
+            e.Handled = true;
+            return;
+        }
+
+        if (FocusManager.GetFocusedElement(RootGrid.XamlRoot) is TextBox)
+            return;
+
         if (ctrl && e.Key == VirtualKey.D)
         {
             AddBookmarkAtCurrentPosition();
@@ -1784,6 +1917,7 @@ public sealed partial class AudiobookWindow : Window
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
+        try { _windowCts.Cancel(); _windowCts.Dispose(); } catch { }
         _library.AudiobookWork.StatusChanged -= OnAudiobookWorkStatusChanged;
         _uiTimer.Stop();
         _listenTimeTracker.Stop();

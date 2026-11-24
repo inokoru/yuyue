@@ -670,6 +670,14 @@ public sealed class SyncService
                 {
                     using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(infoPath));
                     if (doc.RootElement.ValueKind != JsonValueKind.Object) continue;
+                    // Only sync aligned book recordings containing "book" string and "made" field (1:1 Sync.swift:548-549)
+                    if (!doc.RootElement.TryGetProperty("book", out var bookProp) ||
+                        bookProp.ValueKind != JsonValueKind.String ||
+                        string.IsNullOrEmpty(bookProp.GetString()))
+                        continue;
+                    if (!doc.RootElement.TryGetProperty("made", out var madeProp) ||
+                        madeProp.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+                        continue;
                     infoRoot = doc.RootElement.Clone();
                 }
                 catch { continue; }

@@ -35,44 +35,85 @@ public static class DailyQuote
         new("雾凇沆砀，天与云与山与水，上下一白。", "张岱《湖心亭看雪》"),
     ];
 
-    private static DailyQuoteEntry? _cached;
-    private static string _cachedDay = "";
-    private static int _offset;
+    private static readonly DailyQuoteEntry[] BuiltinEn =
+    [
+        new("I declare after all there is no enjoyment like reading!", "Jane Austen · Pride and Prejudice"),
+        new("Whatever our souls are made of, his and mine are the same.", "Emily Brontë · Wuthering Heights"),
+        new("I am no bird; and no net ensnares me: I am a free human being with an independent will.", "Charlotte Brontë · Jane Eyre"),
+        new("The world is full of obvious things which nobody by any chance ever observes.", "Arthur Conan Doyle"),
+        new("We are all in the gutter, but some of us are looking at the stars.", "Oscar Wilde"),
+        new("To live is the rarest thing in the world. Most people exist, that is all.", "Oscar Wilde"),
+        new("Only that day dawns to which we are awake. There is more day to dawn.", "Henry David Thoreau · Walden"),
+        new("I went to the woods because I wished to live deliberately.", "Henry David Thoreau · Walden"),
+        new("So we beat on, boats against the current, borne back ceaselessly into the past.", "F. Scott Fitzgerald · The Great Gatsby"),
+        new("Mrs. Dalloway said she would buy the flowers herself.", "Virginia Woolf · Mrs Dalloway"),
+        new("A room without books is like a body without a soul.", "Cicero"),
+        new("Hope is the thing with feathers that perches in the soul, and sings the tune without the words.", "Emily Dickinson"),
+        new("You have power over your mind — not outside events. Realize this, and you will find strength.", "Marcus Aurelius · Meditations"),
+        new("It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife.", "Jane Austen · Pride and Prejudice"),
+    ];
+
+    private static readonly object Gate = new();
+    private static readonly Dictionary<string, DailyQuoteEntry> CachedEntries = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, string> CachedDays = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, int> Offsets = new(StringComparer.Ordinal);
+
+    private static string Norm(string? language) =>
+        !string.IsNullOrWhiteSpace(language) && language.Trim().StartsWith("en", StringComparison.OrdinalIgnoreCase)
+            ? "en"
+            : "zh";
+
+    private static DailyQuoteEntry[] Pool(string lang) => lang == "en" ? BuiltinEn : BuiltinZh;
 
     private static string TodayKey() => DateTime.Now.ToString("yyyy-MM-dd");
 
-    private static DailyQuoteEntry BuiltinForToday(int offset = 0)
+    private static DailyQuoteEntry BuiltinForToday(string lang, int offset = 0)
     {
-        int days = (int)DateTimeOffset.Now.ToUnixTimeSeconds() / 86_400;
-        int idx = ((days + offset) % BuiltinZh.Length + BuiltinZh.Length) % BuiltinZh.Length;
-        return BuiltinZh[idx];
+        var list = Pool(lang);
+        int days = (int)(DateTimeOffset.Now.ToUnixTimeSeconds() / 86_400);
+        int idx = ((days + offset) % list.Length + list.Length) % list.Length;
+        return list[idx];
     }
 
-    public static DailyQuoteEntry Current(LibraryService? library = null)
+    public static DailyQuoteEntry Current(LibraryService? library = null, string? language = null)
     {
+        string lang = Norm(language);
         string today = TodayKey();
-        if (_cached is not null && (_cachedDay == today || _offset != 0))
-            return _cached;
 
-        if (library is not null && library.Secrets.Get("voice.daily.zh.date") == today)
+        lock (Gate)
         {
-            string savedText = library.Secrets.Get("voice.daily.zh.text").Trim();
-            if (!string.IsNullOrEmpty(savedText))
+            bool hasOffset = Offsets.TryGetValue(lang, out int offset) && offset != 0;
+            if (CachedEntries.TryGetValue(lang, out var cached) &&
+                ((CachedDays.TryGetValue(lang, out var cDay) && cDay == today) || hasOffset))
             {
-                _cached = new DailyQuoteEntry(savedText, library.Secrets.Get("voice.daily.zh.source"));
-                _cachedDay = today;
-                return _cached;
+                return cached;
             }
-        }
 
-        _cached = BuiltinForToday(_offset);
-        _cachedDay = today;
-        return _cached;
+            if (library is not null && library.Secrets.Get($"voice.daily.{lang}.date") == today)
+            {
+                string savedText = library.Secrets.Get($"voice.daily.{lang}.text").Trim();
+                if (!string.IsNullOrEmpty(savedText))
+                {
+                    var saved = new DailyQuoteEntry(savedText, library.Secrets.Get($"voice.daily.{lang}.source"));
+                    CachedEntries[lang] = saved;
+                    CachedDays[lang] = today;
+                    return saved;
+                }
+            }
+
+            var fallback = BuiltinForToday(lang, Offsets.GetValueOrDefault(lang, 0));
+            CachedEntries[lang] = fallback;
+            CachedDays[lang] = today;
+            return fallback;
+        }
     }
 
-    public static async Task<DailyQuoteEntry> EnsureTodayAsync(LibraryService library)
+    public static async Task<DailyQuoteEntry> EnsureTodayAsync(LibraryService library, string? language = null)
     {
-        var cur = Current(library);
+        string lang = Norm(language);
+        var cur = Current(library, lang);
+        if (lang != "zh") return cur;
+
         string today = TodayKey();
         if (library.Secrets.Get("voice.daily.zh.date") == today && library.Secrets.Get("voice.daily.zh.online") == "1")
             return cur;
@@ -80,43 +121,59 @@ public static class DailyQuote
         var fetched = await FetchHitokotoAsync();
         if (fetched is null) return cur;
 
-        Save(library, today, fetched, online: true);
-        _cached = fetched;
-        _cachedDay = today;
+        Save(library, "zh", today, fetched, online: true);
+        lock (Gate)
+        {
+            CachedEntries["zh"] = fetched;
+            CachedDays["zh"] = today;
+        }
         return fetched;
     }
 
-    public static async Task<DailyQuoteEntry> RefreshAsync(LibraryService library)
+    public static async Task<DailyQuoteEntry> RefreshAsync(LibraryService library, string? language = null)
     {
-        string prev = Current(library).Text;
+        string lang = Norm(language);
+        string prev = Current(library, lang).Text;
         string today = TodayKey();
-        var fetched = await FetchHitokotoAsync(prev);
+        DailyQuoteEntry? fetched = null;
+        if (lang == "zh")
+        {
+            fetched = await FetchHitokotoAsync(prev) ?? await FetchHitokotoAsync(prev);
+        }
         bool online = fetched is not null;
-        var chosen = fetched ?? NextBuiltin(prev);
-        Save(library, today, chosen, online);
-        _cached = chosen;
-        _cachedDay = today;
+        var chosen = fetched ?? NextBuiltin(lang, prev);
+        Save(library, lang, today, chosen, online);
+        lock (Gate)
+        {
+            CachedEntries[lang] = chosen;
+            CachedDays[lang] = today;
+        }
         return chosen;
     }
 
-    private static DailyQuoteEntry NextBuiltin(string avoid)
+    private static DailyQuoteEntry NextBuiltin(string lang, string avoid)
     {
-        _offset++;
-        var next = BuiltinForToday(_offset);
-        if (next.Text == avoid && BuiltinZh.Length > 1)
+        var list = Pool(lang);
+        lock (Gate)
         {
-            _offset++;
-            next = BuiltinForToday(_offset);
+            int step = Offsets.GetValueOrDefault(lang, 0) + 1;
+            var next = BuiltinForToday(lang, step);
+            if (next.Text == avoid && list.Length > 1)
+            {
+                step++;
+                next = BuiltinForToday(lang, step);
+            }
+            Offsets[lang] = step;
+            return next;
         }
-        return next;
     }
 
-    private static void Save(LibraryService library, string today, DailyQuoteEntry entry, bool online)
+    private static void Save(LibraryService library, string lang, string today, DailyQuoteEntry entry, bool online)
     {
-        library.Secrets.Set("voice.daily.zh.date", today);
-        library.Secrets.Set("voice.daily.zh.text", entry.Text);
-        library.Secrets.Set("voice.daily.zh.source", entry.Source);
-        library.Secrets.Set("voice.daily.zh.online", online ? "1" : "0");
+        library.Secrets.Set($"voice.daily.{lang}.date", today);
+        library.Secrets.Set($"voice.daily.{lang}.text", entry.Text);
+        library.Secrets.Set($"voice.daily.{lang}.source", entry.Source);
+        library.Secrets.Set($"voice.daily.{lang}.online", online ? "1" : "0");
     }
 
     private static async Task<DailyQuoteEntry?> FetchHitokotoAsync(string? avoid = null)

@@ -207,20 +207,38 @@ public sealed class CardVoiceEngine : IDisposable
                 if (clauses.Length == 0) return null;
 
                 ulong baseSeed = DeterministicSeed(card.Id, text);
-                for (int attempt = 0; attempt <= 1; attempt++)
+                float[]? bestAudible = null;
+                for (int attempt = 0; attempt < 3; attempt++)
                 {
                     ct.ThrowIfCancellationRequested();
+                    ulong seed = unchecked(baseSeed + (ulong)attempt * 0x9E37_79B9_7F4A_7C15UL);
                     float[]? pcm = null;
-                    try { pcm = SynthesizeClauses(core, sess, prompt, clauses, effLang, baseSeed + (ulong)attempt, ct); }
+                    try { pcm = SynthesizeClauses(core, sess, prompt, clauses, effLang, seed, ct); }
                     catch (OperationCanceledException) { throw; }
                     catch { pcm = null; }
 
-                    if (pcm is { Length: > 0 } && core.LiveVoiceCheck(pcm, SampleRate, plain, language, card.Rate))
+                    if (pcm is not { Length: > 0 })
+                        continue;
+
+                    if (core.LiveVoiceCheck(pcm, SampleRate, plain, language, card.Rate))
                     {
                         byte[] wav = EncodeWav24kMono16(pcm);
                         TryWriteCache(cacheFile, wav);
                         return wav;
                     }
+
+                    if (bestAudible is null && IsAudible(pcm))
+                    {
+                        bestAudible = pcm;
+                    }
+                }
+
+                // Retain audible output from the same voice card if strict duration/silence check failed all 3 seeds.
+                if (bestAudible is not null)
+                {
+                    byte[] wav = EncodeWav24kMono16(bestAudible);
+                    TryWriteCache(cacheFile, wav);
+                    return wav;
                 }
                 return null;
             }, ct);
@@ -229,6 +247,20 @@ public sealed class CardVoiceEngine : IDisposable
         {
             _inferGate.Release();
         }
+    }
+
+    private static bool IsAudible(float[] samples)
+    {
+        if (samples.Length == 0) return false;
+        double sumSq = 0;
+        for (int i = 0; i < samples.Length; i++)
+        {
+            float s = samples[i];
+            if (!float.IsFinite(s)) return false;
+            sumSq += (double)s * s;
+        }
+        double rms = Math.Sqrt(sumSq / samples.Length);
+        return rms >= 1e-4;
     }
 
     private Sessions? EnsureSessions(YuyueCore core, LiveVoiceModel model)

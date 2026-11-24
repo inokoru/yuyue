@@ -20,6 +20,7 @@ using Yuyue.Design;
 using Yuyue.Shelf;
 using Yuyue.Speech;
 using TimeSpan = System.TimeSpan;
+using XamlLine = Microsoft.UI.Xaml.Shapes.Line;
 
 namespace Yuyue.Podcast;
 
@@ -44,18 +45,26 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
     public string? OpenIssueId { get; set; }
 
-    public void OpenIssueAt(string issueId, double? seekSec = null)
+    public void OpenIssueAt(string issueId, double? seekSec = null, bool autoPlay = false)
     {
         OpenIssueId = issueId;
-        if (seekSec is double sec && sec > 0)
+        var issue = _library.Podcasts.GetIssues().FirstOrDefault(x => x.Id == issueId);
+        if (issue is not null)
         {
-            var issue = _library.Podcasts.GetIssues().FirstOrDefault(x => x.Id == issueId);
-            if (issue is not null)
+            var sents = LoadOrSynthesizeTranscript(issue);
+            if (seekSec is double sec && sec >= 0)
             {
-                var sents = LoadOrSynthesizeTranscript(issue);
                 int idx = Array.FindLastIndex(sents, s => sec >= s.T0);
                 _activeTurnIdx = Math.Max(0, idx);
                 try { _library.Core.PodcastSavePlayback(issueId, sec, null); } catch { }
+            }
+            if (!SupportsTrackSwitch(issue, sents))
+            {
+                _track = PodcastTrack.Original;
+            }
+            if (autoPlay && sents.Length > 0)
+            {
+                PlayIssueAtTurn(issue, sents, Math.Clamp(_activeTurnIdx, 0, sents.Length - 1));
             }
         }
     }
@@ -82,12 +91,14 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
     private string? _transcribingIssueId;
     private string _transcribeStatus = "";
     private TextBox? _stationCmdBox;
+    private bool _isPreviewingInterruptAnswer;
 
     public PodcastWorkspaceBuilder(ShelfWindow shelf, LibraryService library)
     {
         _shelf = shelf;
         _library = library;
         _ttsPlayer = new AudioPlayer(library);
+        try { App.CurrentApp.BindAudioClaimOwner(_ttsPlayer, _shelf); } catch { }
         _ttsPlayer.SentenceFinished += OnStudioTurnFinished;
 
         _mediaPlayer = new MediaPlayer { AudioCategory = MediaPlayerAudioCategory.Speech, AutoPlay = false };
@@ -169,6 +180,116 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         try { _clipPreviewPlayer.Pause(); _clipPreviewPlayer.Dispose(); } catch { }
     }
 
+    public bool SupportsTrackSwitch(PodcastIssue? issue, MagazineSentence[]? preloaded = null)
+    {
+        if (issue is null) return false;
+        var sents = preloaded is { Length: > 0 } ? preloaded : LoadOrSynthesizeTranscript(issue);
+        return sents.Any(s => !string.IsNullOrWhiteSpace(s.TextTrans) || !string.IsNullOrWhiteSpace(s.CoachNote));
+    }
+
+    public bool HandleKeyDown(VirtualKey key)
+    {
+        if (OpenIssueId is string issueId)
+        {
+            var issue = _library.Podcasts.GetIssues().FirstOrDefault(x => x.Id == issueId);
+            if (issue is null)
+            {
+                if (key == VirtualKey.Escape)
+                {
+                    OpenIssueId = null;
+                    _shelf.RefreshCurrentSubPage();
+                    return true;
+                }
+                return false;
+            }
+
+            var sents = _activeSentences.Length > 0 && _playingIssueId == issueId
+                ? _activeSentences
+                : LoadOrSynthesizeTranscript(issue);
+
+            switch (key)
+            {
+                case VirtualKey.Space:
+                    if (_playing) StopPlayback();
+                    else PlayIssueAtTurn(issue, sents, _activeTurnIdx);
+                    _shelf.RefreshCurrentSubPage();
+                    return true;
+                case VirtualKey.H:
+                    _ = ClipCurrentTurnAsync(issue.Id);
+                    return true;
+                case VirtualKey.I:
+                {
+                    double sec = sents.Length > _activeTurnIdx ? sents[_activeTurnIdx].T0 : issue.PositionSec;
+                    _ = ShowInterruptDialogAsync(issue, sec, sents.ElementAtOrDefault(_activeTurnIdx)?.TextOrig);
+                    return true;
+                }
+                case VirtualKey.Number1:
+                    if (SupportsTrackSwitch(issue, sents)) SwitchTrack(issue.Id, issue, PodcastTrack.Original);
+                    return true;
+                case VirtualKey.Number2:
+                    if (SupportsTrackSwitch(issue, sents)) SwitchTrack(issue.Id, issue, PodcastTrack.Dub);
+                    return true;
+                case VirtualKey.Number3:
+                    if (SupportsTrackSwitch(issue, sents)) SwitchTrack(issue.Id, issue, PodcastTrack.Coach);
+                    return true;
+                case VirtualKey.Escape:
+                    if (_drawerOpen) { _drawerOpen = false; _shelf.RefreshCurrentSubPage(); }
+                    else { StopPlayback(); OpenIssueId = null; _shelf.RefreshCurrentSubPage(); }
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // Station desk shortcuts
+        if (key == (VirtualKey)191 && _stationCmdBox is not null) // '/'
+        {
+            _stationCmdBox.Focus(FocusState.Programmatic);
+            return true;
+        }
+        if (key == VirtualKey.Escape && _drawerOpen)
+        {
+            _drawerOpen = false;
+            _shelf.RefreshCurrentSubPage();
+            return true;
+        }
+        if (key == VirtualKey.Space)
+        {
+            var target = (_playingIssueId is not null
+                ? _library.Podcasts.GetIssues().FirstOrDefault(x => x.Id == _playingIssueId)
+                : null)
+                ?? _library.Podcasts.GetIssues().FirstOrDefault();
+            if (target is not null)
+            {
+                if (_playing) StopPlayback();
+                else
+                {
+                    var sents = LoadOrSynthesizeTranscript(target);
+                    PlayIssueAtTurn(target, sents, Math.Clamp(_activeTurnIdx, 0, Math.Max(0, sents.Length - 1)));
+                }
+                _shelf.RefreshCurrentSubPage();
+                return true;
+            }
+        }
+        if (key == VirtualKey.H && _playingIssueId is string pid)
+        {
+            _ = ClipCurrentTurnAsync(pid);
+            return true;
+        }
+        if (key == VirtualKey.I && _playingIssueId is string pid2)
+        {
+            var cur = _library.Podcasts.GetIssues().FirstOrDefault(x => x.Id == pid2);
+            if (cur is not null)
+            {
+                var sents = _activeSentences.Length > 0 ? _activeSentences : LoadOrSynthesizeTranscript(cur);
+                double sec = sents.Length > _activeTurnIdx ? sents[_activeTurnIdx].T0 : cur.PositionSec;
+                _ = ShowInterruptDialogAsync(cur, sec, sents.ElementAtOrDefault(_activeTurnIdx)?.TextOrig);
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ---------- Top Header ----------
 
     public void PopulateTopHeader(Panel leftAfterToggleHost, Panel rightHost, bool dark)
@@ -204,50 +325,58 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             };
             leftAfterToggleHost.Children.Add(backBtn);
 
-            // Right: Track segmented control + 盲听 + 稍后听 + 原声划线 + 书摘抽屉
-            var trackGrid = new Grid { ColumnSpacing = 2 };
-            (PodcastTrack Tr, string Lbl)[] tracks =
-            [
-                (PodcastTrack.Original, "原声"),
-                (PodcastTrack.Dub, "中文译配"),
-                (PodcastTrack.Coach, "双语助教"),
-            ];
-            for (int i = 0; i < tracks.Length; i++)
+            // Right: Track segmented control (only when episode supports translation / coach notes) + 盲听 + 稍后听 + 原声划线 + 书摘抽屉
+            bool canSwitchTrack = SupportsTrackSwitch(curIssue, _playingIssueId == issueId && _activeSentences.Length > 0 ? _activeSentences : null);
+            if (!canSwitchTrack && _track != PodcastTrack.Original)
             {
-                trackGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                var (tr, lbl) = tracks[i];
-                bool on = _track == tr;
-                var tb = new Button
-                {
-                    Content = lbl,
-                    Height = 24,
-                    MinHeight = 24,
-                    Padding = new Thickness(9, 0, 9, 0),
-                    FontSize = 11,
-                    FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal,
-                    Foreground = ThemeHelper.Brush(on ? p.T1 : p.T2),
-                    Background = on ? ThemeHelper.Brush(p.Card) : new SolidColorBrush(Colors.Transparent),
-                    BorderThickness = new Thickness(0),
-                    CornerRadius = new CornerRadius(7),
-                    UseSystemFocusVisuals = false,
-                };
-                var nextTr = tr;
-                tb.Click += (_, _) =>
-                {
-                    SwitchTrack(issueId, curIssue, nextTr);
-                };
-                Grid.SetColumn(tb, i);
-                trackGrid.Children.Add(tb);
+                _track = PodcastTrack.Original;
             }
-            rightHost.Children.Add(new Border
+            if (canSwitchTrack)
             {
-                CornerRadius = new CornerRadius(9),
-                Background = ThemeHelper.Brush(p.Inset),
-                BorderBrush = ThemeHelper.Brush(p.Line),
-                BorderThickness = new Thickness(0.5),
-                Padding = new Thickness(2),
-                Child = trackGrid,
-            });
+                var trackGrid = new Grid { ColumnSpacing = 2 };
+                (PodcastTrack Tr, string Lbl)[] tracks =
+                [
+                    (PodcastTrack.Original, "原声"),
+                    (PodcastTrack.Dub, "中文译配"),
+                    (PodcastTrack.Coach, "双语助教"),
+                ];
+                for (int i = 0; i < tracks.Length; i++)
+                {
+                    trackGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    var (tr, lbl) = tracks[i];
+                    bool on = _track == tr;
+                    var tb = new Button
+                    {
+                        Content = lbl,
+                        Height = 24,
+                        MinHeight = 24,
+                        Padding = new Thickness(9, 0, 9, 0),
+                        FontSize = 11,
+                        FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal,
+                        Foreground = ThemeHelper.Brush(on ? p.T1 : p.T2),
+                        Background = on ? ThemeHelper.Brush(p.Card) : new SolidColorBrush(Colors.Transparent),
+                        BorderThickness = new Thickness(0),
+                        CornerRadius = new CornerRadius(7),
+                        UseSystemFocusVisuals = false,
+                    };
+                    var nextTr = tr;
+                    tb.Click += (_, _) =>
+                    {
+                        SwitchTrack(issueId, curIssue, nextTr);
+                    };
+                    Grid.SetColumn(tb, i);
+                    trackGrid.Children.Add(tb);
+                }
+                rightHost.Children.Add(new Border
+                {
+                    CornerRadius = new CornerRadius(9),
+                    Background = ThemeHelper.Brush(p.Inset),
+                    BorderBrush = ThemeHelper.Brush(p.Line),
+                    BorderThickness = new Thickness(0.5),
+                    Padding = new Thickness(2),
+                    Child = trackGrid,
+                });
+            }
 
             var blindBtn = new Button
             {
@@ -486,20 +615,6 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         var clips = _library.Core.PodcastClips(null);
 
         var workspace = new Grid { ColumnSpacing = 24, IsTabStop = true };
-        workspace.KeyDown += (_, ke) =>
-        {
-            if (ke.Key == (VirtualKey)191 && _stationCmdBox is not null) // '/' key
-            {
-                ke.Handled = true;
-                _stationCmdBox.Focus(FocusState.Programmatic);
-            }
-            else if (ke.Key == VirtualKey.Escape && _drawerOpen)
-            {
-                ke.Handled = true;
-                _drawerOpen = false;
-                _shelf.RefreshCurrentSubPage();
-            }
-        };
         workspace.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         workspace.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(_drawerOpen ? 316 : 348) });
 
@@ -1739,48 +1854,6 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             Margin = new Thickness(0, 6, 0, 16),
             IsTabStop = true,
         };
-        sheet.KeyDown += async (_, ke) =>
-        {
-            if (ke.Key == VirtualKey.H)
-            {
-                ke.Handled = true;
-                await ClipCurrentTurnAsync(issue.Id);
-            }
-            else if (ke.Key == VirtualKey.I)
-            {
-                ke.Handled = true;
-                double sec = sentences.Length > _activeTurnIdx ? sentences[_activeTurnIdx].T0 : issue.PositionSec;
-                await ShowInterruptDialogAsync(issue, sec, sentences.ElementAtOrDefault(_activeTurnIdx)?.TextOrig);
-            }
-            else if (ke.Key == VirtualKey.Number1)
-            {
-                ke.Handled = true;
-                SwitchTrack(issue.Id, issue, PodcastTrack.Original);
-            }
-            else if (ke.Key == VirtualKey.Number2)
-            {
-                ke.Handled = true;
-                SwitchTrack(issue.Id, issue, PodcastTrack.Dub);
-            }
-            else if (ke.Key == VirtualKey.Number3)
-            {
-                ke.Handled = true;
-                SwitchTrack(issue.Id, issue, PodcastTrack.Coach);
-            }
-            else if (ke.Key == VirtualKey.Escape)
-            {
-                ke.Handled = true;
-                if (_drawerOpen) { _drawerOpen = false; _shelf.RefreshCurrentSubPage(); }
-                else { StopPlayback(); OpenIssueId = null; _shelf.RefreshCurrentSubPage(); }
-            }
-            else if (ke.Key == VirtualKey.Space)
-            {
-                ke.Handled = true;
-                if (_playing) StopPlayback();
-                else PlayIssueAtTurn(issue, sentences, _activeTurnIdx);
-                _shelf.RefreshCurrentSubPage();
-            }
-        };
 
         var kicker = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7 };
         kicker.Children.Add(new Border
@@ -1936,7 +2009,8 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
             string primaryText = (_track == PodcastTrack.Dub && !string.IsNullOrWhiteSpace(s.TextTrans)) ? s.TextTrans! : s.TextOrig;
             bool isLatin = primaryText.Take(20).Count(c => c < 128 && char.IsLetter(c)) > 8;
-            var mainTb = BuildRichPodcastText(primaryText, isLatin ? geoSerif : serif, unknownWords, issue.Title, p, tint);
+            var coachTerms = ParseCoachNoteTerms(s.CoachNote);
+            var mainTb = BuildRichPodcastText(primaryText, isLatin ? geoSerif : serif, unknownWords, coachTerms, issue.Id, s.T0, p, tint);
             body.Children.Add(mainTb);
 
             if (_track == PodcastTrack.Coach && (!string.IsNullOrWhiteSpace(s.TextTrans) || !string.IsNullOrWhiteSpace(s.CoachNote)))
@@ -1955,13 +2029,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 }
                 if (!string.IsNullOrWhiteSpace(s.CoachNote))
                 {
-                    body.Children.Add(new TextBlock
-                    {
-                        Text = $"💡 {s.CoachNote}",
-                        FontSize = 11.5,
-                        Foreground = ThemeHelper.Brush(tint.Accent),
-                        TextWrapping = TextWrapping.Wrap,
-                    });
+                    body.Children.Add(BuildCoachNoteLine(s.CoachNote!, coachTerms, s.TextOrig, issue.Id, s.T0, p, tint));
                 }
             }
 
@@ -2200,62 +2268,263 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         return sheet;
     }
 
-    private TextBlock BuildRichPodcastText(string text, FontFamily font, HashSet<string> vocabWords, string issueTitle, YYPalette p, YYTintColors tint)
+    private static Dictionary<string, string> ParseCoachNoteTerms(string? coachNote)
     {
-        var tb = new TextBlock
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(coachNote)) return map;
+        char[] segSeps = ['\n', '\r', '；', ';', '|', '·'];
+        char[] kvSeps = ['：', ':', '—'];
+        foreach (var rawSeg in coachNote.Split(segSeps, StringSplitOptions.RemoveEmptyEntries))
+        {
+            string seg = rawSeg.Trim();
+            if (seg.StartsWith("💡", StringComparison.Ordinal)) seg = seg[2..];
+            seg = seg.TrimStart('•', '*', '-', ' ');
+            int sepIdx = seg.IndexOfAny(kvSeps);
+            if (sepIdx <= 0 || sepIdx >= seg.Length - 1) continue;
+            string term = seg[..sepIdx].Trim(' ', '"', '\'', '“', '”', '「', '」', '*', '`');
+            string gloss = seg[(sepIdx + 1)..].Trim();
+            if (term.Length is >= 2 and <= 36 && !string.IsNullOrEmpty(gloss))
+            {
+                map[term] = gloss;
+            }
+        }
+        return map;
+    }
+
+    private FrameworkElement BuildCoachNoteLine(
+        string coachNote,
+        Dictionary<string, string> coachTerms,
+        string contextText,
+        string issueId,
+        double turnT0,
+        YYPalette p,
+        YYTintColors tint)
+    {
+        if (coachTerms.Count == 0)
+        {
+            return new TextBlock
+            {
+                Text = $"💡 {coachNote}",
+                FontSize = 11.5,
+                Foreground = ThemeHelper.Brush(tint.Accent),
+                TextWrapping = TextWrapping.Wrap,
+            };
+        }
+
+        var rtb = new RichTextBlock
+        {
+            FontSize = 11.5,
+            LineHeight = 19,
+            Foreground = ThemeHelper.Brush(tint.Accent),
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = false,
+        };
+        var para = new Paragraph { LineHeight = 19 };
+        para.Inlines.Add(new Run { Text = "💡 " });
+        int idx = 0;
+        foreach (var kv in coachTerms)
+        {
+            if (idx > 0) para.Inlines.Add(new Run { Text = "  ·  " });
+            string term = kv.Key;
+            string gloss = kv.Value;
+            para.Inlines.Add(MakeDottedWordInline(term, new FontFamily("Georgia"), 11.5, highlighted: true, p, tint, anchor =>
+                ShowVocabPopover(anchor, term, gloss, contextText, issueId, turnT0, p, tint)));
+            para.Inlines.Add(new Run { Text = $"：{gloss}" });
+            idx++;
+        }
+        rtb.Blocks.Add(para);
+        return rtb;
+    }
+
+    private static InlineUIContainer MakeDottedWordInline(
+        string wordText,
+        FontFamily font,
+        double fontSize,
+        bool highlighted,
+        YYPalette p,
+        YYTintColors tint,
+        Action<FrameworkElement> onClick)
+    {
+        var wordTb = new TextBlock
+        {
+            Text = wordText,
+            FontFamily = font,
+            FontSize = fontSize,
+            FontWeight = highlighted ? FontWeights.SemiBold : FontWeights.Normal,
+            Foreground = ThemeHelper.Brush(highlighted ? tint.Accent : p.T1),
+            Padding = new Thickness(0),
+        };
+        var dashLine = new XamlLine
+        {
+            X1 = 0,
+            X2 = Math.Max(12, wordText.Length * fontSize * 0.52),
+            Y1 = 0,
+            Y2 = 0,
+            Stroke = ThemeHelper.Brush(highlighted ? tint.Accent : p.T3),
+            StrokeThickness = highlighted ? 1.3 : 1.05,
+            StrokeDashArray = new DoubleCollection { 1.5, 2.0 },
+            Opacity = highlighted ? 0.85 : 0.52,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 0, 0, 1),
+            IsHitTestVisible = false,
+        };
+        wordTb.SizeChanged += (_, e) =>
+        {
+            if (e.NewSize.Width > 0) dashLine.X2 = e.NewSize.Width;
+        };
+        var cell = new Grid();
+        cell.Children.Add(wordTb);
+        cell.Children.Add(dashLine);
+
+        var btn = new Button
+        {
+            Padding = new Thickness(0),
+            MinWidth = 0,
+            MinHeight = 0,
+            BorderThickness = new Thickness(0),
+            Background = new SolidColorBrush(Colors.Transparent),
+            UseSystemFocusVisuals = false,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(0, 0, 0, -2),
+            Content = cell,
+        };
+        btn.Click += (_, _) => onClick(btn);
+        return new InlineUIContainer { Child = btn };
+    }
+
+    private FrameworkElement BuildRichPodcastText(
+        string text,
+        FontFamily font,
+        HashSet<string> vocabWords,
+        Dictionary<string, string>? coachTerms,
+        string issueId,
+        double turnT0,
+        YYPalette p,
+        YYTintColors tint)
+    {
+        bool hasLatin = text.Any(c => c < 128 && char.IsLetter(c));
+        bool hasCoachInText = coachTerms is { Count: > 0 } && coachTerms.Keys.Any(k => text.Contains(k, StringComparison.OrdinalIgnoreCase));
+        if (!hasLatin && !hasCoachInText)
+        {
+            return new TextBlock
+            {
+                FontFamily = font,
+                FontSize = 16,
+                LineHeight = 26,
+                Foreground = ThemeHelper.Brush(p.T1),
+                TextWrapping = TextWrapping.Wrap,
+                Text = text,
+            };
+        }
+
+        var rtb = new RichTextBlock
         {
             FontFamily = font,
             FontSize = 16,
             LineHeight = 26,
             Foreground = ThemeHelper.Brush(p.T1),
             TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = false,
         };
-        bool hasLatin = text.Any(c => c < 128 && char.IsLetter(c));
-        if (!hasLatin)
+        var para = new Paragraph { LineHeight = 26 };
+
+        if (!hasLatin && coachTerms is { Count: > 0 })
         {
-            tb.Text = text;
-            return tb;
+            int pos = 0;
+            while (pos < text.Length)
+            {
+                int bestIdx = -1;
+                string? bestTerm = null;
+                foreach (var k in coachTerms.Keys)
+                {
+                    int found = text.IndexOf(k, pos, StringComparison.OrdinalIgnoreCase);
+                    if (found >= 0 && (bestIdx < 0 || found < bestIdx || (found == bestIdx && k.Length > (bestTerm?.Length ?? 0))))
+                    {
+                        bestIdx = found;
+                        bestTerm = k;
+                    }
+                }
+                if (bestIdx < 0 || bestTerm is null)
+                {
+                    para.Inlines.Add(new Run { Text = text[pos..] });
+                    break;
+                }
+                if (bestIdx > pos)
+                {
+                    para.Inlines.Add(new Run { Text = text[pos..bestIdx] });
+                }
+                string surface = text.Substring(bestIdx, bestTerm.Length);
+                string hint = coachTerms[bestTerm];
+                string w = bestTerm;
+                string sentenceCtx = text;
+                para.Inlines.Add(MakeDottedWordInline(surface, font, 16, highlighted: true, p, tint, anchor =>
+                    ShowVocabPopover(anchor, w, hint, sentenceCtx, issueId, turnT0, p, tint)));
+                pos = bestIdx + bestTerm.Length;
+            }
+            rtb.Blocks.Add(para);
+            return rtb;
         }
 
+        char[] trimPunct = [',', '.', ';', ':', '!', '?', '"', '\'', '“', '”', '(', ')', '[', ']', '—', '…'];
         var parts = text.Split(' ');
         for (int i = 0; i < parts.Length; i++)
         {
-            if (i > 0) tb.Inlines.Add(new Run { Text = " " });
+            if (i > 0) para.Inlines.Add(new Run { Text = " " });
             string rawToken = parts[i];
-            string clean = rawToken.Trim(',', '.', ';', ':', '!', '?', '"', '\'', '“', '”', '(', ')', '[', ']', '—');
+            if (string.IsNullOrEmpty(rawToken)) continue;
+
+            int start = 0;
+            while (start < rawToken.Length && Array.IndexOf(trimPunct, rawToken[start]) >= 0) start++;
+            int end = rawToken.Length;
+            while (end > start && Array.IndexOf(trimPunct, rawToken[end - 1]) >= 0) end--;
+
+            string clean = start < end ? rawToken[start..end] : "";
             bool isVocab = !string.IsNullOrEmpty(clean) && vocabWords.Contains(clean);
-            bool isLookupWord = isVocab || (clean.Length >= 3 && clean.All(c => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-' || c == '\''));
+            string? coachHint = null;
+            bool isCoach = !string.IsNullOrEmpty(clean) && coachTerms is not null && coachTerms.TryGetValue(clean, out coachHint);
+            bool isLookupWord = isVocab || isCoach || (clean.Length >= 3 && clean.All(c => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-' || c == '\''));
 
             if (isLookupWord)
             {
-                var link = new Hyperlink
-                {
-                    UnderlineStyle = isVocab ? UnderlineStyle.Single : UnderlineStyle.None,
-                    Foreground = ThemeHelper.Brush(isVocab ? tint.Accent : p.T1),
-                };
-                link.Inlines.Add(new Run
-                {
-                    Text = rawToken,
-                    FontWeight = isVocab ? FontWeights.SemiBold : FontWeights.Normal,
-                });
+                if (start > 0) para.Inlines.Add(new Run { Text = rawToken[..start] });
                 string w = clean;
+                string? hint = coachHint;
                 string sentenceCtx = text;
-                link.Click += (_, _) => ShowVocabPopover(tb, w, sentenceCtx, issueTitle, p, tint);
-                tb.Inlines.Add(link);
+                para.Inlines.Add(MakeDottedWordInline(clean, font, 16, highlighted: isVocab || isCoach, p, tint, anchor =>
+                    ShowVocabPopover(anchor, w, hint, sentenceCtx, issueId, turnT0, p, tint)));
+                if (end < rawToken.Length) para.Inlines.Add(new Run { Text = rawToken[end..] });
             }
             else
             {
-                tb.Inlines.Add(new Run { Text = rawToken });
+                para.Inlines.Add(new Run { Text = rawToken });
             }
         }
-        return tb;
+        rtb.Blocks.Add(para);
+        return rtb;
     }
 
-    private void ShowVocabPopover(FrameworkElement anchor, string word, string context, string issueTitle, YYPalette p, YYTintColors tint)
+    private void ShowVocabPopover(
+        FrameworkElement anchor,
+        string word,
+        string? coachHint,
+        string context,
+        string issueId,
+        double turnT0,
+        YYPalette p,
+        YYTintColors tint)
     {
         var hit = _library.LookUpWordRich(word);
         string headword = hit?.Headword ?? word.ToLowerInvariant();
         bool alreadySaved = _library.GetWords().Any(x => x.Word.Equals(headword, StringComparison.OrdinalIgnoreCase) && !x.Known);
+
+        string? combinedMeaning = hit?.Summary;
+        if (!string.IsNullOrWhiteSpace(coachHint))
+        {
+            combinedMeaning = string.IsNullOrWhiteSpace(combinedMeaning)
+                ? coachHint
+                : $"{coachHint}\n{combinedMeaning}";
+        }
 
         var pop = new StackPanel { Width = 280, Spacing = 7 };
         var top = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
@@ -2266,7 +2535,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
         pop.Children.Add(new TextBlock
         {
-            Text = hit is not null ? hit.Summary : "词典中未查到该词，仍可收进生词本稍后复习。",
+            Text = !string.IsNullOrWhiteSpace(combinedMeaning) ? combinedMeaning : "词典中未查到该词，仍可收进生词本稍后复习。",
             FontSize = 12,
             LineHeight = 18,
             Foreground = ThemeHelper.Brush(p.T2),
@@ -2279,7 +2548,21 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         var pronBtn = MakePaperPill("▶ 读一遍", accent: false, p, tint);
         pronBtn.Height = 24;
         pronBtn.FontSize = 11;
-        pronBtn.Click += (_, _) => _ = AudioPlayer.PreviewVoiceAsync(_library, PickHostVoiceId(false, true), 0.95, headword);
+        pronBtn.Click += async (_, _) =>
+        {
+            bool wordIsEn = headword.Any(c => c < 128 && char.IsLetter(c));
+            _isPreviewingInterruptAnswer = true;
+            try
+            {
+                await AudioPlayer.SpeakForeignWordAsync(_library, headword, wordIsEn ? "en" : "zh-CN");
+            }
+            finally
+            {
+                _isPreviewingInterruptAnswer = false;
+                if (_playing)
+                    App.CurrentApp.ClaimAudioPlayback(_shelf, CreateShelfPauseCallback());
+            }
+        };
 
         var flyout = new Flyout { Content = pop };
         var saveBtn = MakePaperPill(alreadySaved ? "✓ 已在生词本" : "+ 收进生词本", accent: !alreadySaved, p, tint);
@@ -2290,7 +2573,9 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         {
             try
             {
-                _library.Core.AddWord(headword, hit?.Phonetic, hit?.Summary, issueTitle, 0, 0, context);
+                string podcastBookKey = "podcast:" + issueId;
+                uint sentSec = (uint)Math.Max(0, (int)Math.Round(turnT0));
+                _library.Core.AddWord(headword, hit?.Phonetic, combinedMeaning, podcastBookKey, 0, sentSec, context);
                 _library.Core.SetWordKnown(headword, false);
                 saveBtn.Content = "✓ 已收进生词本";
                 saveBtn.IsEnabled = false;
@@ -2372,48 +2657,137 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         _shelf.RefreshCurrentSubPage();
     }
 
+    private Action CreateShelfPauseCallback() => () =>
+    {
+        if (_isPreviewingInterruptAnswer) return;
+        _shelf.DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_isPreviewingInterruptAnswer) return;
+            StopPlayback();
+            _shelf.RefreshCurrentSubPage();
+        });
+    };
+
     private string? PickHostVoiceId(bool secondHost, bool english)
     {
-        string style = _library.Prefs.PodcastStudioVoiceStyle;
-        if (style.StartsWith("card:", StringComparison.Ordinal)) return style;
-        if (style == "studio-solo-zh") secondHost = false;
+        string style = _library.Prefs.PodcastStudioVoiceStyle ?? "studio-duo-zh";
+        bool useEn = english || style == "studio-duo-en";
+        string langPrefix = useEn ? "en" : "zh";
 
-        // Respect PodcastRememberedVoices toggles from the "声音卡" drawer
-        string firstKey = english ? "david" : "linshen";
-        string secondKey = english ? "clara" : "suwan";
-        bool allowFirst = !_library.Prefs.PodcastRememberedVoices.TryGetValue(firstKey, out var fOn) || fOn;
-        bool allowSecond = !_library.Prefs.PodcastRememberedVoices.TryGetValue(secondKey, out var sOn) || sOn;
-        if (secondHost && !allowSecond && allowFirst) secondHost = false;
-        else if (!secondHost && !allowFirst && allowSecond) secondHost = true;
+        string? clonedId = null;
+        if (style.StartsWith("card:", StringComparison.Ordinal))
+            clonedId = style[5..];
+        else if (style.StartsWith("cloned:", StringComparison.Ordinal))
+            clonedId = "cloned." + style[7..];
+        else if (style.StartsWith("cloned.", StringComparison.Ordinal))
+            clonedId = style;
 
-        if (!english && _library.LiveVoice.IsReady)
+        VoiceCard? clonedCard = null;
+        if (!string.IsNullOrEmpty(clonedId))
         {
-            var cards = _library.LiveVoice.GetBuiltinCards();
-            if (cards.Count >= 2)
-                return "card:" + (secondHost ? cards[1].Id : cards[0].Id);
-            if (cards.Count == 1)
-                return "card:" + cards[0].Id;
+            clonedCard = _library.LiveVoice.GetClonedCards().FirstOrDefault(c => c.Id == clonedId);
+            if (!secondHost)
+            {
+                return clonedCard is not null ? clonedCard.Id : clonedId;
+            }
+            // When a cloned voice is host 0, pick a distinct partner voice for host 1 (1:1 PodcastHub.swift:1172-1190)
         }
 
-        string langPrefix = english || style == "studio-duo-en" ? "en" : "zh";
-        var sysVoices = AudioPlayer.AvailableVoices
-            .Where(v => v.Language.StartsWith(langPrefix, StringComparison.OrdinalIgnoreCase))
-            .ToArray();
+        if (style == "studio-solo-zh") secondHost = false;
 
-        if (sysVoices.Length >= 2)
-            return "sys:" + (secondHost ? sysVoices[1].Id : sysVoices[0].Id);
-        if (sysVoices.Length == 1)
-            return "sys:" + sysVoices[0].Id;
-        return _library.Prefs.VoiceId;
+        // Respect PodcastRememberedVoices toggles from the "声音卡" drawer when no cloned override is active
+        if (string.IsNullOrEmpty(clonedId))
+        {
+            string firstKey = useEn ? "david" : "linshen";
+            string secondKey = useEn ? "clara" : "suwan";
+            bool allowFirst = !_library.Prefs.PodcastRememberedVoices.TryGetValue(firstKey, out var fOn) || fOn;
+            bool allowSecond = !_library.Prefs.PodcastRememberedVoices.TryGetValue(secondKey, out var sOn) || sOn;
+            if (secondHost && !allowSecond && allowFirst) secondHost = false;
+            else if (!secondHost && !allowFirst && allowSecond) secondHost = true;
+        }
+
+        CharacterGender wantGender = secondHost
+            ? (clonedCard?.Gender == CharacterGender.F ? CharacterGender.M : CharacterGender.F)
+            : CharacterGender.M;
+
+        // 1. LiveVoice neural cards (both Chinese and English when matching cards exist)
+        if (_library.LiveVoice.IsReady)
+        {
+            var cards = _library.LiveVoice.GetBuiltinCards()
+                .Where(c => c.Lang.StartsWith(langPrefix, StringComparison.OrdinalIgnoreCase) && c.Id != clonedId)
+                .ToArray();
+            if (cards.Length > 0)
+            {
+                var hostA = cards.FirstOrDefault(c => c.Gender == CharacterGender.M && c.Narrator)
+                    ?? cards.FirstOrDefault(c => c.Gender == CharacterGender.M)
+                    ?? cards[0];
+                if (!secondHost) return hostA.Id;
+
+                var hostB = cards.FirstOrDefault(c => c.Id != hostA.Id && c.Gender == wantGender && c.Narrator)
+                    ?? cards.FirstOrDefault(c => c.Id != hostA.Id && c.Gender == wantGender)
+                    ?? cards.FirstOrDefault(c => c.Id != hostA.Id)
+                    ?? hostA;
+                return hostB.Id;
+            }
+        }
+
+        // 2. Kokoro offline neural voices
+        if (_library.Kokoro.IsInstalled)
+        {
+            var spks = _library.Kokoro.GetSpeakers(langPrefix)
+                .Where(s => s.Id != clonedId)
+                .ToArray();
+            if (spks.Length > 0)
+            {
+                var hostA = spks.FirstOrDefault(s => s.Gender == CharacterGender.M && s.Narrator)
+                    ?? spks.FirstOrDefault(s => s.Gender == CharacterGender.M)
+                    ?? spks[0];
+                if (!secondHost) return hostA.Id;
+
+                var hostB = spks.FirstOrDefault(s => s.Id != hostA.Id && s.Gender == wantGender && s.Narrator)
+                    ?? spks.FirstOrDefault(s => s.Id != hostA.Id && s.Gender == wantGender)
+                    ?? spks.FirstOrDefault(s => s.Id != hostA.Id)
+                    ?? hostA;
+                return hostB.Id;
+            }
+        }
+
+        // 3. Edge online neural voices (zero API key)
+        if (_library.CloudVoices.IsConfigured(CloudTtsProvider.Edge))
+        {
+            if (useEn)
+            {
+                return secondHost
+                    ? (wantGender == CharacterGender.M ? "cloud.edge.en-US-AndrewMultilingualNeural" : "cloud.edge.en-US-AvaMultilingualNeural")
+                    : "cloud.edge.en-US-AndrewMultilingualNeural";
+            }
+            return secondHost
+                ? (wantGender == CharacterGender.M ? "cloud.edge.zh-CN-YunxiNeural" : "cloud.edge.zh-CN-XiaoxiaoNeural")
+                : "cloud.edge.zh-CN-YunxiNeural";
+        }
+
+        // 4. Windows SAPI fallback (gender-matched)
+        var sysVoices = AudioPlayer.GetSystemVoicesForLanguage(useEn ? "en-US" : "zh-CN");
+        if (sysVoices.Count > 0)
+        {
+            var wantSysGender = wantGender == CharacterGender.F
+                ? Windows.Media.SpeechSynthesis.VoiceGender.Female
+                : Windows.Media.SpeechSynthesis.VoiceGender.Male;
+            var hostA = sysVoices.FirstOrDefault(v => v.Gender == Windows.Media.SpeechSynthesis.VoiceGender.Male) ?? sysVoices[0];
+            if (!secondHost) return "sys:" + hostA.Id;
+
+            var hostB = sysVoices.FirstOrDefault(v => v.Id != hostA.Id && v.Gender == wantSysGender)
+                ?? sysVoices.FirstOrDefault(v => v.Id != hostA.Id)
+                ?? hostA;
+            return "sys:" + hostB.Id;
+        }
+
+        return _library.Prefs.GetVoiceForLanguage(useEn ? "en-US" : "zh-Hans");
     }
 
     private void PlayIssueAtTurn(PodcastIssue issue, MagazineSentence[] sentences, int idx)
     {
-        App.CurrentApp.ClaimAudioPlayback(_shelf, () => _shelf.DispatcherQueue.TryEnqueue(() =>
-        {
-            StopPlayback();
-            _shelf.RefreshCurrentSubPage();
-        }));
+        App.CurrentApp.ClaimAudioPlayback(_shelf, CreateShelfPauseCallback());
 
         _playing = true;
         _playingIssueId = issue.Id;
@@ -2467,8 +2841,10 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             bool secondHost = spk.Contains("苏") || spk.Contains("沈") || spk.Contains("Clara", StringComparison.OrdinalIgnoreCase)
                 || (_activeTurnIdx % 2 == 1 && string.IsNullOrEmpty(spk));
             bool isEn = (issue.Language ?? "").StartsWith("en", StringComparison.OrdinalIgnoreCase) && _track != PodcastTrack.Dub;
+            string targetLang = isEn ? "en-US" : "zh-Hans";
 
             string? hostVid = PickHostVoiceId(secondHost, isEn);
+            _ttsPlayer.SetBookContext(issue.Id, targetLang);
             _ttsPlayer.SetVoice(hostVid);
             _ttsPlayer.SetRate(_rate);
 
@@ -2480,7 +2856,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 _ => s.TextOrig,
             };
             try { _library.Core.PodcastSavePlayback(issue.Id, s.T0, issue.DurationSec); } catch { }
-            _ = _ttsPlayer.SpeakSentenceAsync(text, issue.Title, issue.ShowTitle, issue.Id, isEn ? "en-US" : "zh-Hans");
+            _ = _ttsPlayer.SpeakSentenceAsync(text, issue.Title, issue.ShowTitle, issue.Id, targetLang);
         }
     }
 
@@ -2622,7 +2998,12 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             thought = string.IsNullOrWhiteSpace(tBox.Text) ? null : tBox.Text.Trim();
         }
 
-        string? audioRelPath = await _library.Podcasts.SliceLocalAudioClipAsync(issue, win.T0, win.T1);
+        string spkForClip = win.Speaker ?? sents.ElementAtOrDefault(_activeTurnIdx)?.Speaker ?? "";
+        bool clipSecondHost = spkForClip.Contains("苏") || spkForClip.Contains("沈") || spkForClip.Contains("Clara", StringComparison.OrdinalIgnoreCase);
+        bool clipIsEn = (issue.Language ?? "").StartsWith("en", StringComparison.OrdinalIgnoreCase);
+        string? clipVoiceId = PickHostVoiceId(clipSecondHost, clipIsEn);
+
+        string? audioRelPath = await _library.Podcasts.SliceLocalAudioClipAsync(issue, win.T0, win.T1, default, quote, clipVoiceId);
         try
         {
             _library.Core.PodcastAddClip(issueId, win.T0, win.T1, win.Speaker, quote, thought, audioRelPath);
@@ -2712,10 +3093,21 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             FontSize = 11.5,
             Visibility = Visibility.Collapsed,
         };
-        speakReplyBtn.Click += (_, _) =>
+        speakReplyBtn.Click += async (_, _) =>
         {
-            if (!string.IsNullOrWhiteSpace(latestReply))
-                _ = AudioPlayer.PreviewVoiceAsync(_library, PickHostVoiceId(false, false), 1.0, latestReply);
+            if (string.IsNullOrWhiteSpace(latestReply)) return;
+            bool replyEn = !latestReply.Any(ch => ch >= 0x4E00 && ch <= 0x9FFF);
+            _isPreviewingInterruptAnswer = true;
+            try
+            {
+                await AudioPlayer.PreviewVoiceAsync(_library, PickHostVoiceId(false, replyEn), 1.0, latestReply);
+            }
+            finally
+            {
+                _isPreviewingInterruptAnswer = false;
+                if (_playing)
+                    App.CurrentApp.ClaimAudioPlayback(_shelf, CreateShelfPauseCallback());
+            }
         };
 
         var sp = new StackPanel { Width = 450, Spacing = 9 };
@@ -2763,6 +3155,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         };
 
         await dlg.ShowAsync();
+        _isPreviewingInterruptAnswer = false;
         micCts?.Cancel();
 
         // Restore volume & rewind 3 seconds on resume (1:1 PodcastHub.swift)

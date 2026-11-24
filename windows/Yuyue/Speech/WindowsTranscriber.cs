@@ -29,6 +29,67 @@ public static class WindowsTranscriber
     }
 
     /// <summary>
+    /// Transcribes a short or full audio file into plain text (used by Voice Clone ASR auto-fill and quality verification).
+    /// Returns <c>null</c> if transcription is unavailable or fails, without throwing.
+    /// </summary>
+    public static async Task<string?> TranscribeAsync(
+        LibraryService library,
+        string audioPath,
+        string lang = "zh",
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(audioPath) || !File.Exists(audioPath))
+            return null;
+
+        string scratchDir = Path.Combine(Path.GetTempPath(), $"yuyue-asr-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(scratchDir);
+        try
+        {
+            var words = await TranscribeFileAsync(library, audioPath, scratchDir, 0, 0.0, 0.0, lang, null, ct);
+            if (words.Length == 0) return null;
+            string joined = JoinHeardWords(words, lang);
+            return string.IsNullOrWhiteSpace(joined) ? null : joined;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            try { if (Directory.Exists(scratchDir)) Directory.Delete(scratchDir, recursive: true); } catch { }
+        }
+    }
+
+    private static string JoinHeardWords(HeardWord[] words, string lang)
+    {
+        var sb = new StringBuilder();
+        bool preferSpaces = lang.StartsWith("en", StringComparison.OrdinalIgnoreCase);
+        foreach (var w in words)
+        {
+            string t = (w.Text ?? "").Trim();
+            if (string.IsNullOrEmpty(t)) continue;
+            if (sb.Length > 0)
+            {
+                char prev = sb[^1];
+                char next = t[0];
+                bool prevCjk = IsCjkOrFullwidthPunct(prev);
+                bool nextCjk = IsCjkOrFullwidthPunct(next);
+                if (preferSpaces || (!prevCjk && !nextCjk && char.IsLetterOrDigit(prev) && char.IsLetterOrDigit(next)))
+                    sb.Append(' ');
+            }
+            sb.Append(t);
+        }
+        return sb.ToString().Trim();
+    }
+
+    private static bool IsCjkOrFullwidthPunct(char ch) =>
+        (ch >= '\u4E00' && ch <= '\u9FFF') ||
+        (ch >= '\u3400' && ch <= '\u4DBF') ||
+        (ch >= '\u3000' && ch <= '\u303F') ||
+        (ch >= '\uFF00' && ch <= '\uFFEF');
+
+    /// <summary>
     /// Live single-utterance microphone speech recognition using WinRT <see cref="SpeechRecognizer"/>.
     /// Returns recognized text or <c>null</c> if cancelled / unavailable.
     /// </summary>
@@ -287,12 +348,36 @@ public static class WindowsTranscriber
         return list.ToArray();
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SpEventNative
+    {
+        public ushort EventId;
+        public ushort ParamType;
+        public uint StreamNum;
+        public ulong AudioStreamOffset;
+        public nint WParam;
+        public nint LParam;
+    }
+
+    private static readonly Guid IidSpEventSource = new("BE7A9CCE-5F9E-11D2-960F-00C04F8EE628");
+    private static readonly Guid IidSpPhrase = new("1A5C0354-B621-4B5A-8791-D306ED379E53");
+
+    private const ushort SpeiEndSrStream = 34;
+    private const ushort SpeiRecognition = 38;
+    private const ushort SpeiHypothesis = 39;
+    private const ulong SpfeiFlagCheck = (1UL << 30) | (1UL << 33);
+    private const ulong SpfeiAllSrEvents = 0x003FFFFC00000000UL | SpfeiFlagCheck;
+
     private static Task<HeardWord[]> TranscribeViaSapiOfflineAsync(
         string wavPath, double chunkOffsetSec, double chunkDurSec, string lang, CancellationToken ct)
     {
+        var utterances = SegmentSpeechUtterances(wavPath, chunkDurSec);
         var tcs = new TaskCompletionSource<HeardWord[]>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
         {
+            IntPtr pEventSource = IntPtr.Zero;
+            IntPtr pUnkContext = IntPtr.Zero;
+            string uttTempFile = Path.Combine(Path.GetTempPath(), $"yuyue-sapi-utt-{Guid.NewGuid():N}.wav");
             try
             {
                 var ctxType = Type.GetTypeFromProgID("SAPI.SpInProcRecoContext");
@@ -302,10 +387,6 @@ public static class WindowsTranscriber
 
                 dynamic recoContext = Activator.CreateInstance(ctxType)!;
                 dynamic recognizer = recoContext.Recognizer;
-                dynamic fileStream = Activator.CreateInstance(streamType)!;
-                // SSFMOpenForRead = 0
-                fileStream.Open(wavPath, 0, false);
-
                 try
                 {
                     // Pick matching language recognizer token (zh-CN = 804, en-US = 409)
@@ -316,32 +397,86 @@ public static class WindowsTranscriber
                 }
                 catch { }
 
-                recognizer.AudioInputStream = fileStream;
+                pUnkContext = Marshal.GetIUnknownForObject(recoContext);
+                Guid iidEv = IidSpEventSource;
+                int qiHr = Marshal.QueryInterface(pUnkContext, ref iidEv, out pEventSource);
+                if (qiHr < 0 || pEventSource == IntPtr.Zero)
+                    throw new InvalidOperationException("无法绑定 SAPI 5 离线事件源（ISpEventSource）。");
+
+                ConfigureSpEventSource(pEventSource);
+
                 dynamic grammar = recoContext.CreateGrammar(1);
                 grammar.DictationLoad("", 0);
-                grammar.DictationSetState(1); // SGDSActive
 
-                var list = new List<HeardWord>();
-                bool done = false;
                 var phrases = new List<(string Text, double Start, double End)>();
+                const double headPadSec = 0.20;
+                const double tailPadSec = 0.45;
 
-                // Poll recognition results via AudioInputStream offset while dictation runs
-                var sw = System.Diagnostics.Stopwatch.StartNew();
-                while (!done && !ct.IsCancellationRequested && sw.Elapsed.TotalSeconds < Math.Max(30, chunkDurSec * 1.5))
+                foreach (var utt in utterances)
                 {
-                    Thread.Sleep(50);
+                    ct.ThrowIfCancellationRequested();
+                    if (!WritePaddedUtteranceWav(wavPath, utt.StartSec, utt.EndSec, headPadSec, tailPadSec, uttTempFile))
+                        continue;
+
+                    DrainSpEvents(pEventSource, null, out _);
+
+                    dynamic fileStream = Activator.CreateInstance(streamType)!;
                     try
                     {
-                        long posBytes = Convert.ToInt64(fileStream.Seek(0, 1)); // SSSPTRelativeCurrentPosition = 1
-                        double streamSec = posBytes / (double)(Aligner.SampleRate * 2);
-                        if (streamSec >= chunkDurSec - 0.1) done = true;
+                        // SSFMOpenForRead = 0
+                        fileStream.Open(uttTempFile, 0, false);
+                        recognizer.AudioInputStream = fileStream;
+                        grammar.DictationSetState(1); // SGDSActive
+
+                        var uttPieces = new List<(string Text, double RelEndSec)>();
+                        string? lastHypothesis = null;
+                        bool streamEnded = false;
+                        double maxWaitSec = Math.Max(8.0, (utt.EndSec - utt.StartSec + headPadSec + tailPadSec) * 2.5);
+                        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+                        while (!streamEnded && !ct.IsCancellationRequested && sw.Elapsed.TotalSeconds < maxWaitSec)
+                        {
+                            WaitSpEvent(pEventSource, 80);
+                            streamEnded = DrainSpEvents(pEventSource, uttPieces, out string? hyp);
+                            if (!string.IsNullOrWhiteSpace(hyp))
+                                lastHypothesis = hyp;
+                        }
+
+                        // Drain once more after stream completion to capture final committed recognition
+                        _ = DrainSpEvents(pEventSource, uttPieces, out string? tailHyp);
+                        if (!string.IsNullOrWhiteSpace(tailHyp))
+                            lastHypothesis = tailHyp;
+
+                        try { grammar.DictationSetState(0); } catch { }
+
+                        if (uttPieces.Count > 0)
+                        {
+                            double cursor = utt.StartSec;
+                            for (int i = 0; i < uttPieces.Count; i++)
+                            {
+                                var (pieceText, relEnd) = uttPieces[i];
+                                double mappedEnd = relEnd > headPadSec
+                                    ? Math.Clamp(utt.StartSec + (relEnd - headPadSec), cursor + 0.08, utt.EndSec)
+                                    : utt.StartSec + (utt.EndSec - utt.StartSec) * ((i + 1.0) / uttPieces.Count);
+                                if (i == uttPieces.Count - 1)
+                                    mappedEnd = Math.Max(mappedEnd, utt.EndSec);
+                                phrases.Add((pieceText, cursor, Math.Max(cursor + 0.08, mappedEnd)));
+                                cursor = Math.Min(utt.EndSec - 0.02, mappedEnd);
+                            }
+                        }
+                        else if (!string.IsNullOrWhiteSpace(lastHypothesis))
+                        {
+                            phrases.Add((lastHypothesis.Trim(), utt.StartSec, Math.Max(utt.StartSec + 0.10, utt.EndSec)));
+                        }
                     }
-                    catch { done = true; }
+                    finally
+                    {
+                        try { fileStream.Close(); } catch { }
+                        try { Marshal.FinalReleaseComObject(fileStream); } catch { }
+                    }
                 }
 
-                grammar.DictationSetState(0);
-                try { fileStream.Close(); } catch { }
-
+                var list = new List<HeardWord>();
                 foreach (var (text, s, e) in phrases)
                     DistributeTextIntoHeardWords(text, chunkOffsetSec + s, chunkOffsetSec + e, list);
 
@@ -350,15 +485,337 @@ public static class WindowsTranscriber
 
                 tcs.TrySetResult(list.ToArray());
             }
+            catch (OperationCanceledException ex)
+            {
+                tcs.TrySetCanceled(ex.CancellationToken);
+            }
             catch (Exception ex)
             {
                 tcs.TrySetException(ex);
+            }
+            finally
+            {
+                try { if (File.Exists(uttTempFile)) File.Delete(uttTempFile); } catch { }
+                if (pEventSource != IntPtr.Zero) Marshal.Release(pEventSource);
+                if (pUnkContext != IntPtr.Zero) Marshal.Release(pUnkContext);
             }
         })
         { IsBackground = true };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         return tcs.Task;
+    }
+
+    private static unsafe void ConfigureSpEventSource(IntPtr pEventSource)
+    {
+        nint* vtbl = *(nint**)pEventSource;
+        // ISpNotifySource::SetNotifyWin32Event is slot 7
+        var setNotifyEvent = (delegate* unmanaged[Stdcall]<IntPtr, int>)vtbl[7];
+        int hr = setNotifyEvent(pEventSource);
+        if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+
+        // ISpEventSource::SetInterest is slot 10
+        var setInterest = (delegate* unmanaged[Stdcall]<IntPtr, ulong, ulong, int>)vtbl[10];
+        hr = setInterest(pEventSource, SpfeiAllSrEvents, SpfeiAllSrEvents);
+        if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+    }
+
+    private static unsafe void WaitSpEvent(IntPtr pEventSource, uint timeoutMs)
+    {
+        nint* vtbl = *(nint**)pEventSource;
+        // ISpNotifySource::WaitForNotifyEvent is slot 8
+        var waitFn = (delegate* unmanaged[Stdcall]<IntPtr, uint, int>)vtbl[8];
+        _ = waitFn(pEventSource, timeoutMs);
+    }
+
+    private static unsafe bool DrainSpEvents(
+        IntPtr pEventSource,
+        List<(string Text, double RelEndSec)>? recognizedPieces,
+        out string? latestHypothesis)
+    {
+        latestHypothesis = null;
+        bool streamEnded = false;
+        nint* vtbl = *(nint**)pEventSource;
+        // ISpEventSource::GetEvents is slot 11
+        var getEvents = (delegate* unmanaged[Stdcall]<IntPtr, uint, SpEventNative*, uint*, int>)vtbl[11];
+
+        SpEventNative ev = default;
+        while (true)
+        {
+            uint fetched = 0;
+            int hr = getEvents(pEventSource, 1, &ev, &fetched);
+            if (hr < 0 || fetched == 0) break;
+
+            try
+            {
+                if (ev.EventId == SpeiEndSrStream)
+                {
+                    streamEnded = true;
+                }
+                else if (ev.EventId == SpeiRecognition && ev.LParam != 0 && recognizedPieces is not null)
+                {
+                    string? txt = ExtractPhraseText(ev.LParam);
+                    if (!string.IsNullOrWhiteSpace(txt))
+                    {
+                        double relEndSec = ev.AudioStreamOffset / (double)(Aligner.SampleRate * 2);
+                        recognizedPieces.Add((txt.Trim(), relEndSec));
+                    }
+                }
+                else if (ev.EventId == SpeiHypothesis && ev.LParam != 0)
+                {
+                    string? hyp = ExtractPhraseText(ev.LParam);
+                    if (!string.IsNullOrWhiteSpace(hyp))
+                        latestHypothesis = hyp.Trim();
+                }
+            }
+            finally
+            {
+                ClearSpEvent(ref ev);
+                ev = default;
+            }
+        }
+        return streamEnded;
+    }
+
+    private static unsafe string? ExtractPhraseText(nint pRecoResult)
+    {
+        if (pRecoResult == 0) return null;
+        Guid iidPhrase = IidSpPhrase;
+        if (Marshal.QueryInterface(pRecoResult, ref iidPhrase, out IntPtr pPhrase) >= 0 && pPhrase != IntPtr.Zero)
+        {
+            try
+            {
+                nint* vtbl = *(nint**)pPhrase;
+                // ISpPhrase::GetText(ULONG ulStart, ULONG ulCount, BOOL fUseTextReplacements, LPWSTR* ppszCoMemText, BYTE* pbDisplayAttributes) is slot 5
+                var getText = (delegate* unmanaged[Stdcall]<IntPtr, uint, uint, int, IntPtr*, IntPtr, int>)vtbl[5];
+                IntPtr pText = IntPtr.Zero;
+                int hr = getText(pPhrase, 0xFFFF_FFFFu, 0xFFFF_FFFFu, 1, &pText, IntPtr.Zero);
+                if (hr >= 0 && pText != IntPtr.Zero)
+                {
+                    try { return Marshal.PtrToStringUni(pText); }
+                    finally { Marshal.FreeCoTaskMem(pText); }
+                }
+            }
+            finally
+            {
+                Marshal.Release(pPhrase);
+            }
+        }
+
+        try
+        {
+            dynamic obj = Marshal.GetObjectForIUnknown(pRecoResult);
+            return (string?)obj.PhraseInfo.GetText(0, -1, true);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void ClearSpEvent(ref SpEventNative ev)
+    {
+        if (ev.LParam == 0) return;
+        if (ev.ParamType is 1 or 2)
+        {
+            try { Marshal.Release(ev.LParam); } catch { }
+        }
+        else if (ev.ParamType is 3 or 4)
+        {
+            try { Marshal.FreeCoTaskMem(ev.LParam); } catch { }
+        }
+        ev.LParam = 0;
+    }
+
+    /// <summary>
+    /// Segments a 16 kHz mono PCM WAV into speech utterances of at most 12 seconds by energy/silence VAD.
+    /// </summary>
+    private static List<(double StartSec, double EndSec)> SegmentSpeechUtterances(string wavPath, double fallbackDurSec)
+    {
+        var result = new List<(double StartSec, double EndSec)>();
+        if (!Aligner.TryReadWavInfo(wavPath, out var info) || info.SampleCount <= 0 || info.BitsPerSample != 16)
+        {
+            for (double t = 0; t < Math.Max(0.3, fallbackDurSec); t += 10.0)
+                result.Add((t, Math.Min(Math.Max(0.3, fallbackDurSec), t + 10.0)));
+            return result;
+        }
+
+        double totalSec = info.SampleCount / (double)info.SampleRate;
+        int frameSamples = Math.Max(160, info.SampleRate * 30 / 1000); // 30 ms frames
+        int channels = Math.Max(1, (int)info.Channels);
+        int totalFrames = (int)((info.SampleCount + frameSamples - 1) / frameSamples);
+        if (totalFrames <= 0)
+        {
+            result.Add((0, Math.Max(0.3, totalSec)));
+            return result;
+        }
+
+        var rms = new float[totalFrames];
+        using (var fs = new FileStream(wavPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            fs.Seek(info.DataOffset, SeekOrigin.Begin);
+            byte[] buf = new byte[frameSamples * channels * 2];
+            for (int f = 0; f < totalFrames; f++)
+            {
+                int read = fs.Read(buf, 0, buf.Length);
+                if (read < 2) break;
+                int samplesRead = read / (channels * 2);
+                if (samplesRead <= 0) break;
+                double sumSq = 0;
+                for (int i = 0; i < samplesRead; i++)
+                {
+                    short s = BitConverter.ToInt16(buf, i * channels * 2);
+                    double v = s / 32768.0;
+                    sumSq += v * v;
+                }
+                rms[f] = (float)Math.Sqrt(sumSq / samplesRead);
+            }
+        }
+
+        float[] sorted = (float[])rms.Clone();
+        Array.Sort(sorted);
+        float noiseFloor = sorted[(int)(sorted.Length * 0.20)];
+        float peak90 = sorted[(int)(sorted.Length * 0.90)];
+        float threshold = Math.Clamp(noiseFloor * 2.5f + (peak90 - noiseFloor) * 0.10f, 0.0035f, 0.025f);
+
+        const int bridgeSilenceFrames = 12; // 360 ms pause bridge
+        const int maxUttFrames = 380;       // ~11.4 s max per utterance
+        const int minSplitFrames = 220;     // ~6.6 s min before looking for silence valley
+
+        int iFrame = 0;
+        while (iFrame < totalFrames)
+        {
+            if (rms[iFrame] < threshold)
+            {
+                iFrame++;
+                continue;
+            }
+
+            int startF = iFrame;
+            int lastSpeechF = iFrame;
+            int f = iFrame + 1;
+            while (f < totalFrames)
+            {
+                if (rms[f] >= threshold)
+                {
+                    lastSpeechF = f;
+                }
+                else if (f - lastSpeechF >= bridgeSilenceFrames)
+                {
+                    break;
+                }
+
+                if (f - startF >= maxUttFrames)
+                {
+                    // Split at quietest frame in [startF + minSplitFrames .. f]
+                    int bestSplit = f;
+                    float minE = float.MaxValue;
+                    for (int k = startF + minSplitFrames; k <= f; k++)
+                    {
+                        if (rms[k] <= minE)
+                        {
+                            minE = rms[k];
+                            bestSplit = k;
+                        }
+                    }
+                    lastSpeechF = bestSplit;
+                    f = bestSplit + 1;
+                    break;
+                }
+                f++;
+            }
+
+            double s0 = Math.Max(0.0, (startF * frameSamples) / (double)info.SampleRate - 0.12);
+            double s1 = Math.Min(totalSec, ((lastSpeechF + 1) * frameSamples) / (double)info.SampleRate + 0.12);
+            if (s1 - s0 >= 0.22)
+            {
+                if (result.Count > 0 && s0 <= result[^1].EndSec + 0.08 && (s1 - result[^1].StartSec) <= 12.0)
+                    result[^1] = (result[^1].StartSec, Math.Max(result[^1].EndSec, s1));
+                else
+                    result.Add((s0, s1));
+            }
+
+            iFrame = Math.Max(f, lastSpeechF + 1);
+        }
+
+        if (result.Count == 0)
+        {
+            for (double t = 0; t < totalSec; t += 10.0)
+                result.Add((t, Math.Min(totalSec, t + 10.0)));
+        }
+
+        return result;
+    }
+
+    private static bool WritePaddedUtteranceWav(
+        string srcWavPath,
+        double fromSec,
+        double toSec,
+        double headSilenceSec,
+        double tailSilenceSec,
+        string dstPath)
+    {
+        if (!Aligner.TryReadWavInfo(srcWavPath, out var info) || info.SampleCount <= 0)
+            return false;
+
+        long startSample = Math.Clamp((long)(fromSec * info.SampleRate), 0, info.SampleCount);
+        long endSample = Math.Clamp((long)(toSec * info.SampleRate), startSample, info.SampleCount);
+        if (endSample <= startSample) return false;
+
+        int frameBytes = info.Channels * (info.BitsPerSample / 8);
+        int headBytes = Math.Max(0, (int)(headSilenceSec * info.SampleRate)) * frameBytes;
+        int speechBytes = (int)((endSample - startSample) * frameBytes);
+        int tailBytes = Math.Max(0, (int)(tailSilenceSec * info.SampleRate)) * frameBytes;
+        int totalDataBytes = headBytes + speechBytes + tailBytes;
+
+        using var src = new FileStream(srcWavPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        src.Seek(info.DataOffset + startSample * frameBytes, SeekOrigin.Begin);
+
+        using var dst = new FileStream(dstPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        using var bw = new BinaryWriter(dst, Encoding.ASCII, leaveOpen: true);
+        bw.Write(Encoding.ASCII.GetBytes("RIFF"));
+        bw.Write(36 + totalDataBytes);
+        bw.Write(Encoding.ASCII.GetBytes("WAVE"));
+        bw.Write(Encoding.ASCII.GetBytes("fmt "));
+        bw.Write(16);
+        bw.Write((short)1);
+        bw.Write((short)info.Channels);
+        bw.Write(info.SampleRate);
+        bw.Write(info.SampleRate * frameBytes);
+        bw.Write((short)frameBytes);
+        bw.Write((short)info.BitsPerSample);
+        bw.Write(Encoding.ASCII.GetBytes("data"));
+        bw.Write(totalDataBytes);
+        bw.Flush();
+
+        byte[] zeroBuf = new byte[Math.Min(16384, Math.Max(headBytes, tailBytes))];
+        int leftHead = headBytes;
+        while (leftHead > 0)
+        {
+            int n = Math.Min(zeroBuf.Length, leftHead);
+            dst.Write(zeroBuf, 0, n);
+            leftHead -= n;
+        }
+
+        byte[] copyBuf = new byte[65536];
+        int leftSpeech = speechBytes;
+        while (leftSpeech > 0)
+        {
+            int n = src.Read(copyBuf, 0, Math.Min(copyBuf.Length, leftSpeech));
+            if (n <= 0) break;
+            dst.Write(copyBuf, 0, n);
+            leftSpeech -= n;
+        }
+
+        int leftTail = tailBytes;
+        while (leftTail > 0)
+        {
+            int n = Math.Min(zeroBuf.Length, leftTail);
+            dst.Write(zeroBuf, 0, n);
+            leftTail -= n;
+        }
+
+        return true;
     }
 
     internal static void DistributeTextIntoHeardWords(string text, double t0, double t1, List<HeardWord> output)

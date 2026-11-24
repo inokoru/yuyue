@@ -78,53 +78,117 @@ public static class AudiobookImporter
     public static string[] ExpandAndValidatePaths(LibraryService library, IReadOnlyList<string> rawPaths)
     {
         var collected = new List<string>();
+        var createdUnzipDirs = new List<string>();
 
-        foreach (var raw in rawPaths)
+        try
         {
-            if (Directory.Exists(raw))
+            foreach (var raw in rawPaths)
             {
-                collected.AddRange(Directory.EnumerateFiles(raw, "*.*", SearchOption.AllDirectories));
-                continue;
+                if (Directory.Exists(raw))
+                {
+                    collected.AddRange(Directory.EnumerateFiles(raw, "*.*", SearchOption.AllDirectories));
+                    continue;
+                }
+
+                if (!File.Exists(raw)) continue;
+                string ext = Path.GetExtension(raw).ToLowerInvariant();
+                if (ext == ".zip")
+                {
+                    string unzipDir = Path.Combine(library.DataDir, "audiobook-unzip", Guid.NewGuid().ToString("D"));
+                    Directory.CreateDirectory(unzipDir);
+                    createdUnzipDirs.Add(unzipDir);
+                    string[] extracted = library.Core.AudiobookUnzip(raw, unzipDir);
+                    collected.AddRange(extracted);
+                }
+                else
+                {
+                    collected.Add(raw);
+                }
             }
 
-            if (!File.Exists(raw)) continue;
-            string ext = Path.GetExtension(raw).ToLowerInvariant();
-            if (ext == ".zip")
+            foreach (var p in collected)
             {
-                string unzipDir = Path.Combine(library.DataDir, "audiobook-unzip", Guid.NewGuid().ToString("N")[..12]);
-                Directory.CreateDirectory(unzipDir);
-                string[] extracted = library.Core.AudiobookUnzip(raw, unzipDir);
-                collected.AddRange(extracted);
+                string ext = Path.GetExtension(p).ToLowerInvariant();
+                bool locked = DrmExtensions.Contains(ext);
+                if (!locked && Extensions.Contains(ext))
+                {
+                    try { locked = library.Core.AudiobookIsLocked(p); } catch { }
+                }
+                if (locked)
+                {
+                    throw new InvalidOperationException("这份有声书带有 DRM 数字版权保护（如 Audible .aax 或受保护的 .m4b/.m4p），语阅无法直接播放。请导入无加密保护的音频文件。");
+                }
             }
-            else
+
+            var valid = collected
+                .Where(p => File.Exists(p) && Extensions.Contains(Path.GetExtension(p).ToLowerInvariant()))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            if (valid.Length == 0)
+                throw new InvalidOperationException("未在所选路径或压缩包中找到受支持的音频文件（支持 .m4b / .mp3 / .m4a / .flac / .ogg / .opus / .wav）。");
+
+            return library.Core.SortAudioFiles(valid);
+        }
+        catch
+        {
+            foreach (string dir in createdUnzipDirs)
             {
-                collected.Add(raw);
+                try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); } catch { }
             }
+            throw;
+        }
+    }
+
+    private static AudioMark[] BuildCombinedChapterMarks(LibraryService library, IReadOnlyList<AudioFile> files)
+    {
+        if (files.Count == 0) return [];
+        var combined = new List<AudioMark>();
+        double offset = 0.0;
+        foreach (var file in files)
+        {
+            AudioMark[] own = [];
+            try { own = library.Core.AudioChapterMarks(file.Path); } catch { }
+            foreach (var m in own)
+            {
+                combined.Add(new AudioMark(m.Title, offset + Math.Max(0.0, m.Start)));
+            }
+            offset += Math.Max(0.0, file.Seconds);
         }
 
-        foreach (var p in collected)
+        // Preserve single-file embedded marks and multi-file combined marks (when >= 2 marks exist across files).
+        if (files.Count == 1)
+            return combined.Count >= 1 ? combined.ToArray() : [];
+        return combined.Count >= 2 ? combined.ToArray() : [];
+    }
+
+    private static void CleanupTemporaryUnzipDirs(string dataDir, IEnumerable<AudioFile> files)
+    {
+        try
         {
-            string ext = Path.GetExtension(p).ToLowerInvariant();
-            bool locked = DrmExtensions.Contains(ext);
-            if (!locked && Extensions.Contains(ext))
+            string unzipRoot = Path.GetFullPath(Path.Combine(dataDir, "audiobook-unzip"));
+            if (!Directory.Exists(unzipRoot)) return;
+            string prefix = unzipRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+            var toDelete = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in files)
             {
-                try { locked = library.Core.AudiobookIsLocked(p); } catch { }
+                if (string.IsNullOrWhiteSpace(f.Path)) continue;
+                string full = Path.GetFullPath(f.Path);
+                if (!full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+                string rel = full[prefix.Length..];
+                int sep = rel.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
+                string bucket = sep > 0 ? rel[..sep] : rel;
+                if (!string.IsNullOrWhiteSpace(bucket))
+                    toDelete.Add(Path.Combine(unzipRoot, bucket));
             }
-            if (locked)
+
+            foreach (string dir in toDelete)
             {
-                throw new InvalidOperationException("这份有声书带有 DRM 数字版权保护（如 Audible .aax 或受保护的 .m4b/.m4p），语阅无法直接播放。请导入无加密保护的音频文件。");
+                try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); } catch { }
             }
         }
-
-        var valid = collected
-            .Where(p => File.Exists(p) && Extensions.Contains(Path.GetExtension(p).ToLowerInvariant()))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        if (valid.Length == 0)
-            throw new InvalidOperationException("未在所选路径或压缩包中找到受支持的音频文件（支持 .m4b / .mp3 / .m4a / .flac / .ogg / .opus / .wav）。");
-
-        return library.Core.SortAudioFiles(valid);
+        catch { }
     }
 
     public static async Task<PendingAudiobookImport> PrepareImportAsync(LibraryService library, IReadOnlyList<string> rawPaths)
@@ -207,9 +271,7 @@ public static class AudiobookImporter
                 : Path.GetFileNameWithoutExtension(ordered[0]);
         }
 
-        AudioMark[] marks = ordered.Length == 1
-            ? library.Core.AudioChapterMarks(ordered[0])
-            : [];
+        AudioMark[] marks = BuildCombinedChapterMarks(library, audioFiles);
 
         string[] authors = string.IsNullOrWhiteSpace(author) ? [] : [author];
         var matchedEbook = FindMatchingShelfEbook(library, title);
@@ -234,13 +296,20 @@ public static class AudiobookImporter
     public static async Task<BookSummary> ImportFilesAsync(LibraryService library, IReadOnlyList<string> rawPaths)
     {
         var pending = await PrepareImportAsync(library, rawPaths);
-        var import = new AudioImport(pending.Files.ToArray(), pending.Title, pending.Authors, pending.Marks, pending.Cover);
-        var summary = await Task.Run(() => library.Core.ImportAudiobook(import));
-        if (pending.MatchedEbook is not null)
+        try
         {
-            try { library.Core.AudiobookPair(summary.Id, pending.MatchedEbook.Id); } catch { }
+            var import = new AudioImport(pending.Files.ToArray(), pending.Title, pending.Authors, pending.Marks, pending.Cover);
+            var summary = await Task.Run(() => library.Core.ImportAudiobook(import));
+            if (pending.MatchedEbook is not null)
+            {
+                try { library.Core.AudiobookPair(summary.Id, pending.MatchedEbook.Id); } catch { }
+            }
+            return summary;
         }
-        return summary;
+        finally
+        {
+            CleanupTemporaryUnzipDirs(library.DataDir, pending.Files);
+        }
     }
 
     /// <summary>
@@ -505,19 +574,30 @@ public static class AudiobookImporter
             DefaultButton = ContentDialogButton.Primary,
         };
 
-        if (await dlg.ShowAsync() != ContentDialogResult.Primary) return null;
-
-        string finalTitle = string.IsNullOrWhiteSpace(titleBox.Text) ? pending.Title : titleBox.Text.Trim();
-        string[] finalAuthors = authorBox.Text
-            .Split(['、', ',', '，', '/'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-        var finalImport = new AudioImport(pending.Files.ToArray(), finalTitle, finalAuthors, pending.Marks, coverBytes);
-        var imported = await Task.Run(() => library.Core.ImportAudiobook(finalImport));
-        if (pairWithEbook && pending.MatchedEbook is not null)
+        try
         {
-            try { library.Core.AudiobookPair(imported.Id, pending.MatchedEbook.Id); } catch { }
+            if (await dlg.ShowAsync() != ContentDialogResult.Primary) return null;
+
+            string finalTitle = string.IsNullOrWhiteSpace(titleBox.Text) ? pending.Title : titleBox.Text.Trim();
+            string[] finalAuthors = authorBox.Text
+                .Split(['、', ',', '，', '/'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            var finalMarks = pending.Files.Count > 1
+                ? BuildCombinedChapterMarks(library, pending.Files)
+                : pending.Marks;
+
+            var finalImport = new AudioImport(pending.Files.ToArray(), finalTitle, finalAuthors, finalMarks, coverBytes);
+            var imported = await Task.Run(() => library.Core.ImportAudiobook(finalImport));
+            if (pairWithEbook && pending.MatchedEbook is not null)
+            {
+                try { library.Core.AudiobookPair(imported.Id, pending.MatchedEbook.Id); } catch { }
+            }
+            return imported;
         }
-        return imported;
+        finally
+        {
+            CleanupTemporaryUnzipDirs(library.DataDir, pending.Files);
+        }
     }
 
     private static string FormatTotalLength(double sec)

@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.Web.WebView2.Core;
 using Windows.Storage.Streams;
@@ -147,7 +148,7 @@ public sealed class ReaderWebViewHost : IDisposable
                     const c = e.code || '';
                     if (ctrl && (k === 'c' || k === 'C' || k === 'a' || k === 'A')) return;
                     const isCtrlShortcut = ctrl && (
-                        ['f','F','k','K','g','G','d','D','b','B','[',']','=','+','-','_',','].includes(k) ||
+                        ['f','F','k','K','g','G','d','D','b','B','z','Z','[',']','=','+','-','_',','].includes(k) ||
                         (alt && ['t','T','n','N','ArrowUp','ArrowDown'].includes(k))
                     );
                     const isNavKey = !ctrl && !alt && (
@@ -460,21 +461,7 @@ public sealed class ReaderWebViewHost : IDisposable
             switch (served)
             {
                 case Served.Html html:
-                    string body = html.Body;
-                    if (_library.Prefs.PaperFollowAppearance && !_library.Prefs.GlobalEinkMode)
-                    {
-                        var segs = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
-                        string? bookId = segs.Length >= 2 ? Uri.UnescapeDataString(segs[1]) : null;
-                        try
-                        {
-                            var rs = (bookId is not null ? _library.GetBookReaderSettings(bookId) : null)
-                                ?? _library.GetReaderSettings();
-                            var resolved = PaperAppearance.Resolve(_library, rs);
-                            if (resolved != PaperAppearance.Raw(_library, rs))
-                                body = PaperAppearance.ApplyToHtml(body, resolved);
-                        }
-                        catch { }
-                    }
+                    string body = BuildSectionHtml(path, html.Body);
                     args.Response = FromBytes(env, Encoding.UTF8.GetBytes(body), "text/html; charset=utf-8");
                     return;
                 case Served.File file when File.Exists(file.Path):
@@ -487,6 +474,46 @@ public sealed class ReaderWebViewHost : IDisposable
         }
 
         args.Response = NotFound(env);
+    }
+
+    private string BuildSectionHtml(string path, string body)
+    {
+        if (_library.Prefs.GlobalEinkMode)
+        {
+            body = PaperAppearance.ApplyToHtml(body, "eink", null, null);
+            int start = body.IndexOf("<html ", StringComparison.Ordinal);
+            if (start >= 0)
+            {
+                int end = body.IndexOf('>', start);
+                if (end > start)
+                {
+                    string tag = body[start..end];
+                    tag = Regex.Replace(tag, @" data-yy-eink=""[^""]*""", "");
+                    tag = Regex.Replace(tag, @" data-yy-eink-gray=""[^""]*""", "");
+                    string grayVal = _library.Prefs.GlobalEinkGray ? "1" : "0";
+                    tag += $@" data-yy-eink=""1"" data-yy-eink-gray=""{grayVal}""";
+                    body = body[..start] + tag + body[end..];
+                }
+            }
+            return body;
+        }
+
+        if (_library.Prefs.PaperFollowAppearance)
+        {
+            var segs = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            string? bookId = segs.Length >= 2 ? Uri.UnescapeDataString(segs[1]) : null;
+            try
+            {
+                var rs = (bookId is not null ? _library.GetBookReaderSettings(bookId) : null)
+                    ?? _library.GetReaderSettings();
+                var resolved = PaperAppearance.Resolve(_library, rs);
+                if (resolved != PaperAppearance.Raw(_library, rs))
+                    body = PaperAppearance.ApplyToHtml(body, resolved);
+            }
+            catch { }
+        }
+
+        return body;
     }
 
     private static CoreWebView2WebResourceResponse FromBytes(CoreWebView2Environment env, byte[] bytes, string contentType)

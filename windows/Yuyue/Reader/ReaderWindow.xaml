@@ -65,29 +65,37 @@
 
                         <!-- Row 1: 4 颜色圆点 (带 1..4 键帽) + 实线/点线下划线 + 删除 -->
                         <Grid>
-                            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                                 <Button Tag="yellow" Padding="2" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="黄色划线 (1)" Click="MarkColor_Click">
                                     <StackPanel Spacing="2" HorizontalAlignment="Center">
-                                        <Border Width="18" Height="18" CornerRadius="9" Background="#FBE7A0" BorderBrush="#22000000" BorderThickness="0.5" />
+                                        <Border x:Name="SwatchYellowRing" Width="22" Height="22" CornerRadius="11" Padding="1.5" BorderThickness="1.5" BorderBrush="Transparent">
+                                            <Border CornerRadius="9" Background="#FBE7A0" BorderBrush="#22000000" BorderThickness="0.5" />
+                                        </Border>
                                         <TextBlock Text="1" FontSize="9" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
                                 <Button Tag="blue" Padding="2" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="蓝色划线 (2)" Click="MarkColor_Click">
                                     <StackPanel Spacing="2" HorizontalAlignment="Center">
-                                        <Border Width="18" Height="18" CornerRadius="9" Background="#CFE6F4" BorderBrush="#22000000" BorderThickness="0.5" />
+                                        <Border x:Name="SwatchBlueRing" Width="22" Height="22" CornerRadius="11" Padding="1.5" BorderThickness="1.5" BorderBrush="Transparent">
+                                            <Border CornerRadius="9" Background="#CFE6F4" BorderBrush="#22000000" BorderThickness="0.5" />
+                                        </Border>
                                         <TextBlock Text="2" FontSize="9" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
                                 <Button Tag="pink" Padding="2" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="粉色划线 (3)" Click="MarkColor_Click">
                                     <StackPanel Spacing="2" HorizontalAlignment="Center">
-                                        <Border Width="18" Height="18" CornerRadius="9" Background="#F6C7C0" BorderBrush="#22000000" BorderThickness="0.5" />
+                                        <Border x:Name="SwatchPinkRing" Width="22" Height="22" CornerRadius="11" Padding="1.5" BorderThickness="1.5" BorderBrush="Transparent">
+                                            <Border CornerRadius="9" Background="#F6C7C0" BorderBrush="#22000000" BorderThickness="0.5" />
+                                        </Border>
                                         <TextBlock Text="3" FontSize="9" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
                                 <Button Tag="wave" Padding="2" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="波浪线 (4)" Click="MarkColor_Click">
                                     <StackPanel Spacing="2" HorizontalAlignment="Center">
-                                        <Border Width="18" Height="18" CornerRadius="9" Background="Transparent" BorderBrush="#EF7F71" BorderThickness="1.5">
-                                            <TextBlock Text="~" FontSize="11" FontWeight="Bold" Foreground="#EF7F71" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
+                                        <Border x:Name="SwatchWaveRing" Width="22" Height="22" CornerRadius="11" Padding="1.5" BorderThickness="1.5" BorderBrush="Transparent">
+                                            <Border CornerRadius="9" Background="Transparent" BorderBrush="#EF7F71" BorderThickness="1.5">
+                                                <TextBlock Text="~" FontSize="11" FontWeight="Bold" Foreground="#EF7F71" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
+                                            </Border>
                                         </Border>
                                         <TextBlock Text="4" FontSize="9" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Center" />
                                     </StackPanel>
@@ -95,13 +103,13 @@
                             </StackPanel>
 
                             <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right" VerticalAlignment="Center">
-                                <Button Tag="underline" Width="32" Height="30" Padding="0" CornerRadius="8" Background="{ThemeResource YYInsetBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="1" UseSystemFocusVisuals="False" ToolTipService.ToolTip="实线下划线" Click="MarkColor_Click">
+                                <Button x:Name="LineUnderlineBtn" Tag="underline" Width="32" Height="30" Padding="0" CornerRadius="8" Background="{ThemeResource YYInsetBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="1" UseSystemFocusVisuals="False" ToolTipService.ToolTip="实线下划线" Click="MarkColor_Click">
                                     <StackPanel Spacing="3" HorizontalAlignment="Center" VerticalAlignment="Center">
                                         <TextBlock Text="A" FontSize="13" FontWeight="SemiBold" LineHeight="13" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" />
                                         <Border Width="18" Height="2" CornerRadius="1" Background="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
-                                <Button Tag="dotted" Width="32" Height="30" Padding="0" CornerRadius="8" Background="{ThemeResource YYInsetBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="1" UseSystemFocusVisuals="False" ToolTipService.ToolTip="点线下划线" Click="MarkColor_Click">
+                                <Button x:Name="LineDottedBtn" Tag="dotted" Width="32" Height="30" Padding="0" CornerRadius="8" Background="{ThemeResource YYInsetBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="1" UseSystemFocusVisuals="False" ToolTipService.ToolTip="点线下划线" Click="MarkColor_Click">
                                     <StackPanel Spacing="3" HorizontalAlignment="Center" VerticalAlignment="Center">
                                         <TextBlock Text="A" FontSize="13" FontWeight="SemiBold" LineHeight="13" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" />
                                         <StackPanel Orientation="Horizontal" Spacing="2.5" HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -258,6 +266,71 @@
                     </StackPanel>
                 </Border>
 
+                <!-- 沉浸模式底边悬停呼出听书胶囊/返回条感应区（置于底部胶囊下层以免拦截按钮点击） -->
+                <Border
+                    x:Name="ImmersiveBottomPeekZone"
+                    Height="42"
+                    VerticalAlignment="Bottom"
+                    Background="Transparent"
+                    PointerEntered="ImmersiveBottomPeek_Entered"
+                    PointerMoved="ImmersiveBottomPeek_Entered"
+                    PointerExited="ImmersiveBottomPeek_Exited" />
+
+                <!-- 顶部紧凑状态提示横幅（书籍重整 MarksStale / 仅按章对齐有声书） -->
+                <StackPanel
+                    x:Name="TopInfoBannersStack"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Top"
+                    Margin="0,58,0,0"
+                    Spacing="6">
+                    <Border
+                        x:Name="MarksStaleBanner"
+                        Visibility="Collapsed"
+                        HorizontalAlignment="Center"
+                        CornerRadius="12"
+                        Padding="12,5,6,5"
+                        Background="{ThemeResource YYCardBrush}"
+                        BorderBrush="{ThemeResource YYLineBrush}"
+                        BorderThickness="1">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <TextBlock
+                                Text="这本书重新整理过，划线和书签在原来的位置"
+                                FontSize="11.5"
+                                Foreground="{ThemeResource YYText2Brush}"
+                                VerticalAlignment="Center" />
+                            <Button
+                                Content="知道了"
+                                Height="24"
+                                MinHeight="24"
+                                Padding="10,0"
+                                CornerRadius="8"
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                Background="{ThemeResource YYInsetBrush}"
+                                Foreground="{ThemeResource YYText1Brush}"
+                                BorderThickness="0"
+                                UseSystemFocusVisuals="False"
+                                Click="AcknowledgeMarksBanner_Click" />
+                        </StackPanel>
+                    </Border>
+                    <Border
+                        x:Name="ChapterOnlyAudioBanner"
+                        Visibility="Collapsed"
+                        HorizontalAlignment="Center"
+                        CornerRadius="12"
+                        Padding="12,6"
+                        Background="{ThemeResource YYCardBrush}"
+                        BorderBrush="{ThemeResource YYLineBrush}"
+                        BorderThickness="1"
+                        IsHitTestVisible="False">
+                        <TextBlock
+                            Text="这本有声书只标到章，翻页不跟着声音走"
+                            FontSize="11.5"
+                            Foreground="{ThemeResource YYText2Brush}"
+                            VerticalAlignment="Center" />
+                    </Border>
+                </StackPanel>
+
                 <!-- 底部 360px 听书胶囊 + 448px ListenCard 浮层 (1:1 MacReaderView.swift:605-688 & 02-listening.png) -->
                 <Border
                     x:Name="ListenCapsule"
@@ -268,7 +341,9 @@
                     Margin="0,0,0,18"
                     CornerRadius="23"
                     BorderThickness="0.5"
-                    Padding="6,5">
+                    Padding="6,5"
+                    PointerEntered="ImmersiveBottomChild_Entered"
+                    PointerExited="ImmersiveBottomChild_Exited">
                     <Grid>
                         <Grid ColumnSpacing="2">
                             <Grid.ColumnDefinitions>
@@ -305,7 +380,7 @@
                                 UseSystemFocusVisuals="False"
                                 ToolTipService.ToolTip="听书：声音、速度、睡眠定时与伴听功能">
                                 <Button.Flyout>
-                                    <Flyout x:Name="ListenCardFlyout" Placement="Top" Opened="ListenCardFlyout_Opened">
+                                    <Flyout x:Name="ListenCardFlyout" Placement="Top" Opened="ListenCardFlyout_Opened" Closed="ListenCardFlyout_Closed">
                                         <StackPanel x:Name="ListenCardHost" Width="432" Spacing="12" />
                                     </Flyout>
                                 </Button.Flyout>
@@ -349,7 +424,9 @@
                     Visibility="Collapsed"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Bottom"
-                    Margin="0,0,0,74" />
+                    Margin="0,0,0,74"
+                    PointerEntered="ImmersiveBottomChild_Entered"
+                    PointerExited="ImmersiveBottomChild_Exited" />
 
                 <!-- 睡眠定时回到昨晚胶囊 (SleepReturnCard, 1:1 ReaderFlag.swift:260-294) -->
                 <ContentControl
@@ -358,14 +435,6 @@
                     HorizontalAlignment="Center"
                     VerticalAlignment="Bottom"
                     Margin="0,0,0,22" />
-
-                <!-- 沉浸模式底边悬停呼出听书胶囊感应区 -->
-                <Border
-                    x:Name="ImmersiveBottomPeekZone"
-                    Height="26"
-                    VerticalAlignment="Bottom"
-                    Background="Transparent"
-                    PointerEntered="ImmersiveBottomPeek_Entered" />
 
                 <!-- 跳转后返回原位胶囊 (ReaderReturn) -->
                 <Button
@@ -381,6 +450,8 @@
                     BorderBrush="{ThemeResource YYLineBrush}"
                     BorderThickness="1"
                     UseSystemFocusVisuals="False"
+                    PointerEntered="ImmersiveBottomChild_Entered"
+                    PointerExited="ImmersiveBottomChild_Exited"
                     Click="ReturnPill_Click">
                     <TextBlock x:Name="ReturnPillText" Text="↩ 回到刚才位置" FontSize="11.5" Foreground="{ThemeResource YYText1Brush}" />
                 </Button>
@@ -511,16 +582,16 @@
                             <StackPanel x:Name="CompanionMessages" Spacing="10" />
                         </ScrollViewer>
 
-                        <!-- 底部：空对话快捷推荐卡 + 引用条 + macOS 白底多行输入框（1:1 reader-companion-lines/1.png） -->
+                        <!-- 底部：空对话快捷推荐卡 + 引用条 + / 指令浮层 + macOS 白底多行输入框（1:1 reader-companion-lines/1.png） -->
                         <StackPanel Grid.Row="2" Spacing="8" Margin="0,8,0,0">
                             <Border x:Name="CompanionSuggestionsCard" CornerRadius="14" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.5" Padding="6,4">
                                 <StackPanel Spacing="0">
-                                    <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" CornerRadius="8" Padding="8,7" UseSystemFocusVisuals="False" Tag="请帮我简要回顾到当前位置为止前面发生了什么，不要剧透后面的内容。" Click="CompanionQuickPrompt_Click">
-                                        <TextBlock Text="前面发生了什么？" FontSize="12.5" Foreground="{ThemeResource YYText1Brush}" />
+                                    <Button x:Name="CompanionSugBtn1" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" CornerRadius="8" Padding="8,7" UseSystemFocusVisuals="False" Tag="请帮我简要回顾到当前位置为止前面发生了什么，不要剧透后面的内容。" Click="CompanionQuickPrompt_Click">
+                                        <TextBlock x:Name="CompanionSugText1" Text="前面发生了什么？" FontSize="12.5" Foreground="{ThemeResource YYText1Brush}" />
                                     </Button>
                                     <Border Height="0.5" Background="{ThemeResource YYLineBrush}" Margin="8,0" />
-                                    <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" CornerRadius="8" Padding="8,7" UseSystemFocusVisuals="False" Tag="结合当前章节已读内容，这一章讲了什么？不要剧透未读部分。" Click="CompanionQuickPrompt_Click">
-                                        <TextBlock Text="这一章讲了什么？" FontSize="12.5" Foreground="{ThemeResource YYText1Brush}" />
+                                    <Button x:Name="CompanionSugBtn2" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" CornerRadius="8" Padding="8,7" UseSystemFocusVisuals="False" Tag="结合当前章节已读内容，这一章讲了什么？不要剧透未读部分。" Click="CompanionQuickPrompt_Click">
+                                        <TextBlock x:Name="CompanionSugText2" Text="这一章讲了什么？" FontSize="12.5" Foreground="{ThemeResource YYText1Brush}" />
                                     </Button>
                                 </StackPanel>
                             </Border>
@@ -540,9 +611,20 @@
                                 </Grid>
                             </Border>
 
+                            <!-- 11 个 / 快捷指令实时过滤弹窗 (1:1 MacReaderCards.swift:1350-1565) -->
+                            <Border x:Name="CompanionSlashPopup" Visibility="Collapsed" CornerRadius="12" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="1" Padding="5,5,5,4">
+                                <StackPanel Spacing="3">
+                                    <ScrollViewer MaxHeight="224" VerticalScrollBarVisibility="Auto">
+                                        <StackPanel x:Name="CompanionSlashList" Spacing="1" />
+                                    </ScrollViewer>
+                                    <Border Height="0.5" Background="{ThemeResource YYLineBrush}" Margin="4,1" />
+                                    <TextBlock Text="↑↓ 选择 · Tab 补全 · ↵ 执行 · Esc 关闭" FontSize="10" Foreground="{ThemeResource YYText3Brush}" Margin="6,1,6,2" />
+                                </StackPanel>
+                            </Border>
+
                             <Border CornerRadius="14" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.75" Padding="10,8,8,7">
                                 <StackPanel Spacing="6">
-                                    <TextBox x:Name="CompanionInputBox" PlaceholderText="问这本书，或输入 / …" BorderThickness="0" Background="Transparent" FontSize="12.5" Padding="2,2" TextWrapping="Wrap" MaxHeight="84" KeyDown="CompanionInput_KeyDown" />
+                                    <TextBox x:Name="CompanionInputBox" PlaceholderText="问这本书，或输入 / …" BorderThickness="0" Background="Transparent" FontSize="12.5" Padding="2,2" TextWrapping="Wrap" MaxHeight="84" TextChanged="CompanionInput_TextChanged" PreviewKeyDown="CompanionInput_PreviewKeyDown" KeyDown="CompanionInput_KeyDown" />
                                     <Grid>
                                         <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                                             <Button Width="24" Height="24" Padding="0" CornerRadius="7" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="启发提问">
@@ -556,17 +638,17 @@
                                                     </MenuFlyout>
                                                 </Button.Flyout>
                                             </Button>
-                                            <Button Width="24" Height="24" Padding="0" CornerRadius="7" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="快捷指令">
+                                            <Button x:Name="CompanionSlashBtn" Width="24" Height="24" Padding="0" CornerRadius="7" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="快捷指令 (/)" Click="CompanionSlashBtn_Click">
                                                 <TextBlock Text="/" FontSize="12.5" FontWeight="SemiBold" Foreground="{ThemeResource YYText2Brush}" />
-                                                <Button.Flyout>
-                                                    <MenuFlyout Placement="TopEdgeAlignedLeft">
-                                                        <MenuFlyoutItem Text="/recap  生成前情提要" Click="CompanionRecap_Click" />
-                                                        <MenuFlyoutItem Text="/clear  清空当前对话" Click="CompanionClear_Click" />
-                                                        <MenuFlyoutItem Text="/settings  切换模型或配置 Key…" Click="CompanionSettings_Click" />
-                                                    </MenuFlyout>
-                                                </Button.Flyout>
                                             </Button>
-                                            <Button x:Name="CompanionModelPillBtn" Height="24" MinHeight="24" Padding="8,0" CornerRadius="12" Background="{ThemeResource YYInsetBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.5" UseSystemFocusVisuals="False" ToolTipService.ToolTip="书伴模型设置" Click="CompanionSettings_Click">
+                                            <Button x:Name="CompanionModelPillBtn" Height="24" MinHeight="24" Padding="8,0" CornerRadius="12" Background="{ThemeResource YYInsetBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.5" UseSystemFocusVisuals="False" ToolTipService.ToolTip="切换书伴模型" Click="CompanionChangeModel_Click">
+                                                <Button.Flyout>
+                                                    <Flyout x:Name="CompanionModelFlyout" Placement="TopEdgeAlignedLeft" Opened="CompanionModelFlyout_Opened">
+                                                        <ScrollViewer MaxHeight="320" VerticalScrollBarVisibility="Auto">
+                                                            <StackPanel x:Name="CompanionModelFlyoutHost" Width="256" Spacing="2" />
+                                                        </ScrollViewer>
+                                                    </Flyout>
+                                                </Button.Flyout>
                                                 <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                                                     <TextBlock x:Name="CompanionModelPillText" Text="" FontSize="11" Foreground="{ThemeResource YYText2Brush}" MaxWidth="112" TextTrimming="CharacterEllipsis" />
                                                     <TextBlock Text="⇕" FontSize="9.5" Foreground="{ThemeResource YYText3Brush}" />
@@ -761,21 +843,19 @@
                                         <!-- 4 列字体网格（系统 / 宋体 / 楷体 / 霞鹜文楷 + 更多） -->
                                         <Grid x:Name="FontTilesHost" ColumnSpacing="6" RowSpacing="6" />
 
-                                        <!-- A− | 字号 | A+ 步进栏 (1:1 MacReaderCards.swift:76-87) -->
-                                        <Border Height="34" CornerRadius="10" Background="{ThemeResource YYInsetBrush}">
-                                            <Grid>
+                                        <!-- A− | 连续滑块 (12..34) | 字号 | A+ 步进栏 -->
+                                        <Border Height="36" CornerRadius="10" Background="{ThemeResource YYInsetBrush}" Padding="2,0">
+                                            <Grid ColumnSpacing="4">
                                                 <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="38" />
                                                     <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="1" />
-                                                    <ColumnDefinition Width="52" />
-                                                    <ColumnDefinition Width="1" />
-                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="30" />
+                                                    <ColumnDefinition Width="38" />
                                                 </Grid.ColumnDefinitions>
-                                                <Button Grid.Column="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent" BorderThickness="0" CornerRadius="10" FontSize="13" Content="A−" UseSystemFocusVisuals="False" Click="FontStepDown_Click" />
-                                                <Border Grid.Column="1" Width="1" Height="16" Background="{ThemeResource YYLineBrush}" VerticalAlignment="Center" />
-                                                <TextBlock x:Name="FontSizeValueText" Grid.Column="2" Text="18" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                                <Border Grid.Column="3" Width="1" Height="16" Background="{ThemeResource YYLineBrush}" VerticalAlignment="Center" />
-                                                <Button Grid.Column="4" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent" BorderThickness="0" CornerRadius="10" FontSize="15.5" Content="A+" UseSystemFocusVisuals="False" Click="FontStepUp_Click" />
+                                                <Button Grid.Column="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent" BorderThickness="0" CornerRadius="8" FontSize="13" Content="A−" UseSystemFocusVisuals="False" Click="FontStepDown_Click" />
+                                                <Slider x:Name="FontSizeSlider" Grid.Column="1" Minimum="12" Maximum="34" StepFrequency="1" VerticalAlignment="Center" ValueChanged="FontSizeSlider_ValueChanged" />
+                                                <TextBlock x:Name="FontSizeValueText" Grid.Column="2" Text="18" FontSize="11.5" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                <Button Grid.Column="3" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent" BorderThickness="0" CornerRadius="8" FontSize="15" Content="A+" UseSystemFocusVisuals="False" Click="FontStepUp_Click" />
                                             </Grid>
                                         </Border>
 

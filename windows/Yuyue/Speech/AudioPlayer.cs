@@ -51,6 +51,8 @@ public sealed class AudioPlayer : IDisposable
     private readonly LibraryService? _library;
     private readonly MediaPlayer _player;
     private readonly SpeechSynthesizer _synth;
+    private readonly SemaphoreSlim _synthLock = new(1, 1);
+    private VoiceInformation? _selectedSystemVoice;
     private readonly Microsoft.UI.Dispatching.DispatcherQueue? _uiQueue;
     private readonly Microsoft.UI.Xaml.DispatcherTimer? _tickTimer;
     private CancellationTokenSource? _cts;
@@ -84,11 +86,13 @@ public sealed class AudioPlayer : IDisposable
     private string? _selectedCloudId;
     private string _voiceDisplayName = "系统语音";
 
-    // Sleep timer with 20s linear volume fade & pause-aware countdown
+    // Sleep timer with 20s linear volume fade & wall-clock deadline (#28)
     private int _sleepMode; // 0=off, 1=timed, 2=endOfChapter, 3=afterSentence
     private double _sleepRemainingSec;
+    private DateTime? _sleepDeadlineUtc;
     private DateTime _sleepLastTickUtc = DateTime.UtcNow;
     private bool _isSleepFading;
+    private bool _sleepTriggeredStop;
 
     // Paired human audiobook recording state ("原声" inside ReaderWindow)
     private string? _pairedAudioBookId;
@@ -102,6 +106,7 @@ public sealed class AudioPlayer : IDisposable
     private double _pairedLastMomentSkipTarget = -1;
     private double _pairedIgnoreExtraUntilSec = -1;
     private bool _pairedSpeakingUnread;
+    private AudioPlayer? _pairedFillTtsPlayer;
     private int _pairedLastReportedSentence = -1;
     private uint _pairedLastReportedSection = uint.MaxValue;
     private double _pairedSentenceEndStopSec = -1;
@@ -113,6 +118,7 @@ public sealed class AudioPlayer : IDisposable
     public event Action<int, int, int, bool>? SentenceProgressSynced;
     public event Action<bool>? PlayStateChanged;
     public event Action? SectionFinished;
+    public event Action? PreviousSectionRequested;
     public event Action? SentenceFinished;
     public event Action<int>? MarkHeardRequested;
     public event Action<string>? SynthesisError;
@@ -134,7 +140,9 @@ public sealed class AudioPlayer : IDisposable
     public bool HeadphoneMarkMode { get; set; } = true;
 
     public int SleepMode => _sleepMode;
-    public double SleepSecondsRemaining => _sleepRemainingSec;
+    public double SleepSecondsRemaining => _sleepMode == 1 && _sleepDeadlineUtc is DateTime dl
+        ? Math.Max(0, (dl - DateTime.UtcNow).TotalSeconds)
+        : _sleepRemainingSec;
     public bool IsSleepFading => _isSleepFading;
 
     public bool HasPairedRecording => _pairedRecording is not null && !string.IsNullOrEmpty(_pairedAudioBookId);
@@ -307,6 +315,9 @@ public sealed class AudioPlayer : IDisposable
     {
         _bookId = bookId;
         _language = string.IsNullOrWhiteSpace(language) ? "zh-Hans" : language;
+        _sectionIndex = null;
+        _loopRangeStart = null;
+        _loopRangeEnd = null;
         _cachedDramaSectionIndex = null;
         _cachedSectionActs = null;
         if (_library is not null)
@@ -315,6 +326,8 @@ public sealed class AudioPlayer : IDisposable
 
     public void SetSectionContext(uint sectionIndex, bool dramaMode)
     {
+        _loopRangeStart = null;
+        _loopRangeEnd = null;
         if (_sectionIndex != sectionIndex || _dramaMode != dramaMode)
         {
             _sectionIndex = sectionIndex;
@@ -358,11 +371,14 @@ public sealed class AudioPlayer : IDisposable
 
     public void StartSleepTimer(int minutes)
     {
+        double secs = Math.Max(1, minutes) * 60.0;
         _sleepMode = 1;
-        _sleepRemainingSec = Math.Max(1, minutes) * 60.0;
+        _sleepRemainingSec = secs;
+        _sleepDeadlineUtc = DateTime.UtcNow.AddSeconds(secs);
         _sleepLastTickUtc = DateTime.UtcNow;
         _isSleepFading = false;
         _stopAfterSentence = false;
+        _sleepTriggeredStop = false;
         _pairedSentenceEndStopSec = -1;
         RestoreVolume();
         EnsureTickTimer();
@@ -373,8 +389,10 @@ public sealed class AudioPlayer : IDisposable
     {
         _sleepMode = 2;
         _sleepRemainingSec = 0;
+        _sleepDeadlineUtc = null;
         _isSleepFading = false;
         _stopAfterSentence = false;
+        _sleepTriggeredStop = false;
         _pairedSentenceEndStopSec = -1;
         RestoreVolume();
         SleepStateChanged?.Invoke();
@@ -384,8 +402,10 @@ public sealed class AudioPlayer : IDisposable
     {
         _sleepMode = 3;
         _sleepRemainingSec = 0;
+        _sleepDeadlineUtc = null;
         _isSleepFading = false;
         _stopAfterSentence = true;
+        _sleepTriggeredStop = true;
         RestoreVolume();
         if (IsUsingPairedRecording && _library is not null && !string.IsNullOrEmpty(_pairedAudioBookId))
         {
@@ -401,11 +421,17 @@ public sealed class AudioPlayer : IDisposable
 
     public void ExtendSleep(int addMinutes = 10)
     {
+        double baseRem = _sleepDeadlineUtc is DateTime dl
+            ? Math.Max(0, (dl - DateTime.UtcNow).TotalSeconds)
+            : Math.Max(0, _sleepRemainingSec);
+        double nextSec = baseRem + addMinutes * 60.0;
         _sleepMode = 1;
-        _sleepRemainingSec = Math.Max(0, _sleepRemainingSec) + addMinutes * 60.0;
+        _sleepRemainingSec = nextSec;
+        _sleepDeadlineUtc = DateTime.UtcNow.AddSeconds(nextSec);
         _sleepLastTickUtc = DateTime.UtcNow;
         _isSleepFading = false;
         _stopAfterSentence = false;
+        _sleepTriggeredStop = false;
         _pairedSentenceEndStopSec = -1;
         RestoreVolume();
         EnsureTickTimer();
@@ -416,11 +442,38 @@ public sealed class AudioPlayer : IDisposable
     {
         _sleepMode = 0;
         _sleepRemainingSec = 0;
+        _sleepDeadlineUtc = null;
         _isSleepFading = false;
         _stopAfterSentence = false;
+        _sleepTriggeredStop = false;
         _pairedSentenceEndStopSec = -1;
         RestoreVolume();
         SleepStateChanged?.Invoke();
+    }
+
+    private void ExpireSleepTimerIfPastDeadline()
+    {
+        if (_sleepMode == 1 && _sleepDeadlineUtc is DateTime dl && DateTime.UtcNow >= dl)
+        {
+            _sleepMode = 0;
+            _sleepRemainingSec = 0;
+            _sleepDeadlineUtc = null;
+            _isSleepFading = false;
+            _stopAfterSentence = false;
+            _sleepTriggeredStop = false;
+            RestoreVolume();
+            SleepStateChanged?.Invoke();
+        }
+    }
+
+    private void StopPairedFillTts()
+    {
+        var fill = Interlocked.Exchange(ref _pairedFillTtsPlayer, null);
+        if (fill is not null)
+        {
+            try { fill.Stop(); fill.Dispose(); } catch { }
+        }
+        _pairedSpeakingUnread = false;
     }
 
     private void RestoreVolume()
@@ -442,6 +495,7 @@ public sealed class AudioPlayer : IDisposable
         bool wasPlaying = _playing;
         int curSent = Math.Max(0, _currentIndex);
         if (wasPlaying) Pause();
+        StopPairedFillTts();
 
         _pairedAudioBookId = audioBookId;
         _pairedRecording = recording;
@@ -502,18 +556,38 @@ public sealed class AudioPlayer : IDisposable
     public void SeekRecordingTo(double globalSeconds)
     {
         if (!IsUsingPairedRecording || _pairedRecording is null || _pairedFileOffsets.Length == 0) return;
+        StopPairedFillTts();
         double total = _pairedRecording.Files.Sum(f => f.Seconds);
         double target = Math.Clamp(globalSeconds, 0, Math.Max(0, total - 0.1));
         _pairedGlobalPosSec = target;
 
         int fileIdx = 0;
-        for (int i = 0; i < _pairedFileOffsets.Length; i++)
+        for (int i = 0; i < _pairedFileOffsets.Length && i < _pairedRecording.Files.Length; i++)
         {
+            if (i > 0 && _pairedRecording.Files[i].Seconds <= 0) break;
             if (target >= _pairedFileOffsets[i]) fileIdx = i;
             else break;
         }
         double localSec = Math.Max(0, target - _pairedFileOffsets[fileIdx]);
         LoadAndPlayPairedFile(fileIdx, localSec, autoPlay: _playing);
+
+        if (!_playing && _library is not null && !string.IsNullOrEmpty(_pairedAudioBookId))
+        {
+            try
+            {
+                var m = _library.Core.AudiobookMoment(_pairedAudioBookId, target);
+                if (m.Hit is SyncHit.Sentence sh)
+                {
+                    _pairedLastReportedSection = sh.Section;
+                    _pairedLastReportedSentence = (int)sh.SentenceValue;
+                    _currentIndex = (int)sh.SentenceValue;
+                    _sentenceStartedUtc = DateTime.UtcNow;
+                    PairedSentenceActive?.Invoke(sh.Section, _currentIndex, 0, 0, false, null);
+                    SentenceStarted?.Invoke(_currentIndex, 0, false);
+                }
+            }
+            catch { }
+        }
     }
 
     public void SkipExtraNow()
@@ -614,43 +688,87 @@ public sealed class AudioPlayer : IDisposable
 
     private void OnTickTimer(object? sender, object e)
     {
-        // 1. Sleep timer with 20s linear fade-out (pause-aware!)
-        if (_sleepMode == 1 && _playing)
+        // 1. Sleep timer with 20s linear fade-out & wall-clock deadline (#28)
+        if (_sleepMode == 1)
         {
             var now = DateTime.UtcNow;
-            double dt = Math.Clamp((now - _sleepLastTickUtc).TotalSeconds, 0, 2.0);
+            if (_sleepDeadlineUtc is DateTime dl)
+            {
+                _sleepRemainingSec = Math.Max(0, (dl - now).TotalSeconds);
+            }
+            else if (_playing)
+            {
+                double dt = Math.Clamp((now - _sleepLastTickUtc).TotalSeconds, 0, 2.0);
+                _sleepRemainingSec = Math.Max(0, _sleepRemainingSec - dt);
+            }
             _sleepLastTickUtc = now;
-            _sleepRemainingSec = Math.Max(0, _sleepRemainingSec - dt);
 
-            if (_sleepRemainingSec <= SleepFadeSeconds && _sleepRemainingSec > 0)
+            if (!_playing)
+            {
+                if (_isSleepFading)
+                {
+                    _isSleepFading = false;
+                    RestoreVolume();
+                }
+                if (_sleepRemainingSec <= 0)
+                {
+                    _sleepMode = 0;
+                    _sleepDeadlineUtc = null;
+                    _sleepRemainingSec = 0;
+                    _stopAfterSentence = false;
+                    _sleepTriggeredStop = false;
+                    RestoreVolume();
+                    SleepStateChanged?.Invoke();
+                    return;
+                }
+            }
+            else if (_sleepRemainingSec <= 0)
+            {
+                _sleepMode = 0;
+                _sleepDeadlineUtc = null;
+                _sleepRemainingSec = 0;
+                _isSleepFading = false;
+                if (IsUsingPairedRecording)
+                {
+                    Pause();
+                    RestoreVolume();
+                    SleepStateChanged?.Invoke();
+                    SleepStopped?.Invoke("定时已到，已暂停并记住位置");
+                }
+                else
+                {
+                    bool activelyPlayingMedia = false;
+                    try
+                    {
+                        activelyPlayingMedia = _player.Source is not null &&
+                            _player.PlaybackSession.PlaybackState == MediaPlaybackState.Playing;
+                    }
+                    catch { }
+
+                    if (!activelyPlayingMedia)
+                    {
+                        Pause();
+                        RestoreVolume();
+                        SleepStateChanged?.Invoke();
+                        SleepStopped?.Invoke("定时已到，已暂停并记住位置");
+                    }
+                    else
+                    {
+                        // Clean between-sentence stop for TTS (1:1 Player.swift)
+                        _stopAfterSentence = true;
+                        _sleepTriggeredStop = true;
+                        SleepStateChanged?.Invoke();
+                    }
+                }
+                return;
+            }
+            else if (_sleepRemainingSec <= SleepFadeSeconds)
             {
                 _isSleepFading = true;
                 double frac = Math.Clamp(_sleepRemainingSec / SleepFadeSeconds, 0.05, 1.0);
                 double baseVol = IsUsingPairedRecording ? _pairedBaseVolume : 1.0;
                 try { _player.Volume = baseVol * frac; } catch { }
             }
-            else if (_sleepRemainingSec <= 0)
-            {
-                _sleepMode = 0;
-                _isSleepFading = false;
-                if (IsUsingPairedRecording)
-                {
-                    Pause();
-                    RestoreVolume();
-                    SleepStopped?.Invoke("定时已到，已暂停并记住位置");
-                }
-                else
-                {
-                    // Clean between-sentence stop for TTS (1:1 Player.swift)
-                    _stopAfterSentence = true;
-                }
-                SleepStateChanged?.Invoke();
-                return;
-            }
-        }
-        else if (_sleepMode == 1)
-        {
-            _sleepLastTickUtc = DateTime.UtcNow;
         }
 
         // 2. Paired human-recording live tracking (words, moments, FillUnread, sentence-end stop)
@@ -723,6 +841,18 @@ public sealed class AudioPlayer : IDisposable
                 int sentIdx = (int)sh.SentenceValue;
                 if (sh.Section != _pairedLastReportedSection || sentIdx != _pairedLastReportedSentence)
                 {
+                    if (_sleepMode == 2 && _pairedLastReportedSection != uint.MaxValue && sh.Section != _pairedLastReportedSection)
+                    {
+                        _sleepMode = 0;
+                        _sleepDeadlineUtc = null;
+                        _sleepRemainingSec = 0;
+                        Pause();
+                        RestoreVolume();
+                        SleepStateChanged?.Invoke();
+                        SleepStopped?.Invoke("本章播完，已暂停并记住位置");
+                        return;
+                    }
+
                     // Check FillUnread: did the narrator skip any unread sentences right before this one?
                     bool fillUnread = false;
                     try { fillUnread = _library.Core.AudiobookSkipSettings(_pairedAudioBookId).FillUnread; } catch { }
@@ -733,7 +863,7 @@ public sealed class AudioPlayer : IDisposable
                             .OrderBy(r => r.Sentence)
                             .Select(r => (int)r.Sentence)
                             .ToArray();
-                        if (unreadRun.Length > 0 && unreadRun.Length <= 8)
+                        if (unreadRun.Length > 0)
                         {
                             _pairedLastReportedSentence = sentIdx;
                             _ = SpeakPairedUnreadRunAsync(sh.Section, unreadRun);
@@ -784,27 +914,40 @@ public sealed class AudioPlayer : IDisposable
     private async Task SpeakPairedUnreadRunAsync(uint section, int[] unreadSentenceIndices)
     {
         if (_library is null) return;
+        StopPairedFillTts();
         _pairedSpeakingUnread = true;
+        var tts = new AudioPlayer(_library);
+        _pairedFillTtsPlayer = tts;
         try
         {
             _player.Pause();
             ExtraNoticeChanged?.Invoke("原声跳过了几句，正用朗读补上…", null, null);
-            using var tts = new AudioPlayer(_library);
             tts.SetBookContext(_bookId, _language);
             tts.SetRate(_rate);
             foreach (int idx in unreadSentenceIndices)
             {
-                if (!_playing) return;
+                if (!_playing || !ReferenceEquals(_pairedFillTtsPlayer, tts)) return;
                 if (idx >= 0 && idx < _sentences.Count)
                 {
                     string txt = _sentences[idx];
                     if (!string.IsNullOrWhiteSpace(txt))
                     {
                         PairedSentenceActive?.Invoke(section, idx, Math.Max(800, txt.Length * 180), 0, true, null);
-                        var done = new TaskCompletionSource();
-                        tts.SentenceFinished += () => done.TrySetResult();
-                        await tts.SpeakSentenceAsync(txt, _bookTitle, _chapterTitle, _bookId, _language);
-                        await Task.WhenAny(done.Task, Task.Delay(20_000));
+                        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                        void OnDone() => done.TrySetResult();
+                        void OnState(bool p) { if (!p) done.TrySetResult(); }
+                        tts.SentenceFinished += OnDone;
+                        tts.PlayStateChanged += OnState;
+                        try
+                        {
+                            await tts.SpeakSentenceAsync(txt, _bookTitle, _chapterTitle, _bookId, _language);
+                            await Task.WhenAny(done.Task, Task.Delay(20_000));
+                        }
+                        finally
+                        {
+                            tts.SentenceFinished -= OnDone;
+                            tts.PlayStateChanged -= OnState;
+                        }
                     }
                 }
             }
@@ -812,9 +955,13 @@ public sealed class AudioPlayer : IDisposable
         catch { }
         finally
         {
-            _pairedSpeakingUnread = false;
-            ExtraNoticeChanged?.Invoke(null, null, null);
-            if (_playing) _player.Play();
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _pairedFillTtsPlayer, null, tts), tts))
+            {
+                try { tts.Stop(); tts.Dispose(); } catch { }
+                _pairedSpeakingUnread = false;
+                ExtraNoticeChanged?.Invoke(null, null, null);
+                if (_playing) _player.Play();
+            }
         }
     }
 
@@ -850,6 +997,12 @@ public sealed class AudioPlayer : IDisposable
 
         if (CloudVoiceService.TryParseFullId(raw, out var cp, out var cvId))
         {
+            if (cp == CloudTtsProvider.Free &&
+                (_library is null || !_library.Prefs.CloudVoiceBaseUrls.TryGetValue("free", out var cfUrl) || string.IsNullOrWhiteSpace(cfUrl)))
+            {
+                cvId = CloudVoiceService.NormalizeFreeVoiceId(cvId, _language);
+                raw = $"cloud.free.{cvId}";
+            }
             _selectedCloudId = raw;
             var entry = _library?.CloudVoices.GetVoices(cp).FirstOrDefault(x => x.VoiceId == cvId);
             _voiceDisplayName = entry is not null ? $"{entry.DisplayName} · 云端语音" : $"{cvId} · 云端语音";
@@ -893,9 +1046,10 @@ public sealed class AudioPlayer : IDisposable
         else if (string.IsNullOrWhiteSpace(raw) && _library?.CloudVoices.IsConfigured(CloudTtsProvider.Free) == true)
         {
             bool isEn = _language.StartsWith("en", StringComparison.OrdinalIgnoreCase);
-            string freeId = isEn ? "af_heart" : "zf_001";
+            bool preferUk = isEn && (_language.StartsWith("en-GB", StringComparison.OrdinalIgnoreCase) || _library.Prefs.ForeignAccent == "uk");
+            string freeId = isEn ? (preferUk ? "en_uk" : "en_us") : "zh_baidu";
             _selectedCloudId = $"cloud.free.{freeId}";
-            _voiceDisplayName = isEn ? "Heart · 免 Key 在线" : "晓语 · 免 Key 在线";
+            _voiceDisplayName = isEn ? (preferUk ? "Clara · 免 Key 在线" : "Emma · 免 Key 在线") : "知声 · 免 Key 在线";
         }
 
         string sysId = raw.StartsWith("sys:", StringComparison.Ordinal) ? raw[4..] : raw;
@@ -908,10 +1062,15 @@ public sealed class AudioPlayer : IDisposable
             ? voices.FirstOrDefault(v => v.Id == sysId)
             : null;
         chosen ??= BestSystemVoice(_language);
+        _selectedSystemVoice = chosen;
 
-        if (chosen is not null) _synth.Voice = chosen;
+        if (chosen is not null && _synthLock.Wait(0))
+        {
+            try { _synth.Voice = chosen; }
+            finally { _synthLock.Release(); }
+        }
         if (_selectedKokoroId is null && _selectedCardId is null && _selectedCloudId is null)
-            _voiceDisplayName = _synth.Voice?.DisplayName ?? "系统语音";
+            _voiceDisplayName = chosen?.DisplayName ?? "系统语音";
     }
 
     public void FallbackToSystemVoice()
@@ -920,8 +1079,13 @@ public sealed class AudioPlayer : IDisposable
         _selectedCardId = null;
         _selectedCloudId = null;
         var sys = BestSystemVoice(_language);
-        if (sys is not null) _synth.Voice = sys;
-        _voiceDisplayName = _synth.Voice?.DisplayName ?? "系统语音";
+        _selectedSystemVoice = sys;
+        if (sys is not null && _synthLock.Wait(0))
+        {
+            try { _synth.Voice = sys; }
+            finally { _synthLock.Release(); }
+        }
+        _voiceDisplayName = sys?.DisplayName ?? "系统语音";
         ClearPrefetch();
         if (_playing) _ = SpeakCurrentAsync();
     }
@@ -1065,6 +1229,7 @@ public sealed class AudioPlayer : IDisposable
     public void Start(IReadOnlyList<string> sentences, int startIndex)
     {
         StopInternal(notify: false);
+        ExpireSleepTimerIfPastDeadline();
         _singleSentenceMode = false;
         _sentences = sentences;
         if (_sentences.Count == 0) return;
@@ -1120,13 +1285,11 @@ public sealed class AudioPlayer : IDisposable
         _playing = false;
         _cts?.Cancel();
         ClearPrefetch();
+        StopPairedFillTts();
         if (IsUsingPairedRecording) _pairedPausedUtc = DateTime.UtcNow;
-        if (_isSleepFading)
-        {
-            _isSleepFading = false;
-            RestoreVolume();
-        }
-        _player.Pause();
+        _isSleepFading = false;
+        RestoreVolume();
+        try { _player.Pause(); } catch { }
         NotifyPlayingState(false);
     }
 
@@ -1134,6 +1297,8 @@ public sealed class AudioPlayer : IDisposable
     {
         if (_playing) return;
         if (_currentIndex < 0 || (_sentences.Count > 0 && _currentIndex >= _sentences.Count)) return;
+        ExpireSleepTimerIfPastDeadline();
+        RestoreVolume();
         _playing = true;
         _sleepLastTickUtc = DateTime.UtcNow;
         NotifyPlayingState(true);
@@ -1180,9 +1345,34 @@ public sealed class AudioPlayer : IDisposable
         ScheduleLookahead(_currentIndex + 1);
     }
 
+    public void SetPausedPosition(int index, IReadOnlyList<string>? sentences = null)
+    {
+        if (sentences is not null) _sentences = sentences;
+        _cts?.Cancel();
+        ClearPrefetch();
+        StopPairedFillTts();
+        _playing = false;
+        _isSleepFading = false;
+        _currentRawDurationMs = 0;
+        _currentIndex = _sentences.Count > 0
+            ? Math.Clamp(index, 0, _sentences.Count - 1)
+            : Math.Max(0, index);
+        _sentenceStartedUtc = DateTime.UtcNow;
+        RestoreVolume();
+        try
+        {
+            _player.Pause();
+            _player.Source = null;
+        }
+        catch { }
+        SentenceStarted?.Invoke(_currentIndex, 0, false);
+        NotifyPlayingState(false);
+    }
+
     public void Next()
     {
         if (_isSleepFading) { ExtendSleep(10); return; }
+        bool stayPaused = !_playing && _currentIndex >= 0;
         if (IsUsingPairedRecording && _library is not null && !string.IsNullOrEmpty(_pairedAudioBookId))
         {
             try
@@ -1193,9 +1383,24 @@ public sealed class AudioPlayer : IDisposable
             catch { }
         }
         if (_sentences.Count == 0) return;
-        if (_currentIndex + 1 < _sentences.Count)
+
+        int nextIdx = _currentIndex + 1;
+        while (nextIdx < _sentences.Count && string.IsNullOrWhiteSpace(_sentences[nextIdx]))
+            nextIdx++;
+
+        if (nextIdx < _sentences.Count)
         {
-            _currentIndex++;
+            _currentIndex = nextIdx;
+            if (stayPaused)
+            {
+                _cts?.Cancel();
+                ClearPrefetch();
+                _currentRawDurationMs = 0;
+                _sentenceStartedUtc = DateTime.UtcNow;
+                try { _player.Pause(); _player.Source = null; } catch { }
+                SentenceStarted?.Invoke(_currentIndex, 0, false);
+                return;
+            }
             _playing = true;
             NotifyPlayingState(true);
             _ = SpeakCurrentAsync();
@@ -1209,6 +1414,7 @@ public sealed class AudioPlayer : IDisposable
     public void Previous()
     {
         if (_isSleepFading) { ExtendSleep(10); return; }
+        bool stayPaused = !_playing && _currentIndex >= 0;
         if (IsUsingPairedRecording && _library is not null && !string.IsNullOrEmpty(_pairedAudioBookId))
         {
             try
@@ -1219,7 +1425,35 @@ public sealed class AudioPlayer : IDisposable
             catch { }
         }
         if (_sentences.Count == 0) return;
-        _currentIndex = Math.Max(0, _currentIndex - 1);
+
+        int prevIdx = _currentIndex - 1;
+        while (prevIdx >= 0 && string.IsNullOrWhiteSpace(_sentences[prevIdx]))
+            prevIdx--;
+
+        if (prevIdx < 0)
+        {
+            if (PreviousSectionRequested is not null)
+            {
+                PreviousSectionRequested.Invoke();
+                return;
+            }
+            prevIdx = 0;
+            while (prevIdx < _sentences.Count && string.IsNullOrWhiteSpace(_sentences[prevIdx]))
+                prevIdx++;
+            if (prevIdx >= _sentences.Count) return;
+        }
+
+        _currentIndex = prevIdx;
+        if (stayPaused)
+        {
+            _cts?.Cancel();
+            ClearPrefetch();
+            _currentRawDurationMs = 0;
+            _sentenceStartedUtc = DateTime.UtcNow;
+            try { _player.Pause(); _player.Source = null; } catch { }
+            SentenceStarted?.Invoke(_currentIndex, 0, false);
+            return;
+        }
         _playing = true;
         NotifyPlayingState(true);
         _ = SpeakCurrentAsync();
@@ -1451,6 +1685,7 @@ public sealed class AudioPlayer : IDisposable
         _cts?.Dispose();
         _cts = null;
         ClearPrefetch();
+        StopPairedFillTts();
         _playing = false;
         _currentRawDurationMs = 0;
         _isSleepFading = false;
@@ -1729,10 +1964,20 @@ public sealed class AudioPlayer : IDisposable
         }
         else
         {
-            using var s = await _synth.SynthesizeTextToStreamAsync(plain).AsTask(synthCts.Token);
-            var bytes = new byte[s.Size];
-            await s.ReadAsync(bytes.AsBuffer(), (uint)bytes.Length, InputStreamOptions.None).AsTask(synthCts.Token);
-            return bytes;
+            await _synthLock.WaitAsync(synthCts.Token);
+            try
+            {
+                if (_selectedSystemVoice is not null && _synth.Voice?.Id != _selectedSystemVoice.Id)
+                    _synth.Voice = _selectedSystemVoice;
+                using var s = await _synth.SynthesizeTextToStreamAsync(plain).AsTask(synthCts.Token);
+                var bytes = new byte[s.Size];
+                await s.ReadAsync(bytes.AsBuffer(), (uint)bytes.Length, InputStreamOptions.None).AsTask(synthCts.Token);
+                return bytes;
+            }
+            finally
+            {
+                _synthLock.Release();
+            }
         }
     }
 
@@ -1805,11 +2050,21 @@ public sealed class AudioPlayer : IDisposable
                 byte[]? wav = await _library.CloudVoices.SynthesizeWavAsync(_selectedCloudId, text, _language, cloudActing, ct);
                 if (wav is { Length: > 44 })
                 {
-                    if (!_singleSentenceMode && sentenceIdx + 1 < _sentences.Count)
+                    if (!_singleSentenceMode && _playing && sentenceIdx + 1 < _sentences.Count)
                     {
                         var upcoming = _sentences.Skip(sentenceIdx + 1).Take(4).ToArray();
                         string cid = _selectedCloudId;
-                        _ = Task.Run(() => _library.CloudVoices.PrefetchAsync(cid, upcoming, _language, CancellationToken.None));
+                        string langCap = _language;
+                        CancellationToken prefetchToken;
+                        lock (_prefetchLock)
+                        {
+                            _prefetchCts ??= new CancellationTokenSource();
+                            prefetchToken = _prefetchCts.Token;
+                        }
+                        if (!prefetchToken.IsCancellationRequested)
+                        {
+                            _ = Task.Run(() => _library.CloudVoices.PrefetchAsync(cid, upcoming, langCap, prefetchToken), prefetchToken);
+                        }
                     }
                     var mem = new InMemoryRandomAccessStream();
                     await mem.WriteAsync(wav.AsBuffer()).AsTask(ct);
@@ -1864,7 +2119,18 @@ public sealed class AudioPlayer : IDisposable
         int timeoutMs = Math.Clamp((int)((20.0 + plain.Length * 0.3) * 1000.0), 10_000, 60_000);
         using var synthCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         synthCts.CancelAfter(timeoutMs);
-        var stream = await _synth.SynthesizeTextToStreamAsync(plain).AsTask(synthCts.Token);
+        SpeechSynthesisStream stream;
+        await _synthLock.WaitAsync(synthCts.Token);
+        try
+        {
+            if (_selectedSystemVoice is not null && _synth.Voice?.Id != _selectedSystemVoice.Id)
+                _synth.Voice = _selectedSystemVoice;
+            stream = await _synth.SynthesizeTextToStreamAsync(plain).AsTask(synthCts.Token);
+        }
+        finally
+        {
+            _synthLock.Release();
+        }
         return MediaSource.CreateFromStream(stream, stream.ContentType);
     }
 
@@ -1939,15 +2205,29 @@ public sealed class AudioPlayer : IDisposable
     {
         if (!_playing) return;
 
-        // Paired recording track ended -> advance to next file seamlessly
+        // Paired recording track ended -> advance to next file seamlessly, or stop cleanly at end of audiobook
         if (IsUsingPairedRecording && _pairedRecording is not null)
         {
             void NextTrack()
             {
-                if (_pairedFileIndex + 1 < _pairedRecording.Files.Length)
-                    LoadAndPlayPairedFile(_pairedFileIndex + 1, 0, autoPlay: true);
+                int nextFile = _pairedFileIndex + 1;
+                if (nextFile < _pairedRecording.Files.Length && _pairedRecording.Files[nextFile].Seconds > 0)
+                {
+                    LoadAndPlayPairedFile(nextFile, 0, autoPlay: true);
+                }
                 else
-                    SectionFinished?.Invoke();
+                {
+                    bool wasChapSleep = _sleepMode == 2;
+                    _sleepMode = 0;
+                    _sleepDeadlineUtc = null;
+                    _sleepRemainingSec = 0;
+                    StopInternal(notify: true);
+                    if (wasChapSleep)
+                    {
+                        SleepStateChanged?.Invoke();
+                        SleepStopped?.Invoke("本章播完，已暂停并记住位置");
+                    }
+                }
             }
             if (_uiQueue is not null) _uiQueue.TryEnqueue(NextTrack);
             else NextTrack();
@@ -1959,11 +2239,24 @@ public sealed class AudioPlayer : IDisposable
             SentenceFinished?.Invoke();
             return;
         }
+
+        int FindNextSpeakableIndex(int fromExclusive)
+        {
+            int idx = fromExclusive + 1;
+            while (idx < _sentences.Count && string.IsNullOrWhiteSpace(_sentences[idx]))
+                idx++;
+            return idx;
+        }
+
+        // #17 & SleepStopped: evaluate _stopAfterSentence and _sleepMode == 2 BEFORE _loopSingleSentence & A-B loop!
         if (_stopAfterSentence)
         {
             _stopAfterSentence = false;
-            bool wasSleep = _sleepMode is 1 or 3;
+            bool wasSleep = _sleepTriggeredStop || _sleepMode is 1 or 3;
+            _sleepTriggeredStop = false;
             _sleepMode = 0;
+            _sleepDeadlineUtc = null;
+            _sleepRemainingSec = 0;
             void FinishStop()
             {
                 Pause();
@@ -1977,6 +2270,23 @@ public sealed class AudioPlayer : IDisposable
             return;
         }
 
+        if (_sleepMode == 2 && FindNextSpeakableIndex(_currentIndex) >= _sentences.Count)
+        {
+            _sleepMode = 0;
+            _sleepDeadlineUtc = null;
+            _sleepRemainingSec = 0;
+            void FinishChapterSleep()
+            {
+                Pause();
+                RestoreVolume();
+                SleepStateChanged?.Invoke();
+                SleepStopped?.Invoke("本章播完，已暂停并记住位置");
+            }
+            if (_uiQueue is not null) _uiQueue.TryEnqueue(FinishChapterSleep);
+            else FinishChapterSleep();
+            return;
+        }
+
         int pauseMs = _shadowPauseMode switch
         {
             1 => 2000,
@@ -1987,6 +2297,35 @@ public sealed class AudioPlayer : IDisposable
         void Advance()
         {
             if (!_playing) return;
+            if (_stopAfterSentence)
+            {
+                _stopAfterSentence = false;
+                bool wasSleep = _sleepTriggeredStop || _sleepMode is 1 or 3;
+                _sleepTriggeredStop = false;
+                _sleepMode = 0;
+                _sleepDeadlineUtc = null;
+                _sleepRemainingSec = 0;
+                Pause();
+                RestoreVolume();
+                SleepStateChanged?.Invoke();
+                if (wasSleep) SleepStopped?.Invoke("已定时停在句尾并记住位置");
+                SentenceFinished?.Invoke();
+                return;
+            }
+
+            int nextIdx = FindNextSpeakableIndex(_currentIndex);
+            if (_sleepMode == 2 && nextIdx >= _sentences.Count)
+            {
+                _sleepMode = 0;
+                _sleepDeadlineUtc = null;
+                _sleepRemainingSec = 0;
+                Pause();
+                RestoreVolume();
+                SleepStateChanged?.Invoke();
+                SleepStopped?.Invoke("本章播完，已暂停并记住位置");
+                return;
+            }
+
             if (_loopSingleSentence)
             {
                 _ = SpeakCurrentAsync();
@@ -1998,21 +2337,13 @@ public sealed class AudioPlayer : IDisposable
                 _ = SpeakCurrentAsync();
                 return;
             }
-            if (_currentIndex + 1 < _sentences.Count)
+            if (nextIdx < _sentences.Count)
             {
-                _currentIndex++;
+                _currentIndex = nextIdx;
                 _ = SpeakCurrentAsync();
             }
             else
             {
-                if (_sleepMode == 2)
-                {
-                    _sleepMode = 0;
-                    Pause();
-                    SleepStateChanged?.Invoke();
-                    SleepStopped?.Invoke("本章播完，已暂停并记住位置");
-                    return;
-                }
                 SectionFinished?.Invoke();
             }
         }
@@ -2095,6 +2426,13 @@ public sealed class AudioPlayer : IDisposable
         try { _ambientPlayer?.Pause(); _ambientPlayer?.Dispose(); } catch { }
         _player.MediaEnded -= OnMediaEnded;
         _player.Dispose();
-        _synth.Dispose();
+        bool locked = false;
+        try { locked = _synthLock.Wait(300); } catch { }
+        try { _synth.Dispose(); } catch { }
+        finally
+        {
+            if (locked) { try { _synthLock.Release(); } catch { } }
+            try { _synthLock.Dispose(); } catch { }
+        }
     }
 }

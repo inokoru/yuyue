@@ -18,6 +18,26 @@ namespace Yuyue.Shelf;
 /// </summary>
 public static class QuickSearchDialog
 {
+    internal static bool IsCompanionEligible(BookSummary b) =>
+        b.Available &&
+        !b.Record &&
+        b.Format is not BookFormat.Audio and not BookFormat.Pdf and not BookFormat.Podcast;
+
+    internal static BookSummary? ResolveCompanionTargetBook(
+        IEnumerable<BookSummary> matchedBooks,
+        BookSummary? passageHitBook,
+        IEnumerable<BookSummary> allBooks)
+    {
+        var fromMatched = matchedBooks.FirstOrDefault(IsCompanionEligible);
+        if (fromMatched is not null) return fromMatched;
+        if (passageHitBook is not null && IsCompanionEligible(passageHitBook)) return passageHitBook;
+        return allBooks
+            .Where(IsCompanionEligible)
+            .OrderByDescending(b => b.OpenedAt ?? 0)
+            .ThenByDescending(b => b.AddedAt)
+            .FirstOrDefault();
+    }
+
     public static async Task ShowAsync(
         XamlRoot xamlRoot,
         LibraryService library,
@@ -64,7 +84,7 @@ public static class QuickSearchDialog
             });
         }
 
-        void AddRow(string icon, string title, string subtitle, string? highlightQuery, Action activate)
+        TextBlock AddRow(string icon, string title, string subtitle, string? highlightQuery, Action activate, bool closeOnActivate = true)
         {
             var grid = new Grid { ColumnSpacing = 10, Padding = new Thickness(8, 7, 8, 7) };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
@@ -72,7 +92,8 @@ public static class QuickSearchDialog
             grid.Children.Add(YYIcons.Make(icon, 13, ThemeHelper.Brush(tint.Accent)));
 
             var sp = new StackPanel { Spacing = 2 };
-            sp.Children.Add(BuildHighlightedBlock(title, highlightQuery, 12.5, FontWeights.SemiBold, p.T1, tint.Accent));
+            var titleTb = BuildHighlightedBlock(title, highlightQuery, 12.5, FontWeights.SemiBold, p.T1, tint.Accent);
+            sp.Children.Add(titleTb);
             if (!string.IsNullOrWhiteSpace(subtitle))
                 sp.Children.Add(BuildHighlightedBlock(subtitle, highlightQuery, 11, FontWeights.Normal, p.T3, tint.Accent));
             Grid.SetColumn(sp, 1);
@@ -89,10 +110,15 @@ public static class QuickSearchDialog
                 UseSystemFocusVisuals = false,
                 Content = grid,
             };
-            Action run = () => { dlg?.Hide(); activate(); };
+            Action run = () =>
+            {
+                if (closeOnActivate) dlg?.Hide();
+                activate();
+            };
             btn.Click += (_, _) => run();
             items.Add((btn, run));
             resultsPanel.Children.Add(btn);
+            return titleTb;
         }
 
         async Task RefreshAsync(string rawQuery)
@@ -106,6 +132,7 @@ public static class QuickSearchDialog
             resultsPanel.Children.Clear();
             items.Clear();
             selectedIdx = -1;
+            statusTb.Foreground = ThemeHelper.Brush(p.T3);
             statusTb.Visibility = Visibility.Collapsed;
 
             var allBooks = library.GetKeptBooks().OrderByDescending(b => b.OpenedAt ?? b.AddedAt).ToArray();
@@ -169,27 +196,53 @@ public static class QuickSearchDialog
                 }
             }
 
-            // 3. Companion quick action
+            // 3. Companion quick action (#29: exclude Audio, PDF, unavailable, and record-only books)
+            BookSummary? firstPassageEligibleBook = null;
+            TextBlock? companionTitleTb = null;
             if (onAskCompanionInCurrentBook is not null && !string.IsNullOrEmpty(currentBookId))
             {
                 AddSectionTitle("书伴提问");
                 AddRow("sparkle", $"问书伴：{q}", "在当前书里基于已读内容解答（不剧透）", null, () => onAskCompanionInCurrentBook(q));
             }
-            else if (allBooks.Length > 0)
+            else
             {
-                var topBook = allBooks[0];
+                BookSummary? ResolveTarget() => ResolveCompanionTargetBook(bookHits, firstPassageEligibleBook, allBooks);
+                var initialTarget = ResolveTarget();
                 AddSectionTitle("书伴提问");
-                AddRow("sparkle", $"在《{topBook.Title}》里问书伴：{q}", "打开当前在读书的书伴直接解答", null, () => App.CurrentApp.OpenBook(topBook.Id, askQuestion: q));
+                string askTitle = initialTarget is not null ? $"在《{initialTarget.Title}》里问书伴：{q}" : $"问书伴：{q}";
+                string askSub = initialTarget is not null ? "打开当前在读书的书伴直接解答" : "先打开一本电子书即可基于已读内容提问";
+                companionTitleTb = AddRow(
+                    "sparkle",
+                    askTitle,
+                    askSub,
+                    null,
+                    () =>
+                    {
+                        var target = ResolveTarget();
+                        if (target is not null)
+                        {
+                            dlg?.Hide();
+                            App.CurrentApp.OpenBook(target.Id, askQuestion: q);
+                        }
+                        else
+                        {
+                            statusTb.Text = "先打开一本书";
+                            statusTb.Foreground = ThemeHelper.Brush(tint.Accent);
+                            statusTb.Visibility = Visibility.Visible;
+                        }
+                    },
+                    closeOnActivate: false);
             }
 
             if (items.Count > 0) { selectedIdx = 0; HighlightSelection(); }
 
-            // 4. Async full-text passage search across ALL text books (round-robin, up to 18 hits)
+            // 4. Async full-text passage search across ALL available text books (round-robin, up to 18 hits)
             if (q.Length >= 2)
             {
                 statusTb.Text = "正在检索全部书籍正文…";
+                statusTb.Foreground = ThemeHelper.Brush(p.T3);
                 statusTb.Visibility = Visibility.Visible;
-                var textBooks = allBooks.Where(b => b.Format != BookFormat.Audio).ToArray();
+                var textBooks = allBooks.Where(b => b.Available && !b.Record && b.Format != BookFormat.Audio).ToArray();
                 var passageHits = await Task.Run(() =>
                 {
                     var hits = new List<(BookSummary Book, SearchHit Hit, string Chapter)>();
@@ -222,6 +275,12 @@ public static class QuickSearchDialog
 
                 if (passageHits.Count > 0)
                 {
+                    firstPassageEligibleBook = passageHits.Select(x => x.Book).FirstOrDefault(IsCompanionEligible);
+                    if (companionTitleTb is not null && bookHits.FirstOrDefault(IsCompanionEligible) is null && firstPassageEligibleBook is not null)
+                    {
+                        companionTitleTb.Text = $"在《{firstPassageEligibleBook.Title}》里问书伴：{q}";
+                    }
+
                     AddSectionTitle($"全文命中 · {passageHits.Count}");
                     foreach (var (book, hit, chap) in passageHits)
                     {
@@ -306,26 +365,163 @@ public static class QuickSearchDialog
             TextTrimming = TextTrimming.CharacterEllipsis,
             TextWrapping = TextWrapping.Wrap,
         };
-        if (string.IsNullOrWhiteSpace(query))
+        if (string.IsNullOrEmpty(text) || string.IsNullOrWhiteSpace(query))
         {
             tb.Text = text;
             return tb;
         }
-        int idx = text.IndexOf(query, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0)
+
+        bool[]? mask = ComputeMatchMask(text, query.Trim());
+        if (mask is null)
         {
             tb.Text = text;
             return tb;
         }
-        if (idx > 0) tb.Inlines.Add(new Run { Text = text[..idx] });
-        tb.Inlines.Add(new Run
+
+        var accentBrush = ThemeHelper.Brush(accentColor);
+        int i = 0;
+        while (i < text.Length)
         {
-            Text = text.Substring(idx, query.Length),
-            Foreground = ThemeHelper.Brush(accentColor),
-            FontWeight = FontWeights.Bold,
-        });
-        if (idx + query.Length < text.Length)
-            tb.Inlines.Add(new Run { Text = text[(idx + query.Length)..] });
+            bool hit = mask[i];
+            int j = i + 1;
+            while (j < text.Length && mask[j] == hit) j++;
+            string seg = text[i..j];
+            if (hit)
+            {
+                tb.Inlines.Add(new Run
+                {
+                    Text = seg,
+                    Foreground = accentBrush,
+                    FontWeight = FontWeights.Bold,
+                });
+            }
+            else
+            {
+                tb.Inlines.Add(new Run { Text = seg });
+            }
+            i = j;
+        }
         return tb;
+    }
+
+    internal static bool[]? ComputeMatchMask(string text, string q)
+    {
+        if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(q)) return null;
+        var mask = new bool[text.Length];
+        bool any = false;
+
+        // 1. Direct case-insensitive substring matches (all occurrences)
+        int searchFrom = 0;
+        while (searchFrom <= text.Length - q.Length)
+        {
+            int idx = text.IndexOf(q, searchFrom, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) break;
+            for (int k = idx; k < idx + q.Length; k++) mask[k] = true;
+            any = true;
+            searchFrom = idx + Math.Max(1, q.Length);
+        }
+        if (any) return mask;
+
+        // 2. Compact whitespace/punctuation-stripped substring match
+        var compactQBuilder = new System.Text.StringBuilder(q.Length);
+        foreach (char ch in q)
+        {
+            if (!char.IsWhiteSpace(ch) && !char.IsPunctuation(ch))
+                compactQBuilder.Append(char.ToLowerInvariant(ch));
+        }
+        string compactQ = compactQBuilder.ToString();
+        if (compactQ.Length == 0) return null;
+
+        var compactChars = new List<char>(text.Length);
+        var compactOrigIdx = new List<int>(text.Length);
+        for (int i = 0; i < text.Length; i++)
+        {
+            char ch = text[i];
+            if (!char.IsWhiteSpace(ch) && !char.IsPunctuation(ch))
+            {
+                compactChars.Add(char.ToLowerInvariant(ch));
+                compactOrigIdx.Add(i);
+            }
+        }
+        string compactText = new string(compactChars.ToArray());
+        int cIdx = compactText.IndexOf(compactQ, StringComparison.Ordinal);
+        if (cIdx >= 0)
+        {
+            for (int k = cIdx; k < cIdx + compactQ.Length; k++)
+                mask[compactOrigIdx[k]] = true;
+            return mask;
+        }
+
+        // 3. NameMatcher Pinyin initials & ASCII word-initial matches (contiguous first, then subsequence)
+        if (compactQ.All(c => (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')))
+        {
+            var initChars = new List<char>(text.Length);
+            var initOrigIdx = new List<int>(text.Length);
+            bool inAsciiWord = false;
+            for (int i = 0; i < text.Length; i++)
+            {
+                char ch = text[i];
+                if (ch >= 0x4E00 && ch <= 0x9FFF)
+                {
+                    inAsciiWord = false;
+                    char py = NameMatcher.GetPinyinInitial(ch);
+                    if (py != '\0')
+                    {
+                        initChars.Add(py);
+                        initOrigIdx.Add(i);
+                    }
+                }
+                else if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z'))
+                {
+                    if (!inAsciiWord)
+                    {
+                        initChars.Add(char.ToLowerInvariant(ch));
+                        initOrigIdx.Add(i);
+                        inAsciiWord = true;
+                    }
+                }
+                else if (ch >= '0' && ch <= '9')
+                {
+                    inAsciiWord = false;
+                    initChars.Add(ch);
+                    initOrigIdx.Add(i);
+                }
+                else
+                {
+                    inAsciiWord = false;
+                }
+            }
+
+            if (initChars.Count >= compactQ.Length)
+            {
+                string initStr = new string(initChars.ToArray());
+                int pIdx = initStr.IndexOf(compactQ, StringComparison.Ordinal);
+                if (pIdx >= 0)
+                {
+                    for (int k = pIdx; k < pIdx + compactQ.Length; k++)
+                        mask[initOrigIdx[k]] = true;
+                    return mask;
+                }
+
+                // Subsequence initial match
+                int qi = 0;
+                var subseqIndices = new int[compactQ.Length];
+                for (int ti = 0; ti < initChars.Count && qi < compactQ.Length; ti++)
+                {
+                    if (initChars[ti] == compactQ[qi])
+                    {
+                        subseqIndices[qi] = initOrigIdx[ti];
+                        qi++;
+                    }
+                }
+                if (qi == compactQ.Length)
+                {
+                    foreach (int origPos in subseqIndices) mask[origPos] = true;
+                    return mask;
+                }
+            }
+        }
+
+        return null;
     }
 }

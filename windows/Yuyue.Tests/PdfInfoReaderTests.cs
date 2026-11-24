@@ -65,4 +65,18 @@ public sealed class PdfInfoReaderTests
         Assert.NotEmpty(hits);
         Assert.Contains(hits, h => h.PageZeroBased == 0 && h.Snippet.Contains("背影"));
     }
+
+    [Fact]
+    public void FindNormalizedMatches_MatchesCjkAndHyphenatedLatinAcrossLineBreaks()
+    {
+        string cjkWrapped = "第一行末尾的漫漫\r\n长途终有回转。";
+        var cjkHits = PdfInfoReader.FindNormalizedMatches(cjkWrapped, "漫漫长途");
+        Assert.Single(cjkHits);
+        Assert.Equal("漫漫\r\n长途", cjkWrapped.Substring(cjkHits[0].Start, cjkHits[0].Length));
+
+        string enHyphenWrapped = "This is an inter-\nnational reading room.";
+        var enHits = PdfInfoReader.FindNormalizedMatches(enHyphenWrapped, "international reading");
+        Assert.Single(enHits);
+        Assert.Equal("inter-\nnational reading", enHyphenWrapped.Substring(enHits[0].Start, enHits[0].Length));
+    }
 }

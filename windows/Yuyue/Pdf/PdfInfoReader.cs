@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text;
 using UglyToad.PdfPig.DocumentLayoutAnalysis.TextExtractor;
@@ -77,6 +78,77 @@ public static class PdfInfoReader
         return latin > cjk * 2 ? "en-US" : "zh-Hans";
     }
 
+    private static readonly ConcurrentDictionary<string, double[]> PageAspectsCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private static bool IsCjkOrFullWidth(char ch) =>
+        (ch >= '\u2E80' && ch <= '\u9FFF') ||
+        (ch >= '\uF900' && ch <= '\uFAFF') ||
+        (ch >= '\u3000' && ch <= '\u303F') ||
+        (ch >= '\uFF00' && ch <= '\uFFEF') ||
+        ch is '“' or '”' or '‘' or '’' or '—' or '…';
+
+    /// <summary>
+    /// Fast lightweight read of per-page height/width aspect ratios from an already-loaded <see cref="PdfDocument"/>
+    /// (reads page box metadata only, zero bitmap rendering).
+    /// </summary>
+    public static double[] GetPageAspectRatios(PdfDocument winPdf, string? cacheKeyPath = null)
+    {
+        int count = (int)winPdf.PageCount;
+        if (count <= 0) return [];
+        if (!string.IsNullOrWhiteSpace(cacheKeyPath) &&
+            PageAspectsCache.TryGetValue(cacheKeyPath, out var cached) &&
+            cached.Length == count)
+        {
+            return cached;
+        }
+
+        var ratios = new double[count];
+        for (int i = 0; i < count; i++)
+        {
+            double ratio = 1.414;
+            try
+            {
+                using var p = winPdf.GetPage((uint)i);
+                if (p.Size.Width > 0 && p.Size.Height > 0)
+                    ratio = Math.Clamp(p.Size.Height / p.Size.Width, 0.25, 4.0);
+            }
+            catch { }
+            ratios[i] = ratio;
+        }
+
+        if (!string.IsNullOrWhiteSpace(cacheKeyPath))
+            PageAspectsCache[cacheKeyPath] = ratios;
+        return ratios;
+    }
+
+    /// <summary>
+    /// Lightweight per-page height/width aspect ratio reader by file path (uses cached values when available).
+    /// </summary>
+    public static double[] ReadPageAspectRatios(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath)) return [];
+        if (PageAspectsCache.TryGetValue(filePath, out var cached)) return cached;
+        try
+        {
+            using var pig = UglyToad.PdfPig.PdfDocument.Open(filePath);
+            int n = pig.NumberOfPages;
+            var ratios = new double[n];
+            for (int i = 1; i <= n; i++)
+            {
+                var p = pig.GetPage(i);
+                ratios[i - 1] = p.Width > 0 && p.Height > 0
+                    ? Math.Clamp(p.Height / p.Width, 0.25, 4.0)
+                    : 1.414;
+            }
+            PageAspectsCache[filePath] = ratios;
+            return ratios;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
     public static async Task<PdfInfo> ReadAsync(string filePath)
     {
         var storageFile = await StorageFile.GetFileFromPathAsync(filePath);
@@ -95,6 +167,7 @@ public static class PdfInfoReader
 
         uint pageCount = winPdf.PageCount;
         if (pageCount == 0) throw new InvalidOperationException("PDF 文件没有页面");
+        _ = GetPageAspectRatios(winPdf, filePath);
 
         string? title = null;
         string[] authors = Array.Empty<string>();
@@ -179,27 +252,33 @@ public static class PdfInfoReader
             if (p < 1 || p > pig.NumberOfPages)
                 return new PdfPageLayout(pageIndexZeroBased, "", []);
 
-            var page = pig.GetPage(p);
+            return ExtractPageLayoutCore(pig.GetPage(p), pageIndexZeroBased, includeGlyphs: true);
+        }
+        catch
+        {
+            return new PdfPageLayout(pageIndexZeroBased, "", []);
+        }
+    }
+
+    private static PdfPageLayout ExtractPageLayoutCore(UglyToad.PdfPig.Content.Page page, int pageIndexZeroBased, bool includeGlyphs)
+    {
+        try
+        {
             double pw = page.Width > 0 ? page.Width : 612.0;
             double ph = page.Height > 0 ? page.Height : 792.0;
 
             var sb = new StringBuilder();
-            var glyphs = new List<PdfGlyphRect>();
+            var glyphs = includeGlyphs ? new List<PdfGlyphRect>() : null;
+            bool hasLetters = false;
             double prevEndX = double.NaN;
             double prevBaseY = double.NaN;
             double prevHeight = 10.0;
-
-            static bool IsCjkOrFullWidth(char ch) =>
-                (ch >= '\u2E80' && ch <= '\u9FFF') ||
-                (ch >= '\uF900' && ch <= '\uFAFF') ||
-                (ch >= '\u3000' && ch <= '\u303F') ||
-                (ch >= '\uFF00' && ch <= '\uFFEF') ||
-                ch is '“' or '”' or '‘' or '’' or '—' or '…';
 
             foreach (var letter in page.Letters)
             {
                 string val = letter.Value;
                 if (string.IsNullOrEmpty(val)) continue;
+                hasLetters = true;
 
                 var rect = letter.GlyphRectangle;
                 double baseY = letter.StartBaseLine.Y;
@@ -232,19 +311,22 @@ public static class PdfInfoReader
                 sb.Append(val);
                 int charEnd = sb.Length;
 
-                double nx = Math.Clamp(startX / pw, 0.0, 1.0);
-                double ny = Math.Clamp((ph - top) / ph, 0.0, 1.0);
-                double nw = Math.Clamp(w / pw, 0.001, 1.0 - nx);
-                double nh = Math.Clamp(h / ph, 0.004, 1.0 - ny);
-                glyphs.Add(new PdfGlyphRect(charStart, charEnd, nx, ny, nw, nh));
+                if (glyphs is not null)
+                {
+                    double nx = Math.Clamp(startX / pw, 0.0, 1.0);
+                    double ny = Math.Clamp((ph - top) / ph, 0.0, 1.0);
+                    double nw = Math.Clamp(w / pw, 0.001, 1.0 - nx);
+                    double nh = Math.Clamp(h / ph, 0.004, 1.0 - ny);
+                    glyphs.Add(new PdfGlyphRect(charStart, charEnd, nx, ny, nw, nh));
+                }
 
                 prevEndX = endX;
                 prevBaseY = baseY;
                 prevHeight = h;
             }
 
-            if (glyphs.Count > 0)
-                return new PdfPageLayout(pageIndexZeroBased, sb.ToString(), glyphs.ToArray());
+            if (hasLetters)
+                return new PdfPageLayout(pageIndexZeroBased, sb.ToString(), glyphs?.ToArray() ?? []);
 
             string fallback = ContentOrderTextExtractor.GetText(page) ?? "";
             return new PdfPageLayout(pageIndexZeroBased, fallback, []);
@@ -369,6 +451,84 @@ public static class PdfInfoReader
         return list;
     }
 
+    /// <summary>
+    /// Normalizes whitespace and line-breaks consistently between PDF search and overlay rendering
+    /// (collapsing line breaks between CJK characters without spaces, and collapsing Latin line breaks to a single space),
+    /// returning exact UTF-16 <c>(Start, Length)</c> ranges in <paramref name="pageText"/>.
+    /// </summary>
+    public static List<(int Start, int Length)> FindNormalizedMatches(string pageText, string query)
+    {
+        var results = new List<(int Start, int Length)>();
+        if (string.IsNullOrEmpty(pageText) || string.IsNullOrWhiteSpace(query))
+            return results;
+
+        static (string Norm, List<int> Starts, List<int> Ends) BuildNormalizedMap(string src)
+        {
+            var sb = new StringBuilder(src.Length);
+            var starts = new List<int>(src.Length);
+            var ends = new List<int>(src.Length);
+            int i = 0;
+            while (i < src.Length)
+            {
+                char ch = src[i];
+                if (char.IsWhiteSpace(ch))
+                {
+                    int wsStart = i;
+                    while (i < src.Length && char.IsWhiteSpace(src[i])) i++;
+                    if (sb.Length == 0 || i >= src.Length) continue;
+                    char prev = sb[^1];
+                    char next = src[i];
+                    // Omit whitespace across line breaks between CJK/full-width characters; collapse other runs to ' '
+                    bool omitSpace = IsCjkOrFullWidth(prev) && IsCjkOrFullWidth(next);
+                    if (!omitSpace)
+                    {
+                        sb.Append(' ');
+                        starts.Add(wsStart);
+                        ends.Add(i);
+                    }
+                    continue;
+                }
+
+                // Join soft hyphenated English line wraps (e.g. "inter-\nnational" -> "international")
+                if (ch == '-' && sb.Length > 0 && char.IsLetter(sb[^1]) && i + 1 < src.Length && (src[i + 1] == '\r' || src[i + 1] == '\n'))
+                {
+                    int j = i + 1;
+                    while (j < src.Length && char.IsWhiteSpace(src[j])) j++;
+                    if (j < src.Length && char.IsLetter(src[j]) && char.IsLower(src[j]))
+                    {
+                        i = j;
+                        continue;
+                    }
+                }
+
+                sb.Append(ch);
+                starts.Add(i);
+                ends.Add(i + 1);
+                i++;
+            }
+            return (sb.ToString(), starts, ends);
+        }
+
+        var (normQ, _, _) = BuildNormalizedMap(query.Trim());
+        if (normQ.Length == 0) return results;
+
+        var (normText, mapStarts, mapEnds) = BuildNormalizedMap(pageText);
+        if (normText.Length < normQ.Length) return results;
+
+        int pos = 0;
+        while (pos <= normText.Length - normQ.Length)
+        {
+            int idx = normText.IndexOf(normQ, pos, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) break;
+            int origStart = mapStarts[idx];
+            int origEnd = mapEnds[idx + normQ.Length - 1];
+            if (origEnd > origStart)
+                results.Add((origStart, origEnd - origStart));
+            pos = idx + Math.Max(1, normQ.Length);
+        }
+        return results;
+    }
+
     public static IReadOnlyList<(int PageZeroBased, int CharOffset, int MatchLen, string Snippet)> SearchText(string filePath, string query)
     {
         var hits = new List<(int, int, int, string)>();
@@ -379,17 +539,16 @@ public static class PdfInfoReader
             using var pig = UglyToad.PdfPig.PdfDocument.Open(filePath);
             for (int i = 1; i <= pig.NumberOfPages && hits.Count < 350; i++)
             {
-                string text = ContentOrderTextExtractor.GetText(pig.GetPage(i)) ?? "";
-                int pos = 0;
-                while (pos < text.Length && hits.Count < 350)
+                string text = ExtractPageLayoutCore(pig.GetPage(i), i - 1, includeGlyphs: false).Text;
+                if (string.IsNullOrEmpty(text)) continue;
+                var matches = FindNormalizedMatches(text, q);
+                foreach (var (origStart, origLen) in matches)
                 {
-                    int idx = text.IndexOf(q, pos, StringComparison.OrdinalIgnoreCase);
-                    if (idx < 0) break;
-                    int start = Math.Max(0, idx - 24);
-                    int len = Math.Min(text.Length - start, q.Length + 56);
-                    string snippet = text.Substring(start, len).Replace('\r', ' ').Replace('\n', ' ').Trim();
-                    hits.Add((i - 1, idx, q.Length, snippet));
-                    pos = idx + Math.Max(1, q.Length);
+                    if (hits.Count >= 350) break;
+                    int start = Math.Max(0, origStart - 24);
+                    int end = Math.Min(text.Length, origStart + origLen + 32);
+                    string snippet = text[start..end].Replace('\r', ' ').Replace('\n', ' ').Trim();
+                    hits.Add((i - 1, origStart, origLen, snippet));
                 }
             }
         }

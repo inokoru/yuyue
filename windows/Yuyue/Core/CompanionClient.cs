@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace Yuyue.Core;
@@ -174,7 +175,7 @@ public sealed class CompanionClient
         }
     }
 
-    public sealed record CompanionSource(int Index, uint Section, uint Sentence, string Snippet, bool Later = false);
+    public sealed record CompanionSource(int Index, uint Section, uint Sentence, string Snippet, bool Later = false, string? Chapter = null);
     public sealed record CompanionAnswer(
         string Text,
         IReadOnlyList<CompanionSource> Sources,
@@ -184,20 +185,42 @@ public sealed class CompanionClient
 
     private sealed class CachedQaEntry
     {
+        [JsonPropertyName("text")]
         public string Text { get; set; } = "";
-        public List<CachedQaSource> Sources { get; set; } = [];
-        public bool NotInRead { get; set; }
+
+        [JsonPropertyName("sources")]
+        public Dictionary<string, CachedQaSource> Sources { get; set; } = new();
+
+        [JsonPropertyName("notYet")]
+        public bool NotYet { get; set; }
+
+        [JsonPropertyName("next")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public List<string>? Next { get; set; }
-        public string? Label { get; set; }
+
+        [JsonPropertyName("label")]
+        public string Label { get; set; } = "";
     }
 
     private sealed class CachedQaSource
     {
-        public int Index { get; set; }
+        [JsonPropertyName("section")]
         public uint Section { get; set; }
+
+        [JsonPropertyName("sentence")]
         public uint Sentence { get; set; }
-        public string Snippet { get; set; } = "";
-        public bool Later { get; set; }
+
+        [JsonPropertyName("chapter")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Chapter { get; set; }
+
+        [JsonPropertyName("quote")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Quote { get; set; }
+
+        [JsonPropertyName("later")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? Later { get; set; }
     }
 
     public async Task<(bool Ok, string Message)> TestConnectionAsync()
@@ -386,7 +409,10 @@ public sealed class CompanionClient
             string snippet = sb.ToString();
             if (snippet.Length > 240) snippet = snippet[..240];
             bool later = wholeBook && (sec > currentSection || (sec == currentSection && sent > (uint)Math.Max(0, currentSentence + 8)));
-            allSources.Add(new CompanionSource(allSources.Count + 1, sec, sent, snippet, later));
+            string? chapName = detail is not null && sec < detail.Sections.Length && !string.IsNullOrWhiteSpace(detail.Sections[sec].Title)
+                ? detail.Sections[sec].Title
+                : null;
+            allSources.Add(new CompanionSource(allSources.Count + 1, sec, sent, snippet, later, chapName));
         }
 
         string authorSuffix = detail?.Summary.Authors is { Length: > 0 } a && !string.IsNullOrWhiteSpace(a[0]) ? $"（{a[0]}）" : "";
@@ -448,9 +474,9 @@ public sealed class CompanionClient
             answerText.Contains("目前读到的地方还没", StringComparison.Ordinal));
 
         var citedIds = ExtractCitations(answerText);
-        var finalSources = citedIds.Count > 0
-            ? allSources.Where(s => citedIds.Contains(s.Index)).ToArray()
-            : (notInRead ? Array.Empty<CompanionSource>() : allSources.Take(4).ToArray());
+        var finalSources = notInRead || citedIds.Count == 0
+            ? Array.Empty<CompanionSource>()
+            : allSources.Where(s => citedIds.Contains(s.Index)).ToArray();
 
         var result = new CompanionAnswer(
             answerText,
@@ -460,7 +486,7 @@ public sealed class CompanionClient
             CurrentProviderLabel);
 
         if (history is null || history.Count == 0)
-            StoreCachedQa(bookId, cacheKey, result);
+            SaveCachedQa(bookId, cacheKey, result);
 
         return result;
     }
@@ -497,59 +523,170 @@ public sealed class CompanionClient
 
     private string GetQaCachePath(string bookId) => Path.Combine(_library.DataDir, "companion", $"{bookId}.json");
 
-    private CompanionAnswer? TryLoadCachedQa(string bookId, string key)
+    private CompanionAnswer? TryLoadCachedQa(string bookId, string key) => LoadCachedQa(bookId, key);
+
+    internal CompanionAnswer? LoadCachedQa(string bookId, string key)
     {
         try
         {
             string path = GetQaCachePath(bookId);
             if (!File.Exists(path)) return null;
-            var map = JsonSerializer.Deserialize<Dictionary<string, CachedQaEntry>>(File.ReadAllText(path));
-            if (map is null || !map.TryGetValue(key, out var e) || string.IsNullOrWhiteSpace(e.Text)) return null;
-            return new CompanionAnswer(
-                e.Text,
-                e.Sources.Select(s => new CompanionSource(s.Index, s.Section, s.Sentence, s.Snippet, s.Later)).ToArray(),
-                e.NotInRead,
-                e.Next,
-                e.Label);
+            return ParseCachedQaJson(File.ReadAllText(path), key);
         }
         catch { return null; }
     }
 
-    private void StoreCachedQa(string bookId, string key, CompanionAnswer ans)
+    internal void SaveCachedQa(string bookId, string key, CompanionAnswer ans)
     {
         try
         {
             string path = GetQaCachePath(bookId);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            Dictionary<string, CachedQaEntry> map;
-            try
-            {
-                map = File.Exists(path)
-                    ? (JsonSerializer.Deserialize<Dictionary<string, CachedQaEntry>>(File.ReadAllText(path)) ?? new())
-                    : new();
-            }
-            catch { map = new(); }
-
-            map[key] = new CachedQaEntry
-            {
-                Text = ans.Text,
-                Sources = ans.Sources.Select(s => new CachedQaSource
-                {
-                    Index = s.Index,
-                    Section = s.Section,
-                    Sentence = s.Sentence,
-                    Snippet = s.Snippet,
-                    Later = s.Later,
-                }).ToList(),
-                NotInRead = ans.NotInRead,
-                Next = ans.NextQuestions?.ToList(),
-                Label = ans.ProviderLabel,
-            };
+            string? existingJson = File.Exists(path) ? File.ReadAllText(path) : null;
+            string serialized = SerializeUpdatedQaCacheJson(existingJson, key, ans);
             string tmp = path + ".part";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(map, CacheJsonOpts));
+            File.WriteAllText(tmp, serialized);
             File.Move(tmp, path, overwrite: true);
         }
         catch { }
+    }
+
+    private void StoreCachedQa(string bookId, string key, CompanionAnswer ans) => SaveCachedQa(bookId, key, ans);
+
+    internal static CompanionAnswer? ParseCachedQaJson(string json, string key)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        using var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
+        if (!doc.RootElement.TryGetProperty(key, out var entryEl) || entryEl.ValueKind != JsonValueKind.Object)
+            return null;
+        return ParseCachedQaEntry(entryEl);
+    }
+
+    internal static string SerializeUpdatedQaCacheJson(string? existingJson, string key, CompanionAnswer ans)
+    {
+        var map = new Dictionary<string, CachedQaEntry>(StringComparer.Ordinal);
+        if (!string.IsNullOrWhiteSpace(existingJson))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(existingJson);
+                if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var prop in doc.RootElement.EnumerateObject())
+                    {
+                        if (prop.Name == key || prop.Value.ValueKind != JsonValueKind.Object) continue;
+                        if (ParseCachedQaEntry(prop.Value) is { } parsed)
+                            map[prop.Name] = ToCachedQaEntry(parsed);
+                    }
+                }
+            }
+            catch { }
+        }
+        map[key] = ToCachedQaEntry(ans);
+        return JsonSerializer.Serialize(map, CacheJsonOpts);
+    }
+
+    private static CachedQaEntry ToCachedQaEntry(CompanionAnswer ans)
+    {
+        var dict = new Dictionary<string, CachedQaSource>(StringComparer.Ordinal);
+        foreach (var s in ans.Sources)
+        {
+            dict[s.Index.ToString()] = new CachedQaSource
+            {
+                Section = s.Section,
+                Sentence = s.Sentence,
+                Chapter = string.IsNullOrEmpty(s.Chapter) ? null : s.Chapter,
+                Quote = string.IsNullOrEmpty(s.Snippet) ? null : s.Snippet,
+                Later = s.Later ? true : null,
+            };
+        }
+        return new CachedQaEntry
+        {
+            Text = ans.Text,
+            Sources = dict,
+            NotYet = ans.NotInRead,
+            Next = ans.NextQuestions is { Count: > 0 } ? ans.NextQuestions.ToList() : null,
+            Label = ans.ProviderLabel ?? "",
+        };
+    }
+
+    private static CompanionAnswer? ParseCachedQaEntry(JsonElement el)
+    {
+        static string? GetStr(JsonElement obj, string name) =>
+            obj.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+
+        static bool? GetBool(JsonElement obj, string name) =>
+            obj.TryGetProperty(name, out var p) && p.ValueKind is JsonValueKind.True or JsonValueKind.False ? p.GetBoolean() : null;
+
+        static uint? GetUInt(JsonElement obj, string name) =>
+            obj.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.Number && p.TryGetUInt32(out uint v) ? v : null;
+
+        static List<string>? GetStrList(JsonElement obj, string name)
+        {
+            if (!obj.TryGetProperty(name, out var p) || p.ValueKind != JsonValueKind.Array) return null;
+            var list = new List<string>();
+            foreach (var item in p.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } s)
+                    list.Add(s);
+            }
+            return list.Count > 0 ? list : null;
+        }
+
+        static CompanionSource ParseSourceObj(JsonElement srcObj, int fallbackIdx)
+        {
+            int idx = srcObj.TryGetProperty("Index", out var ip) && ip.ValueKind == JsonValueKind.Number && ip.TryGetInt32(out int vi)
+                ? vi
+                : (srcObj.TryGetProperty("index", out var ip2) && ip2.ValueKind == JsonValueKind.Number && ip2.TryGetInt32(out int vi2) ? vi2 : fallbackIdx);
+            uint sec = GetUInt(srcObj, "section") ?? GetUInt(srcObj, "Section") ?? 0;
+            uint sent = GetUInt(srcObj, "sentence") ?? GetUInt(srcObj, "Sentence") ?? 0;
+            string? chap = GetStr(srcObj, "chapter") ?? GetStr(srcObj, "Chapter");
+            string quote = GetStr(srcObj, "quote") ?? GetStr(srcObj, "Snippet") ?? GetStr(srcObj, "snippet") ?? "";
+            bool later = GetBool(srcObj, "later") ?? GetBool(srcObj, "Later") ?? false;
+            return new CompanionSource(idx, sec, sent, quote, later, chap);
+        }
+
+        string text = GetStr(el, "text") ?? GetStr(el, "Text") ?? "";
+        if (string.IsNullOrWhiteSpace(text)) return null;
+
+        bool notYet = GetBool(el, "notYet") ?? GetBool(el, "NotInRead") ?? false;
+        string? label = GetStr(el, "label") ?? GetStr(el, "Label");
+        var next = GetStrList(el, "next") ?? GetStrList(el, "Next");
+
+        var sources = new List<CompanionSource>();
+        if (el.TryGetProperty("sources", out var srcEl) || el.TryGetProperty("Sources", out srcEl))
+        {
+            if (srcEl.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in srcEl.EnumerateObject())
+                {
+                    if (prop.Value.ValueKind != JsonValueKind.Object) continue;
+                    int idx = int.TryParse(prop.Name, out int parsedIdx) ? parsedIdx : (sources.Count + 1);
+                    sources.Add(ParseSourceObj(prop.Value, idx));
+                }
+                sources.Sort((a, b) => a.Index.CompareTo(b.Index));
+            }
+            else if (srcEl.ValueKind == JsonValueKind.Array)
+            {
+                var arr = srcEl.EnumerateArray().ToArray();
+                for (int i = 0; i < arr.Length; i++)
+                {
+                    if (arr[i].ValueKind == JsonValueKind.Object)
+                    {
+                        sources.Add(ParseSourceObj(arr[i], sources.Count + 1));
+                    }
+                    else if (arr[i].ValueKind == JsonValueKind.Number && arr[i].TryGetInt32(out int altIdx) &&
+                             i + 1 < arr.Length && arr[i + 1].ValueKind == JsonValueKind.Object)
+                    {
+                        sources.Add(ParseSourceObj(arr[i + 1], altIdx));
+                        i++;
+                    }
+                }
+            }
+        }
+
+        return new CompanionAnswer(text, sources, notYet, next, string.IsNullOrEmpty(label) ? null : label);
     }
 
     public async Task<string> AskBookAsync(

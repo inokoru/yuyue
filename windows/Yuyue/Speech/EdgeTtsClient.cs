@@ -38,19 +38,26 @@ public static class EdgeTtsClient
         string xmlLang = ResolvedXmlLang(voiceId, language);
         var chunks = SplitChunks(cleaned, maxUtf8Bytes: 2800);
 
-        using var ms = new MemoryStream();
+        var parts = new List<byte[]>(chunks.Count);
         foreach (string chunk in chunks)
         {
             ct.ThrowIfCancellationRequested();
             byte[] mp3 = await SynthesizeChunkWithRetryAsync(chunk, fullVoice, xmlLang, ct);
-            ms.Write(mp3, 0, mp3.Length);
+            parts.Add(mp3);
         }
 
-        byte[] combined = ms.ToArray();
+        byte[] combined = CloudVoiceService.CombineMp3Chunks(parts);
         if (combined.Length == 0)
             throw new InvalidOperationException("微软 Edge 返回空音频数据");
         return combined;
     }
+
+    public static Task<byte[]> SynthesizeAsync(
+        string text,
+        string voiceId,
+        string language,
+        CancellationToken ct = default) =>
+        SynthesizeMp3Async(text, voiceId, language, ct);
 
     private static async Task<byte[]> SynthesizeChunkWithRetryAsync(
         string text,
@@ -70,10 +77,16 @@ public static class EdgeTtsClient
             {
                 throw;
             }
+            catch (OperationCanceledException ex) when (!ct.IsCancellationRequested && attempt == 0)
+            {
+                lastErr = new TimeoutException("微软 Edge 语音连接超时", ex);
+                await TrySyncClockSkewAsync(ct);
+                await Task.Delay(220, ct);
+            }
             catch (WebSocketException ex) when (attempt == 0)
             {
                 lastErr = ex;
-                await RefreshClockSkewIfNeededAsync(ct);
+                await TrySyncClockSkewAsync(ct);
                 await Task.Delay(220, ct);
             }
             catch (Exception ex)
@@ -89,24 +102,41 @@ public static class EdgeTtsClient
         throw lastErr ?? new InvalidOperationException("微软 Edge 语音连接失败");
     }
 
-    private static async Task RefreshClockSkewIfNeededAsync(CancellationToken ct)
+    internal static async Task<bool> TrySyncClockSkewAsync(CancellationToken ct = default)
     {
-        try
+        string[] probeUrls =
+        [
+            "https://www.bing.com",
+            "https://speech.platform.bing.com",
+            "https://www.microsoft.com",
+        ];
+
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        foreach (string url in probeUrls)
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-            using var req = new HttpRequestMessage(HttpMethod.Head, "https://www.bing.com");
-            using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
-            if (resp.Headers.Date is DateTimeOffset serverDt)
+            ct.ThrowIfCancellationRequested();
+            try
             {
-                double serverUnix = serverDt.ToUnixTimeMilliseconds() / 1000.0;
-                double nowUnix = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
-                lock (SkewLock)
+                using var req = new HttpRequestMessage(HttpMethod.Head, url);
+                using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+                if (resp.Headers.Date is DateTimeOffset serverDt)
                 {
-                    _clockSkewSeconds = serverUnix - nowUnix;
+                    double serverUnix = serverDt.ToUnixTimeMilliseconds() / 1000.0;
+                    double nowUnix = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+                    lock (SkewLock)
+                    {
+                        _clockSkewSeconds = serverUnix - nowUnix;
+                    }
+                    return true;
                 }
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch { }
         }
-        catch { }
+        return false;
     }
 
     private static async Task<byte[]> SynthesizeSingleChunkAsync(
@@ -142,8 +172,8 @@ public static class EdgeTtsClient
 
         string escaped = EscapeXml(text);
         string ssml =
-            $"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='{xmlLang}'>" +
-            $"<voice name='{fullVoice}'>" +
+            $"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='{EscapeXml(xmlLang)}'>" +
+            $"<voice name='{EscapeXml(fullVoice)}'>" +
             $"<prosody pitch='+0Hz' rate='+0%' volume='+0%'>{escaped}</prosody>" +
             "</voice></speak>";
         string ssmlPayload =
@@ -246,12 +276,7 @@ public static class EdgeTtsClient
         return sb.ToString().Trim();
     }
 
-    public static string EscapeXml(string text) => text
-        .Replace("&", "&amp;", StringComparison.Ordinal)
-        .Replace("<", "&lt;", StringComparison.Ordinal)
-        .Replace(">", "&gt;", StringComparison.Ordinal)
-        .Replace("\"", "&quot;", StringComparison.Ordinal)
-        .Replace("'", "&apos;", StringComparison.Ordinal);
+    public static string EscapeXml(string text) => CloudVoiceService.EscapeXml(text);
 
     private static List<string> SplitChunks(string text, int maxUtf8Bytes)
     {

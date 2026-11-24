@@ -45,8 +45,14 @@ public sealed partial class ShelfWindow : Window
     private bool _sidebarVisible = true;
     private bool _narrowAutoCollapsed;
     private bool _readingExpanded;
+    private static readonly HashSet<string> EbookImportExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".epub", ".pdf", ".txt", ".mobi", ".azw3", ".azw", ".prc", ".fb2",
+    };
+
     private bool _notesByBook;
     private string _notesChip = "all"; // all | thoughts | yellow | blue | pink | wave
+    private string _notesQuery = "";
     private string? _notesChosenBookId;
     private bool _wordsByBook;
     private bool _wordsShowKnown;
@@ -55,6 +61,7 @@ public sealed partial class ShelfWindow : Window
     private bool _toastHoverPaused;
     private readonly List<(Button Btn, Action Activate)> _quickSearchItems = [];
     private int _quickSearchSelectedIdx = -1;
+    private BookSummary? _quickSearchBestCompanionBook;
     private CancellationTokenSource? _quickSearchCts;
     private Windows.Media.Playback.MediaPlayer? _reviewClipPlayer;
 
@@ -125,11 +132,12 @@ public sealed partial class ShelfWindow : Window
         RenderCurrentView();
     }
 
-    public void OpenPodcastInline(string issueId, double? seekSec = null)
+    public void OpenPodcastInline(string issueId, double? seekSec = null, bool autoPlay = false)
     {
-        _podcastBuilder.OpenIssueAt(issueId, seekSec);
+        _podcastBuilder.OpenIssueAt(issueId, seekSec, autoPlay);
         _activeFilter = "podcasts";
         UpdateNavSelectionVisuals();
+        ConfigureHeaderForCurrentView();
         RenderCurrentView();
     }
 
@@ -421,12 +429,31 @@ public sealed partial class ShelfWindow : Window
         };
         if (await dlg.ShowAsync() == ContentDialogResult.Primary)
         {
-            if (_activeFilter == $"col:{col.Id}") _activeFilter = "all";
-            _library.Prefs.PinnedCollectionIds.Remove(col.Id);
+            string colId = col.Id;
+            string colName = col.Name;
+            bool wasViewingCol = _activeFilter == $"col:{colId}";
+            bool wasPinned = _library.Prefs.PinnedCollectionIds.Contains(colId);
+
+            if (wasViewingCol) _activeFilter = "all";
+            _library.Prefs.PinnedCollectionIds.Remove(colId);
             _library.SavePrefs();
-            _library.DeleteCollection(col.Id);
+            _library.DeleteCollection(colId);
             RefreshBooks();
-            ShowToast($"已删除合集“{col.Name}”", canUndo: false, isDelete: true);
+            ShowToast($"已删除合集“{colName}”", canUndo: true, isDelete: true, undo: () =>
+            {
+                try
+                {
+                    _library.Core.RestoreCollection(colId);
+                    if (wasPinned && !_library.Prefs.PinnedCollectionIds.Contains(colId))
+                    {
+                        _library.Prefs.PinnedCollectionIds.Add(colId);
+                        _library.SavePrefs();
+                    }
+                    if (wasViewingCol) _activeFilter = $"col:{colId}";
+                }
+                catch { }
+                RefreshBooks();
+            });
         }
     }
 
@@ -632,6 +659,70 @@ public sealed partial class ShelfWindow : Window
                 }
                 if (totalMarks > 0) ViewSubtitleText.Text = $"{totalMarks} 条 · 来自 {booksCnt} 本书";
 
+                if (totalMarks > 0 || !string.IsNullOrEmpty(_notesQuery))
+                {
+                    var notesFilterWrap = new Border
+                    {
+                        Height = 28,
+                        Width = 164,
+                        CornerRadius = new CornerRadius(14),
+                        Background = ThemeHelper.Brush(p.Inset),
+                        BorderBrush = ThemeHelper.Brush(p.Line),
+                        BorderThickness = new Thickness(0.5),
+                        Padding = new Thickness(9, 0, 6, 0),
+                    };
+                    var nfg = new Grid { ColumnSpacing = 5 };
+                    nfg.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    nfg.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    nfg.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    nfg.Children.Add(YYIcons.Make("search", 11, ThemeHelper.Brush(p.T3)));
+
+                    var notesFilterBox = new TextBox
+                    {
+                        Text = _notesQuery,
+                        PlaceholderText = "找笔记",
+                        FontSize = 11.5,
+                        BorderThickness = new Thickness(0),
+                        Background = new SolidColorBrush(Colors.Transparent),
+                        Padding = new Thickness(0, 4, 0, 0),
+                        MinHeight = 24,
+                        VerticalAlignment = VerticalAlignment.Center,
+                    };
+                    notesFilterBox.TextChanged += (_, _) =>
+                    {
+                        _notesQuery = notesFilterBox.Text ?? "";
+                        RenderNotesPage();
+                    };
+                    Grid.SetColumn(notesFilterBox, 1);
+                    nfg.Children.Add(notesFilterBox);
+
+                    if (!string.IsNullOrEmpty(_notesQuery))
+                    {
+                        var clearNotesBtn = new Button
+                        {
+                            Width = 18,
+                            Height = 18,
+                            MinWidth = 18,
+                            MinHeight = 18,
+                            Padding = new Thickness(0),
+                            CornerRadius = new CornerRadius(9),
+                            BorderThickness = new Thickness(0),
+                            Background = new SolidColorBrush(Colors.Transparent),
+                            Content = YYIcons.Make("xmark", 9, ThemeHelper.Brush(p.T3)),
+                        };
+                        clearNotesBtn.Click += (_, _) =>
+                        {
+                            _notesQuery = "";
+                            ConfigureHeaderForCurrentView();
+                            RenderNotesPage();
+                        };
+                        Grid.SetColumn(clearNotesBtn, 2);
+                        nfg.Children.Add(clearNotesBtn);
+                    }
+                    notesFilterWrap.Child = nfg;
+                    HeaderRightHost.Children.Add(notesFilterWrap);
+                }
+
                 HeaderRightHost.Children.Add(BuildHeaderSegments(_notesByBook, "按时间", "按书", byBook =>
                 {
                     _notesByBook = byBook;
@@ -759,7 +850,7 @@ public sealed partial class ShelfWindow : Window
                     InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
                     var f = await picker.PickSaveFileAsync();
                     if (f is null) return;
-                    string md = chosenBook is not null ? NoteExportService.BuildObsidianBookMarkdown(_library, chosenBook) : NoteExporter.BuildLibraryMarkdown(_library);
+                    string md = BuildFilteredNotesMarkdown(chosenBook);
                     await File.WriteAllTextAsync(f.Path, md);
                     ShowToast($"已导出笔记到 {f.Name}", canUndo: false);
                 };
@@ -814,7 +905,7 @@ public sealed partial class ShelfWindow : Window
                                 encCtx = $"{encCtx[..pos]}<b>{encCtx.Substring(pos, encWord.Length)}</b>{encCtx[(pos + encWord.Length)..]}";
                             ctxHtml = $"<br><i>{encCtx}</i>";
                         }
-                        string bookTitle = _keptBooks.FirstOrDefault(b => b.Id == w.Book)?.Title ?? "";
+                        string bookTitle = ResolveVocabSourceTitle(w.Book);
                         string citeHtml = string.IsNullOrEmpty(bookTitle) ? "" : $"<br><small>——《{System.Net.WebUtility.HtmlEncode(bookTitle)}》</small>";
                         string back = System.Net.WebUtility.HtmlEncode(w.Meaning ?? "").Replace("\n", "<br>") + ctxHtml + citeHtml;
                         sb.AppendLine($"{front}\t{back}\t语阅");
@@ -840,7 +931,7 @@ public sealed partial class ShelfWindow : Window
                     foreach (var w in scope)
                     {
                         string added = DateTimeOffset.FromUnixTimeMilliseconds(w.At).LocalDateTime.ToString("yyyy-MM-dd HH:mm");
-                        string bookTitle = _keptBooks.FirstOrDefault(b => b.Id == w.Book)?.Title ?? "";
+                        string bookTitle = ResolveVocabSourceTitle(w.Book);
                         csvSb.AppendLine(string.Join(",",
                             CsvCell(w.Word),
                             CsvCell(w.Phonetic),
@@ -1200,8 +1291,9 @@ public sealed partial class ShelfWindow : Window
         }
 
         var pct = (int)Math.Round(book.Progress * 100);
+        bool hasPairedOrAudio = book.Format == BookFormat.Audio || _pairedBookIds.Contains(book.Id);
         var metaLine = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(0, 1, 0, 0) };
-        metaLine.Children.Add(new TextBlock { Text = book.Format == BookFormat.Audio ? "有声 ·" : "图书 ·", FontSize = 11, Foreground = metaBrush });
+        metaLine.Children.Add(new TextBlock { Text = hasPairedOrAudio ? "有声 ·" : "图书 ·", FontSize = 11, Foreground = metaBrush });
         metaLine.Children.Add(new TextBlock { Text = pct > 0 ? $"{pct}%" : "刚开始", FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = pctBrush });
         if (FormatRemainingTail(book) is string tail)
         {
@@ -1530,7 +1622,7 @@ public sealed partial class ShelfWindow : Window
                 Child = YYIcons.Make("cloud", 9.5, ThemeHelper.Brush(palette.T2)),
             });
         }
-        else if (width >= 60 && isAudio)
+        else if (width >= 60 && (isAudio || _pairedBookIds.Contains(book.Id)))
         {
             layer.Children.Add(new Border
             {
@@ -1897,6 +1989,7 @@ public sealed partial class ShelfWindow : Window
             if (res == ContentDialogResult.None) return;
             if (res == ContentDialogResult.Primary)
             {
+                App.CurrentApp.CloseBookWindows(book.Id);
                 try { _library.Core.KeepRecordOnly(book.Id); } catch { }
                 RefreshBooks();
                 ShowToast($"已移除《{book.Title}》的文件，保留阅读记录", canUndo: false);
@@ -1906,6 +1999,7 @@ public sealed partial class ShelfWindow : Window
 
         string bid = book.Id;
         string bTitle = book.Title;
+        App.CurrentApp.CloseBookWindows(bid);
         _library.DeleteBook(bid);
         RefreshBooks();
         ShowToast($"已删除《{bTitle}》", canUndo: true, isDelete: true, undo: () =>
@@ -2369,11 +2463,11 @@ public sealed partial class ShelfWindow : Window
     }
 
     // 1:1 对齐 Shelf.swift lines 54-64 & 260-269
-    private static string FormatShelfNote(BookSummary book)
+    private string FormatShelfNote(BookSummary book)
     {
         if (!book.Available) return "在别的设备上";
         int pct = (int)Math.Round(book.Progress * 100);
-        if (book.Format == BookFormat.Audio)
+        if (book.Format == BookFormat.Audio || _pairedBookIds.Contains(book.Id))
         {
             if (book.Status == ReadingStatus.Finished) return "有声 · 听完";
             if (book.Progress > 0.002) return $"有声 · {Math.Max(1, pct)}%";
@@ -2549,6 +2643,96 @@ public sealed partial class ShelfWindow : Window
         return WeekdayNames[(int)day.DayOfWeek];
     }
 
+    private bool MatchesNotesChip(Mark m) => _notesChip switch
+    {
+        "thoughts" => !string.IsNullOrWhiteSpace(m.Note),
+        "yellow" => m.Style == MarkStyle.Yellow,
+        "blue" => m.Style == MarkStyle.Blue,
+        "pink" => m.Style == MarkStyle.Pink,
+        "wave" => m.Style == MarkStyle.Wave,
+        _ => true,
+    };
+
+    private bool MatchesNotesFilter(Mark m, BookSummary? book = null)
+    {
+        if (!MatchesNotesChip(m)) return false;
+        string q = _notesQuery.Trim();
+        if (string.IsNullOrEmpty(q)) return true;
+        if (m.Text.Contains(q, StringComparison.OrdinalIgnoreCase)) return true;
+        if (!string.IsNullOrEmpty(m.Note) && m.Note.Contains(q, StringComparison.OrdinalIgnoreCase)) return true;
+        if (book is not null && NameMatcher.Matches(book.Title, q)) return true;
+        return false;
+    }
+
+    private string BuildFilteredNotesMarkdown(BookSummary? chosenBook)
+    {
+        bool hasActiveFilter = _notesChip != "all" || !string.IsNullOrWhiteSpace(_notesQuery);
+        if (!hasActiveFilter)
+        {
+            return chosenBook is not null
+                ? NoteExportService.BuildObsidianBookMarkdown(_library, chosenBook)
+                : NoteExporter.BuildLibraryMarkdown(_library);
+        }
+
+        string FormatSingleBookFiltered(BookSummary book, IReadOnlyList<Mark> filtered)
+        {
+            BookDetail? detail = null;
+            if (!book.Record)
+            {
+                try { detail = _library.GetBookDetail(book.Id); } catch { }
+            }
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"# {book.Title}");
+            if (book.Authors.Length > 0) sb.AppendLine($"\n> 作者：{string.Join(" / ", book.Authors)}");
+            sb.AppendLine($"> 导出时间：{DateTime.Now:yyyy-MM-dd HH:mm} · 共 {filtered.Count} 条筛选划线\n");
+
+            foreach (var group in filtered.GroupBy(m => m.Section).OrderBy(g => g.Key))
+            {
+                string chapter = book.Format == BookFormat.Pdf
+                    ? $"第 {group.Key + 1} 页"
+                    : (detail is not null && group.Key < detail.Sections.Length && !string.IsNullOrWhiteSpace(detail.Sections[group.Key].Title)
+                        ? detail.Sections[group.Key].Title!
+                        : (detail is null && group.Key == 0 ? "笔记" : $"第 {group.Key + 1} 节"));
+                sb.AppendLine($"## {chapter}\n");
+                foreach (var m in group)
+                {
+                    sb.AppendLine($"> {m.Text.Replace("\n", "\n> ")}");
+                    if (!string.IsNullOrWhiteSpace(m.Note))
+                        sb.AppendLine($"\n{m.Note}");
+                    sb.AppendLine();
+                }
+            }
+            return sb.ToString();
+        }
+
+        if (chosenBook is not null)
+        {
+            var filtered = _library.GetMarks(chosenBook.Id)
+                .Where(m => MatchesNotesFilter(m, chosenBook))
+                .OrderBy(m => m.Section).ThenBy(m => m.Start.Sentence).ThenBy(m => m.Start.Offset)
+                .ToArray();
+            return FormatSingleBookFiltered(chosenBook, filtered);
+        }
+
+        var allSb = new System.Text.StringBuilder();
+        allSb.AppendLine($"# 语阅笔记筛选导出\n\n> 导出时间：{DateTime.Now:yyyy-MM-dd HH:mm}\n");
+        int booksExported = 0;
+        foreach (var book in _keptBooks)
+        {
+            var filtered = _library.GetMarks(book.Id)
+                .Where(m => MatchesNotesFilter(m, book))
+                .OrderBy(m => m.Section).ThenBy(m => m.Start.Sentence).ThenBy(m => m.Start.Offset)
+                .ToArray();
+            if (filtered.Length == 0) continue;
+            booksExported++;
+            allSb.AppendLine("---\n");
+            allSb.AppendLine(FormatSingleBookFiltered(book, filtered));
+        }
+        if (booksExported == 0)
+            allSb.AppendLine("（当前筛选条件下没有匹配的划线或想法）");
+        return allSb.ToString();
+    }
+
     private void RenderNotesPage()
     {
         SubPageStack.Children.Clear();
@@ -2614,15 +2798,7 @@ public sealed partial class ShelfWindow : Window
         }
         catch { }
 
-        bool MatchesChip(Mark m) => _notesChip switch
-        {
-            "thoughts" => !string.IsNullOrWhiteSpace(m.Note),
-            "yellow" => m.Style == MarkStyle.Yellow,
-            "blue" => m.Style == MarkStyle.Blue,
-            "pink" => m.Style == MarkStyle.Pink,
-            "wave" => m.Style == MarkStyle.Wave,
-            _ => true,
-        };
+        bool MatchesChip(Mark m, BookSummary? bk = null) => MatchesNotesFilter(m, bk);
 
         StackPanel BuildFilterChips(IReadOnlyList<Mark> scopeMarks)
         {
@@ -2677,8 +2853,10 @@ public sealed partial class ShelfWindow : Window
         }
 
         var chapterTitleCache = new Dictionary<string, Dictionary<uint, string>>();
-        string GetChapterTitle(string bookId, uint sec)
+        string GetChapterTitle(BookSummary book, uint sec)
         {
+            if (book.Format == BookFormat.Pdf) return $"第 {sec + 1} 页";
+            string bookId = book.Id;
             if (!chapterTitleCache.TryGetValue(bookId, out var map))
             {
                 map = [];
@@ -2727,7 +2905,7 @@ public sealed partial class ShelfWindow : Window
                 left.Children.Add(CreateCoverView(book, 14, 20, elevated: false));
                 left.Children.Add(new TextBlock
                 {
-                    Text = $"{book.Title} · {GetChapterTitle(book.Id, mark.Section)}",
+                    Text = $"{book.Title} · {GetChapterTitle(book, mark.Section)}",
                     FontSize = 11,
                     FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                     Foreground = ThemeHelper.Brush(palette.T2),
@@ -2783,6 +2961,25 @@ public sealed partial class ShelfWindow : Window
                 }
             };
 
+            var styleSubItem = new MenuFlyoutSubItem { Text = "换个样子" };
+            foreach (var (st, stLabel) in new[]
+            {
+                (MarkStyle.Yellow, "荧光黄"),
+                (MarkStyle.Blue, "浅蓝"),
+                (MarkStyle.Pink, "樱粉"),
+                (MarkStyle.Wave, "波浪线"),
+            })
+            {
+                var targetStyle = st;
+                var smi = new ToggleMenuFlyoutItem { Text = stLabel, IsChecked = mark.Style == targetStyle };
+                smi.Click += (_, _) =>
+                {
+                    _library.SetMarkStyle(book.Id, mark.Id, targetStyle);
+                    RefreshBooks();
+                };
+                styleSubItem.Items.Add(smi);
+            }
+
             var copyItem = new MenuFlyoutItem { Text = "复制" };
             copyItem.Click += (_, _) =>
             {
@@ -2792,8 +2989,10 @@ public sealed partial class ShelfWindow : Window
                 ShowToast("已复制划线", canUndo: false);
             };
 
+            string noteChapter = GetChapterTitle(book, mark.Section);
             var shareItem = new MenuFlyoutItem { Text = "分享书摘…" };
-            shareItem.Click += async (_, _) => await QuoteShareDialog.ShowAsync(this, RootGrid.XamlRoot, mark.Text, mark.Note, book.Title, book.Authors.FirstOrDefault(), book.CoverPath);
+            shareItem.Click += async (_, _) => await QuoteShareDialog.ShowAsync(
+                this, RootGrid.XamlRoot, mark.Text, mark.Note, book.Title, book.Authors.FirstOrDefault(), book.CoverPath, chapter: noteChapter, library: _library);
 
             var delItem = new MenuFlyoutItem { Text = "删除划线", Foreground = ThemeHelper.Brush(palette.Danger) };
             delItem.Click += (_, _) =>
@@ -2811,6 +3010,7 @@ public sealed partial class ShelfWindow : Window
 
             ctx.Items.Add(jumpItem);
             ctx.Items.Add(editNoteItem);
+            ctx.Items.Add(styleSubItem);
             ctx.Items.Add(copyItem);
             ctx.Items.Add(shareItem);
             ctx.Items.Add(new MenuFlyoutSeparator());
@@ -2868,7 +3068,7 @@ public sealed partial class ShelfWindow : Window
             catch { }
 
             var byDay = bookNotes
-                .SelectMany(bn => bn.Marks.Where(MatchesChip).Select(m => (bn.Book, Mark: m, Day: DateTimeOffset.FromUnixTimeMilliseconds(m.At).LocalDateTime.Date)))
+                .SelectMany(bn => bn.Marks.Where(m => MatchesChip(m, bn.Book)).Select(m => (bn.Book, Mark: m, Day: DateTimeOffset.FromUnixTimeMilliseconds(m.At).LocalDateTime.Date)))
                 .OrderByDescending(x => x.Mark.At)
                 .GroupBy(x => x.Day);
 
@@ -3078,7 +3278,7 @@ public sealed partial class ShelfWindow : Window
             rightStack.Children.Add(head);
             rightStack.Children.Add(BuildFilterChips(chosen.Marks));
 
-            var filteredMarks = chosen.Marks.Where(MatchesChip)
+            var filteredMarks = chosen.Marks.Where(m => MatchesChip(m, chosen.Book))
                 .OrderBy(m => m.Section).ThenBy(m => m.Start.Sentence).ThenBy(m => m.Start.Offset)
                 .ToArray();
 
@@ -3087,7 +3287,7 @@ public sealed partial class ShelfWindow : Window
                 var chHead = new Grid { Margin = new Thickness(4, 4, 4, -6) };
                 chHead.Children.Add(new TextBlock
                 {
-                    Text = GetChapterTitle(chosen.Book.Id, secGrp.Key),
+                    Text = GetChapterTitle(chosen.Book, secGrp.Key),
                     FontSize = 12,
                     FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                     Foreground = ThemeHelper.Brush(palette.T2),
@@ -3217,11 +3417,14 @@ public sealed partial class ShelfWindow : Window
 
     private async Task ShowReviewSheetAsync(string? onlyBookId)
     {
-        long dayStartMs = new DateTimeOffset(DateTime.Today).ToUnixTimeMilliseconds();
+        // 1:1 MacReviewView.swift:30-31: per-book review uses UtcNow & 5u so it always works even after 8 daily cards
+        long dayStartMs = onlyBookId is not null
+            ? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            : new DateTimeOffset(DateTime.Today).ToUnixTimeMilliseconds();
         ReviewItem[] items;
         try
         {
-            var deck = _library.Core.ReviewToday(onlyBookId, dayStartMs, onlyBookId is null ? 5u : 8u);
+            var deck = _library.Core.ReviewToday(onlyBookId, dayStartMs, 5u);
             items = deck.Items;
         }
         catch { return; }
@@ -3747,7 +3950,7 @@ public sealed partial class ShelfWindow : Window
         }
         catch { }
 
-        string BookTitleOf(string id) => _keptBooks.FirstOrDefault(b => b.Id == id)?.Title ?? "外文书";
+        string BookTitleOf(string id) => ResolveVocabSourceTitle(id, "外文书");
 
         var groups = _wordsByBook
             ? shown.GroupBy(w => w.Book).Select(g => (Title: BookTitleOf(g.Key), Sub: (string?)null, Words: g.ToArray())).ToArray()
@@ -3800,7 +4003,8 @@ public sealed partial class ShelfWindow : Window
                     Content = YYIcons.Make("speaker", 12, ThemeHelper.Brush(palette.T1)),
                 };
                 string speakText = w.Word;
-                spkBtn.Click += (_, _) => _ = Yuyue.Speech.AudioPlayer.SpeakForeignWordAsync(_library, speakText);
+                string? wordLang = ResolveVocabLanguage(w.Book);
+                spkBtn.Click += (_, _) => _ = Yuyue.Speech.AudioPlayer.SpeakForeignWordAsync(_library, speakText, wordLang);
                 head.Children.Add(spkBtn);
                 item.Children.Add(head);
 
@@ -3900,12 +4104,17 @@ public sealed partial class ShelfWindow : Window
                 foot.Children.Add(knownBtn);
                 item.Children.Add(foot);
 
-                // 右键菜单：回到书里这一句 / 读一遍 / 拷贝 / 删除（带撤销）
+                // 右键菜单：回到书里/播客这一句 / 读一遍 / 拷贝 / 删除（带撤销）
+                var podIssue = TryResolvePodcastIssueForWord(w.Book);
+                Action jumpAction = podIssue is not null
+                    ? () => OpenPodcastInline(podIssue.Id, w.Sentence > 0 ? (double?)w.Sentence : null)
+                    : () => App.CurrentApp.OpenBook(w.Book, section: w.Section, sentence: (int)w.Sentence);
+
                 var wCtx = new MenuFlyout();
-                var wJump = new MenuFlyoutItem { Text = "回到书里这一句" };
-                wJump.Click += (_, _) => App.CurrentApp.OpenBook(w.Book, section: w.Section, sentence: (int)w.Sentence);
+                var wJump = new MenuFlyoutItem { Text = podIssue is not null ? "回到播客这一句" : "回到书里这一句" };
+                wJump.Click += (_, _) => jumpAction();
                 var wSpeak = new MenuFlyoutItem { Text = "读一遍" };
-                wSpeak.Click += (_, _) => _ = Yuyue.Speech.AudioPlayer.SpeakForeignWordAsync(_library, speakText);
+                wSpeak.Click += (_, _) => _ = Yuyue.Speech.AudioPlayer.SpeakForeignWordAsync(_library, speakText, wordLang);
                 var wCopy = new MenuFlyoutItem { Text = "拷贝" };
                 wCopy.Click += (_, _) =>
                 {
@@ -3924,8 +4133,7 @@ public sealed partial class ShelfWindow : Window
                     {
                         try
                         {
-                            var restored = _library.AddWord(savedWord.Word, savedWord.Phonetic, savedWord.Meaning, savedWord.Book, savedWord.Section, savedWord.Sentence, savedWord.Context);
-                            if (savedWord.Known) _library.SetWordKnown(restored.Word, true);
+                            _library.Core.RestoreWord(savedWord.Word);
                         }
                         catch { }
                         RefreshBooks();
@@ -3938,7 +4146,7 @@ public sealed partial class ShelfWindow : Window
                 wCtx.Items.Add(wDel);
                 item.ContextFlyout = wCtx;
 
-                item.DoubleTapped += (_, _) => App.CurrentApp.OpenBook(w.Book, section: w.Section, sentence: (int)w.Sentence);
+                item.DoubleTapped += (_, _) => jumpAction();
                 cardStack.Children.Add(item);
             }
 
@@ -4871,20 +5079,47 @@ public sealed partial class ShelfWindow : Window
         }
     }
 
+    private PodcastIssue? TryResolvePodcastIssueForWord(string? bookKey)
+    {
+        if (string.IsNullOrWhiteSpace(bookKey)) return null;
+        string candId = bookKey.StartsWith("podcast:", StringComparison.Ordinal) ? bookKey[8..] : bookKey;
+        var issues = _library.Podcasts.GetIssues();
+        return issues.FirstOrDefault(i => i.Id == candId)
+            ?? issues.FirstOrDefault(i => string.Equals(i.Title, bookKey, StringComparison.Ordinal));
+    }
+
+    private string ResolveVocabSourceTitle(string? bookKey, string fallback = "")
+    {
+        if (string.IsNullOrWhiteSpace(bookKey)) return fallback;
+        var bk = _keptBooks.FirstOrDefault(b => b.Id == bookKey);
+        if (bk is not null) return bk.Title;
+        var pod = TryResolvePodcastIssueForWord(bookKey);
+        if (pod is not null) return pod.Title;
+        return bookKey.StartsWith("podcast:", StringComparison.Ordinal) ? "播客单集" : fallback;
+    }
+
+    private string? ResolveVocabLanguage(string? bookKey)
+    {
+        if (string.IsNullOrWhiteSpace(bookKey)) return null;
+        var bk = _keptBooks.FirstOrDefault(b => b.Id == bookKey);
+        if (bk is not null && !string.IsNullOrWhiteSpace(bk.Language)) return bk.Language;
+        var pod = TryResolvePodcastIssueForWord(bookKey);
+        if (pod is not null && !string.IsNullOrWhiteSpace(pod.Language)) return pod.Language;
+        return null;
+    }
+
     private void TriggerAskCompanionFromQuickSearch(string q)
     {
+        var targetBook = _quickSearchBestCompanionBook
+            ?? QuickSearchDialog.ResolveCompanionTargetBook([], null, _shelfBooks);
         CloseQuickSearch();
-        var latestBook = _shelfBooks
-            .Where(b => !b.Record && b.Available && b.Format != BookFormat.Audio && b.Format != BookFormat.Pdf)
-            .OrderByDescending(b => Math.Max(b.OpenedAt ?? 0, b.AddedAt))
-            .FirstOrDefault();
-        if (latestBook is not null)
+        if (targetBook is not null)
         {
-            App.CurrentApp.OpenBook(latestBook.Id, askQuestion: string.IsNullOrWhiteSpace(q) ? null : q);
+            App.CurrentApp.OpenBook(targetBook.Id, askQuestion: string.IsNullOrWhiteSpace(q) ? null : q);
         }
         else
         {
-            App.CurrentApp.OpenSettings("companion");
+            ShowToast("先打开一本书", canUndo: false);
         }
     }
 
@@ -5030,7 +5265,20 @@ public sealed partial class ShelfWindow : Window
             QuickSearchResults.Children.Add(btn);
         }
 
-        // Row 0：始终展示「问书伴」
+        // Group 1：最近读过 / 书名和篇目（支持拼音首字母 NameMatcher）
+        var bookMatches = string.IsNullOrEmpty(q)
+            ? _shelfBooks.OrderByDescending(b => Math.Max(b.OpenedAt ?? 0, b.AddedAt)).Take(5).ToArray()
+            : _shelfBooks.Where(b =>
+                NameMatcher.Matches(b.Title, q) ||
+                b.Authors.Any(a => NameMatcher.Matches(a, q))).Take(8).ToArray();
+
+        var passageHitBook = fullTextHits.Select(h => h.Book).FirstOrDefault(QuickSearchDialog.IsCompanionEligible);
+        _quickSearchBestCompanionBook = QuickSearchDialog.ResolveCompanionTargetBook(
+            string.IsNullOrEmpty(q) ? [] : bookMatches,
+            passageHitBook,
+            _shelfBooks);
+
+        // Row 0：始终展示「问书伴」（#29：排除有声书、PDF、未下载与纯记录书）
         var askGrid = new Grid { ColumnSpacing = 10 };
         askGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });
         askGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -5053,7 +5301,10 @@ public sealed partial class ShelfWindow : Window
             MaxLines = 1,
             TextTrimming = TextTrimming.CharacterEllipsis,
         });
-        askMeta.Children.Add(new TextBlock { Text = "只用你读过的部分回答，带出处", FontSize = 10.5, Foreground = ThemeHelper.Brush(palette.T3) });
+        string askSubText = _quickSearchBestCompanionBook is not null
+            ? $"在《{_quickSearchBestCompanionBook.Title}》里只用你读过的部分回答，带出处"
+            : "只用你读过的部分回答，带出处";
+        askMeta.Children.Add(new TextBlock { Text = askSubText, FontSize = 10.5, Foreground = ThemeHelper.Brush(palette.T3), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
         Grid.SetColumn(askMeta, 1);
         askGrid.Children.Add(askMeta);
         var keycap = new Border
@@ -5080,13 +5331,6 @@ public sealed partial class ShelfWindow : Window
         };
         RegisterRow(askBtn, () => TriggerAskCompanionFromQuickSearch(q));
 
-        // Group 1：最近读过 / 书名和篇目（支持拼音首字母 NameMatcher）
-        var bookMatches = string.IsNullOrEmpty(q)
-            ? _shelfBooks.OrderByDescending(b => Math.Max(b.OpenedAt ?? 0, b.AddedAt)).Take(5).ToArray()
-            : _shelfBooks.Where(b =>
-                NameMatcher.Matches(b.Title, q) ||
-                b.Authors.Any(a => NameMatcher.Matches(a, q))).Take(8).ToArray();
-
         if (bookMatches.Length > 0 || tocMatches.Count > 0)
         {
             string? countNote = string.IsNullOrEmpty(q) ? null : $"{bookMatches.Length + tocMatches.Count} 项";
@@ -5105,13 +5349,10 @@ public sealed partial class ShelfWindow : Window
                 Grid.SetColumn(tb, 1);
                 row.Children.Add(tb);
 
-                var sub = new TextBlock
-                {
-                    Text = $"{book.Authors.FirstOrDefault() ?? ""} · {FormatShelfNote(book)}".Trim(' ', '·'),
-                    FontSize = 11,
-                    Foreground = ThemeHelper.Brush(palette.T3),
-                    VerticalAlignment = VerticalAlignment.Center,
-                };
+                string subLabel = $"{book.Authors.FirstOrDefault() ?? ""} · {FormatShelfNote(book)}".Trim(' ', '·');
+                var sub = QuickSearchDialog.BuildHighlightedBlock(subLabel, q, 11, Microsoft.UI.Text.FontWeights.Normal, palette.T3, tint.Accent);
+                sub.MaxLines = 1;
+                sub.VerticalAlignment = VerticalAlignment.Center;
                 Grid.SetColumn(sub, 2);
                 row.Children.Add(sub);
 
@@ -5138,7 +5379,9 @@ public sealed partial class ShelfWindow : Window
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
                 row.Children.Add(CreateCoverView(book, 20, 28, elevated: false));
-                var tb = new TextBlock { Text = secTitle, FontSize = 12.5, Foreground = ThemeHelper.Brush(palette.T1), VerticalAlignment = VerticalAlignment.Center, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis };
+                var tb = QuickSearchDialog.BuildHighlightedBlock(secTitle, q, 12.5, Microsoft.UI.Text.FontWeights.Normal, palette.T1, tint.Accent);
+                tb.MaxLines = 1;
+                tb.VerticalAlignment = VerticalAlignment.Center;
                 Grid.SetColumn(tb, 1);
                 row.Children.Add(tb);
 
@@ -5317,6 +5560,16 @@ public sealed partial class ShelfWindow : Window
             e.Handled = true;
         }
         else if (e.Key == VirtualKey.Escape && QuickSearchOverlay.Visibility == Visibility.Visible) { CloseQuickSearch(); e.Handled = true; }
+        else if (!ctrl && !alt && _activeFilter == "podcasts" && QuickSearchOverlay.Visibility != Visibility.Visible)
+        {
+            var focused = FocusManager.GetFocusedElement(RootGrid.XamlRoot);
+            if (focused is not TextBox and not RichEditBox and not PasswordBox and not AutoSuggestBox
+                && VisualTreeHelper.GetOpenPopupsForXamlRoot(RootGrid.XamlRoot).Count == 0)
+            {
+                if (_podcastBuilder.HandleKeyDown(e.Key))
+                    e.Handled = true;
+            }
+        }
     }
 
     private async void ImportButton_Click(object sender, RoutedEventArgs e)
@@ -5329,7 +5582,7 @@ public sealed partial class ShelfWindow : Window
         }
         else
         {
-            foreach (var ext in LibraryService.SupportedExtensions) picker.FileTypeFilter.Add(ext);
+            foreach (var ext in EbookImportExtensions) picker.FileTypeFilter.Add(ext);
             foreach (var ext in AudiobookImporter.Extensions) picker.FileTypeFilter.Add(ext);
             picker.FileTypeFilter.Add(".zip");
         }
@@ -5349,12 +5602,47 @@ public sealed partial class ShelfWindow : Window
         await ImportPathsAsync([folder.Path], openFirst: false);
     }
 
+    // 1:1 Library.swift:825-835 (booksInside): recursively enumerate ebook files inside a directory, skipping hidden entries
+    private static List<string> EnumerateBooksInsideFolder(string dir)
+    {
+        var found = new List<string>();
+        var stack = new Stack<string>();
+        stack.Push(dir);
+        while (stack.Count > 0)
+        {
+            string cur = stack.Pop();
+            try
+            {
+                foreach (var sub in Directory.EnumerateDirectories(cur))
+                {
+                    string dname = Path.GetFileName(sub);
+                    if (!string.IsNullOrEmpty(dname) && !dname.StartsWith('.'))
+                        stack.Push(sub);
+                }
+                foreach (var f in Directory.EnumerateFiles(cur))
+                {
+                    string fname = Path.GetFileName(f);
+                    if (string.IsNullOrEmpty(fname) || fname.StartsWith('.')) continue;
+                    if (EbookImportExtensions.Contains(Path.GetExtension(f)))
+                        found.Add(f);
+                }
+            }
+            catch { }
+        }
+        found.Sort(StringComparer.OrdinalIgnoreCase);
+        return found;
+    }
+
     public async Task ImportPathsAsync(IReadOnlyList<string> paths, bool openFirst, string? targetCollectionId = null)
     {
         string? effectiveColId = targetCollectionId
             ?? (_activeFilter.StartsWith("col:", StringComparison.Ordinal) ? _activeFilter[4..] : null);
 
-        var existingIds = _keptBooks.Select(b => b.Id).ToHashSet(StringComparer.Ordinal);
+        // #23: only already-downloaded real shelf books count as duplicates; cloud placeholders & paper records upgrade to "✓ 已导入"
+        var existingIds = _keptBooks
+            .Where(b => b.Available && !b.Record)
+            .Select(b => b.Id)
+            .ToHashSet(StringComparer.Ordinal);
         var imported = new List<BookSummary>();
         var duplicates = new List<BookSummary>();
         var results = new List<(string Name, string Status, bool IsError, BookSummary? Book)>();
@@ -5370,29 +5658,54 @@ public sealed partial class ShelfWindow : Window
         }
         if (snapshotPaths.Length == paths.Count) return;
 
-        var audioPaths = paths.Where(AudiobookImporter.IsAudiobookOrArchivePath).ToArray();
-        if (audioPaths.Length > 0)
+        var ebookFiles = new List<string>();
+        var audioBatches = new List<string[]>();
+        var looseAudioTracks = new List<string>();
+
+        foreach (var raw in paths)
         {
-            try
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            if (string.Equals(Path.GetExtension(raw), ".yuyue", StringComparison.OrdinalIgnoreCase)) continue;
+
+            if (Directory.Exists(raw))
             {
-                BookSummary? audioBook = RootGrid.XamlRoot is not null && !openFirst
-                    ? await AudiobookImporter.ShowImportSheetAsync(this, RootGrid.XamlRoot, _library, audioPaths)
-                    : await AudiobookImporter.ImportFilesAsync(_library, audioPaths);
-                if (audioBook is not null)
+                var booksInside = EnumerateBooksInsideFolder(raw);
+                if (booksInside.Count > 0)
                 {
-                    if (!string.IsNullOrEmpty(effectiveColId))
-                        _library.SetInCollection(effectiveColId, audioBook.Id, true);
-                    imported.Add(audioBook);
-                    results.Add((audioBook.Title, "✓ 已导入有声书", false, audioBook));
+                    ebookFiles.AddRange(booksInside);
                 }
+                else if (AudiobookImporter.IsAudiobookOrArchivePath(raw))
+                {
+                    audioBatches.Add([raw]);
+                }
+                continue;
             }
-            catch (Exception ex) { results.Add(("有声书", ex.Message, true, null)); }
+
+            if (!File.Exists(raw)) continue;
+            string ext = Path.GetExtension(raw).ToLowerInvariant();
+            if (EbookImportExtensions.Contains(ext))
+            {
+                ebookFiles.Add(raw);
+            }
+            else if (ext is ".m4b" or ".zip" || AudiobookImporter.DrmExtensions.Contains(ext))
+            {
+                // Each .m4b or .zip archive is its own standalone audiobook
+                audioBatches.Add([raw]);
+            }
+            else if (AudiobookImporter.Extensions.Contains(ext))
+            {
+                looseAudioTracks.Add(raw);
+            }
         }
 
-        foreach (var path in paths)
+        if (looseAudioTracks.Count > 0)
         {
-            var ext = Path.GetExtension(path).ToLowerInvariant();
-            if (!LibraryService.SupportedExtensions.Contains(ext)) continue;
+            audioBatches.Add(looseAudioTracks.ToArray());
+        }
+
+        // Import ebooks first so simultaneous ebook + audiobook drops auto-pair cleanly
+        foreach (var path in ebookFiles)
+        {
             string fname = Path.GetFileName(path);
             try
             {
@@ -5406,11 +5719,41 @@ public sealed partial class ShelfWindow : Window
                 }
                 else
                 {
+                    existingIds.Add(book.Id);
                     imported.Add(book);
                     results.Add((book.Title, "✓ 已导入", false, book));
                 }
             }
             catch (Exception ex) { results.Add((fname, ex.Message, true, null)); }
+        }
+
+        bool useInteractiveAudioSheet = audioBatches.Count == 1 && ebookFiles.Count == 0 && RootGrid.XamlRoot is not null && !openFirst;
+        foreach (var batch in audioBatches)
+        {
+            string label = batch.Length == 1 ? Path.GetFileName(batch[0]) : "有声书";
+            try
+            {
+                BookSummary? audioBook = useInteractiveAudioSheet
+                    ? await AudiobookImporter.ShowImportSheetAsync(this, RootGrid.XamlRoot!, _library, batch)
+                    : await AudiobookImporter.ImportFilesAsync(_library, batch);
+                if (audioBook is not null)
+                {
+                    if (!string.IsNullOrEmpty(effectiveColId))
+                        _library.SetInCollection(effectiveColId, audioBook.Id, true);
+                    if (existingIds.Contains(audioBook.Id))
+                    {
+                        duplicates.Add(audioBook);
+                        results.Add((audioBook.Title, "已在书架里", false, audioBook));
+                    }
+                    else
+                    {
+                        existingIds.Add(audioBook.Id);
+                        imported.Add(audioBook);
+                        results.Add((audioBook.Title, "✓ 已导入有声书", false, audioBook));
+                    }
+                }
+            }
+            catch (Exception ex) { results.Add((label, ex.Message, true, null)); }
         }
 
         RefreshBooks();

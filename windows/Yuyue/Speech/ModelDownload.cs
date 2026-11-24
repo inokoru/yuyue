@@ -107,11 +107,7 @@ public static class ModelDownload
             long existing = new FileInfo(partFile).Length;
             if (expectedBytes > 0 && existing >= expectedBytes)
             {
-                bool hasDigest = !string.IsNullOrEmpty(expectedBlake3);
-                bool valid = hasDigest
-                    ? await MatchesDigestAsync(partFile, expectedBlake3, ct)
-                    : (existing == expectedBytes);
-                if (valid)
+                if (await MatchesDigestAsync(partFile, expectedBlake3, expectedBytes, ct))
                 {
                     onBytes(existing, existing);
                     return;
@@ -134,7 +130,7 @@ public static class ModelDownload
                 {
                     await StreamOneSourceAsync(url, partFile, expectedBytes, expectedBlake3, onBytes, ct);
                 }
-                if (await MatchesDigestAsync(partFile, expectedBlake3, ct))
+                if (await MatchesDigestAsync(partFile, expectedBlake3, expectedBytes, ct))
                     return;
                 if (File.Exists(partFile)) File.Delete(partFile);
                 lastError = new InvalidOperationException("文件校验不一致");
@@ -169,6 +165,13 @@ public static class ModelDownload
         }
     }
 
+    private enum RangeFetchOutcome
+    {
+        Ok,
+        RangeNotSatisfiable,
+        MismatchedPartialRestart,
+    }
+
     private static async Task StreamOneSourceAsync(
         string url,
         string partFile,
@@ -178,26 +181,29 @@ public static class ModelDownload
         CancellationToken ct)
     {
         long offset = File.Exists(partFile) ? new FileInfo(partFile).Length : 0;
-        var status = await FetchRangeAsync(url, partFile, offset, expectedBytes, onBytes, ct);
-        if (status == HttpStatusCode.RequestedRangeNotSatisfiable)
+        var outcome = await FetchRangeAsync(url, partFile, offset, expectedBytes, onBytes, ct);
+        if (outcome == RangeFetchOutcome.RangeNotSatisfiable)
         {
-            bool hasDigest = !string.IsNullOrEmpty(expectedBlake3);
-            bool looksComplete = hasDigest
-                ? await MatchesDigestAsync(partFile, expectedBlake3, ct)
-                : (expectedBytes > 0 && offset == expectedBytes);
-            if (offset > 0 && looksComplete)
+            if (offset > 0 && await MatchesDigestAsync(partFile, expectedBlake3, expectedBytes, ct))
             {
                 onBytes(offset, offset);
                 return;
             }
             if (File.Exists(partFile)) File.Delete(partFile);
             var retry = await FetchRangeAsync(url, partFile, 0, expectedBytes, onBytes, ct);
-            if ((int)retry < 200 || (int)retry >= 300)
-                throw new HttpRequestException($"HTTP {(int)retry}");
+            if (retry != RangeFetchOutcome.Ok)
+                throw new HttpRequestException("下载服务器返回无效的分片响应");
+        }
+        else if (outcome == RangeFetchOutcome.MismatchedPartialRestart)
+        {
+            if (File.Exists(partFile)) File.Delete(partFile);
+            var retry = await FetchRangeAsync(url, partFile, 0, expectedBytes, onBytes, ct);
+            if (retry != RangeFetchOutcome.Ok)
+                throw new HttpRequestException("下载服务器返回不匹配的 HTTP 206 Content-Range");
         }
     }
 
-    private static async Task<HttpStatusCode> FetchRangeAsync(
+    private static async Task<RangeFetchOutcome> FetchRangeAsync(
         string url,
         string partFile,
         long offset,
@@ -208,15 +214,31 @@ public static class ModelDownload
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         if (offset > 0)
             req.Headers.Range = new RangeHeaderValue(offset, null);
+        else
+            req.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
 
         using var headCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         headCts.CancelAfter(RequestStallTimeout);
         using var resp = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, headCts.Token);
         if (resp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
-            return resp.StatusCode;
+            return RangeFetchOutcome.RangeNotSatisfiable;
         resp.EnsureSuccessStatusCode();
 
-        bool isPartial = resp.StatusCode == HttpStatusCode.PartialContent && offset > 0;
+        bool isPartial = resp.StatusCode == HttpStatusCode.PartialContent;
+        if (isPartial)
+        {
+            long? rangeStart = resp.Content.Headers.ContentRange?.From ?? TryParseContentRangeStart(resp);
+            bool validResume = offset > 0
+                && File.Exists(partFile)
+                && new FileInfo(partFile).Length == offset
+                && rangeStart == offset;
+            if (!validResume)
+            {
+                try { if (File.Exists(partFile)) File.Delete(partFile); } catch { }
+                return RangeFetchOutcome.MismatchedPartialRestart;
+            }
+        }
+
         long? contentLen = resp.Content.Headers.ContentLength;
         long total = isPartial
             ? (resp.Content.Headers.ContentRange?.Length ?? (contentLen is > 0 ? offset + contentLen.Value : Math.Max(expectedBytes, offset)))
@@ -252,13 +274,30 @@ public static class ModelDownload
             }
         }
         onBytes(done, Math.Max(total, done));
-        return resp.StatusCode;
+        return RangeFetchOutcome.Ok;
     }
 
-    private static async Task<bool> MatchesDigestAsync(string path, string? expectedBlake3, CancellationToken ct)
+    private static long? TryParseContentRangeStart(HttpResponseMessage resp)
     {
-        if (string.IsNullOrEmpty(expectedBlake3)) return true;
+        if (!resp.Content.Headers.TryGetValues("Content-Range", out var vals))
+            return null;
+        foreach (string raw in vals)
+        {
+            string s = raw.Trim();
+            if (!s.StartsWith("bytes", StringComparison.OrdinalIgnoreCase)) continue;
+            string rest = s[5..].Trim();
+            int dash = rest.IndexOf('-');
+            if (dash > 0 && long.TryParse(rest[..dash].Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out long from))
+                return from;
+        }
+        return null;
+    }
+
+    internal static async Task<bool> MatchesDigestAsync(string path, string? expectedBlake3, long expectedBytes = 0, CancellationToken ct = default)
+    {
         if (!File.Exists(path)) return false;
+        if (expectedBytes > 0 && new FileInfo(path).Length != expectedBytes) return false;
+        if (string.IsNullOrEmpty(expectedBlake3)) return true;
         string actual = await Task.Run(() => YuyueCoreMethods.FileDigest(path), ct);
         return string.Equals(actual, expectedBlake3, StringComparison.OrdinalIgnoreCase);
     }

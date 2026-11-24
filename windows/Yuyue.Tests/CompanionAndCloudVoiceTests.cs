@@ -158,4 +158,77 @@ public sealed class CompanionAndCloudVoiceTests : IDisposable
             EdgeTtsClient.FormatVoiceName("zh-CN-liaoning-XiaobeiNeural"));
         Assert.Equal(22, CloudVoiceService.EdgeBuiltinVoices.Length);
     }
+
+    [Fact]
+    public void CompanionClient_QaCacheSerializesAppleCamelCaseSchemaAndReadsLegacyWindowsSchema()
+    {
+        var sample = new CompanionClient.CompanionAnswer(
+            Text: "宝玉初见黛玉便觉得眼熟 [1]。",
+            Sources: [new CompanionClient.CompanionSource(1, 2, 8, "这个妹妹我曾见过的", Later: false, Chapter: "第三回")],
+            NotInRead: false,
+            NextQuestions: ["为什么觉得眼熟？"],
+            ProviderLabel: "OpenRouter · gpt-5-mini");
+
+        string json = CompanionClient.SerializeUpdatedQaCacheJson(null, "q1", sample);
+        using (var doc = JsonDocument.Parse(json))
+        {
+            var q1 = doc.RootElement.GetProperty("q1");
+            Assert.Equal("宝玉初见黛玉便觉得眼熟 [1]。", q1.GetProperty("text").GetString());
+            Assert.False(q1.GetProperty("notYet").GetBoolean());
+            Assert.Equal("OpenRouter · gpt-5-mini", q1.GetProperty("label").GetString());
+            var s1 = q1.GetProperty("sources").GetProperty("1");
+            Assert.Equal(2u, s1.GetProperty("section").GetUInt32());
+            Assert.Equal(8u, s1.GetProperty("sentence").GetUInt32());
+            Assert.Equal("第三回", s1.GetProperty("chapter").GetString());
+            Assert.Equal("这个妹妹我曾见过的", s1.GetProperty("quote").GetString());
+        }
+
+        var roundTrip = CompanionClient.ParseCachedQaJson(json, "q1");
+        Assert.NotNull(roundTrip);
+        Assert.Equal(sample.Text, roundTrip!.Text);
+        Assert.Single(roundTrip.Sources);
+        Assert.Equal("第三回", roundTrip.Sources[0].Chapter);
+
+        // Also reads legacy Windows PascalCase array schema seamlessly
+        const string legacyJson = """
+        {
+          "legacy_q": {
+            "Text": "旧缓存回答 [2]",
+            "Sources": [{ "Index": 2, "Section": 1, "Sentence": 4, "Snippet": "原文片段", "Later": true }],
+            "NotInRead": false,
+            "Next": ["后续问题"],
+            "Label": "DeepSeek"
+          }
+        }
+        """;
+        var legacy = CompanionClient.ParseCachedQaJson(legacyJson, "legacy_q");
+        Assert.NotNull(legacy);
+        Assert.Equal("旧缓存回答 [2]", legacy!.Text);
+        Assert.Single(legacy.Sources);
+        Assert.Equal(2, legacy.Sources[0].Index);
+        Assert.True(legacy.Sources[0].Later);
+    }
+
+    [Fact]
+    public void CloudVoiceService_BaiduFreeVoicesMp3StrippingAndXmlSanitization()
+    {
+        Assert.Equal(3, CloudVoiceService.FreeBuiltinVoices.Length);
+        Assert.Contains(CloudVoiceService.FreeBuiltinVoices, v => v.Id == "zh_baidu");
+        Assert.Contains(CloudVoiceService.FreeBuiltinVoices, v => v.Id == "en_us");
+        Assert.Contains(CloudVoiceService.FreeBuiltinVoices, v => v.Id == "en_uk");
+
+        // EscapeXml strips illegal XML 1.0 control chars and escapes quotes/entities
+        string dirty = "A\u0000B\u0007C\u001FD & <tag attr=\"1\" s='2'>";
+        Assert.Equal("ABCD &amp; &lt;tag attr=&quot;1&quot; s=&apos;2&apos;&gt;", CloudVoiceService.EscapeXml(dirty));
+
+        // CombineMp3Chunks strips leading ID3v2 (10 + 4 bytes) and trailing ID3v1 (128 bytes "TAG...")
+        byte[] payload1 = [0x11, 0x22, 0x33, 0x44];
+        byte[] id3v2 = [0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0xAA, 0xBB, 0xCC, 0xDD];
+        byte[] id3v1 = new byte[128];
+        id3v1[0] = (byte)'T'; id3v1[1] = (byte)'A'; id3v1[2] = (byte)'G';
+        byte[] chunk1 = [.. id3v2, .. payload1, .. id3v1];
+        byte[] chunk2 = [.. id3v2, 0x55, 0x66];
+        byte[] combined = CloudVoiceService.CombineMp3Chunks([chunk1, chunk2]);
+        Assert.Equal(new byte[] { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66 }, combined);
+    }
 }

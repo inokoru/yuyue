@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Microsoft.UI.Xaml;
 using Yuyue.Audiobook;
 using Yuyue.Core;
@@ -26,7 +27,28 @@ public partial class App : Application
     private Windows.UI.ViewManagement.UISettings? _uiSettings;
     private object? _activeAudioClaimant;
     private Action? _pauseActiveAudio;
+    private readonly ConditionalWeakTable<object, object> _claimOwners = new();
     private bool _exitingApp;
+
+    /// <summary>
+    /// Binds a child audio engine (such as PodcastWorkspaceBuilder's internal TTS player) to its owning surface
+    /// so internal TTS synthesis/playback does not self-abort its own owner's audio claim.
+    /// </summary>
+    public void BindAudioClaimOwner(object child, object owner)
+    {
+        if (child is null || owner is null || ReferenceEquals(child, owner)) return;
+        _claimOwners.AddOrUpdate(child, owner);
+    }
+
+    private object NormalizeClaimant(object claimant)
+    {
+        object cur = claimant;
+        for (int i = 0; i < 4 && _claimOwners.TryGetValue(cur, out var owner) && !ReferenceEquals(cur, owner); i++)
+        {
+            cur = owner;
+        }
+        return cur;
+    }
 
     /// <summary>
     /// 1:1 <c>NowPlaying.swift</c> (<c>yyAudioClaimed</c>): whenever any reader, PDF, audiobook, or podcast engine
@@ -34,12 +56,41 @@ public partial class App : Application
     /// </summary>
     public void ClaimAudioPlayback(object claimant, Action pauseCallback)
     {
-        if (_activeAudioClaimant is not null && !ReferenceEquals(_activeAudioClaimant, claimant))
+        object normClaimant = NormalizeClaimant(claimant);
+        object? normActive = _activeAudioClaimant is not null ? NormalizeClaimant(_activeAudioClaimant) : null;
+        if (normActive is not null && !ReferenceEquals(normActive, normClaimant))
         {
             try { _pauseActiveAudio?.Invoke(); } catch { }
         }
-        _activeAudioClaimant = claimant;
-        _pauseActiveAudio = pauseCallback;
+        if (!ReferenceEquals(normActive, normClaimant) || ReferenceEquals(claimant, normClaimant))
+        {
+            _pauseActiveAudio = pauseCallback;
+        }
+        _activeAudioClaimant = normClaimant;
+    }
+
+    /// <summary>
+    /// Closes any open reader, PDF, audiobook, or podcast window for a deleted or record-only book (#26).
+    /// </summary>
+    public void CloseBookWindows(string bookId)
+    {
+        if (string.IsNullOrEmpty(bookId)) return;
+        if (_readerWindows.Remove(bookId, out var rwin))
+        {
+            try { rwin.Close(); } catch { }
+        }
+        if (_pdfWindows.Remove(bookId, out var pwin))
+        {
+            try { pwin.Close(); } catch { }
+        }
+        if (_audioWindows.Remove(bookId, out var awin))
+        {
+            try { awin.Close(); } catch { }
+        }
+        if (_podcastWindows.Remove(bookId, out var podWin))
+        {
+            try { podWin.Close(); } catch { }
+        }
     }
 
     public App()

@@ -449,14 +449,19 @@ public static class SnapshotAndConflictDialogs
         await dlgRef.ShowAsync();
     }
 
-    private static (string Prefix, string MidA, string Suffix, string MidB) ComputeDiffSlices(string a, string b)
+    internal static (string Prefix, string MidA, string Suffix, string MidB) ComputeDiffSlices(string a, string b)
     {
         int pre = 0;
         int minLen = Math.Min(a.Length, b.Length);
         while (pre < minLen && a[pre] == b[pre]) pre++;
+        // Never split between a UTF-16 high surrogate and low surrogate
+        if (pre > 0 && (char.IsHighSurrogate(a[pre - 1]) || char.IsHighSurrogate(b[pre - 1])))
+            pre--;
 
         int suf = 0;
         while (suf < minLen - pre && a[a.Length - 1 - suf] == b[b.Length - 1 - suf]) suf++;
+        if (suf > 0 && (char.IsLowSurrogate(a[a.Length - suf]) || char.IsLowSurrogate(b[b.Length - suf])))
+            suf--;
 
         string prefix = a[..pre];
         string suffix = suf > 0 ? a[(a.Length - suf)..] : "";

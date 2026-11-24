@@ -36,6 +36,7 @@ public sealed partial class SettingsWindow : Window
     // 书伴页状态
     private string _focusedCompanionId;
     private bool _companionPickingModel;
+    private readonly HashSet<string> _newlyAddedCompanionIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, IReadOnlyList<string>> _cachedCompanionModels = new();
     private Dictionary<string, IReadOnlyList<string>> _liveLocalCompanions = new();
     private bool _localCompanionProbeStarted;
@@ -46,7 +47,7 @@ public sealed partial class SettingsWindow : Window
     private bool _snapNotes = true;
     private bool _snapWords = true;
     private bool _snapSettings = true;
-    private bool _snapFiles = true;
+    private bool _snapFiles = false;
 
     // 最近修改记录与 1.8s 自动消隐保存提示（对齐 MacSettingsHistory.swift：持久化 + 10s 折叠 + 撤销/重做 + 分类筛选 + 跳转）
     private readonly SettingsHistoryStore _history;
@@ -85,12 +86,16 @@ public sealed partial class SettingsWindow : Window
         _library.Kokoro.StateChanged += OnLiveVoiceStateChanged;
         _library.LiveVoice.StateChanged += OnLiveVoiceStateChanged;
         _library.Fonts.Changed += OnFontsChanged;
+        _library.Sync.StatusChanged += OnSyncStatusChanged;
+        _library.Usage.Changed += OnUsageChanged;
         Closed += (_, _) =>
         {
             _flashTimer?.Stop();
             _library.Kokoro.StateChanged -= OnLiveVoiceStateChanged;
             _library.LiveVoice.StateChanged -= OnLiveVoiceStateChanged;
             _library.Fonts.Changed -= OnFontsChanged;
+            _library.Sync.StatusChanged -= OnSyncStatusChanged;
+            _library.Usage.Changed -= OnUsageChanged;
         };
 
         ApplyAppearance();
@@ -420,6 +425,24 @@ public sealed partial class SettingsWindow : Window
         DispatcherQueue.TryEnqueue(() =>
         {
             if (_activePage == "reading") { RenderDynamicPage("reading"); RenderInspector("reading"); }
+        });
+    }
+
+    private void OnSyncStatusChanged()
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_activePage == "sync" && !_editingWebDav && !_editingGDrive)
+                RenderDynamicPage("sync");
+        });
+    }
+
+    private void OnUsageChanged()
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_activePage == "companion")
+                RenderDynamicPage("companion");
         });
     }
 
@@ -790,26 +813,28 @@ public sealed partial class SettingsWindow : Window
                         "notoserif" => "思源宋体",
                         "notosans" => "思源黑体",
                         "wenkai" => "霞鹜文楷",
+                        _ when rs.FontFace.StartsWith("file:", StringComparison.OrdinalIgnoreCase) => _library.Fonts.GetFontFileDisplayName(rs.FontFace[5..]),
+                        _ when rs.FontFace.StartsWith("local:", StringComparison.OrdinalIgnoreCase) => FontShelfService.CleanRegistryFontFamilyName(rs.FontFace[6..]),
+                        _ when rs.FontFace.StartsWith("sys:", StringComparison.OrdinalIgnoreCase) => FontShelfService.CleanRegistryFontFamilyName(rs.FontFace[4..]),
                         _ => rs.FontFace,
                     }
                     : rs.Font switch { Font.Serif => "宋体", Font.Kai => "楷体", Font.WenKai => "霞鹜文楷", Font.Sans => "黑体", _ => "系统" };
                 InspectorHost.Children.Add(InspectorHead("样张", $"{paperName} · {fontName} · {(int)Math.Round(rs.FontSize)}"));
 
+                string baseFallbackFam = (rs.Font switch
+                {
+                    Font.Sans => YYFontFamily.Sans,
+                    Font.Kai => YYFontFamily.Kaiti,
+                    Font.WenKai => YYFontFamily.Wenkai,
+                    _ => YYFontFamily.Serif,
+                }).WindowsFamily();
                 string fam = !string.IsNullOrEmpty(rs.FontFace)
-                    ? rs.FontFace switch
-                    {
-                        "notoserif" => YYFontFamily.Serif.WindowsFamily(),
-                        "notosans" => YYFontFamily.Sans.WindowsFamily(),
-                        "wenkai" => YYFontFamily.Wenkai.WindowsFamily(),
-                        _ => $"{rs.FontFace}, {YYFontFamily.Serif.WindowsFamily()}",
-                    }
-                    : (rs.Font switch
-                    {
-                        Font.Sans => YYFontFamily.Sans,
-                        Font.Kai => YYFontFamily.Kaiti,
-                        Font.WenKai => YYFontFamily.Wenkai,
-                        _ => YYFontFamily.Serif,
-                    }).WindowsFamily();
+                    ? _library.Fonts.ResolveXamlFontSource(
+                        rs.FontFace,
+                        rs.FontFace == "notosans" ? YYFontFamily.Sans.WindowsFamily() : baseFallbackFam)
+                    : (rs.Font == Font.WenKai
+                        ? _library.Fonts.ResolveXamlFontSource("wenkai", YYFontFamily.Wenkai.WindowsFamily())
+                        : baseFallbackFam);
                 double samplePt = Math.Round(rs.FontSize * 0.68);
                 double lh = (rs.LineHeight ?? 1.85) * samplePt;
                 string indent = (rs.Indent ?? true) ? "　　" : "";
@@ -1607,7 +1632,7 @@ public sealed partial class SettingsWindow : Window
             ("system", "系统", Font.Sans, null, YYFontFamily.Sans.WindowsFamily()),
             ("serif", "宋体", Font.Serif, null, YYFontFamily.Serif.WindowsFamily()),
             ("kai", "楷体", Font.Kai, null, YYFontFamily.Kaiti.WindowsFamily()),
-            ("wenkai", _library.Fonts.IsDownloading("wenkai") ? "下载中…" : "霞鹜文楷", Font.WenKai, null, YYFontFamily.Wenkai.WindowsFamily()),
+            ("wenkai", _library.Fonts.IsDownloading("wenkai") ? "下载中…" : "霞鹜文楷", Font.WenKai, null, _library.Fonts.ResolveXamlFontSource("wenkai", YYFontFamily.Wenkai.WindowsFamily())),
         };
 
         // Append user-pinned fonts from FontBook (up to 4 extra pinned tiles)
@@ -1617,16 +1642,20 @@ public sealed partial class SettingsWindow : Window
             if (pinId.StartsWith("file:", StringComparison.Ordinal))
             {
                 string fn = pinId[5..];
-                tileEntries.Add((pinId, Path.GetFileNameWithoutExtension(fn), Font.Serif, pinId, YYFontFamily.Serif.WindowsFamily()));
+                string disp = _library.Fonts.GetFontFileDisplayName(fn);
+                string fam = _library.Fonts.ResolveXamlFontSource(pinId, YYFontFamily.Serif.WindowsFamily());
+                tileEntries.Add((pinId, disp, Font.Serif, pinId, fam));
             }
             else if (pinId.StartsWith("sys:", StringComparison.Ordinal))
             {
-                string fam = pinId[4..];
+                string fam = FontShelfService.CleanRegistryFontFamilyName(pinId[4..]);
+                if (string.IsNullOrEmpty(fam)) continue;
                 tileEntries.Add((pinId, fam, Font.Serif, $"local:{fam}", $"{fam}, {YYFontFamily.Serif.WindowsFamily()}"));
             }
             else if (_library.Fonts.Catalog.FirstOrDefault(c => c.Id == pinId) is { } pk)
             {
-                string fam = pk.Kind == FontKind.Song ? YYFontFamily.Serif.WindowsFamily() : YYFontFamily.Sans.WindowsFamily();
+                string fallbackFam = pk.Kind == FontKind.Song ? YYFontFamily.Serif.WindowsFamily() : YYFontFamily.Sans.WindowsFamily();
+                string fam = _library.Fonts.ResolveXamlFontSource(pk.Id, fallbackFam);
                 tileEntries.Add((pinId, _library.Fonts.IsDownloading(pk.Id) ? "下载中…" : pk.Name, pk.Kind == FontKind.Song ? Font.Serif : Font.Sans, pk.Id, fam));
             }
         }
@@ -1907,12 +1936,13 @@ public sealed partial class SettingsWindow : Window
                     var pk = pack;
                     bool inst = _library.Fonts.IsPackInstalled(pk.Id);
                     bool dl = _library.Fonts.IsDownloading(pk.Id);
-                    string previewFam = pk.Id switch
+                    string fallbackPreviewFam = pk.Id switch
                     {
                         "wenkai" => YYFontFamily.Wenkai.WindowsFamily(),
                         "notosans" => YYFontFamily.Sans.WindowsFamily(),
                         _ => YYFontFamily.Serif.WindowsFamily(),
                     };
+                    string previewFam = _library.Fonts.ResolveXamlFontSource(pk.Id, fallbackPreviewFam);
 
                     var card = new StackPanel { Spacing = 6 };
                     var top = new Grid { ColumnSpacing = 10 };
@@ -1929,7 +1959,17 @@ public sealed partial class SettingsWindow : Window
 
                     var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
                     if (pk.Id != "wenkai") acts.Children.Add(MakePinBtn(pk.Id, RebuildFontBook));
-                    if (inst)
+                    if (dl)
+                    {
+                        var cancelBtn = new Button { Style = (Style)Application.Current.Resources["YYIconButtonStyle"], Content = "取消", FontSize = 11, Foreground = ThemeHelper.Brush(p.Danger) };
+                        cancelBtn.Click += (_, _) =>
+                        {
+                            _library.Fonts.CancelDownload(pk.Id);
+                            RebuildFontBook();
+                        };
+                        acts.Children.Add(cancelBtn);
+                    }
+                    else if (inst)
                     {
                         var delBtn = new Button { Style = (Style)Application.Current.Resources["YYIconButtonStyle"], Content = "删除", FontSize = 11, Foreground = ThemeHelper.Brush(p.Danger) };
                         delBtn.Click += (_, _) =>
@@ -2041,7 +2081,7 @@ public sealed partial class SettingsWindow : Window
                 {
                     list.Children.Add(new TextBlock
                     {
-                        Text = "尚未导入本地字体。点击下方按钮可导入任意 .ttf / .otf / .woff2 字体文件。",
+                        Text = "尚未导入本地字体。点击下方按钮可导入任意 .ttf / .otf / .ttc / .woff2 字体文件。",
                         FontSize = 12,
                         Foreground = ThemeHelper.Brush(p.T3),
                         TextWrapping = TextWrapping.Wrap,
@@ -2053,10 +2093,25 @@ public sealed partial class SettingsWindow : Window
                     foreach (var fn in customs)
                     {
                         string fileName = fn;
-                        string baseName = Path.GetFileNameWithoutExtension(fileName);
+                        string dispName = _library.Fonts.GetFontFileDisplayName(fileName);
+                        string? realFam = _library.Fonts.GetFontFileFamily(fileName);
                         string faceKey = $"file:{fileName}";
+                        string previewFam = _library.Fonts.ResolveXamlFontSource(faceKey, YYFontFamily.Serif.WindowsFamily());
 
-                        var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+                        var card = new StackPanel { Spacing = 5 };
+                        var top = new Grid { ColumnSpacing = 8 };
+                        top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                        top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                        var meta = new StackPanel { Spacing = 1 };
+                        meta.Children.Add(new TextBlock { Text = dispName, FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
+                        string subLine = !string.IsNullOrEmpty(realFam) && !string.Equals(realFam, dispName, StringComparison.OrdinalIgnoreCase)
+                            ? $"{realFam} · {fileName}"
+                            : fileName;
+                        meta.Children.Add(new TextBlock { Text = subLine, FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3) });
+                        top.Children.Add(meta);
+
+                        var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
                         acts.Children.Add(MakePinBtn(faceKey, RebuildFontBook));
                         var delBtn = new Button { Style = (Style)Application.Current.Resources["YYIconButtonStyle"], Content = "删除", FontSize = 11, Foreground = ThemeHelper.Brush(p.Danger) };
                         delBtn.Click += (_, _) =>
@@ -2070,13 +2125,35 @@ public sealed partial class SettingsWindow : Window
                         var useBtn = new Button { Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"], Content = "选用", Height = 25, MinHeight = 25, FontSize = 11 };
                         useBtn.Click += (_, _) =>
                         {
-                            updateFn("字体", baseName, s => s with { Font = Font.Serif, FontFace = faceKey });
+                            updateFn("字体", dispName, s => s with { Font = Font.Serif, FontFace = faceKey });
                             dlgRef?.Hide();
                             RenderDynamicPage("reading");
                         };
                         acts.Children.Add(delBtn);
                         acts.Children.Add(useBtn);
-                        list.Children.Add(MakeCard(MakeRow(baseName, fileName, acts, compact: true)));
+                        Grid.SetColumn(acts, 1);
+                        top.Children.Add(acts);
+                        card.Children.Add(top);
+
+                        card.Children.Add(new TextBlock
+                        {
+                            Text = sampleText,
+                            FontFamily = new FontFamily(previewFam),
+                            FontSize = 14,
+                            Foreground = ThemeHelper.Brush(p.T2),
+                            TextTrimming = TextTrimming.CharacterEllipsis,
+                            MaxLines = 1,
+                        });
+
+                        list.Children.Add(new Border
+                        {
+                            CornerRadius = new CornerRadius(10),
+                            Background = ThemeHelper.Brush(p.Card),
+                            BorderBrush = ThemeHelper.Brush(p.Line),
+                            BorderThickness = new Thickness(1),
+                            Padding = new Thickness(12, 8, 12, 8),
+                            Child = card,
+                        });
                     }
                 }
             }
@@ -2085,12 +2162,13 @@ public sealed partial class SettingsWindow : Window
         specimenBox.TextChanged += (_, _) => RebuildFontBook();
         RebuildFontBook();
 
-        var importLocalBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = "+ 导入本地字体文件 (.ttf / .otf / .woff2)…" };
+        var importLocalBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = "+ 导入本地字体文件 (.ttf / .otf / .ttc / .woff2)…" };
         importLocalBtn.Click += async (_, _) =>
         {
             var picker = new FileOpenPicker { ViewMode = PickerViewMode.List };
             picker.FileTypeFilter.Add(".ttf");
             picker.FileTypeFilter.Add(".otf");
+            picker.FileTypeFilter.Add(".ttc");
             picker.FileTypeFilter.Add(".woff2");
             InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
             var f = await picker.PickSingleFileAsync();
@@ -2098,7 +2176,8 @@ public sealed partial class SettingsWindow : Window
             try
             {
                 string fn = _library.Fonts.ImportFontFile(f.Path);
-                updateFn("字体", Path.GetFileNameWithoutExtension(fn), s => s with { FontFace = $"file:{fn}" });
+                string disp = _library.Fonts.GetFontFileDisplayName(fn);
+                updateFn("字体", disp, s => s with { FontFace = $"file:{fn}" });
                 dlgRef?.Hide();
                 RenderDynamicPage("reading");
             }
@@ -3593,11 +3672,24 @@ public sealed partial class SettingsWindow : Window
                 };
                 useLocalBtn.Click += (_, _) =>
                 {
-                    if (!_library.Prefs.ConfiguredAiProviders.Contains(lpid))
+                    bool wasNew = !_library.Prefs.ConfiguredAiProviders.Contains(lpid, StringComparer.OrdinalIgnoreCase);
+                    if (wasNew)
+                    {
                         _library.Prefs.ConfiguredAiProviders.Add(lpid);
+                        _newlyAddedCompanionIds.Add(lpid);
+                    }
                     if (kv.Value.Count > 0) _library.Prefs.AiProviderModels[lpid] = kv.Value[0];
                     _focusedCompanionId = lpid;
-                    _library.SavePrefs();
+                    _companionPickingModel = false;
+                    if (string.IsNullOrWhiteSpace(_library.Prefs.AiProvider) || !_library.Companion.IsConfigured)
+                    {
+                        _newlyAddedCompanionIds.Remove(lpid);
+                        ActivateCompanionProvider(lpid);
+                    }
+                    else
+                    {
+                        _library.SavePrefs();
+                    }
                     RenderDynamicPage("companion");
                     RenderInspector("companion");
                 };
@@ -3608,12 +3700,12 @@ public sealed partial class SettingsWindow : Window
             DynamicPageHost.Children.Add(MakeCard(localFoundRows.ToArray()));
         }
 
-        // 用量（1:1 settings-companion/1.png: big 28px Token 用量 card + separate 省费 card with segmented cap control）
+        // 用量（1:1 MacCompanionSettings.swift CompanionTokenUsageView: 30-day daily bar chart + per-feature breakdown chips）
         var snap = _library.Usage.Snapshot30Days();
         var todayRec = _library.Usage.GetToday();
         DynamicPageHost.Children.Add(MakeHeading("用量"));
 
-        var usageTop = new StackPanel { Spacing = 6, Padding = new Thickness(16, 14, 16, 14) };
+        var usageTop = new StackPanel { Spacing = 8, Padding = new Thickness(16, 14, 16, 14) };
         var usageHead = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         usageHead.Children.Add(new TextBlock { Text = "Token 用量", FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
         usageHead.Children.Add(new TextBlock { Text = "近 30 天", FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Bottom });
@@ -3633,8 +3725,248 @@ public sealed partial class SettingsWindow : Window
             Foreground = ThemeHelper.Brush(p.T3),
         });
 
+        // 30-day daily bar chart
+        if (snap.Days.Count > 0)
+        {
+            const double chartHeight = 84.0;
+            long peak = Math.Max(1, snap.PeakTokens);
+            var dayDetailText = new TextBlock
+            {
+                FontSize = 11,
+                Foreground = ThemeHelper.Brush(p.T2),
+            };
+            var dayDetailBox = new Border
+            {
+                CornerRadius = new CornerRadius(7),
+                Background = ThemeHelper.Brush(p.Inset),
+                Padding = new Thickness(10, 5, 10, 5),
+                Visibility = Visibility.Collapsed,
+                Child = dayDetailText,
+            };
+
+            var chartRow = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 4, 0, 0) };
+            chartRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            chartRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            if (snap.PeakTokens > 0)
+            {
+                var yAxis = new Grid { Height = chartHeight, MinWidth = 34 };
+                yAxis.Children.Add(new TextBlock
+                {
+                    Text = CompanionUsageLedger.FormatCount(snap.PeakTokens),
+                    FontSize = 9.5,
+                    Foreground = ThemeHelper.Brush(p.T3),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Top,
+                });
+                long avgRounded = (long)Math.Round(snap.AverageTokens);
+                if (avgRounded > 0 && avgRounded < snap.PeakTokens * 0.85)
+                {
+                    double avgFrac = 1.0 - Math.Clamp(snap.AverageTokens / peak, 0.1, 0.9);
+                    yAxis.Children.Add(new TextBlock
+                    {
+                        Text = CompanionUsageLedger.FormatCount(avgRounded),
+                        FontSize = 9.5,
+                        Foreground = ThemeHelper.Brush(p.T3),
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        VerticalAlignment = VerticalAlignment.Top,
+                        Margin = new Thickness(0, Math.Round(chartHeight * avgFrac) - 6, 0, 0),
+                    });
+                }
+                yAxis.Children.Add(new TextBlock
+                {
+                    Text = "0",
+                    FontSize = 9.5,
+                    Foreground = ThemeHelper.Brush(p.T3),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Bottom,
+                });
+                chartRow.Children.Add(yAxis);
+            }
+
+            var plotArea = new Grid { Height = chartHeight };
+            plotArea.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), VerticalAlignment = VerticalAlignment.Top });
+            plotArea.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), VerticalAlignment = VerticalAlignment.Bottom });
+            if (snap.PeakTokens > 0 && snap.AverageTokens > 0)
+            {
+                double avgTop = Math.Round(chartHeight * (1.0 - Math.Clamp(snap.AverageTokens / peak, 0.05, 0.95)));
+                plotArea.Children.Add(new Border
+                {
+                    Height = 0.5,
+                    Background = ThemeHelper.Brush(p.Line),
+                    Opacity = 0.65,
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(0, avgTop, 0, 0),
+                });
+            }
+
+            var barsGrid = new Grid { ColumnSpacing = 2.5, Height = chartHeight };
+            var outBrush = ThemeHelper.Brush(tint.Accent);
+            var missBrush = ThemeHelper.Brush(Color.FromArgb((byte)(IsDark ? 150 : 120), tint.Accent.R, tint.Accent.G, tint.Accent.B));
+            var cacheBrush = ThemeHelper.Brush(Color.FromArgb((byte)(IsDark ? 175 : 145), p.Ok.R, p.Ok.G, p.Ok.B));
+            var zeroTickBrush = ThemeHelper.Brush(p.Inset);
+
+            for (int di = 0; di < snap.Days.Count; di++)
+            {
+                barsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                var day = snap.Days[di];
+                long dayTotal = day.TotalTokens;
+
+                var colHost = new Grid
+                {
+                    Background = new SolidColorBrush(Colors.Transparent),
+                    VerticalAlignment = VerticalAlignment.Stretch,
+                };
+
+                if (dayTotal > 0 && snap.PeakTokens > 0)
+                {
+                    double totalH = Math.Max(3.0, chartHeight * ((double)dayTotal / peak));
+                    double outH = totalH * ((double)day.Output / dayTotal);
+                    double missH = totalH * ((double)day.MissInput / dayTotal);
+                    double cacheH = Math.Max(0, totalH - outH - missH);
+
+                    var barStack = new StackPanel
+                    {
+                        Spacing = 0,
+                        VerticalAlignment = VerticalAlignment.Bottom,
+                        CornerRadius = new CornerRadius(2, 2, 0, 0),
+                    };
+                    if (outH >= 0.5) barStack.Children.Add(new Border { Height = outH, Background = outBrush });
+                    if (missH >= 0.5) barStack.Children.Add(new Border { Height = missH, Background = missBrush });
+                    if (cacheH >= 0.5) barStack.Children.Add(new Border { Height = cacheH, Background = cacheBrush });
+                    if (barStack.Children.Count == 0)
+                        barStack.Children.Add(new Border { Height = 3, Background = outBrush });
+
+                    colHost.Children.Add(barStack);
+                    string tip = $"{day.Date} · 总 {dayTotal:N0}" +
+                                 (day.CachedInput > 0 ? $" · 缓存 {day.CachedInput:N0}" : "") +
+                                 $" · 输出 {day.Output:N0} · {day.Requests} 次";
+                    ToolTipService.SetToolTip(colHost, tip);
+                    colHost.PointerEntered += (_, _) =>
+                    {
+                        dayDetailText.Text = tip;
+                        dayDetailBox.Visibility = Visibility.Visible;
+                    };
+                    colHost.PointerPressed += (_, _) =>
+                    {
+                        dayDetailText.Text = tip;
+                        dayDetailBox.Visibility = dayDetailBox.Visibility == Visibility.Visible && dayDetailText.Text == tip
+                            ? Visibility.Collapsed
+                            : Visibility.Visible;
+                    };
+                }
+                else
+                {
+                    colHost.Children.Add(new Border
+                    {
+                        Height = 2,
+                        CornerRadius = new CornerRadius(1),
+                        Background = zeroTickBrush,
+                        VerticalAlignment = VerticalAlignment.Bottom,
+                    });
+                }
+
+                Grid.SetColumn(colHost, di);
+                barsGrid.Children.Add(colHost);
+            }
+
+            barsGrid.PointerExited += (_, _) => dayDetailBox.Visibility = Visibility.Collapsed;
+            plotArea.Children.Add(barsGrid);
+            Grid.SetColumn(plotArea, 1);
+            chartRow.Children.Add(plotArea);
+            usageTop.Children.Add(chartRow);
+
+            // X-axis date labels (start, peak, end)
+            var xAxisRow = new Grid { ColumnSpacing = 8 };
+            xAxisRow.ColumnDefinitions.Add(new ColumnDefinition { Width = snap.PeakTokens > 0 ? new GridLength(34) : new GridLength(0) });
+            xAxisRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var xLabels = new Grid();
+            xLabels.Children.Add(new TextBlock { Text = snap.Days[0].ShortLabel, FontSize = 9.5, Foreground = ThemeHelper.Brush(p.T3), HorizontalAlignment = HorizontalAlignment.Left });
+            if (snap.PeakTokens > 0 && snap.PeakIndex > 3 && snap.PeakIndex < snap.Days.Count - 4)
+            {
+                xLabels.Children.Add(new TextBlock
+                {
+                    Text = $"峰值 {snap.Days[snap.PeakIndex].ShortLabel}",
+                    FontSize = 9.5,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+                    Foreground = ThemeHelper.Brush(tint.Accent),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                });
+            }
+            xLabels.Children.Add(new TextBlock { Text = snap.Days[^1].ShortLabel, FontSize = 9.5, Foreground = ThemeHelper.Brush(p.T3), HorizontalAlignment = HorizontalAlignment.Right });
+            Grid.SetColumn(xLabels, 1);
+            xAxisRow.Children.Add(xLabels);
+            usageTop.Children.Add(xAxisRow);
+            usageTop.Children.Add(dayDetailBox);
+
+            if (snap.TotalTokens > 0)
+            {
+                var legend = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
+                void AddLegendItem(Brush swatch, string label)
+                {
+                    var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
+                    sp.Children.Add(new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(2), Background = swatch, VerticalAlignment = VerticalAlignment.Center });
+                    sp.Children.Add(new TextBlock { Text = label, FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center });
+                    legend.Children.Add(sp);
+                }
+                if (snap.CachedInputTokens > 0) AddLegendItem(cacheBrush, "缓存命中输入");
+                if (snap.MissInputTokens > 0) AddLegendItem(missBrush, "常规输入");
+                if (snap.OutputTokens > 0) AddLegendItem(outBrush, "输出");
+                usageTop.Children.Add(legend);
+            }
+        }
+
+        // Per-feature breakdown chips (书伴问答 / 播客 / 广播剧 / 前情提要 / 翻译整理)
+        var chipsScroll = new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            HorizontalScrollMode = ScrollMode.Auto,
+            VerticalScrollMode = ScrollMode.Disabled,
+            Margin = new Thickness(0, 2, 0, 0),
+        };
+        var chipsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        if (snap.Sources.Count > 0)
+        {
+            foreach (var share in snap.Sources)
+            {
+                int pct = Math.Max(1, (int)Math.Round(share.Share * 100));
+                string srcTitle = CompanionUsageLedger.SourceTitle(share.Source);
+                var chipSp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
+                chipSp.Children.Add(new TextBlock { Text = srcTitle, FontSize = 11, Foreground = ThemeHelper.Brush(p.T2) });
+                chipSp.Children.Add(new TextBlock { Text = $"{pct}%", FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
+                chipSp.Children.Add(new TextBlock { Text = CompanionUsageLedger.FormatCount(share.Tokens), FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3) });
+                chipsRow.Children.Add(new Border
+                {
+                    CornerRadius = new CornerRadius(11),
+                    Background = ThemeHelper.Brush(p.Inset),
+                    Padding = new Thickness(9, 3, 9, 3),
+                    Child = chipSp,
+                });
+            }
+        }
+        else
+        {
+            foreach (string feat in new[] { "书伴问答", "播客", "广播剧认人", "前情提要", "翻译与错字整理" })
+            {
+                chipsRow.Children.Add(new Border
+                {
+                    CornerRadius = new CornerRadius(11),
+                    Background = ThemeHelper.Brush(p.Inset),
+                    Padding = new Thickness(9, 3, 9, 3),
+                    Opacity = 0.72,
+                    Child = new TextBlock { Text = $"{feat} 0%", FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3) },
+                });
+            }
+        }
+        chipsScroll.Content = chipsRow;
+        usageTop.Children.Add(chipsScroll);
+
+        string ttsText = snap.TtsSavedChars > 0
+            ? $"{CompanionUsageLedger.FormatCount(snap.TtsChars)} 字 · 本地缓存省 {CompanionUsageLedger.FormatCount(snap.TtsSavedChars)} 字"
+            : $"{CompanionUsageLedger.FormatCount(snap.TtsChars)} 字";
         var ttsUsageRow = MakeRow("云端朗读 · 近 30 天", null,
-            new TextBlock { Text = $"{CompanionUsageLedger.FormatCount(snap.TtsChars)} 字", FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) },
+            new TextBlock { Text = ttsText, FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) },
             compact: true);
         DynamicPageHost.Children.Add(MakeCard(usageTop, ttsUsageRow));
 
@@ -4063,6 +4395,7 @@ public sealed partial class SettingsWindow : Window
         searchRow.Children.Add(searchBox);
 
         var groupsHost = new StackPanel { Spacing = 16 };
+        string? pickedProviderId = null;
 
         void RebuildGroups(string rawQuery)
         {
@@ -4138,13 +4471,21 @@ public sealed partial class SettingsWindow : Window
                     string pid = pr.Id;
                     btn.Click += (_, _) =>
                     {
-                        if (!_library.Prefs.ConfiguredAiProviders.Contains(pid))
+                        bool wasNew = !_library.Prefs.ConfiguredAiProviders.Contains(pid, StringComparer.OrdinalIgnoreCase);
+                        if (wasNew)
+                        {
                             _library.Prefs.ConfiguredAiProviders.Add(pid);
+                            _newlyAddedCompanionIds.Add(pid);
+                        }
+                        else if (string.IsNullOrWhiteSpace(_library.Prefs.AiProvider) || !_library.Companion.IsConfigured)
+                        {
+                            _newlyAddedCompanionIds.Add(pid);
+                        }
+                        pickedProviderId = pid;
                         _focusedCompanionId = pid;
+                        _companionPickingModel = false;
                         _library.SavePrefs();
                         dlgRef?.Hide();
-                        RenderDynamicPage("companion");
-                        RenderInspector("companion");
                     };
                     Grid.SetRow(btn, i / 3);
                     Grid.SetColumn(btn, i % 3);
@@ -4191,11 +4532,12 @@ public sealed partial class SettingsWindow : Window
             string cid = "custom." + Guid.NewGuid().ToString("N")[..8];
             _library.Prefs.AiCustomProviderNames[cid] = "自定义服务";
             _library.Prefs.ConfiguredAiProviders.Add(cid);
+            _newlyAddedCompanionIds.Add(cid);
+            pickedProviderId = cid;
             _focusedCompanionId = cid;
+            _companionPickingModel = false;
             _library.SavePrefs();
             dlgRef?.Hide();
-            RenderDynamicPage("companion");
-            RenderInspector("companion");
         };
 
         var topPad = new StackPanel
@@ -4218,6 +4560,15 @@ public sealed partial class SettingsWindow : Window
 
         dlgRef = YYChrome.CreateMacSheet(RootGrid.XamlRoot, IsDark, 480, outer);
         await dlgRef.ShowAsync();
+        if (!string.IsNullOrEmpty(pickedProviderId))
+        {
+            _focusedCompanionId = pickedProviderId;
+            _companionPickingModel = false;
+            RenderDynamicPage("companion");
+            RenderInspector("companion");
+            L10n.ApplyTree(DynamicPageHost);
+            L10n.ApplyTree(InspectorHost);
+        }
     }
 
     private void BuildCompanionInspector(YYPalette p, YYTintColors tint)
@@ -4518,7 +4869,8 @@ public sealed partial class SettingsWindow : Window
         headRow.Children.Add(MakeServiceLogoTile(preset.Id, 30));
         var hMeta = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
         hMeta.Children.Add(new TextBlock { Text = ShortProviderTitle(preset.Id, preset.Name), FontSize = 13.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
-        hMeta.Children.Add(new TextBlock { Text = inUse ? "当前使用" : "已添加 · 未设为当前", FontSize = 11, Foreground = ThemeHelper.Brush(inUse ? p.Ok : p.T3) });
+        var hStatusTb = new TextBlock { Text = inUse ? "当前使用" : "已添加 · 未设为当前", FontSize = 11, Foreground = ThemeHelper.Brush(inUse ? p.Ok : p.T3) };
+        hMeta.Children.Add(hStatusTb);
         Grid.SetColumn(hMeta, 1);
         headRow.Children.Add(hMeta);
         InspectorHost.Children.Add(headRow);
@@ -4604,6 +4956,7 @@ public sealed partial class SettingsWindow : Window
                 {
                     string gotKey = await CompanionClient.SignInWithOpenRouterAsync();
                     _library.Secrets.Set("ai.key.openrouter", gotKey);
+                    _newlyAddedCompanionIds.Remove("openrouter");
                     ActivateCompanionProvider("openrouter");
                     RecordChange("OpenRouter", "已登录");
                     RenderDynamicPage("companion");
@@ -4690,9 +5043,38 @@ public sealed partial class SettingsWindow : Window
             string testBase = urlBox.Text.Trim();
             if (string.IsNullOrEmpty(testBase)) testBase = preset.BaseUrl;
             string testModel = GetProviderModel(preset.Id, preset.DefaultModel);
-            var (ok, msg) = await _library.Companion.TestProviderAsync(preset.Id, testBase, testModel, keyBox.Password.Trim());
+            string trimmedKey = keyBox.Password.Trim();
+            if (!string.IsNullOrEmpty(trimmedKey))
+                _library.Secrets.Set($"ai.key.{preset.Id}", trimmedKey);
+            if (!string.IsNullOrEmpty(urlBox.Text.Trim()))
+                _library.Prefs.AiProviderUrls[preset.Id] = urlBox.Text.Trim();
+
+            var (ok, msg) = await _library.Companion.TestProviderAsync(preset.Id, testBase, testModel, trimmedKey);
             sw.Stop();
-            testResult.Text = ok ? $"✓ 正常 · {sw.Elapsed.TotalSeconds:0.1} 秒" : msg;
+            bool autoActivated = false;
+            if (ok && !inUse &&
+                (string.IsNullOrWhiteSpace(_library.Prefs.AiProvider) ||
+                 !_library.Companion.IsConfigured ||
+                 _newlyAddedCompanionIds.Remove(preset.Id)))
+            {
+                ActivateCompanionProvider(preset.Id);
+                inUse = true;
+                useSw.IsOn = true;
+                hStatusTb.Text = "当前使用";
+                hStatusTb.Foreground = ThemeHelper.Brush(p.Ok);
+                autoActivated = true;
+                RecordChange("书伴服务", ShortProviderTitle(preset.Id, preset.Name));
+            }
+            else if (ok)
+            {
+                _newlyAddedCompanionIds.Remove(preset.Id);
+                if (inUse) ActivateCompanionProvider(preset.Id);
+                else _library.SavePrefs();
+            }
+
+            testResult.Text = ok
+                ? (autoActivated ? $"✓ 正常 · {sw.Elapsed.TotalSeconds:0.1} 秒 · 已设为当前服务" : $"✓ 正常 · {sw.Elapsed.TotalSeconds:0.1} 秒")
+                : msg;
             testResult.Foreground = ThemeHelper.Brush(ok ? p.Ok : p.Danger);
             checkBtn.IsEnabled = true;
             RenderDynamicPage("companion");
@@ -5107,6 +5489,26 @@ public sealed partial class SettingsWindow : Window
             editBtn.Click += (_, _) => { _editingWebDav = true; RenderDynamicPage("sync"); };
             DynamicPageHost.Children.Add(MakeCard(MakeRow("WebDAV 服务器", $"{_library.Prefs.WebDavUrl} · {_library.Prefs.WebDavUser}", editBtn, compact: true)));
         }
+        else if (_library.Prefs.SyncMethod == "gdrive")
+        {
+            var gOutBtn = new Button
+            {
+                Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+                Content = "退出",
+                Foreground = ThemeHelper.Brush(p.Danger),
+            };
+            gOutBtn.Click += (_, _) =>
+            {
+                _library.Sync.StopSync();
+                RecordChange("Google 账号", "已退出");
+                App.CurrentApp.NotifyShelfRefresh();
+                RenderDynamicPage("sync");
+            };
+            string gAccountDetail = string.IsNullOrWhiteSpace(_library.Prefs.GoogleEmail)
+                ? "存放于 Google Drive 应用专属目录"
+                : $"{_library.Prefs.GoogleEmail} · 存放于 Google Drive 应用专属目录";
+            DynamicPageHost.Children.Add(MakeCard(MakeRow("Google 账号", gAccountDetail, gOutBtn, compact: true)));
+        }
         else if (_library.Prefs.SyncMethod == "folder" && !string.IsNullOrEmpty(_library.Prefs.SyncLocalFolder))
         {
             var folderBtns = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
@@ -5137,7 +5539,12 @@ public sealed partial class SettingsWindow : Window
         var contentHeading = MakeHeading("同步内容");
         contentHeading.Margin = new Thickness(14, 2, 0, -6);
         DynamicPageHost.Children.Add(contentHeading);
-        string placeName = _library.Prefs.SyncMethod == "webdav" ? "网盘" : "个人云盘";
+        string placeName = _library.Prefs.SyncMethod switch
+        {
+            "webdav" => "网盘",
+            "gdrive" => "Google 云端硬盘",
+            _ => "个人云盘",
+        };
         var filesRowSub = new TextBlock
         {
             Text = $"正在计算书文件大小… · 占用你的{placeName}空间；播客单集体积很小，始终同步",
@@ -5149,7 +5556,13 @@ public sealed partial class SettingsWindow : Window
         var filesRowLeft = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
         filesRowLeft.Children.Add(new TextBlock { Text = "书文件", FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) });
         filesRowLeft.Children.Add(filesRowSub);
-        var filesSw = MakeSwitch(_library.Prefs.SyncFiles, v => { _library.Prefs.SyncFiles = v; _library.SavePrefs(); RecordChange("同步书文件", v ? "开" : "关"); }, enabled: isOn);
+        var filesSw = MakeSwitch(_library.Prefs.SyncFiles, v =>
+        {
+            _library.Prefs.SyncFiles = v;
+            _library.SavePrefs();
+            RecordChange("同步书文件", v ? "开" : "关");
+            if (_library.Sync.IsEnabled) _ = _library.Sync.SyncNowAsync();
+        }, enabled: isOn);
         filesSw.VerticalAlignment = VerticalAlignment.Center;
         var filesRow = new Grid { ColumnSpacing = 12, Padding = new Thickness(16, 4, 16, 4), MinHeight = 36 };
         filesRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -5177,11 +5590,11 @@ public sealed partial class SettingsWindow : Window
         }
 
         var syncContentCard = MakeCard(
-            MakeSyncRow("进度和书签", null, MakeSwitch(_library.Prefs.SyncReading, v => { _library.Prefs.SyncReading = v; _library.SavePrefs(); RecordChange("同步进度和书签", v ? "开" : "关"); }, enabled: isOn)),
-            MakeSyncRow("笔记和生词", null, MakeSwitch(_library.Prefs.SyncNotes, v => { _library.Prefs.SyncNotes = v; _library.SavePrefs(); RecordChange("同步笔记和生词", v ? "开" : "关"); }, enabled: isOn)),
-            MakeSyncRow("设置和替换规则", null, MakeSwitch(_library.Prefs.SyncSettings, v => { _library.Prefs.SyncSettings = v; _library.SavePrefs(); RecordChange("同步设置", v ? "开" : "关"); }, enabled: isOn)),
+            MakeSyncRow("进度和书签", null, MakeSwitch(_library.Prefs.SyncReading, v => { _library.Prefs.SyncReading = v; _library.SavePrefs(); RecordChange("同步进度和书签", v ? "开" : "关"); if (_library.Sync.IsEnabled) _ = _library.Sync.SyncNowAsync(); }, enabled: isOn)),
+            MakeSyncRow("笔记和生词", null, MakeSwitch(_library.Prefs.SyncNotes, v => { _library.Prefs.SyncNotes = v; _library.SavePrefs(); RecordChange("同步笔记和生词", v ? "开" : "关"); if (_library.Sync.IsEnabled) _ = _library.Sync.SyncNowAsync(); }, enabled: isOn)),
+            MakeSyncRow("设置和替换规则", null, MakeSwitch(_library.Prefs.SyncSettings, v => { _library.Prefs.SyncSettings = v; _library.SavePrefs(); RecordChange("同步设置", v ? "开" : "关"); if (_library.Sync.IsEnabled) _ = _library.Sync.SyncNowAsync(); }, enabled: isOn)),
             filesRow,
-            MakeSyncRow("有声书录音", "同步完整音频文件；关闭时仅同步句级对齐信息，其他设备导入同名音频即可直接跟读", MakeSwitch(_library.Prefs.SyncRecordings, v => { _library.Prefs.SyncRecordings = v; _library.SavePrefs(); RecordChange("同步录音", v ? "开" : "关"); }, enabled: isOn)));
+            MakeSyncRow("有声书录音", "同步完整音频文件；关闭时仅同步句级对齐信息，其他设备导入同名音频即可直接跟读", MakeSwitch(_library.Prefs.SyncRecordings, v => { _library.Prefs.SyncRecordings = v; _library.SavePrefs(); RecordChange("同步录音", v ? "开" : "关"); if (_library.Sync.IsEnabled) _ = _library.Sync.SyncNowAsync(); }, enabled: isOn)));
         DynamicPageHost.Children.Add(syncContentCard);
 
         var lockFoot = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(14, -2, 0, 0) };
@@ -5291,13 +5704,21 @@ public sealed partial class SettingsWindow : Window
     {
         // 上半区：连接与目录设置面板（1:1 MacNoteExportSettings.swift:185-695：实时验证、立即发送、保留去重的断开）
         var setupStack = new StackPanel { Spacing = 8 };
+        string initialStatus = _library.Prefs.ExportLastSummary.TryGetValue(_focusedExportTarget, out var lastSum) ? lastSum : "";
         var statusNote = new TextBlock
         {
-            Text = _library.Prefs.ExportLastSummary.TryGetValue(_focusedExportTarget, out var lastSum) ? lastSum : "",
+            Text = initialStatus,
             FontSize = 11,
             Foreground = ThemeHelper.Brush(p.T3),
             TextWrapping = TextWrapping.Wrap,
+            Visibility = string.IsNullOrEmpty(initialStatus) ? Visibility.Collapsed : Visibility.Visible,
         };
+        void SetExportStatus(string msg, Color col)
+        {
+            statusNote.Text = msg;
+            statusNote.Foreground = ThemeHelper.Brush(col);
+            statusNote.Visibility = string.IsNullOrEmpty(msg) ? Visibility.Collapsed : Visibility.Visible;
+        }
 
         switch (_focusedExportTarget)
         {
@@ -5360,10 +5781,9 @@ public sealed partial class SettingsWindow : Window
                 verifyBtn.Click += async (_, _) =>
                 {
                     verifyBtn.IsEnabled = false;
-                    statusNote.Text = "正在校验 Notion Token 与父页面权限…";
+                    SetExportStatus("正在校验 Notion Token 与父页面权限…", p.T3);
                     var (ok, pageTitle, msg) = await _library.NoteExports.VerifyNotionAsync(tkBox.Password, pgBox.Text);
-                    statusNote.Text = msg;
-                    statusNote.Foreground = ThemeHelper.Brush(ok ? p.Ok : p.Danger);
+                    SetExportStatus(msg, ok ? p.Ok : p.Danger);
                     verifyBtn.IsEnabled = true;
                     if (ok)
                     {
@@ -5396,10 +5816,9 @@ public sealed partial class SettingsWindow : Window
                         try
                         {
                             var (bCnt, mCnt) = await _library.NoteExports.ExportToNotionAsync();
-                            statusNote.Text = mCnt > 0 ? $"✓ 已同步 {mCnt} 条笔记（{bCnt} 本书）" : "✓ 所有划线均已同步过，无新增";
-                            statusNote.Foreground = ThemeHelper.Brush(p.Ok);
+                            SetExportStatus(mCnt > 0 ? $"✓ 已同步 {mCnt} 条笔记（{bCnt} 本书）" : "✓ 所有划线均已同步过，已是最新", p.Ok);
                         }
-                        catch (Exception ex) { statusNote.Text = ex.Message; statusNote.Foreground = ThemeHelper.Brush(p.Danger); }
+                        catch (Exception ex) { SetExportStatus(ex.Message, p.Danger); }
                         finally { sendBtn.IsEnabled = true; }
                     };
                     var openAppBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = "在 Notion 中打开目标页面 ↗" };
@@ -5459,8 +5878,7 @@ public sealed partial class SettingsWindow : Window
                     string u = wbBox.Text.Trim();
                     if (!NoteExportService.ValidateFlomoWebhook(u))
                     {
-                        statusNote.Text = "请输入以 https://flomoapp.com/iwh/ 开头的专属 API 地址";
-                        statusNote.Foreground = ThemeHelper.Brush(p.Danger);
+                        SetExportStatus("请输入以 https://flomoapp.com/iwh/ 开头的专属 API 地址", p.Danger);
                         return;
                     }
                     _library.Secrets.Set("export.flomo.url", u);
@@ -5489,10 +5907,9 @@ public sealed partial class SettingsWindow : Window
                         try
                         {
                             var (_, mCnt) = await _library.NoteExports.ExportToFlomoAsync();
-                            statusNote.Text = mCnt > 0 ? $"✓ 已发送 {mCnt} 条卡片到 flomo" : "✓ 没有未发过的新划线";
-                            statusNote.Foreground = ThemeHelper.Brush(p.Ok);
+                            SetExportStatus(mCnt > 0 ? $"✓ 已发送 {mCnt} 条卡片到 flomo" : "✓ 已是最新，没有未发过的新划线", p.Ok);
                         }
-                        catch (Exception ex) { statusNote.Text = ex.Message; statusNote.Foreground = ThemeHelper.Brush(p.Danger); }
+                        catch (Exception ex) { SetExportStatus(ex.Message, p.Danger); }
                         finally { sendBtn.IsEnabled = true; }
                     };
                     var openFlomoBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = "打开 flomo ↗" };
@@ -5514,10 +5931,9 @@ public sealed partial class SettingsWindow : Window
                 verifyBtn.Click += async (_, _) =>
                 {
                     verifyBtn.IsEnabled = false;
-                    statusNote.Text = "正在验证新枝账号…";
+                    SetExportStatus("正在验证新枝账号…", p.T3);
                     var (ok, uName, msg) = await _library.NoteExports.VerifyXinzhiAsync(xzBox.Password);
-                    statusNote.Text = msg;
-                    statusNote.Foreground = ThemeHelper.Brush(ok ? p.Ok : p.Danger);
+                    SetExportStatus(msg, ok ? p.Ok : p.Danger);
                     verifyBtn.IsEnabled = true;
                     if (ok)
                     {
@@ -5547,10 +5963,9 @@ public sealed partial class SettingsWindow : Window
                         try
                         {
                             var (_, mCnt) = await _library.NoteExports.ExportToXinzhiAsync();
-                            statusNote.Text = mCnt > 0 ? $"✓ 已发送 {mCnt} 条笔记到新枝" : "✓ 没有未发过的新划线";
-                            statusNote.Foreground = ThemeHelper.Brush(p.Ok);
+                            SetExportStatus(mCnt > 0 ? $"✓ 已发送 {mCnt} 条笔记到新枝" : "✓ 已是最新，没有未发过的新划线", p.Ok);
                         }
-                        catch (Exception ex) { statusNote.Text = ex.Message; statusNote.Foreground = ThemeHelper.Brush(p.Danger); }
+                        catch (Exception ex) { SetExportStatus(ex.Message, p.Danger); }
                         finally { sendBtn.IsEnabled = true; }
                     };
                     var openXzBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = "打开新枝 ↗" };
@@ -5615,10 +6030,9 @@ public sealed partial class SettingsWindow : Window
                         try
                         {
                             var (bCnt, mCnt) = await _library.NoteExports.ExportToObsidianAsync();
-                            statusNote.Text = $"✓ 已写入 {bCnt} 本书共 {mCnt} 条笔记";
-                            statusNote.Foreground = ThemeHelper.Brush(p.Ok);
+                            SetExportStatus(mCnt > 0 ? $"✓ 已写入 {bCnt} 本书共 {mCnt} 条笔记" : "✓ 已是最新", p.Ok);
                         }
-                        catch (Exception ex) { statusNote.Text = ex.Message; statusNote.Foreground = ThemeHelper.Brush(p.Danger); }
+                        catch (Exception ex) { SetExportStatus(ex.Message, p.Danger); }
                     };
                     var openObsBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = "在 Obsidian 中打开 ↗" };
                     openObsBtn.Click += async (_, _) =>
@@ -5642,8 +6056,7 @@ public sealed partial class SettingsWindow : Window
                 break;
             }
         }
-        if (!string.IsNullOrEmpty(statusNote.Text))
-            setupStack.Children.Add(statusNote);
+        setupStack.Children.Add(statusNote);
         if (_focusedExportTarget == "obsidian")
         {
             InspectorHost.Children.Add(setupStack);
@@ -6023,18 +6436,29 @@ public sealed partial class SettingsWindow : Window
             Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"],
             Content = "生成快照",
         };
-        makeBtn.Click += (_, _) =>
+        makeBtn.Click += async (_, _) =>
         {
+            makeBtn.IsEnabled = false;
+            importExtBtn.IsEnabled = false;
+            makeBtn.Content = "正在打包快照…";
+            estText.Text = "正在打包快照…";
             try
             {
                 string filePath = Path.Combine(snapDir, $"语阅快照-{DateTime.Now:yyyyMMdd-HHmmss}.yuyue");
                 var parts = new SnapshotParts(_snapProgress, _snapNotes, _snapWords, _snapSettings, _snapFiles);
-                ulong bytes = _library.MakeSnapshot(filePath, parts);
+                ulong bytes = await Task.Run(() => _library.MakeSnapshot(filePath, parts));
                 RecordChange("备份快照", FormatBytes((long)bytes));
                 RenderDynamicPage("data");
                 RenderInspector("data");
             }
-            catch (Exception ex) { _ = ShowInfoDialogAsync("生成快照失败", ex.Message); }
+            catch (Exception ex)
+            {
+                makeBtn.IsEnabled = true;
+                importExtBtn.IsEnabled = true;
+                makeBtn.Content = "生成快照";
+                RefreshEstimate();
+                await ShowInfoDialogAsync("生成快照失败", ex.Message);
+            }
         };
 
         // 1:1 settings-data/1.png: 导入快照… + 生成快照 side-by-side in the snapshot card footer
@@ -6046,7 +6470,7 @@ public sealed partial class SettingsWindow : Window
         actionRow.Children.Add(btnPair);
 
         DynamicPageHost.Children.Add(MakeCard(
-            MakeRow("进度和书签", $"读过 {counts.Books} 本", MakeSwitch(_snapProgress, v => { _snapProgress = v; RefreshEstimate(); }), compact: true),
+            MakeRow("进度和书签", $"读过 {counts.Read} 本", MakeSwitch(_snapProgress, v => { _snapProgress = v; RefreshEstimate(); }), compact: true),
             MakeRow("笔记", $"{counts.Notes} 条", MakeSwitch(_snapNotes, v => { _snapNotes = v; RefreshEstimate(); }), compact: true),
             MakeRow("生词", $"{counts.Words} 个词", MakeSwitch(_snapWords, v => { _snapWords = v; RefreshEstimate(); }), compact: true),
             MakeRow("设置和替换规则", null, MakeSwitch(_snapSettings, v => { _snapSettings = v; RefreshEstimate(); }), compact: true),
@@ -6059,19 +6483,77 @@ public sealed partial class SettingsWindow : Window
         DynamicPageHost.Children.Add(MakeCard(
             MakeRow("导出阅读记录", "导出想读、在读、读完状态与完成日期（CSV），可导入 Goodreads 或 StoryGraph", csvBtn)));
 
-        // 历史快照列表（1:1 MacSettings.swift:1185-1208）
+        // 历史快照列表（1:1 MacSettings.swift:1322-1346：PeekSnapshot 元数据 + 无数量上限 + 导出… + 删除确认）
         var savedSnaps = Directory.GetFiles(snapDir, "*.yuyue")
-            .Select(f => new FileInfo(f))
-            .OrderByDescending(fi => fi.LastWriteTime)
+            .Select(f =>
+            {
+                var fi = new FileInfo(f);
+                SnapshotAbout? about = null;
+                try { about = _library.Core.PeekSnapshot(fi.FullName); } catch { }
+                long sortMs = about?.MadeAt ?? new DateTimeOffset(fi.LastWriteTimeUtc).ToUnixTimeMilliseconds();
+                return (File: fi, About: about, SortMs: sortMs);
+            })
+            .OrderByDescending(x => x.SortMs)
             .ToArray();
 
         if (savedSnaps.Length > 0)
         {
             DynamicPageHost.Children.Add(MakeHeading("历史快照"));
             var snapRows = new List<UIElement>();
-            foreach (var fi in savedSnaps.Take(8))
+            foreach (var item in savedSnaps)
             {
+                var fi = item.File;
+                var about = item.About;
                 string fullPath = fi.FullName;
+
+                DateTime madeLocal = about is not null && about.MadeAt > 0
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(about.MadeAt).LocalDateTime
+                    : fi.LastWriteTime;
+                string whenTitle = madeLocal.Year == DateTime.Now.Year
+                    ? $"{madeLocal.Month} 月 {madeLocal.Day} 日 {madeLocal:HH:mm}"
+                    : $"{madeLocal.Year} 年 {madeLocal.Month} 月 {madeLocal.Day} 日 {madeLocal:HH:mm}";
+
+                string rawDevice = !string.IsNullOrWhiteSpace(about?.DeviceName) ? about!.DeviceName : Environment.MachineName;
+                string devLabel = string.Equals(rawDevice, Environment.MachineName, StringComparison.OrdinalIgnoreCase)
+                    ? $"这台电脑（{rawDevice}）"
+                    : rawDevice;
+                long byteCount = about is not null && about.Bytes > 0 ? (long)about.Bytes : fi.Length;
+                bool hasFiles = about?.Parts.Files == true;
+                string subDetail = about is not null
+                    ? $"{devLabel} · 进度 {about.Counts.Read} 本 · 笔记 {about.Counts.Notes} 条 · {FormatBytes(byteCount)}"
+                    : $"{devLabel} · {FormatBytes(byteCount)}";
+
+                async Task ExportSnapshotAsync()
+                {
+                    var picker = new FileSavePicker
+                    {
+                        SuggestedFileName = Path.GetFileNameWithoutExtension(fullPath),
+                    };
+                    picker.FileTypeChoices.Add("语阅数据快照", [".yuyue"]);
+                    InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+                    var dest = await picker.PickSaveFileAsync();
+                    if (dest is null) return;
+                    await Task.Run(() => File.Copy(fullPath, dest.Path, overwrite: true));
+                    ShowFlashBanner("✓ 已导出快照");
+                }
+
+                async Task ConfirmDeleteSnapshotAsync()
+                {
+                    var confirmDlg = new ContentDialog
+                    {
+                        XamlRoot = RootGrid.XamlRoot,
+                        Title = "删除这份快照？",
+                        Content = $"{whenTitle} 生成的快照文件会从本机删除，当前书库里的书籍和笔记不受影响。",
+                        PrimaryButtonText = "删除",
+                        CloseButtonText = "取消",
+                        DefaultButton = ContentDialogButton.Close,
+                    };
+                    if (await confirmDlg.ShowAsync() != ContentDialogResult.Primary) return;
+                    try { File.Delete(fullPath); } catch { }
+                    RenderDynamicPage("data");
+                    RenderInspector("data");
+                }
+
                 var impBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "导入", Height = 26, MinHeight = 26 };
                 impBtn.Click += async (_, _) =>
                 {
@@ -6081,13 +6563,24 @@ public sealed partial class SettingsWindow : Window
                         RenderInspector("data");
                     }
                 };
+                var expBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "导出…", Height = 26, MinHeight = 26 };
+                expBtn.Click += async (_, _) => await ExportSnapshotAsync();
 
-                var rowEl = MakeRow(fi.LastWriteTime.ToString("M 月 d 日 HH:mm"), $"{Environment.MachineName} · {FormatBytes(fi.Length)}", impBtn, compact: true);
+                var rightActs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+                if (hasFiles)
+                    rightActs.Children.Add(MakeStatusPill("含书文件", tint.Accent));
+                rightActs.Children.Add(impBtn);
+                rightActs.Children.Add(expBtn);
+
+                var rowEl = MakeRow(whenTitle, subDetail, rightActs, compact: true);
                 var ctx = new MenuFlyout();
+                var expMi = new MenuFlyoutItem { Text = "导出…" };
+                expMi.Click += async (_, _) => await ExportSnapshotAsync();
                 var revMi = new MenuFlyoutItem { Text = "在资源管理器中显示" };
                 revMi.Click += (_, _) => Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{fullPath}\"") { UseShellExecute = true });
                 var delMi = new MenuFlyoutItem { Text = "删除…", Foreground = ThemeHelper.Brush(p.Danger) };
-                delMi.Click += (_, _) => { try { File.Delete(fullPath); } catch { } RenderDynamicPage("data"); RenderInspector("data"); };
+                delMi.Click += async (_, _) => await ConfirmDeleteSnapshotAsync();
+                ctx.Items.Add(expMi);
                 ctx.Items.Add(revMi);
                 ctx.Items.Add(new MenuFlyoutSeparator());
                 ctx.Items.Add(delMi);

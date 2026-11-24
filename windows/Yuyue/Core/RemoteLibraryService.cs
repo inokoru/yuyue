@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -33,6 +34,9 @@ public sealed class ShareStreamManifest
 {
     public string SourceId { get; set; } = "";
     public string BookId { get; set; } = "";
+    public bool AutoClear { get; set; }
+    public HashSet<int> PassedFiles { get; set; } = [];
+    public Dictionary<int, long> PassedAtUnixSec { get; set; } = new();
     public List<ShareStreamTrack> Tracks { get; set; } = [];
 }
 
@@ -61,6 +65,10 @@ public sealed class RemoteLibraryService
     private const int HashSliceBytes = 1024 * 1024; // 1 MB head & tail for AudioIdParts
 
     private readonly LibraryService _library;
+    private readonly object _streamGate = new();
+    private readonly Dictionary<(string BookId, int TrackIndex), Task<bool>> _inflightTracks = new();
+    private readonly ConcurrentDictionary<string, Task> _bgStreamLoops = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, int> _wantedTrack = new(StringComparer.Ordinal);
 
     public RemoteLibraryService(LibraryService library)
     {
@@ -88,30 +96,92 @@ public sealed class RemoteLibraryService
         SaveSources(list);
     }
 
-    private HttpClient CreateClient(RemoteSourceConfig src, int timeoutSec = 30)
+    /// <summary>
+    /// Creates an HTTP client supporting HTTP Digest Auth challenges (e.g. Calibre Content Server) via
+    /// <c>PreAuthenticate = false</c> + <see cref="NetworkCredential"/>, while falling back to an explicit
+    /// <c>Basic</c> header if a WebDAV/OPDS server rejects unauthenticated requests without a Digest challenge.
+    /// </summary>
+    private HttpClient CreateClient(RemoteSourceConfig src, int timeoutSec = 30, string? passwordOverride = null)
     {
-        string pwd = _library.Secrets.Get($"source.{src.Id}.password");
-        var handler = new HttpClientHandler();
-        if (!string.IsNullOrEmpty(src.Username) || !string.IsNullOrEmpty(pwd))
+        string pwd = passwordOverride ?? _library.Secrets.Get($"source.{src.Id}.password");
+        var inner = new HttpClientHandler
         {
-            handler.Credentials = new NetworkCredential(src.Username, pwd);
-            handler.PreAuthenticate = true;
+            AutomaticDecompression = DecompressionMethods.All,
+            PreAuthenticate = false,
+        };
+        bool hasCreds = !string.IsNullOrEmpty(src.Username) || !string.IsNullOrEmpty(pwd);
+        if (hasCreds)
+        {
+            inner.Credentials = new NetworkCredential(src.Username, pwd);
         }
-        var client = new HttpClient(handler) { Timeout = System.TimeSpan.FromSeconds(timeoutSec) };
+
+        HttpMessageHandler pipeline = !string.IsNullOrEmpty(src.Username)
+            ? new BasicFallbackAuthHandler(inner, src.Username, pwd)
+            : inner;
+
+        var client = new HttpClient(pipeline, disposeHandler: true)
+        {
+            Timeout = System.TimeSpan.FromSeconds(timeoutSec),
+        };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Yuyue/0.1");
-        if (!string.IsNullOrEmpty(src.Username))
-        {
-            string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{src.Username}:{pwd}"));
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", b64);
-        }
         return client;
     }
 
-    public async Task<(bool Ok, string Message)> ProbeSourceAsync(RemoteSourceConfig src, CancellationToken ct = default)
+    private sealed class BasicFallbackAuthHandler : DelegatingHandler
+    {
+        private readonly string _basicToken;
+
+        public BasicFallbackAuthHandler(HttpMessageHandler innerHandler, string username, string password)
+            : base(innerHandler)
+        {
+            _basicToken = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}"));
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var resp = await base.SendAsync(request, cancellationToken);
+            if (resp.StatusCode is not (HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden) ||
+                request.Headers.Authorization is not null)
+            {
+                return resp;
+            }
+
+            // If server issued a Digest challenge, HttpClientHandler.Credentials already attempted Digest auth;
+            // a 401 here means credentials were rejected — do not clobber with Basic.
+            bool isDigest = resp.Headers.WwwAuthenticate.Any(h =>
+                string.Equals(h.Scheme, "Digest", StringComparison.OrdinalIgnoreCase));
+            if (isDigest)
+                return resp;
+
+            var retryReq = await CloneRequestAsync(request, cancellationToken);
+            retryReq.Headers.Authorization = new AuthenticationHeaderValue("Basic", _basicToken);
+            resp.Dispose();
+            return await base.SendAsync(retryReq, cancellationToken);
+        }
+
+        private static async Task<HttpRequestMessage> CloneRequestAsync(HttpRequestMessage req, CancellationToken ct)
+        {
+            var clone = new HttpRequestMessage(req.Method, req.RequestUri) { Version = req.Version };
+            foreach (var h in req.Headers)
+                clone.Headers.TryAddWithoutValidation(h.Key, h.Value);
+            if (req.Content is not null)
+            {
+                byte[] bytes = await req.Content.ReadAsByteArrayAsync(ct);
+                var content = new ByteArrayContent(bytes);
+                foreach (var ch in req.Content.Headers)
+                    content.Headers.TryAddWithoutValidation(ch.Key, ch.Value);
+                clone.Content = content;
+            }
+            return clone;
+        }
+    }
+
+    public async Task<(bool Ok, string Message)> ProbeSourceAsync(
+        RemoteSourceConfig src, CancellationToken ct = default, string? passwordOverride = null)
     {
         try
         {
-            var (items, _, _) = await FetchPageAsync(src, null, ct);
+            var (items, _, _) = await FetchPageAsync(src, null, ct, passwordOverride);
             return (true, $"连接正常（共 {items.Count} 项）");
         }
         catch (Exception ex)
@@ -121,10 +191,10 @@ public sealed class RemoteLibraryService
     }
 
     public async Task<(IReadOnlyList<RemoteEntryItem> Items, string? SearchTemplate, string? NextPageUrl)> FetchPageAsync(
-        RemoteSourceConfig src, string? overrideUrl = null, CancellationToken ct = default)
+        RemoteSourceConfig src, string? overrideUrl = null, CancellationToken ct = default, string? passwordOverride = null)
     {
         string targetUrl = overrideUrl ?? src.Url;
-        using var client = CreateClient(src);
+        using var client = CreateClient(src, passwordOverride: passwordOverride);
 
         if (src.Kind == "webdav")
         {
@@ -199,27 +269,22 @@ public sealed class RemoteLibraryService
                 else if (rel == "search")
                 {
                     if (resolved.Contains("{searchTerms}", StringComparison.Ordinal))
-                        searchTpl = resolved;
-                    else if (type.Contains("opensearchdescription+xml"))
+                    {
+                        if (type.Contains("atom", StringComparison.OrdinalIgnoreCase) || searchTpl is null)
+                            searchTpl = resolved;
+                    }
+                    else if (type.Contains("opensearchdescription"))
                         openSearchXmlUrl = resolved;
                 }
             }
 
-            // Resolve OpenSearch Description XML (1:1 RemoteLibrary.swift)
+            // Resolve OpenSearch Description XML (1:1 RemoteLibrary.swift: prefer type*="atom")
             if (searchTpl is null && openSearchXmlUrl is not null)
             {
                 try
                 {
                     string osXml = await client.GetStringAsync(openSearchXmlUrl, ct);
-                    var osDoc = XDocument.Parse(osXml);
-                    var urlEl = osDoc.Descendants().FirstOrDefault(e =>
-                        e.Name.LocalName.Equals("Url", StringComparison.OrdinalIgnoreCase) &&
-                        (e.Attribute("template")?.Value.Contains("{searchTerms}", StringComparison.Ordinal) == true));
-                    if (urlEl?.Attribute("template")?.Value is string tpl)
-                    {
-                        var osBase = new Uri(openSearchXmlUrl);
-                        searchTpl = UpgradeIfHttps(baseUri, new Uri(osBase, tpl)).ToString();
-                    }
+                    searchTpl = ParseOpenSearchTemplate(osXml, baseUri, new Uri(openSearchXmlUrl));
                 }
                 catch { }
             }
@@ -318,13 +383,47 @@ public sealed class RemoteLibraryService
                 }
             }
 
-            BookSummary imported = AudiobookImporter.Extensions.Contains(ext.ToLowerInvariant())
-                ? await AudiobookImporter.ImportFilesAsync(_library, [dest])
-                : await _library.ImportBookWithExtrasAsync(dest, fallbackTitle: item.Title, fallbackAuthor: item.Author);
+                bool isAudio = AudiobookImporter.Extensions.Contains(ext.ToLowerInvariant());
+                bool isPdf = ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase);
+                byte[]? coverBytes = null;
+                if ((isAudio || isPdf) && !string.IsNullOrWhiteSpace(item.CoverUrl))
+                {
+                    try { coverBytes = await client.GetByteArrayAsync(item.CoverUrl, ct); }
+                    catch { }
+                }
 
-            _library.Prefs.RemoteAcquiredUrls.Add(item.Url);
-            _library.SavePrefs();
-            return imported;
+                BookSummary imported;
+                if (isAudio)
+                {
+                    var pending = await AudiobookImporter.PrepareImportAsync(_library, [dest]);
+                    string stem = Path.GetFileNameWithoutExtension(dest);
+                    string finalTitle = !string.IsNullOrWhiteSpace(item.Title) &&
+                                        (string.IsNullOrWhiteSpace(pending.Title) || string.Equals(pending.Title, stem, StringComparison.OrdinalIgnoreCase))
+                        ? item.Title.Trim()
+                        : pending.Title;
+                    string[] fallbackAuthors = SplitAuthors(item.Author);
+                    string[] finalAuthors = pending.Authors.Length == 0 && fallbackAuthors.Length > 0 ? fallbackAuthors : pending.Authors;
+                    byte[]? finalCover = pending.Cover ?? coverBytes;
+                    var audioImport = new AudioImport(pending.Files.ToArray(), finalTitle, finalAuthors, pending.Marks, finalCover);
+                    imported = await Task.Run(() => _library.Core.ImportAudiobook(audioImport), ct);
+                    var matchedEbook = AudiobookImporter.FindMatchingShelfEbook(_library, finalTitle) ?? pending.MatchedEbook;
+                    if (matchedEbook is not null)
+                    {
+                        try { _library.Core.AudiobookPair(imported.Id, matchedEbook.Id); } catch { }
+                    }
+                }
+                else
+                {
+                    imported = await _library.ImportBookWithExtrasAsync(
+                        dest,
+                        fallbackTitle: item.Title,
+                        fallbackAuthor: item.Author,
+                        fallbackCover: coverBytes);
+                }
+
+                _library.Prefs.RemoteAcquiredUrls.Add(item.Url);
+                _library.SavePrefs();
+                return imported;
         }
         finally
         {
@@ -334,8 +433,9 @@ public sealed class RemoteLibraryService
 
     /// <summary>
     /// 1:1 WebDAV <c>ShareStream</c> ("边下边听"): hashes head 1 MB + tail 1 MB of each WebDAV audio track via
-    /// HTTP Range, calls <see cref="YuyueCore.AudioIdParts"/> + <see cref="YuyueCore.AudiobookReserve"/>,
-    /// downloads the first track so playback starts immediately, and saves a stream manifest for on-demand fetching.
+    /// HTTP Range, calls <see cref="YuyueCore.AudioIdParts"/> + <see cref="YuyueCore.AudiobookReserve"/>
+    /// (with real per-file durations from <see cref="YuyueCore.AudiobookMap"/> when available),
+    /// downloads the first track so playback starts immediately, and starts a sequential background pre-downloader.
     /// </summary>
     public async Task<BookSummary> ReserveWebDavAudiobookStreamAsync(
         RemoteSourceConfig src,
@@ -349,7 +449,6 @@ public sealed class RemoteLibraryService
 
         using var client = CreateClient(src, timeoutSec: 120);
         var parts = new List<AudioIdPart>(audioTracks.Count);
-        var files = new List<AudioFile>(audioTracks.Count);
         var manifestTracks = new List<ShareStreamTrack>(audioTracks.Count);
 
         for (int i = 0; i < audioTracks.Count; i++)
@@ -374,7 +473,6 @@ public sealed class RemoteLibraryService
             parts.Add(new AudioIdPart((ulong)size, headSlice, tailSlice));
             string fileName = Path.GetFileName(new Uri(tr.Url).AbsolutePath);
             fileName = Uri.UnescapeDataString(string.IsNullOrEmpty(fileName) ? $"{tr.Title}.{tr.FormatExt ?? "mp3"}" : fileName);
-            files.Add(new AudioFile(fileName, 0));
             manifestTracks.Add(new ShareStreamTrack
             {
                 Index = i,
@@ -385,75 +483,311 @@ public sealed class RemoteLibraryService
         }
 
         string bookId = _library.Core.AudioIdParts(parts.ToArray());
-        var import = new AudioImport(files.ToArray(), bookTitle, [], [], null);
+        double[] knownDurations = [];
+        try { knownDurations = _library.Core.AudiobookMap(bookId)?.Durations ?? []; } catch { }
+
+        var files = new AudioFile[manifestTracks.Count];
+        for (int i = 0; i < manifestTracks.Count; i++)
+        {
+            double secs = i < knownDurations.Length && knownDurations[i] > 0 ? knownDurations[i] : 0;
+            files[i] = new AudioFile(manifestTracks[i].FileName, secs);
+        }
+
+        var import = new AudioImport(files, bookTitle, [], [], null);
         var summary = _library.Core.AudiobookReserve(bookId, import);
 
-        string manifestDir = Path.Combine(_library.DataDir, "audiobooks", bookId);
-        Directory.CreateDirectory(manifestDir);
-        var manifest = new ShareStreamManifest { SourceId = src.Id, BookId = bookId, Tracks = manifestTracks };
-        File.WriteAllText(Path.Combine(manifestDir, "share-stream.json"), JsonSerializer.Serialize(manifest));
+        lock (_streamGate)
+        {
+            var existing = LoadManifestUnlocked(bookId);
+            var manifest = new ShareStreamManifest
+            {
+                SourceId = src.Id,
+                BookId = bookId,
+                AutoClear = existing?.AutoClear ?? false,
+                PassedFiles = existing?.PassedFiles ?? [],
+                PassedAtUnixSec = existing?.PassedAtUnixSec ?? new(),
+                Tracks = manifestTracks,
+            };
+            SaveManifestUnlocked(manifest);
+        }
 
+        _wantedTrack[bookId] = 0;
         onStatus?.Invoke("正在缓存第 1 轨，马上就能听…");
         await EnsureStreamTrackAsync(bookId, 0, ct);
+        _wantedTrack.TryAdd(bookId, 1);
+        StartBackgroundStreamLoop(bookId);
+
         _library.Prefs.RemoteAcquiredUrls.Add(audioTracks[0].Url);
         _library.SavePrefs();
         return summary;
     }
 
-    public async Task<bool> EnsureStreamTrackAsync(string bookId, int trackIndex, CancellationToken ct = default)
+    public bool GetStreamAutoClear(string bookId)
     {
-        string manifestPath = Path.Combine(_library.DataDir, "audiobooks", bookId, "share-stream.json");
-        if (!File.Exists(manifestPath)) return false;
-        ShareStreamManifest? manifest;
-        try { manifest = JsonSerializer.Deserialize<ShareStreamManifest>(File.ReadAllText(manifestPath)); }
-        catch { return false; }
-        if (manifest is null) return false;
-
-        var track = manifest.Tracks.FirstOrDefault(t => t.Index == trackIndex);
-        var src = GetSources().FirstOrDefault(s => s.Id == manifest.SourceId);
-        if (track is null || src is null) return false;
-
-        string tmpDir = Path.Combine(Path.GetTempPath(), "yuyue-stream-" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(tmpDir);
-        string tmpPath = Path.Combine(tmpDir, track.FileName);
-        try
+        lock (_streamGate)
         {
-            using var client = CreateClient(src, timeoutSec: 180);
-            using var resp = await client.GetAsync(track.Url, HttpCompletionOption.ResponseHeadersRead, ct);
-            resp.EnsureSuccessStatusCode();
-            await using (var remote = await resp.Content.ReadAsStreamAsync(ct))
-            await using (var local = File.Create(tmpPath))
-                await remote.CopyToAsync(local, 65536, ct);
-
-            double secs = 0;
-            try { secs = await AudiobookImporter.ProbeDurationSecondsAsync(tmpPath); } catch { }
-            _library.Core.AudiobookFileArrived(bookId, (uint)trackIndex, tmpPath, secs);
-            track.LastPlayedUnixSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest));
-            PruneOldStreamTracks(manifest);
-            return true;
-        }
-        finally
-        {
-            try { Directory.Delete(tmpDir, recursive: true); } catch { }
+            return LoadManifestUnlocked(bookId)?.AutoClear ?? false;
         }
     }
 
-    /// <summary>Auto-cleans cached stream tracks listened more than 24 hours ago (1:1 ShareStream 24h cleanup).</summary>
-    private void PruneOldStreamTracks(ShareStreamManifest manifest)
+    public void SetStreamAutoClear(string bookId, bool clear)
+    {
+        lock (_streamGate)
+        {
+            var manifest = LoadManifestUnlocked(bookId);
+            if (manifest is null) return;
+            manifest.AutoClear = clear;
+            SaveManifestUnlocked(manifest);
+            if (clear) PruneOldStreamTracksUnlocked(manifest);
+        }
+        if (!clear) StartBackgroundStreamLoop(bookId);
+    }
+
+    public void MarkStreamTrackPassed(string bookId, int trackIdx)
+    {
+        if (trackIdx < 0) return;
+        lock (_streamGate)
+        {
+            var manifest = LoadManifestUnlocked(bookId);
+            if (manifest is null) return;
+            manifest.PassedFiles.Add(trackIdx);
+            if (!manifest.PassedAtUnixSec.ContainsKey(trackIdx))
+                manifest.PassedAtUnixSec[trackIdx] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            SaveManifestUnlocked(manifest);
+            if (manifest.AutoClear)
+                PruneOldStreamTracksUnlocked(manifest);
+        }
+    }
+
+    public async Task<bool> EnsureStreamTrackAsync(string bookId, int trackIndex, CancellationToken ct = default)
+    {
+        _wantedTrack[bookId] = trackIndex;
+        lock (_streamGate)
+        {
+            var manifest = LoadManifestUnlocked(bookId);
+            if (manifest is not null)
+            {
+                // Listening back to an earlier/passed chapter removes it (and later ones) from passedFiles (#38)
+                bool removed = false;
+                foreach (int p in manifest.PassedFiles.Where(k => k >= trackIndex).ToArray())
+                {
+                    manifest.PassedFiles.Remove(p);
+                    manifest.PassedAtUnixSec.Remove(p);
+                    removed = true;
+                }
+                if (removed) SaveManifestUnlocked(manifest);
+            }
+        }
+
+        bool ok = await DownloadOrJoinStreamTrackAsync(bookId, trackIndex, ct);
+        StartBackgroundStreamLoop(bookId);
+        return ok;
+    }
+
+    private Task<bool> DownloadOrJoinStreamTrackAsync(string bookId, int trackIndex, CancellationToken callerCt)
+    {
+        Task<bool> sharedTask;
+        lock (_streamGate)
+        {
+            var key = (bookId, trackIndex);
+            if (!_inflightTracks.TryGetValue(key, out sharedTask!))
+            {
+                sharedTask = DownloadStreamTrackCoreAsync(bookId, trackIndex);
+                _inflightTracks[key] = sharedTask;
+            }
+        }
+        return callerCt.CanBeCanceled ? sharedTask.WaitAsync(callerCt) : sharedTask;
+    }
+
+    private async Task<bool> DownloadStreamTrackCoreAsync(string bookId, int trackIndex)
     {
         try
         {
-            long cutoff = DateTimeOffset.UtcNow.AddHours(-24).ToUnixTimeSeconds();
-            var rec = _library.Core.AudioRecording(manifest.BookId);
-            foreach (var tr in manifest.Tracks)
+            try
             {
-                if (tr.LastPlayedUnixSec > 0 && tr.LastPlayedUnixSec < cutoff && tr.Index < rec.Files.Length)
+                var rec = _library.Core.AudioRecording(bookId);
+                if (trackIndex >= 0 && trackIndex < rec.Files.Length &&
+                    File.Exists(rec.Files[trackIndex].Path) &&
+                    new FileInfo(rec.Files[trackIndex].Path).Length > 0)
                 {
-                    string fp = rec.Files[tr.Index].Path;
-                    if (File.Exists(fp)) try { File.Delete(fp); } catch { }
+                    TouchStreamTrackPlayed(bookId, trackIndex);
+                    return true;
                 }
             }
+            catch { }
+
+            ShareStreamTrack? track;
+            RemoteSourceConfig? src;
+            lock (_streamGate)
+            {
+                var manifest = LoadManifestUnlocked(bookId);
+                if (manifest is null) return false;
+                track = manifest.Tracks.FirstOrDefault(t => t.Index == trackIndex);
+                src = GetSources().FirstOrDefault(s => s.Id == manifest.SourceId);
+            }
+            if (track is null || src is null) return false;
+
+            string tmpDir = Path.Combine(Path.GetTempPath(), "yuyue-stream-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(tmpDir);
+            string tmpPath = Path.Combine(tmpDir, track.FileName);
+            try
+            {
+                using var client = CreateClient(src, timeoutSec: 180);
+                using var resp = await client.GetAsync(track.Url, HttpCompletionOption.ResponseHeadersRead);
+                resp.EnsureSuccessStatusCode();
+                await using (var remote = await resp.Content.ReadAsStreamAsync())
+                await using (var local = File.Create(tmpPath))
+                    await remote.CopyToAsync(local, 65536);
+
+                double secs = 0;
+                try { secs = await AudiobookImporter.ProbeDurationSecondsAsync(tmpPath); } catch { }
+                _library.Core.AudiobookFileArrived(bookId, (uint)trackIndex, tmpPath, secs);
+                TouchStreamTrackPlayed(bookId, trackIndex);
+                return true;
+            }
+            finally
+            {
+                try { Directory.Delete(tmpDir, recursive: true); } catch { }
+            }
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            lock (_streamGate)
+            {
+                _inflightTracks.Remove((bookId, trackIndex));
+            }
+        }
+    }
+
+    private void StartBackgroundStreamLoop(string bookId)
+    {
+        _bgStreamLoops.GetOrAdd(bookId, id => Task.Run(async () =>
+        {
+            try
+            {
+                while (true)
+                {
+                    int? nextIdx = PickNextMissingStreamTrack(id);
+                    if (nextIdx is null) break;
+                    bool ok = await DownloadOrJoinStreamTrackAsync(id, nextIdx.Value, CancellationToken.None);
+                    if (!ok) break;
+                }
+            }
+            finally
+            {
+                _bgStreamLoops.TryRemove(id, out _);
+            }
+        }));
+    }
+
+    private int? PickNextMissingStreamTrack(string bookId)
+    {
+        lock (_streamGate)
+        {
+            var manifest = LoadManifestUnlocked(bookId);
+            if (manifest is null || manifest.Tracks.Count <= 1) return null;
+            AudioRecording rec;
+            try { rec = _library.Core.AudioRecording(bookId); }
+            catch { return null; }
+
+            var skip = manifest.AutoClear ? manifest.PassedFiles : [];
+            var missing = new List<int>();
+            for (int i = 0; i < rec.Files.Length && i < manifest.Tracks.Count; i++)
+            {
+                if (skip.Contains(i)) continue;
+                string fp = rec.Files[i].Path;
+                if (!File.Exists(fp) || new FileInfo(fp).Length == 0)
+                    missing.Add(i);
+            }
+            if (missing.Count == 0) return null;
+
+            int wanted = _wantedTrack.GetValueOrDefault(bookId, 1);
+            foreach (int idx in missing)
+            {
+                if (idx >= wanted) return idx;
+            }
+            // Only wrap around to earlier missing tracks when AutoClear is off (1:1 RemoteLibrary.swift:752-755)
+            return manifest.AutoClear ? null : missing[0];
+        }
+    }
+
+    private void TouchStreamTrackPlayed(string bookId, int trackIndex)
+    {
+        lock (_streamGate)
+        {
+            var manifest = LoadManifestUnlocked(bookId);
+            if (manifest is null) return;
+            var tr = manifest.Tracks.FirstOrDefault(t => t.Index == trackIndex);
+            if (tr is not null)
+                tr.LastPlayedUnixSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            // Chapters strictly before trackIndex have been passed in sequential listening
+            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            for (int i = 0; i < trackIndex; i++)
+            {
+                if (!manifest.PassedAtUnixSec.ContainsKey(i))
+                    manifest.PassedAtUnixSec[i] = now;
+            }
+            SaveManifestUnlocked(manifest);
+            if (manifest.AutoClear)
+                PruneOldStreamTracksUnlocked(manifest);
+        }
+    }
+
+    private string GetManifestPath(string bookId) =>
+        Path.Combine(_library.DataDir, "audiobooks", bookId, "share-stream.json");
+
+    private ShareStreamManifest? LoadManifestUnlocked(string bookId)
+    {
+        string path = GetManifestPath(bookId);
+        if (!File.Exists(path)) return null;
+        try { return JsonSerializer.Deserialize<ShareStreamManifest>(File.ReadAllText(path)); }
+        catch { return null; }
+    }
+
+    private void SaveManifestUnlocked(ShareStreamManifest manifest)
+    {
+        string path = GetManifestPath(manifest.BookId);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        string tmp = path + ".part";
+        File.WriteAllText(tmp, JsonSerializer.Serialize(manifest));
+        File.Move(tmp, path, overwrite: true);
+    }
+
+    /// <summary>Auto-cleans cached stream tracks passed/listened more than 24 hours ago when AutoClear is enabled.</summary>
+    private void PruneOldStreamTracksUnlocked(ShareStreamManifest manifest)
+    {
+        if (!manifest.AutoClear) return;
+        try
+        {
+            long cutoff = DateTimeOffset.UtcNow.AddHours(-24).ToUnixTimeSeconds();
+            int currentWanted = _wantedTrack.GetValueOrDefault(manifest.BookId, int.MaxValue);
+            var rec = _library.Core.AudioRecording(manifest.BookId);
+            bool changed = false;
+            foreach (var tr in manifest.Tracks)
+            {
+                if (tr.Index >= currentWanted || tr.Index >= rec.Files.Length) continue;
+                long ts = manifest.PassedAtUnixSec.TryGetValue(tr.Index, out var passedAt) && passedAt > 0
+                    ? passedAt
+                    : tr.LastPlayedUnixSec;
+                if (ts > 0 && ts <= cutoff)
+                {
+                    string fp = rec.Files[tr.Index].Path;
+                    if (File.Exists(fp))
+                    {
+                        try
+                        {
+                            File.Delete(fp);
+                            if (manifest.PassedFiles.Add(tr.Index)) changed = true;
+                        }
+                        catch { }
+                    }
+                }
+            }
+            if (changed) SaveManifestUnlocked(manifest);
         }
         catch { }
     }
@@ -514,6 +848,8 @@ public sealed class RemoteLibraryService
 
         IReadOnlyList<RemoteEntryItem> currentAudioItems = [];
         string currentFolderTitle = "有声书";
+        CancellationTokenSource? loadCts = null;
+        int loadSeq = 0;
 
         streamAllBtn.Click += async (_, _) =>
         {
@@ -534,26 +870,39 @@ public sealed class RemoteLibraryService
 
         async Task LoadUrlAsync(string? url = null, string? folderTitle = null)
         {
+            var prevCts = loadCts;
+            var myCts = new CancellationTokenSource();
+            loadCts = myCts;
+            int mySeq = ++loadSeq;
+            try { prevCts?.Cancel(); prevCts?.Dispose(); } catch { }
+
             entriesPanel.Children.Clear();
             currentAudioItems = [];
             streamAllBtn.Visibility = Visibility.Collapsed;
             if (!string.IsNullOrWhiteSpace(folderTitle)) currentFolderTitle = folderTitle;
             backBtn.Visibility = navStack.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            searchBox.Visibility = currentSearchTpl is not null ? Visibility.Visible : Visibility.Collapsed;
 
             if (activeSrc is null)
             {
                 statusText.Text = "先在左侧添加一个 Calibre-Web (OPDS) 或 WebDAV 书库源。";
                 return;
             }
-            statusText.Text = $"正在读取 {activeSrc.Name}…";
+
+            var reqSrc = activeSrc;
+            statusText.Text = $"正在读取 {reqSrc.Name}…";
+            statusText.Foreground = ThemeHelper.Brush(p.T3);
             try
             {
-                var (items, searchTpl, nextUrl) = await FetchPageAsync(activeSrc, url);
-                if (searchTpl is not null) currentSearchTpl = searchTpl;
+                var (items, searchTpl, nextUrl) = await FetchPageAsync(reqSrc, url, myCts.Token);
+                if (mySeq != loadSeq || myCts.IsCancellationRequested) return;
+
+                entriesPanel.Children.Clear();
+                if (!string.IsNullOrEmpty(searchTpl)) currentSearchTpl = searchTpl;
                 searchBox.Visibility = currentSearchTpl is not null ? Visibility.Visible : Visibility.Collapsed;
                 statusText.Text = $"共 {items.Count} 项";
 
-                if (activeSrc.Kind == "webdav")
+                if (reqSrc.Kind == "webdav")
                 {
                     var audios = items.Where(i => !i.IsFolder && !string.IsNullOrEmpty(i.FormatExt) && AudiobookImporter.Extensions.Contains("." + i.FormatExt)).ToArray();
                     if (audios.Length > 0)
@@ -563,10 +912,11 @@ public sealed class RemoteLibraryService
                     }
                 }
 
+                var shelfBooks = _library.GetShelfBooks();
                 foreach (var it in items)
                 {
                     var entry = it;
-                    bool alreadyOwned = !entry.IsFolder && _library.Prefs.RemoteAcquiredUrls.Contains(entry.Url);
+                    bool alreadyOwned = IsAlreadyOwned(entry, shelfBooks, _library.Prefs.RemoteAcquiredUrls);
 
                     var row = new Grid { ColumnSpacing = 10, Padding = new Thickness(10, 7, 10, 7) };
                     row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
@@ -603,7 +953,7 @@ public sealed class RemoteLibraryService
                     {
                         if (entry.IsFolder)
                         {
-                            navStack.Push(url ?? activeSrc.Url);
+                            navStack.Push(url ?? reqSrc.Url);
                             await LoadUrlAsync(entry.Url, entry.Title);
                         }
                         else
@@ -612,11 +962,12 @@ public sealed class RemoteLibraryService
                             actBtn.Content = "下载中…";
                             try
                             {
-                                var b = await DownloadAndImportEntryAsync(activeSrc, entry, frac =>
+                                var b = await DownloadAndImportEntryAsync(reqSrc, entry, frac =>
                                 {
                                     actBtn.DispatcherQueue.TryEnqueue(() => actBtn.Content = $"{Math.Round(frac * 100)}%");
                                 });
                                 actBtn.Content = "✓ 已在书架";
+                                actBtn.Style = (Style)Application.Current.Resources["YYPillButtonStyle"];
                                 statusText.Text = $"已导入《{b.Title}》";
                                 onImported();
                             }
@@ -645,13 +996,21 @@ public sealed class RemoteLibraryService
                 {
                     var moreBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], HorizontalAlignment = HorizontalAlignment.Center, Content = "下一页 ›" };
                     string nu = nextUrl!;
-                    moreBtn.Click += async (_, _) => { navStack.Push(url ?? activeSrc.Url); await LoadUrlAsync(nu); };
+                    moreBtn.Click += async (_, _) => { navStack.Push(url ?? reqSrc.Url); await LoadUrlAsync(nu); };
                     entriesPanel.Children.Add(moreBtn);
                 }
             }
+            catch (OperationCanceledException) when (mySeq != loadSeq || myCts.IsCancellationRequested)
+            {
+                // Superseded by a newer navigation/search request
+            }
             catch (Exception ex)
             {
+                if (mySeq != loadSeq) return;
+                // Keep discovered `currentSearchTpl` intact on transient network failure (#24)
+                searchBox.Visibility = currentSearchTpl is not null ? Visibility.Visible : Visibility.Collapsed;
                 statusText.Text = $"读取失败：{ex.Message}";
+                statusText.Foreground = ThemeHelper.Brush(p.Danger);
             }
         }
 
@@ -690,6 +1049,8 @@ public sealed class RemoteLibraryService
                     RemoveSource(src.Id);
                     sources = GetSources();
                     activeSrc = sources.FirstOrDefault();
+                    navStack.Clear();
+                    currentSearchTpl = null;
                     if (editingSourceId == src.Id) editingSourceId = null;
                     RebuildSourcesSidebar();
                     _ = LoadUrlAsync();
@@ -737,35 +1098,30 @@ public sealed class RemoteLibraryService
                 if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out var parsedUri) || string.IsNullOrEmpty(parsedUri.Host))
                 {
                     statusText.Text = "地址格式不正确，请输入完整的 http(s) 链接";
+                    statusText.Foreground = ThemeHelper.Brush(p.Danger);
                     return;
                 }
                 string id = editing?.Id ?? Guid.NewGuid().ToString("N")[..10];
                 string kind = (kindCombo.SelectedItem as ComboBoxItem)?.Tag as string ?? "opds";
                 string nm = string.IsNullOrWhiteSpace(nameIn.Text) ? parsedUri.Host : nameIn.Text.Trim();
                 var cfg = new RemoteSourceConfig(id, nm, kind, parsedUri.ToString(), userIn.Text.Trim());
-                if (!string.IsNullOrEmpty(pwdIn.Password)) _library.Secrets.Set($"source.{id}.password", pwdIn.Password);
 
                 addSrcBtn.IsEnabled = false;
                 statusText.Text = $"正在探测 {nm}…";
-                var (ok, msg) = await ProbeSourceAsync(cfg);
+                statusText.Foreground = ThemeHelper.Brush(p.T3);
+                var (ok, msg) = await SaveSourceAsync(cfg, pwdIn.Password);
                 statusText.Text = msg;
+                statusText.Foreground = ThemeHelper.Brush(ok ? p.Ok : p.Danger);
                 addSrcBtn.IsEnabled = true;
+                if (!ok) return;
 
-                if (editing is not null)
-                {
-                    int idx = sources.FindIndex(x => x.Id == id);
-                    if (idx >= 0) sources[idx] = cfg;
-                }
-                else
-                {
-                    sources.Add(cfg);
-                }
+                sources = GetSources();
                 editingSourceId = null;
-                SaveSources(sources);
                 activeSrc = cfg;
                 navStack.Clear();
+                currentSearchTpl = null;
                 RebuildSourcesSidebar();
-                if (ok) await LoadUrlAsync();
+                await LoadUrlAsync();
             };
 
             leftList.Children.Add(new Border
@@ -798,13 +1154,112 @@ public sealed class RemoteLibraryService
         Grid.SetColumn(rightStack, 1);
         root.Children.Add(rightStack);
 
-        await new ContentDialog
+        try
         {
-            XamlRoot = xamlRoot,
-            Title = "OPDS 与 WebDAV 远程书库",
-            Content = root,
-            CloseButtonText = "完成",
-        }.ShowAsync();
+            await new ContentDialog
+            {
+                XamlRoot = xamlRoot,
+                Title = "OPDS 与 WebDAV 远程书库",
+                Content = root,
+                CloseButtonText = "完成",
+            }.ShowAsync();
+        }
+        finally
+        {
+            try { loadCts?.Cancel(); loadCts?.Dispose(); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// Probes <paramref name="cfg"/> first and only persists credentials &amp; source config when probing succeeds (#24).
+    /// </summary>
+    public async Task<(bool Ok, string Message)> SaveSourceAsync(
+        RemoteSourceConfig cfg, string? password = null, CancellationToken ct = default)
+    {
+        var (ok, msg) = await ProbeSourceAsync(cfg, ct, passwordOverride: password);
+        if (!ok) return (false, msg);
+
+        if (password is not null)
+            _library.Secrets.Set($"source.{cfg.Id}.password", password);
+
+        var list = GetSources();
+        int idx = list.FindIndex(x => x.Id == cfg.Id);
+        if (idx >= 0) list[idx] = cfg;
+        else list.Add(cfg);
+        SaveSources(list);
+        return (true, msg);
+    }
+
+    internal static string? ParseOpenSearchTemplate(string osXml, Uri feedBaseUri, Uri osDocUri)
+    {
+        var osDoc = XDocument.Parse(osXml);
+        var urlEls = osDoc.Descendants()
+            .Where(e => e.Name.LocalName.Equals("Url", StringComparison.OrdinalIgnoreCase) &&
+                        (e.Attribute("template")?.Value.Contains("{searchTerms}", StringComparison.Ordinal) == true))
+            .ToArray();
+        var chosen = urlEls.FirstOrDefault(e =>
+            (e.Attribute("type")?.Value ?? "").Contains("atom", StringComparison.OrdinalIgnoreCase))
+            ?? urlEls.FirstOrDefault();
+
+        if (chosen?.Attribute("template")?.Value is not string tpl || string.IsNullOrWhiteSpace(tpl))
+            return null;
+
+        string cleanTpl = tpl.Replace("&amp;", "&", StringComparison.Ordinal);
+        string safePlaceholder = cleanTpl.Replace("{searchTerms}", "YYSEARCHTERMS", StringComparison.Ordinal);
+        var resolved = UpgradeIfHttps(feedBaseUri, new Uri(osDocUri, safePlaceholder));
+        return resolved.ToString().Replace("YYSEARCHTERMS", "{searchTerms}", StringComparison.Ordinal);
+    }
+
+    internal static bool IsAlreadyOwned(
+        RemoteEntryItem entry,
+        IReadOnlyList<BookSummary> shelfBooks,
+        IReadOnlySet<string>? acquiredUrls = null)
+    {
+        if (entry.IsFolder) return false;
+        if (acquiredUrls is not null && acquiredUrls.Contains(entry.Url)) return true;
+
+        string entryTitle = NormalizePlain(entry.Title);
+        if (string.IsNullOrEmpty(entryTitle)) return false;
+
+        string[] entryAuthors = SplitAuthors(entry.Author)
+            .Select(NormalizePlain)
+            .Where(a => a.Length > 0)
+            .ToArray();
+
+        foreach (var b in shelfBooks)
+        {
+            if (!string.Equals(NormalizePlain(b.Title), entryTitle, StringComparison.Ordinal))
+                continue;
+
+            if (entryAuthors.Length == 0 || b.Authors.Length == 0)
+                return true;
+
+            foreach (var ba in b.Authors)
+            {
+                string normBookAuthor = NormalizePlain(ba);
+                if (normBookAuthor.Length == 0) continue;
+                if (entryAuthors.Any(ea => ea == normBookAuthor || normBookAuthor.Contains(ea, StringComparison.Ordinal) || ea.Contains(normBookAuthor, StringComparison.Ordinal)))
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    private static string[] SplitAuthors(string? raw) =>
+        string.IsNullOrWhiteSpace(raw)
+            ? []
+            : raw.Split(['、', ',', '，', ';', '；', '/'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static string NormalizePlain(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "";
+        var sb = new StringBuilder(raw.Length);
+        foreach (char c in raw)
+        {
+            if (char.IsWhiteSpace(c) || char.IsPunctuation(c) || char.IsSymbol(c)) continue;
+            sb.Append(char.ToLowerInvariant(c));
+        }
+        return sb.ToString();
     }
 
     private static Uri UpgradeIfHttps(Uri baseUri, Uri target)

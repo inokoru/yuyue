@@ -99,6 +99,9 @@ public static class VoiceCloneAndDramaDialogs
         langRow.Children.Add(zhLangBtn);
         langRow.Children.Add(enLangBtn);
 
+        bool suppressScriptChanged = false;
+        bool scriptEditedByUser = false;
+
         var nameBox = new TextBox { Header = "给这个声音起个名字", PlaceholderText = forRoleName is not null ? $"{forRoleName}的声音" : "例如：我的声音", Text = forRoleName ?? "" };
         var scriptBox = new TextBox
         {
@@ -113,7 +116,10 @@ public static class VoiceCloneAndDramaDialogs
         {
             lang = next;
             scriptText = LoadScript(lang);
-            scriptBox.Text = scriptText;
+            scriptEditedByUser = false;
+            suppressScriptChanged = true;
+            try { scriptBox.Text = scriptText; }
+            finally { suppressScriptChanged = false; }
             zhLangBtn.Style = (Style)Application.Current.Resources[lang == "zh" ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
             enLangBtn.Style = (Style)Application.Current.Resources[lang == "en" ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
         }
@@ -200,6 +206,21 @@ public static class VoiceCloneAndDramaDialogs
             UpdateSaveGate();
         }
 
+        scriptBox.TextChanged += (_, _) =>
+        {
+            if (suppressScriptChanged) return;
+            scriptEditedByUser = !string.Equals(scriptBox.Text.Trim(), scriptText.Trim(), StringComparison.Ordinal);
+            if (capturedSamples24k is { Length: >= 24_000 } && !string.IsNullOrWhiteSpace(scriptBox.Text))
+            {
+                try
+                {
+                    latestCheck = library.Core.CardCheck(capturedSamples24k, 24_000, scriptBox.Text.Trim(), null);
+                    RenderCheckResult(latestCheck);
+                }
+                catch { }
+            }
+        };
+
         recTimer.Tick += (_, _) =>
         {
             if (isRecording)
@@ -252,8 +273,14 @@ public static class VoiceCloneAndDramaDialogs
                         await File.WriteAllBytesAsync(tmpWav, wavBytes);
                         try
                         {
-                            capturedSamples24k = library.Core.CardDecodeClip(tmpWav, 24_000);
-                            latestCheck = library.Core.CardCheck(capturedSamples24k, 24_000, scriptBox.Text.Trim(), null);
+                            capturedSamples24k = await Task.Run(() => library.Core.CardDecodeClip(tmpWav, 24_000));
+                            string? heard = await WindowsTranscriber.TranscribeAsync(library, tmpWav, lang);
+                            string spokenTarget = scriptBox.Text.Trim();
+                            latestCheck = await Task.Run(() => library.Core.CardCheck(
+                                capturedSamples24k,
+                                24_000,
+                                spokenTarget,
+                                string.IsNullOrWhiteSpace(heard) ? null : heard));
                             RenderCheckResult(latestCheck);
                         }
                         finally { try { File.Delete(tmpWav); } catch { } }
@@ -285,8 +312,19 @@ public static class VoiceCloneAndDramaDialogs
             if (f is null) return;
             try
             {
+                checkCardHost.Children.Clear();
+                checkCardHost.Children.Add(new TextBlock { Text = "正在识别录音文字并检测音质…", FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T2) });
                 capturedSamples24k = await Task.Run(() => library.Core.CardDecodeClip(f.Path, 24_000));
-                latestCheck = await Task.Run(() => library.Core.CardCheck(capturedSamples24k, 24_000, scriptBox.Text.Trim(), null));
+                string? heard = await WindowsTranscriber.TranscribeAsync(library, f.Path, lang);
+                if (!scriptEditedByUser && !string.IsNullOrWhiteSpace(heard))
+                {
+                    suppressScriptChanged = true;
+                    try { scriptBox.Text = heard.Trim(); }
+                    finally { suppressScriptChanged = false; }
+                }
+                string checkText = scriptBox.Text.Trim();
+                string? checkHeard = string.IsNullOrWhiteSpace(heard) ? null : heard.Trim();
+                latestCheck = await Task.Run(() => library.Core.CardCheck(capturedSamples24k, 24_000, checkText, checkHeard));
                 RenderCheckResult(latestCheck);
                 if (string.IsNullOrWhiteSpace(nameBox.Text))
                     nameBox.Text = Path.GetFileNameWithoutExtension(f.Name);
@@ -352,7 +390,7 @@ public static class VoiceCloneAndDramaDialogs
         if (res != ContentDialogResult.Primary || capturedSamples24k is null || capturedSamples24k.Length < 24_000 || latestCheck is not { Ok: true })
             return null;
 
-        string cardId = $"cloned.{Guid.NewGuid():N}"[..19];
+        string cardId = $"cloned.{Guid.NewGuid():D}";
         string cardName = string.IsNullOrWhiteSpace(nameBox.Text) ? "我的声音" : nameBox.Text.Trim();
         string stageDir = Path.Combine(library.DataDir, "clones", cardId);
         Directory.CreateDirectory(stageDir);
@@ -543,17 +581,43 @@ public static class VoiceCloneAndDramaDialogs
 
                 if (existing is not null)
                 {
-                    var playB = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "▶", Height = 24, MinHeight = 24, FontSize = 11 };
+                    var playB = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "▶ 试听", Height = 24, MinHeight = 24, FontSize = 11 };
                     CardStyle capPlaySt = st;
                     playB.Click += async (_, _) =>
                     {
+                        playB.IsEnabled = false;
                         try
                         {
-                            string? clipPath = library.Core.CardClipPath(null, card.Id, capPlaySt);
-                            if (!string.IsNullOrEmpty(clipPath) && File.Exists(clipPath))
-                                await PlayWavBytesOnceAsync(await File.ReadAllBytesAsync(clipPath));
+                            byte[]? synthWav = null;
+                            if (library.LiveVoice.IsReady && CardVoiceEngine.SpeaksLanguage(card.Lang))
+                            {
+                                string sampleLine;
+                                try { sampleLine = library.Core.CardScript(card.Lang, capPlaySt); }
+                                catch { sampleLine = existing.Text; }
+                                synthWav = await CardVoiceEngine.Instance.SynthesizeWavAsync(
+                                    library.Core,
+                                    library.LiveVoice,
+                                    library.DataDir,
+                                    card,
+                                    null,
+                                    sampleLine,
+                                    card.Lang,
+                                    capPlaySt);
+                            }
+
+                            if (synthWav is { Length: > 44 })
+                            {
+                                await PlayWavBytesOnceAsync(synthWav);
+                            }
+                            else
+                            {
+                                string? clipPath = library.Core.CardClipPath(null, card.Id, capPlaySt);
+                                if (!string.IsNullOrEmpty(clipPath) && File.Exists(clipPath))
+                                    await PlayWavBytesOnceAsync(await File.ReadAllBytesAsync(clipPath));
+                            }
                         }
                         catch { }
+                        finally { playB.IsEnabled = true; }
                     };
                     Grid.SetColumn(playB, 1);
                     rg.Children.Add(playB);
@@ -644,6 +708,8 @@ public static class VoiceCloneAndDramaDialogs
         InMemoryRandomAccessStream? stream = null;
         bool recording = false;
 
+        bool styleScriptEdited = false;
+        bool suppressStyleScript = false;
         var scriptBox = new TextBox { Header = $"示范台词（{instruction}）", Text = script, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
         var statusText = new TextBlock { FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T2), TextWrapping = TextWrapping.Wrap };
         ContentDialog? dlgRef = null;
@@ -657,6 +723,17 @@ public static class VoiceCloneAndDramaDialogs
                 : "✕ " + (c.Messages.Length > 0 ? string.Join("；", c.Messages) : "请重新录制清晰语音");
             if (dlgRef is not null) dlgRef.IsPrimaryButtonEnabled = c.Ok;
         }
+
+        scriptBox.TextChanged += (_, _) =>
+        {
+            if (suppressStyleScript) return;
+            styleScriptEdited = !string.Equals(scriptBox.Text.Trim(), script.Trim(), StringComparison.Ordinal);
+            if (samples24k is { Length: >= 24_000 } && !string.IsNullOrWhiteSpace(scriptBox.Text))
+            {
+                try { ApplyCheck(library.Core.CardCheck(samples24k, 24_000, scriptBox.Text.Trim(), null)); }
+                catch { }
+            }
+        };
 
         var recBtn = new Button { Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"], Content = "🎙 开始录音" };
         recBtn.Click += async (_, _) =>
@@ -692,8 +769,13 @@ public static class VoiceCloneAndDramaDialogs
                         await File.WriteAllBytesAsync(tmp, bytes);
                         try
                         {
-                            samples24k = library.Core.CardDecodeClip(tmp, 24_000);
-                            ApplyCheck(library.Core.CardCheck(samples24k, 24_000, scriptBox.Text.Trim(), null));
+                            samples24k = await Task.Run(() => library.Core.CardDecodeClip(tmp, 24_000));
+                            string? heard = await WindowsTranscriber.TranscribeAsync(library, tmp, card.Lang);
+                            ApplyCheck(await Task.Run(() => library.Core.CardCheck(
+                                samples24k,
+                                24_000,
+                                scriptBox.Text.Trim(),
+                                string.IsNullOrWhiteSpace(heard) ? null : heard)));
                         }
                         finally { try { File.Delete(tmp); } catch { } }
                     }
@@ -707,14 +789,24 @@ public static class VoiceCloneAndDramaDialogs
         impBtn.Click += async (_, _) =>
         {
             var picker = new FileOpenPicker();
-            picker.FileTypeFilter.Add(".wav"); picker.FileTypeFilter.Add(".mp3"); picker.FileTypeFilter.Add(".m4a");
+            picker.FileTypeFilter.Add(".wav"); picker.FileTypeFilter.Add(".mp3"); picker.FileTypeFilter.Add(".m4a"); picker.FileTypeFilter.Add(".flac");
             InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(ownerWindow));
             var f = await picker.PickSingleFileAsync();
             if (f is null) return;
             try
             {
+                statusText.Foreground = ThemeHelper.Brush(p.T2);
+                statusText.Text = "正在识别录音文字并检测音质…";
                 samples24k = await Task.Run(() => library.Core.CardDecodeClip(f.Path, 24_000));
-                ApplyCheck(await Task.Run(() => library.Core.CardCheck(samples24k, 24_000, scriptBox.Text.Trim(), null)));
+                string? heard = await WindowsTranscriber.TranscribeAsync(library, f.Path, card.Lang);
+                if (!styleScriptEdited && !string.IsNullOrWhiteSpace(heard))
+                {
+                    suppressStyleScript = true;
+                    try { scriptBox.Text = heard.Trim(); }
+                    finally { suppressStyleScript = false; }
+                }
+                string? checkHeard = string.IsNullOrWhiteSpace(heard) ? null : heard.Trim();
+                ApplyCheck(await Task.Run(() => library.Core.CardCheck(samples24k, 24_000, scriptBox.Text.Trim(), checkHeard)));
             }
             catch (Exception ex) { statusText.Text = $"解码失败：{ex.Message}"; }
         };
@@ -851,23 +943,36 @@ public static class VoiceCloneAndDramaDialogs
 
         string lang = "zh-Hans";
         try { lang = library.GetBookDetail(bookId).Summary.Language ?? "zh-Hans"; } catch { }
-        DramaSynthService.UpdateDramaCaps(library, bookId, lang, null, ttsActive: false);
+        uint targetSection = focusSection;
+        DramaSynthService.UpdateDramaCaps(library, bookId, lang, null, ttsActive: DramaSynthService.IsPreRendering(bookId), allowLlm: true);
         SoundLibraryService.Register(library.Core, library.DataDir);
 
         _ = Task.Run(async () =>
         {
             var nextTaskGate = new SemaphoreSlim(1, 1);
+            var returnedOutOfScope = new HashSet<string>(StringComparer.Ordinal);
+            int inFlight = 0;
             const int Parallelism = 2;
+
+            static bool IsFatalModelError(string? msg) =>
+                !string.IsNullOrEmpty(msg) && (
+                    msg.Contains("401", StringComparison.Ordinal) ||
+                    msg.Contains("402", StringComparison.Ordinal) ||
+                    msg.Contains("403", StringComparison.Ordinal) ||
+                    msg.Contains("密钥", StringComparison.Ordinal) ||
+                    msg.Contains("余额", StringComparison.Ordinal) ||
+                    msg.Contains("额度", StringComparison.Ordinal) ||
+                    msg.Contains("上限", StringComparison.Ordinal));
 
             async Task RunSlotAsync()
             {
                 while (!ct.IsCancellationRequested)
                 {
                     DramaTask? task;
+                    uint curFocus = state.SectionOnly ? targetSection : state.FocusSection;
                     await nextTaskGate.WaitAsync(ct);
                     try
                     {
-                        uint curFocus = state.FocusSection;
                         task = library.Core.DramaNextTask(bookId, curFocus);
                     }
                     catch (Exception ex)
@@ -877,74 +982,116 @@ public static class VoiceCloneAndDramaDialogs
                     }
                     finally { nextTaskGate.Release(); }
 
-                    if (task is null) break;
+                    if (task is null)
+                    {
+                        if (Volatile.Read(ref inFlight) > 0)
+                        {
+                            await Task.Delay(1500, ct);
+                            continue;
+                        }
+                        break;
+                    }
 
                     if (task is DramaTask.Llm llm)
                     {
-                        // Respect sectionOnly scope: task IDs for chapters carry "s{sec}:" or section scope check
-                        if (state.SectionOnly && llm.Id.StartsWith("scene:", StringComparison.Ordinal))
+                        if (state.SectionOnly && !TaskMatchesSection(llm.Id, bookId, curFocus))
                         {
-                            var parts = llm.Id.Split(':');
-                            if (parts.Length >= 2 && uint.TryParse(parts[1], out uint taskSec) && taskSec != state.FocusSection)
-                            {
-                                try { library.Core.DramaSubmit(bookId, llm.Id, new DramaResult.Returned()); } catch { }
-                                break;
-                            }
-                        }
-
-                        // Put <schema> in system prompt to maximize prompt cache hit rate (1:1 DramaWork.swift)
-                        string systemPrompt = string.IsNullOrWhiteSpace(llm.Schema)
-                            ? llm.System
-                            : $"{llm.System}\n\n<schema>\n{llm.Schema}\n</schema>";
-                        int maxTokens = llm.MaxOutputTokens > 0 ? (int)Math.Clamp(llm.MaxOutputTokens, 256u, 8192u) : 2048;
-
-                        Interlocked.Add(ref state.SentChars, systemPrompt.Length + llm.User.Length);
-
-                        string? answer = null;
-                        string? lastErr = null;
-                        int[] backoffs = [4, 12, 36];
-                        for (int attempt = 0; attempt <= backoffs.Length; attempt++)
-                        {
-                            ct.ThrowIfCancellationRequested();
-                            try
-                            {
-                                answer = await library.Companion.ChatAsync(
-                                    llm.User,
-                                    systemPrompt,
-                                    maxTokens: maxTokens,
-                                    fast: true,
-                                    cachePrefixLen: (int)llm.CachePrefixLen,
-                                    source: UsageSource.Drama,
-                                    ct: ct);
-                                lastErr = null;
-                                break;
-                            }
-                            catch (OperationCanceledException) { throw; }
-                            catch (Exception ex) when (attempt < backoffs.Length && !ex.Message.Contains("401") && !ex.Message.Contains("402") && !ex.Message.Contains("403"))
-                            {
-                                lastErr = ex.Message;
-                                await Task.Delay(System.TimeSpan.FromSeconds(backoffs[attempt]), ct);
-                            }
-                            catch (Exception ex)
-                            {
-                                lastErr = ex.Message;
-                                answer = null;
-                                break;
-                            }
-                        }
-
-                        if (!string.IsNullOrWhiteSpace(answer))
-                        {
-                            try { library.Core.DramaSubmit(bookId, llm.Id, new DramaResult.Llm(answer)); } catch { }
-                            DramaSynthService.InvalidateCast(bookId);
-                            onProgressUpdated();
-                        }
-                        else
-                        {
-                            state.LastError = lastErr ?? "模型未返回有效结果";
-                            LastWorkerErrors[bookId] = state.LastError;
                             try { library.Core.DramaSubmit(bookId, llm.Id, new DramaResult.Returned()); } catch { }
+                            bool alreadySeen;
+                            lock (returnedOutOfScope)
+                            {
+                                alreadySeen = !returnedOutOfScope.Add(llm.Id);
+                            }
+                            if (Volatile.Read(ref inFlight) > 0)
+                            {
+                                await Task.Delay(1500, ct);
+                                continue;
+                            }
+                            if (alreadySeen || returnedOutOfScope.Count > 0)
+                                break;
                             break;
+                        }
+
+                        Interlocked.Increment(ref inFlight);
+                        try
+                        {
+                            // Put <schema> in system prompt to maximize prompt cache hit rate (1:1 DramaWork.swift)
+                            string systemPrompt = string.IsNullOrWhiteSpace(llm.Schema)
+                                ? llm.System
+                                : $"{llm.System}\n\n<schema>\n{llm.Schema}\n</schema>";
+                            int maxTokens = llm.MaxOutputTokens > 0
+                                ? Math.Clamp((int)llm.MaxOutputTokens, 256, 32768)
+                                : 2048;
+                            bool useFast = llm.Tier != LlmTier.Strong;
+
+                            Interlocked.Add(ref state.SentChars, systemPrompt.Length + llm.User.Length);
+
+                            string? answer = null;
+                            string? lastErr = null;
+                            int[] backoffs = [4, 12, 36];
+                            for (int attempt = 0; attempt <= backoffs.Length; attempt++)
+                            {
+                                ct.ThrowIfCancellationRequested();
+                                try
+                                {
+                                    answer = await library.Companion.ChatAsync(
+                                        llm.User,
+                                        systemPrompt,
+                                        maxTokens: maxTokens,
+                                        fast: useFast,
+                                        cachePrefixLen: (int)llm.CachePrefixLen,
+                                        source: UsageSource.Drama,
+                                        ct: ct);
+                                    lastErr = null;
+                                    break;
+                                }
+                                catch (OperationCanceledException) { throw; }
+                                catch (Exception ex) when (attempt < backoffs.Length && !IsFatalModelError(ex.Message))
+                                {
+                                    lastErr = ex.Message;
+                                    await Task.Delay(System.TimeSpan.FromSeconds(backoffs[attempt]), ct);
+                                }
+                                catch (Exception ex)
+                                {
+                                    lastErr = ex.Message;
+                                    answer = null;
+                                    break;
+                                }
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(answer))
+                            {
+                                Interlocked.Add(ref state.SentChars, answer.Length);
+                                try { library.Core.DramaSubmit(bookId, llm.Id, new DramaResult.Llm(answer)); } catch { }
+                                DramaSynthService.InvalidateCast(bookId);
+                                lock (returnedOutOfScope) returnedOutOfScope.Clear();
+                                onProgressUpdated();
+                            }
+                            else
+                            {
+                                string reason = lastErr ?? "模型未返回有效结果";
+                                state.LastError = reason;
+                                LastWorkerErrors[bookId] = reason;
+                                bool isCast = llm.Id.StartsWith("cast:", StringComparison.Ordinal);
+                                if (ct.IsCancellationRequested || IsFatalModelError(lastErr) || isCast)
+                                {
+                                    try { library.Core.DramaSubmit(bookId, llm.Id, new DramaResult.Returned()); } catch { }
+                                    try { state.Cts.Cancel(); } catch { }
+                                    break;
+                                }
+
+                                try { library.Core.DramaSubmit(bookId, llm.Id, new DramaResult.Failed(reason)); } catch { }
+                                onProgressUpdated();
+                            }
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            try { library.Core.DramaSubmit(bookId, llm.Id, new DramaResult.Returned()); } catch { }
+                            throw;
+                        }
+                        finally
+                        {
+                            Interlocked.Decrement(ref inFlight);
                         }
                     }
                     else
@@ -959,6 +1106,11 @@ public static class VoiceCloneAndDramaDialogs
                         if (!string.IsNullOrEmpty(tid))
                         {
                             try { library.Core.DramaSubmit(bookId, tid, new DramaResult.Returned()); } catch { }
+                        }
+                        if (Volatile.Read(ref inFlight) > 0)
+                        {
+                            await Task.Delay(1500, ct);
+                            continue;
                         }
                         break;
                     }
@@ -979,10 +1131,31 @@ public static class VoiceCloneAndDramaDialogs
             finally
             {
                 ActiveDramaWorkers.TryRemove(bookId, out _);
+                DramaSynthService.UpdateDramaCaps(library, bookId, lang, null, ttsActive: DramaSynthService.IsPreRendering(bookId), allowLlm: false);
                 state.Cts.Dispose();
                 onProgressUpdated();
             }
         }, ct);
+    }
+
+    internal static bool TaskMatchesSection(string taskId, string bookId, uint targetSection)
+    {
+        if (string.IsNullOrEmpty(taskId)) return false;
+        string[] parts = taskId.Split(':');
+        if (parts.Length < 3) return false;
+        string kind = parts[0];
+        if (kind is not ("unquoted" or "attr" or "verify" or "direct"))
+            return false;
+
+        string prefix = $"{kind}:{bookId}:";
+        if (taskId.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            string rest = taskId[prefix.Length..];
+            int colon = rest.IndexOf(':');
+            string secPart = colon >= 0 ? rest[..colon] : rest;
+            return uint.TryParse(secPart, out uint s) && s == targetSection;
+        }
+        return uint.TryParse(parts[2], out uint sec) && sec == targetSection;
     }
 
     // ---------- 3. Searchable PeoplePicker (1:1 DramaViews.swift PeoplePicker) ----------

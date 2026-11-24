@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO.Compression;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -47,8 +48,19 @@ public sealed class WifiTransferService : IDisposable
     {
         Stop();
         _cts = new CancellationTokenSource();
-        _listener = new TcpListener(IPAddress.Any, 0);
-        _listener.Start();
+        TcpListener? listener = null;
+        try
+        {
+            listener = new TcpListener(IPAddress.Any, 8080);
+            listener.Start();
+        }
+        catch
+        {
+            try { listener?.Stop(); } catch { }
+            listener = new TcpListener(IPAddress.Any, 0);
+            listener.Start();
+        }
+        _listener = listener;
         int port = ((IPEndPoint)_listener.LocalEndpoint).Port;
         string ip = GetLanIpAddress();
         Url = $"http://{ip}:{port}";
@@ -145,30 +157,32 @@ public sealed class WifiTransferService : IDisposable
                         return;
                     }
 
-                    var (accepted, statusCode, expectedOffset) = ValidateChunkOffset(offset, entry.Received);
-                    if (!accepted)
+                    if (entry.Imported && entry.Received >= entry.Size)
                     {
-                        byte[] err = JsonSerializer.SerializeToUtf8Bytes(new
-                        {
-                            error = "分片偏移量不一致，请重新上传",
-                            expectedOffset,
-                            received = entry.Received,
-                        });
-                        await WriteHttpResponseAsync(stream, $"{statusCode} Conflict", "application/json", err, ct);
+                        byte[] alreadyDone = JsonSerializer.SerializeToUtf8Bytes(new { ok = true, received = entry.Size, done = true });
+                        await WriteHttpResponseAsync(stream, "200 OK", "application/json", alreadyDone, ct);
                         return;
                     }
 
-                    if (offset == entry.Received)
+                    if (offset != entry.Received)
                     {
-                        string? parentDir = Path.GetDirectoryName(entry.TempPath);
-                        if (!string.IsNullOrEmpty(parentDir)) Directory.CreateDirectory(parentDir);
-
-                        await using (var fs = new FileStream(entry.TempPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None))
+                        byte[] mismatch = JsonSerializer.SerializeToUtf8Bytes(new
                         {
-                            fs.Seek(offset, SeekOrigin.Begin);
-                            await fs.WriteAsync(body, ct);
-                            entry.Received = fs.Length;
-                        }
+                            ok = false,
+                            received = entry.Received,
+                        });
+                        await WriteHttpResponseAsync(stream, "200 OK", "application/json", mismatch, ct);
+                        return;
+                    }
+
+                    string? parentDir = Path.GetDirectoryName(entry.TempPath);
+                    if (!string.IsNullOrEmpty(parentDir)) Directory.CreateDirectory(parentDir);
+
+                    await using (var fs = new FileStream(entry.TempPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None))
+                    {
+                        fs.Seek(offset, SeekOrigin.Begin);
+                        await fs.WriteAsync(body, ct);
+                        entry.Received = fs.Length;
                     }
 
                     double elapsedSec = Math.Max(0.05, (DateTimeOffset.UtcNow - entry.StartedAt).TotalSeconds);
@@ -193,7 +207,9 @@ public sealed class WifiTransferService : IDisposable
                         {
                             string ext = Path.GetExtension(entry.Name).ToLowerInvariant();
                             BookSummary summary;
-                            if (AudiobookImporter.Extensions.Contains(ext))
+                            if (ext == ".zip")
+                                summary = await ImportZipArchiveAsync(entry.Id, entry.Name, entry.TempPath);
+                            else if (AudiobookImporter.Extensions.Contains(ext))
                                 summary = await AudiobookImporter.ImportFilesAsync(_library, [entry.TempPath]);
                             else if (LibraryService.SupportedExtensions.Contains(ext))
                                 summary = await _library.ImportBookWithExtrasAsync(entry.TempPath);
@@ -213,8 +229,8 @@ public sealed class WifiTransferService : IDisposable
                     }
 
                     byte[] resp = importError is not null
-                        ? JsonSerializer.SerializeToUtf8Bytes(new { error = importError })
-                        : JsonSerializer.SerializeToUtf8Bytes(new { received = entry.Received, done, bytesPerSec, etaSec });
+                        ? JsonSerializer.SerializeToUtf8Bytes(new { ok = false, received = entry.Received, error = importError })
+                        : JsonSerializer.SerializeToUtf8Bytes(new { ok = true, received = entry.Received, done, bytesPerSec, etaSec });
                     await WriteHttpResponseAsync(stream, "200 OK", "application/json", resp, ct);
                     return;
                 }
@@ -387,21 +403,153 @@ public sealed class WifiTransferService : IDisposable
         return dict;
     }
 
+    private async Task<BookSummary> ImportZipArchiveAsync(string uploadId, string zipFileName, string zipPath)
+    {
+        string stem = SanitizeFileName(Path.GetFileNameWithoutExtension(zipFileName));
+        if (string.IsNullOrWhiteSpace(stem)) stem = "audiobook";
+        string unzipRoot = Path.GetFullPath(Path.Combine(_tempDir, $"unzip-{uploadId}"));
+        string extractDir = Path.GetFullPath(Path.Combine(unzipRoot, stem));
+        Directory.CreateDirectory(extractDir);
+
+        try
+        {
+            string[] audioExtracted = [];
+            try { audioExtracted = await Task.Run(() => _library.Core.AudiobookUnzip(zipPath, extractDir)); }
+            catch { }
+
+            if (audioExtracted.Length > 0)
+                return await AudiobookImporter.ImportFilesAsync(_library, audioExtracted);
+
+            var extractedBooks = new List<string>();
+            var extractedAudios = new List<string>();
+            using (var archive = ZipFile.OpenRead(zipPath))
+            {
+                foreach (var zae in archive.Entries)
+                {
+                    if (string.IsNullOrEmpty(zae.Name) || zae.Name.StartsWith('.')) continue;
+                    string ext = Path.GetExtension(zae.Name).ToLowerInvariant();
+                    bool isEbook = LibraryService.SupportedExtensions.Contains(ext);
+                    bool isAudio = AudiobookImporter.Extensions.Contains(ext);
+                    if (!isEbook && !isAudio) continue;
+
+                    string safeEntry = SanitizeFileName(zae.Name);
+                    string dest = Path.GetFullPath(Path.Combine(extractDir, safeEntry));
+                    if (!dest.StartsWith(extractDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    if (File.Exists(dest))
+                        dest = Path.Combine(extractDir, $"{Path.GetFileNameWithoutExtension(safeEntry)}-{extractedBooks.Count + extractedAudios.Count + 1}{ext}");
+
+                    zae.ExtractToFile(dest, overwrite: true);
+                    if (isEbook) extractedBooks.Add(dest);
+                    else extractedAudios.Add(dest);
+                }
+            }
+
+            if (extractedBooks.Count > 0)
+            {
+                BookSummary? first = null;
+                foreach (string bp in extractedBooks)
+                {
+                    var imported = await _library.ImportBookWithExtrasAsync(bp);
+                    first ??= imported;
+                }
+                return first!;
+            }
+
+            if (extractedAudios.Count > 0)
+                return await AudiobookImporter.ImportFilesAsync(_library, extractedAudios);
+
+            throw new InvalidOperationException("压缩包中未找到受支持的电子书或有声书文件。");
+        }
+        finally
+        {
+            try { if (Directory.Exists(unzipRoot)) Directory.Delete(unzipRoot, recursive: true); } catch { }
+        }
+    }
+
+    internal static int ScoreLanCandidate(
+        string adapterName,
+        string adapterDescription,
+        NetworkInterfaceType type,
+        bool hasGateway,
+        IPAddress ip)
+    {
+        if (ip.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(ip))
+            return int.MinValue;
+
+        byte[] b = ip.GetAddressBytes();
+        // APIPA link-local 169.254.x.x
+        if (b[0] == 169 && b[1] == 254)
+            return -1000;
+
+        int score = 0;
+        string meta = $"{adapterName} {adapterDescription}";
+        string[] virtualTokens =
+        [
+            "vEthernet", "WSL", "Hyper-V", "Docker", "VMware", "VirtualBox",
+            "Virtual", "ZeroTier", "Tailscale", "TAP-", "TUN", "VPN",
+            "Loopback", "Npcap", "Bluetooth",
+        ];
+        if (virtualTokens.Any(tok => meta.Contains(tok, StringComparison.OrdinalIgnoreCase)))
+            score -= 500;
+
+        score += type switch
+        {
+            NetworkInterfaceType.Wireless80211 => 200,
+            NetworkInterfaceType.Ethernet or NetworkInterfaceType.GigabitEthernet
+                or NetworkInterfaceType.FastEthernetFx or NetworkInterfaceType.FastEthernetT => 160,
+            _ => 20,
+        };
+
+        if (hasGateway)
+            score += 120;
+
+        if (b[0] == 192 && b[1] == 168)
+            score += 150;
+        else if (b[0] == 10)
+            score += 130;
+        else if (b[0] == 172 && b[1] >= 16 && b[1] <= 31)
+            score += 30;
+        else if (b[0] == 100 && b[1] >= 64 && b[1] <= 127)
+            score -= 100;
+
+        return score;
+    }
+
     private static string GetLanIpAddress()
     {
         try
         {
+            string? bestIp = null;
+            int bestScore = int.MinValue;
+
             foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
             {
                 if (ni.OperationalStatus != OperationalStatus.Up ||
                     ni.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel)
                     continue;
-                foreach (var ua in ni.GetIPProperties().UnicastAddresses)
+
+                var props = ni.GetIPProperties();
+                bool hasGateway = props.GatewayAddresses.Any(g =>
+                    g.Address.AddressFamily == AddressFamily.InterNetwork &&
+                    !g.Address.Equals(IPAddress.Any));
+
+                foreach (var ua in props.UnicastAddresses)
                 {
-                    if (ua.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(ua.Address))
-                        return ua.Address.ToString();
+                    if (ua.Address.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(ua.Address))
+                        continue;
+
+                    int sc = ScoreLanCandidate(ni.Name, ni.Description, ni.NetworkInterfaceType, hasGateway, ua.Address);
+                    if (sc > bestScore)
+                    {
+                        bestScore = sc;
+                        bestIp = ua.Address.ToString();
+                    }
                 }
             }
+
+            if (!string.IsNullOrEmpty(bestIp))
+                return bestIp;
         }
         catch { }
         return "127.0.0.1";

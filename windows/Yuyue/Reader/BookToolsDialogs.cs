@@ -20,9 +20,14 @@ namespace Yuyue.Reader;
 public static class BookToolsDialogs
 {
     public static async Task<bool> ShowReplaceRulesDialogAsync(
-        XamlRoot xamlRoot, LibraryService library, string bookId, string bookTitle)
+        XamlRoot xamlRoot, LibraryService library, string bookId, string bookTitle, Action? onRulesChanged = null)
     {
         bool anyChanged = false;
+        void NotifyRulesChanged()
+        {
+            anyChanged = true;
+            try { onRulesChanged?.Invoke(); } catch { }
+        }
         bool scopeBook = true;
         string subMode = "list"; // list | edit | common
         ReplaceRule? editingRule = null;
@@ -212,14 +217,14 @@ public static class BookToolsDialogs
                     upBtn.Click += (_, _) =>
                     {
                         MoveRule(rules, idx, idx - 1);
-                        anyChanged = true;
+                        NotifyRulesChanged();
                         RenderHost();
                     };
                     var downBtn = new Button { Style = (Style)Application.Current.Resources["YYIconButtonStyle"], Content = "↓", Width = 22, Height = 24, FontSize = 11, IsEnabled = idx < rules.Length - 1 };
                     downBtn.Click += (_, _) =>
                     {
                         MoveRule(rules, idx, idx + 1);
-                        anyChanged = true;
+                        NotifyRulesChanged();
                         RenderHost();
                     };
                     orderBtns.Children.Add(upBtn);
@@ -231,7 +236,7 @@ public static class BookToolsDialogs
                 var sw = new ToggleSwitch { IsOn = rule.Enabled, MinWidth = 0, OnContent = "", OffContent = "", VerticalAlignment = VerticalAlignment.Center };
                 sw.Toggled += (_, _) =>
                 {
-                    try { library.Core.SetReplaceRuleEnabled(rule.Id, sw.IsOn); anyChanged = true; RenderHost(); } catch { }
+                    try { library.Core.SetReplaceRuleEnabled(rule.Id, sw.IsOn); NotifyRulesChanged(); RenderHost(); } catch { }
                 };
                 Grid.SetColumn(sw, 2);
                 row.Children.Add(sw);
@@ -250,7 +255,7 @@ public static class BookToolsDialogs
                     try
                     {
                         library.Core.DeleteReplaceRule(rule.Id);
-                        anyChanged = true;
+                        NotifyRulesChanged();
                         removedRules = [rule];
                         removedToken = Guid.NewGuid();
                         TriggerUndoExpiry(removedToken);
@@ -265,13 +270,12 @@ public static class BookToolsDialogs
                 var editMi = new MenuFlyoutItem { Text = "编辑" };
                 editMi.Click += (_, _) => { editingRule = rule; subMode = "edit"; RenderHost(); };
                 var delMi = new MenuFlyoutItem { Text = "删掉", Foreground = ThemeHelper.Brush(p.Danger) };
-                delMi.Click += (_, _) => delBtn.Focus(FocusState.Programmatic);
                 delMi.Click += (_, _) =>
                 {
                     try
                     {
                         library.Core.DeleteReplaceRule(rule.Id);
-                        anyChanged = true;
+                        NotifyRulesChanged();
                         removedRules = [rule];
                         removedToken = Guid.NewGuid();
                         TriggerUndoExpiry(removedToken);
@@ -314,7 +318,7 @@ public static class BookToolsDialogs
                         try { library.Core.RestoreReplaceRule(r.Id); } catch { }
                     }
                     removedRules.Clear();
-                    anyChanged = true;
+                    NotifyRulesChanged();
                     RenderHost();
                 };
                 Grid.SetColumn(undoBtn, 1);
@@ -524,7 +528,7 @@ public static class BookToolsDialogs
                     try
                     {
                         library.Core.DeleteReplaceRule(draft.Id);
-                        anyChanged = true;
+                        NotifyRulesChanged();
                         removedRules = [draft];
                         removedToken = Guid.NewGuid();
                         TriggerUndoExpiry(removedToken);
@@ -680,7 +684,7 @@ public static class BookToolsDialogs
                 {
                     var saved = library.Core.SaveReplaceRule(draft);
                     scopeBook = saved.Book is not null;
-                    anyChanged = true;
+                    NotifyRulesChanged();
                     subMode = "list";
                     RenderHost();
                 }
@@ -750,7 +754,7 @@ public static class BookToolsDialogs
                     try
                     {
                         library.Core.SaveReplaceRule(c.Rule with { Id = "", Book = scopeBook ? bookId : null, Enabled = true });
-                        anyChanged = true;
+                        NotifyRulesChanged();
                         RenderHost();
                     }
                     catch { }
@@ -797,7 +801,8 @@ public static class BookToolsDialogs
         LibraryService library,
         string bookId,
         string bookTitle,
-        Action<uint>? onJumpToSection = null)
+        Action<uint>? onJumpToSection = null,
+        Action? beforeRebuild = null)
     {
         TxtChoice applied;
         try { applied = library.Core.TxtChoice(bookId); }
@@ -808,6 +813,7 @@ public static class BookToolsDialogs
         TxtLayout? currentLayout = null;
         string? readFailure = null;
         bool showAllChapters = false;
+        bool working = false;
         uint? pendingJumpSection = null;
         CancellationTokenSource? debounceCts = null;
 
@@ -1234,7 +1240,7 @@ public static class BookToolsDialogs
             topLeft.Children.Add(new TextBlock { Text = L10n.T("编码和目录"), FontSize = 18, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
             topLeft.Children.Add(headerSubtitleTb);
             topHead.Children.Add(topLeft);
-            var closeCircle = YYChrome.MakeSheetCloseButton(() => dlgRef?.Hide(), dark);
+            var closeCircle = YYChrome.MakeSheetCloseButton(() => { if (!working) dlgRef?.Hide(); }, dark);
             closeCircle.HorizontalAlignment = HorizontalAlignment.Right;
             topHead.Children.Add(closeCircle);
 
@@ -1284,11 +1290,87 @@ public static class BookToolsDialogs
             sp.Children.Add(resetRuleBtn);
             sp.Children.Add(warningHost);
 
+            var workingRow = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 8,
+                Visibility = Visibility.Collapsed,
+                Margin = new Thickness(2, 4, 2, 0),
+                Children =
+                {
+                    new ProgressRing { IsActive = true, Width = 16, Height = 16 },
+                    new TextBlock
+                    {
+                        Text = "正在按新的方式整理这本书…",
+                        FontSize = 12,
+                        Foreground = ThemeHelper.Brush(p.T2),
+                        VerticalAlignment = VerticalAlignment.Center,
+                    },
+                },
+            };
+            var applyErrorTb = new TextBlock
+            {
+                FontSize = 11.5,
+                Foreground = ThemeHelper.Brush(p.Danger),
+                TextWrapping = TextWrapping.Wrap,
+                Visibility = Visibility.Collapsed,
+                Margin = new Thickness(2, 2, 2, 0),
+            };
+            sp.Children.Add(workingRow);
+            sp.Children.Add(applyErrorTb);
+
             var saveSp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, VerticalAlignment = VerticalAlignment.Center };
             saveSp.Children.Add(new TextBlock { Text = L10n.T("保存"), FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(tint.Accent) });
             saveSp.Children.Add(new TextBlock { Text = "↵", FontSize = 11.5, Foreground = ThemeHelper.Brush(tint.Accent), Opacity = 0.72, VerticalAlignment = VerticalAlignment.Center });
 
-            saveSheetBtn = YYChrome.MakeSheetPillButton(saveSp, () => { confirmedSave = true; dlgRef?.Hide(); }, dark, library.Prefs.Tint, "warm", height: 36, horizontalPadding: 18);
+            Button? cancelSheetBtn = null;
+            void SetSheetWorking(bool busy)
+            {
+                working = busy;
+                workingRow.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+                closeCircle.IsEnabled = !busy;
+                if (cancelSheetBtn is not null) cancelSheetBtn.IsEnabled = !busy;
+                if (saveSheetBtn is not null) saveSheetBtn.IsEnabled = !busy && string.IsNullOrEmpty(currentLayout?.Error);
+                ruleBox.IsEnabled = !busy;
+                encHost.IsHitTestVisible = !busy;
+                resetRuleBtn.IsEnabled = !busy;
+            }
+
+            cancelSheetBtn = YYChrome.MakeSheetPillButton("取消", () => { if (!working) dlgRef?.Hide(); }, dark, library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 18);
+            saveSheetBtn = YYChrome.MakeSheetPillButton(saveSp, async () =>
+            {
+                if (working) return;
+                if (!IsChoiceChanged())
+                {
+                    dlgRef?.Hide();
+                    return;
+                }
+
+                applyErrorTb.Visibility = Visibility.Collapsed;
+                SetSheetWorking(true);
+                try
+                {
+                    beforeRebuild?.Invoke();
+                    var finalChoice = new TxtChoice(selectedEnc, string.IsNullOrWhiteSpace(ruleText) ? null : ruleText.Trim());
+                    await Task.Run(() => library.Core.SetTxtChoice(bookId, finalChoice));
+                    confirmedSave = true;
+                    SetSheetWorking(false);
+                    dlgRef?.Hide();
+                }
+                catch (CoreException.Invalid inv)
+                {
+                    SetSheetWorking(false);
+                    applyErrorTb.Text = inv.detail;
+                    applyErrorTb.Visibility = Visibility.Visible;
+                }
+                catch (Exception ex)
+                {
+                    SetSheetWorking(false);
+                    applyErrorTb.Text = ex.Message;
+                    applyErrorTb.Visibility = Visibility.Visible;
+                }
+            }, dark, library.Prefs.Tint, "warm", height: 36, horizontalPadding: 18);
+
             var footActs = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -1296,7 +1378,7 @@ public static class BookToolsDialogs
                 HorizontalAlignment = HorizontalAlignment.Right,
                 Children =
                 {
-                    YYChrome.MakeSheetPillButton("取消", () => dlgRef?.Hide(), dark, library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 18),
+                    cancelSheetBtn,
                     saveSheetBtn,
                 },
             };
@@ -1323,6 +1405,10 @@ public static class BookToolsDialogs
         RefreshLayout(debounce: false);
 
         dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 504, host, maxHeight: 780);
+        dlgRef.Closing += (_, args) =>
+        {
+            if (working) args.Cancel = true;
+        };
         await dlgRef.ShowAsync();
         debounceCts?.Cancel();
 
@@ -1332,18 +1418,6 @@ public static class BookToolsDialogs
             return false;
         }
 
-        if (!confirmedSave || !IsChoiceChanged())
-            return false;
-
-        try
-        {
-            var finalChoice = new TxtChoice(selectedEnc, string.IsNullOrWhiteSpace(ruleText) ? null : ruleText.Trim());
-            await Task.Run(() => library.Core.SetTxtChoice(bookId, finalChoice));
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
+        return confirmedSave;
     }
 }

@@ -710,6 +710,43 @@ public sealed class UpdateAndFeedbackService
         bool withLogs = _library.Prefs.FeedbackAttachLogs;
         var attachments = new List<(string Name, byte[] Data, bool IsImage, string? SourcePath)>();
 
+        string draftTempDir = Path.Combine(_library.DataDir, "cache", "feedback-drafts");
+        Directory.CreateDirectory(draftTempDir);
+        string fullDraftTempPrefix = Path.GetFullPath(draftTempDir).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+        string SaveTempDraftAttachment(string fileName, byte[] data)
+        {
+            Directory.CreateDirectory(draftTempDir);
+            string safe = string.Concat(fileName.Split(Path.GetInvalidFileNameChars())).Trim();
+            if (string.IsNullOrEmpty(safe)) safe = "attachment.jpg";
+            string dst = Path.Combine(draftTempDir, $"{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}-{Guid.NewGuid().ToString("N")[..6]}-{safe}");
+            File.WriteAllBytes(dst, data);
+            return dst;
+        }
+
+        void DeleteOwnedDraftTempIfAny(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+            try
+            {
+                string full = Path.GetFullPath(path);
+                if (full.StartsWith(fullDraftTempPrefix, StringComparison.OrdinalIgnoreCase) && File.Exists(full))
+                    File.Delete(full);
+            }
+            catch { }
+        }
+
+        void ClearPersistedDraft()
+        {
+            foreach (string saved in _library.Prefs.FeedbackDraftFiles.ToArray())
+                DeleteOwnedDraftTempIfAny(saved);
+            foreach (var att in attachments)
+                DeleteOwnedDraftTempIfAny(att.SourcePath);
+            _library.Prefs.FeedbackDraftText = "";
+            _library.Prefs.FeedbackDraftFiles.Clear();
+            _library.SavePrefs();
+        }
+
         // Restore persisted draft attachment files if still present on disk
         foreach (string savedPath in _library.Prefs.FeedbackDraftFiles.Take(3).ToArray())
         {
@@ -723,7 +760,17 @@ public sealed class UpdateAndFeedbackService
                 byte[] raw = await File.ReadAllBytesAsync(savedPath);
                 if (isImg) raw = await SanitizeImageBytesToJpegAsync(raw, raw);
                 if (raw.Length <= 1_500_000)
-                    attachments.Add((isImg ? Path.ChangeExtension(fi.Name, ".jpg") : fi.Name, raw, isImg, savedPath));
+                {
+                    string displayName = fi.Name;
+                    // Strip internal timestamp-guid prefix from draft temp filenames for clean UI display
+                    if (Path.GetFullPath(savedPath).StartsWith(fullDraftTempPrefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        string[] parts = fi.Name.Split('-', 3);
+                        if (parts.Length == 3 && long.TryParse(parts[0], out _) && parts[1].Length == 6)
+                            displayName = parts[2];
+                    }
+                    attachments.Add((isImg ? Path.ChangeExtension(displayName, ".jpg") : displayName, raw, isImg, savedPath));
+                }
             }
             catch { }
         }
@@ -733,6 +780,7 @@ public sealed class UpdateAndFeedbackService
             _library.Prefs.FeedbackDraftCategory = category;
             _library.Prefs.FeedbackAttachInfo = withDeviceInfo;
             _library.Prefs.FeedbackAttachLogs = withLogs;
+            _library.Prefs.FeedbackDraftText = bodyBoxRefText();
             _library.Prefs.FeedbackDraftFiles = attachments
                 .Where(a => !string.IsNullOrEmpty(a.SourcePath))
                 .Select(a => a.SourcePath!)
@@ -740,6 +788,9 @@ public sealed class UpdateAndFeedbackService
                 .ToList();
             _library.SavePrefs();
         }
+
+        TextBox? bodyBoxHolder = null;
+        string bodyBoxRefText() => bodyBoxHolder?.Text ?? _library.Prefs.FeedbackDraftText;
 
         var catRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         var catBtns = new List<(string Id, Button Btn)>();
@@ -753,6 +804,7 @@ public sealed class UpdateAndFeedbackService
             MinHeight = 116,
             MaxLength = 800,
         };
+        bodyBoxHolder = bodyBox;
         var counterText = new TextBlock
         {
             Text = bodyBox.Text.Length >= 500 ? $"{bodyBox.Text.Length} / 800" : "",
@@ -827,6 +879,7 @@ public sealed class UpdateAndFeedbackService
                 var rm = new Button { Content = "×", Padding = new Thickness(4, 0, 4, 0), FontSize = 11, Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0) };
                 rm.Click += (_, _) =>
                 {
+                    DeleteOwnedDraftTempIfAny(attachments[idx].SourcePath);
                     attachments.RemoveAt(idx);
                     ShowAttachError(null);
                     RebuildAttachments();
@@ -883,32 +936,21 @@ public sealed class UpdateAndFeedbackService
             await TryAttachFileAsync(f);
         };
 
+        ContentDialog? activeDlg = null;
+        bool captureRequested = false;
+
         var snapWindowBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "📷 截取当前窗口", Height = 26, FontSize = 11.5 };
-        snapWindowBtn.Click += async (_, _) =>
+        snapWindowBtn.Click += (_, _) =>
         {
             if (attachments.Count >= 3)
             {
                 ShowAttachError("最多只能添加 3 个附件。");
                 return;
             }
-            if (ownerWindow.Content is not UIElement rootEl) return;
-            try
-            {
-                var rtb = new RenderTargetBitmap();
-                await rtb.RenderAsync(rootEl);
-                var pix = await rtb.GetPixelsAsync();
-                using var ms = new InMemoryRandomAccessStream();
-                var enc = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, ms);
-                enc.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, (uint)rtb.PixelWidth, (uint)rtb.PixelHeight, 96, 96, pix.ToArray());
-                await enc.FlushAsync();
-                ms.Seek(0);
-                var bytes = new byte[ms.Size];
-                await ms.ReadAsync(bytes.AsBuffer(), (uint)bytes.Length, InputStreamOptions.None);
-                ShowAttachError(null);
-                attachments.Add(($"shot-{attachments.Count + 1}.jpg", bytes, true, null));
-                RebuildAttachments();
-            }
-            catch (Exception ex) { ShowAttachError($"截屏失败：{ex.Message}"); }
+            if (ownerWindow.Content is not UIElement) return;
+            SaveDraftState();
+            captureRequested = true;
+            activeDlg?.Hide();
         };
 
         var clearDraftBtn = new Button
@@ -951,11 +993,10 @@ public sealed class UpdateAndFeedbackService
             category = "bug";
             SyncCatVisuals();
             bodyBox.Text = "";
+            ClearPersistedDraft();
             attachments.Clear();
             ShowAttachError(null);
             RebuildAttachments();
-            _library.Prefs.FeedbackDraftText = "";
-            _library.Prefs.FeedbackDraftFiles.Clear();
             SaveDraftState();
         };
 
@@ -1036,9 +1077,12 @@ public sealed class UpdateAndFeedbackService
                     ShowAttachError("剪贴板图片压缩后仍超过 1.5 MB 上限。");
                     return;
                 }
+                string pasteName = $"paste-{attachments.Count + 1}.jpg";
+                string draftPath = SaveTempDraftAttachment(pasteName, jpeg);
                 ShowAttachError(null);
-                attachments.Add(($"paste-{attachments.Count + 1}.jpg", jpeg, true, null));
+                attachments.Add((pasteName, jpeg, true, draftPath));
                 RebuildAttachments();
+                SaveDraftState();
             }
             catch { }
         }
@@ -1047,18 +1091,62 @@ public sealed class UpdateAndFeedbackService
 
         RebuildAttachments();
 
-        var dlg = new ContentDialog
+        ContentDialogResult res;
+        while (true)
         {
-            XamlRoot = xamlRoot,
-            Title = "写反馈",
-            Content = root,
-            PrimaryButtonText = "发送反馈",
-            SecondaryButtonText = "在 GitHub 打开 Issue ↗",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary,
-        };
+            activeDlg = new ContentDialog
+            {
+                XamlRoot = xamlRoot,
+                Title = "写反馈",
+                Content = root,
+                PrimaryButtonText = "发送反馈",
+                SecondaryButtonText = "在 GitHub 打开 Issue ↗",
+                CloseButtonText = "取消",
+                DefaultButton = ContentDialogButton.Primary,
+            };
 
-        var res = await dlg.ShowAsync();
+            res = await activeDlg.ShowAsync();
+            activeDlg.Content = null;
+            if (!captureRequested) break;
+
+            captureRequested = false;
+            await Task.Delay(180);
+            if (ownerWindow.Content is UIElement rootEl)
+            {
+                try
+                {
+                    var rtb = new RenderTargetBitmap();
+                    await rtb.RenderAsync(rootEl);
+                    var pix = await rtb.GetPixelsAsync();
+                    using var ms = new InMemoryRandomAccessStream();
+                    var enc = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, ms);
+                    enc.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, (uint)rtb.PixelWidth, (uint)rtb.PixelHeight, 96, 96, pix.ToArray());
+                    await enc.FlushAsync();
+                    ms.Seek(0);
+                    var rawBytes = new byte[ms.Size];
+                    await ms.ReadAsync(rawBytes.AsBuffer(), (uint)rawBytes.Length, InputStreamOptions.None);
+                    byte[] jpeg = await SanitizeImageBytesToJpegAsync(rawBytes, rawBytes);
+                    if (jpeg.Length > 1_500_000)
+                    {
+                        ShowAttachError("窗口截图压缩后仍超过 1.5 MB 上限。");
+                    }
+                    else
+                    {
+                        string shotName = $"shot-{attachments.Count + 1}.jpg";
+                        string draftPath = SaveTempDraftAttachment(shotName, jpeg);
+                        ShowAttachError(null);
+                        attachments.Add((shotName, jpeg, true, draftPath));
+                        RebuildAttachments();
+                        SaveDraftState();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ShowAttachError($"截屏失败：{ex.Message}");
+                }
+            }
+        }
+
         SaveDraftState();
         if (res == ContentDialogResult.None) return;
 
@@ -1074,12 +1162,10 @@ public sealed class UpdateAndFeedbackService
         if (res == ContentDialogResult.Primary)
         {
             var relayStatus = await TrySubmitViaRelayAsync(category, text, withDeviceInfo, publicShots, finalAttachments);
-            _library.Prefs.FeedbackDraftText = "";
-            _library.Prefs.FeedbackDraftFiles.Clear();
-            _library.SavePrefs();
 
             if (relayStatus == RelaySubmitOutcome.Sent)
             {
+                ClearPersistedDraft();
                 await new ContentDialog
                 {
                     XamlRoot = xamlRoot,
@@ -1090,29 +1176,42 @@ public sealed class UpdateAndFeedbackService
             }
             else if (relayStatus == RelaySubmitOutcome.QueuedOffline)
             {
+                // Keep saved draft untouched if network upload threw; only inform user when queued without error
                 await new ContentDialog
                 {
                     XamlRoot = xamlRoot,
                     Title = "已暂存离线队列",
-                    Content = "当前网络暂时无法直达反馈通道，内容已安全保存在本机，联网后将自动补发。",
+                    Content = "当前服务暂时繁忙，内容已安全保存在本机（草稿也已保留），联网后将自动补发。",
                     CloseButtonText = "好",
                 }.ShowAsync();
             }
+            else if (relayStatus == RelaySubmitOutcome.UploadFailed)
+            {
+                // NEVER clear saved draft when network upload throws!
+                var retryDlg = new ContentDialog
+                {
+                    XamlRoot = xamlRoot,
+                    Title = "网络上传未成功，草稿已保留",
+                    Content = "当前无法上传反馈或附件。你填写的文字与截图已保存在草稿中，稍后重新打开即可继续发送。",
+                    PrimaryButtonText = "改为在 GitHub 打开 Issue ↗",
+                    CloseButtonText = "好",
+                };
+                if (await retryDlg.ShowAsync() == ContentDialogResult.Primary)
+                    OpenGitHubIssue(category, text, withDeviceInfo);
+            }
             else
             {
+                // YuyueFeedbackTopic unconfigured: NEVER clear saved draft!
                 OpenGitHubIssue(category, text, withDeviceInfo);
             }
         }
         else if (res == ContentDialogResult.Secondary)
         {
-            _library.Prefs.FeedbackDraftText = "";
-            _library.Prefs.FeedbackDraftFiles.Clear();
-            _library.SavePrefs();
             OpenGitHubIssue(category, text, withDeviceInfo);
         }
     }
 
-    private enum RelaySubmitOutcome { Unavailable, Sent, QueuedOffline }
+    private enum RelaySubmitOutcome { Unconfigured, Sent, QueuedOffline, UploadFailed }
 
     internal static (string? Topic, string? PublicKey) ResolveFeedbackConfig()
     {
@@ -1140,7 +1239,7 @@ public sealed class UpdateAndFeedbackService
     {
         var (topic, pubKey) = ResolveFeedbackConfig();
         if (string.IsNullOrWhiteSpace(topic) || string.IsNullOrWhiteSpace(pubKey))
-            return RelaySubmitOutcome.Unavailable;
+            return RelaySubmitOutcome.Unconfigured;
 
         try
         {
@@ -1173,30 +1272,26 @@ public sealed class UpdateAndFeedbackService
                 Files: fileIds.ToArray());
 
             string sealedJson = YuyueCoreMethods.FeedbackMessage(draft);
-            try
+            using var postReq = new HttpRequestMessage(HttpMethod.Post, $"https://ntfy.sh/{topic}")
             {
-                using var postReq = new HttpRequestMessage(HttpMethod.Post, $"https://ntfy.sh/{topic}")
-                {
-                    Content = new StringContent(sealedJson, Encoding.UTF8, "application/json"),
-                };
-                postReq.Headers.Add("X-Firebase", "no");
-                using var postResp = await Http.SendAsync(postReq);
-                if ((int)postResp.StatusCode == 429 || !postResp.IsSuccessStatusCode)
+                Content = new StringContent(sealedJson, Encoding.UTF8, "application/json"),
+            };
+            postReq.Headers.Add("X-Firebase", "no");
+            using var postResp = await Http.SendAsync(postReq);
+            if ((int)postResp.StatusCode == 429 || !postResp.IsSuccessStatusCode)
+            {
+                if (attachments.Count == 0)
                 {
                     EnqueueOfflineFeedback(topic, sealedJson);
                     return RelaySubmitOutcome.QueuedOffline;
                 }
-                return RelaySubmitOutcome.Sent;
+                return RelaySubmitOutcome.UploadFailed;
             }
-            catch
-            {
-                EnqueueOfflineFeedback(topic, sealedJson);
-                return RelaySubmitOutcome.QueuedOffline;
-            }
+            return RelaySubmitOutcome.Sent;
         }
         catch
         {
-            return RelaySubmitOutcome.Unavailable;
+            return RelaySubmitOutcome.UploadFailed;
         }
     }
 

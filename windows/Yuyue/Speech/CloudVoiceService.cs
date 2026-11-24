@@ -542,17 +542,40 @@ public sealed class CloudVoiceService
         ("ja-JP-KeitaNeural", "圭太 · 自然日本語男声", "ja-JP", "male", "young"),
     ];
 
-    public static readonly (string Id, string Name, string Locale, string Gender, int Sid)[] FreeBuiltinVoices =
+    public static readonly (string Id, string Name, string Locale, string Gender)[] FreeBuiltinVoices =
     [
-        ("zf_001", "晓语 · 温和女声", "zh-CN", "female", 55),
-        ("zf_002", "清禾 · 清润女声", "zh-CN", "female", 56),
-        ("zm_010", "云泽 · 沉稳男声", "zh-CN", "male", 100),
-        ("zm_009", "知行 · 明朗男声", "zh-CN", "male", 99),
-        ("af_heart", "Heart · Warm Narrator", "en-US", "female", 3),
-        ("af_bella", "Bella · Clear Female", "en-US", "female", 2),
-        ("am_michael", "Michael · Steady Male", "en-US", "male", 16),
-        ("bf_emma", "Emma · British Narrator", "en-GB", "female", 21),
+        ("zh_baidu", "知声 · 清晰播报", "zh-CN", "female"),
+        ("en_us", "Emma · American", "en-US", "female"),
+        ("en_uk", "Clara · British", "en-GB", "female"),
     ];
+
+    public static string NormalizeFreeVoiceId(string? voiceId, string? language = null)
+    {
+        string v = (voiceId ?? "").Trim();
+        if (string.Equals(v, "zh_baidu", StringComparison.OrdinalIgnoreCase) ||
+            v.StartsWith("zf_", StringComparison.OrdinalIgnoreCase) ||
+            v.StartsWith("zm_", StringComparison.OrdinalIgnoreCase))
+        {
+            return "zh_baidu";
+        }
+        if (string.Equals(v, "en_uk", StringComparison.OrdinalIgnoreCase) ||
+            v.StartsWith("bf_", StringComparison.OrdinalIgnoreCase) ||
+            v.StartsWith("bm_", StringComparison.OrdinalIgnoreCase))
+        {
+            return "en_uk";
+        }
+        if (string.Equals(v, "en_us", StringComparison.OrdinalIgnoreCase) ||
+            v.StartsWith("af_", StringComparison.OrdinalIgnoreCase) ||
+            v.StartsWith("am_", StringComparison.OrdinalIgnoreCase) ||
+            v is "0" or "1" or "2")
+        {
+            return "en_us";
+        }
+        string lang = (language ?? "").Trim();
+        if (lang.StartsWith("en-GB", StringComparison.OrdinalIgnoreCase)) return "en_uk";
+        if (lang.StartsWith("en", StringComparison.OrdinalIgnoreCase)) return "en_us";
+        return "zh_baidu";
+    }
 
     public static readonly (string Id, string Name, string Locale, string Gender)[] VolcengineBuiltinVoices =
     [
@@ -745,7 +768,7 @@ public sealed class CloudVoiceService
 
             case CloudTtsProvider.Free:
                 return FreeBuiltinVoices
-                    .Select(v => new CloudVoiceEntry(provider, v.Id, v.Name, v.Locale, v.Gender, null))
+                    .Select(v => new CloudVoiceEntry(provider, v.Id, v.Name, v.Locale, v.Gender, v.Id == "zh_baidu" ? "middle_aged" : "young"))
                     .ToArray();
 
             case CloudTtsProvider.Volcengine:
@@ -870,8 +893,8 @@ public sealed class CloudVoiceService
                 case CloudTtsProvider.Free:
                 {
                     _library.Secrets.Set("tts.free.dismissed", "");
-                    byte[]? probe = await FetchFreeOnlineWavAsync("zf_001", "你好", "zh-CN", ct);
-                    if (probe is null || probe.Length < 128)
+                    byte[]? probe = await FetchFreeOnlineWavAsync("zh_baidu", "你好，我来给你读这本书。", "zh-CN", ct);
+                    if (probe is null || !IsValidRiffWav(probe))
                         return (false, 0, "在线公共线路当前繁忙，请稍后再试或下载本地离线模型");
                     return (true, FreeBuiltinVoices.Length, $"已连通免 Key 在线自然语音（{FreeBuiltinVoices.Length} 个音色可用）");
                 }
@@ -1150,6 +1173,12 @@ public sealed class CloudVoiceService
         if (!plain.Any(char.IsLetterOrDigit)) return null;
 
         string pKey = CloudVoiceEntry.ProviderKey(provider);
+        if (provider == CloudTtsProvider.Free &&
+            (!_library.Prefs.CloudVoiceBaseUrls.TryGetValue("free", out var customFreeUrl) || string.IsNullOrWhiteSpace(customFreeUrl)))
+        {
+            voiceId = NormalizeFreeVoiceId(voiceId, language);
+            fullVoiceId = $"cloud.free.{voiceId}";
+        }
         string apiKey = GetApiKey(provider);
         if (NeedsKey(provider) && string.IsNullOrEmpty(apiKey)) return null;
 
@@ -1176,12 +1205,13 @@ public sealed class CloudVoiceService
                 try
                 {
                     byte[] cached = await File.ReadAllBytesAsync(hit, ct);
-                    if (cached.Length > 44)
+                    if (IsValidRiffWav(cached))
                     {
                         try { File.SetLastWriteTimeUtc(hit, DateTime.UtcNow); } catch { }
                         if (IsPaidCloud(provider)) _library.Usage.RecordTts(plain.Length, cached: true);
                         return cached;
                     }
+                    try { File.Delete(hit); } catch { }
                 }
                 catch { }
             }
@@ -1195,18 +1225,18 @@ public sealed class CloudVoiceService
             _library.Usage.RecordTts(plain.Length, cached: false);
 
         byte[] wavBytes = await EnsureWavBytesAsync(rawAudio, ct);
-        if (wavBytes.Length > 44)
+        if (!IsValidRiffWav(wavBytes))
+            throw new InvalidOperationException("语音服务返回的音频数据无法解码为 WAV");
+
+        try
         {
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
-                string tmp = cachePath + ".part";
-                await File.WriteAllBytesAsync(tmp, wavBytes, ct);
-                File.Move(tmp, cachePath, overwrite: true);
-                TrimPersistentCacheIfNeeded();
-            }
-            catch { }
+            Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
+            string tmp = cachePath + ".part";
+            await File.WriteAllBytesAsync(tmp, wavBytes, ct);
+            File.Move(tmp, cachePath, overwrite: true);
+            TrimPersistentCacheIfNeeded();
         }
+        catch { }
         return wavBytes;
     }
 
@@ -1392,10 +1422,29 @@ public sealed class CloudVoiceService
                 string json = await resp.Content.ReadAsStringAsync(ct);
                 ValidateMiniMaxBaseResp(json, name);
                 using var doc = JsonDocument.Parse(json);
-                string audioStr = doc.RootElement.GetProperty("data").GetProperty("audio").GetString() ?? "";
-                if (audioStr.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                    return await Http.GetByteArrayAsync(audioStr, ct);
-                return Convert.FromHexString(audioStr);
+                string audioStr = (doc.RootElement.GetProperty("data").GetProperty("audio").GetString() ?? "").Trim();
+                if (string.IsNullOrEmpty(audioStr))
+                    throw new InvalidOperationException("MiniMax 返回空音频数据");
+                byte[] mmBytes;
+                if (audioStr.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                    audioStr.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!Uri.TryCreate(audioStr, UriKind.Absolute, out var mmUri) ||
+                        (mmUri.Scheme != Uri.UriSchemeHttps && mmUri.Scheme != Uri.UriSchemeHttp) ||
+                        string.IsNullOrWhiteSpace(mmUri.Host))
+                    {
+                        throw new InvalidOperationException("MiniMax 返回的音频地址无效");
+                    }
+                    mmBytes = await Http.GetByteArrayAsync(mmUri, ct);
+                }
+                else
+                {
+                    try { mmBytes = Convert.FromHexString(audioStr); }
+                    catch (FormatException) { throw new InvalidOperationException("MiniMax 返回的音频编码格式无效"); }
+                }
+                if (mmBytes.Length == 0)
+                    throw new InvalidOperationException("MiniMax 返回空音频数据");
+                return mmBytes;
             }
 
             case CloudTtsProvider.OpenAi:
@@ -1417,7 +1466,7 @@ public sealed class CloudVoiceService
                 if (string.IsNullOrEmpty(region)) throw new InvalidOperationException("未配置 Azure 区域");
                 string xmlLang = ResolveXmlLang(voiceId, language);
                 string inner = BuildAzureSsmlInner(plain, parts, xmlLang, act);
-                string ssml = $"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='{xmlLang}'><voice name='{EscapeXml(voiceId)}'>{inner}</voice></speak>";
+                string ssml = $"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='{EscapeXml(xmlLang)}'><voice name='{EscapeXml(voiceId)}'>{inner}</voice></speak>";
 
                 using var req = new HttpRequestMessage(HttpMethod.Post, $"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1");
                 req.Headers.Add("Ocp-Apim-Subscription-Key", apiKey);
@@ -1569,83 +1618,254 @@ public sealed class CloudVoiceService
         return (_library.Secrets.Get("tts.volcengine.appid").Trim(), rawKey);
     }
 
-    private static async Task<byte[]?> FetchFreeOnlineWavAsync(string voiceId, string text, string language, CancellationToken ct)
+    private async Task<byte[]?> FetchFreeOnlineWavAsync(string voiceId, string text, string language, CancellationToken ct)
     {
-        bool isZh = language.StartsWith("zh", StringComparison.OrdinalIgnoreCase) || text.Any(c => c >= 0x4E00 && c <= 0x9FFF);
-        int sid = FreeBuiltinVoices.FirstOrDefault(v => v.Id == voiceId).Sid;
-        if (sid <= 0) sid = isZh ? 55 : 3;
-
-        string[] bases =
-        [
-            "https://www.modelscope.cn/api/v1/studio/k2-fsa/text-to-speech/gradio",
-            "https://k2-fsa-text-to-speech.hf.space",
-        ];
-        string langLabel = isZh ? "Chinese+English (kokoro-v1.1-zh)" : "English (kokoro-v1.0)";
-        string modelLabel = isZh ? "csukuangfj/kokoro-int8-multi-lang-v1_1|103" : "csukuangfj/kokoro-int8-en-v0_19|11";
-        foreach (string b in bases)
+        if (_library.Prefs.CloudVoiceBaseUrls.TryGetValue("free", out var customBase) && !string.IsNullOrWhiteSpace(customBase))
         {
-            byte[]? wav = await CallGradioWavAsync(b, "process", new object[] { langLabel, modelLabel, text, sid, 1.0 }, ct);
-            if (wav is not null) return wav;
+            string? endpoint = SpeechEndpoint(customBase);
+            if (!string.IsNullOrEmpty(endpoint))
+            {
+                string mdl = _library.Prefs.CloudVoiceModels.TryGetValue("free", out var cm) && !string.IsNullOrWhiteSpace(cm)
+                    ? cm.Trim()
+                    : "kokoro";
+                using var req = new HttpRequestMessage(HttpMethod.Post, endpoint)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(new
+                    {
+                        model = mdl,
+                        voice = voiceId,
+                        input = text,
+                        response_format = "mp3",
+                    }), Encoding.UTF8, "application/json"),
+                };
+                using var customCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                customCts.CancelAfter(System.TimeSpan.FromSeconds(25));
+                using var resp = await Http.SendAsync(req, customCts.Token);
+                if (!resp.IsSuccessStatusCode) return null;
+                byte[] customBytes = await resp.Content.ReadAsByteArrayAsync(customCts.Token);
+                if (customBytes.Length == 0) return null;
+                byte[] customWav = await EnsureWavBytesAsync(customBytes, ct);
+                return IsValidRiffWav(customWav) ? customWav : null;
+            }
         }
-        // 不跨模型静默回退到不同音色，失败时向上报错告知用户。
+
+        string clean = (text ?? "").Trim();
+        if (string.IsNullOrEmpty(clean)) return null;
+
+        bool hasCjk = false;
+        foreach (Rune r in clean.EnumerateRunes())
+        {
+            if (r.Value is >= 0x4E00 and <= 0x9FFF) { hasCjk = true; break; }
+        }
+
+        string mappedId = NormalizeFreeVoiceId(voiceId, language);
+        bool isEnglish = !hasCjk && (
+            language.StartsWith("en", StringComparison.OrdinalIgnoreCase)
+            || voiceId.StartsWith("en_", StringComparison.OrdinalIgnoreCase)
+            || voiceId is "0" or "1" or "2"
+            || voiceId.StartsWith("af_", StringComparison.OrdinalIgnoreCase)
+            || voiceId.StartsWith("am_", StringComparison.OrdinalIgnoreCase)
+            || voiceId.StartsWith("bf_", StringComparison.OrdinalIgnoreCase)
+            || voiceId.StartsWith("bm_", StringComparison.OrdinalIgnoreCase));
+
+        string lan = isEnglish ? (mappedId == "en_uk" ? "uk" : "en") : "zh";
+        string spd = isEnglish ? "3" : "5";
+        var chunks = SplitFreeChunks(clean, maxChars: 160);
+
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (attempt > 0)
+                await Task.Delay(250, ct);
+
+            try
+            {
+                var parts = new List<byte[]>(chunks.Count);
+                foreach (string chunk in chunks)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    string url = $"https://fanyi.baidu.com/gettts?lan={lan}&spd={spd}&source=web&text={Uri.EscapeDataString(chunk)}";
+                    using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                    req.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15");
+                    using var chunkCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    chunkCts.CancelAfter(System.TimeSpan.FromSeconds(12));
+                    using var resp = await Http.SendAsync(req, chunkCts.Token);
+                    if (!resp.IsSuccessStatusCode)
+                        throw new HttpRequestException($"HTTP {(int)resp.StatusCode}");
+                    byte[] data = await resp.Content.ReadAsByteArrayAsync(chunkCts.Token);
+                    if (!LooksLikeAudio(data))
+                        throw new InvalidDataException("返回内容不是有效音频");
+                    parts.Add(data);
+                }
+
+                if (parts.Count > 0)
+                {
+                    byte[] combinedMp3 = CombineMp3Chunks(parts);
+                    byte[] wav = await EnsureWavBytesAsync(combinedMp3, ct);
+                    if (IsValidRiffWav(wav))
+                        return wav;
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                // Retry once on transient network/timeout error; never silently switch voice route.
+            }
+        }
         return null;
     }
 
-    private static async Task<byte[]?> CallGradioWavAsync(string baseUrl, string fnName, object[] args, CancellationToken ct)
+    internal static List<string> SplitFreeChunks(string text, int maxChars = 160)
     {
-        try
+        if (text.Length <= maxChars) return [text];
+        ReadOnlySpan<char> breaks = "。！？；，.!?;,";
+        var chunks = new List<string>();
+        var current = new StringBuilder();
+        foreach (char ch in text)
         {
-            string joinUrl = $"{baseUrl.TrimEnd('/')}/gradio_api/call/{fnName}";
-            using var joinReq = new HttpRequestMessage(HttpMethod.Post, joinUrl)
+            current.Append(ch);
+            if (current.Length >= maxChars || (current.Length >= maxChars * 2 / 3 && breaks.Contains(ch)))
             {
-                Content = new StringContent(JsonSerializer.Serialize(new { data = args }), Encoding.UTF8, "application/json"),
-            };
-            using var joinResp = await Http.SendAsync(joinReq, ct);
-            if (!joinResp.IsSuccessStatusCode) return null;
-            using var joinDoc = JsonDocument.Parse(await joinResp.Content.ReadAsStringAsync(ct));
-            string eventId = joinDoc.RootElement.TryGetProperty("event_id", out var ep) ? ep.GetString() ?? "" : "";
-            if (string.IsNullOrEmpty(eventId)) return null;
+                string t = current.ToString().Trim();
+                if (!string.IsNullOrEmpty(t)) chunks.Add(t);
+                current.Clear();
+            }
+        }
+        string rem = current.ToString().Trim();
+        if (!string.IsNullOrEmpty(rem)) chunks.Add(rem);
+        return chunks.Count == 0 ? [text] : chunks;
+    }
 
-            using var sseResp = await Http.GetAsync($"{joinUrl}/{eventId}", ct);
-            if (!sseResp.IsSuccessStatusCode) return null;
-            string sseText = await sseResp.Content.ReadAsStringAsync(ct);
-            string? audioUrl = null;
-            string lastEvent = "";
-            foreach (string rawLine in sseText.Split('\n'))
+    public static bool IsValidRiffWav(ReadOnlySpan<byte> data) =>
+        data.Length > 44
+        && data[0] == (byte)'R' && data[1] == (byte)'I' && data[2] == (byte)'F' && data[3] == (byte)'F'
+        && data[8] == (byte)'W' && data[9] == (byte)'A' && data[10] == (byte)'V' && data[11] == (byte)'E';
+
+    public static bool LooksLikeAudio(ReadOnlySpan<byte> data)
+    {
+        if (data.Length < 64) return false;
+        if (data[0] == (byte)'<' || data[0] == (byte)'{') return false;
+        if (data[0] == 0x52 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x46) return true; // RIFF
+        if (data[0] == 0x66 && data[1] == 0x4C && data[2] == 0x61 && data[3] == 0x43) return true; // fLaC
+        if (data[0] == 0x4F && data[1] == 0x67 && data[2] == 0x67 && data[3] == 0x53) return true; // OggS
+        if (data[0] == 0x49 && data[1] == 0x44 && data[2] == 0x33) return true; // ID3
+        if (data[0] == 0xFF && (data[1] & 0xE0) == 0xE0) return true; // MPEG sync
+        return true;
+    }
+
+    /// <summary>
+    /// Concatenates multiple MP3 chunks after stripping leading ID3v2 tags, trailing ID3v1 tags,
+    /// and leading Xing/Info/VBRI VBR header frames (1:1 <c>CloudVoice.combineAudioChunks</c>).
+    /// </summary>
+    public static byte[] CombineMp3Chunks(IReadOnlyList<byte[]> parts)
+    {
+        if (parts.Count == 0) return [];
+        if (parts.Count == 1) return parts[0];
+
+        int totalCap = 0;
+        for (int i = 0; i < parts.Count; i++) totalCap += parts[i].Length;
+        using var ms = new MemoryStream(totalCap);
+        for (int i = 0; i < parts.Count; i++)
+        {
+            byte[] stripped = StripMp3Metadata(parts[i]);
+            if (stripped.Length > 0)
+                ms.Write(stripped, 0, stripped.Length);
+        }
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Strips leading ID3v2 tags, trailing ID3v1 tags, and leading Xing/Info/VBRI VBR info
+    /// frames from an MP3 buffer, leaving raw MPEG audio frames safe to concatenate
+    /// (1:1 <c>CloudVoice.stripMP3Metadata</c>).
+    /// </summary>
+    public static byte[] StripMp3Metadata(ReadOnlySpan<byte> data)
+    {
+        int start = 0;
+        int end = data.Length;
+
+        // 1. Strip one or more leading ID3v2 headers ("ID3" + 2B version + 1B flags + 4B synchsafe size).
+        while (end - start >= 10 &&
+               data[start] == 0x49 && data[start + 1] == 0x44 && data[start + 2] == 0x33 &&
+               data[start + 3] < 0xFF && data[start + 4] < 0xFF &&
+               data[start + 6] < 0x80 && data[start + 7] < 0x80 &&
+               data[start + 8] < 0x80 && data[start + 9] < 0x80)
+        {
+            int tagSize = (data[start + 6] << 21)
+                | (data[start + 7] << 14)
+                | (data[start + 8] << 7)
+                | data[start + 9];
+            int footerSize = (data[start + 5] & 0x10) != 0 ? 10 : 0;
+            int skip = 10 + tagSize + footerSize;
+            if (skip <= 0 || start + skip > end) break;
+            start += skip;
+        }
+
+        // 2. Strip trailing 128-byte ID3v1 tag ("TAG...").
+        if (end - start >= 128 &&
+            data[end - 128] == 0x54 && data[end - 127] == 0x41 && data[end - 126] == 0x47)
+        {
+            end -= 128;
+        }
+
+        // 3. Sync to first valid MPEG audio frame and skip an optional Xing/Info/VBRI metadata frame.
+        ReadOnlySpan<int> mpeg1Bitrates = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0];
+        ReadOnlySpan<int> mpeg2Bitrates = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0];
+        ReadOnlySpan<int> mpeg1Rates = [44100, 48000, 32000];
+        ReadOnlySpan<int> mpeg2Rates = [22050, 24000, 16000];
+        ReadOnlySpan<int> mpeg25Rates = [11025, 12000, 8000];
+
+        int i = start;
+        while (i + 4 <= end)
+        {
+            byte b0 = data[i], b1 = data[i + 1], b2 = data[i + 2], b3 = data[i + 3];
+            int version = (b1 >> 3) & 0x03;
+            int layer = (b1 >> 1) & 0x03;
+            int bitrateIdx = (b2 >> 4) & 0x0F;
+            int srIdx = (b2 >> 2) & 0x03;
+            if (b0 == 0xFF && (b1 & 0xE0) == 0xE0 &&
+                version != 1 && layer != 0 &&
+                bitrateIdx is >= 1 and <= 14 && srIdx < 3)
             {
-                string line = rawLine.Trim();
-                if (line.StartsWith("event:", StringComparison.Ordinal))
-                    lastEvent = line[6..].Trim();
-                else if (line.StartsWith("data:", StringComparison.Ordinal) && lastEvent == "complete")
+                start = i;
+                if (layer == 1)
                 {
-                    using var arrDoc = JsonDocument.Parse(line[5..].Trim());
-                    if (arrDoc.RootElement.ValueKind == JsonValueKind.Array)
+                    int padding = (b2 >> 1) & 0x01;
+                    int channelMode = (b3 >> 6) & 0x03;
+                    int frameLen;
+                    int xingOffset;
+                    if (version == 3)
                     {
-                        foreach (var el in arrDoc.RootElement.EnumerateArray())
-                        {
-                            if (el.ValueKind != JsonValueKind.Object) continue;
-                            if (el.TryGetProperty("url", out var uProp) && uProp.GetString() is { } u && u.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                            {
-                                audioUrl = u;
-                                break;
-                            }
-                            if (el.TryGetProperty("path", out var pProp) && pProp.GetString() is { } p && !string.IsNullOrEmpty(p))
-                            {
-                                audioUrl = $"{baseUrl.TrimEnd('/')}/gradio_api/file={p}";
-                                break;
-                            }
-                        }
+                        frameLen = (144 * mpeg1Bitrates[bitrateIdx] * 1000) / mpeg1Rates[srIdx] + padding;
+                        xingOffset = i + 4 + (channelMode == 3 ? 17 : 32);
+                    }
+                    else
+                    {
+                        var srTable = version == 2 ? mpeg2Rates : mpeg25Rates;
+                        frameLen = (72 * mpeg2Bitrates[bitrateIdx] * 1000) / srTable[srIdx] + padding;
+                        xingOffset = i + 4 + (channelMode == 3 ? 9 : 17);
+                    }
+                    int frameEnd = i + frameLen;
+                    if (frameLen >= 4 && frameEnd <= end)
+                    {
+                        bool isXingOrInfo = xingOffset + 4 <= frameEnd && (
+                            (data[xingOffset] == 0x58 && data[xingOffset + 1] == 0x69 && data[xingOffset + 2] == 0x6E && data[xingOffset + 3] == 0x67)
+                            || (data[xingOffset] == 0x49 && data[xingOffset + 1] == 0x6E && data[xingOffset + 2] == 0x66 && data[xingOffset + 3] == 0x6F));
+                        bool isVbri = i + 40 <= frameEnd &&
+                            data[i + 36] == 0x56 && data[i + 37] == 0x42 && data[i + 38] == 0x52 && data[i + 39] == 0x49;
+                        if (isXingOrInfo || isVbri)
+                            start = frameEnd;
                     }
                 }
+                break;
             }
-            if (string.IsNullOrEmpty(audioUrl)) return null;
-            byte[] bytes = await Http.GetByteArrayAsync(audioUrl, ct);
-            return bytes.Length > 128 ? bytes : null;
+            i++;
         }
-        catch
-        {
-            return null;
-        }
+
+        return start < end ? data[start..end].ToArray() : data.ToArray();
     }
 
     private bool HasCached(string providerKey, string fullVoiceId, string plainText, CloudVoiceActing act, string readings) =>
@@ -1850,8 +2070,28 @@ public sealed class CloudVoiceService
         return string.Join(" ", outSyllables);
     }
 
-    private static string EscapeXml(string s) =>
-        s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("'", "&apos;");
+    public static string EscapeXml(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        var sb = new StringBuilder(s.Length + 16);
+        foreach (Rune r in s.EnumerateRunes())
+        {
+            int v = r.Value;
+            // Strip illegal XML 1.0 control characters (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F) and noncharacters
+            if (v <= 0x08 || v == 0x0B || v == 0x0C || (v >= 0x0E && v <= 0x1F) || v == 0xFFFE || v == 0xFFFF)
+                continue;
+            switch (v)
+            {
+                case '&': sb.Append("&amp;"); break;
+                case '<': sb.Append("&lt;"); break;
+                case '>': sb.Append("&gt;"); break;
+                case '"': sb.Append("&quot;"); break;
+                case '\'': sb.Append("&apos;"); break;
+                default: sb.Append(r.ToString()); break;
+            }
+        }
+        return sb.ToString();
+    }
 
     public static byte[] WrapPcm16MonoInWav(byte[] pcmBytes, int sampleRate)
     {

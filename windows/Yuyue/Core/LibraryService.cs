@@ -159,7 +159,7 @@ public sealed class DevicePrefs
     public bool SyncReading { get; set; } = true;
     public bool SyncNotes { get; set; } = true;
     public bool SyncSettings { get; set; } = true;
-    public bool SyncFiles { get; set; } = false;
+    public bool SyncFiles { get; set; } = true;
     public bool SyncRecordings { get; set; } = false;
     public long? LastSyncedUnixMs { get; set; }
     public string SyncWrittenVersion { get; set; } = "";
@@ -347,7 +347,7 @@ public sealed class LibraryService : IDisposable
     public Dictionary<string, uint> GetMarkCounts() => Core.MarkCounts();
     public BookSummary ImportBook(string filePath) => Core.ImportBook(filePath);
 
-    public async Task<BookSummary> ImportBookWithExtrasAsync(string filePath, string? fallbackTitle = null, string? fallbackAuthor = null)
+    public async Task<BookSummary> ImportBookWithExtrasAsync(string filePath, string? fallbackTitle = null, string? fallbackAuthor = null, byte[]? fallbackCover = null)
     {
         string stem = Path.GetFileNameWithoutExtension(filePath);
         string? cleanTitle = string.IsNullOrWhiteSpace(fallbackTitle) ? null : fallbackTitle.Trim();
@@ -363,9 +363,10 @@ public sealed class LibraryService : IDisposable
             {
                 string orig = TryOriginalFile(summary.Id) ?? filePath;
                 var info = await PdfInfoReader.ReadAsync(orig);
-                string? title = string.IsNullOrWhiteSpace(info.Title) ? cleanTitle : info.Title;
+                string? title = string.IsNullOrWhiteSpace(info.Title) || info.Title == stem ? (cleanTitle ?? info.Title) : info.Title;
                 string[] authors = info.Authors.Length == 0 && cleanAuthors.Length > 0 ? cleanAuthors : info.Authors;
-                var merged = new PdfInfo(info.Pages, title, authors, info.Characters, info.Cover);
+                byte[]? cover = info.Cover ?? fallbackCover;
+                var merged = new PdfInfo(info.Pages, title, authors, info.Characters, cover);
                 summary = await Task.Run(() => Core.SetPdfInfo(summary.Id, merged));
             }
             catch { }
@@ -381,6 +382,14 @@ public sealed class LibraryService : IDisposable
                     summary.Id,
                     needsTitle ? cleanTitle! : summary.Title,
                     needsAuthors ? cleanAuthors : summary.Authors));
+            }
+            catch { }
+        }
+        if (string.IsNullOrEmpty(summary.CoverPath) && fallbackCover is { Length: > 0 })
+        {
+            try
+            {
+                summary = await Task.Run(() => Core.SetCover(summary.Id, fallbackCover));
             }
             catch { }
         }

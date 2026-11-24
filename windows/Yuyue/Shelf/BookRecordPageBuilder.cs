@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.UI;
 using Yuyue.Core;
 using Yuyue.Design;
@@ -804,6 +805,20 @@ public sealed class BookRecordPageBuilder
             page.Children.Add(BuildManualProgressBlock(book, p, tint));
         }
 
+        BookPodcastMention[] podcastMentions;
+        try { podcastMentions = _library.Core.PodcastMentionsForBook(book.Id, book.Title); }
+        catch { podcastMentions = []; }
+        var bookPodcastIssues = _library.Podcasts.GetIssues().Where(i => i.BookIds.Contains(book.Id)).ToArray();
+        int? podCount = podcastMentions.Length > 0
+            ? podcastMentions.Length
+            : (bookPodcastIssues.Length > 0 ? bookPodcastIssues.Length : null);
+
+        // 1:1 BookRecordPage.swift:597-648 — inline podcast mentions card when mentions exist
+        if (podcastMentions.Length > 0 && _subTab != "podcast")
+        {
+            page.Children.Add(BuildInlinePodcastMentionsCard(book, podcastMentions, p, tint, serif));
+        }
+
         // 子标签栏：目录 / 简介 / 笔记 / 记录 / 播客 + 右侧「书房电台」胶囊
         var subBar = new Grid();
         var subTabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
@@ -812,7 +827,7 @@ public sealed class BookRecordPageBuilder
         tabDefs.Add(("desc", "note-card", "简介", null));
         tabDefs.Add(("notes", "highlighter", "笔记", marks.Count));
         tabDefs.Add(("log", "clock", "记录", null));
-        tabDefs.Add(("podcast", "headphones", "播客", null));
+        tabDefs.Add(("podcast", "headphones", "播客", podCount));
 
         foreach (var (key, icon, lbl, cnt) in tabDefs)
         {
@@ -862,13 +877,13 @@ public sealed class BookRecordPageBuilder
                 page.Children.Add(BuildRecordDescTab(book, p, tint, serif));
                 break;
             case "notes":
-                page.Children.Add(BuildRecordNotesTab(book, marks, p, tint, dark, serif));
+                page.Children.Add(BuildRecordNotesTab(book, detail, marks, p, tint, dark, serif));
                 break;
             case "log":
                 page.Children.Add(BuildRecordTimelineTab(book, marks, curSection, chapterCount, p, tint));
                 break;
             case "podcast":
-                page.Children.Add(BuildRecordPodcastTab(book, p, tint, serif));
+                page.Children.Add(BuildRecordPodcastTab(book, bookPodcastIssues, podcastMentions, p, tint, serif));
                 break;
         }
 
@@ -1154,9 +1169,25 @@ public sealed class BookRecordPageBuilder
         };
     }
 
-    private FrameworkElement BuildRecordNotesTab(BookSummary book, IReadOnlyList<Mark> marks, YYPalette p, YYTintColors tint, bool dark, FontFamily serif)
+    private FrameworkElement BuildRecordNotesTab(BookSummary book, BookDetail? detail, IReadOnlyList<Mark> marks, YYPalette p, YYTintColors tint, bool dark, FontFamily serif)
     {
         var stack = new StackPanel { Spacing = 14 };
+
+        var tocMap = new Dictionary<uint, string>();
+        if (detail is not null)
+        {
+            foreach (var t in detail.Toc)
+                if (!tocMap.ContainsKey(t.Section) && !string.IsNullOrWhiteSpace(t.Title))
+                    tocMap[t.Section] = t.Title;
+        }
+        string ResolveMarkChapter(Mark mk)
+        {
+            if (book.Format == BookFormat.Pdf) return $"第 {mk.Section + 1} 页";
+            if (tocMap.TryGetValue(mk.Section, out var t)) return t;
+            if (detail is not null && mk.Section < detail.Sections.Length && !string.IsNullOrWhiteSpace(detail.Sections[mk.Section].Title))
+                return detail.Sections[mk.Section].Title!;
+            return book.Record ? "" : $"第 {mk.Section + 1} 章";
+        }
 
         // 短评卡片（自动保存）
         var commentStack = new StackPanel { Spacing = 8 };
@@ -1227,8 +1258,88 @@ public sealed class BookRecordPageBuilder
                     openMi.Click += (_, _) => App.CurrentApp.OpenBook(book.Id, section: mk.Section, sentence: (int)mk.Start.Sentence);
                     ctx.Items.Add(openMi);
                 }
+
+                var editNoteMi = new MenuFlyoutItem { Text = string.IsNullOrWhiteSpace(mk.Note) ? "写想法…" : "改想法…" };
+                editNoteMi.Click += async (_, _) =>
+                {
+                    var box = new TextBox
+                    {
+                        AcceptsReturn = true,
+                        TextWrapping = TextWrapping.Wrap,
+                        MinHeight = 90,
+                        Text = mk.Note ?? "",
+                        PlaceholderText = "写下此刻的想法…",
+                    };
+                    var dlg = new ContentDialog
+                    {
+                        Title = string.IsNullOrWhiteSpace(mk.Note) ? "写想法" : "改想法",
+                        Content = new StackPanel
+                        {
+                            Spacing = 8,
+                            Width = 360,
+                            Children =
+                            {
+                                new TextBlock
+                                {
+                                    Text = $"“{mk.Text}”",
+                                    FontFamily = serif,
+                                    FontSize = 12.5,
+                                    Foreground = ThemeHelper.Brush(p.T2),
+                                    MaxLines = 3,
+                                    TextTrimming = TextTrimming.CharacterEllipsis,
+                                    TextWrapping = TextWrapping.Wrap,
+                                },
+                                box,
+                            },
+                        },
+                        PrimaryButtonText = "保存",
+                        CloseButtonText = "取消",
+                        DefaultButton = ContentDialogButton.Primary,
+                        XamlRoot = _shelf.WindowXamlRoot,
+                    };
+                    if (await dlg.ShowAsync() == ContentDialogResult.Primary)
+                    {
+                        _library.SetMarkNote(book.Id, mk.Id, string.IsNullOrWhiteSpace(box.Text) ? null : box.Text.Trim());
+                        _shelf.RefreshBooks();
+                    }
+                };
+                ctx.Items.Add(editNoteMi);
+
+                var styleSub = new MenuFlyoutSubItem { Text = "换个样子" };
+                foreach (var (st, stName) in new[]
+                {
+                    (MarkStyle.Yellow, "荧光黄"),
+                    (MarkStyle.Blue, "浅蓝"),
+                    (MarkStyle.Pink, "樱粉"),
+                    (MarkStyle.Wave, "波浪线"),
+                })
+                {
+                    var targetStyle = st;
+                    var smi = new ToggleMenuFlyoutItem { Text = stName, IsChecked = mk.Style == targetStyle };
+                    smi.Click += (_, _) =>
+                    {
+                        _library.SetMarkStyle(book.Id, mk.Id, targetStyle);
+                        _shelf.RefreshBooks();
+                    };
+                    styleSub.Items.Add(smi);
+                }
+                ctx.Items.Add(styleSub);
+
+                var copyMi = new MenuFlyoutItem { Text = "复制" };
+                copyMi.Click += (_, _) =>
+                {
+                    var dp = new DataPackage();
+                    dp.SetText(string.IsNullOrWhiteSpace(mk.Note) ? mk.Text : $"{mk.Text}\n—— {mk.Note}");
+                    Clipboard.SetContent(dp);
+                    _shelf.ShowToast("已复制划线", canUndo: false);
+                };
+                ctx.Items.Add(copyMi);
+
+                string markChap = ResolveMarkChapter(mk);
+                string? chapArg = string.IsNullOrWhiteSpace(markChap) ? null : markChap;
                 var shareMi = new MenuFlyoutItem { Text = "分享书摘…" };
-                shareMi.Click += async (_, _) => await Yuyue.Reader.QuoteShareDialog.ShowAsync(_shelf, _shelf.WindowXamlRoot, mk.Text, mk.Note, book.Title, book.Authors.FirstOrDefault(), book.CoverPath, library: _library);
+                shareMi.Click += async (_, _) => await Yuyue.Reader.QuoteShareDialog.ShowAsync(
+                    _shelf, _shelf.WindowXamlRoot, mk.Text, mk.Note, book.Title, book.Authors.FirstOrDefault(), book.CoverPath, chapter: chapArg, library: _library);
                 var delMi = new MenuFlyoutItem { Text = "删除划线", Foreground = ThemeHelper.Brush(p.Danger) };
                 delMi.Click += (_, _) =>
                 {
@@ -1321,27 +1432,165 @@ public sealed class BookRecordPageBuilder
         };
     }
 
-    private FrameworkElement BuildRecordPodcastTab(BookSummary book, YYPalette p, YYTintColors tint, FontFamily serif)
+    private static string FormatMentionClock(double sec)
     {
-        var issues = _library.Podcasts.GetIssues().Where(i => i.BookIds.Contains(book.Id)).ToArray();
-        BookPodcastMention[] mentions;
-        try { mentions = _library.Core.PodcastMentionsForBook(book.Id, book.Title); }
-        catch { mentions = []; }
+        int s = Math.Max(0, (int)Math.Round(sec));
+        int h = s / 3600;
+        int m = (s % 3600) / 60;
+        int rem = s % 60;
+        return h > 0 ? $"{h}:{m:D2}:{rem:D2}" : $"{m:D2}:{rem:D2}";
+    }
 
+    private FrameworkElement BuildInlinePodcastMentionsCard(
+        BookSummary book,
+        BookPodcastMention[] mentions,
+        YYPalette p,
+        YYTintColors tint,
+        FontFamily serif)
+    {
+        var stack = new StackPanel { Spacing = 8 };
+        var head = new Grid();
+        var leftHead = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7, VerticalAlignment = VerticalAlignment.Center };
+        leftHead.Children.Add(YYIcons.Make("headphones", 12, ThemeHelper.Brush(tint.Accent)));
+        leftHead.Children.Add(new TextBlock
+        {
+            Text = "播客提过这本书",
+            FontSize = 12.5,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush(p.T1),
+        });
+        leftHead.Children.Add(new TextBlock
+        {
+            Text = $"{mentions.Length} 处提及 · 防剧透锁",
+            FontSize = 11,
+            Foreground = ThemeHelper.Brush(p.T3),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        head.Children.Add(leftHead);
+
+        var brewBtn = MakeCompactCardButton("+ 酿一期", main: false, p, tint);
+        brewBtn.HorizontalAlignment = HorizontalAlignment.Right;
+        brewBtn.Click += async (_, _) => await _shelf.OpenStudioSheetForBookAsync(book.Id);
+        head.Children.Add(brewBtn);
+        stack.Children.Add(head);
+
+        var list = new StackPanel { Spacing = 0 };
+        var shown = mentions.Take(5).ToArray();
+        for (int i = 0; i < shown.Length; i++)
+        {
+            if (i > 0) list.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) });
+            var mt = shown[i];
+            list.Children.Add(BuildMentionRow(mt, p, tint, serif));
+        }
+        stack.Children.Add(list);
+
+        return new Border
+        {
+            CornerRadius = new CornerRadius(14),
+            Background = ThemeHelper.Brush(p.Card),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(16, 12, 16, 10),
+            Child = stack,
+        };
+    }
+
+    private FrameworkElement BuildMentionRow(BookPodcastMention mt, YYPalette p, YYTintColors tint, FontFamily serif)
+    {
+        string showName = string.IsNullOrWhiteSpace(mt.ShowTitle) ? "书房电台" : mt.ShowTitle;
+        var r = new Grid { ColumnSpacing = 10, Padding = new Thickness(4, 8, 4, 8) };
+        r.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
+        r.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        r.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        r.Children.Add(new Border
+        {
+            Width = 22,
+            Height = 22,
+            CornerRadius = new CornerRadius(6),
+            Background = ThemeHelper.Brush(tint.Soft),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = YYIcons.Make("play", 9, ThemeHelper.Brush(tint.Accent)),
+        });
+
+        var m = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        m.Children.Add(new TextBlock
+        {
+            Text = mt.IssueTitle,
+            FontFamily = serif,
+            FontSize = 13.5,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush(p.T1),
+            MaxLines = 1,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+        string subText = string.IsNullOrWhiteSpace(mt.Snippet) ? showName : $"{showName} · {mt.Snippet}";
+        m.Children.Add(new TextBlock
+        {
+            Text = subText,
+            FontSize = 11.5,
+            Foreground = ThemeHelper.Brush(p.T2),
+            MaxLines = 2,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+        Grid.SetColumn(m, 1);
+        r.Children.Add(m);
+
+        string mid = mt.IssueId;
+        double seekAt = mt.AtSec;
+        var jumpBtn = MakeCompactCardButton($"跳到 {FormatMentionClock(seekAt)}", main: false, p, tint);
+        jumpBtn.Click += (_, _) => _shelf.OpenPodcastInline(mid, seekAt, autoPlay: true);
+        Grid.SetColumn(jumpBtn, 2);
+        r.Children.Add(jumpBtn);
+
+        var rowBtn = new Button
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(0),
+            UseSystemFocusVisuals = false,
+            Content = r,
+        };
+        rowBtn.Click += (_, _) => _shelf.OpenPodcastInline(mid, seekAt, autoPlay: true);
+        return rowBtn;
+    }
+
+    private FrameworkElement BuildRecordPodcastTab(
+        BookSummary book,
+        PodcastIssue[] issues,
+        BookPodcastMention[] mentions,
+        YYPalette p,
+        YYTintColors tint,
+        FontFamily serif)
+    {
         var stack = new StackPanel { Spacing = 10 };
 
         if (issues.Length > 0 || mentions.Length > 0)
         {
             var head = new Grid();
-            head.Children.Add(new TextBlock { Text = "你听过的节目里聊到过它", FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center });
+            string headLabel = mentions.Length > 0
+                ? $"你听过的节目里聊到过它 · {mentions.Length} 处提及"
+                : "你听过的节目里聊到过它";
+            head.Children.Add(new TextBlock { Text = headLabel, FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center });
             var brewMoreBtn = MakeCompactCardButton("+ 酿一期", main: false, p, tint);
             brewMoreBtn.HorizontalAlignment = HorizontalAlignment.Right;
             brewMoreBtn.Click += async (_, _) => await _shelf.OpenStudioSheetForBookAsync(book.Id);
             head.Children.Add(brewMoreBtn);
             stack.Children.Add(head);
 
-            foreach (var iss in issues)
+            for (int i = 0; i < mentions.Length; i++)
             {
+                if (i > 0) stack.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) });
+                stack.Children.Add(BuildMentionRow(mentions[i], p, tint, serif));
+            }
+
+            var unmentionedIssues = issues.Where(iss => mentions.All(mt => mt.IssueId != iss.Id)).ToArray();
+            foreach (var iss in unmentionedIssues)
+            {
+                if (mentions.Length > 0) stack.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) });
                 var r = new Grid { ColumnSpacing = 10, Padding = new Thickness(4, 6, 4, 6) };
                 r.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 r.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -1352,25 +1601,6 @@ public sealed class BookRecordPageBuilder
                 string iid = iss.Id;
                 var openBtn = MakeCompactCardButton("展开书页", main: true, p, tint);
                 openBtn.Click += (_, _) => _shelf.OpenPodcastInline(iid);
-                Grid.SetColumn(openBtn, 1);
-                r.Children.Add(openBtn);
-                stack.Children.Add(r);
-            }
-
-            var extraMentions = mentions.Where(mt => issues.All(i => i.Id != mt.IssueId)).ToArray();
-            foreach (var mt in extraMentions)
-            {
-                var r = new Grid { ColumnSpacing = 10, Padding = new Thickness(4, 6, 4, 6) };
-                r.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                r.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                var m = new StackPanel { Spacing = 2 };
-                m.Children.Add(new TextBlock { Text = $"{mt.ShowTitle} · {mt.IssueTitle}", FontFamily = serif, FontSize = 13.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
-                m.Children.Add(new TextBlock { Text = mt.Snippet, FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T2), MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis });
-                r.Children.Add(m);
-                string mid = mt.IssueId;
-                double seekAt = mt.AtSec;
-                var openBtn = MakeCompactCardButton("去听", main: false, p, tint);
-                openBtn.Click += (_, _) => _shelf.OpenPodcastInline(mid, seekAt);
                 Grid.SetColumn(openBtn, 1);
                 r.Children.Add(openBtn);
                 stack.Children.Add(r);

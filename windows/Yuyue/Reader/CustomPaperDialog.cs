@@ -73,20 +73,16 @@ public static class CustomPaperDialog
 
     public static CustomPaper NewDraftFromSettings(LibraryService library, ReaderSettings settings)
     {
-        if (!string.IsNullOrEmpty(settings.CustomPaper))
+        var resolved = PaperAppearance.Resolve(library, settings);
+        if (resolved.Custom is { } mine)
         {
-            try
-            {
-                var mine = library.Core.CustomPapers().FirstOrDefault(x => x.Id == settings.CustomPaper);
-                if (mine is not null)
-                    return new CustomPaper("", "", mine.Bg, mine.Ink, mine.Layout, mine.Texture);
-            }
-            catch { }
+            return new CustomPaper("", "", mine.Bg, mine.Ink, mine.Layout, mine.Texture);
         }
 
-        bool night = settings.Paper is Paper.Dark or Paper.KamiNight;
+        var preset = resolved.Preset;
+        bool night = preset is Paper.Dark or Paper.KamiNight;
         var made = YuyueCoreMethods.PaperPalette(night).Swatches;
-        int idx = night ? 0 : settings.Paper switch
+        int idx = night ? 0 : preset switch
         {
             Paper.Kami => Math.Min(1, made.Length - 1),
             Paper.Sage => Math.Min(2, made.Length - 1),
@@ -98,17 +94,18 @@ public static class CustomPaperDialog
             Name: "",
             Bg: made.Length > 0 ? made[Math.Max(0, idx)].Color : (night ? "#1C1B19" : "#F6F1E6"),
             Ink: null,
-            Layout: settings.Paper is Paper.Plain or Paper.Dark ? Paper.Plain : Paper.Kami,
-            Texture: settings.Paper == Paper.Eink ? PaperTexture.Grain : PaperTexture.None);
+            Layout: preset is Paper.Plain or Paper.Dark ? Paper.Plain : Paper.Kami,
+            Texture: preset == Paper.Eink ? PaperTexture.Grain : PaperTexture.None);
     }
 
     public static async Task<CustomPaper?> ShowEditorAsync(
         XamlRoot xamlRoot,
         LibraryService library,
         CustomPaper? existing = null,
-        Action<CustomPaper?>? onPreview = null)
+        Action<CustomPaper?>? onPreview = null,
+        ReaderSettings? currentSettings = null)
     {
-        var initial = existing ?? NewDraftFromSettings(library, library.GetReaderSettings());
+        var initial = existing ?? NewDraftFromSettings(library, currentSettings ?? library.GetReaderSettings());
         var draft = initial;
         bool night = YuyueCoreMethods.PaperColors(draft).Dark;
         var hsl = YuyueCoreMethods.PaperHsl(draft.Bg);
@@ -604,6 +601,7 @@ public static class CustomPaperDialog
         if (res == ContentDialogResult.Secondary && !string.IsNullOrEmpty(initial.Id))
         {
             try { library.Core.DeleteCustomPaper(initial.Id); } catch { }
+            PaperAppearance.Forget(library, initial.Id);
             onPreview?.Invoke(null);
             return null;
         }

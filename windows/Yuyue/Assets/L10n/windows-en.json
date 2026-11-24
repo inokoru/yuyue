@@ -300,5 +300,9 @@
   "未接书伴模型 · 将用本机离线摘要成稿": "No Companion model · Uses local offline digest",
   "加到这本书": "Add to This Book",
   "加到全部书": "Add to All Books",
-  "加完还能改、能关": "You can edit or toggle rules anytime after adding"
+  "加完还能改、能关": "You can edit or toggle rules anytime after adding",
+  "↑↓ 选择 · Tab 补全 · ↵ 执行 · Esc 关闭": "↑↓ Select · Tab Complete · ↵ Run · Esc Close",
+  "切换书伴模型": "Switch Companion Model",
+  "这本书重新整理过，划线和书签在原来的位置": "This book was reformatted; highlights and bookmarks remain at their prior spots",
+  "这本有声书只标到章，翻页不跟着声音走": "This audiobook is aligned by chapter only; pages do not turn automatically with audio"
 }
