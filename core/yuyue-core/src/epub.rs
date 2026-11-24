@@ -101,6 +101,7 @@ pub struct Book {
     targets: HashMap<(String, String), (u32, String)>,
     /// Archive path of a document → the section its content starts in.
     doc_sections: HashMap<String, u32>,
+    encryption: Encryption,
 }
 
 impl Book {
@@ -138,7 +139,10 @@ impl Book {
             if self.archive.size(&name).is_none_or(|s| s > MAX_ENTRY) {
                 continue;
             }
-            let bytes = self.archive.read(&name)?;
+            let mut bytes = self.archive.read(&name)?;
+            if !self.encryption.prepare_resource(&name, &mut bytes) {
+                continue;
+            }
             let dest = dir.join(rel);
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -242,23 +246,256 @@ fn safe_relative(name: &str) -> Option<PathBuf> {
     Some(path)
 }
 
-fn check_drm(archive: &mut Archive) -> Result<()> {
-    // FairPlay and Readium LCP.
-    if archive.name("META-INF/sinf.xml").is_some() || archive.name("META-INF/license.lcpl").is_some() {
-        return Err(CoreError::Protected);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FontObfuscation {
+    Idpf,
+    Adobe,
+}
+
+#[derive(Default)]
+struct Encryption {
+    /// Stored archive path → font obfuscation method, or `None` for other encryption (AES, etc.).
+    entries: HashMap<String, Option<FontObfuscation>>,
+    /// Whether the archive carries a DRM marker (`sinf.xml`, `license.lcpl`, `rights.xml`, or non-font `encryption.xml`).
+    drm_marked: bool,
+    idpf_key: Option<[u8; 20]>,
+    adobe_key: Option<[u8; 16]>,
+}
+
+impl Encryption {
+    fn set_keys(&mut self, package: &Package) {
+        if let Some(uid) = &package.uid {
+            let clean: String = uid.chars().filter(|c| !matches!(c, ' ' | '\t' | '\r' | '\n')).collect();
+            if !clean.is_empty() {
+                self.idpf_key = Some(sha1(clean.as_bytes()));
+            }
+        }
+        self.adobe_key = package
+            .uid
+            .iter()
+            .chain(package.identifiers.iter())
+            .find_map(|s| parse_adobe_key(s));
     }
+
+    /// Unscrambles standard obfuscated fonts, keeps resources that were already decrypted in-place,
+    /// and skips resources still locked with unknown encryption so WebView falls back cleanly.
+    fn prepare_resource(&self, name: &str, bytes: &mut [u8]) -> bool {
+        let Some(&method) = self.entries.get(name) else { return true };
+        if is_known_asset_header(bytes) {
+            return true;
+        }
+        match method {
+            Some(FontObfuscation::Idpf) => {
+                let Some(key) = &self.idpf_key else { return false };
+                let limit = bytes.len().min(1040);
+                for (i, b) in bytes[..limit].iter_mut().enumerate() {
+                    *b ^= key[i % 20];
+                }
+                is_font_header(bytes)
+            }
+            Some(FontObfuscation::Adobe) => {
+                let Some(key) = &self.adobe_key else { return false };
+                let limit = bytes.len().min(1024);
+                for (i, b) in bytes[..limit].iter_mut().enumerate() {
+                    *b ^= key[i % 16];
+                }
+                is_font_header(bytes)
+            }
+            None => false,
+        }
+    }
+}
+
+fn attr_ci<'a>(el: &'a Element, name: &str) -> Option<&'a str> {
+    el.attrs.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
+}
+
+fn classify_algorithm(alg: &str) -> Option<FontObfuscation> {
+    match alg.trim() {
+        "http://www.idpf.org/2008/embedding" => Some(FontObfuscation::Idpf),
+        "http://ns.adobe.com/pdf/enc#RC" | "http://www.ns.adobe.com/pdf/enc#RC" => Some(FontObfuscation::Adobe),
+        _ => None,
+    }
+}
+
+fn read_encryption(archive: &mut Archive) -> Result<Encryption> {
+    let mut enc = Encryption {
+        drm_marked: archive.name("META-INF/sinf.xml").is_some()
+            || archive.name("META-INF/license.lcpl").is_some()
+            || archive.name("META-INF/rights.xml").is_some(),
+        ..Default::default()
+    };
     if archive.name("META-INF/encryption.xml").is_none() {
-        return Ok(());
+        return Ok(enc);
     }
     let text = decode_markup(&archive.read("META-INF/encryption.xml")?);
-    let Ok(root) = dom::parse_xml(&text) else { return Ok(()) };
-    let mut methods = Vec::new();
-    root.find_all(&|e| e.name == "encryptionmethod", &mut methods);
-    // Font obfuscation (IDPF, Adobe) only scrambles embedded fonts; the text is readable.
-    let fonts_only = methods.iter().all(|m| {
-        m.attr("Algorithm").is_some_and(|a| a == "http://www.idpf.org/2008/embedding" || a == "http://ns.adobe.com/pdf/enc#RC")
-    });
-    if fonts_only { Ok(()) } else { Err(CoreError::Protected) }
+    let Ok(root) = dom::parse_xml(&text) else { return Ok(enc) };
+    let mut blocks = Vec::new();
+    root.find_all(&|e| e.name == "encrypteddata", &mut blocks);
+    for block in &blocks {
+        let alg = block
+            .child_elements()
+            .find(|e| e.name == "encryptionmethod")
+            .and_then(|m| attr_ci(m, "algorithm"));
+        let obf = alg.and_then(classify_algorithm);
+        if obf.is_none() {
+            enc.drm_marked = true;
+        }
+        if let Some(uri) = block
+            .child_elements()
+            .find(|e| e.name == "cipherdata")
+            .and_then(|c| c.child_elements().find(|e| e.name == "cipherreference"))
+            .and_then(|r| attr_ci(r, "uri"))
+            && let Some((p, _)) = resolve("", uri)
+            && let Some(stored) = archive.name(&p).map(str::to_string)
+        {
+            enc.entries.insert(stored, obf);
+        }
+    }
+    if blocks.is_empty() {
+        let mut methods = Vec::new();
+        root.find_all(&|e| e.name == "encryptionmethod", &mut methods);
+        if methods.iter().any(|m| attr_ci(m, "algorithm").and_then(classify_algorithm).is_none()) {
+            enc.drm_marked = true;
+        }
+    }
+    Ok(enc)
+}
+
+fn is_font_header(bytes: &[u8]) -> bool {
+    bytes.len() >= 4
+        && matches!(
+            &bytes[..4],
+            [0x00, 0x01, 0x00, 0x00] | b"OTTO" | b"true" | b"typ1" | b"ttcf" | b"wOFF" | b"wOF2"
+        )
+}
+
+fn is_known_asset_header(bytes: &[u8]) -> bool {
+    if is_font_header(bytes) {
+        return true;
+    }
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G'])
+        || bytes.starts_with(&[0xFF, 0xD8, 0xFF])
+        || bytes.starts_with(b"GIF8")
+        || bytes.starts_with(b"RIFF")
+    {
+        return true;
+    }
+    let head = bytes.trim_ascii_start();
+    head.starts_with(b"<svg") || head.starts_with(b"<?xml")
+}
+
+fn parse_adobe_key(raw: &str) -> Option<[u8; 16]> {
+    let mut s = raw.trim();
+    if let Some((_, rest)) = s.split_once(':')
+        && s[..s.find(':').unwrap()].eq_ignore_ascii_case("urn")
+    {
+        s = rest.strip_prefix("uuid:").or_else(|| rest.strip_prefix("UUID:")).unwrap_or(rest);
+    }
+    let hex: Vec<u8> = s.bytes().filter(|b| !matches!(b, b'-' | b' ' | b'\t' | b'\r' | b'\n')).collect();
+    if hex.len() != 32 || !hex.iter().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let mut out = [0u8; 16];
+    for (i, slot) in out.iter_mut().enumerate() {
+        let hi = (hex[i * 2] as char).to_digit(16)? as u8;
+        let lo = (hex[i * 2 + 1] as char).to_digit(16)? as u8;
+        *slot = (hi << 4) | lo;
+    }
+    Some(out)
+}
+
+fn sha1(data: &[u8]) -> [u8; 20] {
+    let mut padded = Vec::with_capacity((data.len() + 9).div_ceil(64) * 64);
+    padded.extend_from_slice(data);
+    padded.push(0x80);
+    while padded.len() % 64 != 56 {
+        padded.push(0);
+    }
+    padded.extend_from_slice(&((data.len() as u64) * 8).to_be_bytes());
+
+    let (mut h0, mut h1, mut h2, mut h3, mut h4) =
+        (0x67452301u32, 0xEFCDAB89u32, 0x98BADCFEu32, 0x10325476u32, 0xC3D2E1F0u32);
+    for chunk in padded.chunks_exact(64) {
+        let mut w = [0u32; 80];
+        for (i, word) in chunk.chunks_exact(4).enumerate() {
+            w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
+        }
+        for i in 16..80 {
+            w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
+        }
+        let (mut a, mut b, mut c, mut d, mut e) = (h0, h1, h2, h3, h4);
+        for (i, &wi) in w.iter().enumerate() {
+            let (f, k) = match i {
+                0..=19 => ((b & c) | ((!b) & d), 0x5A827999u32),
+                20..=39 => (b ^ c ^ d, 0x6ED9EBA1u32),
+                40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1BBCDCu32),
+                _ => (b ^ c ^ d, 0xCA62C1D6u32),
+            };
+            let temp = a.rotate_left(5).wrapping_add(f).wrapping_add(e).wrapping_add(k).wrapping_add(wi);
+            e = d;
+            d = c;
+            c = b.rotate_left(30);
+            b = a;
+            a = temp;
+        }
+        h0 = h0.wrapping_add(a);
+        h1 = h1.wrapping_add(b);
+        h2 = h2.wrapping_add(c);
+        h3 = h3.wrapping_add(d);
+        h4 = h4.wrapping_add(e);
+    }
+    let mut out = [0u8; 20];
+    for (i, h) in [h0, h1, h2, h3, h4].into_iter().enumerate() {
+        out[i * 4..i * 4 + 4].copy_from_slice(&h.to_be_bytes());
+    }
+    out
+}
+
+/// True when a markup entry is unreadable binary ciphertext rather than HTML, XML or plain text.
+/// Decrypted ("脱壳") EPUBs often leave `META-INF/encryption.xml` behind while the spine files are
+/// already plain UTF-8 markup; checking the bytes lets those open while catching real DRM.
+fn is_encrypted_markup(bytes: &[u8], flagged: bool) -> bool {
+    let trimmed = bytes.trim_ascii();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let utf16_no_bom = bytes.starts_with(b"<\0") || bytes.starts_with(b"\0<");
+    let has_bom = encoding_rs::Encoding::for_bom(bytes).is_some();
+    let text = if bytes.starts_with(b"<\0") {
+        encoding_rs::UTF_16LE.decode_without_bom_handling(bytes).0.into_owned()
+    } else if bytes.starts_with(b"\0<") {
+        encoding_rs::UTF_16BE.decode_without_bom_handling(bytes).0.into_owned()
+    } else {
+        decode_markup(bytes)
+    };
+    if dom::parse_xhtml(&text).is_ok() {
+        return false;
+    }
+    let lower = text.to_ascii_lowercase();
+    let has_tag = [
+        "<!doctype", "<?xml", "<html", "<body", "<head", "<div", "<p>", "<p ", "<span",
+        "<h1", "<h2", "<h3", "<svg", "<section", "<article", "<img", "<br",
+    ]
+    .iter()
+    .any(|tag| lower.contains(tag));
+    let sample = &bytes[..bytes.len().min(4096)];
+    let binary_controls = if utf16_no_bom || has_bom {
+        text.chars()
+            .take(4096)
+            .filter(|&c| matches!(c, '\0'..='\x08' | '\x0b' | '\x0c' | '\x0e'..='\x1f'))
+            .count()
+    } else {
+        sample.iter().filter(|&&b| matches!(b, 0x00..=0x08 | 0x0b | 0x0c | 0x0e..=0x1f)).count()
+    };
+    let total = sample.len().max(1);
+    if has_tag {
+        return binary_controls * 20 > total;
+    }
+    if binary_controls * 50 > total {
+        return true;
+    }
+    flagged && std::str::from_utf8(bytes).is_err()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -266,17 +503,33 @@ fn check_drm(archive: &mut Archive) -> Result<()> {
 
 pub fn read(path: &Path) -> Result<Book> {
     let mut archive = Archive::open(path)?;
-    check_drm(&mut archive)?;
-    let opf = find_package(&mut archive)?;
-    let mut package = parse_package(&decode_markup(&archive.read(&opf)?), &opf)?;
+    let mut encryption = read_encryption(&mut archive)?;
+    let opf = match find_package(&mut archive) {
+        Ok(p) => p,
+        Err(_) if encryption.drm_marked => return Err(CoreError::Protected),
+        Err(e) => return Err(e),
+    };
+    let opf_bytes = archive.read(&opf)?;
+    let opf_flagged = encryption.drm_marked || matches!(encryption.entries.get(&opf), Some(None));
+    let mut package = match parse_package(&decode_markup(&opf_bytes), &opf) {
+        Ok(p) => p,
+        Err(_) if encryption.drm_marked || is_encrypted_markup(&opf_bytes, opf_flagged) => {
+            return Err(CoreError::Protected);
+        }
+        Err(e) => return Err(e),
+    };
+    encryption.set_keys(&package);
     for item in package.manifest.values_mut() {
         if let Some(name) = archive.name(&item.path) {
             item.path = name.to_string();
         }
     }
     let toc = read_toc(&mut archive, &package);
-    let (docs, styles) = read_docs(&mut archive, &package)?;
+    let (docs, styles) = read_docs(&mut archive, &package, &encryption)?;
     if docs.is_empty() {
+        if encryption.drm_marked {
+            return Err(CoreError::Protected);
+        }
         return Err(CoreError::bad_book("no readable content"));
     }
 
@@ -284,6 +537,9 @@ pub fn read(path: &Path) -> Result<Book> {
     let mut a = assemble(pieces, &docs, &toc);
     split_large(&mut a);
     if a.sections.is_empty() {
+        if encryption.drm_marked {
+            return Err(CoreError::Protected);
+        }
         return Err(CoreError::bad_book("no readable content"));
     }
     let targets = collect_targets(&mut a.sections, &docs);
@@ -316,6 +572,7 @@ pub fn read(path: &Path) -> Result<Book> {
         styles,
         targets,
         doc_sections,
+        encryption,
     })
 }
 
@@ -363,6 +620,8 @@ struct Package {
     authors: Vec<String>,
     language: Option<String>,
     isbn: Option<String>,
+    uid: Option<String>,
+    identifiers: Vec<String>,
     manifest: HashMap<String, Item>,
     spine: Vec<(String, bool)>,
     nav: Option<String>,
@@ -476,10 +735,27 @@ fn parse_package(text: &str, opf: &str) -> Result<Package> {
     }
 
     let mut isbn = None;
+    let mut uid = None;
+    let mut identifiers = Vec::new();
+    let uid_id = root.attr("unique-identifier");
     if let Some(m) = metadata {
         let mut nodes = Vec::new();
         m.find_all(&|e| e.name == "identifier", &mut nodes);
         isbn = nodes.iter().find_map(|e| isbn13(&e.text_content()));
+        for e in &nodes {
+            let text = e.text_content();
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if uid.is_none() && uid_id.is_some_and(|id| e.attr("id") == Some(id)) {
+                uid = Some(trimmed.to_string());
+            }
+            identifiers.push(trimmed.to_string());
+        }
+        if uid.is_none() {
+            uid = identifiers.first().cloned();
+        }
     }
 
     let manifest_el = root.child_elements().find(|e| e.name == "manifest").ok_or_else(|| CoreError::bad_book("no manifest"))?;
@@ -525,6 +801,8 @@ fn parse_package(text: &str, opf: &str) -> Result<Package> {
         authors,
         language: field("language"),
         isbn,
+        uid,
+        identifiers,
         manifest,
         spine,
         nav,
@@ -654,10 +932,15 @@ struct Doc {
     text_dump: bool,
 }
 
-fn read_docs(archive: &mut Archive, package: &Package) -> Result<(Vec<Doc>, Vec<(String, String)>)> {
+fn read_docs(
+    archive: &mut Archive,
+    package: &Package,
+    encryption: &Encryption,
+) -> Result<(Vec<Doc>, Vec<(String, String)>)> {
     let mut docs = Vec::new();
     let mut inline = Vec::new();
     let mut seen = HashSet::new();
+    let mut encrypted_docs = 0usize;
     for (idref, linear) in &package.spine {
         let Some(item) = package.manifest.get(idref) else { continue };
         if !seen.insert(item.path.clone()) {
@@ -687,6 +970,11 @@ fn read_docs(archive: &mut Archive, package: &Package) -> Result<(Vec<Doc>, Vec<
                 Err(CoreError::NotFound { .. }) => continue,
                 Err(e) => return Err(e),
             };
+            let flagged = encryption.drm_marked || matches!(encryption.entries.get(&item.path), Some(None));
+            if is_encrypted_markup(&bytes, flagged) {
+                encrypted_docs += 1;
+                continue;
+            }
             read_document(&bytes, &item.path, *linear, docs.len(), &mut inline)
         } else {
             continue;
@@ -697,6 +985,10 @@ fn read_docs(archive: &mut Archive, package: &Package) -> Result<(Vec<Doc>, Vec<
             .filter_map(|s| if s.starts_with("__styles/") { Some(s) } else { archive.name(&s).map(str::to_string) })
             .collect();
         docs.push(doc);
+    }
+    let text_docs = docs.iter().filter(|d| d.chars > 0).count();
+    if encrypted_docs > 0 && (encryption.drm_marked || text_docs == 0) {
+        return Err(CoreError::Protected);
     }
     Ok((docs, inline))
 }
@@ -1777,6 +2069,140 @@ mod tests {
         assert_eq!(isbn13("7536692935").as_deref(), Some("9787536692930"));
         assert_eq!(isbn13("ISBN 978 7 5366 9293 1"), None);
         assert_eq!(isbn13("urn:uuid:5a5f6a2e-9d65-4c4b-9c25-6f6d1e1f2a3b"), None);
+    }
+
+    fn write_test_epub(name: &str, entries: &[(&str, &[u8])]) -> PathBuf {
+        use std::io::Write as _;
+        let path = std::env::temp_dir().join(format!("yuyue-{name}-{}.epub", std::process::id()));
+        let file = File::create(&path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let opts = zip::write::SimpleFileOptions::default();
+        for (entry_name, data) in entries {
+            zip.start_file(*entry_name, opts).unwrap();
+            zip.write_all(data).unwrap();
+        }
+        zip.finish().unwrap();
+        path
+    }
+
+    #[test]
+    fn leftover_duokan_encryption_and_locked_fonts_still_import() {
+        assert_eq!(
+            sha1(b"abc"),
+            [
+                0xa9, 0x99, 0x3e, 0x36, 0x47, 0x06, 0x81, 0x6a, 0xba, 0x3e,
+                0x25, 0x71, 0x78, 0x50, 0xc2, 0x6c, 0x9c, 0xd0, 0xd8, 0x9d,
+            ]
+        );
+        let uid = "urn:uuid:5a5f6a2e-9d65-4c4b-9c25-6f6d1e1f2a3b";
+        let key = sha1(uid.as_bytes());
+        let mut raw_font = b"OTTO".to_vec();
+        raw_font.resize(1200, 0x42);
+        let mut obf_font = raw_font.clone();
+        for (i, b) in obf_font[..1040].iter_mut().enumerate() {
+            *b ^= key[i % 20];
+        }
+        let locked_font = [0xde, 0xad, 0xbe, 0xef, 0x13, 0x37, 0x99, 0x00];
+
+        let container = br#"<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>"#;
+        let opf = r#"<?xml version="1.0" encoding="UTF-8"?>
+<package version="2.0" unique-identifier="BookId" xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <metadata>
+    <dc:title>多看脱壳测试</dc:title>
+    <dc:language>zh-CN</dc:language>
+    <dc:identifier id="BookId">urn:uuid:5a5f6a2e-9d65-4c4b-9c25-6f6d1e1f2a3b</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="Text/ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="f1" href="Fonts/idpf.otf" media-type="font/otf"/>
+    <item id="f2" href="Fonts/dk-locked.ttf" media-type="font/ttf"/>
+  </manifest>
+  <spine><itemref idref="ch1"/></spine>
+</package>"#.as_bytes();
+        let ch1 = r#"<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>第一章</h1><p>正文已经是明文。</p></body></html>"#.as_bytes();
+        let enc = br#"<?xml version="1.0" encoding="UTF-8"?>
+<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container" xmlns:enc="http://www.w3.org/2001/04/xmlenc#">
+  <enc:EncryptedData>
+    <enc:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes128-ctr"/>
+    <enc:KeyInfo><enc:EncryptedKey><enc:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#rsa-1_5"/></enc:EncryptedKey></enc:KeyInfo>
+    <enc:CipherData><enc:CipherReference URI="OEBPS/Text/ch1.xhtml"/></enc:CipherData>
+  </enc:EncryptedData>
+  <enc:EncryptedData>
+    <enc:EncryptionMethod Algorithm="http://www.idpf.org/2008/embedding"/>
+    <enc:CipherData><enc:CipherReference URI="OEBPS/Fonts/idpf.otf"/></enc:CipherData>
+  </enc:EncryptedData>
+  <enc:EncryptedData>
+    <enc:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes128-cbc"/>
+    <enc:CipherData><enc:CipherReference URI="OEBPS/Fonts/dk-locked.ttf"/></enc:CipherData>
+  </enc:EncryptedData>
+</encryption>"#;
+
+        let path = write_test_epub(
+            "duokan-residual",
+            &[
+                ("META-INF/container.xml", container),
+                ("META-INF/encryption.xml", enc),
+                ("META-INF/sinf.xml", b"<sinf/>"),
+                ("OEBPS/content.opf", opf),
+                ("OEBPS/Text/ch1.xhtml", ch1),
+                ("OEBPS/Fonts/idpf.otf", &obf_font),
+                ("OEBPS/Fonts/dk-locked.ttf", &locked_font),
+            ],
+        );
+        let mut book = read(&path).unwrap();
+        assert_eq!(book.title.as_deref(), Some("多看脱壳测试"));
+        assert!(plain_text(&book.sections[0].body).contains("正文已经是明文"));
+
+        let res_dir = std::env::temp_dir().join(format!("yuyue-duokan-res-{}", std::process::id()));
+        book.extract_resources(&res_dir).unwrap();
+        assert_eq!(std::fs::read(res_dir.join("OEBPS/Fonts/idpf.otf")).unwrap(), raw_font);
+        assert!(!res_dir.join("OEBPS/Fonts/dk-locked.ttf").exists());
+        let _ = std::fs::remove_dir_all(&res_dir);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn genuinely_encrypted_spine_returns_protected() {
+        let container = br#"<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>"#;
+        let opf = r#"<?xml version="1.0" encoding="UTF-8"?>
+<package version="2.0" xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <metadata><dc:title>加密书</dc:title><dc:language>zh</dc:language></metadata>
+  <manifest>
+    <item id="cover" href="Text/cover.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch1" href="Text/ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine><itemref idref="cover"/><itemref idref="ch1"/></spine>
+</package>"#.as_bytes();
+        let cover = br#"<html><body><div><img src="../cover.jpg" alt=""/></div></body></html>"#;
+        let enc = br#"<?xml version="1.0" encoding="UTF-8"?>
+<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container" xmlns:enc="http://www.w3.org/2001/04/xmlenc#">
+  <enc:EncryptedData>
+    <enc:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes128-ctr"/>
+    <enc:CipherData><enc:CipherReference URI="OEBPS/Text/ch1.xhtml"/></enc:CipherData>
+  </enc:EncryptedData>
+</encryption>"#;
+        let ciphertext: Vec<u8> = (0u8..=255).cycle().take(512).collect();
+
+        let path = write_test_epub(
+            "duokan-locked",
+            &[
+                ("META-INF/container.xml", container),
+                ("META-INF/encryption.xml", enc),
+                ("OEBPS/content.opf", opf),
+                ("OEBPS/Text/cover.xhtml", cover),
+                ("OEBPS/Text/ch1.xhtml", &ciphertext),
+            ],
+        );
+        let err = read(&path).err().expect("expected Protected error");
+        assert!(matches!(err, CoreError::Protected), "got {err:?}");
+        let _ = std::fs::remove_file(&path);
     }
 
 }

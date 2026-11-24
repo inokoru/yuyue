@@ -5724,6 +5724,7 @@ public sealed partial class ShelfWindow : Window
                     results.Add((book.Title, "✓ 已导入", false, book));
                 }
             }
+            catch (CoreException.Protected) { results.Add((fname, "这本书有版权保护（DRM），打不开", true, null)); }
             catch (Exception ex) { results.Add((fname, ex.Message, true, null)); }
         }
 
