@@ -360,6 +360,7 @@ fun Root(library: Library) {
     androidx.compose.runtime.DisposableEffect(lifecycle) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, e ->
             if (e == androidx.lifecycle.Lifecycle.Event.ON_START) library.scope.launch { library.watched.scan(library) }
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) app.yuyue.update.Updates.launchPendingConfirmIfAny(context)
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }

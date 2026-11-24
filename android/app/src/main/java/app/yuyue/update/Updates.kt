@@ -1,5 +1,10 @@
 package app.yuyue.update
 
+import android.Manifest
+import android.app.ActivityManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -8,13 +13,16 @@ import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.Process
 import android.provider.Settings
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import app.yuyue.BuildConfig
+import app.yuyue.R
 import app.yuyue.design.Prefs
 import app.yuyue.t
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -24,6 +32,8 @@ import uniffi.yuyue_core.UpdateInfo
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 更新渠道. Switching back to 正式版 never goes back a version: the next release, whose
@@ -83,6 +93,8 @@ object Updates {
     private const val LAST_CURRENT_KEY = "update.lastWasCurrent"
     private const val DAY = 24 * 3600 * 1000L
     private const val REMIND = 3 * DAY
+    private const val INSTALL_CHANNEL_ID = "yuyue.update.install"
+    private const val INSTALL_NOTIFY_ID = 4201
 
     var phase by mutableStateOf<UpdatePhase>(UpdatePhase.Idle)
         private set
@@ -104,6 +116,14 @@ object Updates {
     var lastWasCurrent by mutableStateOf(Prefs.bool(LAST_CURRENT_KEY, false))
         private set
     private var apk: File? = null
+    private val installing = AtomicBoolean(false)
+    private val pendingConfirmRef = AtomicReference<Intent?>(null)
+
+    var pendingConfirmIntent: Intent?
+        get() = pendingConfirmRef.get()
+        internal set(value) {
+            pendingConfirmRef.set(value)
+        }
 
     val enabled: Boolean get() = BuildConfig.SELF_UPDATE
     val currentLabel get() = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
@@ -164,6 +184,8 @@ object Updates {
             Prefs.set(LAST_AUTO_KEY, !byHand)
             Prefs.set(LAST_CURRENT_KEY, found == null)
             reconcile(context)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             phase = if (byHand) UpdatePhase.CheckFailed else before
         }
@@ -212,7 +234,7 @@ object Updates {
         val between = uniffi.yuyue_core.releasesAfter(log, BuildConfig.VERSION_NAME)
         val releases = if (between.any { it.version == info.version }) between else listOf(uniffi.yuyue_core.updateRelease(info)) + between
         val file = apkFile(context, info)
-        val ready = file.exists() && file.length() == info.size.toLong() && sha256(file) == info.sha256.lowercase()
+        val ready = UpdateVerifier.validateCachedApk(file, info.size.toLong(), info.sha256) { sameSigner(context, it) }
         return UpdateOffer(info, releases) to file.takeIf { ready }
     }
 
@@ -322,57 +344,120 @@ object Updates {
         if (apk != null) phase = UpdatePhase.Ready
     }
 
-    /** Back from the system's settings: allowed now, install. */
-    fun onResume(context: Context) {
+    /** Back from the system's settings or background: launch pending confirm or install if allowed now. */
+    suspend fun onResume(context: Context) {
+        if (launchPendingConfirmIfAny(context)) return
         if (phase == UpdatePhase.NeedPermission && mayInstall(context)) install(context)
     }
 
-    /** Hands the APK to the system's installer, which asks the user and then replaces the app. */
-    fun install(context: Context) {
-        val file = apk ?: return
-        if (!file.isFile) {
-            apk = null
-            phase = UpdatePhase.DownloadFailed(t("安装包不完整，请重新下载"))
+    fun launchPendingConfirmIfAny(context: Context): Boolean {
+        val pending = pendingConfirmRef.getAndSet(null) ?: return false
+        cancelInstallConfirmNotification(context)
+        val launched = runCatching { context.startActivity(pending) }.isSuccess
+        if (!launched) {
+            pendingConfirmRef.compareAndSet(null, pending)
+        }
+        return launched
+    }
+
+    internal fun postInstallConfirmNotification(context: Context, confirm: Intent) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
             return
         }
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        val channel = NotificationChannel(
+            INSTALL_CHANNEL_ID,
+            t("软件更新"),
+            NotificationManager.IMPORTANCE_HIGH,
+        )
+        nm.createNotificationChannel(channel)
+        val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val pendingIntent = PendingIntent.getActivity(context, INSTALL_NOTIFY_ID, confirm, piFlags)
+        val notification = Notification.Builder(context, INSTALL_CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher_monochrome)
+            .setContentTitle(t("新版本已就绪"))
+            .setContentText(t("轻点以确认安装语阅更新"))
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setCategory(Notification.CATEGORY_STATUS)
+            .build()
+        runCatching { nm.notify(INSTALL_NOTIFY_ID, notification) }
+    }
+
+    internal fun cancelInstallConfirmNotification(context: Context) {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        runCatching { nm.cancel(INSTALL_NOTIFY_ID) }
+    }
+
+    /** Hands the APK to the system's installer, which asks the user and then replaces the app. */
+    suspend fun install(context: Context) {
+        val file = apk ?: return
         if (!mayInstall(context)) { phase = UpdatePhase.NeedPermission; return }
+        if (!installing.compareAndSet(false, true)) return
+        val expectedInfo = offer?.info
         phase = UpdatePhase.Ready
         try {
-            val installer = context.packageManager.packageInstaller
-            val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
-                setAppPackageName(context.packageName)
-                if (Build.VERSION.SDK_INT >= 31) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
-            }
-            val id = installer.createSession(params)
-            installer.openSession(id).use { session ->
-                file.inputStream().use { input ->
-                    session.openWrite("yuyue.apk", 0, file.length()).use { out ->
-                        input.copyTo(out)
-                        session.fsync(out)
-                    }
+            val check = withContext(Dispatchers.IO) {
+                val verified = UpdateVerifier.validateForInstall(
+                    file = file,
+                    expectedSize = expectedInfo?.size?.toLong(),
+                    expectedSha256 = expectedInfo?.sha256,
+                    verifySigner = { sameSigner(context, it) },
+                )
+                if (verified != UpdateVerifier.InstallCheckResult.Ok) return@withContext verified
+                val installer = context.packageManager.packageInstaller
+                val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+                    setAppPackageName(context.packageName)
+                    if (Build.VERSION.SDK_INT >= 31) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
                 }
-                val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
-                val pending = PendingIntent.getBroadcast(context, id, Intent(context, InstallResult::class.java), flags)
-                session.commit(pending.intentSender)
+                var sessionId = -1
+                var committed = false
+                try {
+                    sessionId = installer.createSession(params)
+                    installer.openSession(sessionId).use { session ->
+                        file.inputStream().use { input ->
+                            session.openWrite("yuyue.apk", 0, file.length()).use { out ->
+                                input.copyTo(out)
+                                session.fsync(out)
+                            }
+                        }
+                        val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
+                        val pending = PendingIntent.getBroadcast(context, sessionId, Intent(context, InstallResult::class.java), flags)
+                        session.commit(pending.intentSender)
+                        committed = true
+                    }
+                } catch (e: Throwable) {
+                    if (sessionId >= 0 && !committed) {
+                        runCatching { installer.abandonSession(sessionId) }
+                    }
+                    throw e
+                }
+                UpdateVerifier.InstallCheckResult.Ok
             }
+            when (check) {
+                UpdateVerifier.InstallCheckResult.Ok -> Unit
+                UpdateVerifier.InstallCheckResult.MissingOrCorrupt -> {
+                    apk = null
+                    phase = UpdatePhase.DownloadFailed(t("安装包不完整，请重新下载"))
+                }
+                UpdateVerifier.InstallCheckResult.WrongSigner -> {
+                    apk = null
+                    phase = UpdatePhase.DownloadFailed(t("安装包签名不对，不能安装"))
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             if (!file.isFile) apk = null
             phase = UpdatePhase.DownloadFailed(e.message ?: t("读写文件时出了问题，再试一次"))
+        } finally {
+            installing.set(false)
         }
     }
 
-    private fun sha256(f: File): String {
-        val md = MessageDigest.getInstance("SHA-256")
-        f.inputStream().use { input ->
-            val buf = ByteArray(64 * 1024)
-            while (true) {
-                val n = input.read(buf)
-                if (n < 0) break
-                md.update(buf, 0, n)
-            }
-        }
-        return md.digest().joinToString("") { "%02x".format(it) }
-    }
+    private fun sha256(f: File): String = UpdateVerifier.sha256(f)
 
     /** The new APK is signed by the same key as this app: nobody else's build gets in. */
     @Suppress("DEPRECATION")
@@ -414,19 +499,103 @@ object Updates {
     }
 }
 
+/** Pure APK integrity & signer verification helpers (kept free of Prefs/Android init for JVM tests). */
+internal object UpdateVerifier {
+    enum class InstallCheckResult { Ok, MissingOrCorrupt, WrongSigner }
+
+    fun sha256(f: File): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        f.inputStream().use { input ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    fun validateCachedApk(
+        file: File,
+        expectedSize: Long,
+        expectedSha256: String,
+        verifySigner: (File) -> Boolean,
+    ): Boolean {
+        if (!file.isFile) return false
+        val valid = file.length() == expectedSize &&
+            sha256(file) == expectedSha256.lowercase() &&
+            verifySigner(file)
+        if (!valid) {
+            file.delete()
+        }
+        return valid
+    }
+
+    fun validateForInstall(
+        file: File,
+        expectedSize: Long?,
+        expectedSha256: String?,
+        verifySigner: (File) -> Boolean,
+    ): InstallCheckResult {
+        if (!file.isFile) return InstallCheckResult.MissingOrCorrupt
+        if (expectedSize != null && file.length() != expectedSize) {
+            file.delete()
+            return InstallCheckResult.MissingOrCorrupt
+        }
+        if (!expectedSha256.isNullOrEmpty() && sha256(file) != expectedSha256.lowercase()) {
+            file.delete()
+            return InstallCheckResult.MissingOrCorrupt
+        }
+        if (!verifySigner(file)) {
+            file.delete()
+            return InstallCheckResult.WrongSigner
+        }
+        return InstallCheckResult.Ok
+    }
+}
+
 /** The installer's answer: ask the user when it must, report a failure. */
 class InstallResult : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 @Suppress("DEPRECATION")
-                val confirm = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java) else intent.getParcelableExtra(Intent.EXTRA_INTENT)
-                confirm?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)?.let(context::startActivity)
+                val confirm = if (Build.VERSION.SDK_INT >= 33) {
+                    intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+                } else {
+                    intent.getParcelableExtra(Intent.EXTRA_INTENT)
+                } ?: return
+                confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                val launched = isAppInForeground(context) && runCatching { context.startActivity(confirm) }.isSuccess
+                if (!launched) {
+                    Updates.pendingConfirmIntent = confirm
+                    Updates.postInstallConfirmNotification(context, confirm)
+                }
             }
-            PackageInstaller.STATUS_SUCCESS -> Unit
+            PackageInstaller.STATUS_SUCCESS -> {
+                Updates.pendingConfirmIntent = null
+                Updates.cancelInstallConfirmNotification(context)
+            }
             // 取消 in the system's dialog: the page stays, ready.
-            PackageInstaller.STATUS_FAILURE_ABORTED -> Unit
-            else -> Updates.failed(intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "")
+            PackageInstaller.STATUS_FAILURE_ABORTED -> {
+                Updates.pendingConfirmIntent = null
+                Updates.cancelInstallConfirmNotification(context)
+            }
+            else -> {
+                Updates.pendingConfirmIntent = null
+                Updates.cancelInstallConfirmNotification(context)
+                Updates.failed(intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "")
+            }
+        }
+    }
+
+    private fun isAppInForeground(context: Context): Boolean {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return false
+        val pid = Process.myPid()
+        val processes = runCatching { am.runningAppProcesses }.getOrNull() ?: return false
+        return processes.any {
+            it.pid == pid && it.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
         }
     }
 }

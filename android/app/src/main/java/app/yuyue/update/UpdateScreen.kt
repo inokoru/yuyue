@@ -65,7 +65,7 @@ fun UpdateScreen() {
     val scope = rememberCoroutineScope()
     val life = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(life) {
-        val observer = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) u.onResume(context) }
+        val observer = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) scope.launch { u.onResume(context) } }
         life.addObserver(observer)
         onDispose { life.removeObserver(observer) }
     }
@@ -83,7 +83,7 @@ fun UpdateScreen() {
             UpdatePhase.Release -> u.offer?.let { Release(it) { scope.launch { u.download(context) } } } ?: Status(checking = false)
             is UpdatePhase.Downloading -> Progress(phase.done)
             is UpdatePhase.DownloadFailed -> FailedDownload(phase.why) { scope.launch { u.download(context) } }
-            UpdatePhase.Ready -> Ready { u.install(context) }
+            UpdatePhase.Ready -> Ready { scope.launch { u.install(context) } }
             UpdatePhase.NeedPermission -> Permission({ u.openInstallSettings(context) }, { u.installLater() })
             else -> Status(checking = false)
         }
