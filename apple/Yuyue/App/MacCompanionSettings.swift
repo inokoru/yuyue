@@ -1132,6 +1132,18 @@ struct ServiceTile: View {
                         Image("brand-\(p.id)").resizable().scaledToFit()
                     } else if ServiceTile.hasImage("provider-\(p.id)") {
                         Image("provider-\(p.id)").resizable().scaledToFit().foregroundStyle(Color(yy: YYRGBA(42, 43, 46, 1)))
+                    } else if p == .edge {
+                        Text("e")
+                            .font(.system(size: PanelScale.k * size * 0.42, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .frame(width: size * 0.64, height: size * 0.64)
+                            .background(
+                                LinearGradient(
+                                    colors: [Color(red: 0.0, green: 0.47, blue: 0.84), Color(red: 0.07, green: 0.72, blue: 0.58)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                ),
+                                in: .rect(cornerRadius: size * 0.16)
+                            )
                     } else if p == .free {
                         Image(systemName: "globe.asia.australia.fill")
                             .font(.system(size: size * 0.44, weight: .medium))

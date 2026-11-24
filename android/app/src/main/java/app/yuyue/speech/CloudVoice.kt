@@ -48,6 +48,7 @@ class CloudVoice(
     }
 
     enum class Provider(val key: String, val group: Group) {
+        Edge("edge", Group.Global),
         Free("free", Group.Domestic),
         Volcengine("volcengine", Group.Domestic),
         Xiaomi("xiaomi", Group.Domestic),
@@ -66,10 +67,12 @@ class CloudVoice(
         Local("local", Group.Local);
 
         val isLocal: Boolean get() = group == Group.Local
-        val isPaidCloud: Boolean get() = !isLocal && this != Free
+        val isFreeOnline: Boolean get() = this == Edge || this == Free
+        val isPaidCloud: Boolean get() = !isLocal && !isFreeOnline
 
         val title: String
             get() = when (this) {
+                Edge -> t("微软 Edge")
                 Free -> t("在线自然语音")
                 Volcengine -> t("火山引擎（豆包）")
                 Fish -> "Fish Audio"
@@ -90,6 +93,7 @@ class CloudVoice(
 
         val aliases: String
             get() = when (this) {
+                Edge -> "edge microsoft bing 微软 晓晓 云希 云健 免key 免费 在线 朗读"
                 Free -> "free online 免key 免费 在线 自然 语音 kokoro melotts"
                 Volcengine -> "volcengine 火山 豆包 字节 doubao seedtts"
                 Fish -> "fish audio fishspeech openaudio s1 克隆"
@@ -110,7 +114,7 @@ class CloudVoice(
 
         val badge: String?
             get() = when (this) {
-                Free -> t("免 Key")
+                Edge, Free -> t("免 Key")
                 Volcengine -> t("豆包语音")
                 Fish -> "OpenAudio S1"
                 Xiaomi -> t("限时免费")
@@ -162,7 +166,7 @@ class CloudVoice(
 
         val isSetUp: Boolean
             get() = when {
-                this == Free -> !Prefs.bool(dismissedName, false)
+                isFreeOnline -> !Prefs.bool(dismissedName, false)
                 isLocal -> Prefs.bool(enabledName, false) && savedURL.isNotEmpty()
                 this == Volcengine -> {
                     val k = apiKey
@@ -173,7 +177,7 @@ class CloudVoice(
 
         val keyHint: String
             get() = when (this) {
-                Free -> t("无需填写 Key")
+                Edge, Free -> t("无需填写 Key")
                 Volcengine -> "Access Token…"
                 Fish -> "API Key…"
                 Xiaomi, SiliconFlow, DashScope, OpenAI -> "sk-…"
@@ -186,6 +190,7 @@ class CloudVoice(
 
         val help: String
             get() = when (this) {
+                Edge -> t("免注册免填 Key，直连微软 Edge 自然神经语音（晓晓、云希、Ava 等），已朗读句子自动缓存在本机。")
                 Free -> t("0 MB 免下载、免注册免填 Key，直连公共语音接口，已朗读句子自动缓存在本机。")
                 Volcengine -> t("火山引擎控制台 › 豆包语音 › 语音合成大模型，获取 AppID 与 Access Token。")
                 Fish -> t("fish.audio › API Keys 新建密钥，支持 OpenAudio S1 高表现力中英音色与社区声音库。")
@@ -300,6 +305,7 @@ class CloudVoice(
 
     private fun fetch(text: String, language: String, parts: List<uniffi.yuyue_core.SpokenPart>? = null, acting: Acting? = null): Pair<ByteArray, String> {
         return when (provider) {
+            Provider.Edge -> fetchEdge(voiceID, text, language)
             Provider.Free -> fetchFreeOnline(voiceID, text, language)
 
             Provider.Volcengine -> {
@@ -699,6 +705,31 @@ class CloudVoice(
 
         data class PresetVoice(val id: String, val name: String, val lang: String?, val gender: String?, val age: String?)
 
+        val edgeVoices = listOf(
+            PresetVoice("zh-CN-XiaoxiaoNeural", "晓晓 · 温暖自然女声", "zh-CN", "female", "young"),
+            PresetVoice("zh-CN-YunxiNeural", "云希 · 阳光清朗男声", "zh-CN", "male", "young"),
+            PresetVoice("zh-CN-YunjianNeural", "云健 · 沉稳播讲男声", "zh-CN", "male", "middle_aged"),
+            PresetVoice("zh-CN-XiaoyiNeural", "晓伊 · 灵动活泼女声", "zh-CN", "female", "young"),
+            PresetVoice("zh-CN-YunyangNeural", "云扬 · 新闻播报男声", "zh-CN", "male", "middle_aged"),
+            PresetVoice("zh-CN-YunxiaNeural", "云夏 · 少年清亮男声", "zh-CN", "male", "young"),
+            PresetVoice("zh-CN-liaoning-XiaobeiNeural", "晓北 · 东北风趣女声", "zh-CN", "female", "young"),
+            PresetVoice("zh-CN-shaanxi-XiaoniNeural", "晓妮 · 陕西温婉女声", "zh-CN", "female", "young"),
+            PresetVoice("zh-TW-HsiaoChenNeural", "曉臻 · 台湾温润女声", "zh-TW", "female", "young"),
+            PresetVoice("zh-TW-YunJheNeural", "雲哲 · 台湾沉稳男声", "zh-TW", "male", "middle_aged"),
+            PresetVoice("zh-HK-HiuMaanNeural", "曉曼 · 粤语自然女声", "zh-HK", "female", "young"),
+            PresetVoice("zh-HK-WanLungNeural", "雲龍 · 粤语沉稳男声", "zh-HK", "male", "middle_aged"),
+            PresetVoice("en-US-AvaMultilingualNeural", "Ava · Natural Multilingual", "en-US", "female", "young"),
+            PresetVoice("en-US-AndrewMultilingualNeural", "Andrew · Warm Multilingual", "en-US", "male", "middle_aged"),
+            PresetVoice("en-US-EmmaMultilingualNeural", "Emma · Clear Multilingual", "en-US", "female", "young"),
+            PresetVoice("en-US-BrianMultilingualNeural", "Brian · Calm Multilingual", "en-US", "male", "middle_aged"),
+            PresetVoice("en-US-AriaNeural", "Aria · Expressive American", "en-US", "female", "young"),
+            PresetVoice("en-US-GuyNeural", "Guy · Deep American", "en-US", "male", "middle_aged"),
+            PresetVoice("en-GB-SoniaNeural", "Sonia · British Female", "en-GB", "female", "young"),
+            PresetVoice("en-GB-RyanNeural", "Ryan · British Male", "en-GB", "male", "middle_aged"),
+            PresetVoice("ja-JP-NanamiNeural", "七海 · 自然日本語女声", "ja-JP", "female", "young"),
+            PresetVoice("ja-JP-KeitaNeural", "圭太 · 自然日本語男声", "ja-JP", "male", "young"),
+        )
+
         val freeOnlineVoices = listOf(
             PresetVoice("zh_baidu", "知声 · 清晰播报", "zh-CN", "female", "middle_aged"),
             PresetVoice("en_us", "Emma · American", "en-US", "female", "young"),
@@ -754,6 +785,31 @@ class CloudVoice(
             "baidu_zh" -> "https://fanyi.baidu.com/gettts?lan=zh&spd=5&source=web&text=$encodedChunk"
             "baidu_uk" -> "https://fanyi.baidu.com/gettts?lan=uk&spd=3&source=web&text=$encodedChunk"
             else -> "https://fanyi.baidu.com/gettts?lan=en&spd=3&source=web&text=$encodedChunk"
+        }
+
+        private fun fetchEdge(voiceID: String, text: String, language: String): Pair<ByteArray, String> {
+            val customBase = Provider.Edge.savedURL
+            if (customBase.isNotEmpty()) {
+                val ep = speechEndpoint(customBase)
+                if (ep != null) {
+                    val payload = JSONObject()
+                        .put("model", Provider.Edge.savedModel.ifEmpty { "tts-1" })
+                        .put("voice", voiceID)
+                        .put("input", text)
+                        .put("response_format", "mp3")
+                    val audio = postJSON(Provider.Edge, ep, payload.toString().toByteArray(), readTimeoutMs = 30_000)
+                    return audio to sniffExt(audio, "mp3")
+                }
+            }
+            val audio = try {
+                EdgeTTS.synthesize(text = text, voiceID = voiceID, language = language)
+            } catch (e: EdgeTTS.EdgeHttpException) {
+                throw Failure("${Provider.Edge.title} (${e.code})")
+            } catch (e: Exception) {
+                throw Failure(e.message?.let { "${Provider.Edge.title}: $it" } ?: t("微软 Edge 暂时连不上，请稍后再试"))
+            }
+            if (!looksLikeAudio(audio)) throw Failure(t("声音数据读不出来"))
+            return audio to sniffExt(audio, "mp3")
         }
 
         private fun fetchFreeOnline(voiceID: String, text: String, language: String): Pair<ByteArray, String> {
@@ -933,6 +989,7 @@ class CloudVoice(
 
         fun all(): List<CloudVoice> = Provider.entries.filter { it.isSetUp }.flatMap { p ->
             when (p) {
+                Provider.Edge -> edgeVoices.map { CloudVoice(p, it.id, it.name, it.lang, it.gender, it.age) }
                 Provider.Free -> freeOnlineVoices.map { CloudVoice(p, it.id, it.name, it.lang, it.gender, it.age) }
                 Provider.Volcengine -> volcengineVoices.map { CloudVoice(p, it.id, it.name, it.lang, it.gender, it.age) }
                 Provider.Fish -> savedTuples(p).ifEmpty { fishPresets.map { CloudVoice(p, it.id, it.name, it.lang, it.gender, it.age) } }
@@ -961,6 +1018,10 @@ class CloudVoice(
                 return c.inputStream.use { String(it.readBytes()) }
             }
             when (p) {
+                Provider.Edge -> {
+                    fetchEdge("zh-CN-XiaoxiaoNeural", "你好，我来给你读这本书。", "zh-CN")
+                    edgeVoices.size
+                }
                 Provider.Free -> {
                     fetchFreeOnline("zh_baidu", "你好，我来给你读这本书。", "zh-CN")
                     freeOnlineVoices.size

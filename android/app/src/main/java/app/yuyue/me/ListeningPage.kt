@@ -145,6 +145,7 @@ private fun SourceBadgePill(text: String, tone: Int) {
 
 private val CloudVoice.Provider.blurb: String
     get() = when (this) {
+        CloudVoice.Provider.Edge -> t("免 Key 直连微软 Edge 自然神经语音，含晓晓、云希、Ava 等多语种音色")
         CloudVoice.Provider.Free -> t("0 MB 免下载、免注册免 Key，已读句子缓存在本机")
         CloudVoice.Provider.Volcengine -> t("豆包大模型语音，中文播客与小说自然度高")
         CloudVoice.Provider.Fish -> t("OpenAudio S1 高表现力中英音色与社区声音库")
@@ -165,6 +166,7 @@ private val CloudVoice.Provider.blurb: String
 
 private val CloudVoice.Provider.keyPage: String
     get() = when (this) {
+        CloudVoice.Provider.Edge -> "https://www.microsoft.com/edge"
         CloudVoice.Provider.Free -> "https://modelscope.cn/studios/k2-fsa/text-to-speech"
         CloudVoice.Provider.Volcengine -> "https://console.volcengine.com/speech/app"
         CloudVoice.Provider.Fish -> "https://fish.audio/app/api-keys/"
@@ -299,6 +301,12 @@ private fun SourceTile(id: String, size: Float = 26f) {
         }
         when (val p = cloud(id)) {
             null -> Icon(Icons.phone, null, tint = YY.c.t2, modifier = Modifier.size(YY.s(size * 0.58f)))
+            CloudVoice.Provider.Edge -> Box(
+                Modifier.size(YY.s(size * 0.64f)).background(Color(0xFF0078D4), RoundedCornerShape(YY.s(size * 0.16f))),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("e", style = YY.font(size * 0.38f, FontWeight.Bold), color = Color.White)
+            }
             CloudVoice.Provider.Free -> Box(
                 Modifier.size(YY.s(size * 0.64f)).background(Color(0xFF16A34A), RoundedCornerShape(YY.s(size * 0.16f))),
                 contentAlignment = Alignment.Center,
@@ -385,7 +393,7 @@ fun ListeningPage(open: (String) -> Unit) {
                             when {
                                 id == NEURAL -> SourceBadgePill(t("推荐"), 0)
                                 id == SYSTEM -> SourceBadgePill(t("不推荐"), 1)
-                                p?.badge != null -> SourceBadgePill(p.badge!!, if (p == CloudVoice.Provider.Free || p == CloudVoice.Provider.Xiaomi) 0 else 2)
+                                p?.badge != null -> SourceBadgePill(p.badge!!, if (p.isFreeOnline || p == CloudVoice.Provider.Xiaomi) 0 else 2)
                             }
                         }
                         Text(
@@ -396,6 +404,7 @@ fun ListeningPage(open: (String) -> Unit) {
                                     t("一键下载（125 MB）· 跨端离线自然语音")
                                 }
                                 id == SYSTEM -> t("%lld 个音色 · 机械音明显，仅作断网兜底", systemCount)
+                                p != null && p == CloudVoice.Provider.Edge -> t("%lld 个微软神经音色 · 免 Key 直连，已读缓存在本机", CloudVoice.all().count { it.provider == p })
                                 p != null && p == CloudVoice.Provider.Free -> t("%lld 个音色 · 零配置免 Key 即点即听", CloudVoice.all().count { it.provider == p })
                                 p != null && p.isLocal -> t("%lld 个音色 · 局域网语音", CloudVoice.all().count { it.provider == p })
                                 p != null -> t("%lld 个音色 · 已连接", CloudVoice.all().count { it.provider == p })
@@ -443,7 +452,7 @@ fun ListeningPage(open: (String) -> Unit) {
         VoiceProviderSheet(
             close = { adding = false },
             pick = { picked ->
-                if (picked == CloudVoice.Provider.Free) Prefs.set(picked.dismissedName, false)
+                if (picked.isFreeOnline) Prefs.set(picked.dismissedName, false)
                 adding = false
                 open(picked.key)
             },
@@ -488,7 +497,7 @@ private fun VoiceProviderSheet(close: () -> Unit, pick: (CloudVoice.Provider) ->
                                 ) {
                                     Box {
                                         SourceTile(p.key, 18f)
-                                        if (p.companionSharedKey != null || p == CloudVoice.Provider.Free || p == CloudVoice.Provider.Xiaomi || p == CloudVoice.Provider.Azure || p == CloudVoice.Provider.Deepgram) {
+                                        if (p.companionSharedKey != null || p.isFreeOnline || p == CloudVoice.Provider.Xiaomi || p == CloudVoice.Provider.Azure || p == CloudVoice.Provider.Deepgram) {
                                             Box(Modifier.align(Alignment.TopEnd).offset(x = 1.5.dp, y = (-1.5).dp).size(5.dp).background(YY.c.ok, CircleShape))
                                         }
                                     }
@@ -1070,13 +1079,13 @@ fun VoiceSourceSettings(id: String, back: () -> Unit) {
             val inUse = listOf("zh", "en").any { Prefs.string("player.voice.$it").startsWith("cloud.${p.key}.") }
             PanelHeader(p.title, if (inUse) t("当前使用") else p.blurb, if (inUse) YY.c.ok else YY.c.t3) { SourceTile(p.key, 34f) }
             KeyCard(p, connected = true) {}
-            if (!p.isLocal && p != CloudVoice.Provider.Free) YYNote(t("粘贴后自动验证，有效才会替换。"))
-            DestructiveCard(if (p == CloudVoice.Provider.Free) t("隐藏 %@", p.title) else t("断开 %@", p.title)) { removing = true }
+            if (!p.isLocal && !p.isFreeOnline) YYNote(t("粘贴后自动验证，有效才会替换。"))
+            DestructiveCard(if (p.isFreeOnline) t("隐藏 %@", p.title) else t("断开 %@", p.title)) { removing = true }
             if (removing) AlertDialog(
                 onDismissRequest = { removing = false },
                 containerColor = YY.c.card,
-                title = { Text(if (p == CloudVoice.Provider.Free) t("隐藏 %@？", p.title) else t("断开 %@？", p.title), color = YY.c.t1) },
-                text = { Text(if (p == CloudVoice.Provider.Free) t("隐藏后可在「添加声音来源」重新开启。") else t("断开后将移除配置；使用该服务音色的书籍将切回本地音色。"), color = YY.c.t2) },
+                title = { Text(if (p.isFreeOnline) t("隐藏 %@？", p.title) else t("断开 %@？", p.title), color = YY.c.t1) },
+                text = { Text(if (p.isFreeOnline) t("隐藏后可在「添加声音来源」重新开启。") else t("断开后将移除配置；使用该服务音色的书籍将切回本地音色。"), color = YY.c.t2) },
                 confirmButton = {
                     TextButton({
                         Keys.delete(p.keyName)
@@ -1084,14 +1093,14 @@ fun VoiceSourceSettings(id: String, back: () -> Unit) {
                         Prefs.set(p.urlName, null)
                         Prefs.set(p.modelName, null)
                         Prefs.set(p.enabledName, false)
-                        if (p == CloudVoice.Provider.Free) Prefs.set(p.dismissedName, true)
+                        if (p.isFreeOnline) Prefs.set(p.dismissedName, true)
                         if (p == CloudVoice.Provider.Volcengine) Prefs.set(CloudVoice.Provider.VOLC_APP_ID, null)
                         if (p == CloudVoice.Provider.Local) Prefs.set("tts.local.title", null)
                         for (lang in listOf("zh", "en")) if (Prefs.string("player.voice.$lang").startsWith("cloud.${p.key}.")) Prefs.set("player.voice.$lang", "")
                         removing = false
                         back()
                         back()
-                    }) { Text(if (p == CloudVoice.Provider.Free) t("隐藏") else t("断开"), color = YY.c.danger) }
+                    }) { Text(if (p.isFreeOnline) t("隐藏") else t("断开"), color = YY.c.danger) }
                 },
                 dismissButton = { TextButton({ removing = false }) { Text(t("取消"), color = YY.c.t2) } },
             )
@@ -1112,7 +1121,7 @@ private fun KeyCard(p: CloudVoice.Provider, connected: Boolean, changed: () -> U
     var outcome by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
     val scope = rememberCoroutineScope()
 
-    if (p == CloudVoice.Provider.Free) {
+    if (p.isFreeOnline) {
         YYGroup {
             row { YYRow(t("模式"), value = t("免 Key · 零配置即用")) }
             row {
@@ -1135,7 +1144,7 @@ private fun KeyCard(p: CloudVoice.Provider, connected: Boolean, changed: () -> U
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(8)),
                 ) {
                     Icon(Icons.waveformEcg, null, tint = YY.c.ok, modifier = Modifier.size(YY.s(14)))
-                    Text(if (connected) t("检查在线线路") else t("开启免 Key 在线语音"), style = YY.font(11.5f), color = YY.c.ok, modifier = Modifier.weight(1f))
+                    Text(if (connected) t("检查在线线路") else t("开启 %@", p.title), style = YY.font(11.5f), color = YY.c.ok, modifier = Modifier.weight(1f))
                     when {
                         checking -> CircularProgressIndicator(Modifier.size(12.dp), color = YY.c.t3, strokeWidth = 1.5.dp)
                         outcome != null -> Text(outcome!!.second, style = YY.font(10.5f), color = if (outcome!!.first) YY.c.ok else YY.c.danger, maxLines = 2, textAlign = TextAlign.End)

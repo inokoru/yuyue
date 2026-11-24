@@ -45346,6 +45346,116 @@
           }
         }
       }
+    },
+    "微软 Edge" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Microsoft Edge"
+          }
+        }
+      }
+    },
+    "了解微软 Edge 朗读语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About Microsoft Edge Read Aloud"
+          }
+        }
+      }
+    },
+    "免 Key · 微软 Edge 神经语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keyless · Microsoft Edge neural voices"
+          }
+        }
+      }
+    },
+    "免 Key · 微软神经语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keyless · Microsoft neural"
+          }
+        }
+      }
+    },
+    "免 Key 免费 · 微软 Edge 神经语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Free & keyless · Microsoft Edge neural"
+          }
+        }
+      }
+    },
+    "免 Key 直连微软 Edge 自然神经语音，含晓晓、云希、Ava 等多语种音色" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keyless Microsoft Edge neural voices including Xiaoxiao, Yunxi, and Ava"
+          }
+        }
+      }
+    },
+    "免注册免填 Key，直连微软 Edge 神经语音（晓晓、云希、云健、Ava 等），已朗读句子缓存在本机" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No signup or API key needed. Connects directly to Microsoft Edge neural voices (Xiaoxiao, Yunxi, Yunjian, Ava, etc.) and caches played sentences locally"
+          }
+        }
+      }
+    },
+    "免注册免填 Key，直连微软 Edge 自然神经语音（晓晓、云希、Ava 等），已朗读句子自动缓存在本机。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No signup or API key needed. Connects directly to Microsoft Edge neural voices (Xiaoxiao, Yunxi, Ava, etc.) and caches played sentences locally."
+          }
+        }
+      }
+    },
+    "留空用默认直连线路，或填 /v1 兼容地址" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leave blank for direct connection, or enter a /v1 gateway"
+          }
+        }
+      }
+    },
+    "%lld 个微软神经音色 · 免 Key 直连，已读缓存在本机" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld Microsoft neural voices · keyless, cached locally"
+          }
+        }
+      }
+    },
+    "开启 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable %@"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

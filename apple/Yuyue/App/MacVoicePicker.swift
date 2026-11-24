@@ -484,7 +484,7 @@ private struct SourceRow: View {
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 1.5)
                                 .background(YYColor.warn.opacity(0.13), in: .capsule)
-                        case .cloud(let p) where p == .free:
+                        case .cloud(let p) where p.isFreeOnline:
                             Text("免 Key")
                                 .font(.yy(size: 10, weight: .semibold))
                                 .foregroundStyle(YYColor.ok)
@@ -527,6 +527,8 @@ private struct SourceRow: View {
                         case .cloud(let p):
                             if !on {
                                 Text(p.blurb)
+                            } else if p == .edge {
+                                Text("\(source.voiceCount) 个微软神经音色 · 免 Key 直连，已读缓存在本机")
                             } else if p == .free {
                                 Text("\(source.voiceCount) 个中英音色 · 免注册开箱即听，已读缓存在本机")
                             } else if p.isLocal {
@@ -1293,7 +1295,7 @@ private struct SourceTabs: View {
                 let label: String = switch s {
                 case .neural: "\(s.title)（推荐）"
                 case .mac: "\(s.title)（不推荐）"
-                case .cloud(let p): p == .free ? "\(p.title)（免 Key）" : p.title
+                case .cloud(let p): p.isFreeOnline ? "\(p.title)（免 Key）" : p.title
                 }
                 if s == selection {
                     Label(label, systemImage: "checkmark")
@@ -1929,6 +1931,7 @@ struct ListeningVoiceCard: View {
     private static func cost(_ v: any Voice) -> String {
         guard let c = v as? CloudVoice else { return String(localized: "免费 · 不联网") }
         switch c.provider {
+        case .edge: return String(localized: "免 Key 免费 · 微软 Edge 神经语音")
         case .free: return String(localized: "免 Key 免费 · 语阅在线自然语音")
         case .volcengine: return String(localized: "按字符计费 · 走你的火山引擎")
         case .fish: return String(localized: "按字符计费 · 走你的 Fish Audio")

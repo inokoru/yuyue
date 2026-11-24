@@ -615,5 +615,6 @@
   "这台设备内存不足，可使用「在线自然语音（免 Key）」": "Not enough memory for offline voices; use Free Online Voices (No Key) instead",
   "隐藏 %@": "Hide %@",
   "隐藏 %@？": "Hide %@?",
-  "隐藏后可在「添加声音来源」重新开启。": "You can re-enable it anytime in Add Voice Source."
+  "隐藏后可在「添加声音来源」重新开启。": "You can re-enable it anytime in Add Voice Source.",
+  "微软 Edge 暂时连不上，请稍后再试": "Couldn't reach Microsoft Edge right now. Please try again later."
 }

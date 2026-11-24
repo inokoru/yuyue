@@ -343,6 +343,7 @@ extension CloudVoice.Provider {
 
     var account: String {
         switch self {
+        case .edge: String(localized: "免 Key · 微软 Edge 神经语音")
         case .free: String(localized: "免 Key · 零配置在线语音")
         case .volcengine: String(localized: "火山引擎豆包语音")
         case .fish: "Fish Audio"
@@ -361,6 +362,7 @@ extension CloudVoice.Provider {
 
     var blurb: String {
         switch self {
+        case .edge: String(localized: "免 Key 直连微软 Edge 自然神经语音，含晓晓、云希、Ava 等多语种音色")
         case .free: String(localized: "0 MB 免下载、免注册免 Key，已读句子缓存在本机")
         case .volcengine: String(localized: "豆包大模型语音，中文播客与小说自然度高")
         case .fish: String(localized: "OpenAudio S1 高表现力中英音色与社区声音库")
@@ -385,6 +387,7 @@ extension CloudVoice.Provider {
             return String(localized: "可复用书伴 Key")
         }
         return switch self {
+        case .edge: String(localized: "免 Key · 微软神经语音")
         case .free: String(localized: "免 Key · 即点即听")
         case .volcengine: String(localized: "豆包大模型语音")
         case .fish: String(localized: "OpenAudio S1")
@@ -406,6 +409,10 @@ extension CloudVoice.Provider {
 
     var keyStep: (title: String, detail: String, url: URL) {
         switch self {
+        case .edge:
+            (String(localized: "了解微软 Edge 朗读语音"),
+             String(localized: "免注册免填 Key，直连微软 Edge 神经语音（晓晓、云希、云健、Ava 等），已朗读句子缓存在本机"),
+             URL(string: "https://www.microsoft.com/edge")!)
         case .free:
             (String(localized: "了解在线自然语音"),
              String(localized: "内置免 Key 公共直连语音线路，无需注册或填写 Key，已朗读句子缓存在本机"),
@@ -495,6 +502,9 @@ extension CloudVoice.Provider {
 
     var endpointHost: String {
         switch self {
+        case .edge:
+            (UserDefaults.standard.string(forKey: urlName)?.trimmingCharacters(in: .whitespacesAndNewlines))
+                .flatMap { $0.isEmpty ? nil : (URL(string: $0)?.host() ?? $0) } ?? "speech.platform.bing.com"
         case .free:
             (UserDefaults.standard.string(forKey: urlName)?.trimmingCharacters(in: .whitespacesAndNewlines))
                 .flatMap { $0.isEmpty ? nil : (URL(string: $0)?.host() ?? $0) } ?? "dict.youdao.com / fanyi.baidu.com"
@@ -520,7 +530,7 @@ extension CloudVoice.Provider {
         d.removeObject(forKey: urlName)
         d.removeObject(forKey: modelName)
         d.set(false, forKey: enabledName)
-        if self == .free {
+        if isFreeOnline {
             d.set(true, forKey: dismissedName)
         }
         if isLocal {
@@ -572,7 +582,7 @@ extension CloudVoice.Provider {
             else { d.set(clean, forKey: urlName) }
         }
         d.set(false, forKey: dismissedName)
-        let n = try await CloudVoice.refresh(.free)
+        let n = try await CloudVoice.refresh(self)
         return .init(
             ticks: [
                 .init(title: String(localized: "连得上 \(endpointHost)")),
@@ -762,7 +772,7 @@ struct VoiceProviderSheet: View {
 
     private func choose(_ p: CloudVoice.Provider) {
         #if os(macOS)
-        if p == .free {
+        if p.isFreeOnline {
             UserDefaults.standard.set(false, forKey: p.dismissedName)
             dismiss()
             pick(p)
@@ -780,7 +790,7 @@ struct VoiceProviderSheet: View {
             HStack(spacing: YYUI.s(8)) {
                 ZStack(alignment: .topTrailing) {
                     ServiceTile(mark: .cloud(p), size: YYUI.s(18))
-                    if p.companionSharedKey != nil || p == .free || p == .xiaomi || p == .azure || p == .deepgram {
+                    if p.companionSharedKey != nil || p.isFreeOnline || p == .xiaomi || p == .azure || p == .deepgram {
                         Circle()
                             .fill(YYColor.ok)
                             .frame(width: 5, height: 5)
@@ -939,10 +949,10 @@ private struct MacVoiceProviderForm: View {
                         .foregroundStyle(YYColor.t3)
                         .padding(.horizontal, 2)
 
-                    if provider == .free {
+                    if provider.isFreeOnline {
                         PanelCard {
                             PanelButton(systemImage: "waveform.path.ecg", tint: YYColor.ok) {
-                                Text("开启免 Key 在线自然语音").foregroundStyle(YYColor.ok)
+                                Text("开启 \(provider.title)").foregroundStyle(YYColor.ok)
                                 Spacer(minLength: 8)
                                 if connect.busy { ProgressView().controlSize(.mini) }
                             } action: {
@@ -1032,7 +1042,7 @@ private struct MacVoiceProviderForm: View {
                             Spacer(minLength: 0)
                         } action: { NSWorkspace.shared.open(step.url) }
                     }
-                    PanelHint(step.detail + (provider.isLocal || provider == .free ? "" : String(localized: "。API Key 仅保存在本机，调用费用由服务商直接结算。")))
+                    PanelHint(step.detail + (provider.isLocal || provider.isFreeOnline ? "" : String(localized: "。API Key 仅保存在本机，调用费用由服务商直接结算。")))
                 }
                 .padding(.horizontal, 1)
                 .padding(.top, 2)
@@ -1047,8 +1057,8 @@ private struct MacVoiceProviderForm: View {
             }
         }
         .onDisappear { connect.reset() }
-        .onChange(of: key) { if !provider.isLocal && provider != .free { attemptCloud(now: false) } }
-        .onChange(of: region) { if !provider.isLocal && provider != .free && !key.isEmpty { attemptCloud(now: true) } }
+        .onChange(of: key) { if !provider.isLocal && !provider.isFreeOnline { attemptCloud(now: false) } }
+        .onChange(of: region) { if !provider.isLocal && !provider.isFreeOnline && !key.isEmpty { attemptCloud(now: true) } }
     }
 
     private var cloudFilled: Bool {
@@ -1140,12 +1150,12 @@ struct CloudVoicePanel: View {
                 ServiceTile(mark: .cloud(provider), size: 34)
             }
             PanelCard {
-                if provider == .free {
+                if provider.isFreeOnline {
                     PanelRow { Text("模式") } trailing: {
                         SettingsPill(String(localized: "免 Key · 零配置"), tone: .ok)
                     }
                     if editing {
-                        PanelField(label: String(localized: "线路"), text: $url, prompt: String(localized: "留空用官方开源线路，或填 /v1 地址"), autofocus: true, submit: saveFree, cancel: stopEditing)
+                        PanelField(label: String(localized: "线路"), text: $url, prompt: String(localized: "留空用默认直连线路，或填 /v1 兼容地址"), autofocus: true, submit: saveFree, cancel: stopEditing)
                         PanelButton(systemImage: "checkmark", tint: YYColor.ok) {
                             Text("保存线路").foregroundStyle(YYColor.ok)
                             Spacer(minLength: 0)
@@ -1221,23 +1231,23 @@ struct CloudVoicePanel: View {
             }
             if editing {
                 AutoConnectStatus(connect: connect)
-                if case .idle = connect.phase, !provider.isLocal, provider != .free {
+                if case .idle = connect.phase, !provider.isLocal, !provider.isFreeOnline {
                     PanelHint(String(localized: "粘贴后自动验证，有效才会替换；按 Esc 取消"))
                 }
             }
             PanelCard { checkRow }
             PanelCard {
                 PanelButton(tint: YYColor.danger, destructive: true) {
-                    Text(provider == .free ? String(localized: "隐藏 \(provider.title)") : String(localized: "断开 \(provider.title)"))
+                    Text(provider.isFreeOnline ? String(localized: "隐藏 \(provider.title)") : String(localized: "断开 \(provider.title)"))
                 } action: {
                     confirming = YYConfirm(
-                        title: provider == .free ? String(localized: "隐藏 \(provider.title)？") : String(localized: "断开 \(provider.title)？"),
-                        message: provider == .free
+                        title: provider.isFreeOnline ? String(localized: "隐藏 \(provider.title)？") : String(localized: "断开 \(provider.title)？"),
+                        message: provider.isFreeOnline
                             ? String(localized: "隐藏后可在「添加声音来源」随时重新开启；正在使用该来源的书籍将切回本地语音。")
                             : (provider.isLocal
                                 ? String(localized: "断开后将不再显示在列表中；使用该服务音色的书籍将切回本地自带音色。")
                                 : String(localized: "将同时移除 API Key；使用该服务音色的书籍将切回本地音色。")),
-                        button: provider == .free ? String(localized: "隐藏") : String(localized: "断开")
+                        button: provider.isFreeOnline ? String(localized: "隐藏") : String(localized: "断开")
                     ) {
                         provider.remove()
                         focus.page = nil
@@ -1250,9 +1260,9 @@ struct CloudVoicePanel: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 14)
-        .onChange(of: key) { if !provider.isLocal && provider != .free { attempt(now: false) } }
+        .onChange(of: key) { if !provider.isLocal && !provider.isFreeOnline { attempt(now: false) } }
         .onChange(of: region) {
-            guard !provider.isLocal, provider != .free, let k = provider.key else { return }
+            guard !provider.isLocal, !provider.isFreeOnline, let k = provider.key else { return }
             let p = provider, r = region
             check.start("", delay: .zero) { try await p.tryKey(k, region: r) } done: { focus.reload() }
         }
@@ -1315,7 +1325,7 @@ struct CloudVoicePanel: View {
         } action: {
             guard !check.busy else { return }
             let p = provider
-            if p == .free {
+            if p.isFreeOnline {
                 check.start("", delay: .zero) {
                     try await p.tryFree()
                 } done: { focus.reload() }

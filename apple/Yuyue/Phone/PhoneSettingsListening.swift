@@ -74,7 +74,7 @@ struct PhoneListening: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $addingSheet) {
             VoiceProviderSheet { picked in
-                if picked == .free {
+                if picked.isFreeOnline {
                     UserDefaults.standard.set(false, forKey: picked.dismissedName)
                     ListeningFocus.shared.reload()
                 }
@@ -106,7 +106,7 @@ struct PhoneListening: View {
                     } else if source == .mac {
                         SettingsPill(String(localized: "不推荐"), tone: .warn)
                     } else if case .cloud(let p) = source, let badge = p.badge {
-                        SettingsPill(badge, tone: p == .free || p == .xiaomi ? .ok : .quiet)
+                        SettingsPill(badge, tone: p.isFreeOnline || p == .xiaomi ? .ok : .quiet)
                     }
                 }
                 Text(detail(source)).font(YYUI.font(10)).foregroundStyle(YYColor.t3).lineLimit(1)
@@ -242,15 +242,15 @@ private struct PhoneSourceSettings: View {
                     PanelHint(String(localized: "系统自带合成音机械感较重，建议改用「语阅离线语音（Kokoro）」或「在线自然语音（免 Key）」。"))
                 case .cloud(let p):
                     PhoneCloudConnected(provider: p, changed: changed).padding(.horizontal, -16)
-                    PanelDestructive(p == .free ? String(localized: "隐藏 \(p.title)") : String(localized: "断开 \(p.title)")) { removing = true }
-                        .confirmationDialog(p == .free ? String(localized: "隐藏 \(p.title)？") : String(localized: "断开 \(p.title)？"), isPresented: $removing) {
-                            Button(p == .free ? "隐藏" : "断开", role: .destructive) {
+                    PanelDestructive(p.isFreeOnline ? String(localized: "隐藏 \(p.title)") : String(localized: "断开 \(p.title)")) { removing = true }
+                        .confirmationDialog(p.isFreeOnline ? String(localized: "隐藏 \(p.title)？") : String(localized: "断开 \(p.title)？"), isPresented: $removing) {
+                            Button(p.isFreeOnline ? "隐藏" : "断开", role: .destructive) {
                                 p.remove()
                                 changed()
                                 dismiss()
                             }
                         } message: {
-                            Text(p == .free ? "隐藏后可在「添加声音来源」重新开启。" : "将同时移除 API Key；使用该服务音色的书籍将切回本地音色。")
+                            Text(p.isFreeOnline ? "隐藏后可在「添加声音来源」重新开启。" : "将同时移除 API Key；使用该服务音色的书籍将切回本地音色。")
                         }
                 }
             }
@@ -280,10 +280,10 @@ private struct PhoneCloudKey: View {
         let step = provider.keyStep
         VStack(alignment: .leading, spacing: 10) {
             PanelHeader(title: provider.title, detail: provider.blurb) { ServiceTile(mark: .cloud(provider), size: 30) }
-            if provider == .free {
+            if provider.isFreeOnline {
                 PanelCard {
                     PanelButton(systemImage: "waveform.path.ecg", tint: YYColor.ok) {
-                        Text("开启免 Key 在线自然语音").foregroundStyle(YYColor.ok)
+                        Text("开启 \(provider.title)").foregroundStyle(YYColor.ok)
                         Spacer(minLength: 8)
                         if connect.busy { ProgressView().controlSize(.mini) }
                     } action: {
@@ -348,7 +348,7 @@ private struct PhoneCloudKey: View {
                     Spacer(minLength: 0)
                 } action: { openURL(step.url) }
             }
-            PanelHint(step.detail + (provider.isLocal || provider == .free ? "" : String(localized: "。API Key 仅保存在本机钥匙串，调用费用由服务商直接结算。")))
+            PanelHint(step.detail + (provider.isLocal || provider.isFreeOnline ? "" : String(localized: "。API Key 仅保存在本机钥匙串，调用费用由服务商直接结算。")))
         }
         .padding(.horizontal, 16)
         .onAppear {
@@ -358,8 +358,8 @@ private struct PhoneCloudKey: View {
                 if provider == .local { customName = UserDefaults.standard.string(forKey: "tts.local.title") ?? "" }
             }
         }
-        .onChange(of: key) { if !provider.isLocal && provider != .free { attempt(now: false) } }
-        .onChange(of: region) { if !provider.isLocal && provider != .free && !key.isEmpty { attempt(now: true) } }
+        .onChange(of: key) { if !provider.isLocal && !provider.isFreeOnline { attempt(now: false) } }
+        .onChange(of: region) { if !provider.isLocal && !provider.isFreeOnline && !key.isEmpty { attempt(now: true) } }
     }
 
     private func attempt(now: Bool) {
@@ -404,7 +404,7 @@ private struct PhoneCloudConnected: View {
                 ServiceTile(mark: .cloud(provider), size: 30)
             }
             PanelCard {
-                if provider == .free {
+                if provider.isFreeOnline {
                     PanelRow { Text("模式") } trailing: {
                         SettingsPill(String(localized: "免 Key · 零配置"), tone: .ok)
                     }
@@ -461,7 +461,7 @@ private struct PhoneCloudConnected: View {
                 } action: {
                     guard !check.busy else { return }
                     let p = provider
-                    if p == .free {
+                    if p.isFreeOnline {
                         check.start("", delay: .zero) {
                             try await p.tryFree()
                         } done: { changed() }
@@ -478,14 +478,14 @@ private struct PhoneCloudConnected: View {
             }
             if editing {
                 AutoConnectStatus(connect: connect)
-                if case .idle = connect.phase, !provider.isLocal { PanelHint(String(localized: "粘贴后自动验证，有效才会替换。")) }
+                if case .idle = connect.phase, !provider.isLocal, !provider.isFreeOnline { PanelHint(String(localized: "粘贴后自动验证，有效才会替换。")) }
             }
         }
         .animation(YYMotion.standard, value: editing)
         .padding(.horizontal, 16)
-        .onChange(of: key) { if !provider.isLocal { attempt(now: false) } }
+        .onChange(of: key) { if !provider.isLocal && !provider.isFreeOnline { attempt(now: false) } }
         .onChange(of: region) {
-            guard !provider.isLocal, let k = provider.key else { return }
+            guard !provider.isLocal, !provider.isFreeOnline, let k = provider.key else { return }
             let p = provider, r = region
             check.start("", delay: .zero) { try await p.tryKey(k, region: r) } done: { changed() }
         }

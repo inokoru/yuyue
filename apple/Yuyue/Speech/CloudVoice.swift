@@ -24,6 +24,7 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
     }
 
     enum Provider: String, CaseIterable, Identifiable, Sendable {
+        case edge
         case free
         case volcengine
         case xiaomi
@@ -46,18 +47,19 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
         var group: Group {
             switch self {
             case .free, .volcengine, .xiaomi, .siliconflow, .dashscope, .minimax: .domestic
-            case .fish, .azure, .openai, .elevenlabs, .deepgram: .global
+            case .edge, .fish, .azure, .openai, .elevenlabs, .deepgram: .global
             case .voicestudio, .voicebox, .mlxaudio, .speaches, .local: .local
             }
         }
 
         var isLocal: Bool { group == .local }
-        var isFreeOnline: Bool { self == .free }
+        var isFreeOnline: Bool { self == .edge || self == .free }
         var isPaidCloud: Bool { !isLocal && !isFreeOnline }
         var needsKey: Bool { !isLocal && !isFreeOnline }
 
         var title: String {
             switch self {
+            case .edge: String(localized: "微软 Edge")
             case .free: String(localized: "在线自然语音")
             case .volcengine: String(localized: "火山引擎（豆包）")
             case .xiaomi: String(localized: "小米 MiMo")
@@ -83,6 +85,7 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
         /// 顶部紧凑切换栏使用的短标题（避免在窄栏里被截断）。
         var tabTitle: String {
             switch self {
+            case .edge: "Edge"
             case .free: String(localized: "在线语音")
             case .volcengine: String(localized: "火山豆包")
             case .xiaomi: String(localized: "小米 MiMo")
@@ -109,6 +112,7 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
         /// 搜索别名（中文名、开源项目名、模型名）。
         var aliases: String {
             switch self {
+            case .edge: "edge microsoft bing 微软 晓晓 云希 云健 免key 免费 在线 朗读"
             case .free: "free keyless sherpa kokoro melotts 免key 免费 在线"
             case .volcengine: "volcengine doubao bytedance 火山 豆包 字节 灿灿"
             case .xiaomi: "xiaomi mimo 小米 小爱 冰糖 茉莉"
@@ -131,7 +135,7 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
         /// 推荐角标（如免费额度提示），保持克制。
         var badge: String? {
             switch self {
-            case .free: String(localized: "免 Key")
+            case .edge, .free: String(localized: "免 Key")
             case .xiaomi: String(localized: "限时免费")
             case .volcengine, .fish, .azure, .deepgram: String(localized: "含免费额度")
             case .voicestudio, .voicebox, .mlxaudio, .speaches: String(localized: "本机开源")
@@ -233,7 +237,7 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
 
         var keyHint: String {
             switch self {
-            case .free: String(localized: "免填 Key")
+            case .edge, .free: String(localized: "免填 Key")
             case .volcengine: String(localized: "AppID|AccessToken（如 12345678|token…）")
             case .xiaomi, .siliconflow, .dashscope, .openai: "sk-…"
             case .fish: "fish_… / Bearer Key"
@@ -247,6 +251,7 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
 
         var help: String {
             switch self {
+            case .edge: String(localized: "免注册免填 Key，直连微软 Edge 自然神经语音（晓晓、云希、Ava 等），已朗读句子自动缓存在本机。")
             case .free: String(localized: "0 MB 免下载、免注册免填 Key，直连公共语音接口，已朗读句子自动缓存在本机。")
             case .volcengine: String(localized: "火山引擎语音技术控制台创建应用后，按「AppID|AccessToken」填入（竖线分隔），支持豆包灿灿 2.0 等自然声线。")
             case .xiaomi: String(localized: "platform.xiaomimimo.com 控制台新建 API Key，当前限时免费，支持自然语言语气控制。")
@@ -482,6 +487,9 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
 
     private func fetch(_ text: String, language: String, parts: [SpokenPart]? = nil, acting: Acting? = nil) async throws -> (Data, String) {
         switch provider {
+        case .edge:
+            return try await Self.fetchEdge(text: text, voiceID: voiceID, language: language)
+
         case .free:
             return try await Self.fetchFreeOnline(text: text, voiceID: voiceID, language: language)
 
@@ -903,6 +911,31 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
 
     // MARK: Built-in preset voice tables
 
+    static let edgeVoices: [(id: String, name: String, lang: String, gender: String, age: String)] = [
+        ("zh-CN-XiaoxiaoNeural", "晓晓 · 温暖自然女声", "zh-CN", "female", "young"),
+        ("zh-CN-YunxiNeural", "云希 · 阳光清朗男声", "zh-CN", "male", "young"),
+        ("zh-CN-YunjianNeural", "云健 · 沉稳播讲男声", "zh-CN", "male", "middle_aged"),
+        ("zh-CN-XiaoyiNeural", "晓伊 · 灵动活泼女声", "zh-CN", "female", "young"),
+        ("zh-CN-YunyangNeural", "云扬 · 新闻播报男声", "zh-CN", "male", "middle_aged"),
+        ("zh-CN-YunxiaNeural", "云夏 · 少年清亮男声", "zh-CN", "male", "young"),
+        ("zh-CN-liaoning-XiaobeiNeural", "晓北 · 东北风趣女声", "zh-CN", "female", "young"),
+        ("zh-CN-shaanxi-XiaoniNeural", "晓妮 · 陕西温婉女声", "zh-CN", "female", "young"),
+        ("zh-TW-HsiaoChenNeural", "曉臻 · 台湾温润女声", "zh-TW", "female", "young"),
+        ("zh-TW-YunJheNeural", "雲哲 · 台湾沉稳男声", "zh-TW", "male", "middle_aged"),
+        ("zh-HK-HiuMaanNeural", "曉曼 · 粤语自然女声", "zh-HK", "female", "young"),
+        ("zh-HK-WanLungNeural", "雲龍 · 粤语沉稳男声", "zh-HK", "male", "middle_aged"),
+        ("en-US-AvaMultilingualNeural", "Ava · Natural Multilingual", "en-US", "female", "young"),
+        ("en-US-AndrewMultilingualNeural", "Andrew · Warm Multilingual", "en-US", "male", "middle_aged"),
+        ("en-US-EmmaMultilingualNeural", "Emma · Clear Multilingual", "en-US", "female", "young"),
+        ("en-US-BrianMultilingualNeural", "Brian · Calm Multilingual", "en-US", "male", "middle_aged"),
+        ("en-US-AriaNeural", "Aria · Expressive American", "en-US", "female", "young"),
+        ("en-US-GuyNeural", "Guy · Deep American", "en-US", "male", "middle_aged"),
+        ("en-GB-SoniaNeural", "Sonia · British Female", "en-GB", "female", "young"),
+        ("en-GB-RyanNeural", "Ryan · British Male", "en-GB", "male", "middle_aged"),
+        ("ja-JP-NanamiNeural", "七海 · 自然日本語女声", "ja-JP", "female", "young"),
+        ("ja-JP-KeitaNeural", "圭太 · 自然日本語男声", "ja-JP", "male", "young"),
+    ]
+
     static let freeOnlineVoices: [(id: String, name: String, lang: String, gender: String, age: String)] = [
         ("zh_baidu", "知声 · 清晰播报", "zh-CN", "female", "middle_aged"),
         ("en_us", "Emma · American", "en-US", "female", "young"),
@@ -1003,6 +1036,8 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
     static func all() -> [CloudVoice] {
         Provider.allCases.filter(\.isSetUp).flatMap { p -> [CloudVoice] in
             switch p {
+            case .edge:
+                return edgeVoices.map { CloudVoice(provider: p, voiceID: $0.id, name: $0.name, language: $0.lang, gender: $0.gender, age: $0.age) }
             case .free:
                 return freeOnlineVoices.map { CloudVoice(provider: p, voiceID: $0.id, name: $0.name, language: $0.lang, gender: $0.gender, age: $0.age) }
             case .volcengine:
@@ -1053,6 +1088,10 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
     /// Checks credentials / connectivity, fetches dynamic voices where supported, and caches them.
     static func refresh(_ p: Provider) async throws -> Int {
         switch p {
+        case .edge:
+            _ = try await fetchEdge(text: "你好，我来给你读这本书。", voiceID: "zh-CN-XiaoxiaoNeural", language: "zh-CN")
+            return edgeVoices.count
+
         case .free:
             _ = try await fetchFreeOnline(text: "你好，我来给你读这本书。", voiceID: "zh_baidu", language: "zh-CN")
             return freeOnlineVoices.count
@@ -1247,6 +1286,43 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
         let savedApp = (UserDefaults.standard.string(forKey: Provider.volcAppIDName) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !savedApp.isEmpty else { return nil }
         return (savedApp, rawKey)
+    }
+
+    /// 免 Key 微软 Edge 自然神经语音：默认直连 Edge Read Aloud WebSocket（v2 Sec-MS-GEC）；
+    /// 也支持用户填入自建 OpenAI `/v1/audio/speech` 兼容网关（如 `openai-edge-tts`）。
+    static func fetchEdge(text: String, voiceID: String, language: String) async throws -> (Data, String) {
+        let customBase = (UserDefaults.standard.string(forKey: Provider.edge.urlName) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !customBase.isEmpty, let endpoint = speechEndpoint(from: customBase) {
+            var req = URLRequest(url: endpoint, timeoutInterval: 25)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let model = (UserDefaults.standard.string(forKey: Provider.edge.modelName) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let payload: [String: Any] = [
+                "model": model.isEmpty ? "tts-1" : model,
+                "voice": voiceID,
+                "input": text,
+                "response_format": "mp3",
+            ]
+            req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200 ..< 300).contains(code), !data.isEmpty else { throw failure(.edge, code, data) }
+            return (data, sniffExt(data, fallback: "mp3"))
+        }
+
+        do {
+            let audio = try await EdgeTTS.synthesize(text: text, voiceID: voiceID, language: language)
+            guard looksLikeAudio(audio) else { throw Failure.unreadable }
+            return (audio, sniffExt(audio, fallback: "mp3"))
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let EdgeTTS.EdgeError.httpStatus(code, _) {
+            throw Failure.server(.edge, code, nil)
+        } catch EdgeTTS.EdgeError.emptyAudio {
+            throw Failure.unreadable
+        } catch {
+            throw Failure.server(.edge, 0, error.localizedDescription)
+        }
     }
 
     /// 免 Key 在线自然语音：支持自定免密兼容网关，默认直连与当前所选音色严格对应的公共 MP3 语音接口，

@@ -10,12 +10,15 @@ class CloudVoiceTest {
     @Test
     fun providerCatalogGroupsAndPaidFlagsMatchCurrentProviders() {
         val gridTiles = CloudVoice.Provider.entries.filter { it != CloudVoice.Provider.Local }
-        assertEquals(15, gridTiles.size)
+        assertEquals(16, gridTiles.size)
         assertEquals(6, gridTiles.count { it.group == CloudVoice.Group.Domestic })
-        assertEquals(5, gridTiles.count { it.group == CloudVoice.Group.Global })
+        assertEquals(6, gridTiles.count { it.group == CloudVoice.Group.Global })
         assertEquals(4, gridTiles.count { it.group == CloudVoice.Group.Local })
         assertTrue(CloudVoice.Provider.Local.isLocal)
         assertTrue(!CloudVoice.Provider.Local.isPaidCloud)
+        assertTrue(CloudVoice.Provider.Edge.isFreeOnline)
+        assertTrue(!CloudVoice.Provider.Edge.isPaidCloud)
+        assertTrue(CloudVoice.Provider.Free.isFreeOnline)
         assertTrue(!CloudVoice.Provider.Free.isPaidCloud)
         assertTrue(CloudVoice.Provider.Xiaomi.isPaidCloud)
     }
@@ -83,5 +86,28 @@ class CloudVoiceTest {
             assertTrue(url.startsWith("https://fanyi.baidu.com/gettts?"))
             assertTrue(!url.contains("dict.youdao.com"))
         }
+    }
+
+    @Test
+    fun edgeTtsGeneratesValidSecMsGecV2TokensAndFormatsVoiceNames() {
+        assertEquals(
+            "2CD23A2CA0B2595A-F3C846C370E05F9CC83ACC5F995C5F5D87A4D0F14CE8936A0F902E64099E38A2",
+            EdgeTTS.generateSecMsGecV2(1700000000.0),
+        )
+        assertEquals(
+            "6D50DDDB91812C33-DD68EFB01898B0750C9797D51A5FF93471DFDAE6888A1039D532CBDCCE54545D",
+            EdgeTTS.generateSecMsGecV2(1760000000.0),
+        )
+        assertEquals(
+            "Microsoft Server Speech Text to Speech Voice (zh-CN, XiaoxiaoNeural)",
+            EdgeTTS.formatVoiceName("zh-CN-XiaoxiaoNeural"),
+        )
+        assertEquals(
+            "Microsoft Server Speech Text to Speech Voice (zh-CN-liaoning, XiaobeiNeural)",
+            EdgeTTS.formatVoiceName("zh-CN-liaoning-XiaobeiNeural"),
+        )
+        assertEquals(22, CloudVoice.edgeVoices.size)
+        assertTrue(CloudVoice.edgeVoices.any { it.id == "zh-CN-XiaoxiaoNeural" && it.lang == "zh-CN" })
+        assertTrue(CloudVoice.edgeVoices.any { it.id == "en-US-AvaMultilingualNeural" && it.lang == "en-US" })
     }
 }
