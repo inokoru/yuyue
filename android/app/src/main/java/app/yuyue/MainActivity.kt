@@ -88,6 +88,7 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val library: Library get() = (application as YuyueApp).library
+    private val xiaomiPen by lazy { app.yuyue.reader.XiaomiPenEngine(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         AppLanguage.apply(this)
@@ -117,8 +118,20 @@ class MainActivity : ComponentActivity() {
         AppLanguage.apply(this)
     }
 
-    /** 音量键翻页: volume down turns on, up turns back; held down, the pages keep turning. */
+    /** 音量键与小米触控笔手势翻页: down turns on, up turns back. */
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        // Xiaomi Focus Pen Pro gestures (#7875) reuse gamepad keycodes. They are
+        // pen gestures only while HyperOS's engine has registered 语阅, never from
+        // a gamepad/joystick. Forward the first DOWN of a held gesture to the
+        // reader's page-turn handler; an unbound gesture is a no-op there.
+        val penForward = app.yuyue.reader.XiaomiPenKeys.forward(keyCode)
+        if (penForward != null &&
+            app.yuyue.reader.XiaomiPenKeys.nameFor(keyCode, event.source, xiaomiPen.registered) != null
+        ) {
+            if (event.repeatCount == 0) app.yuyue.reader.VolumeKeys.handler?.invoke(penForward)
+            return true
+        }
+
         val forward = when (keyCode) {
             android.view.KeyEvent.KEYCODE_VOLUME_DOWN -> true
             android.view.KeyEvent.KEYCODE_VOLUME_UP -> false
@@ -131,6 +144,18 @@ class MainActivity : ComponentActivity() {
         if ((keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) && app.yuyue.reader.VolumeKeys.handler != null &&
             Prefs.bool("reader.volumeKeys", true)) return true
         return super.onKeyUp(keyCode, event)
+    }
+
+    // The pen engine sends gestures to the registered app instead of the system,
+    // so hold the registration only while 语阅 is in front (as Xiaomi's guide does).
+    override fun onResume() {
+        super.onResume()
+        xiaomiPen.register()
+    }
+
+    override fun onPause() {
+        xiaomiPen.unregister()
+        super.onPause()
     }
 
     override fun onNewIntent(intent: Intent) {
