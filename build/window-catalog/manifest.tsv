@@ -1,0 +1,68 @@
+shelf-import	书架 · 导入卡片(三本书、一份 PDF 进来)
+shelf	书架(红楼梦、了不起的盖茨比、背影、样张 PDF 四本)
+shelf-podcasts	书架 · 播客页(两个节目、几集文稿)
+shelf-notes	书架 · 笔记页
+shelf-words	书架 · 生词页
+shelf-audio	书架 · 有声书页
+shelf-collections	书架(侧栏里有两个合集)
+shelf-quick	搜索 · 问(⌘K,书架窗)
+shelf-menu	书的右键卡片
+shelf-pick	加入合集(调试钉住的卡片)
+shelf-pop	加入合集(真的 popover)
+shelf-edit	编辑信息(书名、作者、封面)
+shelf-toast	撤销横幅(Toast)
+shelf-drop	拖三份文件进来时的提示
+shelf-conflict	笔记冲突(同步冲突弹窗)
+shelf-desk	播客 · 编辑部(写稿台)
+shelf-show-make	配一档节目(节目编辑表)
+shelf-desk-lines	播客 · 写稿台 引用行
+settings-general	设置 · 通用
+settings-appearance	设置 · 外观
+settings-reading	设置 · 阅读
+settings-foreign	设置 · 外文
+settings-listening	设置 · 朗读
+settings-companion	设置 · 书伴
+settings-sync	设置 · 同步
+settings-notes	设置 · 笔记导出
+settings-storage	设置 · 存储
+settings-data	设置 · 数据
+settings-update	设置 · 关于
+settings-history	设置 · 最近改过(侧栏底的 popover)
+settings-companion-add	设置 · 书伴 添加服务商(sheet)
+settings-cloudvoice	设置 · 朗读 接云端声音
+settings-voice-mac	设置 · 朗读 这台 Mac 的声音面板
+settings-voice-lines	选声音 · 角色台词(列表)
+settings-notes-obsidian	设置 · 笔记导出 选中 Obsidian
+reader	读书窗(红楼梦正文)
+reader-toc	读书窗 · 目录面板
+reader-notes	读书窗 · 笔记面板(带几条划线)
+reader-words	读书窗 · 笔记面板 生词页
+reader-companion	读书窗 · 书伴面板
+reader-search	读书窗 · 书内搜索(搜「父亲」)
+reader-rules	替换规则(sheet)
+reader-txt	编码和目录(TXT 用的 sheet)
+reader-typeset	排版卡(工具栏 popover)
+reader-listen	听书卡(胶囊 popover)
+reader-cast	声音班底(听书卡里再开的 sheet)
+reader-word	查词卡(外文书里点一个词)
+reader-translate	整句翻译卡(外文)
+reader-select	划线选区卡
+reader-immersive	沉浸阅读
+reader-quick	问(⌘K,读书窗)
+reader-ask	书伴 · 问一问(未接 Key,答复是错误提示)
+reader-thought	写想法 sheet(第一条划线)
+reader-rule-edit	替换规则 · 编辑规则 sheet
+reader-rules-common	替换规则 · 常用规则 sheet
+reader-companion-lines	书伴卡 · 引用行
+notes-review	回顾 sheet(笔记页,带种子划线)
+notes-quote	书摘分享 sheet(带想法的划线)
+audiobook-make	有声书 · 合成中/合成好了
+audiobook-page	有声书 · 一本有声书的页
+audiobook-pair	有声书 · 配对(录音配电子书)
+pdf	PDF 阅读窗(样张)
+pdf-toc	PDF · 目录面板
+pdf-search	PDF · 书内搜索(父亲)
+pdf-notes	PDF · 笔记面板(带标记)
+pdf-show	PDF · 显示卡
+pdf-menu	PDF · 划线操作菜单
+pdf-voice	PDF · 听书卡
