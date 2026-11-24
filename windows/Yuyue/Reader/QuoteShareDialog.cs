@@ -30,11 +30,14 @@ public static class QuoteShareDialog
     {
         bool darkUi = ThemeHelper.IsDark(xamlRoot.Content is FrameworkElement fe ? fe.ActualTheme : ElementTheme.Light);
         var uiPalette = ThemeHelper.Palette(darkUi);
-        var prefs = (library ?? App.CurrentApp.Library)?.Prefs;
+        var libSvc = library ?? App.CurrentApp.Library;
+        var prefs = libSvc?.Prefs;
+        var tint = prefs?.Tint ?? YYTints.Camel;
 
-        string look = prefs?.QuoteShareLook is "cover" or "kami" or "plain" or "dark" ? prefs.QuoteShareLook : "kami";
+        string look = prefs?.QuoteShareLook is "cover" or "kami" or "plain" or "dark" ? prefs.QuoteShareLook : "cover";
         string shape = prefs?.QuoteShareShape is "tall" or "square" or "wide" ? prefs.QuoteShareShape : "tall";
         bool includeThought = !string.IsNullOrWhiteSpace(thought) && (prefs?.QuoteShareIncludeThought ?? true);
+        ContentDialog? dlgRef = null;
 
         Color coverTone = Color.FromArgb(255, 58, 72, 92);
         if (!string.IsNullOrEmpty(coverPath) && File.Exists(coverPath))
@@ -82,17 +85,6 @@ public static class QuoteShareDialog
                     Color.FromArgb(255, 108, 101, 91),
                     Color.FromArgb(34, 92, 76, 54),
                     Color.FromArgb(255, 138, 101, 63)),
-            };
-
-            var card = new Border
-            {
-                Width = w,
-                MinHeight = minH,
-                CornerRadius = new CornerRadius(16),
-                Background = ThemeHelper.Brush(bg),
-                BorderBrush = ThemeHelper.Brush(rule),
-                BorderThickness = new Thickness(1),
-                Padding = new Thickness(26, 26, 26, 22),
             };
 
             var grid = new Grid { RowSpacing = 14 };
@@ -207,40 +199,55 @@ public static class QuoteShareDialog
 
             Grid.SetRow(footStack, 2);
             grid.Children.Add(footStack);
-            card.Child = grid;
+
+            var innerBorder = new Border
+            {
+                CornerRadius = new CornerRadius(4),
+                BorderBrush = ThemeHelper.Brush(rule),
+                BorderThickness = new Thickness(0.75),
+                Padding = new Thickness(20, 20, 20, 16),
+                Child = grid,
+            };
+
+            var card = new Border
+            {
+                Width = w,
+                MinHeight = minH,
+                CornerRadius = new CornerRadius(10),
+                Background = ThemeHelper.Brush(bg),
+                Padding = new Thickness(9),
+                Child = innerBorder,
+            };
 
             currentCard = card;
             previewHost.Children.Add(card);
         }
 
-        // Controls row: 4 color dots + 3 aspect ratio segments
-        var controlsBar = new Grid { ColumnSpacing = 12 };
-        controlsBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        controlsBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-        var dotsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
-        var dotBtns = new List<(string Key, Border Ring)>();
+        // 1:1 notes-quote/1.png: centered 4 color circles + active color name label, then full-width 3-segment shape bar
+        var dotsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var dotBtns = new List<(string Key, string Label, Border Ring)>();
+        var activeLookLabel = new TextBlock { FontSize = 12, Foreground = ThemeHelper.Brush(uiPalette.T2), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0) };
         var shapeBtns = new List<(string Key, Button Btn)>();
         foreach (var (k, lbl, col) in new[]
         {
             ("cover", "封面色", coverTone),
             ("kami", "纸本", Color.FromArgb(255, 246, 241, 230)),
             ("plain", "素白", Color.FromArgb(255, 255, 255, 255)),
-            ("dark", "暗黑", Color.FromArgb(255, 28, 28, 32)),
+            ("dark", "暗黑", Color.FromArgb(255, 20, 20, 23)),
         })
         {
             var ring = new Border
             {
-                Width = 22,
-                Height = 22,
-                CornerRadius = new CornerRadius(11),
+                Width = 24,
+                Height = 24,
+                CornerRadius = new CornerRadius(12),
                 Padding = new Thickness(2),
                 BorderThickness = new Thickness(1.5),
                 Child = new Border
                 {
-                    CornerRadius = new CornerRadius(8),
+                    CornerRadius = new CornerRadius(9),
                     Background = ThemeHelper.Brush(col),
-                    BorderBrush = ThemeHelper.Brush(Color.FromArgb(40, 0, 0, 0)),
+                    BorderBrush = ThemeHelper.Brush(Color.FromArgb(30, 0, 0, 0)),
                     BorderThickness = new Thickness(0.5),
                 },
             };
@@ -257,16 +264,16 @@ public static class QuoteShareDialog
             b.Click += (_, _) =>
             {
                 look = key;
-                if (prefs is not null) { prefs.QuoteShareLook = key; (library ?? App.CurrentApp.Library)?.SavePrefs(); }
+                if (prefs is not null) { prefs.QuoteShareLook = key; libSvc?.SavePrefs(); }
                 SyncOptionVisuals();
                 RebuildCard();
             };
-            dotBtns.Add((key, ring));
+            dotBtns.Add((key, lbl, ring));
             dotsRow.Children.Add(b);
         }
-        controlsBar.Children.Add(dotsRow);
+        dotsRow.Children.Add(activeLookLabel);
 
-        var shapeSeg = new Grid { ColumnSpacing = 2, Width = 168, HorizontalAlignment = HorizontalAlignment.Right };
+        var shapeSeg = new Grid { ColumnSpacing = 3 };
         var shapeItems = new[] { ("tall", "竖图"), ("square", "方图"), ("wide", "横图") };
         for (int i = 0; i < shapeItems.Length; i++)
         {
@@ -276,19 +283,19 @@ public static class QuoteShareDialog
             {
                 Content = sl,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
-                Height = 24,
-                MinHeight = 24,
+                Height = 30,
+                MinHeight = 30,
                 Padding = new Thickness(0),
-                FontSize = 11,
+                FontSize = 12.5,
                 BorderThickness = new Thickness(0),
-                CornerRadius = new CornerRadius(7),
+                CornerRadius = new CornerRadius(8),
                 UseSystemFocusVisuals = false,
             };
             string key = sk;
             sb.Click += (_, _) =>
             {
                 shape = key;
-                if (prefs is not null) { prefs.QuoteShareShape = key; (library ?? App.CurrentApp.Library)?.SavePrefs(); }
+                if (prefs is not null) { prefs.QuoteShareShape = key; libSvc?.SavePrefs(); }
                 SyncOptionVisuals();
                 RebuildCard();
             };
@@ -298,19 +305,21 @@ public static class QuoteShareDialog
         }
         var shapeWrap = new Border
         {
-            HorizontalAlignment = HorizontalAlignment.Right,
-            CornerRadius = new CornerRadius(9),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            CornerRadius = new CornerRadius(10),
             Background = ThemeHelper.Brush(uiPalette.Inset),
-            Padding = new Thickness(2),
+            Padding = new Thickness(3),
             Child = shapeSeg,
         };
-        Grid.SetColumn(shapeWrap, 1);
-        controlsBar.Children.Add(shapeWrap);
 
         void SyncOptionVisuals()
         {
-            foreach (var (k, ring) in dotBtns)
-                ring.BorderBrush = k == look ? ThemeHelper.Brush(uiPalette.T1) : new SolidColorBrush(Colors.Transparent);
+            foreach (var (k, lbl, ring) in dotBtns)
+            {
+                bool active = k == look;
+                ring.BorderBrush = active ? ThemeHelper.Brush(uiPalette.T1) : new SolidColorBrush(Colors.Transparent);
+                if (active) activeLookLabel.Text = L10n.T(lbl);
+            }
             foreach (var (k, btn) in shapeBtns)
             {
                 bool on = k == shape;
@@ -323,45 +332,47 @@ public static class QuoteShareDialog
         SyncOptionVisuals();
         RebuildCard();
 
-        var rootStack = new StackPanel { Spacing = 12, Width = 440 };
-        rootStack.Children.Add(new Border
-        {
-            CornerRadius = new CornerRadius(14),
-            Background = ThemeHelper.Brush(uiPalette.Inset),
-            Padding = new Thickness(10, 14, 10, 14),
-            Child = previewHost,
-        });
-        rootStack.Children.Add(controlsBar);
+        var rootStack = new StackPanel { Spacing = 12, Padding = new Thickness(22, 18, 22, 18) };
+        rootStack.Children.Add(YYChrome.MakeSheetHeader("分享书摘", null, () => dlgRef?.Hide(), darkUi, titleSize: 16));
+        rootStack.Children.Add(previewHost);
+        rootStack.Children.Add(dotsRow);
+        rootStack.Children.Add(shapeWrap);
 
         if (!string.IsNullOrWhiteSpace(thought))
         {
             var thRow = new Grid
             {
-                Padding = new Thickness(12, 6, 12, 6),
+                Padding = new Thickness(14, 8, 14, 8),
+                MinHeight = 42,
                 Background = ThemeHelper.Brush(uiPalette.Card),
                 BorderBrush = ThemeHelper.Brush(uiPalette.Line),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(10),
+                BorderThickness = new Thickness(0.5),
+                CornerRadius = new CornerRadius(11),
             };
-            thRow.Children.Add(new TextBlock { Text = "带上想法", FontSize = 12.5, Foreground = ThemeHelper.Brush(uiPalette.T1), VerticalAlignment = VerticalAlignment.Center });
-            var sw = new ToggleSwitch { IsOn = includeThought, HorizontalAlignment = HorizontalAlignment.Right, MinWidth = 0, OnContent = "", OffContent = "" };
+            thRow.Children.Add(new TextBlock { Text = "带上想法", FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(uiPalette.T1), VerticalAlignment = VerticalAlignment.Center });
+            var sw = new ToggleSwitch { IsOn = includeThought, HorizontalAlignment = HorizontalAlignment.Right };
             sw.Toggled += (_, _) =>
             {
                 includeThought = sw.IsOn;
-                if (prefs is not null) { prefs.QuoteShareIncludeThought = includeThought; (library ?? App.CurrentApp.Library)?.SavePrefs(); }
+                if (prefs is not null) { prefs.QuoteShareIncludeThought = includeThought; libSvc?.SavePrefs(); }
                 RebuildCard();
             };
             thRow.Children.Add(sw);
             rootStack.Children.Add(thRow);
         }
 
-        var statusText = new TextBlock { FontSize = 11.5, Foreground = ThemeHelper.Brush(uiPalette.T3), HorizontalAlignment = HorizontalAlignment.Center };
+        var statusText = new TextBlock { FontSize = 11.5, Foreground = ThemeHelper.Brush(uiPalette.T3), HorizontalAlignment = HorizontalAlignment.Center, Visibility = Visibility.Collapsed };
 
-        var textBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "纯文字", HorizontalAlignment = HorizontalAlignment.Stretch };
-        var savePngBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "存图", HorizontalAlignment = HorizontalAlignment.Stretch };
-        var copyImgBtn = new Button { Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"], Content = "复制图片", HorizontalAlignment = HorizontalAlignment.Stretch };
+        StackPanel MakeActionLabel(string icon, string text, Color fg)
+        {
+            var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            sp.Children.Add(YYIcons.Make(icon, 14, ThemeHelper.Brush(fg)));
+            sp.Children.Add(new TextBlock { Text = L10n.T(text), FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(fg), VerticalAlignment = VerticalAlignment.Center });
+            return sp;
+        }
 
-        textBtn.Click += (_, _) =>
+        var tc = ThemeHelper.TintColors(tint, darkUi);
+        var textBtn = YYChrome.MakeSheetPillButton(MakeActionLabel("doc-lines", "纯文字", uiPalette.T1), () =>
         {
             string cite = string.IsNullOrWhiteSpace(author) ? $"——《{bookTitle}》" : $"——《{bookTitle}》 {author}";
             string txt = includeThought && !string.IsNullOrWhiteSpace(thought)
@@ -371,9 +382,10 @@ public static class QuoteShareDialog
             dp.SetText(txt);
             Clipboard.SetContent(dp);
             statusText.Text = "✓ 已复制纯文字书摘";
-        };
+            statusText.Visibility = Visibility.Visible;
+        }, darkUi, tint, "secondary", height: 40, stretch: true);
 
-        savePngBtn.Click += async (_, _) =>
+        var savePngBtn = YYChrome.MakeSheetPillButton(MakeActionLabel("arrow-down-circle", "存图", uiPalette.T1), async () =>
         {
             try
             {
@@ -389,11 +401,12 @@ public static class QuoteShareDialog
                 await pngStream.ReadAsync(bytes.AsBuffer(), (uint)bytes.Length, InputStreamOptions.None);
                 await File.WriteAllBytesAsync(file.Path, bytes);
                 statusText.Text = $"✓ 已保存到 {file.Name}";
+                statusText.Visibility = Visibility.Visible;
             }
-            catch (Exception ex) { statusText.Text = $"保存失败：{ex.Message}"; }
-        };
+            catch (Exception ex) { statusText.Text = $"保存失败：{ex.Message}"; statusText.Visibility = Visibility.Visible; }
+        }, darkUi, tint, "secondary", height: 40, stretch: true);
 
-        copyImgBtn.Click += async (_, _) =>
+        var shareBtn = YYChrome.MakeSheetPillButton(MakeActionLabel("share", "分享", tc.Accent), async () =>
         {
             try
             {
@@ -401,32 +414,28 @@ public static class QuoteShareDialog
                 var dp = new DataPackage();
                 dp.SetBitmap(RandomAccessStreamReference.CreateFromStream(stream));
                 Clipboard.SetContent(dp);
-                statusText.Text = "✓ 已复制卡片图片，可直接粘贴发送";
+                statusText.Text = "✓ 已复制书摘卡片图片，可直接粘贴分享";
+                statusText.Visibility = Visibility.Visible;
             }
-            catch (Exception ex) { statusText.Text = $"复制失败：{ex.Message}"; }
-        };
+            catch (Exception ex) { statusText.Text = $"复制失败：{ex.Message}"; statusText.Visibility = Visibility.Visible; }
+        }, darkUi, tint, "warm", height: 40, stretch: true);
 
-        var actionGrid = new Grid { ColumnSpacing = 8 };
+        var actionGrid = new Grid { ColumnSpacing = 10, Margin = new Thickness(0, 2, 0, 0) };
         actionGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         actionGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        actionGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.2, GridUnitType.Star) });
+        actionGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         Grid.SetColumn(savePngBtn, 1);
-        Grid.SetColumn(copyImgBtn, 2);
+        Grid.SetColumn(shareBtn, 2);
         actionGrid.Children.Add(textBtn);
         actionGrid.Children.Add(savePngBtn);
-        actionGrid.Children.Add(copyImgBtn);
+        actionGrid.Children.Add(shareBtn);
 
         rootStack.Children.Add(actionGrid);
         rootStack.Children.Add(statusText);
+        L10n.ApplyTree(rootStack);
 
-        var dlg = new ContentDialog
-        {
-            XamlRoot = xamlRoot,
-            Title = "分享书摘",
-            Content = rootStack,
-            CloseButtonText = "关闭",
-        };
-        await dlg.ShowAsync();
+        dlgRef = YYChrome.CreateMacSheet(xamlRoot, darkUi, 456, rootStack, maxHeight: 820);
+        await dlgRef.ShowAsync();
     }
 
     internal static async Task SaveElementPngAsync(UIElement element, string filePath)

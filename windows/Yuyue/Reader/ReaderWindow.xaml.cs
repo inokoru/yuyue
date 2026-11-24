@@ -2874,18 +2874,55 @@ public sealed partial class ReaderWindow : Window
 
         bool dark = ThemeHelper.IsDark(RootGrid.ActualTheme);
         var p = ThemeHelper.Palette(dark);
-        bool submittedByHotkey = false;
+        var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+        string actionTaken = "cancel"; // cancel | save | delete
         ContentDialog? dialog = null;
+
+        string chapSub = _currentSection < _detail.Sections.Length && !string.IsNullOrWhiteSpace(_detail.Sections[_currentSection].Title)
+            ? $"{_detail.Summary.Title} · {_detail.Sections[_currentSection].Title}"
+            : _detail.Summary.Title;
+
+        // 1:1 reader-thought/1.png: vertical-bar quote preview + white rounded input card + bottom char count & pills
+        var quoteBar = new Grid { ColumnSpacing = 10, Margin = new Thickness(2, 2, 2, 2) };
+        quoteBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2.5) });
+        quoteBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        quoteBar.Children.Add(new Border { CornerRadius = new CornerRadius(1.25), Background = ThemeHelper.Brush(p.Line) });
+        var qText = new TextBlock
+        {
+            Text = $"“{quote.Trim()}”",
+            FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
+            FontSize = 14,
+            LineHeight = 22,
+            Foreground = ThemeHelper.Brush(p.T2),
+            TextWrapping = TextWrapping.Wrap,
+            MaxLines = 3,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        Grid.SetColumn(qText, 1);
+        quoteBar.Children.Add(qText);
 
         var input = new TextBox
         {
             Text = existingMark?.Note ?? "",
-            PlaceholderText = "写下这一句的想法…（Ctrl+Enter 保存）",
+            PlaceholderText = L10n.T("写下此刻的想法…"),
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
-            MinHeight = 96,
+            MinHeight = 104,
+            BorderThickness = new Thickness(0),
+            Background = new SolidColorBrush(Colors.Transparent),
+            FontSize = 13.5,
+            Padding = new Thickness(12, 10, 12, 10),
         };
-        var counterTb = new TextBlock { Text = $"{input.Text.Length} 字", FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), HorizontalAlignment = HorizontalAlignment.Right };
+        var inputCard = new Border
+        {
+            CornerRadius = new CornerRadius(12),
+            Background = ThemeHelper.Brush(p.Card),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(0.75),
+            Child = input,
+        };
+
+        var counterTb = new TextBlock { Text = $"{input.Text.Length} 字", FontSize = 12, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center };
         input.TextChanged += (_, _) => counterTb.Text = $"{input.Text.Length} 字";
         input.KeyDown += (_, ke) =>
         {
@@ -2893,41 +2930,64 @@ public sealed partial class ReaderWindow : Window
             if (ctrl && ke.Key == VirtualKey.Enter)
             {
                 ke.Handled = true;
-                submittedByHotkey = true;
+                actionTaken = "save";
                 dialog?.Hide();
             }
         };
 
-        dialog = new ContentDialog
+        var footLeft = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
+        footLeft.Children.Add(counterTb);
+        if (existingMark is not null && !string.IsNullOrWhiteSpace(existingMark.Note))
         {
-            Title = $"想法 · {_detail.Summary.Title}",
-            Content = new StackPanel
+            var delNoteBtn = new Button
             {
-                Spacing = 10,
-                Width = 420,
-                Children =
-                {
-                    new TextBlock { Text = $"“{quote}”", FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()), FontSize = 13, Foreground = ThemeHelper.Brush(p.T2), TextWrapping = TextWrapping.Wrap, MaxLines = 3 },
-                    input,
-                    counterTb,
-                },
+                Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
+                Content = L10n.T("删掉想法"),
+                Foreground = ThemeHelper.Brush(p.Danger),
+                FontSize = 12,
+                Padding = new Thickness(6, 2, 6, 2),
+            };
+            delNoteBtn.Click += (_, _) => { actionTaken = "delete"; dialog?.Hide(); };
+            footLeft.Children.Add(delNoteBtn);
+        }
+
+        var saveSp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        saveSp.Children.Add(new TextBlock { Text = L10n.T("保存"), FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(tint.Accent) });
+        saveSp.Children.Add(new TextBlock { Text = "Ctrl+↵", FontSize = 11, Foreground = ThemeHelper.Brush(tint.Accent), Opacity = 0.72, VerticalAlignment = VerticalAlignment.Center });
+
+        var footRight = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, HorizontalAlignment = HorizontalAlignment.Right };
+        footRight.Children.Add(YYChrome.MakeSheetPillButton("取消", () => dialog?.Hide(), dark, _library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 18));
+        footRight.Children.Add(YYChrome.MakeSheetPillButton(saveSp, () => { actionTaken = "save"; dialog?.Hide(); }, dark, _library.Prefs.Tint, "warm", height: 36, horizontalPadding: 18));
+
+        var footRow = new Grid { Margin = new Thickness(2, 2, 0, 0) };
+        footRow.Children.Add(footLeft);
+        footRow.Children.Add(footRight);
+
+        var body = new StackPanel
+        {
+            Spacing = 12,
+            Padding = new Thickness(22, 18, 22, 18),
+            Children =
+            {
+                YYChrome.MakeSheetHeader("想法", chapSub, () => dialog?.Hide(), dark, titleSize: 18),
+                quoteBar,
+                inputCard,
+                footRow,
             },
-            PrimaryButtonText = "保存",
-            SecondaryButtonText = existingMark is not null && !string.IsNullOrWhiteSpace(existingMark.Note) ? "删掉想法" : "",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = RootGrid.XamlRoot,
         };
 
-        var res = await dialog.ShowAsync();
-        if (res == ContentDialogResult.Secondary && existingMark is not null)
+        dialog = YYChrome.CreateMacSheet(RootGrid.XamlRoot, dark, 472, body);
+        dialog.Opened += (_, _) => input.Focus(FocusState.Programmatic);
+        await dialog.ShowAsync();
+
+        if (actionTaken == "delete" && existingMark is not null)
         {
             _library.SetMarkNote(_bookId, existingMark.Id, null);
             HideSelectionCard();
             await RefreshSectionMarksAsync();
             return;
         }
-        if (res == ContentDialogResult.Primary || submittedByHotkey)
+        if (actionTaken == "save")
         {
             string? note = string.IsNullOrWhiteSpace(input.Text) ? null : input.Text.Trim();
             if (existingMark is not null)
@@ -3496,6 +3556,7 @@ public sealed partial class ReaderWindow : Window
         SidePanelColumn.Width = new GridLength(Math.Clamp(baseW, 272.0, maxPanel) + 14.0);
         SidePanelBorder.Visibility = Visibility.Visible;
         SidePanelResizeHandle.Visibility = Visibility.Visible;
+        YYChrome.AnimateSlideX(SidePanelBorder, fromX: 18f, durationMs: 180);
 
         CompanionPanel.Visibility = isCompanion ? Visibility.Visible : Visibility.Collapsed;
         DynamicSideHost.Visibility = isCompanion ? Visibility.Collapsed : Visibility.Visible;
@@ -6177,6 +6238,7 @@ public sealed partial class ReaderWindow : Window
             ReaderToastActionBtn.Visibility = Visibility.Collapsed;
         }
         ReaderToastBanner.Visibility = Visibility.Visible;
+        YYChrome.AnimateEntrance(ReaderToastBanner, fromY: 10f, durationMs: 165);
         _readerToastTimer?.Stop();
         if (autoHideSeconds > 0)
         {

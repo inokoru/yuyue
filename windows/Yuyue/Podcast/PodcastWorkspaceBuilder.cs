@@ -2792,17 +2792,20 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         bool dark = ThemeHelper.IsDark(_shelf.WindowXamlRoot.Content is FrameworkElement fe ? fe.ActualTheme : ElementTheme.Light);
         var p = ThemeHelper.Palette(dark);
         var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+        var serif = new FontFamily(YYFontFamily.Serif.WindowsFamily());
         Color leafSurface = dark ? Color.FromArgb(255, 31, 30, 28) : Color.FromArgb(255, 248, 245, 239);
 
         StudioKind chosenKind = initialKind;
         uint durationMin = initialKind == StudioKind.Roundtable ? 15u : 10u;
         bool noSpoiler = true;
-        string bookFilter = "reading"; // reading | finished | all
+        string bookFilter = "all"; // reading | finished | all
         string bookSearch = "";
         string voiceStyle = _library.Prefs.PodcastStudioVoiceStyle;
+        bool confirmedGenerate = false;
+        ContentDialog? dlgRef = null;
 
         var allBooks = _library.GetKeptBooks().Where(b => b.Format != BookFormat.Audio).ToArray();
-        if (!allBooks.Any(b => b.Status == ReadingStatus.Reading)) bookFilter = "all";
+        if (allBooks.Any(b => b.Status == ReadingStatus.Reading)) bookFilter = "reading";
 
         var selectedBooks = new HashSet<string>();
         if (!string.IsNullOrEmpty(preselectedBookId)) selectedBooks.Add(preselectedBookId);
@@ -2813,90 +2816,141 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             if (selectedBooks.Count == 0 && allBooks.Length > 0) selectedBooks.Add(allBooks[0].Id);
         }
 
-        var root = new Grid { Width = 660, ColumnSpacing = 14 };
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(172) });
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-        var leftFormats = new StackPanel { Spacing = 3, Padding = new Thickness(6) };
+        // 1:1 shelf-show-make/1.png: 720px frameless two-column studio sheet
+        var headerSubtitle = new TextBlock
+        {
+            FontSize = 13,
+            Foreground = ThemeHelper.Brush(p.T3),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(4, 2, 0, 0),
+        };
+        var leftFormats = new StackPanel { Spacing = 4, Padding = new Thickness(8) };
         var spoilerSegHost = new Grid { ColumnSpacing = 2 };
         spoilerSegHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         spoilerSegHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        var rightHost = new StackPanel { Spacing = 10 };
-        var filterRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-        var searchBox = new TextBox { PlaceholderText = "搜书名或作者…", FontSize = 12 };
-        var selectedChipsHost = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-        var selectedChipsScroll = new ScrollViewer
-        {
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Content = selectedChipsHost,
-        };
-        var booksBodyHost = new ContentControl();
-        var topicBox = new TextBox { PlaceholderText = "选题方向（留空由书房电台根据划线与阅读进度拟题）", FontSize = 12 };
-        var durRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-        var customDurBox = new NumberBox
-        {
-            Minimum = 3,
-            Maximum = 90,
-            Value = durationMin,
-            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
-            Width = 88,
-            Height = 28,
-            FontSize = 11.5,
-            VerticalAlignment = VerticalAlignment.Center,
-            PlaceholderText = "自定义",
-        };
-        var voiceCombo = new ComboBox { Header = "主播声线组合", HorizontalAlignment = HorizontalAlignment.Stretch, FontSize = 12 };
+        var refScopeSub = new TextBlock { FontSize = 12, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center };
+        var refCountText = new TextBlock { FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(tint.Accent), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
 
-        var voiceOptions = new List<(string Id, string Label)>
+        var searchBox = new TextBox
         {
-            ("studio-duo-zh", "林深 · 苏晚（中文双人对谈）"),
-            ("studio-duo-en", "Clara & David（英文双人对谈）"),
-            ("studio-solo-zh", "林深 · 单人深度导读"),
+            PlaceholderText = $"搜书名、作者（共 {allBooks.Length} 本）…",
+            BorderThickness = new Thickness(0),
+            Background = new SolidColorBrush(Colors.Transparent),
+            FontSize = 12.5,
+            VerticalAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(0, 5, 0, 5),
+        };
+        var searchPill = new Grid
+        {
+            Height = 32,
+            Padding = new Thickness(10, 0, 10, 0),
+            CornerRadius = new CornerRadius(8),
+            Background = ThemeHelper.Brush(p.Inset),
+            ColumnSpacing = 6,
+        };
+        searchPill.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        searchPill.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        searchPill.Children.Add(YYIcons.Make("search", 12.5, ThemeHelper.Brush(p.T3)));
+        Grid.SetColumn(searchBox, 1);
+        searchPill.Children.Add(searchBox);
+
+        var filterSegGrid = new Grid { ColumnSpacing = 2 };
+        for (int c = 0; c < 3; c++) filterSegGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var filterSegWrap = new Border { CornerRadius = new CornerRadius(8), Background = ThemeHelper.Brush(p.Inset), Padding = new Thickness(2), Child = filterSegGrid };
+
+        var booksBodyHost = new ContentControl();
+        var topicBox = new TextBox
+        {
+            PlaceholderText = "选填 · 留空则按最近划线自动拟题",
+            BorderThickness = new Thickness(0),
+            Background = new SolidColorBrush(Colors.Transparent),
+            FontSize = 12.5,
+            VerticalAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(0, 6, 0, 6),
+        };
+
+        uint[] durTicks = [5, 10, 15, 30, 45, 60];
+        int durIdx = Math.Max(0, Array.IndexOf(durTicks, durationMin));
+        var durSlider = new Slider { Minimum = 0, Maximum = durTicks.Length - 1, StepFrequency = 1, Value = durIdx, VerticalAlignment = VerticalAlignment.Center };
+        var durBadgeText = new TextBlock { Text = $"{durationMin} 分钟", FontSize = 12.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var tickLabelsGrid = new Grid();
+        for (int ti = 0; ti < durTicks.Length; ti++)
+            tickLabelsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var voiceOptions = new List<(string Id, string ShortLabel, string FullLabel)>
+        {
+            ("studio-duo-zh", "林深 · 苏晚", "林深 · 苏晚（中文双人对谈）"),
+            ("studio-duo-en", "Clara · David", "Clara & David（英文双人对谈）"),
+            ("studio-solo-zh", "林深 · 独白", "林深 · 单人深度导读"),
         };
         foreach (var cc in _library.LiveVoice.GetClonedCards())
-            voiceOptions.Add(("card:" + cc.Id, $"✦ {cc.Name}（我的克隆声音）"));
+            voiceOptions.Add(("card:" + cc.Id, cc.Name, $"✦ {cc.Name}（我的克隆声音）"));
 
-        int selVoiceIdx = 0;
-        for (int i = 0; i < voiceOptions.Count; i++)
+        string ShortHostName(string id) => voiceOptions.FirstOrDefault(v => v.Id == id).ShortLabel ?? "林深 · 苏晚";
+        var hostVoiceLabel = new TextBlock { Text = ShortHostName(voiceStyle), FontSize = 12.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center };
+
+        void RebuildTickLabels()
         {
-            voiceCombo.Items.Add(new ComboBoxItem { Content = voiceOptions[i].Label, Tag = voiceOptions[i].Id });
-            if (voiceOptions[i].Id == voiceStyle) selVoiceIdx = i;
+            tickLabelsGrid.Children.Clear();
+            for (int ti = 0; ti < durTicks.Length; ti++)
+            {
+                bool active = durTicks[ti] == durationMin;
+                var tl = new TextBlock
+                {
+                    Text = durTicks[ti].ToString(),
+                    FontSize = 10.5,
+                    FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal,
+                    Foreground = ThemeHelper.Brush(active ? tint.Accent : p.T3),
+                    HorizontalAlignment = ti == 0 ? HorizontalAlignment.Left : (ti == durTicks.Length - 1 ? HorizontalAlignment.Right : HorizontalAlignment.Center),
+                };
+                Grid.SetColumn(tl, ti);
+                tickLabelsGrid.Children.Add(tl);
+            }
         }
-        voiceCombo.SelectedIndex = selVoiceIdx;
-        voiceCombo.SelectionChanged += (_, _) =>
-        {
-            if (voiceCombo.SelectedItem is ComboBoxItem ci && ci.Tag is string vid)
-                voiceStyle = vid;
-        };
 
         void RebuildForm()
         {
+            headerSubtitle.Text = chosenKind switch
+            {
+                StudioKind.BookGuide => "·  读前热身精讲 · 拆解核心脉络",
+                StudioKind.Roundtable => "·  多书观点碰撞 · 串联不同视角",
+                StudioKind.VocabRadio => "·  把生词本织进自然对话",
+                _ => "·  串起近期划线与阅读心绪",
+            };
+            refScopeSub.Text = chosenKind == StudioKind.BookGuide ? "单选精讲" : (chosenKind == StudioKind.VocabRadio ? "生词本" : "可多选串讲");
+            refCountText.Text = chosenKind == StudioKind.VocabRadio ? "" : $"已选 {selectedBooks.Count} 本";
+
             leftFormats.Children.Clear();
-            (StudioKind K, string Name, string Sub)[] kinds =
+            (StudioKind K, string Icon, string Name, string Sub)[] kinds =
             [
-                (StudioKind.WeeklyDigest, "书房周刊", "串起本周划线"),
-                (StudioKind.BookGuide, "难书导读", "精讲难懂章节"),
-                (StudioKind.Roundtable, "跨书圆桌", "多书观点对谈"),
-                (StudioKind.VocabRadio, "生词伴听", "生词自然伴听"),
+                (StudioKind.WeeklyDigest, "checklist-lines", "书房周刊", "串起本周划线"),
+                (StudioKind.BookGuide, "book-open", "难书导读", "精讲难懂章节"),
+                (StudioKind.Roundtable, "circles-venn", "跨书圆桌", "多书观点对谈"),
+                (StudioKind.VocabRadio, "vocab", "生词外语", "生词自然伴听"),
             ];
-            foreach (var (k, nm, sub) in kinds)
+            foreach (var (k, ic, nm, sub) in kinds)
             {
                 bool on = chosenKind == k;
-                var sp = new StackPanel { Spacing = 1.5 };
-                sp.Children.Add(new TextBlock { Text = nm, FontSize = 12.5, FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal, Foreground = ThemeHelper.Brush(on ? tint.Accent : p.T1) });
-                sp.Children.Add(new TextBlock { Text = sub, FontSize = 10, Foreground = ThemeHelper.Brush(on ? tint.Accent : p.T3) });
+                var row = new Grid { ColumnSpacing = 10 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.Children.Add(YYIcons.Make(ic, 14, ThemeHelper.Brush(on ? tint.Accent : p.T2)));
+                var sp = new StackPanel { Spacing = 1 };
+                sp.Children.Add(new TextBlock { Text = nm, FontSize = 12.5, FontWeight = on ? FontWeights.SemiBold : FontWeights.Medium, Foreground = ThemeHelper.Brush(on ? p.T1 : p.T1) });
+                sp.Children.Add(new TextBlock { Text = sub, FontSize = 10.5, Foreground = ThemeHelper.Brush(on ? tint.Accent : p.T3) });
+                Grid.SetColumn(sp, 1);
+                row.Children.Add(sp);
                 var b = new Button
                 {
                     HorizontalAlignment = HorizontalAlignment.Stretch,
-                    HorizontalContentAlignment = HorizontalAlignment.Left,
-                    Padding = new Thickness(10, 7, 10, 7),
-                    CornerRadius = new CornerRadius(8.5),
-                    Background = on ? ThemeHelper.Brush(tint.Soft) : new SolidColorBrush(Colors.Transparent),
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    Padding = new Thickness(10, 8, 10, 8),
+                    CornerRadius = new CornerRadius(10),
+                    Background = on ? ThemeHelper.Brush(p.Inset) : new SolidColorBrush(Colors.Transparent),
                     BorderThickness = new Thickness(0),
                     UseSystemFocusVisuals = false,
-                    Content = sp,
+                    Content = row,
                 };
                 var nextK = k;
                 b.Click += (_, _) =>
@@ -2913,24 +2967,24 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 leftFormats.Children.Add(b);
             }
 
-            // Spoiler control: 仅已读 | 全书
+            // Spoiler control: 🔒 仅已读 | 全书
             spoilerSegHost.Children.Clear();
             foreach (var (col, isSafe, lbl) in new[] { (0, true, "仅已读"), (1, false, "全书") })
             {
                 bool on = noSpoiler == isSafe;
+                var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+                if (isSafe) sp.Children.Add(YYIcons.Make("lock", 10.5, ThemeHelper.Brush(on ? tint.Accent : p.T2)));
+                sp.Children.Add(new TextBlock { Text = lbl, FontSize = 11.5, FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal, Foreground = ThemeHelper.Brush(on ? (isSafe ? tint.Accent : p.T1) : p.T2) });
                 var sb = new Button
                 {
-                    Content = lbl,
+                    Content = sp,
                     HorizontalAlignment = HorizontalAlignment.Stretch,
-                    Height = 24,
-                    MinHeight = 24,
+                    Height = 26,
+                    MinHeight = 26,
                     Padding = new Thickness(0),
-                    FontSize = 11,
-                    FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal,
-                    Foreground = ThemeHelper.Brush(on ? p.T1 : p.T2),
                     Background = on ? ThemeHelper.Brush(p.Card) : new SolidColorBrush(Colors.Transparent),
                     BorderThickness = new Thickness(0),
-                    CornerRadius = new CornerRadius(6),
+                    CornerRadius = new CornerRadius(7),
                     UseSystemFocusVisuals = false,
                 };
                 bool nextSafe = isSafe;
@@ -2939,19 +2993,40 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 spoilerSegHost.Children.Add(sb);
             }
 
-            // Right composer body: Vocab preview OR 2-column searchable book grid (uncapped, scrollable)
-            filterRow.Children.Clear();
-            selectedChipsHost.Children.Clear();
+            filterSegGrid.Children.Clear();
+            var fOpts = new[] { ("reading", "在读"), ("finished", "读过"), ("all", "全部") };
+            for (int fi = 0; fi < fOpts.Length; fi++)
+            {
+                var (fk, fl) = fOpts[fi];
+                bool on = bookFilter == fk;
+                var fb = new Button
+                {
+                    Content = fl,
+                    Height = 28,
+                    MinHeight = 28,
+                    Padding = new Thickness(10, 0, 10, 0),
+                    FontSize = 11.5,
+                    FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal,
+                    Foreground = ThemeHelper.Brush(on ? p.T1 : p.T2),
+                    Background = on ? ThemeHelper.Brush(p.Card) : new SolidColorBrush(Colors.Transparent),
+                    BorderThickness = new Thickness(0),
+                    CornerRadius = new CornerRadius(7),
+                    UseSystemFocusVisuals = false,
+                };
+                string key = fk;
+                fb.Click += (_, _) => { bookFilter = key; RebuildForm(); };
+                Grid.SetColumn(fb, fi);
+                filterSegGrid.Children.Add(fb);
+            }
+
             if (chosenKind == StudioKind.VocabRadio)
             {
-                searchBox.Visibility = Visibility.Collapsed;
-                selectedChipsScroll.Visibility = Visibility.Collapsed;
                 var words = _library.GetWords().Where(w => !w.Known).ToArray();
-                var vStack = new StackPanel { Spacing = 6 };
+                var vStack = new StackPanel { Spacing = 8, Padding = new Thickness(4, 6, 4, 6) };
                 vStack.Children.Add(new TextBlock
                 {
                     Text = words.Length > 0 ? $"将从生词本挑选近期 {Math.Min(12, words.Length)} 个「在学」词汇自然融入对话：" : "生词本目前还没有「在学」生词，将为你生成一段英文阅读热身短播客。",
-                    FontSize = 11.5,
+                    FontSize = 12,
                     Foreground = ThemeHelper.Brush(p.T2),
                     TextWrapping = TextWrapping.Wrap,
                 });
@@ -2970,31 +3045,6 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             }
             else
             {
-                searchBox.Visibility = Visibility.Visible;
-                selectedChipsScroll.Visibility = selectedBooks.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-                foreach (var sid in selectedBooks.ToArray())
-                {
-                    var sbk = allBooks.FirstOrDefault(x => x.Id == sid);
-                    if (sbk is null) continue;
-                    string removeId = sid;
-                    var chip = MakePaperPill($"{sbk.Title} ×", accent: true, p, tint);
-                    chip.Height = 22;
-                    chip.FontSize = 10.5;
-                    chip.Click += (_, _) => { selectedBooks.Remove(removeId); RebuildForm(); };
-                    selectedChipsHost.Children.Add(chip);
-                }
-
-                foreach (var (fk, fl) in new[] { ("reading", "在读"), ("finished", "读过"), ("all", "全部") })
-                {
-                    bool on = bookFilter == fk;
-                    var fb = MakePaperPill(fl, accent: on, p, tint);
-                    fb.Height = 24;
-                    fb.FontSize = 11;
-                    string key = fk;
-                    fb.Click += (_, _) => { bookFilter = key; RebuildForm(); };
-                    filterRow.Children.Add(fb);
-                }
-
                 string q = bookSearch.Trim();
                 var filtered = !string.IsNullOrEmpty(q)
                     ? allBooks.Where(b => b.Title.Contains(q, StringComparison.OrdinalIgnoreCase) || b.Authors.Any(a => a.Contains(q, StringComparison.OrdinalIgnoreCase))).ToArray()
@@ -3005,7 +3055,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                         _ => allBooks,
                     };
 
-                var bGrid = new Grid { ColumnSpacing = 6, RowSpacing = 6 };
+                var bGrid = new Grid { ColumnSpacing = 8, RowSpacing = 8 };
                 bGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 bGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 int shownCount = filtered.Length;
@@ -3016,17 +3066,52 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 {
                     var bk = filtered[i];
                     bool checkedOn = selectedBooks.Contains(bk.Id);
-                    var cell = new Grid { ColumnSpacing = 8 };
+                    var cell = new Grid { ColumnSpacing = 10 };
+                    cell.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
                     cell.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                     cell.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                    var bMeta = new StackPanel { Spacing = 1 };
-                    bMeta.Children.Add(new TextBlock { Text = bk.Title, FontSize = 12, FontWeight = checkedOn ? FontWeights.SemiBold : FontWeights.Normal, Foreground = ThemeHelper.Brush(checkedOn ? tint.Accent : p.T1), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
-                    bMeta.Children.Add(new TextBlock { Text = $"已读 {(int)Math.Round(bk.Progress * 100)}%", FontSize = 10, Foreground = ThemeHelper.Brush(p.T3) });
+
+                    // Mini cover thumbnail inside each book card (1:1 shelf-show-make/1.png)
+                    UIElement miniCover;
+                    if (!string.IsNullOrEmpty(bk.CoverPath) && File.Exists(bk.CoverPath))
+                    {
+                        miniCover = new Border
+                        {
+                            Width = 28,
+                            Height = 38,
+                            CornerRadius = new CornerRadius(3),
+                            BorderBrush = ThemeHelper.Brush(p.Line),
+                            BorderThickness = new Thickness(0.5),
+                            Child = new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(bk.CoverPath)), Stretch = Stretch.UniformToFill },
+                        };
+                    }
+                    else
+                    {
+                        miniCover = new Border
+                        {
+                            Width = 28,
+                            Height = 38,
+                            CornerRadius = new CornerRadius(3),
+                            Background = ThemeHelper.Brush(Color.FromArgb(255, 234, 230, 222)),
+                            BorderBrush = ThemeHelper.Brush(p.Line),
+                            BorderThickness = new Thickness(0.5),
+                            Child = new TextBlock { Text = bk.Title.Length > 0 ? bk.Title[..1] : "书", FontFamily = serif, FontSize = 9, Foreground = ThemeHelper.Brush(p.T2), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center },
+                        };
+                    }
+                    cell.Children.Add(miniCover);
+
+                    var bMeta = new StackPanel { Spacing = 1.5, VerticalAlignment = VerticalAlignment.Center };
+                    bMeta.Children.Add(new TextBlock { Text = bk.Title, FontSize = 12.5, FontWeight = checkedOn ? FontWeights.SemiBold : FontWeights.Medium, Foreground = ThemeHelper.Brush(checkedOn ? tint.Accent : p.T1), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
+                    string stName = bk.Status switch { ReadingStatus.Reading => $"在读 {(int)Math.Round(bk.Progress * 100)}%", ReadingStatus.Finished => "读过", _ => "想读" };
+                    string authorPrefix = bk.Authors.FirstOrDefault() is { Length: > 0 } au ? $"{au} · {stName}" : stName;
+                    bMeta.Children.Add(new TextBlock { Text = authorPrefix, FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
+                    Grid.SetColumn(bMeta, 1);
                     cell.Children.Add(bMeta);
+
                     if (checkedOn)
                     {
-                        var chk = YYIcons.Make("checkmark", 11, ThemeHelper.Brush(tint.Accent));
-                        Grid.SetColumn(chk, 1);
+                        var chk = YYIcons.Make("checkmark", 11.5, ThemeHelper.Brush(tint.Accent));
+                        Grid.SetColumn(chk, 2);
                         cell.Children.Add(chk);
                     }
 
@@ -3034,11 +3119,11 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                     {
                         HorizontalAlignment = HorizontalAlignment.Stretch,
                         HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                        Padding = new Thickness(10, 6, 10, 6),
-                        CornerRadius = new CornerRadius(9),
-                        Background = ThemeHelper.Brush(checkedOn ? tint.Soft : p.Card),
+                        Padding = new Thickness(10, 8, 10, 8),
+                        CornerRadius = new CornerRadius(10),
+                        Background = ThemeHelper.Brush(checkedOn ? tint.Soft : leafSurface),
                         BorderBrush = ThemeHelper.Brush(checkedOn ? tint.Edge : p.Line),
-                        BorderThickness = new Thickness(1),
+                        BorderThickness = new Thickness(0.75),
                         UseSystemFocusVisuals = false,
                         Content = cell,
                     };
@@ -3064,124 +3149,203 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 booksBodyHost.Content = new ScrollViewer { MaxHeight = 148, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = bGrid };
             }
 
-            durRow.Children.Clear();
-            foreach (uint m in new uint[] { 5, 10, 15, 30, 45, 60 })
-            {
-                bool on = durationMin == m;
-                uint val = m;
-                var db = new Button
-                {
-                    Content = $"{m}分",
-                    Height = 26,
-                    MinHeight = 26,
-                    Padding = new Thickness(10, 0, 10, 0),
-                    CornerRadius = new CornerRadius(13),
-                    FontSize = 11.5,
-                    FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal,
-                    Foreground = ThemeHelper.Brush(on ? tint.OnBlack : p.T2),
-                    Background = ThemeHelper.Brush(on ? tint.Black : p.Inset),
-                    BorderThickness = new Thickness(0),
-                    UseSystemFocusVisuals = false,
-                };
-                db.Click += (_, _) =>
-                {
-                    durationMin = val;
-                    customDurBox.Value = val;
-                    RebuildForm();
-                };
-                durRow.Children.Add(db);
-            }
-            durRow.Children.Add(customDurBox);
+            RebuildTickLabels();
         }
 
-        customDurBox.ValueChanged += (_, args) =>
+        durSlider.ValueChanged += (_, args) =>
         {
-            if (double.IsNaN(args.NewValue)) return;
-            uint clamped = (uint)Math.Clamp(Math.Round(args.NewValue), 3, 90);
-            if (clamped != durationMin)
-            {
-                durationMin = clamped;
-                RebuildForm();
-            }
+            int ni = Math.Clamp((int)Math.Round(args.NewValue), 0, durTicks.Length - 1);
+            durationMin = durTicks[ni];
+            durBadgeText.Text = $"{durationMin} 分钟";
+            RebuildTickLabels();
         };
 
         searchBox.TextChanged += (_, _) => { bookSearch = searchBox.Text; RebuildForm(); };
         RebuildForm();
 
-        // Assemble left card (formats + spoiler bottom tier)
+        // Top Header
+        var topHead = new Grid { Padding = new Thickness(24, 18, 22, 12) };
+        var topLeft = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        topLeft.Children.Add(new TextBlock { Text = L10n.T("酿一期书房电台"), FontFamily = serif, FontSize = 20, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
+        topLeft.Children.Add(headerSubtitle);
+        topHead.Children.Add(topLeft);
+        var closeBtn = YYChrome.MakeSheetCloseButton(() => dlgRef?.Hide(), dark);
+        closeBtn.HorizontalAlignment = HorizontalAlignment.Right;
+        topHead.Children.Add(closeBtn);
+
+        // Left rail card
         var leftGrid = new Grid();
         leftGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         leftGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         leftGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         leftGrid.Children.Add(leftFormats);
-        var div = new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) };
-        Grid.SetRow(div, 1);
-        leftGrid.Children.Add(div);
-
+        var leftDiv = new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) };
+        Grid.SetRow(leftDiv, 1);
+        leftGrid.Children.Add(leftDiv);
         var spoilerBox = new StackPanel
         {
             Spacing = 6,
             Padding = new Thickness(10),
             Background = ThemeHelper.Brush(leafSurface),
-            CornerRadius = new CornerRadius(0, 0, 12, 12),
+            CornerRadius = new CornerRadius(0, 0, 13, 13),
             Children =
             {
-                new TextBlock { Text = "防剧透范围", FontSize = 11, FontWeight = FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T2) },
+                new TextBlock { Text = L10n.T("防剧透范围"), FontSize = 11, FontWeight = FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T2) },
                 new Border { CornerRadius = new CornerRadius(8), Background = ThemeHelper.Brush(p.Inset), Padding = new Thickness(2), Child = spoilerSegHost },
             },
         };
         Grid.SetRow(spoilerBox, 2);
         leftGrid.Children.Add(spoilerBox);
 
-        root.Children.Add(new Border
+        var leftCard = new Border
         {
-            CornerRadius = new CornerRadius(13),
+            CornerRadius = new CornerRadius(14),
             Background = ThemeHelper.Brush(p.Card),
             BorderBrush = ThemeHelper.Brush(p.Line),
-            BorderThickness = new Thickness(1),
+            BorderThickness = new Thickness(0.5),
             Child = leftGrid,
-        });
-
-        // Assemble right composer
-        var topFilterLine = new Grid { ColumnSpacing = 8 };
-        topFilterLine.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        topFilterLine.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        topFilterLine.Children.Add(filterRow);
-        Grid.SetColumn(searchBox, 1);
-        topFilterLine.Children.Add(searchBox);
-
-        rightHost.Children.Add(topFilterLine);
-        rightHost.Children.Add(selectedChipsScroll);
-        rightHost.Children.Add(booksBodyHost);
-        rightHost.Children.Add(topicBox);
-        rightHost.Children.Add(new TextBlock { Text = "节目时长", FontSize = 11.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T2) });
-        rightHost.Children.Add(durRow);
-        rightHost.Children.Add(voiceCombo);
-
-        if (!_library.Companion.IsConfigured)
-        {
-            rightHost.Children.Add(new TextBlock
-            {
-                Text = "未连接书伴大模型 · 将使用本机确定性摘录引擎生成无剧透短电台",
-                FontSize = 11,
-                Foreground = ThemeHelper.Brush(p.T3),
-            });
-        }
-
-        Grid.SetColumn(rightHost, 1);
-        root.Children.Add(rightHost);
-
-        var dlg = new ContentDialog
-        {
-            XamlRoot = _shelf.WindowXamlRoot,
-            Title = "酿一期书房电台",
-            Content = root,
-            PrimaryButtonText = "开始生成",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary,
         };
-        dlg.Resources["ContentDialogMaxWidth"] = 740.0;
-        if (await dlg.ShowAsync() == ContentDialogResult.Primary)
+
+        // Right column
+        var refHead = new Grid();
+        var refHeadLeft = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        refHeadLeft.Children.Add(new TextBlock { Text = L10n.T("参考书目"), FontFamily = serif, FontSize = 14.5, FontWeight = FontWeights.Bold, Foreground = ThemeHelper.Brush(p.T1) });
+        refHeadLeft.Children.Add(refScopeSub);
+        refHead.Children.Add(refHeadLeft);
+        refHead.Children.Add(refCountText);
+
+        var topFilterLine = new Grid { ColumnSpacing = 8 };
+        topFilterLine.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        topFilterLine.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        topFilterLine.Children.Add(searchPill);
+        Grid.SetColumn(filterSegWrap, 1);
+        topFilterLine.Children.Add(filterSegWrap);
+
+        var booksCard = new Border
+        {
+            CornerRadius = new CornerRadius(14),
+            Background = ThemeHelper.Brush(p.Card),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(0.5),
+            Padding = new Thickness(12, 10, 12, 10),
+            Child = new StackPanel { Spacing = 10, Children = { topFilterLine, booksBodyHost } },
+        };
+
+        // Topic + Duration card
+        var topicRow = new Grid { ColumnSpacing = 12, Padding = new Thickness(14, 5, 12, 5), MinHeight = 40 };
+        topicRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
+        topicRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        topicRow.Children.Add(new TextBlock { Text = L10n.T("选题"), FontSize = 12.5, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center });
+        Grid.SetColumn(topicBox, 1);
+        topicRow.Children.Add(topicBox);
+
+        var durGrid = new Grid { ColumnSpacing = 12, Padding = new Thickness(14, 8, 14, 10) };
+        durGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
+        durGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        durGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        durGrid.Children.Add(new TextBlock { Text = L10n.T("时长"), FontSize = 12.5, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center });
+        var sliderCol = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children = { durSlider, tickLabelsGrid } };
+        Grid.SetColumn(sliderCol, 1);
+        durGrid.Children.Add(sliderCol);
+        var durBadge = new Border
+        {
+            Height = 32,
+            MinWidth = 68,
+            Padding = new Thickness(12, 0, 12, 0),
+            CornerRadius = new CornerRadius(9),
+            Background = ThemeHelper.Brush(leafSurface),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(0.5),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = durBadgeText,
+        };
+        Grid.SetColumn(durBadge, 2);
+        durGrid.Children.Add(durBadge);
+
+        var metaCard = new Border
+        {
+            CornerRadius = new CornerRadius(14),
+            Background = ThemeHelper.Brush(p.Card),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(0.5),
+            Child = new StackPanel
+            {
+                Spacing = 0,
+                Children =
+                {
+                    topicRow,
+                    new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(14, 0, 14, 0) },
+                    durGrid,
+                },
+            },
+        };
+
+        var rightHost = new StackPanel { Spacing = 10, Children = { refHead, booksCard, metaCard } };
+
+        var columnsGrid = new Grid { ColumnSpacing = 16, Padding = new Thickness(24, 0, 24, 14) };
+        columnsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(184) });
+        columnsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        columnsGrid.Children.Add(leftCard);
+        Grid.SetColumn(rightHost, 1);
+        columnsGrid.Children.Add(rightHost);
+
+        // Bottom bar: host voice dropdown pill + AI status + Cancel + dark 开始生成
+        var voiceMenu = new MenuFlyout();
+        foreach (var vo in voiceOptions)
+        {
+            string vid = vo.Id;
+            string vShort = vo.ShortLabel;
+            var mi = new MenuFlyoutItem { Text = vo.FullLabel };
+            mi.Click += (_, _) => { voiceStyle = vid; hostVoiceLabel.Text = vShort; };
+            voiceMenu.Items.Add(mi);
+        }
+        var hostSp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7, VerticalAlignment = VerticalAlignment.Center };
+        hostSp.Children.Add(YYIcons.Make("wave", 13, ThemeHelper.Brush(tint.Accent)));
+        hostSp.Children.Add(hostVoiceLabel);
+        hostSp.Children.Add(YYIcons.Make("chevron-down", 9.5, ThemeHelper.Brush(p.T3)));
+        var hostVoiceBtn = new Button
+        {
+            Height = 36,
+            MinHeight = 36,
+            Padding = new Thickness(14, 0, 12, 0),
+            CornerRadius = new CornerRadius(18),
+            Background = ThemeHelper.Brush(p.Card),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(0.75),
+            UseSystemFocusVisuals = false,
+            Content = hostSp,
+            Flyout = voiceMenu,
+        };
+
+        var bottomBar = new Grid { Padding = new Thickness(24, 4, 24, 18), ColumnSpacing = 12 };
+        bottomBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        bottomBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        bottomBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        bottomBar.Children.Add(hostVoiceBtn);
+
+        var aiNote = new TextBlock
+        {
+            Text = _library.Companion.IsConfigured ? L10n.T("已连接书伴模型 · 生成双人对谈文稿") : L10n.T("未接书伴模型 · 将用本机离线摘要成稿"),
+            FontSize = 11.5,
+            Foreground = ThemeHelper.Brush(p.T3),
+            VerticalAlignment = VerticalAlignment.Center,
+            MaxLines = 1,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        Grid.SetColumn(aiNote, 1);
+        bottomBar.Children.Add(aiNote);
+
+        var rightActs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        rightActs.Children.Add(YYChrome.MakeSheetPillButton("取消", () => dlgRef?.Hide(), dark, _library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 18));
+        rightActs.Children.Add(YYChrome.MakeSheetPillButton("开始生成", () => { confirmedGenerate = true; dlgRef?.Hide(); }, dark, _library.Prefs.Tint, "dark", height: 36, horizontalPadding: 20));
+        Grid.SetColumn(rightActs, 2);
+        bottomBar.Children.Add(rightActs);
+
+        var sheetStack = new StackPanel { Spacing = 0, Children = { topHead, columnsGrid, bottomBar } };
+        dlgRef = YYChrome.CreateMacSheet(_shelf.WindowXamlRoot, dark, 720, sheetStack, maxHeight: 780);
+        await dlgRef.ShowAsync();
+
+        if (confirmedGenerate)
         {
             if (selectedBooks.Count == 0 && chosenKind != StudioKind.VocabRadio)
             {

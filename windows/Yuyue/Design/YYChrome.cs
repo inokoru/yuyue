@@ -1,9 +1,16 @@
+using System.Numerics;
 using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Shapes;
+using Windows.Foundation;
+using Windows.System;
 using Windows.UI;
+using Windows.UI.Text;
 using Yuyue.Core;
 
 namespace Yuyue.Design;
@@ -158,7 +165,7 @@ public static class YYChrome
                 return MakeTile(whiteTile, neutralLine,
                     MakeGlyphMark("M", Color.FromArgb(255, 240, 110, 42), Color.FromArgb(255, 240, 110, 42), size));
 
-            case "grok":
+            case "grok" or "xai":
                 return MakeTile(whiteTile, neutralLine,
                     MakeGlyphMark("G", dark ? Colors.White : Color.FromArgb(255, 28, 30, 34), dark ? Colors.White : Color.FromArgb(255, 28, 30, 34), size));
 
@@ -520,4 +527,463 @@ public static class YYChrome
         ReadingStatus.Dropped => "弃读",
         _ => "想读",
     };
+
+    /// <summary>
+    /// 1:1 port of <c>PhoneSignature.swift</c> (<c>PencilSignature</c>) used in <c>MacUpdate.swift</c>:
+    /// invisible when the About page opens; clicking the signature area or the <c>by nowtin · GPL-3.0</c>
+    /// line beneath it writes out all three graphite strokes ("CTT") one after another.
+    /// </summary>
+    public static (FrameworkElement View, Action TriggerWrite) MakePencilSignature(double size, bool dark)
+    {
+        double k = size / 60.0;
+        double w = size;
+        double h = size * 56.0 / 60.0;
+        Color lead = dark ? Color.FromArgb(255, 217, 213, 205) : Color.FromArgb(255, 47, 46, 45);
+
+        Point Pt(double x, double y) => new((x - 8.0) * k, (y - 6.0) * k);
+
+        // Pre-sampled arc-length tables for exact smooth trim(0..t) at 60fps
+        var s0 = SampleMultiBezier([
+            (Pt(24, 9),    Pt(19, 15),    Pt(13.5, 25),  Pt(11.5, 33)),
+            (Pt(11.5, 33), Pt(10, 39),    Pt(13, 41.5),  Pt(20, 41.5)),
+            (Pt(20, 41.5), Pt(28, 41.5),  Pt(36, 40.5),  Pt(44, 39.5)),
+            (Pt(44, 39.5), Pt(51, 38.5),  Pt(58, 37.5),  Pt(64, 37)),
+        ]);
+        var s1 = SampleMultiBezier([
+            (Pt(21.5, 17), Pt(27, 18.5),  Pt(31.5, 18.8), Pt(35, 18.2)),
+            (Pt(35, 18.2), Pt(31, 21),    Pt(27.5, 26),   Pt(26.3, 33)),
+            (Pt(26.3, 33), Pt(25.3, 40),  Pt(24.6, 47),   Pt(25.2, 53)),
+        ]);
+        var s2 = SampleMultiBezier([
+            (Pt(43, 17.5), Pt(48, 18.8),  Pt(52.5, 17.8), Pt(56.5, 15.5)),
+            (Pt(56.5, 15.5), Pt(51, 19),  Pt(45.5, 24),   Pt(43.3, 31)),
+            (Pt(43.3, 31), Pt(41.5, 39),  Pt(40.3, 49),   Pt(41, 59.5)),
+        ]);
+        var pressed = SampleMultiBezier([
+            (Pt(40, 40.2), Pt(48, 39), Pt(56, 37.8), Pt(63.5, 37.2)),
+        ]);
+
+        Polyline MakeLine(double thickness, double opacity, double dx = 0, double dy = 0, bool grainDash = false)
+        {
+            var pl = new Polyline
+            {
+                Stroke = ThemeHelper.Brush(lead),
+                StrokeThickness = thickness,
+                Opacity = opacity,
+                StrokeStartLineCap = PenLineCap.Round,
+                StrokeEndLineCap = PenLineCap.Round,
+                StrokeLineJoin = PenLineJoin.Round,
+                IsHitTestVisible = false,
+            };
+            if (grainDash)
+            {
+                pl.StrokeDashArray = [2.4, 0.65];
+                pl.StrokeDashCap = PenLineCap.Round;
+            }
+            if (dx != 0 || dy != 0)
+            {
+                Canvas.SetLeft(pl, dx);
+                Canvas.SetTop(pl, dy);
+            }
+            return pl;
+        }
+
+        var canvas = new Canvas
+        {
+            Width = w,
+            Height = h,
+            Background = new SolidColorBrush(Colors.Transparent),
+            Opacity = 0.86,
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+
+        var mainLines = new[]
+        {
+            MakeLine(1.9 * k, 0.82),
+            MakeLine(1.9 * k, 0.82),
+            MakeLine(1.9 * k, 0.82),
+        };
+        var grainLines = new[]
+        {
+            MakeLine(1.0 * k, 0.54, 0.28 * k, 0.22 * k, grainDash: true),
+            MakeLine(1.0 * k, 0.54, 0.28 * k, 0.22 * k, grainDash: true),
+            MakeLine(1.0 * k, 0.54, 0.28 * k, 0.22 * k, grainDash: true),
+        };
+        var pressedLine = MakeLine(2.6 * k, 0.46);
+
+        for (int i = 0; i < 3; i++)
+        {
+            canvas.Children.Add(mainLines[i]);
+            canvas.Children.Add(grainLines[i]);
+            if (i == 0) canvas.Children.Add(pressedLine);
+        }
+
+        canvas.PointerEntered += (_, _) => canvas.Opacity = 1.0;
+        canvas.PointerExited += (_, _) => canvas.Opacity = 0.86;
+
+        var samples = new[] { s0, s1, s2 };
+        double[] durations = [0.62, 0.50, 0.56];
+        double[] starts = [0.10, 0.10 + 0.62 * 0.82, 0.10 + 0.62 * 0.82 + 0.50 * 0.82];
+        double totalEnd = starts[2] + durations[2] + 0.04;
+
+        DispatcherTimer? timer = null;
+        var sw = new System.Diagnostics.Stopwatch();
+
+        void ApplyTrim(Polyline target, (Point Pt, double CumLen)[] table, double t)
+        {
+            target.Points.Clear();
+            if (t <= 0.001 || table.Length < 2) return;
+            double total = table[^1].CumLen;
+            double targetLen = Math.Clamp(t, 0.0, 1.0) * total;
+            target.Points.Add(table[0].Pt);
+            for (int idx = 1; idx < table.Length; idx++)
+            {
+                if (table[idx].CumLen <= targetLen)
+                {
+                    target.Points.Add(table[idx].Pt);
+                }
+                else
+                {
+                    double prevLen = table[idx - 1].CumLen;
+                    double seg = Math.Max(1e-6, table[idx].CumLen - prevLen);
+                    double frac = (targetLen - prevLen) / seg;
+                    var a = table[idx - 1].Pt;
+                    var b = table[idx].Pt;
+                    target.Points.Add(new Point(a.X + (b.X - a.X) * frac, a.Y + (b.Y - a.Y) * frac));
+                    break;
+                }
+            }
+        }
+
+        void Write()
+        {
+            timer?.Stop();
+            for (int i = 0; i < 3; i++)
+            {
+                mainLines[i].Points.Clear();
+                grainLines[i].Points.Clear();
+            }
+            pressedLine.Points.Clear();
+
+            sw.Restart();
+            timer = new DispatcherTimer { Interval = System.TimeSpan.FromMilliseconds(16) };
+            timer.Tick += (_, _) =>
+            {
+                double elapsed = sw.Elapsed.TotalSeconds;
+                for (int i = 0; i < 3; i++)
+                {
+                    double raw = (elapsed - starts[i]) / durations[i];
+                    double eased = raw <= 0 ? 0 : (raw >= 1 ? 1 : CubicBezierEase(raw, 0.45, 0.05, 0.30, 1.0));
+                    ApplyTrim(mainLines[i], samples[i], eased);
+                    ApplyTrim(grainLines[i], samples[i], eased);
+                    if (i == 0)
+                    {
+                        double pTrim = Math.Max(0.0, eased * 2.1 - 1.1);
+                        ApplyTrim(pressedLine, pressed, pTrim);
+                    }
+                }
+                if (elapsed >= totalEnd)
+                {
+                    timer.Stop();
+                }
+            };
+            timer.Start();
+        }
+
+        canvas.PointerPressed += (_, e) =>
+        {
+            Write();
+            e.Handled = true;
+        };
+        canvas.Unloaded += (_, _) => timer?.Stop();
+
+        return (canvas, Write);
+    }
+
+    private static (Point Pt, double CumLen)[] SampleMultiBezier((Point P0, Point C1, Point C2, Point P3)[] segs)
+    {
+        const int stepsPerSeg = 36;
+        var list = new List<(Point Pt, double CumLen)>(segs.Length * stepsPerSeg + 1);
+        double cum = 0;
+        Point prev = segs[0].P0;
+        list.Add((prev, 0));
+        foreach (var (p0, c1, c2, p3) in segs)
+        {
+            for (int s = 1; s <= stepsPerSeg; s++)
+            {
+                double t = (double)s / stepsPerSeg;
+                double u = 1.0 - t;
+                double x = u * u * u * p0.X + 3 * u * u * t * c1.X + 3 * u * t * t * c2.X + t * t * t * p3.X;
+                double y = u * u * u * p0.Y + 3 * u * u * t * c1.Y + 3 * u * t * t * c2.Y + t * t * t * p3.Y;
+                var cur = new Point(x, y);
+                double dx = cur.X - prev.X;
+                double dy = cur.Y - prev.Y;
+                cum += Math.Sqrt(dx * dx + dy * dy);
+                list.Add((cur, cum));
+                prev = cur;
+            }
+        }
+        return list.ToArray();
+    }
+
+    private static double CubicBezierEase(double x, double x1, double y1, double x2, double y2)
+    {
+        double lo = 0.0, hi = 1.0, t = x;
+        for (int i = 0; i < 12; i++)
+        {
+            t = 0.5 * (lo + hi);
+            double u = 1.0 - t;
+            double bx = 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t;
+            if (bx < x) lo = t; else hi = t;
+        }
+        double uFinal = 1.0 - t;
+        return 3 * uFinal * uFinal * t * y1 + 3 * uFinal * t * t * y2 + t * t * t;
+    }
+
+    // ---------- Frameless macOS Sheet & Motion Helpers ----------
+
+    /// <summary>
+    /// Creates a frameless macOS-style sheet <see cref="ContentDialog"/> with warm paper surface,
+    /// <c>18px</c> corner radius, zero built-in WinUI command bar, custom exact width, Esc-to-close,
+    /// and smooth Composition entrance animation.
+    /// </summary>
+    public static ContentDialog CreateMacSheet(
+        XamlRoot xamlRoot,
+        bool dark,
+        double width,
+        FrameworkElement body,
+        double maxHeight = 760)
+    {
+        var p = ThemeHelper.Palette(dark);
+        var dlg = new ContentDialog
+        {
+            XamlRoot = xamlRoot,
+            RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light,
+            Background = ThemeHelper.Brush(p.Bg),
+            BorderBrush = ThemeHelper.Brush(dark ? Color.FromArgb(28, 255, 255, 255) : p.Line),
+            BorderThickness = new Thickness(0.75),
+            CornerRadius = new CornerRadius(18),
+            Width = width,
+            MinWidth = width,
+            MaxWidth = width,
+            Content = body,
+        };
+        dlg.Resources["ContentDialogPadding"] = new Thickness(0);
+        dlg.Resources["ContentDialogMinWidth"] = width;
+        dlg.Resources["ContentDialogMaxWidth"] = width;
+        dlg.Resources["ContentDialogMaxHeight"] = maxHeight;
+        dlg.Resources["ContentDialogTopOverlay"] = new Thickness(0);
+
+        body.Width = width;
+        dlg.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == VirtualKey.Escape)
+            {
+                dlg.Hide();
+                e.Handled = true;
+            }
+        };
+        dlg.Opened += (_, _) => AnimateEntrance(body, fromY: 8f, durationMs: 170);
+        return dlg;
+    }
+
+    /// <summary>
+    /// Circular <c>28×28</c> recessed macOS sheet close button (<c>×</c>).
+    /// </summary>
+    public static Button MakeSheetCloseButton(Action onClose, bool dark, double size = 28)
+    {
+        var p = ThemeHelper.Palette(dark);
+        var btn = new Button
+        {
+            Width = size,
+            Height = size,
+            MinWidth = size,
+            MinHeight = size,
+            Padding = new Thickness(0),
+            CornerRadius = new CornerRadius(size / 2.0),
+            Background = ThemeHelper.Brush(dark ? Color.FromArgb(255, 44, 45, 49) : Color.FromArgb(255, 236, 233, 227)),
+            BorderThickness = new Thickness(0),
+            UseSystemFocusVisuals = false,
+            VerticalAlignment = VerticalAlignment.Center,
+            Content = YYIcons.Make("xmark", Math.Round(size * 0.39), ThemeHelper.Brush(p.T2)),
+        };
+        btn.Click += (_, _) => onClose();
+        return btn;
+    }
+
+    /// <summary>
+    /// Standard macOS sheet header row: optional leading tile + bold title + muted inline subtitle + trailing circular <c>×</c>.
+    /// </summary>
+    public static Grid MakeSheetHeader(
+        string title,
+        string? subtitle,
+        Action onClose,
+        bool dark,
+        FrameworkElement? leading = null,
+        double titleSize = 16.5,
+        bool serifTitle = false)
+    {
+        var p = ThemeHelper.Palette(dark);
+        var row = new Grid { ColumnSpacing = 10 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var left = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        if (leading is not null)
+        {
+            leading.VerticalAlignment = VerticalAlignment.Center;
+            left.Children.Add(leading);
+        }
+        var titleTb = new TextBlock
+        {
+            Text = L10n.T(title),
+            FontSize = titleSize,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush(p.T1),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        if (serifTitle) titleTb.FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily());
+        left.Children.Add(titleTb);
+
+        if (!string.IsNullOrWhiteSpace(subtitle))
+        {
+            left.Children.Add(new TextBlock
+            {
+                Text = subtitle,
+                FontSize = 12.5,
+                Foreground = ThemeHelper.Brush(p.T3),
+                VerticalAlignment = VerticalAlignment.Center,
+                MaxLines = 1,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxWidth = 340,
+                Margin = new Thickness(2, 1, 0, 0),
+            });
+        }
+        row.Children.Add(left);
+
+        var closeBtn = MakeSheetCloseButton(onClose, dark);
+        Grid.SetColumn(closeBtn, 1);
+        row.Children.Add(closeBtn);
+        return row;
+    }
+
+    /// <summary>
+    /// Pill button used in macOS sheet footers (<c>"secondary"</c> white pill, <c>"warm"</c> soft tint wash, <c>"dark"</c> solid charcoal).
+    /// </summary>
+    public static Button MakeSheetPillButton(
+        object content,
+        Action onClick,
+        bool dark,
+        YYTint tint,
+        string kind = "secondary",
+        double height = 36,
+        double horizontalPadding = 18,
+        bool stretch = false)
+    {
+        var p = ThemeHelper.Palette(dark);
+        var tc = ThemeHelper.TintColors(tint, dark);
+        Color bg, fg, edge;
+        double borderW;
+        FontWeight fw;
+        switch (kind)
+        {
+            case "warm":
+                bg = tc.Soft;
+                fg = tc.Accent;
+                edge = tc.Edge;
+                borderW = 0.75;
+                fw = FontWeights.SemiBold;
+                break;
+            case "dark":
+                bg = p.T1;
+                fg = p.Card;
+                edge = p.T1;
+                borderW = 0;
+                fw = FontWeights.SemiBold;
+                break;
+            default:
+                bg = p.Card;
+                fg = p.T1;
+                edge = p.Line;
+                borderW = 0.75;
+                fw = FontWeights.Medium;
+                break;
+        }
+
+        UIElement child = content is string s
+            ? new TextBlock { Text = L10n.T(s), FontSize = 13, FontWeight = fw, Foreground = ThemeHelper.Brush(fg), VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center }
+            : (UIElement)content;
+
+        var btn = new Button
+        {
+            Height = height,
+            MinHeight = height,
+            Padding = new Thickness(horizontalPadding, 0, horizontalPadding, 0),
+            CornerRadius = new CornerRadius(height / 2.0),
+            Background = ThemeHelper.Brush(bg),
+            Foreground = ThemeHelper.Brush(fg),
+            BorderBrush = ThemeHelper.Brush(edge),
+            BorderThickness = new Thickness(borderW),
+            FontWeight = fw,
+            HorizontalAlignment = stretch ? HorizontalAlignment.Stretch : HorizontalAlignment.Left,
+            UseSystemFocusVisuals = false,
+            Content = child,
+        };
+        btn.Click += (_, _) => onClick();
+        return btn;
+    }
+
+    /// <summary>
+    /// GPU Composition vertical fade+slide entrance (macOS spring curve, zero layout cost).
+    /// </summary>
+    public static void AnimateEntrance(UIElement element, float fromY = 8f, int durationMs = 170)
+    {
+        try
+        {
+            ElementCompositionPreview.SetIsTranslationEnabled(element, true);
+            var visual = ElementCompositionPreview.GetElementVisual(element);
+            var comp = visual.Compositor;
+            var ease = comp.CreateCubicBezierEasingFunction(new Vector2(0.22f, 1.0f), new Vector2(0.36f, 1.0f));
+
+            var offsetAnim = comp.CreateVector3KeyFrameAnimation();
+            offsetAnim.InsertKeyFrame(0f, new Vector3(0f, fromY, 0f));
+            offsetAnim.InsertKeyFrame(1f, Vector3.Zero, ease);
+            offsetAnim.Duration = System.TimeSpan.FromMilliseconds(durationMs);
+            visual.StartAnimation("Translation", offsetAnim);
+
+            var opAnim = comp.CreateScalarKeyFrameAnimation();
+            opAnim.InsertKeyFrame(0f, 0.0f);
+            opAnim.InsertKeyFrame(1f, 1.0f, ease);
+            opAnim.Duration = System.TimeSpan.FromMilliseconds(Math.Max(90, durationMs - 30));
+            visual.StartAnimation("Opacity", opAnim);
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// GPU Composition horizontal slide+fade entrance for side drawers/panels.
+    /// </summary>
+    public static void AnimateSlideX(UIElement element, float fromX = 20f, int durationMs = 190)
+    {
+        try
+        {
+            ElementCompositionPreview.SetIsTranslationEnabled(element, true);
+            var visual = ElementCompositionPreview.GetElementVisual(element);
+            var comp = visual.Compositor;
+            var ease = comp.CreateCubicBezierEasingFunction(new Vector2(0.22f, 1.0f), new Vector2(0.36f, 1.0f));
+
+            var offsetAnim = comp.CreateVector3KeyFrameAnimation();
+            offsetAnim.InsertKeyFrame(0f, new Vector3(fromX, 0f, 0f));
+            offsetAnim.InsertKeyFrame(1f, Vector3.Zero, ease);
+            offsetAnim.Duration = System.TimeSpan.FromMilliseconds(durationMs);
+            visual.StartAnimation("Translation", offsetAnim);
+
+            var opAnim = comp.CreateScalarKeyFrameAnimation();
+            opAnim.InsertKeyFrame(0f, 0.25f);
+            opAnim.InsertKeyFrame(1f, 1.0f, ease);
+            opAnim.Duration = System.TimeSpan.FromMilliseconds(Math.Max(90, durationMs - 40));
+            visual.StartAnimation("Opacity", opAnim);
+        }
+        catch { }
+    }
 }

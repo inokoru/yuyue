@@ -290,5 +290,15 @@
   "/settings  切换模型或配置 Key…": "/settings  Switch Model or Configure Key…",
   "⇧↵ 换行": "⇧↵ Newline",
   "书伴模型": "Companion Model",
-  "书伴模型设置": "Companion Model Settings"
+  "书伴模型设置": "Companion Model Settings",
+  "检查并添加": "Verify & Add",
+  "先填 Key": "Enter Key first",
+  "点此验证": "Click to verify",
+  "‹ 返回全部声音来源": "‹ All Voice Sources",
+  "只改书架上显示的名字，书的文件不动。封面也可以直接拖一张图到上面。": "Changes only the shelf display name; the book file stays untouched. You can also drag an image onto the cover above.",
+  "已连接书伴模型 · 生成双人对谈文稿": "Companion connected · Generates duo dialogue script",
+  "未接书伴模型 · 将用本机离线摘要成稿": "No Companion model · Uses local offline digest",
+  "加到这本书": "Add to This Book",
+  "加到全部书": "Add to All Books",
+  "加完还能改、能关": "You can edit or toggle rules anytime after adding"
 }

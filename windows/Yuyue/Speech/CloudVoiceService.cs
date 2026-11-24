@@ -19,6 +19,7 @@ public enum CloudProviderGroup
 public enum CloudTtsProvider
 {
     // Free / Domestic
+    Edge,
     Free,
     Volcengine,
     Xiaomi,
@@ -62,6 +63,7 @@ public sealed record CloudVoiceEntry(
 
     public static string ProviderKey(CloudTtsProvider p) => p switch
     {
+        CloudTtsProvider.Edge => "edge",
         CloudTtsProvider.Free => "free",
         CloudTtsProvider.Volcengine => "volcengine",
         CloudTtsProvider.Xiaomi => "xiaomi",
@@ -85,6 +87,7 @@ public sealed record CloudVoiceEntry(
     {
         switch (pKey.ToLowerInvariant())
         {
+            case "edge": provider = CloudTtsProvider.Edge; return true;
             case "free": provider = CloudTtsProvider.Free; return true;
             case "volcengine": provider = CloudTtsProvider.Volcengine; return true;
             case "fish": provider = CloudTtsProvider.Fish; return true;
@@ -385,6 +388,7 @@ public sealed class CloudVoiceService
 
     public static readonly CloudTtsProvider[] AllProviders =
     [
+        CloudTtsProvider.Edge,
         CloudTtsProvider.Free,
         CloudTtsProvider.Volcengine,
         CloudTtsProvider.Xiaomi,
@@ -406,17 +410,19 @@ public sealed class CloudVoiceService
     public static CloudProviderGroup ProviderGroup(CloudTtsProvider p) => p switch
     {
         CloudTtsProvider.Free or CloudTtsProvider.Volcengine or CloudTtsProvider.Xiaomi or CloudTtsProvider.SiliconFlow or CloudTtsProvider.DashScope or CloudTtsProvider.MiniMax => CloudProviderGroup.Domestic,
-        CloudTtsProvider.Fish or CloudTtsProvider.Azure or CloudTtsProvider.OpenAi or CloudTtsProvider.ElevenLabs or CloudTtsProvider.Deepgram => CloudProviderGroup.Global,
+        CloudTtsProvider.Edge or CloudTtsProvider.Fish or CloudTtsProvider.Azure or CloudTtsProvider.OpenAi or CloudTtsProvider.ElevenLabs or CloudTtsProvider.Deepgram => CloudProviderGroup.Global,
         _ => CloudProviderGroup.Local,
     };
 
     public static bool IsLocalProvider(CloudTtsProvider p) => ProviderGroup(p) == CloudProviderGroup.Local;
-    public static bool IsPaidCloud(CloudTtsProvider p) => !IsLocalProvider(p) && p != CloudTtsProvider.Free;
-    public static bool NeedsKey(CloudTtsProvider p) => !IsLocalProvider(p) && p != CloudTtsProvider.Free;
+    public static bool IsFreeOnline(CloudTtsProvider p) => p is CloudTtsProvider.Edge or CloudTtsProvider.Free;
+    public static bool IsPaidCloud(CloudTtsProvider p) => !IsLocalProvider(p) && !IsFreeOnline(p);
+    public static bool NeedsKey(CloudTtsProvider p) => !IsLocalProvider(p) && !IsFreeOnline(p);
 
     public static string ProviderDisplayName(CloudTtsProvider p, DevicePrefs? prefs = null) => p switch
     {
-        CloudTtsProvider.Free => "免 Key 在线",
+        CloudTtsProvider.Edge => "微软 Edge",
+        CloudTtsProvider.Free => "在线自然语音",
         CloudTtsProvider.Volcengine => "火山豆包",
         CloudTtsProvider.Fish => "Fish Audio",
         CloudTtsProvider.Xiaomi => "小米 MiMo",
@@ -441,16 +447,16 @@ public sealed class CloudVoiceService
 
     public static string? ProviderBadge(CloudTtsProvider p) => p switch
     {
-        CloudTtsProvider.Free => "免费免配",
+        CloudTtsProvider.Edge or CloudTtsProvider.Free => "免 Key",
         CloudTtsProvider.Xiaomi => "限时免费",
-        CloudTtsProvider.Azure or CloudTtsProvider.Deepgram => "含免费额度",
+        CloudTtsProvider.Volcengine or CloudTtsProvider.Fish or CloudTtsProvider.Azure or CloudTtsProvider.Deepgram => "含免费额度",
         CloudTtsProvider.VoiceStudio or CloudTtsProvider.Voicebox or CloudTtsProvider.MlxAudio or CloudTtsProvider.Speaches => "本机开源",
         _ => null,
     };
 
     public static string ProviderKeyHint(CloudTtsProvider p) => p switch
     {
-        CloudTtsProvider.Free => "无需填写 Key",
+        CloudTtsProvider.Edge or CloudTtsProvider.Free => "免填 Key",
         CloudTtsProvider.Volcengine => "AppID|Access Token 或单独填 Access Token",
         CloudTtsProvider.Fish => "Fish Audio API Key",
         CloudTtsProvider.Xiaomi or CloudTtsProvider.SiliconFlow or CloudTtsProvider.DashScope or CloudTtsProvider.OpenAi => "sk-…",
@@ -463,6 +469,7 @@ public sealed class CloudVoiceService
 
     public static string ProviderHelp(CloudTtsProvider p) => p switch
     {
+        CloudTtsProvider.Edge => "免注册免填 Key，直连微软 Edge 自然神经语音（晓晓、云希、Ava 等），已朗读句子自动缓存在本机。",
         CloudTtsProvider.Free => "无需 API Key，经由开源公共线路试听或朗读中英自然人声；高频朗读建议下载本机离线模型。",
         CloudTtsProvider.Volcengine => "火山引擎语音合成（豆包大模型音色），在控制台新建应用获取 AppID 与 Access Token。",
         CloudTtsProvider.Fish => "fish.audio 控制台新建 API Key，支持 OpenAudio S1 自然旁白与社区音色库。",
@@ -508,6 +515,32 @@ public sealed class CloudVoiceService
         CloudTtsProvider.OpenAi => "openai",
         _ => null,
     };
+
+    public static readonly (string Id, string Name, string Locale, string Gender, string Age)[] EdgeBuiltinVoices =
+    [
+        ("zh-CN-XiaoxiaoNeural", "晓晓 · 温暖自然女声", "zh-CN", "female", "young"),
+        ("zh-CN-YunxiNeural", "云希 · 阳光清朗男声", "zh-CN", "male", "young"),
+        ("zh-CN-YunjianNeural", "云健 · 沉稳播讲男声", "zh-CN", "male", "middle_aged"),
+        ("zh-CN-XiaoyiNeural", "晓伊 · 灵动活泼女声", "zh-CN", "female", "young"),
+        ("zh-CN-YunyangNeural", "云扬 · 新闻播报男声", "zh-CN", "male", "middle_aged"),
+        ("zh-CN-YunxiaNeural", "云夏 · 少年清亮男声", "zh-CN", "male", "young"),
+        ("zh-CN-liaoning-XiaobeiNeural", "晓北 · 东北风趣女声", "zh-CN", "female", "young"),
+        ("zh-CN-shaanxi-XiaoniNeural", "晓妮 · 陕西温婉女声", "zh-CN", "female", "young"),
+        ("zh-TW-HsiaoChenNeural", "曉臻 · 台湾温润女声", "zh-TW", "female", "young"),
+        ("zh-TW-YunJheNeural", "雲哲 · 台湾沉稳男声", "zh-TW", "male", "middle_aged"),
+        ("zh-HK-HiuMaanNeural", "曉曼 · 粤语自然女声", "zh-HK", "female", "young"),
+        ("zh-HK-WanLungNeural", "雲龍 · 粤语沉稳男声", "zh-HK", "male", "middle_aged"),
+        ("en-US-AvaMultilingualNeural", "Ava · Natural Multilingual", "en-US", "female", "young"),
+        ("en-US-AndrewMultilingualNeural", "Andrew · Warm Multilingual", "en-US", "male", "middle_aged"),
+        ("en-US-EmmaMultilingualNeural", "Emma · Clear Multilingual", "en-US", "female", "young"),
+        ("en-US-BrianMultilingualNeural", "Brian · Calm Multilingual", "en-US", "male", "middle_aged"),
+        ("en-US-AriaNeural", "Aria · Expressive American", "en-US", "female", "young"),
+        ("en-US-GuyNeural", "Guy · Deep American", "en-US", "male", "middle_aged"),
+        ("en-GB-SoniaNeural", "Sonia · British Female", "en-GB", "female", "young"),
+        ("en-GB-RyanNeural", "Ryan · British Male", "en-GB", "male", "middle_aged"),
+        ("ja-JP-NanamiNeural", "七海 · 自然日本語女声", "ja-JP", "female", "young"),
+        ("ja-JP-KeitaNeural", "圭太 · 自然日本語男声", "ja-JP", "male", "young"),
+    ];
 
     public static readonly (string Id, string Name, string Locale, string Gender, int Sid)[] FreeBuiltinVoices =
     [
@@ -681,6 +714,8 @@ public sealed class CloudVoiceService
 
     public bool IsConfigured(CloudTtsProvider provider)
     {
+        if (provider == CloudTtsProvider.Edge)
+            return _library.Secrets.Get("tts.edge.dismissed") != "1";
         if (provider == CloudTtsProvider.Free)
             return _library.Secrets.Get("tts.free.dismissed") != "1";
         if (IsLocalProvider(provider))
@@ -703,6 +738,11 @@ public sealed class CloudVoiceService
         string pKey = CloudVoiceEntry.ProviderKey(provider);
         switch (provider)
         {
+            case CloudTtsProvider.Edge:
+                return EdgeBuiltinVoices
+                    .Select(v => new CloudVoiceEntry(provider, v.Id, v.Name, v.Locale, v.Gender, v.Age))
+                    .ToArray();
+
             case CloudTtsProvider.Free:
                 return FreeBuiltinVoices
                     .Select(v => new CloudVoiceEntry(provider, v.Id, v.Name, v.Locale, v.Gender, null))
@@ -818,6 +858,15 @@ public sealed class CloudVoiceService
         {
             switch (provider)
             {
+                case CloudTtsProvider.Edge:
+                {
+                    _library.Secrets.Set("tts.edge.dismissed", "");
+                    byte[] mp3 = await FetchEdgeAudioAsync("zh-CN-XiaoxiaoNeural", "你好，我来给你读这本书。", "zh-CN", ct);
+                    if (mp3.Length < 128)
+                        return (false, 0, "微软 Edge 语音线路当前繁忙，请稍后再试");
+                    return (true, EdgeBuiltinVoices.Length, $"已连通微软 Edge 神经语音（{EdgeBuiltinVoices.Length} 个音色可用）");
+                }
+
                 case CloudTtsProvider.Free:
                 {
                     _library.Secrets.Set("tts.free.dismissed", "");
@@ -1161,6 +1210,30 @@ public sealed class CloudVoiceService
         return wavBytes;
     }
 
+    private async Task<byte[]> FetchEdgeAudioAsync(string voiceId, string plain, string language, CancellationToken ct)
+    {
+        if (_library.Prefs.CloudVoiceBaseUrls.TryGetValue("edge", out var customBase) && !string.IsNullOrWhiteSpace(customBase))
+        {
+            string baseV1 = NormalizedBaseV1(customBase);
+            string mdl = _library.Prefs.CloudVoiceModels.TryGetValue("edge", out var cm) && !string.IsNullOrWhiteSpace(cm)
+                ? cm.Trim()
+                : "tts-1";
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseV1}/audio/speech");
+            req.Content = new StringContent(JsonSerializer.Serialize(new
+            {
+                model = mdl,
+                voice = voiceId,
+                input = plain,
+                response_format = "mp3",
+            }), Encoding.UTF8, "application/json");
+            using var resp = await Http.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) throw new InvalidOperationException(await FormatHttpErrorAsync("微软 Edge", resp));
+            return await resp.Content.ReadAsByteArrayAsync(ct);
+        }
+
+        return await EdgeTtsClient.SynthesizeMp3Async(plain, voiceId, language, ct);
+    }
+
     private async Task<byte[]> FetchProviderAudioAsync(
         CloudTtsProvider provider,
         string voiceId,
@@ -1174,6 +1247,9 @@ public sealed class CloudVoiceService
         string name = ProviderDisplayName(provider, _library.Prefs);
         switch (provider)
         {
+            case CloudTtsProvider.Edge:
+                return await FetchEdgeAudioAsync(voiceId, plain, language, ct);
+
             case CloudTtsProvider.Free:
             {
                 byte[]? freeWav = await FetchFreeOnlineWavAsync(voiceId, plain, language, ct);

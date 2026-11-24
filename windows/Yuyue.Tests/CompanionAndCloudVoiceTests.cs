@@ -58,9 +58,11 @@ public sealed class CompanionAndCloudVoiceTests : IDisposable
     }
 
     [Fact]
-    public void CloudVoiceService_ParsesAll16ProvidersAndEndpointsAndEvictsLruCache()
+    public void CloudVoiceService_ParsesAll17ProvidersAndEndpointsAndEvictsLruCache()
     {
-        Assert.Equal(16, CloudVoiceService.AllProviders.Length);
+        Assert.Equal(17, CloudVoiceService.AllProviders.Length);
+        Assert.False(CloudVoiceService.IsPaidCloud(CloudTtsProvider.Edge));
+        Assert.False(CloudVoiceService.NeedsKey(CloudTtsProvider.Edge));
         Assert.False(CloudVoiceService.IsPaidCloud(CloudTtsProvider.Free));
         Assert.False(CloudVoiceService.NeedsKey(CloudTtsProvider.Free));
         foreach (var p in CloudVoiceService.AllProviders)
@@ -137,5 +139,23 @@ public sealed class CompanionAndCloudVoiceTests : IDisposable
         Assert.Equal(400, u.Input);
         Assert.Equal(200, u.Output);
         Assert.Equal(600, u.Cached);
+    }
+
+    [Fact]
+    public void EdgeTtsClient_GeneratesValidSecMsGecV2TokensAndFormatsVoiceNames()
+    {
+        Assert.Equal(
+            "2CD23A2CA0B2595A-F3C846C370E05F9CC83ACC5F995C5F5D87A4D0F14CE8936A0F902E64099E38A2",
+            EdgeTtsClient.GenerateSecMsGecV2(1700000000.0));
+        Assert.Equal(
+            "6D50DDDB91812C33-DD68EFB01898B0750C9797D51A5FF93471DFDAE6888A1039D532CBDCCE54545D",
+            EdgeTtsClient.GenerateSecMsGecV2(1760000000.0));
+        Assert.Equal(
+            "Microsoft Server Speech Text to Speech Voice (zh-CN, XiaoxiaoNeural)",
+            EdgeTtsClient.FormatVoiceName("zh-CN-XiaoxiaoNeural"));
+        Assert.Equal(
+            "Microsoft Server Speech Text to Speech Voice (zh-CN-liaoning, XiaobeiNeural)",
+            EdgeTtsClient.FormatVoiceName("zh-CN-liaoning-XiaobeiNeural"));
+        Assert.Equal(22, CloudVoiceService.EdgeBuiltinVoices.Length);
     }
 }

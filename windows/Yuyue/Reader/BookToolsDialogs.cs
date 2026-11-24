@@ -38,7 +38,7 @@ public static class BookToolsDialogs
         try { detail = library.GetBookDetail(bookId); } catch { }
 
         ContentDialog? dlgRef = null;
-        var host = new Grid { Width = 440 };
+        var host = new Grid();
 
         void TriggerUndoExpiry(Guid token)
         {
@@ -70,21 +70,16 @@ public static class BookToolsDialogs
 
         UIElement BuildListView()
         {
-            if (dlgRef is not null)
-            {
-                dlgRef.Title = $"替换规则 · {bookTitle}";
-                dlgRef.CloseButtonText = "好了";
-            }
-
             ReplaceRule[] mine;
             ReplaceRule[] shared;
             try { mine = library.Core.ReplaceRules(bookId); } catch { mine = []; }
             try { shared = library.Core.ReplaceRules(null); } catch { shared = []; }
             var rules = scopeBook ? mine : shared;
 
-            var root = new StackPanel { Spacing = 10 };
+            var root = new StackPanel { Spacing = 12, Padding = new Thickness(22, 18, 22, 18) };
+            root.Children.Add(YYChrome.MakeSheetHeader("替换规则", bookTitle, () => dlgRef?.Hide(), dark, titleSize: 18));
 
-            // Segmented scope bar with counts
+            // Segmented scope bar with counts (1:1 reader-rule-edit/3.png: "这本书 0 | 全部书 0")
             var segGrid = new Grid { ColumnSpacing = 3 };
             segGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             segGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -92,19 +87,19 @@ public static class BookToolsDialogs
             Button MakeScopeSeg(int col, bool isBook, string label, int count)
             {
                 bool on = scopeBook == isBook;
+                var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+                sp.Children.Add(new TextBlock { Text = L10n.T(label), FontSize = 12.5, FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal, Foreground = ThemeHelper.Brush(on ? p.T1 : p.T2) });
+                sp.Children.Add(new TextBlock { Text = count.ToString(), FontSize = 12, Foreground = ThemeHelper.Brush(p.T3) });
                 var b = new Button
                 {
                     HorizontalAlignment = HorizontalAlignment.Stretch,
-                    Height = 28,
-                    MinHeight = 28,
+                    Height = 30,
+                    MinHeight = 30,
                     CornerRadius = new CornerRadius(8),
                     BorderThickness = new Thickness(0),
                     Background = on ? ThemeHelper.Brush(p.Card) : new SolidColorBrush(Colors.Transparent),
-                    Foreground = ThemeHelper.Brush(on ? p.T1 : p.T2),
-                    FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal,
-                    FontSize = 12,
                     UseSystemFocusVisuals = false,
-                    Content = count > 0 ? $"{label} ({count})" : label,
+                    Content = sp,
                 };
                 b.Click += (_, _) => { scopeBook = isBook; RenderHost(); };
                 Grid.SetColumn(b, col);
@@ -365,34 +360,18 @@ public static class BookToolsDialogs
             };
             root.Children.Add(listScroll);
 
-            // Secondary card: 从常用规则里挑 + 全部书的 N 条也在生效 (1:1 ReplaceRules.swift:146-162)
-            var extraGroup = new StackPanel { Spacing = 0 };
-            var commonRowBtn = new Button
-            {
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                Padding = new Thickness(12, 9, 12, 9),
-                Background = new SolidColorBrush(Colors.Transparent),
-                BorderThickness = new Thickness(0),
-                UseSystemFocusVisuals = false,
-            };
-            var cg = new Grid();
-            cg.Children.Add(new TextBlock { Text = "＋ 从常用规则里挑", FontSize = 12, FontWeight = FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) });
-            cg.Children.Add(new TextBlock { Text = "网址水印、多余空行 ›", FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), HorizontalAlignment = HorizontalAlignment.Right });
-            commonRowBtn.Content = cg;
-            commonRowBtn.Click += (_, _) => { subMode = "common"; RenderHost(); };
-            extraGroup.Children.Add(commonRowBtn);
-
+            // 1:1 reader-rule-edit/3.png: clean note + bottom bar (+ 常用规则 on left, 好了 on right)
             if (scopeBook && shared.Length > 0)
             {
-                extraGroup.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(12, 0, 12, 0) });
                 var crossBtn = new Button
                 {
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                     HorizontalContentAlignment = HorizontalAlignment.Stretch,
                     Padding = new Thickness(12, 9, 12, 9),
-                    Background = new SolidColorBrush(Colors.Transparent),
-                    BorderThickness = new Thickness(0),
+                    CornerRadius = new CornerRadius(11),
+                    Background = ThemeHelper.Brush(p.Card),
+                    BorderBrush = ThemeHelper.Brush(p.Line),
+                    BorderThickness = new Thickness(0.5),
                     UseSystemFocusVisuals = false,
                 };
                 var xg = new Grid();
@@ -400,25 +379,25 @@ public static class BookToolsDialogs
                 xg.Children.Add(new TextBlock { Text = "看看 ›", FontSize = 11, Foreground = ThemeHelper.Brush(tint.Accent), HorizontalAlignment = HorizontalAlignment.Right });
                 crossBtn.Content = xg;
                 crossBtn.Click += (_, _) => { scopeBook = false; RenderHost(); };
-                extraGroup.Children.Add(crossBtn);
+                root.Children.Add(crossBtn);
             }
-
-            root.Children.Add(new Border
-            {
-                CornerRadius = new CornerRadius(12),
-                Background = ThemeHelper.Brush(p.Card),
-                BorderBrush = ThemeHelper.Brush(p.Line),
-                BorderThickness = new Thickness(1),
-                Child = extraGroup,
-            });
 
             root.Children.Add(new TextBlock
             {
-                Text = "规则从上往下依次执行。只改朗读的规则不动屏幕上的字，只改读出来的音。",
-                FontSize = 11,
+                Text = "规则从上往下依次执行，按住一条可以拖动顺序。只改朗读的规则不动屏幕上的字，只改读出来的音。",
+                FontSize = 11.5,
+                LineHeight = 18,
                 Foreground = ThemeHelper.Brush(p.T3),
                 TextWrapping = TextWrapping.Wrap,
             });
+
+            var footRow = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+            var commonPill = YYChrome.MakeSheetPillButton("＋  常用规则", () => { subMode = "common"; RenderHost(); }, dark, library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 15);
+            var donePill = YYChrome.MakeSheetPillButton("好了", () => dlgRef?.Hide(), dark, library.Prefs.Tint, "warm", height: 36, horizontalPadding: 20);
+            donePill.HorizontalAlignment = HorizontalAlignment.Right;
+            footRow.Children.Add(commonPill);
+            footRow.Children.Add(donePill);
+            root.Children.Add(footRow);
 
             return root;
         }
@@ -447,26 +426,9 @@ public static class BookToolsDialogs
         UIElement BuildEditorView(ReplaceRule initial)
         {
             bool isNew = string.IsNullOrEmpty(initial.Id);
-            if (dlgRef is not null)
-            {
-                dlgRef.Title = isNew ? "添加规则" : "编辑规则";
-                dlgRef.CloseButtonText = "关闭";
-            }
-
             var draft = initial;
-            var root = new StackPanel { Spacing = 10 };
-
-            var backBtn = new Button
-            {
-                Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
-                Content = "‹ 返回规则列表",
-                Height = 26,
-                MinHeight = 26,
-                FontSize = 11.5,
-                HorizontalAlignment = HorizontalAlignment.Left,
-            };
-            backBtn.Click += (_, _) => { subMode = "list"; RenderHost(); };
-            root.Children.Add(backBtn);
+            var root = new StackPanel { Spacing = 10, Padding = new Thickness(22, 18, 22, 18) };
+            root.Children.Add(YYChrome.MakeSheetHeader(isNew ? "添加规则" : "编辑规则", bookTitle, () => { subMode = "list"; RenderHost(); }, dark, titleSize: 18));
 
             var findBox = new TextBox
             {
@@ -733,30 +695,19 @@ public static class BookToolsDialogs
             return root;
         }
 
-        // ---------- Sub-view: Common Presets ----------
+        // ---------- Sub-view: Common Presets (1:1 reader-rules-common/1.png) ----------
         UIElement BuildCommonView()
         {
-            if (dlgRef is not null)
-            {
-                dlgRef.Title = scopeBook ? $"加到《{bookTitle}》" : "加到全部书";
-                dlgRef.CloseButtonText = "好了";
-            }
-
             ReplaceRule[] existing;
             try { existing = library.Core.ReplaceRules(scopeBook ? bookId : null); } catch { existing = []; }
 
-            var root = new StackPanel { Spacing = 10 };
-            var backBtn = new Button
-            {
-                Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
-                Content = "‹ 返回规则列表",
-                Height = 26,
-                MinHeight = 26,
-                FontSize = 11.5,
-                HorizontalAlignment = HorizontalAlignment.Left,
-            };
-            backBtn.Click += (_, _) => { subMode = "list"; RenderHost(); };
-            root.Children.Add(backBtn);
+            var root = new StackPanel { Spacing = 12, Padding = new Thickness(22, 18, 22, 18) };
+            root.Children.Add(YYChrome.MakeSheetHeader(
+                scopeBook ? "加到这本书" : "加到全部书",
+                scopeBook ? bookTitle : null,
+                () => { subMode = "list"; RenderHost(); },
+                dark,
+                titleSize: 18));
 
             var group = new StackPanel { Spacing = 0 };
             CommonRule[] presets;
@@ -764,27 +715,35 @@ public static class BookToolsDialogs
 
             for (int i = 0; i < presets.Length; i++)
             {
-                if (i > 0) group.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(12, 0, 12, 0) });
+                if (i > 0) group.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(14, 0, 14, 0) });
                 var c = presets[i];
                 bool added = existing.Any(r => r.Find == c.Rule.Find && r.Regex == c.Rule.Regex);
 
-                var row = new Grid { Padding = new Thickness(12, 10, 12, 10), ColumnSpacing = 10 };
+                var row = new Grid { Padding = new Thickness(14, 11, 14, 11), ColumnSpacing = 12 };
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
                 var meta = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-                meta.Children.Add(new TextBlock { Text = c.Title, FontSize = 12.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
-                meta.Children.Add(new TextBlock { Text = c.Detail, FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), TextWrapping = TextWrapping.Wrap });
+                meta.Children.Add(new TextBlock { Text = c.Title, FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
+                meta.Children.Add(new TextBlock { Text = c.Detail, FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), TextWrapping = TextWrapping.Wrap });
                 row.Children.Add(meta);
 
                 var addBtn = new Button
                 {
-                    Style = (Style)Application.Current.Resources[added ? "YYIconButtonStyle" : "YYPillButtonStyle"],
-                    Content = added ? "✓ 加上了" : "＋ 加上",
-                    Height = 26,
-                    MinHeight = 26,
+                    Height = 28,
+                    MinHeight = 28,
+                    Padding = new Thickness(12, 0, 12, 0),
+                    CornerRadius = new CornerRadius(14),
+                    Background = ThemeHelper.Brush(added ? p.Inset : p.Card),
+                    BorderBrush = ThemeHelper.Brush(p.Line),
+                    BorderThickness = new Thickness(added ? 0 : 0.75),
+                    Foreground = ThemeHelper.Brush(added ? p.T3 : tint.Accent),
+                    FontWeight = FontWeights.SemiBold,
                     FontSize = 11.5,
                     IsEnabled = !added,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    UseSystemFocusVisuals = false,
+                    Content = added ? "✓ 已加上" : "＋ 加上",
                 };
                 addBtn.Click += (_, _) =>
                 {
@@ -803,29 +762,29 @@ public static class BookToolsDialogs
 
             root.Children.Add(new ScrollViewer
             {
-                MaxHeight = 340,
+                MaxHeight = 360,
                 Content = new Border
                 {
                     CornerRadius = new CornerRadius(12),
                     Background = ThemeHelper.Brush(p.Card),
                     BorderBrush = ThemeHelper.Brush(p.Line),
-                    BorderThickness = new Thickness(1),
+                    BorderThickness = new Thickness(0.75),
                     Child = group,
                 },
             });
-            root.Children.Add(new TextBlock { Text = "加完还能改、能关。", FontSize = 11, Foreground = ThemeHelper.Brush(p.T3) });
+
+            var footRow = new Grid { Margin = new Thickness(2, 2, 0, 0) };
+            footRow.Children.Add(new TextBlock { Text = "加完还能改、能关", FontSize = 12, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center });
+            var okBtn = YYChrome.MakeSheetPillButton("好了", () => { subMode = "list"; RenderHost(); }, dark, library.Prefs.Tint, "warm", height: 36, horizontalPadding: 20);
+            okBtn.HorizontalAlignment = HorizontalAlignment.Right;
+            footRow.Children.Add(okBtn);
+            root.Children.Add(footRow);
             return root;
         }
 
         RenderHost();
 
-        dlgRef = new ContentDialog
-        {
-            XamlRoot = xamlRoot,
-            Title = $"替换规则 · {bookTitle}",
-            Content = host,
-            CloseButtonText = "好了",
-        };
+        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 472, host);
         await dlgRef.ShowAsync();
         previewCts?.Cancel();
         return anyChanged;
@@ -857,7 +816,16 @@ public static class BookToolsDialogs
         var tint = ThemeHelper.TintColors(library.Prefs.Tint, dark);
 
         ContentDialog? dlgRef = null;
-        var host = new Grid { Width = 460 };
+        bool confirmedSave = false;
+        var host = new Grid();
+        var headerSubtitleTb = new TextBlock
+        {
+            Text = $"{bookTitle}.txt",
+            FontSize = 13,
+            Foreground = ThemeHelper.Brush(p.T3),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(4, 1, 0, 0),
+        };
 
         bool IsChoiceChanged()
         {
@@ -921,9 +889,24 @@ public static class BookToolsDialogs
         {
             Text = ruleText,
             FontFamily = new FontFamily(YYFontFamily.Mono.WindowsFamily()),
-            FontSize = 11.5,
+            FontSize = 12,
+            BorderThickness = new Thickness(0),
+            Background = new SolidColorBrush(Colors.Transparent),
+            VerticalAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(0, 4, 0, 4),
         };
-        var encHost = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        var encSegGrid = new Grid { ColumnSpacing = 3 };
+        for (int c = 0; c < 4; c++) encSegGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var encHost = new Border
+        {
+            CornerRadius = new CornerRadius(19),
+            Background = ThemeHelper.Brush(p.Card),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(0.75),
+            Padding = new Thickness(3),
+            Child = encSegGrid,
+        };
+        Button? saveSheetBtn = null;
         var encTrailTb = new TextBlock { FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), HorizontalAlignment = HorizontalAlignment.Right };
         var chapTrailTb = new TextBlock { FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), HorizontalAlignment = HorizontalAlignment.Right };
         var previewCardHost = new StackPanel { Spacing = 4 };
@@ -988,29 +971,14 @@ public static class BookToolsDialogs
         void RenderAllChaptersView()
         {
             if (currentLayout is null) return;
-            if (dlgRef is not null)
-            {
-                dlgRef.Title = $"全部 {currentLayout.Chapters.Length} 章 · {bookTitle}";
-                dlgRef.IsPrimaryButtonEnabled = false;
-            }
             host.Children.Clear();
-            var sp = new StackPanel { Spacing = 10 };
-            var backBtn = new Button
-            {
-                Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
-                Content = "‹ 返回编码和目录",
-                Height = 26,
-                MinHeight = 26,
-                FontSize = 11.5,
-                HorizontalAlignment = HorizontalAlignment.Left,
-            };
-            backBtn.Click += (_, _) =>
+            var sp = new StackPanel { Spacing = 10, Padding = new Thickness(22, 18, 22, 18) };
+            sp.Children.Add(YYChrome.MakeSheetHeader($"全部 {currentLayout.Chapters.Length} 章", bookTitle, () =>
             {
                 showAllChapters = false;
                 BuildMainFrame();
                 RenderMainContent();
-            };
-            sp.Children.Add(backBtn);
+            }, dark, titleSize: 18));
 
             var allStack = new StackPanel { Spacing = 0 };
             int? longIdx = currentLayout.Long is uint l ? (int)l : null;
@@ -1027,7 +995,7 @@ public static class BookToolsDialogs
                     CornerRadius = new CornerRadius(12),
                     Background = ThemeHelper.Brush(p.Card),
                     BorderBrush = ThemeHelper.Brush(p.Line),
-                    BorderThickness = new Thickness(1),
+                    BorderThickness = new Thickness(0.75),
                     Child = allStack,
                 },
             });
@@ -1036,39 +1004,44 @@ public static class BookToolsDialogs
 
         void RenderMainContent()
         {
-            if (dlgRef is not null)
-            {
-                string sub = currentLayout is not null ? $" · {FormatBytesShort(currentLayout.Size)}" : "";
-                dlgRef.Title = $"编码和目录 · {bookTitle}.txt{sub}";
-                dlgRef.IsPrimaryButtonEnabled = string.IsNullOrEmpty(currentLayout?.Error);
-            }
+            string sub = currentLayout is not null ? $" · {FormatBytesShort(currentLayout.Size)}" : "";
+            headerSubtitleTb.Text = $"{bookTitle}.txt{sub}";
+            if (saveSheetBtn is not null)
+                saveSheetBtn.IsEnabled = string.IsNullOrEmpty(currentLayout?.Error);
 
             encTrailTb.Text = currentLayout is not null ? $"自动识别为 {currentLayout.Detected}" : "";
             chapTrailTb.Text = currentLayout is not null && string.IsNullOrEmpty(currentLayout.Error)
                 ? $"识别出 {currentLayout.Chapters.Length} 章"
                 : "";
-            if (currentLayout is not null && string.IsNullOrEmpty(ruleBox.PlaceholderText))
-                ruleBox.PlaceholderText = currentLayout.DefaultRule;
-            else if (currentLayout is not null)
+            if (currentLayout is not null)
                 ruleBox.PlaceholderText = currentLayout.DefaultRule;
 
-            // Encoding buttons ("自动 · GBK", "UTF-8", "GB18030", "Big5")
-            encHost.Children.Clear();
+            // 1:1 reader-txt/1.png: 4-segment white capsule with warm active pill ("自动 · GBK", "UTF-8", "GB18030", "Big5")
+            encSegGrid.Children.Clear();
             string autoLabel = currentLayout is not null ? $"自动 · {currentLayout.Detected}" : "自动";
-            foreach (var (id, lbl) in new (string? Id, string Label)[] { (null, autoLabel), ("UTF-8", "UTF-8"), ("GB18030", "GB18030"), ("Big5", "Big5") })
+            var encItems = new (string? Id, string Label)[] { (null, autoLabel), ("UTF-8", "UTF-8"), ("GB18030", "GB18030"), ("Big5", "Big5") };
+            for (int ei = 0; ei < encItems.Length; ei++)
             {
+                var (id, lbl) = encItems[ei];
                 bool on = string.Equals(id, selectedEnc, StringComparison.OrdinalIgnoreCase);
                 var b = new Button
                 {
-                    Style = (Style)Application.Current.Resources[on ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"],
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
                     Content = lbl,
-                    Height = 27,
-                    MinHeight = 27,
-                    FontSize = 11.5,
+                    Height = 31,
+                    MinHeight = 31,
+                    CornerRadius = new CornerRadius(15.5),
+                    Background = on ? ThemeHelper.Brush(tint.AccentSoft) : new SolidColorBrush(Colors.Transparent),
+                    Foreground = ThemeHelper.Brush(on ? tint.Accent : p.T2),
+                    FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal,
+                    BorderThickness = new Thickness(0),
+                    FontSize = 12,
+                    UseSystemFocusVisuals = false,
                 };
                 string? targetEnc = id;
                 b.Click += (_, _) => { selectedEnc = targetEnc; RefreshLayout(debounce: false); };
-                encHost.Children.Add(b);
+                Grid.SetColumn(b, ei);
+                encSegGrid.Children.Add(b);
             }
 
             // Preview card
@@ -1256,9 +1229,17 @@ public static class BookToolsDialogs
         void BuildMainFrame()
         {
             host.Children.Clear();
-            var sp = new StackPanel { Spacing = 8 };
+            var topHead = new Grid();
+            var topLeft = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+            topLeft.Children.Add(new TextBlock { Text = L10n.T("编码和目录"), FontSize = 18, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
+            topLeft.Children.Add(headerSubtitleTb);
+            topHead.Children.Add(topLeft);
+            var closeCircle = YYChrome.MakeSheetCloseButton(() => dlgRef?.Hide(), dark);
+            closeCircle.HorizontalAlignment = HorizontalAlignment.Right;
+            topHead.Children.Add(closeCircle);
 
-            var encHead = new Grid();
+            var sp = new StackPanel { Spacing = 8 };
+            var encHead = new Grid { Margin = new Thickness(2, 2, 2, 0) };
             encHead.Children.Add(new TextBlock { Text = "编码", FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T2) });
             encHead.Children.Add(encTrailTb);
             sp.Children.Add(encHead);
@@ -1268,26 +1249,26 @@ public static class BookToolsDialogs
                 CornerRadius = new CornerRadius(12),
                 Background = ThemeHelper.Brush(p.Card),
                 BorderBrush = ThemeHelper.Brush(p.Line),
-                BorderThickness = new Thickness(1),
-                Padding = new Thickness(14, 10, 14, 10),
+                BorderThickness = new Thickness(0.75),
+                Padding = new Thickness(14, 11, 14, 11),
                 Child = previewCardHost,
             });
             sp.Children.Add(unreadableTb);
 
-            var chapHead = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+            var chapHead = new Grid { Margin = new Thickness(2, 6, 2, 0) };
             chapHead.Children.Add(new TextBlock { Text = "目录", FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T2) });
             chapHead.Children.Add(chapTrailTb);
             sp.Children.Add(chapHead);
 
             var chapCard = new StackPanel { Spacing = 0 };
-            var ruleRow = new Grid { Padding = new Thickness(12, 8, 12, 8), ColumnSpacing = 8 };
+            var ruleRow = new Grid { Padding = new Thickness(14, 6, 12, 6), ColumnSpacing = 10, MinHeight = 38 };
             ruleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
             ruleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             ruleRow.Children.Add(new TextBlock { Text = "规则", FontSize = 12, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center });
             Grid.SetColumn(ruleBox, 1);
             ruleRow.Children.Add(ruleBox);
             chapCard.Children.Add(ruleRow);
-            chapCard.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(12, 0, 12, 0) });
+            chapCard.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(14, 0, 14, 0) });
             chapCard.Children.Add(chaptersHost);
 
             sp.Children.Add(new Border
@@ -1295,33 +1276,54 @@ public static class BookToolsDialogs
                 CornerRadius = new CornerRadius(12),
                 Background = ThemeHelper.Brush(p.Card),
                 BorderBrush = ThemeHelper.Brush(p.Line),
-                BorderThickness = new Thickness(1),
+                BorderThickness = new Thickness(0.75),
                 Child = chapCard,
             });
 
             resetRuleBtn.Visibility = !string.IsNullOrWhiteSpace(ruleText) ? Visibility.Visible : Visibility.Collapsed;
             sp.Children.Add(resetRuleBtn);
             sp.Children.Add(warningHost);
-            sp.Children.Add(new TextBlock { Text = "自动识别还认得序章、楔子、Chapter 1。", FontSize = 11, Foreground = ThemeHelper.Brush(p.T3) });
 
-            host.Children.Add(new ScrollViewer { MaxHeight = 470, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = sp });
+            var saveSp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, VerticalAlignment = VerticalAlignment.Center };
+            saveSp.Children.Add(new TextBlock { Text = L10n.T("保存"), FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(tint.Accent) });
+            saveSp.Children.Add(new TextBlock { Text = "↵", FontSize = 11.5, Foreground = ThemeHelper.Brush(tint.Accent), Opacity = 0.72, VerticalAlignment = VerticalAlignment.Center });
+
+            saveSheetBtn = YYChrome.MakeSheetPillButton(saveSp, () => { confirmedSave = true; dlgRef?.Hide(); }, dark, library.Prefs.Tint, "warm", height: 36, horizontalPadding: 18);
+            var footActs = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 10,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Children =
+                {
+                    YYChrome.MakeSheetPillButton("取消", () => dlgRef?.Hide(), dark, library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 18),
+                    saveSheetBtn,
+                },
+            };
+            var footRow = new Grid { Margin = new Thickness(2, 4, 0, 0) };
+            footRow.Children.Add(new TextBlock { Text = "自动识别还认得序章、楔子、Chapter 1", FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center });
+            footRow.Children.Add(footActs);
+
+            var outer = new StackPanel
+            {
+                Spacing = 12,
+                Padding = new Thickness(22, 18, 22, 18),
+                Children =
+                {
+                    topHead,
+                    new ScrollViewer { MaxHeight = 430, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = sp },
+                    footRow,
+                },
+            };
+            host.Children.Add(outer);
         }
 
         BuildMainFrame();
         RenderMainContent();
         RefreshLayout(debounce: false);
 
-        dlgRef = new ContentDialog
-        {
-            XamlRoot = xamlRoot,
-            Title = $"编码和目录 · {bookTitle}",
-            Content = host,
-            PrimaryButtonText = "保存",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary,
-        };
-
-        var result = await dlgRef.ShowAsync();
+        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 504, host, maxHeight: 780);
+        await dlgRef.ShowAsync();
         debounceCts?.Cancel();
 
         if (pendingJumpSection is uint jumpSec)
@@ -1330,7 +1332,7 @@ public static class BookToolsDialogs
             return false;
         }
 
-        if (result != ContentDialogResult.Primary || !IsChoiceChanged())
+        if (!confirmedSave || !IsChoiceChanged())
             return false;
 
         try

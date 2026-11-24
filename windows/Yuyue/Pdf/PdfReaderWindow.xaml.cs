@@ -660,12 +660,12 @@ public sealed partial class PdfReaderWindow : Window
 
             var btn = new Button
             {
-                Height = 58,
+                Height = 64,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
-                Background = ThemeHelper.Brush(p.Inset),
-                BorderBrush = on ? ThemeHelper.Brush(p.T1) : new SolidColorBrush(Colors.Transparent),
-                BorderThickness = new Thickness(1.5),
-                CornerRadius = new CornerRadius(9),
+                Background = ThemeHelper.Brush(on ? p.Inset : p.Card),
+                BorderBrush = ThemeHelper.Brush(on ? Color.FromArgb(255, 118, 116, 112) : p.Line),
+                BorderThickness = new Thickness(on ? 1.5 : 0.75),
+                CornerRadius = new CornerRadius(11),
                 Padding = new Thickness(0),
                 UseSystemFocusVisuals = false,
                 Content = sp,
@@ -707,7 +707,9 @@ public sealed partial class PdfReaderWindow : Window
         ShowCardHost.Children.Add(new Border
         {
             CornerRadius = new CornerRadius(11),
-            Background = ThemeHelper.Brush(p.Inset),
+            Background = ThemeHelper.Brush(p.Card),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(0.75),
             Child = nightRow,
         });
     }

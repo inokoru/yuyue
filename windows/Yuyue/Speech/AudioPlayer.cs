@@ -256,7 +256,7 @@ public sealed class AudioPlayer : IDisposable
         foreach (var cv in library.CloudVoices.GetAllConfiguredVoices())
         {
             string pLabel = CloudVoiceService.ProviderDisplayName(cv.Provider, library.Prefs);
-            bool recommended = cv.Provider == CloudTtsProvider.Free || cv.Provider == CloudTtsProvider.Volcengine || cv.Provider == CloudTtsProvider.Fish;
+            bool recommended = cv.Provider is CloudTtsProvider.Edge or CloudTtsProvider.Free or CloudTtsProvider.Volcengine or CloudTtsProvider.Fish;
             list.Add(new SpeechVoiceOption(cv.FullId, $"☁ {cv.DisplayName}（{pLabel}）", recommended, SpeechVoiceKind.Cloud, cv.Gender, cv.Language));
         }
 
