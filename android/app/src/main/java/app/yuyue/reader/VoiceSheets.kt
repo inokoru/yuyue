@@ -352,12 +352,16 @@ fun VoiceGroupsContent(
     var previewingId by remember { mutableStateOf<String?>(null) }
     var previewLoading by remember { mutableStateOf(false) }
     var previewJob by remember { mutableStateOf<Job?>(null) }
+    var previewFailedKey by remember { mutableStateOf<String?>(null) }
+    var previewError by remember { mutableStateOf<String?>(null) }
 
     fun stopLocalPreview() {
         previewJob?.cancel()
         previewJob = null
         previewingId = null
         previewLoading = false
+        previewFailedKey = null
+        previewError = null
         SystemVoice.Engine.stopPreview()
     }
 
@@ -404,6 +408,8 @@ fun VoiceGroupsContent(
             }
             if (!started && previewingId == key) {
                 previewingId = null
+                previewFailedKey = key
+                previewError = t("试听暂不可用，请检查系统语音设置或稍后再试")
             }
             return
         }
@@ -422,17 +428,23 @@ fun VoiceGroupsContent(
                     }
                     if (!started && previewingId == key) {
                         previewingId = null
+                        previewFailedKey = key
+                        previewError = t("试听暂不可用，请检查系统语音设置或稍后再试")
                     }
                 } else if (previewingId == key) {
                     previewingId = null
                     previewLoading = false
+                    previewFailedKey = key
+                    previewError = t("试听暂不可用，请检查网络或稍后再试")
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
-            } catch (_: Throwable) {
+            } catch (e: Throwable) {
                 if (previewingId == key) {
                     previewingId = null
                     previewLoading = false
+                    previewFailedKey = key
+                    previewError = e.message?.ifBlank { null } ?: t("试听暂不可用，请检查网络或稍后再试")
                 }
             }
         }
@@ -443,6 +455,9 @@ fun VoiceGroupsContent(
         previewLoading -> PreviewState.Loading
         else -> PreviewState.Playing
     }
+
+    fun previewErrorOf(key: String): String? =
+        if (previewFailedKey == key) previewError ?: t("试听暂不可用，请检查网络或稍后再试") else null
 
     val hasFollowRow = roleName != null && onPickFollowNarrator != null
     val showRecommended = CardVoice.speaksLanguage(language)
@@ -459,6 +474,7 @@ fun VoiceGroupsContent(
                     subtitle = followSubtitle ?: t("现在旁白是%@，旁白换了%@也跟着换", narratorVoice?.name ?: "", roleName),
                     selected = selectedId == null,
                     previewState = if (narratorVoice != null) previewStateOf(followKey) else PreviewState.Idle,
+                    error = previewErrorOf(followKey),
                     onPreview = narratorVoice?.let { nv -> { playPreview(nv, key = followKey) } },
                     onMore = null,
                     onClick = onPickFollowNarrator,
@@ -549,6 +565,7 @@ fun VoiceGroupsContent(
                                 subtitle = sub,
                                 selected = selectedId == kv.id,
                                 previewState = previewStateOf(kv.id),
+                                error = previewErrorOf(kv.id),
                                 onPreview = { playPreview(kv) },
                                 onMore = null,
                                 onClick = { onPickVoice(kv) },
@@ -577,6 +594,7 @@ fun VoiceGroupsContent(
                                 subtitle = sub,
                                 selected = selectedId == card.id,
                                 previewState = previewStateOf(card.id),
+                                error = previewErrorOf(card.id),
                                 onPreview = { playPreview(v) },
                                 onMore = null,
                                 onClick = { onPickVoice(v) },
@@ -614,6 +632,7 @@ fun VoiceGroupsContent(
                     subtitle = sub,
                     selected = selectedId == card.id,
                     previewState = previewStateOf(card.id),
+                    error = previewErrorOf(card.id),
                     onPreview = if (LiveVoiceModel.canRun(dataDir) || (v as? ClonedVoice)?.isReady == true) ({ playPreview(v) }) else null,
                     onMore = { onOpenDetail(card.id) },
                     onClick = { onPickVoice(v) },
@@ -636,6 +655,7 @@ fun VoiceGroupsContent(
                     subtitle = sub,
                     selected = selectedId == card.id,
                     previewState = previewStateOf(card.id),
+                    error = previewErrorOf(card.id),
                     onPreview = if (LiveVoiceModel.canRun(dataDir)) ({ playPreview(v) }) else null,
                     onMore = null,
                     onClick = { onPickVoice(v) },
@@ -681,6 +701,7 @@ fun VoiceGroupsContent(
                         subtitle = if (used.isNotEmpty()) t("%@在用", used.joinToString(t("、"))) else t("云端"),
                         selected = selectedId == v.id,
                         previewState = previewStateOf(v.id),
+                        error = previewErrorOf(v.id),
                         onPreview = { playPreview(v) },
                         onMore = null,
                         onClick = { onPickVoice(v) },
@@ -724,6 +745,7 @@ fun VoiceGroupsContent(
                         subtitle = sub,
                         selected = selectedId == v.id,
                         previewState = previewStateOf(v.id),
+                        error = previewErrorOf(v.id),
                         onPreview = { playPreview(v) },
                         onMore = null,
                         onClick = { onPickVoice(v) },
@@ -745,6 +767,7 @@ private fun VoiceChoiceRow(
     subtitle: String,
     selected: Boolean,
     previewState: PreviewState,
+    error: String? = null,
     onPreview: (() -> Unit)?,
     onMore: (() -> Unit)?,
     onClick: () -> Unit,
@@ -807,6 +830,16 @@ private fun VoiceChoiceRow(
                 }
             }
             Text(subtitle, fontSize = 10.5.sp, color = YY.c.t3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (error != null) {
+                Text(
+                    error,
+                    fontSize = 10.sp,
+                    color = YY.c.danger,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
         }
         if (selected) {
             Icon(Icons.check, null, tint = YY.tint.accent, modifier = Modifier.size(15.dp))

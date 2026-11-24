@@ -1,6 +1,8 @@
 package app.yuyue.design
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.SharedPreferences
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
@@ -8,11 +10,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -20,6 +24,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 
 /** The palette for the appearance in effect: 浅色, 深色 or 跟随系统 (设置 · 外观). */
 val LocalPalette = staticCompositionLocalOf { YYColors.Light }
@@ -72,13 +77,31 @@ fun YuyueTheme(content: @Composable () -> Unit) {
         Appearance.DARK -> true
         else -> isSystemInDarkTheme()
     }
-    app.yuyue.reader.PaperAppearance.syncAppearance(dark)
+    val view = LocalView.current
+    val context = LocalContext.current
+    SideEffect {
+        app.yuyue.reader.PaperAppearance.syncAppearance(dark)
+        if (!view.isInEditMode) {
+            val window = context.findActivity()?.window
+            if (window != null) {
+                val controller = WindowCompat.getInsetsController(window, view)
+                controller.isAppearanceLightStatusBars = !dark
+                controller.isAppearanceLightNavigationBars = !dark
+            }
+        }
+    }
     CompositionLocalProvider(
         LocalPalette provides if (dark) YYColors.Dark else YYColors.Light,
         LocalDark provides dark,
         LocalTint provides (YYTints.All.firstOrNull { it.id == tintID.value } ?: YYTints.Default),
         content = content,
     )
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 /** The app's settings, like the iPhone's UserDefaults. */

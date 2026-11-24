@@ -253,6 +253,9 @@ private object ListeningFocus {
                 if (v.preview(text)) {
                     startedAt = System.currentTimeMillis(); lasts = secs * 1000L
                     delay(secs * 1000L)
+                } else {
+                    failedId = v.id
+                    failedMessage = t("试听暂不可用，请检查系统语音设置或稍后再试")
                 }
             } else {
                 startedAt = 0L
@@ -260,8 +263,12 @@ private object ListeningFocus {
                 val s = result.getOrNull()
                 if (s != null) {
                     startedAt = System.currentTimeMillis(); lasts = s.samples.size * 1000L / s.rate
-                    SystemVoice.Engine.preview(s)
-                    delay(lasts)
+                    if (SystemVoice.Engine.preview(s)) {
+                        delay(lasts)
+                    } else {
+                        failedId = v.id
+                        failedMessage = t("试听暂不可用，请检查系统语音设置或稍后再试")
+                    }
                 } else {
                     val err = result.exceptionOrNull()
                     if (err !is kotlinx.coroutines.CancellationException) {
@@ -946,44 +953,58 @@ private fun VoiceMessage(v: BookVoice, book: VoiceBook, scope: kotlinx.coroutine
 /** The one reading this kind of book, pinned on top: a card of its own colour. */
 @Composable
 private fun PinnedVoice(v: BookVoice, book: VoiceBook, elsewhere: Boolean, scope: kotlinx.coroutines.CoroutineScope) {
+    val focus = ListeningFocus
     val (ground, ink) = colorsOf(v.id)
     val pinTint = if (YY.dark) YY.c.t2 else ink
-    Row(
+    Column(
         Modifier.fillMaxWidth().heightIn(min = YY.s(44)).shadow(6.dp, RoundedCornerShape(YY.s(14)), ambientColor = Color(0x22332E29), spotColor = Color(0x33332E29))
             .clip(RoundedCornerShape(YY.s(14))).background(YY.c.card).background(if (YY.dark) ground.copy(alpha = 0.12f) else ground.copy(alpha = 0.34f))
             .border(0.5.dp, if (YY.dark) YY.c.line else ink.copy(alpha = 0.16f), RoundedCornerShape(YY.s(14)))
             .padding(horizontal = YY.s(10), vertical = YY.s(7)),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(8)),
+        verticalArrangement = Arrangement.spacedBy(YY.s(5)),
     ) {
-        VoiceAvatar(v, 28f, pinned = true)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(YY.s(1))) {
-            // A system voice's name leads with its language; pinned on a narrow row, only 声音 A.
-            Text(
-                if (v is SystemVoice) v.name.substringAfterLast(" · ") else v.name,
-                style = YY.font(11.5f, FontWeight.SemiBold),
-                color = YY.c.t1,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (elsewhere) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(YY.s(3)),
-                ) {
-                    Icon(Icons.pin, t("念你的%@", book.title), tint = pinTint, modifier = Modifier.size(YY.s(9.5f)))
-                    Text(
-                        voiceSourceTitle(sourceOf(v)),
-                        style = YY.font(9.5f, FontWeight.Medium),
-                        color = pinTint,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(8)),
+        ) {
+            VoiceAvatar(v, 28f, pinned = true)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(YY.s(1))) {
+                // A system voice's name leads with its language; pinned on a narrow row, only 声音 A.
+                Text(
+                    if (v is SystemVoice) v.name.substringAfterLast(" · ") else v.name,
+                    style = YY.font(11.5f, FontWeight.SemiBold),
+                    color = YY.c.t1,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (elsewhere) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(YY.s(3)),
+                    ) {
+                        Icon(Icons.pin, t("念你的%@", book.title), tint = pinTint, modifier = Modifier.size(YY.s(9.5f)))
+                        Text(
+                            voiceSourceTitle(sourceOf(v)),
+                            style = YY.font(9.5f, FontWeight.Medium),
+                            color = pinTint,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
+            VoiceBubble(v, book, scope, dark = true, height = 30f, widest = 108f)
+            if (!elsewhere) {
+                Icon(Icons.pin, t("念你的%@", book.title), tint = pinTint, modifier = Modifier.size(YY.s(14)))
+            }
         }
-        VoiceBubble(v, book, scope, dark = true, height = 30f, widest = 108f)
-        if (!elsewhere) {
-            Icon(Icons.pin, t("念你的%@", book.title), tint = pinTint, modifier = Modifier.size(YY.s(14)))
+        if (focus.failedId == v.id) {
+            Text(
+                focus.failedMessage ?: t("试听暂不可用，请检查网络或稍后再试"),
+                style = YY.font(10f),
+                color = YY.c.danger,
+                maxLines = 2,
+            )
         }
     }
 }

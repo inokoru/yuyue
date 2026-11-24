@@ -50,6 +50,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -158,10 +159,12 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
 
     // The status bar only with the controls, as on iPhone; its icons follow the paper.
     val activity = context as? android.app.Activity
-    LaunchedEffect(model.chromeShown, model.searchShown, model.immersive, paper) {
+    val latestAppDark by rememberUpdatedState(YY.dark)
+    LaunchedEffect(model.chromeShown, model.searchShown, model.immersive, paper, latestAppDark) {
         val window = activity?.window ?: return@LaunchedEffect
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         controller.isAppearanceLightStatusBars = !paper.isDark
+        controller.isAppearanceLightNavigationBars = !paper.isDark
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         val show = model.chromeShown || model.searchShown || (model.immersive && !ImmersivePrefs.hidesStatusBar)
         if (show) controller.show(WindowInsetsCompat.Type.statusBars()) else controller.hide(WindowInsetsCompat.Type.statusBars())
@@ -178,7 +181,10 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
     DisposableEffect(Unit) {
         onDispose {
             val window = activity?.window ?: return@onDispose
-            WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
+            val controller = WindowCompat.getInsetsController(window, window.decorView)
+            controller.isAppearanceLightStatusBars = !latestAppDark
+            controller.isAppearanceLightNavigationBars = !latestAppDark
+            controller.show(WindowInsetsCompat.Type.systemBars())
         }
     }
 
@@ -237,6 +243,18 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
     LaunchedEffect(thermalNotice) {
         if (!thermalNotice.isNullOrEmpty()) {
             model.show(Library.Toast(Library.Toast.Icon.Error, thermalNotice, ""))
+        }
+    }
+    val readyOfflineVoice = model.player?.readyOfflineVoice
+    LaunchedEffect(readyOfflineVoice?.id) {
+        if (readyOfflineVoice != null) {
+            model.show(
+                Library.Toast(
+                    Library.Toast.Icon.Check,
+                    t("离线旁白「%@」已下好", app.yuyue.speech.Voices.title(readyOfflineVoice)),
+                    t("打开听书面板可确认切换"),
+                )
+            )
         }
     }
     thought?.let { mark ->

@@ -124,7 +124,6 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
     var editing by remember { mutableStateOf<BookSummary?>(null) }
     var picking by remember { mutableStateOf<BookSummary?>(null) }
     var addingBook by remember { mutableStateOf(false) }
-    var addingPodcast by remember { mutableStateOf(false) }
     var progressStatus by rememberSaveable { mutableStateOf(ReadingStatus.READING) }
     val sort = ShelfSort.of(sortKey)
     val collection = (place as? ShelfPlace.Collection)?.id
@@ -264,23 +263,15 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
             Box(Modifier.align(Alignment.TopEnd).windowInsetsPadding(WindowInsets.statusBars).padding(top = 14.dp, end = 16.dp)) {
                 TopButtons {
                     TopButton(Icons.feedback, t("反馈"), action = openFeedback)
-                    if (library.importing > 0) Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = YY.c.t2)
-                    } else TopButton(
-                        Icons.add,
-                        when (place) {
-                            ShelfPlace.Progress -> t("加书")
-                            ShelfPlace.Podcasts -> t("添加节目")
-                            else -> t("导入")
-                        }
-                    ) {
-                        when (place) {
-                            ShelfPlace.Progress -> addingBook = true
-                            ShelfPlace.Podcasts -> addingPodcast = true
-                            else -> importShown = true
-                        }
-                    }
                     if (place != ShelfPlace.Podcasts) {
+                        if (library.importing > 0) Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = YY.c.t2)
+                        } else TopButton(
+                            Icons.add,
+                            if (place == ShelfPlace.Progress) t("加书") else t("导入"),
+                        ) {
+                            if (place == ShelfPlace.Progress) addingBook = true else importShown = true
+                        }
                         TopButton(Icons.checkCircle, t("选择"), enabled = shown.isNotEmpty()) { selecting = true }
                     }
                 }
@@ -396,7 +387,6 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
     editing?.let { BookInfoSheet(library, it) { editing = null } }
     picking?.let { CollectionPickerSheet(library, it.id) { picking = null } }
     if (addingBook) AddBookSheet(library, progressStatus) { addingBook = false }
-    if (addingPodcast) app.yuyue.podcast.PodcastAddSheet(library) { addingPodcast = false }
 }
 
 private enum class PanelFrom { Title, Chip }
