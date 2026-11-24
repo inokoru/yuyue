@@ -1,3 +1,2 @@
-// 复制成同目录的 Feedback.local.xcconfig，填上 keygen.py 打出的值。不要提交。
+// 复制成同目录的 Feedback.local.xcconfig，填上 ntfy 话题名。不要提交。
 YUYUE_FEEDBACK_TOPIC =
-YUYUE_FEEDBACK_PUBLIC_KEY =

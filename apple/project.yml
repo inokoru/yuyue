@@ -77,9 +77,8 @@ targets:
         LSApplicationCategoryType: public.app-category.books
         # 同步 · Google Drive: the iOS OAuth client of 语阅's Google Cloud project, once registered.
         YYGoogleClientID: $(GOOGLE_CLIENT_ID)
-        # 反馈: empty until Feedback.local.xcconfig fills them in. Not committed.
+        # 反馈: empty until Feedback.local.xcconfig fills it in. Not committed.
         YuyueFeedbackTopic: $(YUYUE_FEEDBACK_TOPIC)
-        YuyueFeedbackPublicKey: $(YUYUE_FEEDBACK_PUBLIC_KEY)
         ITSAppUsesNonExemptEncryption: false
         # 检查更新 (Mac): the newest release's appcast and its EdDSA key; UpdateCenter checks, Sparkle's
         # installer runs as its own service from the sandbox.

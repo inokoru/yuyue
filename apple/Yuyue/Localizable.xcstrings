@@ -45456,6 +45456,76 @@
           }
         }
       }
+    },
+    "· 请勿上传隐私或版权书" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "· Avoid private data or copyrighted books"
+          }
+        }
+      }
+    },
+    "一句话标题" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Short title"
+          }
+        }
+      }
+    },
+    "一句话概括你的建议" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Summarize your idea in one sentence"
+          }
+        }
+      }
+    },
+    "一句话概括遇到的问题" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Summarize the issue in one sentence"
+          }
+        }
+      }
+    },
+    "只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；正文与附件均会公开展示，不收集邮箱。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Goes online only when you submit feedback, relayed via ntfy.sh to a public GitHub Issue. Your text and attachments are posted publicly; no email is collected."
+          }
+        }
+      }
+    },
+    "正文和附件将公开在" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text and attachments are public on"
+          }
+        }
+      }
+    },
+    "问题反馈：只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；正文与附件均会公开展示，不收集邮箱。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Feedback: goes online only when you submit feedback, relayed via ntfy.sh to a public GitHub Issue. Your text and attachments are posted publicly; no email is collected."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

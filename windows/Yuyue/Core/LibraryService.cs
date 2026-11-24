@@ -98,10 +98,12 @@ public sealed class DevicePrefs
     public HashSet<string> DismissedTxtDoubtBooks { get; set; } = new();
     public HashSet<string> FinishedPromptedBooks { get; set; } = new();
     public string FeedbackDraftCategory { get; set; } = "bug";
+    public string FeedbackDraftTitle { get; set; } = "";
     public bool FeedbackAttachInfo { get; set; } = true;
-    public bool FeedbackAttachLogs { get; set; } = true;
+    public bool FeedbackAttachLogs { get; set; } = false;
     public List<string> FeedbackDraftFiles { get; set; } = [];
     public HashSet<string> RemoteAcquiredUrls { get; set; } = new();
+    public Dictionary<string, string> RemoteAcquiredBooks { get; set; } = new();
     public Dictionary<string, float> AudiobookLoudnessGain { get; set; } = new();
     public Dictionary<string, string> SyncCompanionSeenTags { get; set; } = new();
     public Dictionary<string, string> SyncCompanionSentStamps { get; set; } = new();

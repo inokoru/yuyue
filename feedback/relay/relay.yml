@@ -3,8 +3,9 @@
 #
 # 由 Cloudflare Worker（feedback/worker/）每 5 分钟检查 ntfy.sh，发现未处理反馈时
 # 通过 workflow_dispatch 按需唤醒本工作流（也可在网页上手动点 Run workflow），把反馈搬进
-# 语阅仓库（公开）的 Issue，打「反馈」标签。不解密任何东西：私钥只在开发者的 Mac 上。
-# 公开的附件推到 inokoru/yuyue-feedback-assets（公开），密封的附件原样提交到本仓库 feedback-files/。
+# 语阅仓库（公开）的 Issue，打「反馈」标签。
+# 公开截图与文件附件均推到 inokoru/yuyue-feedback-assets（公开），方便开源社区复现与调试；
+# 旧版客户端（0.1.0 / 0.1.1）发来的密封附件仍兼容存到本仓库 feedback-files/。
 #
 # 不再使用 GitHub 原生 on.schedule：私有仓库上的定时触发经常延迟 4～8 小时或静默丢弃，
 # 会错过 ntfy.sh 附件 3 小时的有效期；改走 workflow_dispatch 秒级启动，平时无反馈零消耗，

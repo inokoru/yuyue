@@ -19,13 +19,12 @@ android {
         versionCode = 3
         versionName = "0.1.1"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
-        // 反馈. android/feedback.properties is not committed (topic + public key).
+        // 反馈. android/feedback.properties is not committed (ntfy topic).
         val feedbackFile = rootProject.file("feedback.properties")
         val feedback = Properties()
         if (feedbackFile.exists()) feedbackFile.inputStream().use { feedback.load(it) }
         fun cfg(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
         buildConfigField("String", "FEEDBACK_TOPIC", cfg(feedback.getProperty("topic", "")))
-        buildConfigField("String", "FEEDBACK_PUBLIC_KEY", cfg(feedback.getProperty("publicKey", "")))
         // 检查更新: the APK from GitHub updates itself; Google Play's (`-Pplay`) leaves it to the store.
         buildConfigField("boolean", "SELF_UPDATE", (!project.hasProperty("play")).toString())
     }

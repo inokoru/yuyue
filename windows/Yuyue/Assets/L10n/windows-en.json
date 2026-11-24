@@ -304,5 +304,11 @@
   "↑↓ 选择 · Tab 补全 · ↵ 执行 · Esc 关闭": "↑↓ Select · Tab Complete · ↵ Run · Esc Close",
   "切换书伴模型": "Switch Companion Model",
   "这本书重新整理过，划线和书签在原来的位置": "This book was reformatted; highlights and bookmarks remain at their prior spots",
-  "这本有声书只标到章，翻页不跟着声音走": "This audiobook is aligned by chapter only; pages do not turn automatically with audio"
+  "这本有声书只标到章，翻页不跟着声音走": "This audiobook is aligned by chapter only; pages do not turn automatically with audio",
+  "一句话概括遇到的问题（最多 60 字）": "Summarize the issue in one sentence (max 60 chars)",
+  "一句话概括你的建议（最多 60 字）": "Summarize your idea in one sentence (max 60 chars)",
+  "一句话标题（最多 60 字）": "Short title (max 60 chars)",
+  "附带最近运行日志（末尾 64 KB，随反馈公开）": "Attach recent runtime log (last 64 KB, posted publicly)",
+  "附带最近运行日志（如有，随反馈公开）": "Attach recent runtime log (if present, posted publicly)",
+  "正文和附件都会公开在 GitHub Issue 中，方便社区一起排查；不收集邮箱，请勿上传个人隐私或完整版权书。": "Text and attachments are posted publicly on GitHub Issues so the community can help debug. No email is collected; avoid uploading private data or copyrighted books."
 }

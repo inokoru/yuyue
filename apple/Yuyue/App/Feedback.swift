@@ -11,10 +11,9 @@ import AppKit
 #endif
 
 /// 反馈: the core turns what the form holds into one ntfy message (`feedbackMessage`) and it is
-/// POSTed to ntfy.sh (docs/dev/feedback.md). 语阅 is open source: the words become a public
-/// GitHub Issue, and so do the screenshots unless the person turns that off. No email or contact
-/// info is collected; non-image attachments and private screenshots are sealed so only the
-/// developer reads them. Without a network the message waits on this device and goes on the next try.
+/// POSTed to ntfy.sh (docs/dev/feedback.md). 语阅 is open source: the title, body, optional device
+/// info, and all attachments become a public GitHub Issue so anyone in the community can help debug.
+/// No email or contact info is collected; without a network the message waits on this device.
 @Observable
 final class Feedback {
     static let shared = Feedback()
@@ -27,6 +26,13 @@ final class Feedback {
             case .bug: String(localized: "问题")
             case .idea: String(localized: "建议")
             case .other: String(localized: "其他")
+            }
+        }
+        var titlePlaceholder: String {
+            switch self {
+            case .bug: String(localized: "一句话概括遇到的问题")
+            case .idea: String(localized: "一句话概括你的建议")
+            case .other: String(localized: "一句话标题")
             }
         }
         var placeholder: String {
@@ -64,11 +70,12 @@ final class Feedback {
         let name: String
         let data: Data
         let preview: CGImage?
-        /// A picture (shrunk to a JPEG here); only these may go public.
+        /// A picture shrunk to a JPEG (inline image in the public Issue); other files become download links.
         var isShot: Bool { preview != nil }
     }
 
-    /// The core's own caps (`TEXT_MAX`), counted in Unicode scalars as Rust counts chars.
+    /// The core's own caps (`TITLE_MAX`, `TEXT_MAX`), counted in Unicode scalars as Rust counts chars.
+    static let titleMax = 60
     static let textMax = 800
     static let filesMax = 3
     nonisolated static let fileBytesMax = 1_500_000
@@ -173,33 +180,29 @@ final class Feedback {
     }
 
     private let topic = Feedback.info("YuyueFeedbackTopic")
-    private let publicKey = Feedback.info("YuyueFeedbackPublicKey")
 
-    /// Public builds carry neither; the form says so and does not send.
-    var isConfigured: Bool { !topic.isEmpty && !publicKey.isEmpty }
+    /// Public builds carry no topic; the form says so and does not send.
+    var isConfigured: Bool { !topic.isEmpty }
 
     // MARK: Sending
 
     /// `withInfo` false: the person turned 附加信息 off; version and system stay here.
-    /// `publicShots`: screenshots go up as they are, for the public Issue; otherwise sealed
-    /// like every other file.
     ///
     /// Attachments go first, each its own ntfy attachment; the report then names them.
     /// They need a network now: if one fails nothing is counted and the form keeps everything.
     /// Only the words wait in the queue (ntfy keeps an attachment 3 hours, too short to hold).
-    func send(_ category: Category, text: String, withInfo: Bool = true, publicShots: Bool = true,
+    func send(_ category: Category, title: String, text: String, withInfo: Bool = true,
               files: [Attachment] = []) async throws -> Outcome {
         guard isConfigured else { throw Problem.notConfigured }
         var ids: [String] = []
         for (n, file) in files.prefix(Self.filesMax).enumerated() {
-            let shown = publicShots && file.isShot
-            let data = shown ? file.data : try sealFeedbackFile(publicKeyB64: publicKey, name: file.name, data: file.data)
             do {
-                ids.append(try await upload(data, shown: shown, n: n + 1))
+                ids.append(try await upload(file, n: n + 1))
             } catch Problem.busy { throw Problem.filesBusy } catch { throw Problem.filesOffline }
         }
         let body = try feedbackMessage(draft: FeedbackDraft(
             category: category.rawValue,
+            title: title,
             text: text,
             appVersion: withInfo ? Self.appVersion : "",
             platform: withInfo ? Self.platform : "",
@@ -235,15 +238,40 @@ final class Feedback {
         _ = try await ntfy("POST", Data(body.utf8), timeout: 15)
     }
 
-    /// One attachment. `shown`: a screenshot for the public Issue, the plain JPEG, marked `v2shot`.
-    /// Otherwise a sealed box marked `v1file`, its name inside the box. Returns its ntfy id,
-    /// which the report carries.
-    private func upload(_ body: Data, shown: Bool, n: Int) async throws -> String {
-        let headers = shown ? ["Filename": "shot-\(n).jpg", "X-Message": "v2shot"] : ["Filename": "f.bin", "X-Message": "v1file"]
-        let data = try await ntfy("PUT", body, timeout: 40, headers: headers)
+    /// One public attachment. Screenshots go up as JPEG marked `v2shot`; other files go up raw
+    /// marked `v2file <percent-encoded-name>` with an ASCII-safe `Filename` header.
+    private func upload(_ file: Attachment, n: Int) async throws -> String {
+        let headers: [String: String]
+        if file.isShot {
+            headers = ["Filename": "shot-\(n).jpg", "X-Message": "v2shot"]
+        } else {
+            let ext = Self.safeExt(file.name)
+            let encoded = Self.encodeHeaderName(file.name)
+            let mark = encoded.isEmpty ? "v2file" : "v2file \(encoded)"
+            headers = ["Filename": "file-\(n)\(ext)", "X-Message": mark]
+        }
+        let data = try await ntfy("PUT", file.data, timeout: 40, headers: headers)
         guard let reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let id = reply["id"] as? String, !id.isEmpty else { throw URLError(.badServerResponse) }
         return id
+    }
+
+    private static let headerNameAllowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-~")
+
+    private static func safeExt(_ name: String) -> String {
+        let ext = (name as NSString).pathExtension.lowercased()
+        guard !ext.isEmpty, ext.count <= 10,
+              ext.unicodeScalars.allSatisfy({ ($0 >= "a" && $0 <= "z") || ($0 >= "0" && $0 <= "9") }) else {
+            return ".bin"
+        }
+        return ".\(ext)"
+    }
+
+    private static func encodeHeaderName(_ name: String) -> String {
+        let base = (name as NSString).lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty else { return "" }
+        let clipped = clip(base, 80)
+        return clipped.addingPercentEncoding(withAllowedCharacters: headerNameAllowed) ?? ""
     }
 
     private func ntfy(_ method: String, _ body: Data, timeout: TimeInterval, headers: [String: String] = [:]) async throws -> Data {
@@ -268,11 +296,10 @@ final class Feedback {
     /// (or queued). Attachments are files beside it, in order.
     private struct Draft: Codable {
         var category: String
+        var title: String?
         var text: String
         var withInfo: Bool
         var files: [String]
-        /// Missing in drafts from before the choice existed: on.
-        var publicShots: Bool?
     }
 
     private let draftKey = "feedback.draft"
@@ -281,12 +308,12 @@ final class Feedback {
         URL.applicationSupportDirectory.appending(path: "Yuyue/Feedback/Draft", directoryHint: .isDirectory)
     }
 
-    func saveDraft(category: Category, text: String, withInfo: Bool, publicShots: Bool) {
-        var draft = loadDraftRecord() ?? Draft(category: category.rawValue, text: "", withInfo: true, files: [])
+    func saveDraft(category: Category, title: String, text: String, withInfo: Bool) {
+        var draft = loadDraftRecord() ?? Draft(category: category.rawValue, title: "", text: "", withInfo: true, files: [])
         draft.category = category.rawValue
+        draft.title = title
         draft.text = text
         draft.withInfo = withInfo
-        draft.publicShots = publicShots
         writeDraft(draft)
     }
 
@@ -301,18 +328,18 @@ final class Feedback {
                 if (try? file.data.write(to: draftDir.appending(path: stored))) != nil { names.append(file.name) }
             }
         }
-        var draft = loadDraftRecord() ?? Draft(category: Category.bug.rawValue, text: "", withInfo: true, files: [])
+        var draft = loadDraftRecord() ?? Draft(category: Category.bug.rawValue, title: "", text: "", withInfo: true, files: [])
         draft.files = names
         writeDraft(draft)
     }
 
-    func loadDraft() -> (category: Category, text: String, withInfo: Bool, publicShots: Bool, files: [Attachment])? {
+    func loadDraft() -> (category: Category, title: String, text: String, withInfo: Bool, files: [Attachment])? {
         guard let draft = loadDraftRecord() else { return nil }
         let files: [Attachment] = draft.files.enumerated().compactMap { i, name in
             guard let data = try? Data(contentsOf: draftDir.appending(path: "\(i)")) else { return nil }
             return Self.restored(name: name, data: data)
         }
-        return (Category(rawValue: draft.category) ?? .bug, draft.text, draft.withInfo, draft.publicShots ?? true, files)
+        return (Category(rawValue: draft.category) ?? .bug, draft.title ?? "", draft.text, draft.withInfo, files)
     }
 
     func clearDraft() {
@@ -326,7 +353,7 @@ final class Feedback {
     }
 
     private func writeDraft(_ draft: Draft) {
-        if draft.text.isEmpty && draft.files.isEmpty && draft.withInfo && draft.publicShots ?? true
+        if (draft.title ?? "").isEmpty && draft.text.isEmpty && draft.files.isEmpty && draft.withInfo
             && draft.category == Category.bug.rawValue {
             UserDefaults.standard.removeObject(forKey: draftKey)
         } else if let data = try? JSONEncoder().encode(draft) {
@@ -443,19 +470,18 @@ final class Feedback {
     }
 }
 
-/// The form: 类别, 想说的 (Markdown, with attachments), 附加信息, a mailto hint for private
-/// replies, then 发送. A sheet on the phone and on the Mac.
+/// The form: 类别, 标题, 详细描述 (Markdown, with attachments), 附加信息, a mailto hint for
+/// private replies, then 发送. A sheet on the phone and on the Mac.
 struct FeedbackForm: View {
     let close: () -> Void
     @State private var category = Feedback.Category.bug
+    @State private var title = ""
     @State private var text = ""
     @State private var sending = false
     @State private var done = false
     @State private var notice: String?
     @State private var withInfo = true
     @State private var infoExpanded = false
-    /// Screenshots shown in the public Issue. On until the person turns it off; the card says what it means.
-    @State private var publicShots = true
     @State private var files: [Feedback.Attachment] = []
     @State private var choosingFiles = false
     @State private var restored = false
@@ -463,16 +489,20 @@ struct FeedbackForm: View {
     @State private var pasteMonitor: Any?
     @State private var writing = false
     @State private var dropping = false
+    @FocusState private var titleFocused: Bool
     #else
+    private enum Field { case title, body }
     @State private var picks: [PhotosPickerItem] = []
     @State private var choosingPhotos = false
-    @FocusState private var writing: Bool
+    @FocusState private var field: Field?
     #endif
     private let feedback = Feedback.shared
     private var tint: YYTint { YYTint.standard }
 
-    private var blank: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    private var hasDraft: Bool { !blank || !files.isEmpty }
+    private var titleBlank: Bool { title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var textBlank: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var blank: Bool { titleBlank || textBlank }
+    private var hasDraft: Bool { !titleBlank || !textBlank || !files.isEmpty }
     private var canSend: Bool {
         !blank && !sending && feedback.isConfigured
     }
@@ -507,9 +537,9 @@ struct FeedbackForm: View {
         .task { await feedback.flush() }
         .onAppear(perform: restore)
         .onChange(of: category) { save() }
+        .onChange(of: title) { save() }
         .onChange(of: text) { save() }
         .onChange(of: withInfo) { save() }
-        .onChange(of: publicShots) { save() }
         .onChange(of: files.map(\.id)) { if restored { feedback.saveDraftFiles(files) } }
         #if os(macOS)
         .onAppear(perform: watchPaste)
@@ -526,6 +556,7 @@ struct FeedbackForm: View {
     #if DEBUG
     private func debugFill() async {
         guard UserDefaults.standard.string(forKey: "debugFeedback") == "full" else { return }
+        title = "打开《红楼梦》第三回翻到一半卡死"
         text = "打开《红楼梦》第三回，翻到一半就**卡住**了，点哪里都没反应。\n\n- 重启后还是一样\n- 别的书正常\n- 换成 PDF 版也一样\n\n第三回开头那几页都能翻，到「林黛玉抛父进京都」后面一点开始卡，卡住以后窗口拖不动，只能强制退出。"
         let ctx = CGContext(data: nil, width: 1200, height: 800, bitsPerComponent: 8, bytesPerRow: 0,
                             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
@@ -550,9 +581,9 @@ struct FeedbackForm: View {
         guard !restored else { return }
         if let draft = feedback.loadDraft() {
             category = draft.category
+            title = draft.title
             text = draft.text
             withInfo = draft.withInfo
-            publicShots = draft.publicShots
             files = draft.files
         }
         restored = true
@@ -562,12 +593,18 @@ struct FeedbackForm: View {
         }
         #endif
         // After the sheet has risen, or the focus goes nowhere.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { writing = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            #if os(macOS)
+            if title.isEmpty { titleFocused = true } else { writing = true }
+            #else
+            field = title.isEmpty ? .title : .body
+            #endif
+        }
     }
 
     private func save() {
         guard restored, !done else { return }
-        feedback.saveDraft(category: category, text: text, withInfo: withInfo, publicShots: publicShots)
+        feedback.saveDraft(category: category, title: title, text: text, withInfo: withInfo)
     }
 
     #if os(macOS)
@@ -614,10 +651,8 @@ struct FeedbackForm: View {
                     .background(YYColor.inset, in: .rect(cornerRadius: YYUI.s(12)))
                 }
                 YYSegments(items: Feedback.Category.allCases.map { ($0, $0.title) }, selection: $category)
+                titleField
                 editor
-                if files.contains(where: \.isShot) {
-                    shotsCard
-                }
                 infoCard
                 mailHint
                 if let notice {
@@ -638,6 +673,61 @@ struct FeedbackForm: View {
             .padding(.bottom, YYUI.s(12))
         }
         .scrollBounceBehavior(.basedOnSize)
+    }
+
+    private var isTitleFocused: Bool {
+        #if os(macOS)
+        titleFocused
+        #else
+        field == .title
+        #endif
+    }
+
+    private var isEditorFocused: Bool {
+        #if os(macOS)
+        writing
+        #else
+        field == .body
+        #endif
+    }
+
+    private var titleField: some View {
+        HStack(spacing: YYUI.s(8)) {
+            TextField(category.titlePlaceholder, text: $title)
+                .textFieldStyle(.plain)
+                .font(YYUI.font(14, .medium))
+                .foregroundStyle(YYColor.t1)
+                #if os(macOS)
+                .focused($titleFocused)
+                .onSubmit {
+                    titleFocused = false
+                    writing = true
+                }
+                #else
+                .focused($field, equals: .title)
+                .submitLabel(.next)
+                .onSubmit { field = .body }
+                #endif
+            if title.unicodeScalars.count >= Feedback.titleMax - 15 {
+                Text("\(title.unicodeScalars.count)/\(Feedback.titleMax)")
+                    .font(YYUI.font(10.5).monospacedDigit())
+                    .foregroundStyle(title.unicodeScalars.count > Feedback.titleMax - 5 ? YYAlertTone.warn.ink : YYColor.t3)
+            }
+        }
+        .padding(.horizontal, YYUI.s(14))
+        .padding(.vertical, YYUI.s(10))
+        .background(YYColor.card, in: .rect(cornerRadius: YYUI.s(14)))
+        .overlay {
+            RoundedRectangle(cornerRadius: YYUI.s(14))
+                .strokeBorder(isTitleFocused ? tint.edge : YYColor.line, lineWidth: isTitleFocused ? 1 : 0.5)
+        }
+        .onChange(of: title) { _, new in
+            let flat = new.replacingOccurrences(of: "\r\n", with: " ")
+                .replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: "\r", with: " ")
+            let clipped = Feedback.clip(flat, Feedback.titleMax)
+            if clipped != new { title = clipped }
+        }
     }
 
     private var editor: some View {
@@ -661,7 +751,7 @@ struct FeedbackForm: View {
                     .padding(.top, YYUI.s(4))
                 #else
                 TextEditor(text: $text)
-                    .focused($writing)
+                    .focused($field, equals: .body)
                     .font(YYUI.font(14))
                     .scrollContentBackground(.hidden)
                     .scrollIndicators(.never)
@@ -727,7 +817,7 @@ struct FeedbackForm: View {
         .background(YYColor.card, in: .rect(cornerRadius: YYUI.s(14)))
         .overlay {
             RoundedRectangle(cornerRadius: YYUI.s(14))
-                .strokeBorder(writing ? tint.edge : YYColor.line, lineWidth: writing ? 1 : 0.5)
+                .strokeBorder(isEditorFocused ? tint.edge : YYColor.line, lineWidth: isEditorFocused ? 1 : 0.5)
         }
         #if os(macOS)
         .overlay {
@@ -1011,41 +1101,13 @@ struct FeedbackForm: View {
         .padding(.horizontal, YYUI.s(4))
     }
 
-    /// Only with a screenshot attached. On by default; what it means is said right there, and off
-    /// still sends the screenshots, sealed for the developer alone.
-    private var shotsCard: some View {
-        HStack(alignment: .top, spacing: YYUI.s(10)) {
-            VStack(alignment: .leading, spacing: YYUI.s(2)) {
-                Text("截图公开在 GitHub 上").font(YYUI.font(12.5)).foregroundStyle(YYColor.t1)
-                Text(publicShots
-                     ? "语阅是开源项目，截图和文字一起公开，别人也能帮忙查。发之前看一眼截图里有没有隐私。"
-                     : "截图照样发出，只有开发者能看到。")
-                    .font(YYUI.font(11))
-                    .foregroundStyle(YYColor.t3)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-            Toggle(String(localized: "截图公开在 GitHub 上"), isOn: $publicShots)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .tint(tint.accent)
-                #if os(macOS)
-                .controlSize(.small)
-                #endif
-        }
-        .padding(.vertical, YYUI.s(10))
-        .padding(.horizontal, YYUI.s(14))
-        .background(YYColor.card, in: .rect(cornerRadius: YYUI.s(12)))
-        .overlay(RoundedRectangle(cornerRadius: YYUI.s(12)).strokeBorder(YYColor.line, lineWidth: 0.5))
-        .transition(.opacity)
-    }
-
     private var meta: String {
         feedback.isConfigured ? "" : String(localized: "这个版本发不出反馈")
     }
 
     private func resetDraft() {
         withAnimation(.easeOut(duration: YYMotion.reduce ? 0.01 : 0.15)) {
+            title = ""
             text = ""
             files = []
             notice = nil
@@ -1054,19 +1116,19 @@ struct FeedbackForm: View {
     }
 
     /// Always-visible disclosure pinned inside the fixed footer above Send so users never miss
-    /// that feedback bodies are published publicly on GitHub Issues (zero scrolling required).
+    /// that feedback bodies and attachments are published publicly on GitHub Issues.
     private var publicNotice: some View {
         HStack(spacing: YYUI.s(4)) {
             Image(systemName: "globe")
                 .font(YYUI.font(11, .medium))
                 .foregroundStyle(tint.accent.opacity(0.88))
-            Text("正文将公开在")
+            Text("正文和附件将公开在")
             Link(destination: Feedback.issuesURL) {
                 Text(verbatim: "GitHub Issues ↗")
                     .foregroundStyle(tint.accent)
             }
             .buttonStyle(.plain)
-            Text("· 非公开附件仅开发者可见")
+            Text("· 请勿上传隐私或版权书")
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
             Spacer(minLength: 0)
@@ -1165,14 +1227,15 @@ struct FeedbackForm: View {
         Task {
             defer { sending = false }
             do {
-                switch try await feedback.send(category, text: text, withInfo: withInfo,
-                                               publicShots: publicShots, files: files) {
+                switch try await feedback.send(category, title: title, text: text, withInfo: withInfo,
+                                               files: files) {
                 case .sent:
                     feedback.clearDraft()
                     withAnimation(.easeOut(duration: YYMotion.reduce ? 0.01 : 0.25)) {
                         done = true
                     }
                 case .queued(let busy):
+                    title = ""
                     text = ""
                     files = []
                     feedback.clearDraft()
@@ -1216,11 +1279,11 @@ struct FeedbackForm: View {
             .font(YYUI.font(11.5))
             HStack(spacing: YYUI.s(10)) {
                 Button("再写一条") {
+                    title = ""
                     text = ""
                     category = .bug
                     withInfo = true
                     infoExpanded = false
-                    publicShots = true
                     files = []
                     done = false
                 }

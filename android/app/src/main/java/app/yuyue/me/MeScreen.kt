@@ -592,10 +592,10 @@ private val PRIVACY: String
         t("书、进度、笔记和生词都存在这台设备上。打开同步时，它们只在你的设备和你自己选的网盘（WebDAV，Google Drive 即将支持）之间传，语阅看不到。") + "\n\n" +
         t("免费在线语音会把当前要读的句子发给在线语音服务；书伴、自行配置的云端声音和笔记导出只在你选用并填了自己的 Key 时联网，提问、要读的句子或笔记直接发给你选的服务商；Key 只存在这台设备上，加密保存。") + "\n\n" +
         t("本地模型与声音包：对齐模型、离线语音模型、开源字体和内置声音包会在你需要时从 GitHub Releases、魔搭（ModelScope）或 Hugging Face 下载，运行全在这台设备上完成，原文与录音不出本机。") + "\n\n" +
-        t("问题反馈：只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；不收集邮箱，非图片附件和未公开的截图会在发送前用开发者公钥在本机加密。") + "\n\n" +
+        t("问题反馈：只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；正文与附件均会公开展示，不收集邮箱。") + "\n\n" +
         t("检查更新：从 GitHub 下载安装的版本每天从 GitHub 取一个小文件，看有没有新版本，不带任何关于你和设备的信息；在我的 › 关于 › 检查更新里能关掉。App Store 和 Google Play 的版本不查，由商店更新。")
 
 private val LICENCES: String
     get() = t("语阅用到了这些开源项目，感谢它们的作者：") + "\n\n" +
-        "UniFFI (MPL-2.0) · rusqlite / SQLite (MIT / Public Domain) · serde, serde_json, regex, encoding_rs, chardetng, zip, html5ever, roxmltree, ICU4X, blake3, percent-encoding, thiserror, aho-corasick, base64, crypto_box, flate2, getrandom, lewton, markup5ever_rcdom, ripemd (MIT / Apache-2.0) · rars, rust-lzo1x (MIT) · foliate-js (MIT) · zhconv (GPL-2.0-or-later) · OpenCC dictionaries (Apache-2.0) · ECDICT (MIT) · pinyin, pypinyin (MIT) · ONNX Runtime (MIT) · OkHttp, JNA (Apache-2.0) · AndroidX, Jetpack Compose, Media3, kotlinx.coroutines, Haze (Apache-2.0) · Sparkle (MIT) · PdfPig (Apache-2.0) · Simple Icons (CC0 1.0) · Kokoro-82M-v1.1-zh (Apache-2.0) · ZipVoice weights (CC-BY-NC 4.0) · Vocos (MIT) · voices-1, sounds-1 (CC0 1.0) · Meta MMS (CC-BY-NC 4.0) · 3D-Speaker CAM++ (Apache-2.0) · SenseVoice (FunASR Model License)" + "\n\n" +
+        "UniFFI (MPL-2.0) · rusqlite / SQLite (MIT / Public Domain) · serde, serde_json, regex, encoding_rs, chardetng, zip, html5ever, roxmltree, ICU4X, blake3, percent-encoding, thiserror, aho-corasick, base64, flate2, getrandom, lewton, markup5ever_rcdom, ripemd (MIT / Apache-2.0) · rars, rust-lzo1x (MIT) · foliate-js (MIT) · zhconv (GPL-2.0-or-later) · OpenCC dictionaries (Apache-2.0) · ECDICT (MIT) · pinyin, pypinyin (MIT) · ONNX Runtime (MIT) · OkHttp, JNA (Apache-2.0) · AndroidX, Jetpack Compose, Media3, kotlinx.coroutines, Haze (Apache-2.0) · Sparkle (MIT) · PdfPig (Apache-2.0) · Simple Icons (CC0 1.0) · Kokoro-82M-v1.1-zh (Apache-2.0) · ZipVoice weights (CC-BY-NC 4.0) · Vocos (MIT) · voices-1, sounds-1 (CC0 1.0) · Meta MMS (CC-BY-NC 4.0) · 3D-Speaker CAM++ (Apache-2.0) · SenseVoice (FunASR Model License)" + "\n\n" +
         t("完整的许可文本随源代码一起发布。")

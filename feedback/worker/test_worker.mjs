@@ -36,6 +36,12 @@ function jsonResponse(body, status = 200) {
 
 test("openMessage and safeId mirror relay.py validation", () => {
   assert.equal(safeId("ab c-->x"), "abc--x");
+  assert.deepEqual(openMessage('{"v":2,"category":"bug","title":"翻页卡住","text":"详细说明"}'), {
+    v: 2,
+    category: "bug",
+    title: "翻页卡住",
+    text: "详细说明",
+  });
   assert.deepEqual(openMessage('{"v":2,"category":"bug","text":"翻页卡住"}'), {
     v: 2,
     category: "bug",
@@ -44,10 +50,13 @@ test("openMessage and safeId mirror relay.py validation", () => {
   for (const junk of [
     "hello",
     "v2shot",
+    "v2file sample.mobi",
     "v1file",
     "{",
     '{"v":1,"text":"x"}',
     '{"v":2,"text":"   "}',
+    JSON.stringify({ v: 2, title: "标".repeat(81), text: "正文" }),
+    JSON.stringify({ v: 2, title: 123, text: "正文" }),
     JSON.stringify({ v: 2, text: "字".repeat(1001) }),
     "[1]",
   ]) {

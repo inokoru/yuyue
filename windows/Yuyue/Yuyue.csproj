@@ -28,9 +28,8 @@
 
   <!-- Optional local/CI build-time feedback relay config (gitignored windows/feedback.props or -p:YuyueFeedbackTopic=...) -->
   <Import Project="..\feedback.props" Condition="Exists('..\feedback.props')" />
-  <ItemGroup Condition="'$(YuyueFeedbackTopic)' != '' and '$(YuyueFeedbackPublicKey)' != ''">
+  <ItemGroup Condition="'$(YuyueFeedbackTopic)' != ''">
     <AssemblyMetadata Include="YuyueFeedbackTopic" Value="$(YuyueFeedbackTopic)" />
-    <AssemblyMetadata Include="YuyueFeedbackPublicKey" Value="$(YuyueFeedbackPublicKey)" />
   </ItemGroup>
 
   <ItemGroup>

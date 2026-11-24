@@ -29,7 +29,7 @@ namespace Yuyue.Core;
 /// - Stable &amp; Beta GitHub Releases update feed check via <see cref="YuyueCoreMethods.ParseUpdate"/> / <see cref="YuyueCoreMethods.CompareVersions"/>
 /// - Optional in-app Windows installer download with SHA-256 verification and progress dialog
 /// - Bundled <c>CHANGELOG.md</c> viewer via <see cref="YuyueCoreMethods.ParseChangelog"/>, Privacy sheet, and Open-Source Licenses sheet
-/// - Full Feedback composer with persisted draft, log attachment, drag-and-drop, Ctrl+V screenshot paste, up to 3 attachments (any file ≤ 1.5 MB), EXIF-stripping JPEG, <see cref="YuyueCoreMethods.SealFeedbackFile"/> + <see cref="YuyueCoreMethods.FeedbackMessage"/> ntfy.sh delivery, FIFO offline queue, and post-send confirmation.
+/// - Full Feedback composer with persisted draft, title field (≤ 60 chars, never truncated), log attachment, drag-and-drop, Ctrl+V screenshot paste, up to 3 public attachments (any file ≤ 1.5 MB), EXIF-stripping JPEG, <see cref="YuyueCoreMethods.FeedbackMessage"/> ntfy.sh delivery, FIFO offline queue, and post-send confirmation.
 /// </summary>
 public sealed class UpdateAndFeedbackService
 {
@@ -616,7 +616,7 @@ public sealed class UpdateAndFeedbackService
             ("没有账号，也没有服务器", "语阅没有注册登录，不埋点、不接入任何第三方统计或崩溃分析 SDK。你的书库、阅读进度、划线想法与生词全部保存在本机目录中。"),
             ("连接外部服务时直连服务商", "使用免费在线语音时，当前要读的句子会直接发给在线语音服务；当你主动配置 WebDAV 云盘、AI 书伴（DeepSeek / OpenAI / Claude / Ollama 等）、云端语音或 Notion / flomo / 新枝笔记导出时，客户端直接向你指定的服务地址发起请求，API Key 使用 Windows DPAPI 加密存储在本机，从不经过语阅中转，也从不写入跨端同步包。"),
             ("检查更新与模型下载", "检查更新与按需下载开源字体、离线语音模型、声音包时，仅向 GitHub Releases、魔搭（ModelScope）或 Hugging Face 发起普通 HTTPS GET 请求（字体预览按需访问 Google Fonts），不携带任何书库或设备标识。"),
-            ("问题反馈", "只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；不收集邮箱，非图片附件和未公开的截图会在发送前用开发者公钥在本机加密。"),
+            ("问题反馈", "只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；正文与附件均会公开展示，不收集邮箱。"),
         ];
         foreach (var (t, b) in items)
         {
@@ -705,7 +705,6 @@ public sealed class UpdateAndFeedbackService
         var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
 
         string category = _library.Prefs.FeedbackDraftCategory is "idea" or "other" ? _library.Prefs.FeedbackDraftCategory : "bug";
-        bool publicShots = true;
         bool withDeviceInfo = _library.Prefs.FeedbackAttachInfo;
         bool withLogs = _library.Prefs.FeedbackAttachLogs;
         var attachments = new List<(string Name, byte[] Data, bool IsImage, string? SourcePath)>();
@@ -742,6 +741,7 @@ public sealed class UpdateAndFeedbackService
                 DeleteOwnedDraftTempIfAny(saved);
             foreach (var att in attachments)
                 DeleteOwnedDraftTempIfAny(att.SourcePath);
+            _library.Prefs.FeedbackDraftTitle = "";
             _library.Prefs.FeedbackDraftText = "";
             _library.Prefs.FeedbackDraftFiles.Clear();
             _library.SavePrefs();
@@ -780,6 +780,7 @@ public sealed class UpdateAndFeedbackService
             _library.Prefs.FeedbackDraftCategory = category;
             _library.Prefs.FeedbackAttachInfo = withDeviceInfo;
             _library.Prefs.FeedbackAttachLogs = withLogs;
+            _library.Prefs.FeedbackDraftTitle = titleBoxRefText();
             _library.Prefs.FeedbackDraftText = bodyBoxRefText();
             _library.Prefs.FeedbackDraftFiles = attachments
                 .Where(a => !string.IsNullOrEmpty(a.SourcePath))
@@ -789,11 +790,30 @@ public sealed class UpdateAndFeedbackService
             _library.SavePrefs();
         }
 
+        TextBox? titleBoxHolder = null;
         TextBox? bodyBoxHolder = null;
+        string titleBoxRefText() => titleBoxHolder?.Text ?? _library.Prefs.FeedbackDraftTitle;
         string bodyBoxRefText() => bodyBoxHolder?.Text ?? _library.Prefs.FeedbackDraftText;
 
         var catRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         var catBtns = new List<(string Id, Button Btn)>();
+
+        var titleBox = new TextBox
+        {
+            Text = _library.Prefs.FeedbackDraftTitle,
+            PlaceholderText = "一句话概括遇到的问题（最多 60 字）",
+            AcceptsReturn = false,
+            MaxLength = 60,
+        };
+        titleBoxHolder = titleBox;
+        var titleCounterText = new TextBlock
+        {
+            Text = titleBox.Text.Length >= 45 ? $"{titleBox.Text.Length} / 60" : "",
+            FontSize = 11,
+            Foreground = ThemeHelper.Brush(p.T3),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Visibility = titleBox.Text.Length >= 45 ? Visibility.Visible : Visibility.Collapsed,
+        };
 
         var bodyBox = new TextBox
         {
@@ -812,10 +832,31 @@ public sealed class UpdateAndFeedbackService
             Foreground = ThemeHelper.Brush(p.T3),
             HorizontalAlignment = HorizontalAlignment.Right,
         };
+        ContentDialog? activeDlg = null;
+        void SyncSendEnabled()
+        {
+            if (activeDlg is not null)
+                activeDlg.IsPrimaryButtonEnabled = !string.IsNullOrWhiteSpace(titleBox.Text) && !string.IsNullOrWhiteSpace(bodyBox.Text);
+        }
+        titleBox.TextChanged += (_, _) =>
+        {
+            string flat = titleBox.Text.Replace('\r', ' ').Replace('\n', ' ');
+            if (flat != titleBox.Text)
+            {
+                titleBox.Text = flat;
+                titleBox.SelectionStart = flat.Length;
+            }
+            _library.Prefs.FeedbackDraftTitle = titleBox.Text;
+            bool showCount = titleBox.Text.Length >= 45;
+            titleCounterText.Text = showCount ? $"{titleBox.Text.Length} / 60" : "";
+            titleCounterText.Visibility = showCount ? Visibility.Visible : Visibility.Collapsed;
+            SyncSendEnabled();
+        };
         bodyBox.TextChanged += (_, _) =>
         {
             _library.Prefs.FeedbackDraftText = bodyBox.Text;
             counterText.Text = bodyBox.Text.Length >= 500 ? $"{bodyBox.Text.Length} / 800" : "";
+            SyncSendEnabled();
         };
 
         void SyncCatVisuals()
@@ -824,33 +865,35 @@ public sealed class UpdateAndFeedbackService
                 btn.Style = (Style)Application.Current.Resources[k == category ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
         }
 
-        foreach (var (id, label, hint) in new[]
+        foreach (var (id, label, titleHint, hint) in new[]
         {
-            ("bug", "问题", "哪本书、哪一页，做了什么，结果怎样（支持拖入文件或 Ctrl+V 粘贴截图）"),
-            ("idea", "建议", "想要什么功能，或者哪里可以更顺手"),
-            ("other", "其他", "想说的都可以"),
+            ("bug", "问题", "一句话概括遇到的问题（最多 60 字）", "哪本书、哪一页，做了什么，结果怎样（支持拖入文件或 Ctrl+V 粘贴截图）"),
+            ("idea", "建议", "一句话概括你的建议（最多 60 字）", "想要什么功能，或者哪里可以更顺手"),
+            ("other", "其他", "一句话标题（最多 60 字）", "想说的都可以"),
         })
         {
-            string cid = id, ph = hint;
+            string cid = id, tph = titleHint, ph = hint;
             var b = new Button { Content = label, Height = 28, MinHeight = 28, Padding = new Thickness(12, 0, 12, 0), CornerRadius = new CornerRadius(14) };
             b.Click += (_, _) =>
             {
                 category = cid;
+                titleBox.PlaceholderText = tph;
                 bodyBox.PlaceholderText = ph;
                 SyncCatVisuals();
                 SaveDraftState();
             };
             catBtns.Add((cid, b));
             catRow.Children.Add(b);
-            if (cid == category) bodyBox.PlaceholderText = ph;
+            if (cid == category)
+            {
+                titleBox.PlaceholderText = tph;
+                bodyBox.PlaceholderText = ph;
+            }
         }
         SyncCatVisuals();
 
         var attachList = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         var attachErrorText = new TextBlock { FontSize = 11, Foreground = ThemeHelper.Brush(p.Danger), Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
-        var publicShotToggle = new CheckBox { Content = "截图公开在 GitHub 上（已自动剥离 EXIF；关闭后仅开发者可见）", IsChecked = true, FontSize = 11.5, Visibility = Visibility.Collapsed };
-        publicShotToggle.Checked += (_, _) => publicShots = true;
-        publicShotToggle.Unchecked += (_, _) => publicShots = false;
 
         void ShowAttachError(string? err)
         {
@@ -869,7 +912,6 @@ public sealed class UpdateAndFeedbackService
         void RebuildAttachments()
         {
             attachList.Children.Clear();
-            publicShotToggle.Visibility = attachments.Any(a => a.IsImage) ? Visibility.Visible : Visibility.Collapsed;
             for (int i = 0; i < attachments.Count; i++)
             {
                 int idx = i;
@@ -936,7 +978,6 @@ public sealed class UpdateAndFeedbackService
             await TryAttachFileAsync(f);
         };
 
-        ContentDialog? activeDlg = null;
         bool captureRequested = false;
 
         var snapWindowBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "📷 截取当前窗口", Height = 26, FontSize = 11.5 };
@@ -973,7 +1014,7 @@ public sealed class UpdateAndFeedbackService
 
         var logsCheck = new CheckBox
         {
-            Content = FindLocalLogFile() is not null ? "附带最近运行日志（末尾 64 KB）" : "附带最近运行日志（如有）",
+            Content = FindLocalLogFile() is not null ? "附带最近运行日志（末尾 64 KB，随反馈公开）" : "附带最近运行日志（如有，随反馈公开）",
             IsChecked = withLogs,
             FontSize = 11.5,
         };
@@ -992,6 +1033,7 @@ public sealed class UpdateAndFeedbackService
         {
             category = "bug";
             SyncCatVisuals();
+            titleBox.Text = "";
             bodyBox.Text = "";
             ClearPersistedDraft();
             attachments.Clear();
@@ -1009,18 +1051,19 @@ public sealed class UpdateAndFeedbackService
             Children =
             {
                 catRow,
+                titleBox,
+                titleCounterText,
                 bodyBox,
                 counterText,
                 toolBar,
                 attachList,
                 attachErrorText,
-                publicShotToggle,
                 infoCheck,
                 logsCheck,
                 mailLink,
                 new TextBlock
                 {
-                    Text = "正文和公开截图会发布为 GitHub Issue，不收集邮箱；非图片附件与未公开截图会在本机加密，仅开发者可见。",
+                    Text = "正文和附件都会公开在 GitHub Issue 中，方便社区一起排查；不收集邮箱，请勿上传个人隐私或完整版权书。",
                     FontSize = 11,
                     Foreground = ThemeHelper.Brush(p.T3),
                     TextWrapping = TextWrapping.Wrap,
@@ -1103,6 +1146,7 @@ public sealed class UpdateAndFeedbackService
                 SecondaryButtonText = "在 GitHub 打开 Issue ↗",
                 CloseButtonText = "取消",
                 DefaultButton = ContentDialogButton.Primary,
+                IsPrimaryButtonEnabled = !string.IsNullOrWhiteSpace(titleBox.Text) && !string.IsNullOrWhiteSpace(bodyBox.Text),
             };
 
             res = await activeDlg.ShowAsync();
@@ -1150,8 +1194,9 @@ public sealed class UpdateAndFeedbackService
         SaveDraftState();
         if (res == ContentDialogResult.None) return;
 
+        string title = titleBox.Text.Trim();
         string text = bodyBox.Text.Trim();
-        if (string.IsNullOrEmpty(text)) return;
+        if (string.IsNullOrEmpty(title) || string.IsNullOrEmpty(text)) return;
 
         var finalAttachments = attachments.Select(a => (a.Name, a.Data, a.IsImage)).ToList();
         if (withLogs && finalAttachments.Count < 3 && ReadLocalLogTailBytes() is { Length: > 0 } logBytes)
@@ -1161,7 +1206,7 @@ public sealed class UpdateAndFeedbackService
 
         if (res == ContentDialogResult.Primary)
         {
-            var relayStatus = await TrySubmitViaRelayAsync(category, text, withDeviceInfo, publicShots, finalAttachments);
+            var relayStatus = await TrySubmitViaRelayAsync(category, title, text, withDeviceInfo, finalAttachments);
 
             if (relayStatus == RelaySubmitOutcome.Sent)
             {
@@ -1197,48 +1242,67 @@ public sealed class UpdateAndFeedbackService
                     CloseButtonText = "好",
                 };
                 if (await retryDlg.ShowAsync() == ContentDialogResult.Primary)
-                    OpenGitHubIssue(category, text, withDeviceInfo);
+                    OpenGitHubIssue(category, title, text, withDeviceInfo);
             }
             else
             {
                 // YuyueFeedbackTopic unconfigured: NEVER clear saved draft!
-                OpenGitHubIssue(category, text, withDeviceInfo);
+                OpenGitHubIssue(category, title, text, withDeviceInfo);
             }
         }
         else if (res == ContentDialogResult.Secondary)
         {
-            OpenGitHubIssue(category, text, withDeviceInfo);
+            ClearPersistedDraft();
+            OpenGitHubIssue(category, title, text, withDeviceInfo);
         }
     }
 
     private enum RelaySubmitOutcome { Unconfigured, Sent, QueuedOffline, UploadFailed }
 
-    internal static (string? Topic, string? PublicKey) ResolveFeedbackConfig()
+    internal static string? ResolveFeedbackTopic()
     {
         string? topic = Environment.GetEnvironmentVariable("YuyueFeedbackTopic");
-        string? pubKey = Environment.GetEnvironmentVariable("YuyueFeedbackPublicKey");
-        if (string.IsNullOrWhiteSpace(topic) || string.IsNullOrWhiteSpace(pubKey))
+        if (string.IsNullOrWhiteSpace(topic))
         {
             try
             {
                 var attrs = Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>();
                 foreach (var a in attrs)
                 {
-                    if (string.IsNullOrWhiteSpace(topic) && a.Key == "YuyueFeedbackTopic") topic = a.Value?.Trim();
-                    else if (string.IsNullOrWhiteSpace(pubKey) && a.Key == "YuyueFeedbackPublicKey") pubKey = a.Value?.Trim();
+                    if (a.Key == "YuyueFeedbackTopic" && !string.IsNullOrWhiteSpace(a.Value))
+                    {
+                        topic = a.Value.Trim();
+                        break;
+                    }
                 }
             }
             catch { }
         }
-        return (string.IsNullOrWhiteSpace(topic) ? null : topic, string.IsNullOrWhiteSpace(pubKey) ? null : pubKey);
+        return string.IsNullOrWhiteSpace(topic) ? null : topic;
+    }
+
+    private static string SafeFileExt(string name)
+    {
+        string ext = Path.GetExtension(name).TrimStart('.').ToLowerInvariant();
+        if (ext.Length is >= 1 and <= 10 && ext.All(c => (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')))
+            return "." + ext;
+        return ".bin";
+    }
+
+    private static string EncodeHeaderName(string name)
+    {
+        string baseName = Path.GetFileName(name ?? "").Trim();
+        if (string.IsNullOrEmpty(baseName)) return "";
+        if (baseName.Length > 80) baseName = baseName[..80];
+        return Uri.EscapeDataString(baseName);
     }
 
     private async Task<RelaySubmitOutcome> TrySubmitViaRelayAsync(
-        string category, string text, bool withInfo, bool publicShots,
+        string category, string title, string text, bool withInfo,
         List<(string Name, byte[] Data, bool IsImage)> attachments)
     {
-        var (topic, pubKey) = ResolveFeedbackConfig();
-        if (string.IsNullOrWhiteSpace(topic) || string.IsNullOrWhiteSpace(pubKey))
+        string? topic = ResolveFeedbackTopic();
+        if (string.IsNullOrWhiteSpace(topic))
             return RelaySubmitOutcome.Unconfigured;
 
         try
@@ -1247,15 +1311,22 @@ public sealed class UpdateAndFeedbackService
             for (int i = 0; i < attachments.Count; i++)
             {
                 var att = attachments[i];
-                bool plainShot = publicShots && att.IsImage;
-                byte[] payload = plainShot ? att.Data : YuyueCoreMethods.SealFeedbackFile(pubKey, att.Name, att.Data);
                 using var putReq = new HttpRequestMessage(HttpMethod.Put, $"https://ntfy.sh/{topic}")
                 {
-                    Content = new ByteArrayContent(payload),
+                    Content = new ByteArrayContent(att.Data),
                 };
                 putReq.Headers.Add("X-Firebase", "no");
-                putReq.Headers.Add("Filename", plainShot ? $"shot-{i + 1}.jpg" : "f.bin");
-                putReq.Headers.Add("X-Message", plainShot ? "v2shot" : "v1file");
+                if (att.IsImage)
+                {
+                    putReq.Headers.Add("Filename", $"shot-{i + 1}.jpg");
+                    putReq.Headers.Add("X-Message", "v2shot");
+                }
+                else
+                {
+                    string encoded = EncodeHeaderName(att.Name);
+                    putReq.Headers.Add("Filename", $"file-{i + 1}{SafeFileExt(att.Name)}");
+                    putReq.Headers.Add("X-Message", string.IsNullOrEmpty(encoded) ? "v2file" : $"v2file {encoded}");
+                }
                 using var putResp = await Http.SendAsync(putReq);
                 putResp.EnsureSuccessStatusCode();
                 using var doc = JsonDocument.Parse(await putResp.Content.ReadAsStringAsync());
@@ -1265,6 +1336,7 @@ public sealed class UpdateAndFeedbackService
 
             var draft = new FeedbackDraft(
                 Category: category,
+                Title: title,
                 Text: text,
                 AppVersion: withInfo ? $"{CurrentVersion} ({CurrentBuild})" : "",
                 Platform: withInfo ? "windows" : "",
@@ -1332,15 +1404,14 @@ public sealed class UpdateAndFeedbackService
         _library.SavePrefs();
     }
 
-    private static void OpenGitHubIssue(string category, string text, bool withInfo)
+    private static void OpenGitHubIssue(string category, string title, string text, bool withInfo)
     {
-        string firstLine = text.Split('\n')[0].Trim();
-        if (firstLine.Length > 48) firstLine = firstLine[..48] + "…";
-        string tag = category switch { "idea" => "[建议] ", "other" => "[反馈] ", _ => "[问题] " };
+        string cleanTitle = title.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        string tag = category switch { "idea" => "[建议] ", "other" => "[其他] ", _ => "[问题] " };
         string body = withInfo
             ? $"{text}\n\n---\n- 平台：Windows ({OsDisplayVersion()})\n- 版本：语阅 {CurrentVersion} ({CurrentBuild})"
             : text;
-        string url = $"https://github.com/{RepoSlug}/issues/new?title={Uri.EscapeDataString(tag + firstLine)}&body={Uri.EscapeDataString(body)}";
+        string url = $"https://github.com/{RepoSlug}/issues/new?title={Uri.EscapeDataString(tag + cleanTitle)}&body={Uri.EscapeDataString(body)}";
         _ = Launcher.LaunchUriAsync(new Uri(url));
     }
 

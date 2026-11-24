@@ -799,7 +799,7 @@ private struct PrivacySheetContent: View {
             (String(localized: "离线翻译与本地语音"),
              String(localized: "外文查词与翻译使用系统离线翻译；按需从 GitHub Releases、魔搭（ModelScope）或 Hugging Face 下载的对齐模型、声音包、开源字体与本地语音模型都在设备上离线运行（字体预览样字按需从 Google Fonts 加载），原文与录音不出本机。")),
             (String(localized: "问题反馈"),
-             String(localized: "只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；不收集邮箱，非图片附件和未公开的截图会在发送前用开发者公钥在本机加密。")),
+             String(localized: "只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；正文与附件均会公开展示，不收集邮箱。")),
             (String(localized: "匿名检查更新与签名校验"),
              String(localized: "自动检查更新每天只从 GitHub 读取一次版本号文件，不带任何关于你和设备的信息（可在「关于」页关闭）；安装包经 Sparkle EdDSA 签名校验后才会替换。")),
         ]

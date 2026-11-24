@@ -23,6 +23,7 @@
  *     MIN_INTERVAL_MINUTES  两次触发的最小间隔分钟数（默认 25：平时首条 ≤5 分钟起跑，被连刷时合并批次保住 2000 分钟免费额度）
  */
 
+const TITLE_MAX = 80;
 const TEXT_MAX = 1000;
 const DEDUP_WINDOW_MS = 24 * 3600 * 1000;
 const ISSUE_SCAN_WINDOW_MS = 48 * 3600 * 1000;
@@ -45,6 +46,11 @@ export function openMessage(raw) {
   }
   if (!data || typeof data !== "object" || Array.isArray(data) || data.v !== 2) {
     return null;
+  }
+  if (data.title !== undefined && data.title !== null) {
+    if (typeof data.title !== "string") return null;
+    const cleanTitle = data.title.replace(/[\x00-\x1f\x7f]/g, " ").trim().replace(/\s+/g, " ");
+    if (cleanTitle.length > TITLE_MAX) return null;
   }
   if (typeof data.text !== "string") return null;
   const trimmed = data.text.trim();

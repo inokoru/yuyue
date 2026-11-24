@@ -69,10 +69,9 @@ $publishArgs = @(
     "-p:FileVersion=$Version.$BuildNumber",
     "-o", $StageDir
 )
-if (-not [string]::IsNullOrWhiteSpace($FeedbackTopic) -and -not [string]::IsNullOrWhiteSpace($FeedbackPublicKey)) {
+if (-not [string]::IsNullOrWhiteSpace($FeedbackTopic)) {
     Write-Host "      Injecting build-time feedback relay configuration."
     $publishArgs += "-p:YuyueFeedbackTopic=$FeedbackTopic"
-    $publishArgs += "-p:YuyueFeedbackPublicKey=$FeedbackPublicKey"
 }
 
 & dotnet @publishArgs

@@ -213,8 +213,6 @@
 	</array>
 	<key>YYGoogleClientID</key>
 	<string>$(GOOGLE_CLIENT_ID)</string>
-	<key>YuyueFeedbackPublicKey</key>
-	<string>$(YUYUE_FEEDBACK_PUBLIC_KEY)</string>
 	<key>YuyueFeedbackTopic</key>
 	<string>$(YUYUE_FEEDBACK_TOPIC)</string>
 </dict>

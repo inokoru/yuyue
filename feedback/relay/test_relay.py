@@ -34,11 +34,24 @@ class RelayTest(unittest.TestCase):
         return json.dumps({"v": 2, "category": "bug", "text": "翻页卡住", **fields}, ensure_ascii=False)
 
     def test_message_checks(self):
-        opened = relay.open_message(self.message(platform="ios", os="iOS 18", app="0.1.0 (1)"))
+        opened = relay.open_message(self.message(title="  翻页卡住  ", platform="ios", os="iOS 18", app="0.1.0 (1)"))
+        self.assertEqual(opened["title"], "翻页卡住")
         self.assertEqual(opened["text"], "翻页卡住")
         self.assertEqual(opened["platform"], "ios")
+        self.assertEqual(relay.issue_title(opened), "[问题] 翻页卡住")
+        # Dedicated title up to 60 chars is never truncated.
+        full_title = "mobi文件无法导入，其他文件能导入但一点击阅读就闪退到桌面，包括txt文件（荣耀Magic7 MagicOS11）"
+        self.assertLessEqual(len(full_title), 60)
+        opened_full = relay.open_message(self.message(title=full_title, text="详细说明"))
+        self.assertEqual(relay.issue_title(opened_full), f"[问题] {full_title}")
+        # Legacy clients without a title field do not get cut mid-sentence at 40 chars.
+        legacy_text = "mobi文件无法导入，其他文件能导入但一点击阅读就闪退到桌面，包括txt文件。不知道是哪里出了问题，手机型号是荣耀magic7。"
+        legacy = relay.open_message(self.message(text=legacy_text))
+        self.assertEqual(relay.issue_title(legacy), f"[问题] {legacy_text}")
         for junk in ("hello", "v1.abc", "{", json.dumps({"v": 1, "text": "x"}), self.message(text="  "),
-                     self.message(text="字" * (relay.TEXT_MAX + 1)), "[1]"):
+                     self.message(text="字" * (relay.TEXT_MAX + 1)),
+                     self.message(title="标" * (relay.TITLE_MAX + 1)),
+                     self.message(title=123), "[1]"):
             self.assertIsNone(relay.open_message(junk), junk[:30])
         self.assertEqual(relay.open_message(self.message(category="nope"))["category"], "other")
         # A header field can't fake another line or carry markup.
@@ -82,18 +95,36 @@ class RelayTest(unittest.TestCase):
     def test_attachments(self):
         server = "https://ntfy.sh"
         shot = {"id": "s1", "message": "v2shot", "attachment": {"url": "https://ntfy.sh/file/s1.jpg"}}
+        pub_file = {
+            "id": "p1",
+            "message": "v2file %E7%BA%A2%E6%A5%BC%E6%A2%A6.mobi",
+            "attachment": {"url": "https://ntfy.sh/file/p1.mobi", "name": "file-1.mobi"},
+        }
+        pub_plain = {"id": "p2", "message": "v2file", "attachment": {"url": "https://ntfy.sh/file/p2.txt", "name": "sample.txt"}}
         sealed = {"id": "f1", "message": "v1file", "attachment": {"url": "https://ntfy.sh/file/f1.bin"}}
-        self.assertEqual(relay.attachment(server, shot), ("shot", "https://ntfy.sh/file/s1.jpg"))
+        self.assertEqual(relay.attachment(server, shot), ("shot", "https://ntfy.sh/file/s1.jpg", ""))
+        self.assertEqual(relay.attachment(server, pub_file), ("file", "https://ntfy.sh/file/p1.mobi", "红楼梦.mobi"))
+        self.assertEqual(relay.attachment(server, pub_plain), ("file", "https://ntfy.sh/file/p2.txt", "sample.txt"))
         self.assertEqual(relay.attachment(server, sealed)[0], "sealed")
         self.assertIsNone(relay.attachment(server, {**shot, "attachment": {"url": "https://evil.example/file/x"}}))
         self.assertIsNone(relay.attachment(server, {**shot, "message": "hi"}))
+        self.assertEqual(relay.safe_ext("红楼梦.MOBI"), ".mobi")
+        self.assertEqual(relay.safe_ext("noext"), ".bin")
         self.assertTrue(relay.is_jpeg(JPEG))
         self.assertFalse(relay.is_jpeg(b"\x89PNG\r\n\x1a\n...."))
-        lines = relay.attachment_lines([("shot", JPEG), ("sealed", b"x" * 2000), None], {1: "https://u/1.jpg"}, {2: "p"})
+        lines = relay.attachment_lines(
+            [("shot", JPEG, ""), ("file", b"m" * 631_000, "红楼梦[测试].mobi"), ("sealed", b"x" * 2000, ""), None],
+            {1: "https://u/1.jpg"},
+            {2: ("https://github.com/r/blob/main/id/2.mobi", "https://raw.githubusercontent.com/r/main/id/2.mobi")},
+            {3: "p"},
+        )
         self.assertEqual(lines[0], "![截图 1](https://u/1.jpg)")
-        self.assertIn("只有开发者能看到", lines[1])
-        self.assertIn("没取到", lines[2])
-        self.assertIn("没存上", relay.attachment_lines([("shot", JPEG)], {}, {})[0])
+        self.assertIn("红楼梦\\[测试\\].mobi", lines[1])
+        self.assertIn("https://github.com/r/blob/main/id/2.mobi", lines[1])
+        self.assertIn("直接下载", lines[1])
+        self.assertIn("只有开发者能看到", lines[2])
+        self.assertIn("没取到", lines[3])
+        self.assertIn("没存上", relay.attachment_lines([("shot", JPEG, "")], {}, {}, {})[0])
 
     def test_shots_repo_push(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -102,12 +133,13 @@ class RelayTest(unittest.TestCase):
             run("git", "init", "-q", "--bare", "-b", "main", remote)
             run("git", "clone", "-q", remote, work)
             shots = relay.Shots("inokoru/yuyue-feedback-assets", work)
-            self.assertTrue(shots.add("abc", [(1, JPEG), (3, JPEG)]))
-            self.assertTrue(shots.add("abc", [(1, JPEG)]))  # again: nothing new, still fine
+            self.assertTrue(shots.add_files("abc", [("1.jpg", JPEG), ("2.mobi", b"BOOKMOBI")]))
+            self.assertTrue(shots.add_files("abc", [("1.jpg", JPEG)]))  # again: nothing new, still fine
             listed = subprocess.run(["git", "--git-dir", remote, "ls-tree", "-r", "--name-only", "main"],
                                     capture_output=True, text=True).stdout.split()
-            self.assertEqual(listed, ["abc/1.jpg", "abc/3.jpg"])
+            self.assertEqual(listed, ["abc/1.jpg", "abc/2.mobi"])
             self.assertEqual(shots.url("abc/1.jpg"), "https://raw.githubusercontent.com/inokoru/yuyue-feedback-assets/main/abc/1.jpg")
+            self.assertEqual(shots.blob_url("abc/2.mobi"), "https://github.com/inokoru/yuyue-feedback-assets/blob/main/abc/2.mobi")
 
     @unittest.skipIf(kaneo_import is None or PrivateKey is None, "local kaneo_import / pynacl not installed")
     def test_mac_side_opens_what_the_app_sealed(self):

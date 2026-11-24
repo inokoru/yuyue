@@ -95,23 +95,25 @@ import org.json.JSONArray
 import org.json.JSONObject
 import uniffi.yuyue_core.FeedbackDraft
 import uniffi.yuyue_core.feedbackMessage
-import uniffi.yuyue_core.sealFeedbackFile
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
 /**
  * 反馈: the core turns what the form holds into one ntfy message (`feedbackMessage`) and it is
- * POSTed to ntfy.sh (docs/dev/feedback.md). 语阅 is open source: the words become a public GitHub
- * Issue, and so do the screenshots unless the person turns that off. No email or contact info is
- * collected; non-image attachments and private screenshots are sealed so only the developer reads
- * them. Without a network the message waits on this phone and goes on the next try. Same rules as
- * the Apple app.
+ * POSTed to ntfy.sh (docs/dev/feedback.md). 语阅 is open source: the title, body, optional device
+ * info, and all attachments become a public GitHub Issue so anyone in the community can help debug.
+ * No email or contact info is collected; without a network the message waits on this phone.
  */
 object Feedback {
     enum class Category(val id: String) {
         Bug("bug"), Idea("idea"), Other("other");
 
         val title: String get() = when (this) { Bug -> t("问题"); Idea -> t("建议"); Other -> t("其他") }
+        val titlePlaceholder: String get() = when (this) {
+            Bug -> t("一句话概括遇到的问题")
+            Idea -> t("一句话概括你的建议")
+            Other -> t("一句话标题")
+        }
         val placeholder: String get() = when (this) {
             Bug -> t("哪本书、哪一页，做了什么，结果怎样")
             Idea -> t("想要什么功能，或者哪里可以更顺手")
@@ -128,6 +130,7 @@ object Feedback {
     class Busy : Exception("busy")
 
     /** The core's caps, counted in code points as Rust counts chars. */
+    const val TITLE_MAX = 60
     const val TEXT_MAX = 800
     const val FILES_MAX = 3
     const val FILE_BYTES_MAX = 1_500_000
@@ -137,13 +140,12 @@ object Feedback {
 
     private const val QUEUE_KEY = "feedback.queue"
     private val topic = BuildConfig.FEEDBACK_TOPIC.trim()
-    private val publicKey = BuildConfig.FEEDBACK_PUBLIC_KEY.trim()
     private val http by lazy { OkHttpClient.Builder().callTimeout(15, TimeUnit.SECONDS).build() }
     private val slow by lazy { http.newBuilder().callTimeout(40, TimeUnit.SECONDS).build() }
     private val flushing = Mutex()
 
-    /** Public builds carry neither; the form says so and does not send. */
-    val isConfigured: Boolean get() = topic.isNotEmpty() && publicKey.isNotEmpty()
+    /** Public builds carry no topic; the form says so and does not send. */
+    val isConfigured: Boolean get() = topic.isNotEmpty()
 
     val queued: List<String> get() = readList(QUEUE_KEY)
 
@@ -153,35 +155,31 @@ object Feedback {
      * the original carried — place, camera, time — is gone); anything else goes as it is, up to 1.5 MB.
      */
     class Attachment(val name: String, val data: ByteArray, val preview: ImageBitmap?) {
-        /** A picture (shrunk to a JPEG here); only these may go public. */
+        /** A picture shrunk to a JPEG (inline image in the public Issue); other files become download links. */
         val isShot: Boolean get() = preview != null
     }
 
     /**
      * [withInfo] false: the person turned 附加信息 off; version and system stay here.
-     * [publicShots]: screenshots go up as they are, for the public Issue; otherwise sealed like
-     * every other file.
      *
      * Attachments go first, each its own ntfy attachment; the report then names them.
      * They need a network now: if one fails nothing is counted and the form keeps everything.
      * Only the words wait in the queue (ntfy keeps an attachment 3 hours, too short to hold).
      */
     suspend fun send(
-        category: Category, text: String, withInfo: Boolean = true, publicShots: Boolean = true,
+        category: Category, title: String, text: String, withInfo: Boolean = true,
         files: List<Attachment> = emptyList(),
     ): Outcome {
         if (!isConfigured) throw Problem(t("这个版本没有配置反馈地址，发不出去。"))
         val ids = files.take(FILES_MAX).mapIndexed { i, file ->
-            val shown = publicShots && file.isShot
-            val data = if (shown) file.data else sealFeedbackFile(publicKey, file.name, file.data)
-            try { upload(data, shown, i + 1) } catch (_: Busy) {
+            try { upload(file, i + 1) } catch (_: Busy) {
                 throw Problem(t("反馈服务现在太忙，附件没传上去。写的都还在，过一会儿再点发送。"))
             } catch (_: Exception) {
                 throw Problem(t("附件没传上去，可能是没网。写的都还在，联网后再点发送。"))
             }
         }
         val body = feedbackMessage(FeedbackDraft(
-            category = category.id, text = text,
+            category = category.id, title = title, text = text,
             appVersion = if (withInfo) appVersion else "",
             platform = if (withInfo) "android" else "",
             osVersion = if (withInfo) "$osVersion · $device" else "",
@@ -228,22 +226,52 @@ object Feedback {
     }
 
     /**
-     * One attachment. [shown]: a screenshot for the public Issue, the plain JPEG, marked `v2shot`.
-     * Otherwise a sealed box marked `v1file`, its name inside the box. Returns its ntfy id.
+     * One public attachment. Screenshots go up as JPEG marked `v2shot`; other files go up raw
+     * marked `v2file <percent-encoded-name>` with an ASCII-safe `Filename` header.
      */
-    private suspend fun upload(body: ByteArray, shown: Boolean, n: Int): String = withContext(Dispatchers.IO) {
+    private suspend fun upload(file: Attachment, n: Int): String = withContext(Dispatchers.IO) {
+        val isShot = file.isShot
+        val filename = if (isShot) "shot-$n.jpg" else "file-$n${safeExt(file.name)}"
+        val message = if (isShot) "v2shot" else {
+            val encoded = encodeHeaderName(file.name)
+            if (encoded.isEmpty()) "v2file" else "v2file $encoded"
+        }
         val request = Request.Builder()
             .url("https://ntfy.sh/$topic")
-            .put(body.toRequestBody((if (shown) "image/jpeg" else "application/octet-stream").toMediaType()))
+            .put(file.data.toRequestBody((if (isShot) "image/jpeg" else "application/octet-stream").toMediaType()))
             .header("X-Firebase", "no")
-            .header("Filename", if (shown) "shot-$n.jpg" else "f.bin")
-            .header("X-Message", if (shown) "v2shot" else "v1file")
+            .header("Filename", filename)
+            .header("X-Message", message)
             .build()
         slow.newCall(request).execute().use { reply ->
             if (reply.code == 429) throw Busy()
             if (!reply.isSuccessful) throw Problem("HTTP ${reply.code}")
             JSONObject(reply.body?.string().orEmpty()).optString("id").ifEmpty { throw Problem("no id") }
         }
+    }
+
+    private fun safeExt(name: String): String {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        return if (ext.length in 1..10 && ext.all { it in 'a'..'z' || it in '0'..'9' }) ".$ext" else ".bin"
+    }
+
+    private fun encodeHeaderName(name: String): String {
+        val base = name.replace('\\', '/').substringAfterLast('/').trim()
+        if (base.isEmpty()) return ""
+        val bytes = clip(base, 80).toByteArray(Charsets.UTF_8)
+        val out = StringBuilder(bytes.size * 2)
+        for (b in bytes) {
+            val c = b.toInt() and 0xFF
+            if (c in 'A'.code..'Z'.code || c in 'a'.code..'z'.code || c in '0'.code..'9'.code ||
+                c == '.'.code || c == '_'.code || c == '-'.code || c == '~'.code) {
+                out.append(c.toChar())
+            } else {
+                out.append('%')
+                out.append("0123456789ABCDEF"[c ushr 4])
+                out.append("0123456789ABCDEF"[c and 0x0F])
+            }
+        }
+        return out.toString()
     }
 
     /** A picked file → an [Attachment]. Pictures are shrunk; anything else must already fit. */
@@ -308,21 +336,22 @@ object Feedback {
     private const val DRAFT_KEY = "feedback.draft"
 
     /** What the form held when it closed, so nothing written is lost. Cleared once sent (or queued). */
-    class Draft(val category: Category, val text: String, val withInfo: Boolean, val publicShots: Boolean, val files: List<Attachment>)
+    class Draft(val category: Category, val title: String, val text: String, val withInfo: Boolean, val files: List<Attachment>)
 
     private fun draftDir(context: Context) = java.io.File(context.filesDir, "feedback-draft")
 
     private fun draftJson(): JSONObject = runCatching { JSONObject(Prefs.string(DRAFT_KEY, "{}")) }.getOrDefault(JSONObject())
 
     private fun writeDraft(json: JSONObject) {
-        val empty = json.optString("text").isEmpty() && (json.optJSONArray("files")?.length() ?: 0) == 0 &&
-            json.optBoolean("withInfo", true) && json.optBoolean("publicShots", true) &&
+        val empty = json.optString("title").isEmpty() && json.optString("text").isEmpty() &&
+            (json.optJSONArray("files")?.length() ?: 0) == 0 &&
+            json.optBoolean("withInfo", true) &&
             json.optString("category", Category.Bug.id) == Category.Bug.id
         Prefs.set(DRAFT_KEY, if (empty) null else json.toString())
     }
 
-    fun saveDraft(category: Category, text: String, withInfo: Boolean, publicShots: Boolean) =
-        writeDraft(draftJson().put("category", category.id).put("text", text).put("withInfo", withInfo).put("publicShots", publicShots))
+    fun saveDraft(category: Category, title: String, text: String, withInfo: Boolean) =
+        writeDraft(draftJson().put("category", category.id).put("title", title).put("text", text).put("withInfo", withInfo))
 
     suspend fun saveDraftFiles(context: Context, files: List<Attachment>) = withContext(Dispatchers.IO) {
         val dir = draftDir(context)
@@ -349,7 +378,7 @@ object Feedback {
         }
         Draft(
             Category.entries.firstOrNull { it.id == json.optString("category") } ?: Category.Bug,
-            json.optString("text"), json.optBoolean("withInfo", true), json.optBoolean("publicShots", true), files,
+            json.optString("title"), json.optString("text"), json.optBoolean("withInfo", true), files,
         )
     }
 
@@ -398,25 +427,26 @@ object Feedback {
     private fun writeList(key: String, list: List<String>) = Prefs.set(key, JSONArray(list).toString())
 }
 
-/** The form: 类别, 想说的 (Markdown, with attachments), 附加信息, a mailto hint, then 发送. Its own page. */
+/** The form: 类别, 标题, 详细描述 (Markdown, with attachments), 附加信息, a mailto hint, then 发送. Its own page. */
 @Composable
 fun FeedbackPage(close: () -> Unit) {
     var category by remember { mutableStateOf(Feedback.Category.Bug) }
+    var title by remember { mutableStateOf("") }
     var text by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var done by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var withInfo by remember { mutableStateOf(true) }
-    // Screenshots shown in the public Issue. On until the person turns it off; the card says what it means.
-    var publicShots by remember { mutableStateOf(true) }
+    var titleFocused by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var restored by remember { mutableStateOf(false) }
+    val titleFocus = remember { FocusRequester() }
     val focus = remember { FocusRequester() }
     val files = remember { mutableStateListOf<Feedback.Attachment>() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val blank = text.isBlank()
+    val blank = title.isBlank() || text.isBlank()
     val canSend = !blank && !sending && Feedback.isConfigured
 
     fun openMail() {
@@ -445,23 +475,23 @@ fun FeedbackPage(close: () -> Unit) {
     LaunchedEffect(Unit) {
         Feedback.loadDraft(context)?.let { draft ->
             category = draft.category
+            title = draft.title
             text = draft.text
             withInfo = draft.withInfo
-            publicShots = draft.publicShots
             files.addAll(draft.files)
         }
         restored = true
-        runCatching { focus.requestFocus() }
+        runCatching { (if (title.isEmpty()) titleFocus else focus).requestFocus() }
     }
-    LaunchedEffect(category, text, withInfo, publicShots) {
-        if (restored && !done) Feedback.saveDraft(category, text, withInfo, publicShots)
+    LaunchedEffect(category, title, text, withInfo) {
+        if (restored && !done) Feedback.saveDraft(category, title, text, withInfo)
     }
     LaunchedEffect(files.toList()) { if (restored) Feedback.saveDraftFiles(context, files.toList()) }
 
     if (done) {
         Thanks(
             onMail = { openMail() },
-            again = { text = ""; category = Feedback.Category.Bug; withInfo = true; publicShots = true; files.clear(); done = false },
+            again = { title = ""; text = ""; category = Feedback.Category.Bug; withInfo = true; files.clear(); done = false },
             close = close,
         )
         return
@@ -474,7 +504,7 @@ fun FeedbackPage(close: () -> Unit) {
         ) {
             Text(t("语阅还在早期，哪里不对、想要什么，直接写。"), style = YY.font(11.5f), color = YY.c.t2)
             if (!Feedback.isConfigured) {
-                // Builds without a topic and key (see docs/dev/feedback.md) can't send; mail still works.
+                // Builds without a topic (see docs/dev/feedback.md) can't send; mail still works.
                 androidx.compose.foundation.text.selection.SelectionContainer {
                     Text(
                         t("这个版本发不出反馈。可以发邮件到 %@。", Feedback.SUPPORT_EMAIL), style = YY.font(11f), color = YY.c.t2,
@@ -483,6 +513,39 @@ fun FeedbackPage(close: () -> Unit) {
                 }
             }
             YYSegments(Feedback.Category.entries.map { it to it.title }, category, { category = it }, modifier = Modifier.fillMaxWidth())
+            // 标题: single-line, hard-capped so the Issue title is never truncated.
+            Row(
+                Modifier.fillMaxWidth()
+                    .background(YY.c.card, RoundedCornerShape(YY.s(14)))
+                    .border(if (titleFocused) 1.dp else 0.5.dp, if (titleFocused) YY.tint.edge else YY.c.line, RoundedCornerShape(YY.s(14)))
+                    .padding(horizontal = YY.s(12), vertical = YY.s(11)),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(YY.s(8)),
+            ) {
+                BasicTextField(
+                    title,
+                    { raw ->
+                        val flat = raw.replace('\r', ' ').replace('\n', ' ')
+                        title = Feedback.clip(flat, Feedback.TITLE_MAX)
+                    },
+                    singleLine = true,
+                    textStyle = YY.font(12.5f, FontWeight.Medium).copy(color = YY.c.t1),
+                    cursorBrush = SolidColor(YY.tint.accent),
+                    decorationBox = { inner ->
+                        if (title.isEmpty()) Text(category.titlePlaceholder, style = YY.font(12.5f), color = YY.c.t3)
+                        inner()
+                    },
+                    modifier = Modifier.weight(1f).focusRequester(titleFocus).onFocusChanged { titleFocused = it.isFocused },
+                )
+                val titleLen = Feedback.length(title)
+                if (titleLen >= Feedback.TITLE_MAX - 15) {
+                    Text(
+                        "$titleLen/${Feedback.TITLE_MAX}",
+                        style = YY.font(9.5f),
+                        color = if (titleLen > Feedback.TITLE_MAX - 5) YY.c.warn else YY.c.t3,
+                    )
+                }
+            }
             // 想说的, with the attachments and the count inside the box.
             Column(
                 Modifier.fillMaxWidth()
@@ -563,31 +626,6 @@ fun FeedbackPage(close: () -> Unit) {
                     }
                 }
             }
-            // 截图公开: only with a screenshot attached. On by default; what it means is said right
-            // there, and off still sends the screenshots, sealed for the developer alone.
-            AnimatedVisibility(files.any { it.isShot }, enter = androidx.compose.animation.fadeIn(app.yuyue.design.YYMotion.standard()) + androidx.compose.animation.expandVertically(app.yuyue.design.YYMotion.layout()), exit = androidx.compose.animation.fadeOut(app.yuyue.design.YYMotion.exit()) + androidx.compose.animation.shrinkVertically(app.yuyue.design.YYMotion.layout())) {
-                Row(
-                    Modifier.fillMaxWidth()
-                        .background(YY.c.card, RoundedCornerShape(YY.s(12)))
-                        .border(0.5.dp, YY.c.line, RoundedCornerShape(YY.s(12)))
-                        .padding(horizontal = YY.s(12), vertical = YY.s(8)),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f).padding(end = YY.s(10))) {
-                        Text(t("截图公开在 GitHub 上"), style = YY.font(11.5f), color = YY.c.t1)
-                        Text(
-                            if (publicShots) t("语阅是开源项目，截图和文字一起公开，别人也能帮忙查。发之前看一眼截图里有没有隐私。")
-                            else t("截图照样发出，只有开发者能看到。"),
-                            style = YY.font(9.5f), color = YY.c.t3,
-                        )
-                    }
-                    Switch(
-                        publicShots, { publicShots = it },
-                        modifier = Modifier.semantics { contentDescription = t("截图公开在 GitHub 上") },
-                        colors = SwitchDefaults.colors(checkedTrackColor = YY.tint.fill, checkedThumbColor = YY.c.card, uncheckedTrackColor = YY.c.inset, uncheckedBorderColor = YY.c.line),
-                    )
-                }
-            }
             // 附加信息: what goes along besides the words, shown as it is.
             Column(
                 Modifier.fillMaxWidth()
@@ -632,7 +670,7 @@ fun FeedbackPage(close: () -> Unit) {
             }
             Row(Modifier.padding(horizontal = YY.s(2)), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.globe, null, tint = YY.c.t3, modifier = Modifier.size(YY.s(11)))
-                Text(t("内容会公开在 GitHub 上，非公开附件只有开发者能看到"), style = YY.font(10.5f), color = YY.c.t3, modifier = Modifier.padding(start = YY.s(5)))
+                Text(t("正文和附件都会公开在 GitHub 上，请勿上传隐私或完整版权书"), style = YY.font(10.5f), color = YY.c.t3, modifier = Modifier.padding(start = YY.s(5)))
             }
             Row(Modifier.padding(horizontal = YY.s(2)), verticalAlignment = Alignment.CenterVertically) {
                 Text(t("需要回复或不想公开？"), style = YY.font(10.5f), color = YY.c.t3)
@@ -663,7 +701,7 @@ fun FeedbackPage(close: () -> Unit) {
                 notice = null
                 scope.launch {
                     try {
-                        val outcome = Feedback.send(category, text, withInfo, publicShots, files.toList())
+                        val outcome = Feedback.send(category, title, text, withInfo, files.toList())
                         when (outcome) {
                             Feedback.Outcome.Sent -> {
                                 Feedback.clearDraft(context)
@@ -672,6 +710,7 @@ fun FeedbackPage(close: () -> Unit) {
                             Feedback.Outcome.Queued, Feedback.Outcome.QueuedBusy -> {
                                 val busy = outcome == Feedback.Outcome.QueuedBusy
                                 Feedback.clearDraft(context)
+                                title = ""
                                 text = ""
                                 files.clear()
                                 notice = if (busy) t("反馈服务现在太忙，这条先存在这台设备上，过一会儿自动发出，不用再点。")

@@ -1,28 +1,26 @@
 #!/usr/bin/env python3
-"""把 ntfy 上的反馈搬进语阅仓库的 Issue（公开的），每条一个。不解密任何东西。
+"""把 ntfy 上的反馈搬进语阅仓库的 Issue（公开的），每条一个。
 
-语阅是开源项目，反馈本来就要公开，不收集邮箱或联系方式，所以 App 发来的正文、类别、
-版本、系统都是明文（`{"v":2,…}`）。不公开的附件在 App 里用开发者的公钥封好，这里原样搬运：
+语阅是开源项目，反馈的正文、标题、设备信息和附件均公开在 GitHub，方便社区一起排查复现；
+不收集邮箱或联系方式。
 
-- 截图（用户同意公开的，消息正文 `v2shot`，附件是 JPEG）：推到公开的截图仓库
-  （SHOTS_REPO，本地检出在 SHOTS_DIR），贴进 Issue。
-- 其他附件（非图片文件或用户不想公开的截图；消息正文 `v1file`，附件是密封箱）：
-  原样提交到私有仓库（GH_REPO 的 feedback-files/），Issue 里只写「只有开发者能看到」。
-
-私钥只在开发者自己的 Mac 上（本机解开私密附件）。这个脚本和它跑的
-GitHub Actions 都拿不到私钥，所以私有仓库或 Actions 出了问题，也解不开任何东西。
+- 截图（消息正文 `v2shot`，附件是 JPEG）：推到公开附件仓库（SHOTS_REPO）的 `<ntfy-id>/<n>.jpg`，
+  在 Issue 里直接贴图。
+- 普通文件附件（消息正文 `v2file` 或 `v2file <percent-encoded-name>`）：推到公开附件仓库的
+  `<ntfy-id>/<n><ext>`，在 Issue 里提供查看与直接下载链接，贡献者可直接下载调试。
+- 兼容旧版客户端（0.1.0 / 0.1.1）发来的密封附件（消息正文 `v1file`）：原样提交到私有仓库
+  （GH_REPO 的 feedback-files/），Issue 里写「只有开发者能看到」。
 
 ntfy.sh 只缓存大约 12 小时，附件只留 3 小时，所以这个脚本要在那之前跑（由 Worker 每 5 分钟检查并按需唤醒）。
 格式不对的消息跳过。已经开过的（正文里有 ntfy-id）不会再开，和已有 Issue 正文一样的也跳过。
-话题名打包在 App 里，谁都能往里发，所以每次最多开 MAX_ISSUES 个（默认 10，剩下的下一次），
-公开的附件只收 JPEG。
+话题名打包在 App 里，谁都能往里发，所以每次最多开 MAX_ISSUES 个（默认 10，剩下的下一次）。
 
 环境变量：
   NTFY_TOPIC      话题名
   NTFY_SERVER     默认 https://ntfy.sh
   ISSUE_REPO      开 Issue 的仓库：inokoru/yuyue
   ISSUE_TOKEN     能在 ISSUE_REPO 开 Issue 的 token（fine-grained，只给 Issues 读写）
-  GH_REPO         放密封附件的私有仓库，Actions 里用 github.repository
+  GH_REPO         中转私有仓库（存去重账本和旧版密封附件），Actions 里用 github.repository
   GH_TOKEN        能往 GH_REPO 提交的 token，Actions 里用 GITHUB_TOKEN
   SHOTS_REPO      放公开附件的仓库：inokoru/yuyue-feedback-assets
   SHOTS_DIR       它的本地检出（工作流用部署密钥 clone 下来），推送也用那把密钥
@@ -31,7 +29,7 @@ ntfy.sh 只缓存大约 12 小时，附件只留 3 小时，所以这个脚本�
   LABEL           反馈 Issue 的标签，默认「反馈」
 
 本地试：python relay.py --dry-run --out 目录
-  只要 NTFY_TOPIC，不碰 GitHub；打印会开的 Issue，附件（截图和密文）存进目录。
+  只要 NTFY_TOPIC，不碰 GitHub；打印会开的 Issue，附件存进目录。
 """
 
 from __future__ import annotations
@@ -57,8 +55,11 @@ SEEN_RETENTION_SECONDS = 48 * 3600
 SEEN_PATH = "feedback-files/seen.json"
 SEALED_MARK = "v1file"
 SHOT_MARK = "v2shot"
+FILE_MARK = "v2file"
 FILES_MAX = 3
+TITLE_MAX = 80           # the app caps at 60; a bit of room, then junk
 TEXT_MAX = 1000          # the app caps at 800; a bit of room, then junk
+LEGACY_TITLE_LIMIT = 120
 DOWNLOAD_MAX = 2_100_000
 CATEGORIES = {"bug": "问题", "idea": "建议", "other": "其他"}
 
@@ -79,6 +80,16 @@ def open_message(message: str) -> dict | None:
     body = data.get("text")
     if not isinstance(body, str) or not body.strip() or len(body) > TEXT_MAX:
         return None
+    raw_title = data.get("title")
+    if raw_title is not None:
+        if not isinstance(raw_title, str):
+            return None
+        title = clean_title(raw_title)
+        if len(title) > TITLE_MAX:
+            return None
+        data["title"] = title
+    else:
+        data["title"] = ""
     if data.get("category") not in CATEGORIES:
         data["category"] = "other"
     for key, limit in (("app", 80), ("platform", 40), ("os", 80)):
@@ -89,6 +100,12 @@ def open_message(message: str) -> dict | None:
         files = []
     data["files"] = [safe_id(str(i)) for i in files[:FILES_MAX] if safe_id(str(i))]
     return data
+
+
+def clean_title(text: str) -> str:
+    """Single-line Issue title: strip control characters and collapse whitespace, keeping user punctuation."""
+    text = re.sub(r"[\x00-\x1f\x7f]", " ", text)
+    return " ".join(text.split())
 
 
 def clean_line(text: str) -> str:
@@ -108,9 +125,21 @@ def text_hash(data: dict) -> str:
 
 def issue_title(data: dict) -> str:
     label = CATEGORIES.get(data.get("category"), "其他")
-    text = " ".join(str(data.get("text", "")).split())
-    snippet = text[:40] + ("…" if len(text) > 40 else "")
-    return f"[{label}] {snippet}"
+    explicit = clean_title(str(data.get("title") or ""))
+    if explicit:
+        return f"[{label}] {explicit}"
+    # Legacy clients (0.1.0 / 0.1.1) without a dedicated title field: avoid awkward 40-char cuts.
+    raw = str(data.get("text", "")).strip()
+    first_line = clean_title(raw.splitlines()[0] if raw else "")
+    if not first_line:
+        first_line = clean_title(raw)
+    if len(first_line) <= LEGACY_TITLE_LIMIT:
+        return f"[{label}] {first_line}"
+    # Prefer stopping cleanly at the first sentence ending within the limit.
+    for match in re.finditer(r"[。！？]|[.!?](?=\s)", first_line[:LEGACY_TITLE_LIMIT]):
+        if match.end() >= 12:
+            return f"[{label}] {first_line[:match.end()].rstrip('。')}"
+    return f"[{label}] {first_line[:LEGACY_TITLE_LIMIT]}…"
 
 
 def public_text(text: str) -> str:
@@ -121,7 +150,7 @@ def public_text(text: str) -> str:
 
 
 def issue_body(ntfy_id: str, data: dict, lines: list[str] | None = None) -> str:
-    """`lines`: one Markdown line per attachment (a picture, a private note, or why it is missing)."""
+    """`lines`: one Markdown line per attachment (a picture, a public file link, or a legacy private note)."""
     ntfy_id = safe_id(ntfy_id)
     label = CATEGORIES.get(data.get("category"), "其他")
     tail = ("\n" + "\n\n".join(lines) + "\n") if lines else ""
@@ -181,17 +210,45 @@ def _when(sent_at) -> str:
 
 # ---------------------------------------------------------------- attachments
 
-def attachment(server: str, item: dict) -> tuple[str, str] | None:
-    """("shot" | "sealed", url) for an attachment message, only when ntfy itself hosts the file."""
+def safe_filename(name: str) -> str:
+    """Display filename stripped of paths and control chars."""
+    name = (name or "").replace("\\", "/").rsplit("/", 1)[-1]
+    name = re.sub(r"[\x00-\x1f\x7f]", "", name).strip(" .")
+    return name[:100] or "file"
+
+
+def safe_ext(name: str) -> str:
+    """Safe ASCII extension (e.g. `.mobi`, `.txt`), or `.bin` when absent/unsafe."""
+    base = safe_filename(name)
+    if "." in base:
+        ext = base.rsplit(".", 1)[-1].lower()
+        if re.fullmatch(r"[a-z0-9]{1,10}", ext):
+            return "." + ext
+    return ".bin"
+
+
+def escape_md_label(text: str) -> str:
+    """Escape characters that could break out of a Markdown link label."""
+    return re.sub(r"([\\\[\]()*_`<>])", r"\\\1", text)
+
+
+def attachment(server: str, item: dict) -> tuple[str, str, str] | None:
+    """("shot" | "file" | "sealed", url, display_name) for an attachment message hosted by ntfy."""
     mark = str(item.get("message") or "").strip()
-    kind = {SHOT_MARK: "shot", SEALED_MARK: "sealed"}.get(mark)
-    if not kind:
-        return None
     found = item.get("attachment")
     url = found.get("url") if isinstance(found, dict) else None
     if not isinstance(url, str) or not url.startswith(server.rstrip("/") + "/file/"):
         return None
-    return kind, url
+    if mark == SHOT_MARK:
+        return "shot", url, ""
+    if mark == SEALED_MARK:
+        return "sealed", url, ""
+    if mark == FILE_MARK or mark.startswith(FILE_MARK + " "):
+        encoded = mark[len(FILE_MARK):].strip()
+        decoded = urllib.parse.unquote(encoded) if encoded else ""
+        fallback = found.get("name") if isinstance(found, dict) and isinstance(found.get("name"), str) else ""
+        return "file", url, safe_filename(decoded or fallback or "file")
+    return None
 
 
 def is_jpeg(raw: bytes) -> bool:
@@ -208,21 +265,25 @@ def download(url: str) -> bytes | None:
     return raw if 0 < len(raw) <= DOWNLOAD_MAX else None
 
 
-def fetch_files(data: dict, files: dict[str, tuple[str, str]]) -> list[tuple[str, bytes] | None]:
-    """Per listed id: (kind, bytes), or None when it is gone (ntfy keeps a file 3 hours) or bad."""
-    found: list[tuple[str, bytes] | None] = []
+def fetch_files(data: dict, files: dict[str, tuple[str, str, str]]) -> list[tuple[str, bytes, str] | None]:
+    """Per listed id: (kind, bytes, name), or None when it is gone (ntfy keeps a file 3 hours) or bad."""
+    found: list[tuple[str, bytes, str] | None] = []
     for file_id in data["files"]:
-        kind, url = files.get(file_id, (None, None))
+        entry = files.get(file_id)
+        if not entry:
+            found.append(None)
+            continue
+        kind, url, name = entry
         raw = download(url) if url else None
         if raw is None or (kind == "shot" and not is_jpeg(raw)):
             found.append(None)
         else:
-            found.append((kind, raw))
+            found.append((kind, raw, name))
     return found
 
 
 class Shots:
-    """The public screenshots repo, checked out at `path`; pushed with the deploy key the workflow set up."""
+    """The public attachments repo, checked out at `path`; pushed with the deploy key the workflow set up."""
 
     def __init__(self, repo: str, path: str, branch: str = "main"):
         self.repo, self.path, self.branch = repo, path, branch
@@ -230,14 +291,21 @@ class Shots:
     def url(self, rel: str) -> str:
         return f"https://raw.githubusercontent.com/{self.repo}/{urllib.parse.quote(self.branch)}/{urllib.parse.quote(rel)}"
 
+    def blob_url(self, rel: str) -> str:
+        return f"https://github.com/{self.repo}/blob/{urllib.parse.quote(self.branch)}/{urllib.parse.quote(rel)}"
+
     def git(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(["git", "-C", self.path, *args], capture_output=True, text=True)
 
     def add(self, ntfy_id: str, shots: list[tuple[int, bytes]]) -> bool:
         """Commit and push one report's screenshots as `<ntfy-id>/<n>.jpg`."""
+        return self.add_files(ntfy_id, [(f"{n}.jpg", raw) for n, raw in shots])
+
+    def add_files(self, ntfy_id: str, items: list[tuple[str, bytes]]) -> bool:
+        """Commit and push one report's public attachments as `<ntfy-id>/<filename>`."""
         rels = []
-        for n, raw in shots:
-            rel = f"{ntfy_id}/{n}.jpg"
+        for filename, raw in items:
+            rel = f"{ntfy_id}/{filename}"
             os.makedirs(os.path.join(self.path, ntfy_id), exist_ok=True)
             with open(os.path.join(self.path, rel), "wb") as handle:
                 handle.write(raw)
@@ -245,21 +313,27 @@ class Shots:
         self.git("add", "--", *rels)
         if self.git("diff", "--cached", "--quiet").returncode != 0:  # nothing staged: pushed by an earlier run
             commit = self.git("-c", "user.name=yuyue-feedback", "-c", "user.email=feedback@users.noreply.github.com",
-                              "commit", "-q", "-m", f"反馈截图 {ntfy_id}")
+                              "commit", "-q", "-m", f"反馈附件 {ntfy_id}")
             if commit.returncode != 0:
-                print(f"提交截图失败 {ntfy_id}：{commit.stderr.strip()}", file=sys.stderr)
+                print(f"提交附件失败 {ntfy_id}：{commit.stderr.strip()}", file=sys.stderr)
                 return False
         for _ in range(2):
             push = self.git("push", "-q", "origin", f"HEAD:{self.branch}")
             if push.returncode == 0:
                 return True
             self.git("pull", "-q", "--rebase", "origin", self.branch)
-        print(f"推送截图失败 {ntfy_id}：{push.stderr.strip()}", file=sys.stderr)
+        print(f"推送附件失败 {ntfy_id}：{push.stderr.strip()}", file=sys.stderr)
         return False
 
 
-def attachment_lines(found: list[tuple[str, bytes] | None], shot_urls: dict[int, str],
-                     sealed_urls: dict[int, str]) -> list[str]:
+def attachment_lines(
+    found: list[tuple[str, bytes, str] | None],
+    shot_urls: dict[int, str],
+    file_links: dict[int, tuple[str, str]] | None = None,
+    sealed_urls: dict[int, str] | None = None,
+) -> list[str]:
+    file_links = file_links or {}
+    sealed_urls = sealed_urls or {}
     lines = []
     for n, item in enumerate(found, 1):
         if item is None:
@@ -267,6 +341,14 @@ def attachment_lines(found: list[tuple[str, bytes] | None], shot_urls: dict[int,
         elif item[0] == "shot":
             url = shot_urls.get(n)
             lines.append(f"![截图 {n}]({url})" if url else f"_截图 {n} 没存上_")
+        elif item[0] == "file":
+            links = file_links.get(n)
+            if links:
+                blob_url, raw_url = links
+                label = escape_md_label(item[2] or f"附件 {n}")
+                lines.append(f"📎 附件 {n}：[{label}]({blob_url})（{_size(len(item[1]))} · [直接下载]({raw_url})）")
+            else:
+                lines.append(f"_附件 {n} 没存上_")
         else:
             url = sealed_urls.get(n)
             lines.append(f"📎 附件 {n}（{_size(len(item[1]))}，只有开发者能看到）" if url else f"_附件 {n} 没存上_")
@@ -340,7 +422,7 @@ def ensure_label(repo: str, token: str, name: str) -> None:
 
 
 def commit_sealed(repo: str, token: str, ntfy_id: str, sealed: list[tuple[int, bytes]]) -> dict[int, str]:
-    """The sealed attachments, as they came, at feedback-files/<ntfy-id>/<n>.sealed. Returns n → path."""
+    """Legacy sealed attachments (0.1.0 / 0.1.1), at feedback-files/<ntfy-id>/<n>.sealed. Returns n → path."""
     done = {}
     for n, raw in sealed:
         path = f"feedback-files/{ntfy_id}/{n}.sealed"
@@ -472,29 +554,60 @@ def main() -> int:
             held += 1
             continue
         found = fetch_files(data, files)
-        public = [(n, f[1]) for n, f in enumerate(found, 1) if f and f[0] == "shot"]
-        sealed = [(n, f[1]) for n, f in enumerate(found, 1) if f and f[0] == "sealed"]
+        public_assets: list[tuple[int, str, str, bytes]] = []  # (n, kind, filename, raw)
+        sealed: list[tuple[int, bytes]] = []
+        for n, f in enumerate(found, 1):
+            if not f:
+                continue
+            kind, raw, name = f
+            if kind == "shot":
+                public_assets.append((n, "shot", f"{n}.jpg", raw))
+            elif kind == "file":
+                public_assets.append((n, "file", f"{n}{safe_ext(name)}", raw))
+            else:
+                sealed.append((n, raw))
 
         if args.dry_run:
-            shot_urls, sealed_urls = {}, {}
-            for kind, items, urls in (("jpg", public, shot_urls), ("sealed", sealed, sealed_urls)):
-                for n, raw in items:
-                    urls[n] = "（没存）"
-                    if args.out:
-                        os.makedirs(args.out, exist_ok=True)
-                        urls[n] = os.path.join(args.out, f"{ntfy_id}-{n}.{kind}")
-                        with open(urls[n], "wb") as handle:
-                            handle.write(raw)
+            shot_urls: dict[int, str] = {}
+            file_links: dict[int, tuple[str, str]] = {}
+            sealed_urls: dict[int, str] = {}
+            for n, kind, filename, raw in public_assets:
+                dest = "（没存）"
+                if args.out:
+                    os.makedirs(args.out, exist_ok=True)
+                    dest = os.path.join(args.out, f"{ntfy_id}-{filename}")
+                    with open(dest, "wb") as handle:
+                        handle.write(raw)
+                if kind == "shot":
+                    shot_urls[n] = dest
+                else:
+                    file_links[n] = (dest, dest)
+            for n, raw in sealed:
+                dest = "（没存）"
+                if args.out:
+                    os.makedirs(args.out, exist_ok=True)
+                    dest = os.path.join(args.out, f"{ntfy_id}-{n}.sealed")
+                    with open(dest, "wb") as handle:
+                        handle.write(raw)
+                sealed_urls[n] = dest
             print("—" * 30)
             print(issue_title(data))
-            print(issue_body(ntfy_id, data, attachment_lines(found, shot_urls, sealed_urls)))
+            print(issue_body(ntfy_id, data, attachment_lines(found, shot_urls, file_links, sealed_urls)))
         else:
-            shot_urls = {n: shots.url(f"{ntfy_id}/{n}.jpg") for n, _ in public} if public and shots.add(ntfy_id, public) else {}
+            shot_urls = {}
+            file_links = {}
+            if public_assets and shots.add_files(ntfy_id, [(fn, raw) for _, _, fn, raw in public_assets]):
+                for n, kind, fn, _ in public_assets:
+                    rel = f"{ntfy_id}/{fn}"
+                    if kind == "shot":
+                        shot_urls[n] = shots.url(rel)
+                    else:
+                        file_links[n] = (shots.blob_url(rel), shots.url(rel))
             sealed_urls = commit_sealed(repo, token, ntfy_id, sealed) if sealed else {}
             if not labelled:
                 ensure_label(issue_repo, issue_token, label)
                 labelled = True
-            body = issue_body(ntfy_id, data, attachment_lines(found, shot_urls, sealed_urls))
+            body = issue_body(ntfy_id, data, attachment_lines(found, shot_urls, file_links, sealed_urls))
             status, detail = github("POST", f"/repos/{issue_repo}/issues", issue_token,
                                     {"title": issue_title(data), "body": body, "labels": [label]})
             if status not in (200, 201):
