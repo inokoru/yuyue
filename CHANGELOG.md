@@ -4,6 +4,20 @@
 
 Each version has a section, newest first. The app's changelog page and update notices come from here.
 
+## 0.1.2 · 2026-11-24
+
+### zh
+- Android 打开书籍闪退：修复 0.1.1 版本在 Android 上点击书籍（EPUB、TXT、MOBI 等，包含旧版本已导入的书籍）进入阅读时直接闪退回桌面的问题。
+- 部分 MOBI 无法导入：修复含长章节、旧版编码或特殊文件头的 MOBI 书籍导入失败的问题，并补齐 Android 打开 MOBI 文件的格式识别。
+- 部分 EPUB 误报 DRM：修复正文实际未加密、仅残留加密标记或仅锁定内嵌字体的 EPUB 书籍（含常见网传及多看来源版本）导入时被误判为“有 DRM 无法导入”的问题。
+- 其他稳定性修复：同步修复多项跨端朗读与语音下载、Wi‑Fi 传书、自定义字体、应用内更新、旧版苹果系统兼容以及界面与多语言细节问题。
+
+### en
+- Android book-opening crash: fixed a 0.1.1 regression on Android that crashed back to the home screen when opening books (EPUB, TXT, MOBI, etc., including books imported in earlier versions).
+- MOBI import failures: fixed import failures on MOBI files with long chapters, legacy encodings, or older header layouts, and added Android file-type associations for opening MOBI files.
+- False EPUB DRM warnings: fixed unencrypted EPUBs (such as files with leftover DRM metadata or encrypted/obfuscated embedded fonts) being wrongly rejected as DRM-protected on import.
+- Other stability fixes: improved cross-platform read-aloud and voice downloads, Wi‑Fi transfer, custom fonts, in-app update installation, macOS 14 / iOS 17 compatibility, and UI/localization details.
+
 ## 0.1.1 · 2026-11-24
 
 ### zh
