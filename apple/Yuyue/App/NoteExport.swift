@@ -185,15 +185,25 @@ enum NoteExport {
         UserDefaults.standard.string(forKey: notionPageKey).flatMap(pageID)
     }
 
+    private static var cachedObsidianBookmark: (data: Data, url: URL?)?
+    private static let isoFormatter = ISO8601DateFormatter()
+
     /// The Obsidian folder the reader picked (a security-scoped bookmark: the app is sandboxed).
     static var obsidianFolder: URL? {
-        guard let data = UserDefaults.standard.data(forKey: obsidianKey) else { return nil }
+        guard let data = UserDefaults.standard.data(forKey: obsidianKey) else {
+            cachedObsidianBookmark = nil
+            return nil
+        }
+        if let cached = cachedObsidianBookmark, cached.data == data {
+            return cached.url
+        }
         var stale = false
         #if os(macOS)
         let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope, bookmarkDataIsStale: &stale)
         #else
         let url = try? URL(resolvingBookmarkData: data, bookmarkDataIsStale: &stale)
         #endif
+        cachedObsidianBookmark = (data, url)
         return url
     }
 
@@ -238,7 +248,7 @@ enum NoteExport {
         func yaml(_ s: String) -> String { "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\"" }
         var out = "---\ntitle: \(yaml(b.title))\n"
         if let a = b.author { out += "author: \(yaml(a))\n" }
-        out += "source: 语阅\ntags:\n  - 语阅\nupdated: \(ISO8601DateFormatter().string(from: Date()))\n---\n\n# \(b.title)\n"
+        out += "source: 语阅\ntags:\n  - 语阅\nupdated: \(isoFormatter.string(from: Date()))\n---\n\n# \(b.title)\n"
         for (chapter, marks) in b.chapters {
             out += "\n## \(chapter)\n"
             for m in marks {

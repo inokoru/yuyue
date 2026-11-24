@@ -30,6 +30,9 @@ final class FontShelf {
     @ObservationIgnored private var dir: URL?
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var families: [String: String] = [:]
+    #if os(macOS)
+    @ObservationIgnored private var cachedMacFaces: (files: [String], faces: [String])?
+    #endif
 
     /// Called once the library is open: knows where fonts go, and registers any already there off the main thread.
     func attach(fontsDir: String) {
@@ -262,11 +265,28 @@ final class FontShelf {
     }
 
     #if os(macOS)
-    /// Faces installed on this Mac that set Chinese, besides the ones above. `local:<family>`.
-    func macFaces() -> [String] {
-        let skip = ["Songti SC", "Kaiti SC", "PingFang SC", "LXGW WenKai Lite", "Noto Serif SC", "Noto Sans SC", "STSong", "STKaiti", "Heiti SC", "Hiragino Sans GB"]
-        let ours = Set(files.compactMap { family(ofFile: $0) })
-        return NSFontManager.shared.availableFontFamilies
+    /// Cached Mac CJK faces, if already scanned for the current custom files.
+    var cachedMacFacesNow: [String]? {
+        guard let cached = cachedMacFaces, cached.files == files else { return nil }
+        return cached.faces
+    }
+
+    /// Faces installed on this Mac that set Chinese, scanned off the main thread and cached.
+    func loadMacFaces() async -> [String] {
+        if let cached = cachedMacFaces, cached.files == files { return cached.faces }
+        let currentFiles = files
+        let ours = Set(currentFiles.compactMap { family(ofFile: $0) })
+        let allFamilies = NSFontManager.shared.availableFontFamilies
+        let result = await Self.scanMacFaces(allFamilies: allFamilies, excluding: ours)
+        if files == currentFiles {
+            cachedMacFaces = (currentFiles, result)
+        }
+        return result
+    }
+
+    @concurrent nonisolated private static func scanMacFaces(allFamilies: [String], excluding ours: Set<String>) async -> [String] {
+        let skip: Set<String> = ["Songti SC", "Kaiti SC", "PingFang SC", "LXGW WenKai Lite", "Noto Serif SC", "Noto Sans SC", "STSong", "STKaiti", "Heiti SC", "Hiragino Sans GB"]
+        let candidates = allFamilies
             .filter { !$0.hasPrefix(".") && !skip.contains($0) && !ours.contains($0) }
             // The 繁体 twins (Heiti TC, Baoli TC…) of faces listed already.
             .filter { f in ![" TC", " HK", " TW"].contains { f.hasSuffix($0) } }
@@ -275,8 +295,11 @@ final class FontShelf {
                 let langs = CTFontCopySupportedLanguages(font) as? [String] ?? []
                 return langs.contains { $0.hasPrefix("zh-Hans") || $0 == "zh" }
             }
-            .sorted { Self.localized($0).localizedStandardCompare(Self.localized($1)) == .orderedAscending }
-            .map { "local:\($0)" }
+        // Precompute localized display names once before sorting (O(N) instead of O(N log N) CTFont lookups).
+        let keyed = candidates.map { ($0, Self.localized($0)) }
+        return keyed
+            .sorted { $0.1.localizedStandardCompare($1.1) == .orderedAscending }
+            .map { "local:\($0.0)" }
     }
     #endif
 
@@ -309,10 +332,15 @@ final class FontShelf {
         return family
     }
 
+    nonisolated private static let localizedCache = Mutex<[String: String]>([:])
+
     /// The name a family goes by in the system's language: 圆体 for Yuanti SC.
-    static func localized(_ family: String) -> String {
+    nonisolated static func localized(_ family: String) -> String {
+        if let hit = localizedCache.withLock({ $0[family] }) { return hit }
         let font = CTFontCreateWithName(family as CFString, 12, nil)
-        return CTFontCopyLocalizedName(font, kCTFontFamilyNameKey, nil) as String? ?? family
+        let name = CTFontCopyLocalizedName(font, kCTFontFamilyNameKey, nil) as String? ?? family
+        localizedCache.withLock { $0[family] = name }
+        return name
     }
 
     static func guessKind(_ family: String) -> FontKind {
@@ -373,7 +401,9 @@ extension Notification.Name {
 final class FontPreview {
     static let shared = FontPreview()
     private(set) var faces: [String: CTFont] = [:]
+    @ObservationIgnored private var order: [String] = []
     @ObservationIgnored private var asked: Set<String> = []
+    private static let maxCached = 64
 
     func font(_ id: String, text: String, size: CGFloat) -> SwiftUI.Font? {
         guard let f = faces["\(id)|\(text)"] else { return nil }
@@ -388,6 +418,12 @@ final class FontPreview {
             guard let data = await Self.fetch(family: family, text: text),
                   let d = CTFontManagerCreateFontDescriptorFromData(data as CFData) else { return }
             faces[key] = CTFontCreateWithFontDescriptor(d, 16, nil)
+            order.append(key)
+            if order.count > Self.maxCached {
+                let oldest = order.removeFirst()
+                faces.removeValue(forKey: oldest)
+                asked.remove(oldest)
+            }
         }
     }
 

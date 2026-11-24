@@ -1519,7 +1519,7 @@ private struct KeyWatch: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) {
         let key = $key
         (view as? KeyView)?.onKey = { key.wrappedValue = $0 }
-        context.coordinator.watch(view)
+        context.coordinator.watch(view, syncNow: false)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -1539,6 +1539,7 @@ private struct KeyWatch: NSViewRepresentable {
     final class Coordinator {
         var tokens: [NSObjectProtocol] = []
         weak var view: NSView?
+        private var lastKey: Bool?
 
         /// The window went away: stop hearing about key windows for it.
         func stop() {
@@ -1548,19 +1549,30 @@ private struct KeyWatch: NSViewRepresentable {
 
         private func ping() {
             guard let view else { return }
-            (view as? KeyView)?.onKey?(view.window?.isKeyWindow == true)
+            let next = view.window?.isKeyWindow == true
+            guard lastKey != next else { return }
+            lastKey = next
+            (view as? KeyView)?.onKey?(next)
         }
 
-        func watch(_ view: NSView) {
+        func watch(_ view: NSView, syncNow: Bool = true) {
             self.view = view
-            (view as? KeyView)?.onKey?(view.window?.isKeyWindow == true)
+            if syncNow { ping() }
             guard tokens.isEmpty else { return }
             tokens = [
-                NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.ping() }
+                NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] note in
+                    let senderID = (note.object as AnyObject?).map(ObjectIdentifier.init)
+                    MainActor.assumeIsolated {
+                        guard let self, let w = self.view?.window, senderID == ObjectIdentifier(w) else { return }
+                        self.ping()
+                    }
                 },
-                NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: nil, queue: .main) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.ping() }
+                NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: nil, queue: .main) { [weak self] note in
+                    let senderID = (note.object as AnyObject?).map(ObjectIdentifier.init)
+                    MainActor.assumeIsolated {
+                        guard let self, let w = self.view?.window, senderID == ObjectIdentifier(w) else { return }
+                        self.ping()
+                    }
                 },
             ]
             Task { [weak self] in self?.ping() }

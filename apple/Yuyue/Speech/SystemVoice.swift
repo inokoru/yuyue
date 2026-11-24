@@ -78,10 +78,23 @@ nonisolated final class SystemVoice: Voice, Sendable {
     private static let cached = Mutex<[SystemVoice]?>(nil)
     nonisolated(unsafe) private static let voicesChanged: NSObjectProtocol = NotificationCenter.default.addObserver(
         forName: AVSpeechSynthesizer.availableVoicesDidChangeNotification, object: nil, queue: nil
-    ) { _ in SystemVoice.cached.withLock { $0 = nil } }
+    ) { _ in
+        SystemVoice.cached.withLock { $0 = nil }
+        Task { await SystemVoice.prewarm() }
+    }
 
-    /// Starts listening for voices being added or removed.
-    static func watch() { _ = voicesChanged }
+    /// Starts listening for voices being added or removed, and warms the cache off the main thread.
+    static func watch() {
+        _ = voicesChanged
+        Task { await prewarm() }
+    }
+
+    /// Loads `AVSpeechSynthesisVoice.speechVoices()` off the main thread so the first voice picker open doesn't stall.
+    @concurrent static func prewarm() async {
+        guard cached.withLock({ $0 == nil }) else { return }
+        let fresh = load()
+        cached.withLock { if $0 == nil { $0 = fresh } }
+    }
 
     private static func load() -> [SystemVoice] {
         AVSpeechSynthesisVoice.speechVoices()

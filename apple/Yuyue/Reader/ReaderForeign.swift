@@ -7,7 +7,7 @@ import YuyueCore
 import CoreServices
 import Darwin
 
-private final class LookupBox: @unchecked Sendable {
+nonisolated private final class LookupBox: @unchecked Sendable {
     let word: String
     var raw: String?
     init(_ word: String) { self.word = word }
@@ -86,7 +86,7 @@ struct WordLookup: Equatable {
 }
 
 /// The short meaning, as the card shows it: "fortune /ˈfɔːtʃuːn/ n. 财富，大笔的钱；运气".
-struct WordDefinition: Equatable {
+nonisolated struct WordDefinition: Equatable, Sendable {
     var headword: String
     var phonetic: String?
     /// "n.", "v.", "adj.".
@@ -107,11 +107,20 @@ struct SentenceTranslation: Equatable {
     var failed: String?
 }
 
-enum SystemDictionary {
+nonisolated enum SystemDictionary {
+    private static let cache = Mutex<[String: WordDefinition?]>([:])
+
+    /// Runs `define(_:)` off the main actor so DictionaryServices never stalls UI rendering.
+    @concurrent static func defineAsync(_ word: String) async -> WordDefinition? {
+        define(word)
+    }
+
     /// The first entry the system dictionaries have for `word`, cut down to one line; nil when
     /// none has it (on a Mac, Dictionary › Settings decides which are on, and in what order).
     static func define(_ word: String) -> WordDefinition? {
         #if os(macOS)
+        let key = word.lowercased()
+        if let hit = cache.withLock({ $0[key] }) { return hit }
         // DictionaryServices overwrites a thread-local slot Swift Concurrency reads as its
         // current AsyncTask when called inside a Task; run the lookup on a bare pthread.
         let box = LookupBox(word)
@@ -127,11 +136,17 @@ enum SystemDictionary {
         } else {
             Unmanaged<LookupBox>.fromOpaque(ptr).release()
         }
-        guard let raw = box.raw else { return nil }
-        #if DEBUG
-        try? raw.write(to: URL(filePath: NSTemporaryDirectory()).appending(path: "dict-raw.txt"), atomically: true, encoding: .utf8)
-        #endif
-        return parse(raw, word: word)
+        let parsed = box.raw.flatMap { raw -> WordDefinition? in
+            #if DEBUG
+            try? raw.write(to: URL(filePath: NSTemporaryDirectory()).appending(path: "dict-raw.txt"), atomically: true, encoding: .utf8)
+            #endif
+            return parse(raw, word: word)
+        }
+        cache.withLock {
+            if $0.count >= 512 { $0.removeAll(keepingCapacity: true) }
+            $0[key] = parsed
+        }
+        return parsed
         #else
         return nil
         #endif

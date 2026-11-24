@@ -33,6 +33,8 @@ final class QuickSearch {
         let book: BookSummary
         /// A chapter whose name matched, rather than the book's.
         let chapter: TocItem?
+        /// 0-based index of `chapter` in the book's TOC, cached in `find()` to avoid FFI in `body`.
+        let chapterIndex: Int?
         var id: String { book.id + "/" + (chapter.map { "\($0.section)/\($0.title)" } ?? "") }
     }
 
@@ -97,12 +99,13 @@ final class QuickSearch {
 
     /// Cheap: the ⌘K panel makes one each time the view holding it is drawn again, and keeps
     /// only the first. Contents, notes and words come with `prepare()`.
-    init(library: Library, many: Bool = false) {
+    init(library: Library, many: Bool = false, initialQuery: String = "") {
         self.library = library
         self.many = many
+        self.query = initialQuery
         limit = many ? (40, 60, 60) : (4, 4, 3)
         books = library.books.filter(\.available)
-        find()
+        find(scheduleFullText: false)
     }
 
     /// Reads contents, notes and words off the main thread, then searches again with them.
@@ -142,14 +145,14 @@ final class QuickSearch {
 
     // MARK: Finding
 
-    private func find() {
+    private func find(scheduleFullText: Bool = true) {
         finding?.cancel()
         selected = 0
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else {
             // Nothing typed: the books last read.
             titles = books.filter { $0.openedAt != nil }.sorted { ($0.openedAt ?? 0) > ($1.openedAt ?? 0) }
-                .prefix(5).map { TitleHit(book: $0, chapter: nil) }
+                .prefix(5).map { TitleHit(book: $0, chapter: nil, chapterIndex: nil) }
             lines = []; lineCount = 0; lineCapped = false; lineBooks = 0
             notes = []; noteCount = 0
             words = []
@@ -157,10 +160,10 @@ final class QuickSearch {
         }
         let matcher = NameMatcher(q)
         var t: [TitleHit] = books.filter { b in matcher.match(b.title) != nil || b.authors.contains { matcher.match($0) != nil } }
-            .map { TitleHit(book: $0, chapter: nil) }
+            .map { TitleHit(book: $0, chapter: nil, chapterIndex: nil) }
         for book in books {
-            for item in details[book.id]?.toc ?? [] where item.title.localizedCaseInsensitiveContains(q) && item.title != book.title {
-                t.append(TitleHit(book: book, chapter: item))
+            for (idx, item) in (details[book.id]?.toc ?? []).enumerated() where item.title.localizedCaseInsensitiveContains(q) && item.title != book.title {
+                t.append(TitleHit(book: book, chapter: item, chapterIndex: idx))
             }
         }
         titles = Array(t.prefix(limit.titles))
@@ -174,6 +177,7 @@ final class QuickSearch {
         notes = Array(n.prefix(limit.notes))
         words = vocab.filter { $0.word.localizedCaseInsensitiveContains(q) || ($0.meaning?.localizedCaseInsensitiveContains(q) ?? false) }
 
+        guard scheduleFullText else { return }
         // 全文 can take a moment over a big library: wait for the typing to stop.
         let core = library.core
         let ids = books.map(\.id)
@@ -231,9 +235,7 @@ struct QuickSearchPanel: View {
 
     init(library: Library, query: String = "", close: @escaping () -> Void, ask: @escaping (String) -> Void) {
         self.library = library
-        let s = QuickSearch(library: library)
-        s.query = query
-        _search = State(initialValue: s)
+        _search = State(initialValue: QuickSearch(library: library, initialQuery: query))
         self.close = close
         self.ask = ask
     }
@@ -414,9 +416,8 @@ struct QuickSearchPanel: View {
     private func detail(_ t: QuickSearch.TitleHit) -> String {
         var parts: [String] = []
         if let author = t.book.author { parts.append(author) }
-        if let chapter = t.chapter {
-            let toc = (try? library.core.book(id: t.book.id))?.toc ?? []
-            if let n = toc.firstIndex(where: { $0.section == chapter.section && $0.title == chapter.title }) { parts.append(String(localized: "第 \(n + 1) 篇")) }
+        if let n = t.chapterIndex {
+            parts.append(String(localized: "第 \(n + 1) 篇"))
         }
         parts.append(t.book.shelfNote)
         return parts.joined(separator: " · ")

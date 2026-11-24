@@ -2,6 +2,7 @@ import SwiftUI
 import YuyueCore
 
 #if os(macOS)
+import ServiceManagement
 
 /// Keeps a weak reference to the settings `NSWindow` so confirmation alerts don't lose the parent window.
 @MainActor
@@ -62,25 +63,28 @@ struct MacSettings: View {
                     .transition(YYMotion.swap)
                 } else {
                     SettingsPageHeader(page: page)
-                    ScrollView {
-                        content(page)
-                    }
-                    .scrollBounceBehavior(.basedOnSize)
-                    // The scroller keeps clear of the line by the right column.
-                    .padding(.trailing, 6)
-                    // Rows slide under the header softly instead of being cut at its edge.
-                    .mask {
-                        VStack(spacing: 0) {
-                            LinearGradient(colors: [.black.opacity(0), .black], startPoint: .top, endPoint: .bottom).frame(height: 14)
-                            Rectangle()
+                    ZStack(alignment: .top) {
+                        ScrollView {
+                            content(page)
                         }
+                        .scrollBounceBehavior(.basedOnSize)
+                        // The scroller keeps clear of the line by the right column.
+                        .padding(.trailing, 6)
+                        // A new page starts at its top, and comes in a few points lower with a fade.
+                        .id(page)
+                        .transition(YYMotion.swap)
                     }
-                    // A new page starts at its top, and comes in a few points lower with a fade.
-                    .id(page)
-                    .transition(YYMotion.swap)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .animation(YYMotion.standard, value: page)
+                    // Rows slide under the header softly instead of being cut at its edge.
+                    // Lightweight top fade overlay over solid YYColor.bg avoids full-ScrollView offscreen .mask passes.
+                    .overlay(alignment: .top) {
+                        LinearGradient(colors: [YYColor.bg, YYColor.fade0], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 14)
+                            .allowsHitTesting(false)
+                    }
                 }
             }
-            .animation(YYMotion.standard, value: page)
             .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
             .background(YYColor.bg.ignoresSafeArea())
             if page.hasInspector {
@@ -103,7 +107,7 @@ struct MacSettings: View {
         // The title bar is see-through over the three columns; no toolbar, no title in it.
         .yyHideWindowToolbarChrome()
         .frame(minWidth: 860, idealWidth: 1020, maxWidth: .infinity, minHeight: 540, idealHeight: height, maxHeight: .infinity)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
+        .onGeometryChange(for: CGFloat.self) { min(1084, $0.size.width.rounded()) } action: { windowWidth = $0 }
         .tint(tint.accent)
         // Keep the window title fixed (hidden visually; the sidebar names the page) so tab
         // switches don't trigger AppKit titlebar relayout and reset the traffic lights.
@@ -113,6 +117,7 @@ struct MacSettings: View {
         .trafficLights(CGPoint(x: 22, y: 20))
         .onAppear {
             SettingsLog.shared.library = library
+            Task { _ = await LoginItem.refresh() }
         }
         .background(SettingsUndoKey())
         // Opened again in the new language: the old words swept away.
@@ -370,22 +375,46 @@ private struct SettingsTitlebar: NSViewRepresentable {
 
     final class Host: NSView {
         var onWindow: ((NSWindow) -> Void)?
-        nonisolated(unsafe) private var observer: NSObjectProtocol?
+        nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
+        private var toolbarObservation: NSKeyValueObservation?
+        private var titleObservation: NSKeyValueObservation?
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            observer.map(NotificationCenter.default.removeObserver)
-            observer = nil
+            observers.forEach(NotificationCenter.default.removeObserver)
+            observers = []
+            toolbarObservation?.invalidate()
+            toolbarObservation = nil
+            titleObservation?.invalidate()
+            titleObservation = nil
             guard let window else { return }
             onWindow?(window)
             tidy(window)
-            observer = NotificationCenter.default.addObserver(forName: NSWindow.didUpdateNotification, object: window, queue: nil) { [weak self] note in
-                guard let window = note.object as? NSWindow else { return }
-                MainActor.assumeIsolated { self?.tidy(window) }
+            DispatchQueue.main.async { [weak self, weak window] in
+                guard let self, let window else { return }
+                self.tidy(window)
+            }
+            for name in [NSWindow.didBecomeMainNotification, NSWindow.didBecomeKeyNotification, NSWindow.didResizeNotification, NSWindow.didExitFullScreenNotification] {
+                observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: nil) { [weak self] note in
+                    guard let window = note.object as? NSWindow else { return }
+                    MainActor.assumeIsolated { self?.tidy(window) }
+                })
+            }
+            toolbarObservation = window.observe(\.toolbar, options: [.new]) { [weak self] window, _ in
+                MainActor.assumeIsolated {
+                    if window.toolbar != nil { self?.tidy(window) }
+                }
+            }
+            titleObservation = window.observe(\.titleVisibility, options: [.new]) { [weak self] window, _ in
+                MainActor.assumeIsolated {
+                    if window.titleVisibility != .hidden { self?.tidy(window) }
+                }
             }
         }
 
-        deinit { observer.map(NotificationCenter.default.removeObserver) }
+        deinit {
+            observers.forEach(NotificationCenter.default.removeObserver)
+        }
 
         func tidy(_ window: NSWindow) {
             if window.toolbar != nil { window.toolbar = nil }
@@ -450,7 +479,7 @@ private struct TrafficLights: NSViewRepresentable {
             observedBar = nil
             step = nil
             guard let window else { return }
-            for name in [NSWindow.didUpdateNotification, NSWindow.didResizeNotification, NSWindow.didExitFullScreenNotification] {
+            for name in [NSWindow.didResizeNotification, NSWindow.didExitFullScreenNotification, NSWindow.didBecomeKeyNotification, NSWindow.didChangeScreenNotification] {
                 observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: nil) { [weak self] note in
                     guard let window = note.object as? NSWindow else { return }
                     MainActor.assumeIsolated { self?.place(in: window) }
@@ -698,6 +727,10 @@ struct SettingsHeading: View {
 
 // MARK: - 通用
 
+private final class TriggerBottomBox {
+    var value: CGFloat = 44
+}
+
 private struct GeneralSettings: View {
     @AppStorage("general.reopenLast") private var reopenLast = false
     @AppStorage("general.keepAwake") private var keepAwake = true
@@ -705,6 +738,7 @@ private struct GeneralSettings: View {
     @State private var langLater = false
     @State private var langMenuOpen = false
     @State private var langTriggerBottom: CGFloat = 44
+    @State private var triggerBottomBox = TriggerBottomBox()
 
     private var canRelaunch: Bool {
         let library = SettingsLog.shared.library
@@ -719,7 +753,10 @@ private struct GeneralSettings: View {
                     later: $langLater,
                     menuOpen: $langMenuOpen,
                     onTriggerBottomChange: { bottom in
-                        langTriggerBottom = bottom
+                        triggerBottomBox.value = bottom
+                        if langMenuOpen, abs(langTriggerBottom - bottom) > 0.5 {
+                            langTriggerBottom = bottom
+                        }
                     }
                 )
                 SettingsRow(String(localized: "启动时继续上次阅读"), detail: String(localized: "关闭则进入书架")) {
@@ -762,11 +799,14 @@ private struct GeneralSettings: View {
                         withAnimation(YYMotion.quick) { langMenuOpen = false }
                         pickLanguage(picked)
                     }
-                    .padding(.top, langTriggerBottom + 6)
+                    .padding(.top, triggerBottomBox.value + 6)
                     .padding(.trailing, 16)
                     .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
                 }
             }
+        }
+        .onChange(of: langMenuOpen) { _, open in
+            if open { langTriggerBottom = triggerBottomBox.value }
         }
         .onDisappear { langMenuOpen = false }
     }
@@ -881,11 +921,13 @@ struct AppearanceSettings: View {
         .onHover { hoverMode = $0 ? m : (hoverMode == m ? nil : hoverMode) }
     }
 
+    private static let lightEnv: EnvironmentValues = EnvironmentValues().with(\.colorScheme, .light)
+
     private func tintChoice(_ t: YYTint) -> some View {
         let on = tintID == t.id
         return Button { tintID = t.id } label: {
             VStack(spacing: 6) {
-                Circle().fill(Color(t.accent.resolve(in: EnvironmentValues().with(\.colorScheme, .light))))
+                Circle().fill(Color(t.accent.resolve(in: Self.lightEnv)))
                     .frame(width: 26, height: 26).padding(3)
                     .overlay(Circle().strokeBorder(on ? t.accent : .clear, lineWidth: 2))
                     .animation(YYMotion.quick, value: on)
@@ -973,22 +1015,30 @@ private struct ModeThumbnail: View {
         ZStack {
             fullLeaf(dark: false)
             fullLeaf(dark: true)
-                .mask(GeometryReader { g in
-                    Path { p in
-                        p.move(to: CGPoint(x: g.size.width * 0.60, y: 0))
-                        p.addLine(to: CGPoint(x: g.size.width, y: 0))
-                        p.addLine(to: CGPoint(x: g.size.width, y: g.size.height))
-                        p.addLine(to: CGPoint(x: g.size.width * 0.40, y: g.size.height))
-                        p.closeSubpath()
-                    }
-                })
-            GeometryReader { g in
-                Path { p in
-                    p.move(to: CGPoint(x: g.size.width * 0.60, y: 0))
-                    p.addLine(to: CGPoint(x: g.size.width * 0.40, y: g.size.height))
-                }
+                .clipShape(DiagonalSplitHalf())
+            DiagonalSplitRule()
                 .stroke(Color.white.opacity(0.14), lineWidth: 0.5)
-            }
+        }
+    }
+}
+
+private nonisolated struct DiagonalSplitHalf: Shape {
+    func path(in rect: CGRect) -> Path {
+        Path { p in
+            p.move(to: CGPoint(x: rect.minX + rect.width * 0.60, y: rect.minY))
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+            p.addLine(to: CGPoint(x: rect.minX + rect.width * 0.40, y: rect.maxY))
+            p.closeSubpath()
+        }
+    }
+}
+
+private nonisolated struct DiagonalSplitRule: Shape {
+    func path(in rect: CGRect) -> Path {
+        Path { p in
+            p.move(to: CGPoint(x: rect.minX + rect.width * 0.60, y: rect.minY))
+            p.addLine(to: CGPoint(x: rect.minX + rect.width * 0.40, y: rect.maxY))
         }
     }
 }
@@ -1415,9 +1465,12 @@ private struct StorageSettings: View {
                                 confirming = YYConfirm(title: String(localized: "移除朗读模型与声音包？"),
                                                        message: String(localized: "移除后将改用系统声音朗读，随时可以在听书设置里重新下载。"),
                                                        button: String(localized: "移除")) {
-                                    StorageUsage.removeVoiceModels(in: library.dataDir)
-                                    LiveVoiceDownload.shared.refresh()
-                                    Task { await measure() }
+                                    let dir = library.dataDir
+                                    Task {
+                                        await StorageUsage.removeVoiceModelsAsync(in: dir)
+                                        LiveVoiceDownload.shared.refresh()
+                                        await measure()
+                                    }
                                 }
                             }
                             .disabled({ if case .downloading = LiveVoiceDownload.shared.phase { true } else { false } }())
@@ -1434,8 +1487,11 @@ private struct StorageSettings: View {
                                 confirming = YYConfirm(title: String(localized: "移除语音对齐模型？"),
                                                        message: String(localized: "已合成的有声书不受影响；下次合成时将重新下载（约 270 MB）。"),
                                                        button: String(localized: "移除")) {
-                                    StorageUsage.removeAligner(in: library.dataDir)
-                                    Task { await measure() }
+                                    let dir = library.dataDir
+                                    Task {
+                                        await StorageUsage.removeAlignerAsync(in: dir)
+                                        await measure()
+                                    }
                                 }
                             }
                             .disabled(library.audiobooks.job != nil)
@@ -1451,8 +1507,11 @@ private struct StorageSettings: View {
                             confirming = YYConfirm(title: String(localized: "清理书伴问答缓存？"),
                                                    message: String(localized: "清理后，相同问题或前情回顾将重新请求模型。"),
                                                    button: String(localized: "清理")) {
-                                try? FileManager.default.removeItem(at: companionDir)
-                                companionBytes = Self.bytes(in: companionDir)
+                                let dir = companionDir
+                                Task {
+                                    await Self.clearDir(dir)
+                                    companionBytes = await Self.bytesAsync(in: dir)
+                                }
                             }
                         }
                         .disabled(companionBytes == 0)
@@ -1473,17 +1532,24 @@ private struct StorageSettings: View {
             }
             Spacer(minLength: 0)
         }
-        .task { await measure() }
-        .onAppear { companionBytes = Self.bytes(in: companionDir) }
+        .task {
+            async let m: Void = measure()
+            companionBytes = await Self.bytesAsync(in: companionDir)
+            await m
+        }
         .yyConfirm($confirming)
     }
 
     @State private var companionBytes: Int64 = 0
     private var companionDir: URL { library.dataDir.appending(path: "companion", directoryHint: .isDirectory) }
 
-    private static func bytes(in dir: URL) -> Int64 {
+    @concurrent nonisolated private static func bytesAsync(in dir: URL) async -> Int64 {
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.fileSizeKey])) ?? []
         return files.reduce(0) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+    }
+
+    @concurrent nonisolated private static func clearDir(_ dir: URL) async {
+        try? FileManager.default.removeItem(at: dir)
     }
 
     private func bar(_ u: StorageUsage) -> some View {
@@ -1528,11 +1594,16 @@ private struct StorageSettings: View {
 
     private func purge() {
         cleaning = true
-        _ = try? library.core.purgeDeleted(olderThanMs: 0)
+        let core = library.core
         Task {
+            await Self.purgeOffMain(core)
             await measure()
             cleaning = false
         }
+    }
+
+    @concurrent nonisolated private static func purgeOffMain(_ core: YuyueCore) async {
+        _ = try? core.purgeDeleted(olderThanMs: 0)
     }
 
     static func size(_ bytes: Int64) -> String {
@@ -1606,12 +1677,54 @@ nonisolated struct StorageUsage: Sendable {
     var otherBytes: Int64 { max(0, total - bookBytes - deletedBytes - audioBytes - alignerBytes - voiceModelBytes - fontBytes) }
 
     @concurrent nonisolated static func measure(dir: URL, active: [String: String]) async -> StorageUsage {
+        measureSync(dir: dir, active: active)
+    }
+
+    nonisolated private static func measureSync(dir: URL, active: [String: String]) -> StorageUsage {
         var u = StorageUsage()
-        u.total = bytes(in: dir)
+        let baseComps = dir.standardizedFileURL.pathComponents
+        let baseCount = baseComps.count
+        let alignerName = Aligner.file
+        let alignerPartName = ".\(Aligner.file).zip.part"
+        var bookSizes: [String: Int64] = [:]
+        var modelsBytes: Int64 = 0
+
+        if let e = FileManager.default.enumerator(at: dir.standardizedFileURL, includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey]) {
+            for case let item as URL in e {
+                let v = try? item.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey])
+                guard v?.isRegularFile == true else { continue }
+                let sz = Int64(v?.totalFileAllocatedSize ?? 0)
+                u.total += sz
+                let comps = item.standardizedFileURL.pathComponents
+                guard comps.count > baseCount else { continue }
+                switch comps[baseCount] {
+                case "books":
+                    if comps.count > baseCount + 1 {
+                        let id = comps[baseCount + 1]
+                        if !id.hasPrefix(".") { bookSizes[id, default: 0] += sz }
+                    }
+                case "audiobooks":
+                    u.audioBytes += sz
+                case "models":
+                    modelsBytes += sz
+                    if comps.count > baseCount + 1 {
+                        let top = comps[baseCount + 1]
+                        if top == alignerName || top == alignerPartName {
+                            u.alignerBytes += sz
+                        }
+                    }
+                case "fonts":
+                    u.fontBytes += sz
+                default:
+                    break
+                }
+            }
+        }
+        // Include empty book folders in books/ so deleted count matches previous behavior.
         let booksDir = dir.appending(path: "books", directoryHint: .isDirectory)
         let ids = (try? FileManager.default.contentsOfDirectory(atPath: booksDir.path(percentEncoded: false))) ?? []
         for id in ids where !id.hasPrefix(".") {
-            let size = bytes(in: booksDir.appending(path: id, directoryHint: .isDirectory))
+            let size = bookSizes[id] ?? 0
             if let title = active[id] {
                 u.books.append(Book(id: id, title: title, bytes: size))
             } else {
@@ -1620,19 +1733,23 @@ nonisolated struct StorageUsage: Sendable {
             }
         }
         u.books.sort { $0.bytes > $1.bytes }
-        u.audioBytes = bytes(in: dir.appending(path: "audiobooks", directoryHint: .isDirectory))
-        let modelsDir = Aligner.folder(dir)
-        u.alignerBytes = bytes(in: modelsDir.appending(path: Aligner.file))
-            + bytes(in: modelsDir.appending(path: ".\(Aligner.file).zip.part"))
-        u.voiceModelBytes = max(0, bytes(in: modelsDir) - u.alignerBytes)
-        u.fontBytes = bytes(in: dir.appending(path: "fonts", directoryHint: .isDirectory))
+        u.voiceModelBytes = max(0, modelsBytes - u.alignerBytes)
         u.free = (try? dir.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
             .volumeAvailableCapacityForImportantUsage
         return u
     }
 
+    @concurrent nonisolated static func removeAlignerAsync(in dir: URL) async {
+        removeAligner(in: dir)
+    }
+
+    @concurrent nonisolated static func removeVoiceModelsAsync(in dir: URL) async {
+        removeVoiceModels(in: dir)
+    }
+
     /// Removes only the forced-alignment model (`MMSAligner.mlmodelc`), leaving voice models untouched.
     nonisolated static func removeAligner(in dir: URL) {
+        Aligner.unload()
         let modelsDir = Aligner.folder(dir)
         try? FileManager.default.removeItem(at: modelsDir.appending(path: Aligner.file))
         try? FileManager.default.removeItem(at: modelsDir.appending(path: ".\(Aligner.file).zip.part"))
@@ -1659,51 +1776,49 @@ nonisolated struct StorageUsage: Sendable {
             try? FileManager.default.removeItem(at: url)
         }
     }
-
-    nonisolated private static func bytes(in url: URL) -> Int64 {
-        if let v = try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey]),
-           v.isRegularFile == true {
-            return Int64(v.totalFileAllocatedSize ?? 0)
-        }
-        guard let e = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey]) else { return 0 }
-        var sum: Int64 = 0
-        for case let item as URL in e {
-            let v = try? item.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey])
-            if v?.isRegularFile == true { sum += Int64(v?.totalFileAllocatedSize ?? 0) }
-        }
-        return sum
-    }
 }
 
 #if os(macOS)
 /// 设置 · 通用 · 开机时打开语阅. Shows are written at their time only while 语阅 runs.
 struct LoginItemRow: View {
-    @State private var atLogin = LoginItem.isOn || LoginItem.needsApproval
+    @State private var status: SMAppService.Status = LoginItem.cached
     @State private var problem: String?
+
+    private var atLogin: Bool { status == .enabled || status == .requiresApproval }
+    private var needsApproval: Bool { status == .requiresApproval }
 
     private var detail: String {
         if let problem { return problem }
-        if LoginItem.needsApproval { return String(localized: "需在「系统设置 › 通用 › 登录项」中允许") }
+        if needsApproval { return String(localized: "需在「系统设置 › 通用 › 登录项」中允许") }
         return String(localized: "常驻菜单栏，不弹出窗口，按时生成播客")
     }
 
     var body: some View {
         SettingsRow(String(localized: "登录时后台启动"), detail: detail) {
             HStack(spacing: 10) {
-                if LoginItem.needsApproval {
+                if needsApproval {
                     Button("打开设置") { LoginItem.openSettings() }
                         .lineLimit(1).fixedSize()
                 }
                 SettingsSwitch(isOn: Binding(get: { atLogin }, set: { on in
-                    do {
-                        try LoginItem.set(on)
-                        atLogin = on
-                        problem = nil
-                    } catch {
-                        problem = error.localizedDescription
+                    let previous = status
+                    status = on ? .enabled : .notRegistered
+                    problem = nil
+                    Task {
+                        do {
+                            status = try await LoginItem.set(on)
+                            problem = nil
+                        } catch {
+                            status = previous
+                            problem = error.localizedDescription
+                        }
                     }
                 }))
             }
+        }
+        .task { status = await LoginItem.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { status = await LoginItem.refresh() }
         }
     }
 }

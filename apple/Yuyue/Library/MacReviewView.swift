@@ -149,6 +149,8 @@ struct MacReviewSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
     @FocusState private var focused: Bool
+    @State private var chapterTitles: [String: String] = [:]
+    @State private var noteBookIDs: Set<String> = []
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
 
@@ -195,6 +197,38 @@ struct MacReviewSheet: View {
             withTransaction(t) { review.choose(false) }
             return .handled
         }
+        .task(id: review.items.map(\.mark.id)) {
+            let core = library.core
+            let targets = review.items.map { ($0.book, $0.mark.section) }
+            let (chapters, bookIDs) = await Self.loadMetadata(core: core, items: targets)
+            chapterTitles = chapters
+            noteBookIDs = bookIDs
+        }
+    }
+
+    @concurrent nonisolated private static func loadMetadata(
+        core: YuyueCore,
+        items: [(String, UInt32)]
+    ) async -> ([String: String], Set<String>) {
+        var details: [String: BookDetail] = [:]
+        var chapters: [String: String] = [:]
+        for (bookID, section) in items {
+            let detail: BookDetail?
+            if let cached = details[bookID] {
+                detail = cached
+            } else {
+                let loaded = try? core.book(id: bookID)
+                if let loaded { details[bookID] = loaded }
+                detail = loaded
+            }
+            if let detail,
+               let chapter = detail.chapterTitle(for: section),
+               chapter != detail.summary.title {
+                chapters["\(bookID):\(section)"] = chapter
+            }
+        }
+        let counts = (try? core.markCounts()) ?? [:]
+        return (chapters, Set(counts.keys))
     }
 
     private var heading: String {
@@ -321,7 +355,7 @@ struct MacReviewSheet: View {
     private func source(_ item: ReviewItem, _ book: BookSummary?) -> String {
         var parts: [String] = []
         if let author = book?.author { parts.append(author) }
-        if let book, let chapter = (try? library.core.book(id: book.id))?.chapterTitle(for: item.mark.section), chapter != book.title {
+        if let book, let chapter = chapterTitles["\(book.id):\(item.mark.section)"], chapter != book.title {
             parts.append(chapter)
         }
         parts.append(Self.whenMarked(item.mark.at))
@@ -421,8 +455,7 @@ struct MacReviewSheet: View {
     }
 
     private var booksWithNotes: [BookSummary] {
-        let counts = (try? library.core.markCounts()) ?? [:]
-        return library.books.filter { $0.available && counts[$0.id] != nil }
+        library.books.filter { $0.available && noteBookIDs.contains($0.id) }
     }
 
     // MARK: Buttons

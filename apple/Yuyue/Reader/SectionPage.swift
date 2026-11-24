@@ -363,13 +363,23 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
         self.geometry = geometry
     }
 
+    private static var appAssetCache: [String: Data] = [:]
+
     func webView(_ webView: WKWebView, start task: any WKURLSchemeTask) {
         guard let url = task.request.url else { return }
         let path = url.path(percentEncoded: true)
         if path.hasPrefix("/app/") {
             let name = String(path.dropFirst("/app/".count))
-            let file = Self.bundle.appending(path: name)
-            guard !name.contains(".."), let data = try? Data(contentsOf: file) else { return respond(task, url, status: 404) }
+            guard !name.contains("..") else { return respond(task, url, status: 404) }
+            let data: Data
+            if let cached = Self.appAssetCache[name] {
+                data = cached
+            } else if let loaded = try? Data(contentsOf: Self.bundle.appending(path: name)) {
+                Self.appAssetCache[name] = loaded
+                data = loaded
+            } else {
+                return respond(task, url, status: 404)
+            }
             return respond(task, url, data: data, mime: name.hasSuffix(".css") ? "text/css" : "text/javascript")
         }
         switch core.serve(path: path, geometry: geometry()) {

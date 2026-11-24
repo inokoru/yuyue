@@ -340,8 +340,6 @@ final class ListeningFocus {
                     self.added = CloudVoice.Provider.allCases.filter(\.isSetUp)
                     self.tick &+= 1
                 }
-            } else {
-                self.tick &+= 1
             }
         }
     }

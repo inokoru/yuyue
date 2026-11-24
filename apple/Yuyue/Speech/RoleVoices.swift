@@ -71,7 +71,7 @@ import YuyueCore
 
     /// Renders a multi-segment manual-role sentence into one `Speech` buffer with a short breath
     /// between speaker changes.
-    nonisolated static func renderSegments(_ plan: [(voice: any Voice, text: String)], language: String) async throws -> Speech? {
+    @concurrent nonisolated static func renderSegments(_ plan: [(voice: any Voice, text: String)], language: String) async throws -> Speech? {
         if plan.count == 1 {
             return try await plan[0].voice.render(plan[0].text, language: language)
         }
@@ -106,7 +106,7 @@ nonisolated struct TunedVoice: Voice {
     var isOffline: Bool { base.isOffline }
     func speaks(_ language: String) -> Bool { base.speaks(language) }
 
-    func render(_ text: String, language: String) async throws -> Speech? {
+    @concurrent func render(_ text: String, language: String) async throws -> Speech? {
         guard let speech = try await base.render(text, language: language) else { return nil }
         return Self.tune(speech, rate: rate, pitch: pitch) ?? speech
     }

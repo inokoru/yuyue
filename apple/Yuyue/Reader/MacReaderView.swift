@@ -1182,6 +1182,7 @@ private struct TocPanel: View {
 
     private var chapterList: some View {
         let list = chapters
+        let current = model.currentChapter(in: list)
         let main = list.filter { !$0.isBoilerplate }
         let appendix = list.filter(\.isBoilerplate)
         let numberWidth = ChapterTitle.columnWidth(for: (main.isEmpty ? list : main).map(\.title), minWidth: 44, maxWidth: 82, charWidth: 11.5)
@@ -1189,9 +1190,9 @@ private struct TocPanel: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(main.enumerated()), id: \.element.id) { index, c in
-                        row(c, numberWidth: numberWidth)
+                        row(c, currentID: current, numberWidth: numberWidth)
                             .id(c.id)
-                        if c.id != currentID, index < main.count - 1, main[index + 1].id != currentID {
+                        if c.id != current, index < main.count - 1, main[index + 1].id != current {
                             Rectangle().fill(YYColor.line).frame(height: 0.5)
                         }
                     }
@@ -1204,7 +1205,7 @@ private struct TocPanel: View {
                             .padding(.bottom, 6)
                         ForEach(Array(appendix.enumerated()), id: \.element.id) { index, c in
                             if index > 0 { Rectangle().fill(YYColor.line).frame(height: 0.5).padding(.horizontal, 8) }
-                            boilerplateRow(c)
+                            boilerplateRow(c, currentID: current)
                                 .id(c.id)
                         }
                     }
@@ -1215,12 +1216,12 @@ private struct TocPanel: View {
             // Reaches 6 past the panel's padding (on the scroll view, which clips).
             .padding(.horizontal, -6)
             .onAppear {
-                if let currentID { proxy.scrollTo(currentID, anchor: .center) }
+                if let current { proxy.scrollTo(current, anchor: .center) }
             }
         }
     }
 
-    private func boilerplateRow(_ c: Chapter) -> some View {
+    private func boilerplateRow(_ c: Chapter, currentID: Int?) -> some View {
         let current = c.id == currentID
         return Button { model.go(to: c.item) } label: {
             HStack(spacing: 6) {
@@ -1247,7 +1248,7 @@ private struct TocPanel: View {
         .buttonStyle(.plain)
     }
 
-    private func row(_ c: Chapter, numberWidth: CGFloat) -> some View {
+    private func row(_ c: Chapter, currentID: Int?, numberWidth: CGFloat) -> some View {
         let current = c.id == currentID
         let past = (currentID ?? -1) > c.id
         let t = ChapterTitle(c.title)

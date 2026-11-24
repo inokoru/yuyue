@@ -523,10 +523,12 @@ struct MacPodcastView: View {
                 ))
             }
 
+            let standaloneLabel = String(localized: "单集导入")
+            let byShow = Dictionary(grouping: hub.allIssues.filter { $0.studioKind == nil }) {
+                $0.showTitle.isEmpty ? standaloneLabel : $0.showTitle
+            }
             for show in externalShows {
-                let allShow = hub.allIssues.filter {
-                    $0.studioKind == nil && ($0.showTitle.isEmpty ? String(localized: "单集导入") : $0.showTitle) == show.key
-                }
+                let allShow = byShow[show.key] ?? []
                 // Do not duplicate an episode already shown in 「正在听」
                 let rest = allShow.filter { !inProgressIDs.contains($0.id) }
                 guard !rest.isEmpty else { continue }
@@ -702,8 +704,6 @@ struct MacPodcastView: View {
         let isPlaying = isCurrent && hub.isPlaying
         let isHovered = hoveredIssueID == issue.id
         let dur = isCurrent && hub.duration > 0 ? hub.duration : Double(issue.durationSec)
-        let pos = isCurrent ? hub.currentTime : issue.positionSec
-        let frac = dur > 0 ? min(1, max(0.04, pos / dur)) : 0
         let isSavedLater = issue.placement == .archive
 
         let noteText: String = {
@@ -716,10 +716,7 @@ struct MacPodcastView: View {
             return String(localized: "中文原声")
         }()
 
-        let tailMeta: String = {
-            if showProgress, dur > 0 {
-                return PodcastFormat.remaining(position: pos, duration: dur)
-            }
+        let staticTailMeta: String = {
             let d = PodcastFormat.shortDate(issue.publishedAt)
             let len = PodcastFormat.compactDuration(issue.durationSec)
             return [len, d].filter { !$0.isEmpty && $0 != "—" }.joined(separator: " · ")
@@ -765,9 +762,17 @@ struct MacPodcastView: View {
                     Text(noteText)
                         .fontWeight(.regular)
                         .foregroundStyle(tint.accent)
-                    if !tailMeta.isEmpty {
+                    if showProgress && dur > 0 {
+                        PodcastHomeLiveTimeScope(hub: hub, isActive: isCurrent, fallbackTime: issue.positionSec) { pos in
+                            let rem = PodcastFormat.remaining(position: pos, duration: dur)
+                            if !rem.isEmpty {
+                                Text("·").foregroundStyle(YYColor.t3)
+                                Text(rem).foregroundStyle(YYColor.t3)
+                            }
+                        }
+                    } else if !staticTailMeta.isEmpty {
                         Text("·").foregroundStyle(YYColor.t3)
-                        Text(tailMeta)
+                        Text(staticTailMeta)
                             .foregroundStyle(YYColor.t3)
                     }
                 }
@@ -776,11 +781,14 @@ struct MacPodcastView: View {
                 .lineLimit(1)
 
                 if showProgress && dur > 0 {
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(YYColor.inset).frame(width: 108, height: 2)
-                        Capsule().fill(tint.accent).frame(width: 108 * frac, height: 2)
+                    PodcastHomeLiveTimeScope(hub: hub, isActive: isCurrent, fallbackTime: issue.positionSec) { pos in
+                        let frac = min(1, max(0.04, pos / dur))
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(YYColor.inset).frame(width: 108, height: 2)
+                            Capsule().fill(tint.accent).frame(width: 108 * frac, height: 2)
+                        }
+                        .padding(.top, 4)
                     }
-                    .padding(.top, 4)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1387,9 +1395,7 @@ struct MacPodcastView: View {
 
     private func tabletopPlayerCard(_ issue: PodcastIssue) -> some View {
         let isCurrent = hub.activeIssueID == issue.id
-        let pos = isCurrent ? hub.currentTime : issue.positionSec
         let dur = isCurrent && hub.duration > 0 ? hub.duration : Double(issue.durationSec)
-        let frac = dur > 0 ? min(1, max(0, pos / dur)) : 0
         let sentence = hub.activeSentence(for: issue.id)
         let excerptText: String = {
             if let sentence {
@@ -1401,6 +1407,7 @@ struct MacPodcastView: View {
         }()
         let speakerLabel = sentence?.speaker ?? issue.showTitle
         let supportsTrackSwitch = hub.supportsTrackSwitch(issue)
+        let status = isCurrent && hub.isPlaying ? String(localized: "正在播放") : String(localized: "暂停中")
 
         return PodcastStationeryCard(cornerRadius: 14) {
             VStack(spacing: 0) {
@@ -1418,13 +1425,14 @@ struct MacPodcastView: View {
                                 .font(.yy(size: 13.5, weight: .medium))
                                 .foregroundStyle(YYColor.t1)
                                 .lineLimit(1)
-                            let status = isCurrent && hub.isPlaying ? String(localized: "正在播放") : String(localized: "暂停中")
-                            let rem = PodcastFormat.remaining(position: pos, duration: dur)
-                            Text([issue.showTitle, status, rem].filter { !$0.isEmpty }.joined(separator: " · "))
-                                .font(.yy(size: 11.5))
-                                .monospacedDigit()
-                                .foregroundStyle(YYColor.t3)
-                                .lineLimit(1)
+                            PodcastHomeLiveTimeScope(hub: hub, isActive: isCurrent, fallbackTime: issue.positionSec) { pos in
+                                let rem = PodcastFormat.remaining(position: pos, duration: dur)
+                                Text([issue.showTitle, status, rem].filter { !$0.isEmpty }.joined(separator: " · "))
+                                    .font(.yy(size: 11.5))
+                                    .monospacedDigit()
+                                    .foregroundStyle(YYColor.t3)
+                                    .lineLimit(1)
+                            }
                         }
                         Spacer(minLength: 8)
                         PodcastPaperPill(title: String(localized: "展开书页"), accent: true) {
@@ -1467,35 +1475,38 @@ struct MacPodcastView: View {
                     .buttonStyle(.plain)
                     .padding(.top, 13)
 
-                    // Interactive progress scrubber
-                    VStack(spacing: 3) {
-                        GeometryReader { geo in
-                            let width = max(1, geo.size.width)
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(YYColor.inset).frame(height: 2.5)
-                                Capsule().fill(YYColor.t1).frame(width: max(3, width * frac), height: 2.5)
+                    // Interactive progress scrubber (isolated from MacPodcastView.body 4Hz ticks)
+                    PodcastHomeLiveTimeScope(hub: hub, isActive: isCurrent, fallbackTime: issue.positionSec) { pos in
+                        let frac = dur > 0 ? min(1, max(0, pos / dur)) : 0
+                        VStack(spacing: 3) {
+                            GeometryReader { geo in
+                                let width = max(1, geo.size.width)
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(YYColor.inset).frame(height: 2.5)
+                                    Capsule().fill(YYColor.t1).frame(width: max(3, width * frac), height: 2.5)
+                                }
+                                .frame(maxHeight: .infinity)
+                                .contentShape(.rect)
+                                .gesture(
+                                    DragGesture(minimumDistance: 0)
+                                        .onEnded { drag in
+                                            guard dur > 0 else { return }
+                                            let ratio = min(1, max(0, drag.location.x / width))
+                                            hub.seek(to: dur * ratio)
+                                        }
+                                )
                             }
-                            .frame(maxHeight: .infinity)
-                            .contentShape(.rect)
-                            .gesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onEnded { drag in
-                                        guard dur > 0 else { return }
-                                        let ratio = min(1, max(0, drag.location.x / width))
-                                        hub.seek(to: dur * ratio)
-                                    }
-                            )
-                        }
-                        .frame(height: 14)
+                            .frame(height: 14)
 
-                        HStack {
-                            Text(PodcastFormat.clock(pos))
-                            Spacer()
-                            Text(PodcastFormat.clock(dur))
+                            HStack {
+                                Text(PodcastFormat.clock(pos))
+                                Spacer()
+                                Text(PodcastFormat.clock(dur))
+                            }
+                            .font(.yy(size: 10.5))
+                            .monospacedDigit()
+                            .foregroundStyle(YYColor.t3)
                         }
-                        .font(.yy(size: 10.5))
-                        .monospacedDigit()
-                        .foregroundStyle(YYColor.t3)
                     }
                     .padding(.top, 12)
                 }
@@ -1927,6 +1938,19 @@ struct MacPodcastView: View {
                 transientToast = nil
             }
         }
+    }
+}
+
+/// Isolates 4Hz `hub.currentTime` observation so playing audio only redraws the active row/scrubber,
+/// not the entire podcast home layout.
+private struct PodcastHomeLiveTimeScope<Content: View>: View {
+    let hub: PodcastHub
+    let isActive: Bool
+    let fallbackTime: Double
+    @ViewBuilder let content: (Double) -> Content
+
+    var body: some View {
+        content(isActive ? hub.currentTime : fallbackTime)
     }
 }
 #endif

@@ -64,17 +64,18 @@ struct MacBooksView: View {
                 StatusTabs(status: $status, counts: counts, sort: $sort)
                     .padding(.leading, 22)
                     .padding(.trailing, 28)
-                if books.isEmpty {
+                let currentBooks = books
+                if currentBooks.isEmpty {
                     empty
                 } else {
                     ScrollView {
                         Group {
-                            if books.count == 1, let book = books.first {
+                            if currentBooks.count == 1, let book = currentBooks.first {
                                 recordTile(book)
                                     .frame(maxWidth: 344, alignment: .leading)
                             } else {
                                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 294), spacing: 12)], spacing: 12) {
-                                    ForEach(books) { book in
+                                    ForEach(currentBooks) { book in
                                         recordTile(book)
                                     }
                                 }
@@ -85,7 +86,7 @@ struct MacBooksView: View {
                         .padding(.trailing, 28)
                         .padding(.top, 16)
                         .padding(.bottom, 28)
-                        .animation(YYMotion.layout, value: books.map(\.id))
+                        .animation(YYMotion.layout, value: currentBooks.map(\.id))
                     }
                 }
             }

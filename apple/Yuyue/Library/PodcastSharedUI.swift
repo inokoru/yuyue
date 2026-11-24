@@ -61,20 +61,22 @@ enum PodcastStyle {
         tint.accent.opacity(scheme == .dark ? 0.36 : 0.28)
     }
 
+    #if os(macOS)
+    private static let hasSongtiLight = NSFont(name: "STSongti-SC-Light", size: 12) != nil
+    private static let hasSongtiRegular = NSFont(name: "STSongti-SC-Regular", size: 12) != nil
+    #elseif os(iOS)
+    private static let hasSongtiLight = UIFont(name: "STSongti-SC-Light", size: 12) != nil
+    private static let hasSongtiRegular = UIFont(name: "STSongti-SC-Regular", size: 12) != nil
+    #endif
+
     /// Refined Songti serif for editorial headings and literary excerpts.
     /// macOS `Songti SC` ships Light/Regular/Bold/Black — `.semibold` jumps to heavy Bold,
     /// so `STSongti-SC-Regular` / `STSongti-SC-Light` preserves delicate bookroom typography.
     static func songti(_ size: CGFloat, light: Bool = false) -> SwiftUI.Font {
         let s = size * TextScale.shared.factor
-        #if os(macOS)
-        let name = light ? "STSongti-SC-Light" : "STSongti-SC-Regular"
-        if NSFont(name: name, size: s) != nil {
-            return .custom(name, fixedSize: s)
-        }
-        #elseif os(iOS)
-        let name = light ? "STSongti-SC-Light" : "STSongti-SC-Regular"
-        if UIFont(name: name, size: s) != nil {
-            return .custom(name, fixedSize: s)
+        #if os(macOS) || os(iOS)
+        if light ? hasSongtiLight : hasSongtiRegular {
+            return .custom(light ? "STSongti-SC-Light" : "STSongti-SC-Regular", fixedSize: s)
         }
         #endif
         return YYUI.serif(size, .regular)

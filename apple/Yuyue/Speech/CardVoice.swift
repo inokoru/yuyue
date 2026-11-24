@@ -115,7 +115,7 @@ nonisolated struct CardVoice: Voice {
         try await render(text, language: language, style: .neutral)
     }
 
-    func render(_ text: String, language: String, style: CardStyle) async throws -> Speech? {
+    @concurrent func render(_ text: String, language: String, style: CardStyle) async throws -> Speech? {
         guard text.unicodeScalars.contains(where: { CharacterSet.alphanumerics.contains($0) }) else {
             return nil
         }
@@ -142,7 +142,7 @@ nonisolated struct CardVoice: Voice {
     }
 
     /// 克隆录音刚录完尚未存卡时，直接拿参考音文件合成试听句。
-    static func previewReference(
+    @concurrent static func previewReference(
         path: String,
         refText: String,
         refLang: String,

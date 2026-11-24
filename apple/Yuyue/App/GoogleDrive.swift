@@ -6,7 +6,7 @@ import Foundation
 /// (`appDataFolder`), which only 语阅 can see. Signing in happens once, in the system's sheet;
 /// the refresh token is kept in the Keychain and nothing else about the account is stored but
 /// its address, to show.
-enum GoogleAuth {
+nonisolated enum GoogleAuth {
     /// Set when 语阅 is registered with Google: an iOS client in its Cloud project, put in the
     /// build as `GOOGLE_CLIENT_ID`. Android signs in under the same project, so both see the
     /// same hidden folder. Until then 同步 · Google Drive says it isn't open yet.
@@ -69,7 +69,7 @@ enum GoogleAuth {
         }
     }
 
-    struct TokenReply: Decodable {
+    struct TokenReply: Decodable, Sendable {
         let access_token: String
         let expires_in: Double
         let refresh_token: String?
@@ -94,25 +94,46 @@ enum GoogleAuth {
 }
 
 /// The access token in hand, and which Drive file is which.
-final class DriveSession {
+nonisolated final class DriveSession: Sendable {
     static let shared = DriveSession()
-    private var access: String?
-    private var expires = Date.distantPast
-    var ids: [String: String] = [:]
+    private struct State: Sendable {
+        var access: String?
+        var expires = Date.distantPast
+        var ids: [String: String] = [:]
+    }
+    private let state = Mutex(State())
 
     func took(_ reply: GoogleAuth.TokenReply) {
-        access = reply.access_token
-        expires = Date().addingTimeInterval(reply.expires_in - 60)
+        state.withLock {
+            $0.access = reply.access_token
+            $0.expires = Date().addingTimeInterval(reply.expires_in - 60)
+        }
     }
 
     func forget() {
-        access = nil
-        expires = .distantPast
-        ids = [:]
+        state.withLock {
+            $0.access = nil
+            $0.expires = .distantPast
+            $0.ids = [:]
+        }
+    }
+
+    func fileID(for name: String) -> String? {
+        state.withLock { $0.ids[name] }
+    }
+
+    func setFileID(_ id: String, for name: String) {
+        state.withLock { $0.ids[name] = id }
+    }
+
+    func replaceFileIDs(_ ids: [String: String]) {
+        state.withLock { $0.ids = ids }
     }
 
     func token(force: Bool = false) async throws -> String {
-        if !force, let access, Date() < expires { return access }
+        if !force, let cached = state.withLock({ $0.access != nil && Date() < $0.expires ? $0.access : nil }) {
+            return cached
+        }
         guard let refresh = Keychain.read(Sync.googleRefreshKey) else { throw SyncError.signedOut }
         let reply = try await GoogleAuth.refresh(refresh)
         took(reply)
@@ -120,7 +141,7 @@ final class DriveSession {
     }
 }
 
-struct GoogleDriveFolder: SyncFolder {
+nonisolated struct GoogleDriveFolder: SyncFolder {
     private static let api = URL(string: "https://www.googleapis.com/drive/v3/files")!
     private static let upload = URL(string: "https://www.googleapis.com/upload/drive/v3/files")!
     private var session: DriveSession { DriveSession.shared }
@@ -152,20 +173,20 @@ struct GoogleDriveFolder: SyncFolder {
             }
             page = files.nextPageToken
         } while page != nil
-        session.ids = ids
+        session.replaceFileIDs(ids)
         return out
     }
 
     func read(_ name: String) async throws -> Data {
-        if session.ids[name] == nil { _ = try await list() }
-        guard let id = session.ids[name] else { throw SyncError.status(404) }
+        if session.fileID(for: name) == nil { _ = try await list() }
+        guard let id = session.fileID(for: name) else { throw SyncError.status(404) }
         var c = URLComponents(url: Self.api.appending(path: id), resolvingAgainstBaseURL: false)!
         c.queryItems = [.init(name: "alt", value: "media")]
         return try await send(URLRequest(url: c.url!))
     }
 
     func write(_ name: String, _ data: Data) async throws {
-        if let id = session.ids[name] {
+        if let id = session.fileID(for: name) {
             guard let url = URL(string: Self.upload.appending(path: id).absoluteString + "?uploadType=media") else {
                 throw URLError(.badURL)
             }
@@ -189,16 +210,17 @@ struct GoogleDriveFolder: SyncFolder {
         r.setValue("multipart/related; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         r.httpBody = body
         struct Made: Decodable { let id: String }
-        session.ids[name] = try JSONDecoder().decode(Made.self, from: try await send(r)).id
+        let made = try JSONDecoder().decode(Made.self, from: try await send(r))
+        session.setFileID(made.id, for: name)
     }
 
     /// 书文件 and recordings: a resumable upload (Google takes only small files in one go), the
     /// name and the hidden folder first when the file is new, then the content straight from disk.
     func upload(_ name: String, from file: URL) async throws {
-        if session.ids[name] == nil { _ = try await list() }
+        if session.fileID(for: name) == nil { _ = try await list() }
         let type = Self.type(of: name)
         var r: URLRequest
-        if let id = session.ids[name] {
+        if let id = session.fileID(for: name) {
             guard let url = URL(string: Self.upload.appending(path: id).absoluteString + "?uploadType=resumable") else {
                 throw URLError(.badURL)
             }
@@ -222,12 +244,12 @@ struct GoogleDriveFolder: SyncFolder {
         let status = (done as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else { throw SyncError.status(status) }
         struct Made: Decodable { let id: String }
-        if let made = try? JSONDecoder().decode(Made.self, from: data) { session.ids[name] = made.id }
+        if let made = try? JSONDecoder().decode(Made.self, from: data) { session.setFileID(made.id, for: name) }
     }
 
     func download(_ name: String, to file: URL) async throws {
-        if session.ids[name] == nil { _ = try await list() }
-        guard let id = session.ids[name] else { throw SyncError.status(404) }
+        if session.fileID(for: name) == nil { _ = try await list() }
+        guard let id = session.fileID(for: name) else { throw SyncError.status(404) }
         var c = URLComponents(url: Self.api.appending(path: id), resolvingAgainstBaseURL: false)!
         c.queryItems = [.init(name: "alt", value: "media")]
         var r = URLRequest(url: c.url!, timeoutInterval: 600)
@@ -270,13 +292,13 @@ struct GoogleDriveFolder: SyncFolder {
     }
 }
 
-private extension Data {
+private nonisolated extension Data {
     var base64URL: String {
         base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
     }
 }
 
-private extension String {
+private nonisolated extension String {
     var formEncoded: String {
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._~")

@@ -767,42 +767,77 @@ struct PaperTile: View {
 }
 
 /// 纹理 drawn natively, to look like the page's (reader.css `data-yy-texture`).
+/// Pre-rendered once per `(texture, dark)` into a small tileable CGImage instead of issuing thousands
+/// of Canvas fill calls on every layout or slider frame.
 struct PaperTextureView: View {
     let texture: PaperTexture
     let dark: Bool
 
     var body: some View {
-        Canvas { ctx, size in
-            var seed: UInt64 = 0x9E3779B97F4A7C15
-            func next() -> Double {
-                seed = seed &* 6364136223846793005 &+ 1442695040888963407
-                return Double(seed >> 33) / Double(1 << 31)
-            }
-            switch texture {
-            case .none:
-                break
-            case .grain:
-                let dot = dark ? Color.white.opacity(0.07) : Color.black.opacity(0.09)
-                for _ in 0 ..< Int(size.width * size.height / 7) {
-                    ctx.fill(Path(CGRect(x: next() * size.width, y: next() * size.height, width: 0.8, height: 0.8)), with: .color(dot))
-                }
-            case .xuan:
-                let fibre = Color(red: 0.5, green: 0.44, blue: 0.32).opacity(dark ? 0.16 : 0.11)
-                for _ in 0 ..< Int(size.width * size.height / 90) {
-                    let x = next() * size.width, y = next() * size.height, len = 6 + next() * 22
-                    var p = Path()
-                    p.move(to: CGPoint(x: x, y: y))
-                    p.addLine(to: CGPoint(x: x + len, y: y + (next() - 0.5) * 2))
-                    ctx.stroke(p, with: .color(fibre), lineWidth: 0.6)
-                }
-            case .linen:
-                let thread = Color.gray.opacity(0.09)
-                for x in stride(from: 0.0, to: size.width, by: 3) { ctx.fill(Path(CGRect(x: x, y: 0, width: 0.6, height: size.height)), with: .color(thread)) }
-                for y in stride(from: 0.0, to: size.height, by: 3) { ctx.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 0.6)), with: .color(thread)) }
-            }
+        if texture != .none, let tile = Self.tile(texture: texture, dark: dark) {
+            Image(decorative: tile, scale: 2)
+                .resizable(resizingMode: .tile)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
         }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+    }
+
+    private struct Key: Hashable {
+        let texture: PaperTexture
+        let dark: Bool
+    }
+
+    private static var tiles: [Key: CGImage] = [:]
+
+    private static func tile(texture: PaperTexture, dark: Bool) -> CGImage? {
+        let key = Key(texture: texture, dark: dark)
+        if let hit = tiles[key] { return hit }
+        let ptSide = 120
+        let scale = 2
+        let pxSide = ptSide * scale
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: pxSide,
+            height: pxSide,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        ctx.scaleBy(x: CGFloat(scale), y: CGFloat(scale))
+        let w = Double(ptSide), h = Double(ptSide)
+        var seed: UInt64 = 0x9E3779B97F4A7C15
+        func next() -> Double {
+            seed = seed &* 6364136223846793005 &+ 1442695040888963407
+            return Double(seed >> 33) / Double(1 << 31)
+        }
+        switch texture {
+        case .none:
+            return nil
+        case .grain:
+            ctx.setFillColor(dark ? CGColor(gray: 1, alpha: 0.07) : CGColor(gray: 0, alpha: 0.09))
+            for _ in 0 ..< Int(w * h / 7) {
+                ctx.fill(CGRect(x: next() * w, y: next() * h, width: 0.8, height: 0.8))
+            }
+        case .xuan:
+            ctx.setStrokeColor(CGColor(red: 0.5, green: 0.44, blue: 0.32, alpha: dark ? 0.16 : 0.11))
+            ctx.setLineWidth(0.6)
+            for _ in 0 ..< Int(w * h / 90) {
+                let x = next() * w, y = next() * h, len = 6 + next() * 22
+                let dy = (next() - 0.5) * 2
+                ctx.move(to: CGPoint(x: x, y: y))
+                ctx.addLine(to: CGPoint(x: x + len, y: y + dy))
+            }
+            ctx.strokePath()
+        case .linen:
+            ctx.setFillColor(CGColor(gray: 0.5, alpha: 0.09))
+            for x in stride(from: 0.0, to: w, by: 3) { ctx.fill(CGRect(x: x, y: 0, width: 0.6, height: h)) }
+            for y in stride(from: 0.0, to: h, by: 3) { ctx.fill(CGRect(x: 0, y: y, width: w, height: 0.6)) }
+        }
+        guard let image = ctx.makeImage() else { return nil }
+        tiles[key] = image
+        return image
     }
 }
 

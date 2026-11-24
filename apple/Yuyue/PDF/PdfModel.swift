@@ -107,6 +107,7 @@ final class PdfModel {
     @ObservationIgnored private var lastTurn = Date()
     @ObservationIgnored private var abandoned = false
     @ObservationIgnored private var terminationObserver: NSObjectProtocol?
+    @ObservationIgnored private let documentKey: ObjectIdentifier?
 
     init(library: Library, bookID: String) {
         core = library.core
@@ -127,6 +128,7 @@ final class PdfModel {
         document?.delegate = MarkedPages.shared
         if let document, document.isLocked { document.unlock(withPassword: "") }
         self.document = document
+        self.documentKey = document.map(ObjectIdentifier.init)
         chapters = document?.outlineRoot.map { Self.flatten($0, in: document!) } ?? []
         let d = UserDefaults.standard
         layout = d.string(forKey: "pdf.layout.\(bookID)").flatMap(Layout.init) ?? .scroll
@@ -333,6 +335,7 @@ final class PdfModel {
         finding?.cancel()
         terminationObserver.map(NotificationCenter.default.removeObserver)
         terminationObserver = nil
+        if let documentKey { MarkedPage.clearNight(for: documentKey) }
         if !abandoned {
             if Date().timeIntervalSince(lastTurn) < 180 { tick() }
             if saving != nil {
@@ -353,6 +356,11 @@ final class PdfModel {
         listened(playing: false)
         terminationObserver.map(NotificationCenter.default.removeObserver)
         terminationObserver = nil
+        if let documentKey { MarkedPage.clearNight(for: documentKey) }
+    }
+
+    deinit {
+        if let documentKey { MarkedPage.clearNight(for: documentKey) }
     }
 
     // MARK: The page's sentences

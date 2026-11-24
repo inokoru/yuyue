@@ -15,16 +15,28 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     private static let key = "AppleLanguages"
     /// The language the app last opened in, to know when it changed.
     private static let lastKey = "language.last"
+    private static let availableLocalizations: [String] = Bundle.main.localizations.filter { $0 != "Base" }
+    private static var cachedChosen: AppLanguage?
+    private static var cachedSystemLanguage: AppLanguage?
+    private static var observingLocale = false
 
     /// What was chosen.
     static var chosen: AppLanguage {
-        guard let bundle = Bundle.main.bundleIdentifier,
-              let langs = UserDefaults.standard.persistentDomain(forName: bundle)?[key] as? [String],
-              let first = langs.first else { return .system }
-        return first.hasPrefix("en") ? .en : .zh
+        if let cachedChosen { return cachedChosen }
+        let resolved: AppLanguage
+        if let bundle = Bundle.main.bundleIdentifier,
+           let langs = UserDefaults.standard.persistentDomain(forName: bundle)?[key] as? [String],
+           let first = langs.first {
+            resolved = first.hasPrefix("en") ? .en : .zh
+        } else {
+            resolved = .system
+        }
+        cachedChosen = resolved
+        return resolved
     }
 
     static func choose(_ l: AppLanguage) {
+        cachedChosen = l
         switch l {
         case .system: UserDefaults.standard.removeObject(forKey: key)
         case .zh: UserDefaults.standard.set(["zh-Hans"], forKey: key)
@@ -33,15 +45,24 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     }
 
     /// The language the app is showing now.
-    static var running: AppLanguage {
+    static let running: AppLanguage = {
         Bundle.main.preferredLocalizations.first?.hasPrefix("en") == true ? .en : .zh
-    }
+    }()
 
     /// The system's own language, as far as 语阅 has it.
     static var systemLanguage: AppLanguage {
-        let global = UserDefaults(suiteName: UserDefaults.globalDomain)?.array(forKey: key) as? [String] ?? Locale.preferredLanguages
-        let pick = Bundle.preferredLocalizations(from: Bundle.main.localizations.filter { $0 != "Base" }, forPreferences: global).first
-        return pick?.hasPrefix("en") == true ? .en : .zh
+        if let cachedSystemLanguage { return cachedSystemLanguage }
+        if !observingLocale {
+            observingLocale = true
+            NotificationCenter.default.addObserver(forName: NSLocale.currentLocaleDidChangeNotification, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { AppLanguage.cachedSystemLanguage = nil }
+            }
+        }
+        let global = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)?[key] as? [String] ?? Locale.preferredLanguages
+        let pick = Bundle.preferredLocalizations(from: availableLocalizations, forPreferences: global).first
+        let resolved: AppLanguage = pick?.hasPrefix("en") == true ? .en : .zh
+        cachedSystemLanguage = resolved
+        return resolved
     }
 
     /// The language this choice shows.

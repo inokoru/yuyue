@@ -446,12 +446,12 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
         language.map { SpokenLanguage.matches($0, tag) } ?? true
     }
 
-    func render(_ text: String, language: String) async throws -> Speech? {
+    @concurrent func render(_ text: String, language: String) async throws -> Speech? {
         guard text.unicodeScalars.contains(where: { CharacterSet.alphanumerics.contains($0) }) else { return nil }
         return try await renderCoalesced(text: text, cacheKey: text, language: language, parts: nil, acting: nil)
     }
 
-    private func renderCoalesced(
+    @concurrent private func renderCoalesced(
         text: String,
         cacheKey: String,
         language: String,
@@ -529,11 +529,18 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
     }
 
     private func readCached(_ text: String) -> Speech? {
+        let fm = FileManager.default
         let candidates = Self.cacheExtensions.map { (cacheFile(text, ext: $0), $0) }
             + [(legacyCacheFile(text), "wav")]
         for (url, ext) in candidates {
+            guard fm.fileExists(atPath: url.path) else { continue }
+            if let speech = try? Self.decode(url: url) {
+                try? fm.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+                return speech
+            }
+            // Fallback when stored file extension differs from actual container bytes.
             if let data = try? Data(contentsOf: url), let speech = try? Self.decode(data, ext: ext) {
-                try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+                try? fm.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
                 return speech
             }
         }
@@ -1042,17 +1049,21 @@ nonisolated final class CloudVoice: Voice, @unchecked Sendable {
 
     // MARK: Audio
 
-    static func decode(_ data: Data, ext: String = "wav") throws -> Speech? {
-        let realExt = sniffExt(data, fallback: ext)
-        let tmp = FileManager.default.temporaryDirectory.appending(path: "voice-\(UUID().uuidString).\(realExt)")
-        try data.write(to: tmp)
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        let file = try AVAudioFile(forReading: tmp)
+    static func decode(url: URL) throws -> Speech? {
+        let file = try AVAudioFile(forReading: url)
         guard file.length > 0, let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)) else {
             throw Failure.unreadable
         }
         try file.read(into: buffer)
         return Speech.make(from: [buffer])
+    }
+
+    static func decode(_ data: Data, ext: String = "wav") throws -> Speech? {
+        let realExt = sniffExt(data, fallback: ext)
+        let tmp = FileManager.default.temporaryDirectory.appending(path: "voice-\(UUID().uuidString).\(realExt)")
+        try data.write(to: tmp)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        return try decode(url: tmp)
     }
 
     static func wav(pcm: Data, rate: Int) -> Data {
@@ -1923,6 +1934,7 @@ nonisolated final class LocalVoiceProbe: Sendable {
         config.timeoutIntervalForRequest = timeout
         config.timeoutIntervalForResource = timeout
         let session = URLSession(configuration: config)
+        defer { session.finishTasksAndInvalidate() }
 
         func getJSON(_ urlStr: String) async -> Any? {
             guard let url = URL(string: urlStr) else { return nil }

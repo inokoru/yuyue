@@ -4,6 +4,10 @@ import YuyueCore
 /// 书的详情: the cover and your score at the top, the one thing to do next, then 目录 (as the
 /// page at the front of a book, or as squares) and 笔记 (your line on it, tags, what you
 /// marked). The Mac lays it out wide; the phone in one column.
+private final class StatusRectBox {
+    var rect: CGRect = .zero
+}
+
 struct BookRecordPage: View {
     let library: Library
     let bookID: String
@@ -17,6 +21,8 @@ struct BookRecordPage: View {
     @State private var tab = Tab.contents
     @State private var detail: BookDetail?
     @State private var position: Position?
+    @State private var latestProgressAt: Int64?
+    @State private var timeSpent: (read: Int, listen: Int) = (0, 0)
     @State private var marks: [Mark] = []
     @State private var expanded = false
     @AppStorage("book.contentsAsGrid") private var asGrid = false
@@ -27,6 +33,7 @@ struct BookRecordPage: View {
     /// The Mac's status menu: the app's own white card, under the button.
     @State private var statusMenuShown = false
     @State private var statusButtonFrame = CGRect.zero
+    @State private var statusRectBox = StatusRectBox()
     @State private var podcastMentions: [BookPodcastMention] = []
     @State private var brewingKind: StudioKind?
     @State private var hoveredPodcastKey: String?
@@ -132,9 +139,14 @@ struct BookRecordPage: View {
             if tab == .contents { tab = .notes }
             detail = nil
             position = nil
+            latestProgressAt = nil
+            timeSpent = (0, 0)
         } else {
             detail = try? library.core.book(id: book.id)
-            position = (try? library.core.latestProgress(bookId: book.id))?.position
+            let progress = (try? library.core.latestProgress(bookId: book.id)) ?? nil
+            position = progress?.position
+            latestProgressAt = progress?.at
+            timeSpent = library.timeSpent(on: book)
         }
         marks = ((try? library.core.marks(book: book.id)) ?? []).sorted { $0.at > $1.at }
         about = book.record ? nil : (try? library.core.bookDescription(book: book.id)) ?? nil
@@ -415,7 +427,7 @@ struct BookRecordPage: View {
             parts.append(String(localized: "\(BookSummary.day(f))读完"))
         }
         if !book.record {
-            let spent = library.timeSpent(on: book)
+            let spent = timeSpent
             if spent.read > 0 { parts.append(String(localized: "读了 \(Self.duration(spent.read))")) }
             if spent.listen > 0 { parts.append(String(localized: "听了 \(Self.duration(spent.listen))")) }
             if book.status != .finished, book.progress > 0 { parts.append(book.remaining) }
@@ -425,8 +437,9 @@ struct BookRecordPage: View {
 
     /// The phone's line under the cover: when, and the status to change.
     private func standing(_ book: BookSummary) -> some View {
-        HStack(spacing: 10) {
-            Text(standingLine(book).isEmpty ? book.recordLine : standingLine(book))
+        let line = standingLine(book)
+        return HStack(spacing: 10) {
+            Text(line.isEmpty ? book.recordLine : line)
                 .font(.yy(size: 12)).foregroundStyle(YYColor.t3)
                 .frame(maxWidth: .infinity, alignment: .leading)
             statusButton(book)
@@ -435,7 +448,10 @@ struct BookRecordPage: View {
 
     @ViewBuilder private func statusButton(_ book: BookSummary) -> some View {
         #if os(macOS)
-        Button { statusMenuShown.toggle() } label: {
+        Button {
+            statusButtonFrame = statusRectBox.rect
+            statusMenuShown.toggle()
+        } label: {
             HStack(spacing: 5) {
                 Image(systemName: book.status.symbol).font(.yy(size: 11))
                 Text(book.status.name)
@@ -444,7 +460,10 @@ struct BookRecordPage: View {
         }
         .buttonStyle(RecordButton(main: false, big: !wide))
         .fixedSize()
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("recordPage")) } action: { statusButtonFrame = $0 }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("recordPage")) } action: { rect in
+            statusRectBox.rect = rect
+            if statusMenuShown { statusButtonFrame = rect }
+        }
         .accessibilityLabel(String(localized: "状态：\(book.status.name)"))
         #else
         Menu {
@@ -607,8 +626,8 @@ struct BookRecordPage: View {
     private func log(_ book: BookSummary) -> [LogLine] {
         var out: [LogLine] = [LogLine(id: "added", at: book.addedAt, text: String(localized: "加进来"))]
         if let s = book.startedAt { out.append(LogLine(id: "started", at: s, text: String(localized: "开始读"))) }
-        if !book.record, let p = (try? library.core.latestProgress(bookId: book.id)) ?? nil, let current {
-            out.append(LogLine(id: "at", at: p.at, text: String(localized: "读到 "), bold: String(localized: "第 \(current.number) 章 · \(current.title)")))
+        if !book.record, let at = latestProgressAt, let current {
+            out.append(LogLine(id: "at", at: at, text: String(localized: "读到 "), bold: String(localized: "第 \(current.number) 章 · \(current.title)")))
         }
         let byDay = Dictionary(grouping: marks) { Calendar.current.startOfDay(for: Date(timeIntervalSince1970: Double($0.at) / 1000)) }
         for (day, list) in byDay {

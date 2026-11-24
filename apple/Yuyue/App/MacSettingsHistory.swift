@@ -400,12 +400,15 @@ private struct SettingsHistoryCard: View {
         }
         .frame(maxHeight: 416)
         .fixedSize(horizontal: false, vertical: true)
-        .mask {
-            VStack(spacing: 0) {
-                LinearGradient(colors: [.black.opacity(0), .black], startPoint: .top, endPoint: .bottom).frame(height: 6)
-                Rectangle()
-                LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom).frame(height: 8)
-            }
+        .overlay(alignment: .top) {
+            LinearGradient(colors: [YYColor.bg, YYColor.fade0], startPoint: .top, endPoint: .bottom)
+                .frame(height: 6)
+                .allowsHitTesting(false)
+        }
+        .overlay(alignment: .bottom) {
+            LinearGradient(colors: [YYColor.fade0, YYColor.bg], startPoint: .top, endPoint: .bottom)
+                .frame(height: 8)
+                .allowsHitTesting(false)
         }
     }
 

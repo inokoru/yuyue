@@ -555,7 +555,7 @@ private struct PdfPages: NSViewRepresentable {
         view.displaysPageBreaks = true
         view.pageBreakMargins = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
         view.wantsLayer = true
-        view.layerUsesCoreImageFilters = true
+        view.layerUsesCoreImageFilters = model.night
         #if DEBUG
         context.coordinator.debugObserver = NotificationCenter.default.addObserver(forName: .init("debugPdfMenu"), object: nil, queue: .main) { [weak view] _ in
             MainActor.assumeIsolated { view?.debugMenus() }
@@ -594,6 +594,7 @@ private struct PdfPages: NSViewRepresentable {
             // grey rather than black, the ink a warm light grey rather than white.
             // The filters take in the grey round the pages too: light here comes out dark.
             view.backgroundColor = model.night ? NSColor(white: 0.989, alpha: 1) : NSColor(PdfDesk.color)
+            view.layerUsesCoreImageFilters = model.night
             view.contentFilters = model.night ? Self.nightFilters : []
         }
         if !c.placed, let page = model.document?.page(at: model.page) {

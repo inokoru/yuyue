@@ -76,7 +76,7 @@ nonisolated struct ClonedEntry: Identifiable, Sendable {
 }
 
 enum ClonedVoices {
-    static let changed = Notification.Name("yuyue.clonedVoicesChanged")
+    nonisolated static let changed = Notification.Name("yuyue.clonedVoicesChanged")
 
     nonisolated static var dir: URL {
         if let ctx = LiveVoiceModel.context {
@@ -91,15 +91,28 @@ enum ClonedVoices {
     nonisolated static func sample(_ id: String) -> URL { folder(id).appending(path: "sample.m4a") }
     nonisolated static func metaURL(_ id: String) -> URL { folder(id).appending(path: "meta.json") }
 
+    nonisolated private static let cache = Mutex<[ClonedVoice]?>(nil)
+    nonisolated(unsafe) private static let cacheInvalidator: NSObjectProtocol = NotificationCenter.default.addObserver(
+        forName: changed, object: nil, queue: nil
+    ) { _ in
+        ClonedVoices.cache.withLock { $0 = nil }
+    }
+
     /// 旧版与 ElevenLabs 元数据列表。
     nonisolated static func all() -> [ClonedVoice] {
-        let ids = (try? FileManager.default.contentsOfDirectory(atPath: dir.path(percentEncoded: false))) ?? []
-        return ids.compactMap { id in
-            guard let data = try? Data(contentsOf: metaURL(id)),
-                  let meta = try? JSONDecoder().decode(ClonedVoice.Meta.self, from: data) else { return nil }
-            return ClonedVoice(meta: meta)
+        _ = cacheInvalidator
+        return cache.withLock { slot in
+            if let slot { return slot }
+            let ids = (try? FileManager.default.contentsOfDirectory(atPath: dir.path(percentEncoded: false))) ?? []
+            let loaded = ids.compactMap { id -> ClonedVoice? in
+                guard let data = try? Data(contentsOf: metaURL(id)),
+                      let meta = try? JSONDecoder().decode(ClonedVoice.Meta.self, from: data) else { return nil }
+                return ClonedVoice(meta: meta)
+            }
+            .sorted { $0.meta.created > $1.meta.created }
+            slot = loaded
+            return loaded
         }
-        .sorted { $0.meta.created > $1.meta.created }
     }
 
     nonisolated static func find(_ id: String) -> ClonedVoice? {
@@ -130,14 +143,15 @@ enum ClonedVoices {
     /// 合并核心里的克隆卡（含跨设备同步过来的）与本地 `meta.json` 项。
     nonisolated static func entries() -> [ClonedEntry] {
         let cards = LiveVoiceModel.context?.core.cardsCloned() ?? []
-        let metas = Dictionary(uniqueKeysWithValues: all().map { ($0.meta.id, $0.meta) })
+        let allMetas = all()
+        let metas = Dictionary(uniqueKeysWithValues: allMetas.map { ($0.meta.id, $0.meta) })
         var seen = Set<String>()
         var out: [ClonedEntry] = []
         for card in cards {
             seen.insert(card.id)
             out.append(ClonedEntry(id: card.id, name: card.name, card: card, meta: metas[card.id]))
         }
-        for v in all() where !seen.contains(v.meta.id) {
+        for v in allMetas where !seen.contains(v.meta.id) {
             out.append(ClonedEntry(id: v.meta.id, name: v.meta.name, card: nil, meta: v.meta))
         }
         return out

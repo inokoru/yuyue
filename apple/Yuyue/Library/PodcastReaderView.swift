@@ -71,7 +71,9 @@ struct PodcastReaderView: View {
 
     // Inline vocabulary / book-source popover & geometry tracking
     @State private var activePopover: InlinePopoverState?
-    @State private var sentenceFrames: [String: CGRect] = [:]
+    /// Non-observable reference store so per-row `onGeometryChange` during scroll never invalidates `body`.
+    @State private var sentenceFrameBox = PodcastSentenceFrameBox()
+    @State private var lookedUpPhonetics: [String: String] = [:]
     @State private var wordRectStore = PodcastWordRectStore()
     @State private var sheetWidth: CGFloat = 650
     @State private var savedVocabWords: [VocabWord] = []
@@ -147,12 +149,10 @@ struct PodcastReaderView: View {
                             topBar(issue)
 
                             magazineColumn(issue)
-                                .mask {
-                                    VStack(spacing: 0) {
-                                        Rectangle()
-                                        LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom)
-                                            .frame(height: 14)
-                                    }
+                                .overlay(alignment: .bottom) {
+                                    LinearGradient(colors: [YYColor.fade0, YYColor.bg], startPoint: .top, endPoint: .bottom)
+                                        .frame(height: 14)
+                                        .allowsHitTesting(false)
                                 }
 
                             slimPlayerDock(issue)
@@ -250,6 +250,9 @@ struct PodcastReaderView: View {
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .vocabChanged)) { _ in
                     reloadSavedWords()
+                }
+                .task(id: "\(issueID):\(allSentences.count)") {
+                    await lookupMissingCoachPhonetics()
                 }
                 .onDisappear {
                     hub.stopVoiceInterrupt()
@@ -631,7 +634,7 @@ struct PodcastReaderView: View {
                 }
                 .overlay(alignment: .topLeading) {
                     if let pop = activePopover,
-                       let sentRect = sentenceFrames[pop.sentenceID],
+                       let sentRect = sentenceFrameBox.frames[pop.sentenceID],
                        let sent = shownSentences.first(where: { $0.id == pop.sentenceID }) {
                         let anchor = pop.anchorRect ?? sentRect
                         let popW: CGFloat = min(310, max(240, sheetWidth - 16))
@@ -674,13 +677,14 @@ struct PodcastReaderView: View {
     }
 
     private func transcriptList(_ issue: PodcastIssue) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        let activeID = currentActiveSentenceID
+        return LazyVStack(alignment: .leading, spacing: 4) {
             ForEach(Array(shownSentences.enumerated()), id: \.element.id) { idx, sent in
                 if sent.skipReason != nil {
                     adFoldRow(sent, index: idx)
                         .id(sent.id)
                 } else {
-                    turnRow(sent, issue: issue)
+                    turnRow(sent, issue: issue, isAct: activeID == sent.id)
                         .id(sent.id)
                 }
             }
@@ -737,8 +741,7 @@ struct PodcastReaderView: View {
     /// `.rd-turn`: 2-column row (`50pt` timestamp on left + speaker & serif text on right),
     /// active sage background card (`PodcastStyle.rowTintWash`), inline blind-mode blur,
     /// dotted vocabulary underlines (`.vocab-w`), and inline book source pills (`.src-link`).
-    private func turnRow(_ sent: MagazineSentence, issue: PodcastIssue) -> some View {
-        let isAct = currentActiveSentenceID == sent.id
+    private func turnRow(_ sent: MagazineSentence, issue: PodcastIssue, isAct: Bool) -> some View {
         let isHov = hoveredSentenceID == sent.id
         let isPeeked = isHov || peekedSentenceID == sent.id
         let shouldBlur = listenOnly && !isPeeked
@@ -785,7 +788,7 @@ struct PodcastReaderView: View {
                         .onGeometryChange(for: CGRect.self) { geo in
                             geo.frame(in: .named("rdSheetSpace"))
                         } action: { rect in
-                            sentenceFrames[sent.id] = rect
+                            sentenceFrameBox.frames[sent.id] = rect
                         }
 
                     if let bTitle = sent.bookTitle, !bTitle.isEmpty {
@@ -844,6 +847,39 @@ struct PodcastReaderView: View {
         } else {
             hub.jump(to: sent)
         }
+    }
+
+    /// Pre-loads system dictionary phonetics for coachNote words off the main actor.
+    private func lookupMissingCoachPhonetics() async {
+        var missing: [(key: String, word: String)] = []
+        var seen = Set<String>()
+        for sent in allSentences {
+            guard let note = sent.coachNote?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty else { continue }
+            let parts = note.split(maxSplits: 1, whereSeparator: { $0 == "：" || $0 == ":" })
+            guard parts.count == 2 else { continue }
+            let rawWord = String(parts[0]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = rawWord.lowercased()
+            guard !key.isEmpty,
+                  Self.builtinLexicon[key] == nil,
+                  lookedUpPhonetics[key] == nil,
+                  seen.insert(key).inserted else { continue }
+            missing.append((key, rawWord))
+        }
+        guard !missing.isEmpty else { return }
+        let found = await Self.resolvePhoneticsOffMain(missing)
+        guard !Task.isCancelled, !found.isEmpty else { return }
+        lookedUpPhonetics.merge(found) { _, new in new }
+    }
+
+    @concurrent nonisolated private static func resolvePhoneticsOffMain(_ pairs: [(key: String, word: String)]) async -> [String: String] {
+        var out: [String: String] = [:]
+        for (key, word) in pairs {
+            if Task.isCancelled { break }
+            if let ph = SystemDictionary.define(word)?.phonetic {
+                out[key] = ph
+            }
+        }
+        return out
     }
 
     private func speakerMeta(for sent: MagazineSentence, issue: PodcastIssue) -> (name: String, tag: String) {
@@ -974,7 +1010,7 @@ struct PodcastReaderView: View {
                     meaning.replaceSubrange(commaIdx...commaIdx, with: "：")
                 }
                 let builtin = Self.builtinLexicon[key]
-                let ph = builtin?.phonetic ?? SystemDictionary.define(rawWord)?.phonetic ?? "/\(key)/"
+                let ph = builtin?.phonetic ?? lookedUpPhonetics[key] ?? "/\(key)/"
                 let zhPrefix = meaning.split(separator: "：").first.map(String.init)
                 if seen.insert(key).inserted {
                     entries.append(
@@ -1181,7 +1217,7 @@ struct PodcastReaderView: View {
                         let localRect = wordRectStore.hitRects(for: k).first(where: { $0.insetBy(dx: -12, dy: -10).contains(loc) })
                             ?? wordRectStore.rects[k]
                             ?? CGRect(x: loc.x - 30, y: loc.y - 10, width: 60, height: 20)
-                        let baseRect = sentenceFrames[sent.id] ?? .zero
+                        let baseRect = sentenceFrameBox.frames[sent.id] ?? .zero
                         let wordSheetRect = CGRect(
                             x: baseRect.minX + localRect.minX,
                             y: baseRect.minY + localRect.minY,
@@ -1232,7 +1268,7 @@ struct PodcastReaderView: View {
                 } else {
                     activePopover = InlinePopoverState(
                         sentenceID: sent.id,
-                        anchorRect: sentenceFrames[sent.id],
+                        anchorRect: sentenceFrameBox.frames[sent.id],
                         kind: targetKind
                     )
                 }
@@ -2667,6 +2703,11 @@ private struct PodcastDottedTextRenderer: TextRenderer {
             }
         }
     }
+}
+
+/// Non-observable storage for per-sentence frames so scroll geometry updates never re-render `PodcastReaderView.body`.
+private final class PodcastSentenceFrameBox {
+    var frames: [String: CGRect] = [:]
 }
 
 /// Isolates 4Hz `hub.currentTime` observation exclusively to the bottom player dock so the

@@ -41,30 +41,49 @@ final class WatchedFolder {
         guard !scanning, let data = UserDefaults.standard.data(forKey: Self.bookmarkKey) else { return }
         scanning = true
         defer { scanning = false }
+        let existingSeen = Set(UserDefaults.standard.stringArray(forKey: Self.seenKey) ?? [])
+        guard let result = await Self.scanFolderOffMain(bookmark: data, existingSeen: existingSeen) else { return }
+        if let refreshed = result.refreshedBookmark {
+            UserDefaults.standard.set(refreshed, forKey: Self.bookmarkKey)
+        }
+        guard !result.fresh.isEmpty else { return }
+        UserDefaults.standard.set(Array(result.updatedSeen), forKey: Self.seenKey)
+        let scoped = result.folder.startAccessingSecurityScopedResource()
+        defer { if scoped { result.folder.stopAccessingSecurityScopedResource() } }
+        await library.importFiles(result.fresh, from: result.folder.lastPathComponent)
+    }
+
+    private nonisolated struct ScanResult: Sendable {
+        let folder: URL
+        let refreshedBookmark: Data?
+        let fresh: [URL]
+        let updatedSeen: Set<String>
+    }
+
+    @concurrent nonisolated private static func scanFolderOffMain(bookmark data: Data, existingSeen: Set<String>) async -> ScanResult? {
         var stale = false
         #if os(macOS)
         let resolved = try? URL(resolvingBookmarkData: data, options: .withSecurityScope, bookmarkDataIsStale: &stale)
         #else
         let resolved = try? URL(resolvingBookmarkData: data, bookmarkDataIsStale: &stale)
         #endif
-        guard let folder = resolved else { return }
+        guard let folder = resolved else { return nil }
         let scoped = folder.startAccessingSecurityScopedResource()
         defer { if scoped { folder.stopAccessingSecurityScopedResource() } }
-        if stale, let fresh = try? folder.bookmarkData() { UserDefaults.standard.set(fresh, forKey: Self.bookmarkKey) }
+        let refreshed = stale ? (try? folder.bookmarkData()) : nil
 
-        var seen = Set(UserDefaults.standard.stringArray(forKey: Self.seenKey) ?? [])
+        var seen = existingSeen
         let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
+        let keySet = Set(keys)
         let found = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles, .skipsPackageDescendants])
         var fresh: [URL] = []
         while let url = found?.nextObject() as? URL {
             guard RemoteFormats.extensions.contains(url.pathExtension.lowercased()),
-                  let values = try? url.resourceValues(forKeys: Set(keys)), values.isRegularFile == true else { continue }
+                  let values = try? url.resourceValues(forKeys: keySet), values.isRegularFile == true else { continue }
             let key = "\(url.lastPathComponent)|\(values.fileSize ?? 0)|\(Int(values.contentModificationDate?.timeIntervalSince1970 ?? 0))"
             guard seen.insert(key).inserted else { continue }
             fresh.append(url)
         }
-        UserDefaults.standard.set(Array(seen), forKey: Self.seenKey)
-        guard !fresh.isEmpty else { return }
-        await library.importFiles(fresh, from: folder.lastPathComponent)
+        return ScanResult(folder: folder, refreshedBookmark: refreshed, fresh: fresh, updatedSeen: seen)
     }
 }

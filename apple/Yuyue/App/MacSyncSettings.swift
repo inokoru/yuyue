@@ -76,10 +76,12 @@ struct SyncSettings: View {
                 .padding(.leading, 16)
             Spacer(minLength: 0)
         }
-        .onAppear {
+        .task {
             sync.loadDevices()
-            filesSize = sync.filesSize()
-            recordingsSize = sync.recordingsSize()
+            async let f = sync.filesSizeAsync()
+            async let r = sync.recordingsSizeAsync()
+            filesSize = await f
+            recordingsSize = await r
         }
     }
 

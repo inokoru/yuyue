@@ -255,8 +255,11 @@ struct FontBook: View {
         .frame(width: 800, height: 520)
         .background(YYColor.bg)
         .onAppear {
-            macFaces = shelf.macFaces()
+            if let cached = shelf.cachedMacFacesNow { macFaces = cached }
             pick = pick ?? current
+        }
+        .task {
+            macFaces = await shelf.loadMacFaces()
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.font], allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
@@ -292,15 +295,16 @@ struct FontBook: View {
     }
 
     private var list: some View {
-        ScrollView {
+        let inRow = Set(FontRow.ids())
+        return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if group == .all {
-                    section(String(localized: "可以下载"), shelf.catalog.map(\.id))
-                    section(String(localized: "你添加的"), shelf.files.map { "file:\($0)" })
-                    section(String(localized: "这台 Mac"), macFaces)
-                    section(String(localized: "自带"), FontShelf.builtIn)
+                    section(String(localized: "可以下载"), shelf.catalog.map(\.id), inRow: inRow)
+                    section(String(localized: "你添加的"), shelf.files.map { "file:\($0)" }, inRow: inRow)
+                    section(String(localized: "这台 Mac"), macFaces, inRow: inRow)
+                    section(String(localized: "自带"), FontShelf.builtIn, inRow: inRow)
                 } else {
-                    section(nil, ids(in: group))
+                    section(nil, ids(in: group), inRow: inRow)
                 }
             }
             .padding(8)
@@ -308,16 +312,16 @@ struct FontBook: View {
         .frame(width: 262)
     }
 
-    @ViewBuilder private func section(_ title: String?, _ ids: [String]) -> some View {
+    @ViewBuilder private func section(_ title: String?, _ ids: [String], inRow: Set<String>) -> some View {
         if !ids.isEmpty {
             if let title {
                 Text(title).font(.yy(size: 10.5)).foregroundStyle(YYColor.t3).padding(.horizontal, 10).padding(.top, 10).padding(.bottom, 4)
             }
-            ForEach(ids, id: \.self) { id in row(id) }
+            ForEach(ids, id: \.self) { id in row(id, inRow: inRow) }
         }
     }
 
-    private func row(_ id: String) -> some View {
+    private func row(_ id: String, inRow: Set<String>) -> some View {
         let on = pick == id
         return Button { withAnimation(.easeOut(duration: 0.15)) { pick = id } } label: {
             HStack(spacing: 10) {
@@ -328,7 +332,7 @@ struct FontBook: View {
                     Text(meta(id)).font(.yy(size: 10.5)).foregroundStyle(YYColor.t3).lineLimit(1)
                 }
                 Spacer(minLength: 6)
-                status(id)
+                status(id, inRow: inRow)
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
             .background(on ? ShelfDesk.on : .clear, in: .rect(cornerRadius: 9))
@@ -344,10 +348,10 @@ struct FontBook: View {
         .onAppear { FontPreview.shared.load(id, text: shelf.name(id)) }
     }
 
-    @ViewBuilder private func status(_ id: String) -> some View {
+    @ViewBuilder private func status(_ id: String, inRow: Set<String>) -> some View {
         if let p = shelf.progress[id] {
             ProgressRing(value: p).frame(width: 14, height: 14)
-        } else if FontRow.ids().contains(id) || FontShelf.builtIn.contains(id), shelf.isReady(id) {
+        } else if inRow.contains(id) || FontShelf.builtIn.contains(id), shelf.isReady(id) {
             Image(systemName: "checkmark").font(.yy(size: 10, weight: .semibold)).foregroundStyle(YYTint.standard.accent)
         } else if shelf.failure[id] != nil {
             Text("没下完").font(.yy(size: 10.5)).foregroundStyle(YYColor.danger)
@@ -399,7 +403,12 @@ struct FontBook: View {
                 .scrollContentBackground(.hidden)
                 .lineSpacing(15.5 * 0.9)
                 .frame(maxHeight: .infinity)
-                .onChange(of: text) { FontPreview.shared.load(id, text: text) }
+                .task(id: "\(id)|\(text)") {
+                    guard !ready else { return }
+                    try? await Task.sleep(for: .milliseconds(350))
+                    guard !Task.isCancelled else { return }
+                    FontPreview.shared.load(id, text: text)
+                }
             Text("春眠不觉晓 · 天地玄黄 · 0123456789 · Aa Bb").font(face(13, "春眠不觉晓 · 天地玄黄 · 0123456789 · Aa Bb")).foregroundStyle(Self.ink2).padding(.top, 6)
             Text("点上面这段字可以改成你想看的；换字体时它跟着走").font(.yy(size: 10.5)).foregroundStyle(Self.ink2.opacity(0.75)).padding(.top, 6)
         }

@@ -112,6 +112,18 @@ final class Sync {
 
     /// What the book files would take in the folder.
     func filesSize() -> Int64 {
+        Self.computeFilesSize(core: core)
+    }
+
+    func filesSizeAsync() async -> Int64 {
+        await Self.computeFilesSizeAsync(core: core)
+    }
+
+    @concurrent nonisolated private static func computeFilesSizeAsync(core: YuyueCore) async -> Int64 {
+        computeFilesSize(core: core)
+    }
+
+    nonisolated private static func computeFilesSize(core: YuyueCore) -> Int64 {
         let books = ((try? core.books()) ?? []).filter(\.available).compactMap { try? core.originalFile(bookId: $0.id) }
         let fm = FileManager.default
         return books.reduce(0) { $0 + ((try? fm.attributesOfItem(atPath: $1)[.size] as? Int64) ?? 0) }
@@ -120,9 +132,22 @@ final class Sync {
     /// What the 听读书 made here would take in the folder.
     func recordingsSize() -> Int64 {
         let audio = Audiobooks.shared.map { a in a.all.filter { $0.book != nil && $0.made != nil }.map { a.folder($0.id) } } ?? []
+        return Self.computeRecordingsSize(dirs: audio)
+    }
+
+    func recordingsSizeAsync() async -> Int64 {
+        let audio = Audiobooks.shared.map { a in a.all.filter { $0.book != nil && $0.made != nil }.map { a.folder($0.id) } } ?? []
+        return await Self.computeRecordingsSizeAsync(dirs: audio)
+    }
+
+    @concurrent nonisolated private static func computeRecordingsSizeAsync(dirs: [URL]) async -> Int64 {
+        computeRecordingsSize(dirs: dirs)
+    }
+
+    nonisolated private static func computeRecordingsSize(dirs: [URL]) -> Int64 {
         let fm = FileManager.default
         var total: Int64 = 0
-        for dir in audio {
+        for dir in dirs {
             for name in (try? fm.contentsOfDirectory(atPath: dir.path(percentEncoded: false))) ?? [] where !name.hasPrefix("emissions-") {
                 total += (try? fm.attributesOfItem(atPath: dir.appending(path: name).path(percentEncoded: false))[.size] as? Int64) ?? 0
             }
@@ -212,7 +237,7 @@ final class Sync {
 
     nonisolated static let googleRefreshKey = "sync.google.refresh"
 
-    struct WebDAVAccount: Equatable, Sendable {
+    nonisolated struct WebDAVAccount: Equatable, Sendable {
         var url: URL
         var user: String
         var password: String
@@ -243,19 +268,28 @@ final class Sync {
         now()
     }
 
+    private static var cachedFolderBookmark: (data: Data, url: URL?)?
+
     /// The iCloud Drive folder picked for 同步 (a security-scoped bookmark: the app is sandboxed).
     static var chosenFolder: URL? {
         #if DEBUG
         // `-debugSyncDir <dir>`: a folder in the app's own container, to try a round between two scratch libraries.
         if let dir = UserDefaults.standard.string(forKey: "debugSyncDir") { return URL(filePath: dir, directoryHint: .isDirectory) }
         #endif
-        guard let data = UserDefaults.standard.data(forKey: Keys.folder) else { return nil }
+        guard let data = UserDefaults.standard.data(forKey: Keys.folder) else {
+            cachedFolderBookmark = nil
+            return nil
+        }
+        if let cached = cachedFolderBookmark, cached.data == data {
+            return cached.url
+        }
         var stale = false
         #if os(macOS)
         let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope, bookmarkDataIsStale: &stale)
         #else
         let url = try? URL(resolvingBookmarkData: data, bookmarkDataIsStale: &stale)
         #endif
+        cachedFolderBookmark = (data, url)
         return url
     }
 
@@ -634,7 +668,7 @@ final class Sync {
     }
 }
 
-enum SyncError: Error {
+nonisolated enum SyncError: Error {
     case status(Int)
     case noFolder
     /// Google took the sign-in back, or it ran out.
@@ -645,7 +679,7 @@ enum SyncError: Error {
 }
 
 /// A folder the devices meet in: file name → a tag that changes when the file does.
-protocol SyncFolder: Sendable {
+nonisolated protocol SyncFolder: Sendable {
     func prepare() async throws
     func list() async throws -> [String: String]
     func read(_ name: String) async throws -> Data
@@ -655,14 +689,14 @@ protocol SyncFolder: Sendable {
     func download(_ name: String, to file: URL) async throws
 }
 
-extension SyncFolder {
+nonisolated extension SyncFolder {
     /// The sync files are JSON; everything else goes as it is.
-    nonisolated static func type(of name: String) -> String {
+    static func type(of name: String) -> String {
         name.hasSuffix(".json") ? "application/json" : "application/octet-stream"
     }
 
     /// Puts a file downloaded to `temp` at `file`.
-    nonisolated static func place(_ temp: URL, at file: URL) throws {
+    static func place(_ temp: URL, at file: URL) throws {
         let fm = FileManager.default
         if fm.fileExists(atPath: file.path(percentEncoded: false)) { try fm.removeItem(at: file) }
         try fm.moveItem(at: temp, to: file)
@@ -672,7 +706,7 @@ extension SyncFolder {
 // MARK: - WebDAV
 
 /// 坚果云、群晖、Nextcloud…: files under `<base>/语阅/`.
-struct WebDAVFolder: SyncFolder {
+nonisolated struct WebDAVFolder: SyncFolder {
     let base: URL
     let user: String
     let password: String
@@ -762,7 +796,7 @@ struct WebDAVFolder: SyncFolder {
 }
 
 /// The file names and tags in a PROPFIND answer.
-private final class PropfindParser: NSObject, XMLParserDelegate {
+private nonisolated final class PropfindParser: NSObject, XMLParserDelegate {
     private var out: [String: String] = [:]
     private var href = ""
     private var tag = ""
@@ -803,14 +837,14 @@ private final class PropfindParser: NSObject, XMLParserDelegate {
 
 // MARK: - A folder on disk (iCloud Drive)
 
-struct LocalFolder: SyncFolder {
+nonisolated struct LocalFolder: SyncFolder {
     let url: URL
 
-    func prepare() async throws {
+    @concurrent func prepare() async throws {
         guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else { throw SyncError.noFolder }
     }
 
-    func list() async throws -> [String: String] {
+    @concurrent func list() async throws -> [String: String] {
         try scoped {
             let names = try FileManager.default.contentsOfDirectory(atPath: url.path(percentEncoded: false))
             var out: [String: String] = [:]
@@ -827,11 +861,11 @@ struct LocalFolder: SyncFolder {
         }
     }
 
-    func read(_ name: String) async throws -> Data {
+    @concurrent func read(_ name: String) async throws -> Data {
         try scoped { try Data(contentsOf: url.appending(path: name)) }
     }
 
-    func write(_ name: String, _ data: Data) async throws {
+    @concurrent func write(_ name: String, _ data: Data) async throws {
         try scoped { try data.write(to: url.appending(path: name), options: .atomic) }
     }
 

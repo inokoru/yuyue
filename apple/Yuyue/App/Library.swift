@@ -5,6 +5,8 @@ import UniformTypeIdentifiers
 import YuyueCore
 #if canImport(UIKit)
 import UIKit
+#elseif os(macOS)
+import SystemConfiguration
 #endif
 
 /// A book the reader asked for that cannot be opened. The card stays on the current window.
@@ -644,18 +646,18 @@ final class Library {
             importsTouched = .now
         }
         #endif
+        var had = Set(books.map(\.id))
         for url in urls {
             if url.pathExtension.lowercased() == Snapshots.fileExtension {
                 openedSnapshot = url
                 continue
             }
             let row = rows.first { $0.value == url }?.key
-            let had = Set(books.map(\.id))
             setImport(row, .reading)
             let scoped = url.startAccessingSecurityScopedResource()
             do {
                 let book = try await Self.importBook(core, path: url.path(percentEncoded: false))
-                if had.contains(book.id) {
+                if !had.insert(book.id).inserted {
                     setImport(row, .already(book.id))
                 } else {
                     imported.append(book)
@@ -667,7 +669,6 @@ final class Library {
                 setImport(row, .failed(Self.message(for: error)))
             }
             if scoped { url.stopAccessingSecurityScopedResource() }
-            reload()
         }
         reload()
         #if os(macOS)
@@ -1030,9 +1031,13 @@ final class Library {
         }
     }
 
+    #if os(macOS)
+    private static let cachedDeviceName: String = (SCDynamicStoreCopyComputerName(nil, nil) as String?) ?? "Mac"
+    #endif
+
     static var deviceName: String {
         #if os(macOS)
-        Host.current().localizedName ?? "Mac"
+        cachedDeviceName
         #else
         UIDevice.current.name
         #endif

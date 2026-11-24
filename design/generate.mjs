@@ -218,8 +218,7 @@ ${FONTS.map((f) => `        case .${f}: return .${{ sans: 'default', serif: 'ser
         }
     }
 
-    /// The first installed family from \`appleNames\`, or nil to use the system font.
-    public var installedName: String? {
+    private static let resolvedNames: [YYFontFamily: String] = {
         #if canImport(UIKit)
         let families = Set(UIFont.familyNames)
         #elseif canImport(AppKit)
@@ -227,7 +226,16 @@ ${FONTS.map((f) => `        case .${f}: return .${{ sans: 'default', serif: 'ser
         #else
         let families = Set<String>()
         #endif
-        return appleNames.first { families.contains($0) }
+        var map: [YYFontFamily: String] = [:]
+        for f in allCases {
+            if let hit = f.appleNames.first(where: { families.contains($0) }) { map[f] = hit }
+        }
+        return map
+    }()
+
+    /// The first installed family from \`appleNames\`, or nil to use the system font.
+    public var installedName: String? {
+        Self.resolvedNames[self]
     }
 
     public func font(size: CGFloat, weight: Font.Weight = .regular) -> Font {

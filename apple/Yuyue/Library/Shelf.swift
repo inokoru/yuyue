@@ -232,14 +232,33 @@ struct ProgressLine: View {
 }
 
 extension View {
-    /// Layers of a shadow from the tokens.
+    /// Layers of a shadow from the tokens without nested `AnyView` type-erasure.
     func yyShadow(_ layers: [YYShadowLayer]) -> some View {
-        layers.reduce(AnyView(self)) { view, layer in
-            if layer.blur == 0 && layer.spread > 0 {
-                // A hairline ring.
-                return AnyView(view.overlay(RoundedRectangle(cornerRadius: YYRadius.block).strokeBorder(Color(yy: layer.color), lineWidth: layer.spread)))
+        modifier(YYShadowModifier(layers: layers))
+    }
+}
+
+private struct YYShadowModifier: ViewModifier {
+    let layers: [YYShadowLayer]
+
+    func body(content: Content) -> some View {
+        if layers.count == 1 {
+            apply(content, layers[0])
+        } else if layers.count == 2 {
+            apply(apply(content, layers[0]), layers[1])
+        } else {
+            layers.reduce(AnyView(content)) { view, layer in
+                AnyView(apply(view, layer))
             }
-            return AnyView(view.shadow(color: Color(yy: layer.color), radius: layer.blur / 2, x: layer.x, y: layer.y))
+        }
+    }
+
+    @ViewBuilder
+    private func apply<V: View>(_ view: V, _ layer: YYShadowLayer) -> some View {
+        if layer.blur == 0 && layer.spread > 0 {
+            view.overlay(RoundedRectangle(cornerRadius: YYRadius.block).strokeBorder(Color(yy: layer.color), lineWidth: layer.spread))
+        } else {
+            view.shadow(color: Color(yy: layer.color), radius: layer.blur / 2, x: layer.x, y: layer.y)
         }
     }
 }
@@ -255,6 +274,8 @@ struct TightLabel: LabelStyle {
 }
 
 extension Library {
+    private static let trailingMinutesRegex = #/ \d+ (?:分|min)$/#
+
     /// 有声: an 有声书 of its own, or a narrator's recording laid against this book.
     func hasAudio(_ book: BookSummary) -> Bool { book.format == .audio || audiobooks.audiobook(for: book.id) != nil }
 
@@ -262,11 +283,11 @@ extension Library {
     func shelfNote(_ book: BookSummary) -> String {
         if book.available, book.format == .audio {
             if book.status == .finished { return String(localized: "有声 · 听完") }
-            return String(localized: "有声 · ") + (book.progress > 0 ? book.percent : Audiobook.length(Double(book.listenMinutes) * 60).replacingOccurrences(of: #" \d+ (分|min)$"#, with: "", options: .regularExpression))
+            return String(localized: "有声 · ") + (book.progress > 0 ? book.percent : Audiobook.length(Double(book.listenMinutes) * 60).replacing(Self.trailingMinutesRegex, with: ""))
         }
         guard book.available, let a = audiobooks.audiobook(for: book.id) else { return book.shelfNote }
         if book.status == .finished { return String(localized: "有声 · 听完") }
-        return String(localized: "有声 · ") + (book.progress > 0 ? book.percent : Audiobook.length(a.total).replacingOccurrences(of: #" \d+ (分|min)$"#, with: "", options: .regularExpression))
+        return String(localized: "有声 · ") + (book.progress > 0 ? book.percent : Audiobook.length(a.total).replacing(Self.trailingMinutesRegex, with: ""))
     }
 }
 

@@ -120,16 +120,32 @@ private struct NoteSenderSaving: ViewModifier {
 /// 导出 as a menu: Markdown to share, then the 发到 items.
 struct NoteExportMenu<MenuLabel: View>: View {
     let sender: NoteSender
-    /// The Markdown to share, and its file name.
-    let markdown: String
+    /// The Markdown to share (built lazily when exported), and its file name.
+    let markdown: @MainActor @Sendable () -> String
     let name: String
     let books: () -> [NoteExport.Book]
     var book: BookSummary?
-    @ViewBuilder let label: MenuLabel
+    let label: MenuLabel
+
+    init(
+        sender: NoteSender,
+        markdown: @autoclosure @escaping @MainActor @Sendable () -> String,
+        name: String,
+        books: @escaping () -> [NoteExport.Book],
+        book: BookSummary? = nil,
+        @ViewBuilder label: () -> MenuLabel
+    ) {
+        self.sender = sender
+        self.markdown = markdown
+        self.name = name
+        self.books = books
+        self.book = book
+        self.label = label()
+    }
 
     var body: some View {
         Menu {
-            ShareLink(item: MarkdownFile(text: markdown, name: name), preview: SharePreview(name)) {
+            ShareLink(item: MarkdownFile(makeText: markdown, name: name), preview: SharePreview(name)) {
                 Label("Markdown", systemImage: "doc.plaintext")
             }
             Divider()
@@ -149,15 +165,16 @@ struct NoteExportMenu<MenuLabel: View>: View {
 
 /// Markdown handed to the share sheet as a `.md` file.
 nonisolated struct MarkdownFile: Transferable, Sendable {
-    let text: String
+    let makeText: @MainActor @Sendable () -> String
     let name: String
 
     static var transferRepresentation: some TransferRepresentation {
         FileRepresentation(exportedContentType: .plainText) { file in
+            let text = await file.makeText()
             let dir = FileManager.default.temporaryDirectory.appending(path: "export-\(UUID().uuidString)")
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let url = dir.appending(path: file.name.replacingOccurrences(of: "/", with: "-"))
-            try Data(file.text.utf8).write(to: url)
+            try Data(text.utf8).write(to: url)
             return SentTransferredFile(url)
         }
     }

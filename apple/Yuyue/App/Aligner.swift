@@ -72,6 +72,10 @@ nonisolated enum Aligner {
     /// time.
     private static let loaded = Mutex<(URL, MLModel)?>(nil)
 
+    static func unload() {
+        loaded.withLock { $0 = nil }
+    }
+
     static func model(_ dataDir: URL) throws -> MLModel {
         let url = folder(dataDir).appending(path: file)
         return try loaded.withLock { held in

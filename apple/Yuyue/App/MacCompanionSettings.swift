@@ -1201,20 +1201,29 @@ struct ServiceTile: View {
         .frame(width: size, height: size)
     }
 
+    private static var imageCache: [String: Bool] = [:]
+    private static var symbolCache: [String: Bool] = [:]
+
     static func hasImage(_ name: String) -> Bool {
+        if let hit = imageCache[name] { return hit }
         #if os(macOS)
-        NSImage(named: name) != nil
+        let ok = NSImage(named: name) != nil
         #else
-        UIImage(named: name) != nil
+        let ok = UIImage(named: name) != nil
         #endif
+        imageCache[name] = ok
+        return ok
     }
 
     static func hasSymbol(_ name: String) -> Bool {
+        if let hit = symbolCache[name] { return hit }
         #if os(macOS)
-        NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil
+        let ok = NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil
         #else
-        UIImage(systemName: name) != nil
+        let ok = UIImage(systemName: name) != nil
         #endif
+        symbolCache[name] = ok
+        return ok
     }
 
     private func tile(_ r: CGFloat) -> some View {
@@ -1761,7 +1770,7 @@ private struct DailyCapPills: View {
 
 /// 用量与省费: clean 30-day Token 用量 card + 2-row 省费 card on macOS and iOS.
 struct CompanionUsageAndCostSection: View {
-    @State private var snapshot = CompanionUsage.snapshot30Days()
+    @State private var snapshot = CompanionUsage.Snapshot30Days.empty
     @State private var tierRouting = CompanionUsage.tierRoutingEnabled
     @State private var dailyTokenLimit = CompanionUsage.dailyTokenLimit
 

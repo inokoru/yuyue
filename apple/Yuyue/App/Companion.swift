@@ -378,6 +378,20 @@ nonisolated enum CompanionUsage {
         let ttsChars: Int
         let ttsSavedChars: Int
 
+        static let empty = Snapshot30Days(
+            days: [],
+            totalTokens: 0,
+            cachedInputTokens: 0,
+            missInputTokens: 0,
+            outputTokens: 0,
+            peakTokens: 0,
+            peakIndex: 0,
+            averageTokens: 0,
+            sources: [],
+            ttsChars: 0,
+            ttsSavedChars: 0
+        )
+
         var cacheHitRate: Double? {
             let totalIn = cachedInputTokens + missInputTokens
             return totalIn > 0 ? Double(cachedInputTokens) / Double(totalIn) : nil
@@ -385,7 +399,7 @@ nonisolated enum CompanionUsage {
     }
 
     static let changed = Notification.Name("yuyue.companionUsageChanged")
-    private static let lock = Mutex(())
+    private static let lock = Mutex<[String: DayRecord]?>(nil)
 
     private enum Keys {
         static let ledger = "usage.days30.v1"
@@ -433,17 +447,22 @@ nonisolated enum CompanionUsage {
         }
     }
 
-    private static func loadLedgerLocked(_ d: UserDefaults) -> [String: DayRecord] {
+    private static func loadLedgerLocked(_ cached: inout [String: DayRecord]?, from d: UserDefaults) -> [String: DayRecord] {
+        if let existing = cached { return existing }
         guard let data = d.data(forKey: Keys.ledger),
               let arr = try? JSONDecoder().decode([DayRecord].self, from: data) else {
+            cached = [:]
             return [:]
         }
-        return Dictionary(uniqueKeysWithValues: arr.map { ($0.date, $0) })
+        let map = Dictionary(uniqueKeysWithValues: arr.map { ($0.date, $0) })
+        cached = map
+        return map
     }
 
-    private static func saveLedgerLocked(_ map: [String: DayRecord], to d: UserDefaults) {
+    private static func saveLedgerLocked(_ map: [String: DayRecord], cached: inout [String: DayRecord]?, to d: UserDefaults) {
         let keep = Set(last30DateKeys())
         let pruned = map.values.filter { keep.contains($0.date) }.sorted { $0.date < $1.date }
+        cached = Dictionary(uniqueKeysWithValues: pruned.map { ($0.date, $0) })
         if let data = try? JSONEncoder().encode(pruned) {
             d.set(data, forKey: Keys.ledger)
         }
@@ -454,8 +473,8 @@ nonisolated enum CompanionUsage {
         let limit = dailyTokenLimit
         guard limit > 0 else { return }
         let today = dateKey()
-        let used = lock.withLock { _ -> Int in
-            let map = loadLedgerLocked(UserDefaults.standard)
+        let used = lock.withLock { cached -> Int in
+            let map = loadLedgerLocked(&cached, from: UserDefaults.standard)
             return map[today]?.totalTokens ?? 0
         }
         if used >= limit {
@@ -466,9 +485,9 @@ nonisolated enum CompanionUsage {
     static func recordLlm(input: Int, output: Int, cached: Int, paid: Bool, source: Source = .other) {
         guard paid, input > 0 || output > 0 || cached > 0 else { return }
         let today = dateKey()
-        lock.withLock { _ in
+        lock.withLock { store in
             let d = UserDefaults.standard
-            var map = loadLedgerLocked(d)
+            var map = loadLedgerLocked(&store, from: d)
             var rec = map[today] ?? DayRecord(date: today)
             let c = max(0, cached)
             let m = max(0, input)
@@ -479,7 +498,7 @@ nonisolated enum CompanionUsage {
             rec.requests += 1
             rec.sources[source.rawValue, default: 0] += c + m + o
             map[today] = rec
-            saveLedgerLocked(map, to: d)
+            saveLedgerLocked(map, cached: &store, to: d)
         }
         notify()
     }
@@ -488,8 +507,8 @@ nonisolated enum CompanionUsage {
         let limit = dailyTtsCharLimit
         guard limit > 0 else { return }
         let today = dateKey()
-        let used = lock.withLock { _ -> Int in
-            let map = loadLedgerLocked(UserDefaults.standard)
+        let used = lock.withLock { cached -> Int in
+            let map = loadLedgerLocked(&cached, from: UserDefaults.standard)
             return map[today]?.ttsChars ?? 0
         }
         if used + chars > limit {
@@ -500,9 +519,9 @@ nonisolated enum CompanionUsage {
     static func recordTts(chars: Int, cached: Bool) {
         guard chars > 0 else { return }
         let today = dateKey()
-        lock.withLock { _ in
+        lock.withLock { store in
             let d = UserDefaults.standard
-            var map = loadLedgerLocked(d)
+            var map = loadLedgerLocked(&store, from: d)
             var rec = map[today] ?? DayRecord(date: today)
             if cached {
                 rec.ttsSavedChars += chars
@@ -510,14 +529,14 @@ nonisolated enum CompanionUsage {
                 rec.ttsChars += chars
             }
             map[today] = rec
-            saveLedgerLocked(map, to: d)
+            saveLedgerLocked(map, cached: &store, to: d)
         }
         notify()
     }
 
     static func snapshot30Days() -> Snapshot30Days {
         let keys = last30DateKeys()
-        let map = lock.withLock { _ in loadLedgerLocked(UserDefaults.standard) }
+        let map = lock.withLock { cached in loadLedgerLocked(&cached, from: UserDefaults.standard) }
         let days = keys.map { map[$0] ?? DayRecord(date: $0) }
         var total = 0, cached = 0, miss = 0, out = 0, tts = 0, ttsSaved = 0
         var peak = 0, peakIndex = max(0, days.count - 1)

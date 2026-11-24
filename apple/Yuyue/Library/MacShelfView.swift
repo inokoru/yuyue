@@ -4,6 +4,10 @@ import YuyueCore
 import AppKit
 import UniformTypeIdentifiers
 
+private final class MainOriginBox {
+    var origin: CGPoint = .zero
+}
+
 /// The shelf window: the library, reading status and the user's collections down the side;
 /// the books being read and then all of them in the middle.
 struct MacShelfView: View {
@@ -28,7 +32,8 @@ struct MacShelfView: View {
     @State private var deletingRecord: BookSummary?
     @State private var pickingSheet: String?
     @State private var feedbackShown = false
-    @State private var mainFrame = CGRect.zero
+    @State private var mainWidth: CGFloat = 0
+    @State private var mainOriginBox = MainOriginBox()
     @State private var menuSize = CGSize(width: 214, height: 280)
     @State private var dropCount: Int?
     /// A book 在书架里显示 pointed at, ringed for a moment.
@@ -243,7 +248,11 @@ struct MacShelfView: View {
                     } pick: { book in
                         pickingSheet = book.id
                     }
-                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { mainFrame = $0 }
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { rect in
+                        mainOriginBox.origin = rect.origin
+                        let w = rect.width.rounded()
+                        if abs(mainWidth - w) > 0.5 { mainWidth = w }
+                    }
                     .overlay { menuLayer.animation(YYMotion.quick, value: menu?.book) }
                 case .collections:
                     CollectionWall(library: library, pinnedRaw: $pinnedRaw, leading: headerInset) {
@@ -739,7 +748,7 @@ struct MacShelfView: View {
 
     /// Matches the adaptive grid (`minimum: 266, spacing: 12`) so the collapsed strip fills one row.
     private var readingCap: Int {
-        let w = readingWidth > 0 ? readingWidth : max(0, mainFrame.width - 50)
+        let w = readingWidth > 0 ? readingWidth : max(0, mainWidth - 50)
         guard w > 0 else { return 3 }
         return max(1, Int((w + 12) / (266 + 12)))
     }
@@ -760,7 +769,7 @@ struct MacShelfView: View {
     /// The room left is generous and the width rounded down: with scrollers always shown, a grid
     /// even a point too wide widens the window's column, which widens the grid, without end.
     private var columns: [GridItem] {
-        let room = max(0, mainFrame.width - 50 - 24)
+        let room = max(0, mainWidth - 50 - 24)
         let count = max(1, Int((room + 18) / (coverSize - 24 + 18)))
         // Flexible, not fixed: fixed widths made the grid as wide as the window it was measured
         // in, so the window could grow (the sidebar put away) but never be made narrower again.
@@ -815,9 +824,12 @@ struct MacShelfView: View {
     }
 
     private var main: some View {
-        ScrollViewReader { scroll in
+        let currentShown = shown
+        let currentAllReading = allReading
+        let currentReading = readingExpanded ? currentAllReading : Array(currentAllReading.prefix(readingCap))
+        return ScrollViewReader { scroll in
         Group {
-            if shown.isEmpty {
+            if currentShown.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     mainHeader
 
@@ -848,18 +860,18 @@ struct MacShelfView: View {
                                 .transition(.opacity.combined(with: .move(edge: .top)))
                         }
 
-                        if !reading.isEmpty {
+                        if !currentReading.isEmpty {
                             VStack(alignment: .leading, spacing: 0) {
-                                readingHeader(count: allReading.count)
+                                readingHeader(count: currentAllReading.count)
                                 Group {
-                                    if reading.count == 1, let book = reading.first {
+                                    if currentReading.count == 1, let book = currentReading.first {
                                         // 暂时关闭封面取色染色，恢复浅色卡片；需要时改回 tinted: true
                                         // readingTile(book, tinted: true)
                                         readingTile(book, tinted: false)
                                             .frame(maxWidth: 316, alignment: .leading)
                                     } else {
                                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 266), spacing: 12)], spacing: 12) {
-                                            ForEach(reading) { book in
+                                            ForEach(currentReading) { book in
                                                 // readingTile(book, tinted: true)
                                                 readingTile(book, tinted: false)
                                             }
@@ -867,8 +879,8 @@ struct MacShelfView: View {
                                     }
                                 }
                                 // A book moving into or out of the cards moves, not jumps.
-                                .animation(YYMotion.layout, value: reading.map(\.id))
-                                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { readingWidth = $0 }
+                                .animation(YYMotion.layout, value: currentReading.map(\.id))
+                                .onGeometryChange(for: CGFloat.self) { $0.size.width.rounded() } action: { readingWidth = $0 }
                             }
                             .padding(.leading, 22)
                             .padding(.trailing, 28)
@@ -880,8 +892,8 @@ struct MacShelfView: View {
                         }
 
                         // The books in the 在读 cards above aren't shown again below them.
-                        let carded = Set(reading.map(\.id))
-                        let books = shown.filter { !carded.contains($0.id) }
+                        let carded = Set(currentReading.map(\.id))
+                        let books = currentShown.filter { !carded.contains($0.id) }
                         if !books.isEmpty {
                             VStack(alignment: .leading, spacing: 0) {
                                 HStack {
@@ -922,7 +934,11 @@ struct MacShelfView: View {
         .ignoresSafeArea(.container, edges: .top)
         .blur(radius: dropCount != nil ? 5 : 0)
         .background(YYColor.bg)
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { mainFrame = $0 }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { rect in
+            mainOriginBox.origin = rect.origin
+            let w = rect.width.rounded()
+            if abs(mainWidth - w) > 0.5 { mainWidth = w }
+        }
         .overlay { menuLayer.animation(YYMotion.quick, value: menu?.book) }
         .overlay { dropHint }
         // Files held over the shelf: it softens and the hint fades up, both quickly.
@@ -1196,7 +1212,8 @@ struct MacShelfView: View {
     /// asked for from the keyboard or VoiceOver.
     private func showMenu(for book: BookSummary, at point: CGPoint?) {
         picking = nil
-        let at = point.map { CGPoint(x: $0.x - mainFrame.minX, y: $0.y - mainFrame.minY) } ?? CGPoint(x: 40, y: 80)
+        let origin = mainOriginBox.origin
+        let at = point.map { CGPoint(x: $0.x - origin.x, y: $0.y - origin.y) } ?? CGPoint(x: 40, y: 80)
         menu = OpenMenu(book: book.id, at: at)
     }
 
@@ -1670,8 +1687,7 @@ struct ReadingCard: View {
     /// right-side 🎧 & ··· icon cluster, and a whisper-thin bottom progress hairline.
     private var macBody: some View {
         let useTint = tinted && !eink
-        let resolvedHue = hue ?? CoverHue.cached(book.coverPath) ?? .paper
-        let colors = resolvedHue.continueGradient(dark: scheme == .dark)
+        let tintColors = useTint ? (hue ?? CoverHue.cached(book.coverPath) ?? .paper).continueGradient(dark: scheme == .dark) : nil
         let titleColor: Color = useTint ? .white : YYColor.t1
         let authorColor: Color = useTint ? .white.opacity(0.85) : YYColor.t2
         let metaColor: Color = useTint ? .white.opacity(0.68) : YYColor.t3
@@ -1707,7 +1723,7 @@ struct ReadingCard: View {
                 .allowsHitTesting(false)
 
                 HStack(spacing: 2) {
-                    listenButton(useTint: useTint, tintBg: colors.right)
+                    listenButton(useTint: useTint, tintBg: tintColors?.right ?? .clear)
                     if let menuAt {
                         moreButton(useTint: useTint, menuAt: menuAt)
                     }
@@ -1723,7 +1739,7 @@ struct ReadingCard: View {
                 .allowsHitTesting(false)
         }
         .background {
-            if useTint {
+            if let colors = tintColors {
                 RoundedRectangle(cornerRadius: YYRadius.block)
                     .fill(
                         LinearGradient(

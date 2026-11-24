@@ -352,8 +352,9 @@ final class Audiobooks {
     func adoptMap(_ id: String) {
         guard let a = all.first(where: { $0.id == id }), a.book != nil, job?.audiobook != id,
               let map = try? core.audiobookMap(bookId: id), !map.rows.isEmpty else { return }
-        let t = Timings(map: map, keeping: timings(a), through: a.total)
-        guard t != timings(a) else { return }
+        let existing = timings(a)
+        let t = Timings(map: map, keeping: existing, through: a.total)
+        guard t != existing else { return }
         save(t, for: a)
     }
 
@@ -436,6 +437,7 @@ final class Audiobooks {
     /// After 同步 brought one in, or changed one's timings.
     func reload() {
         recordings = [:]
+        timingsCache = [:]
         load()
         adopt()
     }
@@ -463,6 +465,7 @@ final class Audiobooks {
             }
             let t = Timings(l)
             if timings(a) != t {
+                timingsCache[a.id] = t
                 if let data = try? JSONEncoder().encode(t) { try? data.write(to: folder(a.id).appending(path: "timings.json"), options: .atomic) }
                 recordings[a.id]?.update(t)
                 NotificationCenter.default.post(name: Self.timingsChanged, object: a.id)
@@ -483,7 +486,10 @@ final class Audiobooks {
         for a in all where !known.contains(a.id) && a.book != nil && a.made != nil {
             if let t = timings(a) { push(a, t) }
         }
-        if changed { recordings = [:] }
+        if changed {
+            recordings = [:]
+            timingsCache = [:]
+        }
     }
 
     /// This device's lay-out into the sync log.
@@ -509,11 +515,19 @@ final class Audiobooks {
         all.first { $0.book == book }
     }
 
+    @ObservationIgnored private var timingsCache: [String: Timings] = [:]
+
     func timings(_ a: Audiobook) -> Timings? {
-        (try? Data(contentsOf: folder(a.id).appending(path: "timings.json"))).flatMap { try? JSONDecoder().decode(Timings.self, from: $0) }
+        if let hit = timingsCache[a.id] { return hit }
+        guard let loaded = (try? Data(contentsOf: folder(a.id).appending(path: "timings.json"))).flatMap({ try? JSONDecoder().decode(Timings.self, from: $0) }) else {
+            return nil
+        }
+        timingsCache[a.id] = loaded
+        return loaded
     }
 
     func save(_ t: Timings, for a: Audiobook) {
+        timingsCache[a.id] = t
         if let data = try? JSONEncoder().encode(t) { try? data.write(to: folder(a.id).appending(path: "timings.json"), options: .atomic) }
         recordings[a.id]?.update(t)
         NotificationCenter.default.post(name: Self.timingsChanged, object: a.id)
@@ -621,6 +635,7 @@ final class Audiobooks {
         try? FileManager.default.removeItem(at: folder(a.id))
         removedHere.insert(a.id)
         recordings[a.id] = nil
+        timingsCache[a.id] = nil
         all.removeAll { $0.id == a.id }
     }
 
@@ -643,11 +658,17 @@ final class Audiobooks {
         return near.first
     }
 
+    private static let plainBracketsRegex = /[（(【\[《].*?[)）】\]》]/
+    private static let plainAudioRegex = /有声(?:书|小说|版)?/
+    private static let plainEditionRegex = /(?:全集|完整版|精品|播讲|朗读|演播)/
+    private static let plainLeadingNumRegex = /^\d+[\s._-]*/
+
     static func plain(_ s: String) -> String {
         var t = s.lowercased()
-        for pattern in [#"[（(【\[《].*?[)）】\]》]"#, #"有声(书|小说|版)?"#, #"(全集|完整版|精品|播讲|朗读|演播)"#, #"^\d+[\s._-]*"#] {
-            t = t.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
-        }
+        t.replace(Self.plainBracketsRegex, with: "")
+        t.replace(Self.plainAudioRegex, with: "")
+        t.replace(Self.plainEditionRegex, with: "")
+        t.replace(Self.plainLeadingNumRegex, with: "")
         return t.filter { $0.isLetter || $0.isNumber }
     }
 
@@ -707,7 +728,7 @@ final class Audiobooks {
                         Task { @MainActor in job.heard = base + done }
                     }
                     try Task.checkCancellation()
-                    out.em.withUnsafeBufferPointer { try? Data(buffer: $0).write(to: cache, options: .atomic) }
+                    await Self.writeEmissions(out.em, to: cache)
                 }
                 // The core reads the model's output from the file itself.
                 let em = SavedEmissions(path: cache.path(percentEncoded: false), seconds: a.seconds[i])
@@ -716,10 +737,11 @@ final class Audiobooks {
                 job.heard = offset
                 job.transcribed = Date().timeIntervalSince(started)
                 job.step = .aligning
-                layOut(a, files, through: offset, job: job)
+                await layOut(a, files, through: offset, job: job)
             }
             job.step = .checking
-            layOut(a, files, through: a.total, job: job)
+            await layOut(a, files, through: a.total, job: job)
+            Aligner.unload()
             var done = a
             done.made = .now
             done.took = Date().timeIntervalSince(started)
@@ -729,23 +751,55 @@ final class Audiobooks {
             work(on: done.id, at: nil)
             Self.notify(String(localized: "《\(book.title)》的有声书合成好了"), Timings.summary(timings(done)))
         } catch is CancellationError {
+            Aligner.unload()
         } catch {
+            Aligner.unload()
             job.problem = Library.isOutOfSpace(error) ? String(localized: "存储空间不够：对齐用的模型要约 800 MB 空间才装得下")
                 : (error as? AudiobookError)?.message ?? (Library.offline(error) != nil ? String(localized: "对齐用的模型没下载下来，连上网再试一次")
                 : String(localized: "合成没做完（\(error.localizedDescription)）"))
         }
     }
 
-    private func layOut(_ a: Audiobook, _ files: [SavedEmissions], through: Double, job: Job) {
-        guard let book = a.book, let alignment = try? core.alignRecordingSaved(bookId: book, files: files) else { return }
+    @concurrent nonisolated private static func writeEmissions(_ em: [Float], to url: URL) async {
+        em.withUnsafeBufferPointer { try? Data(buffer: $0).write(to: url, options: .atomic) }
+    }
+
+    @concurrent nonisolated private static func computeLayout(
+        core: YuyueCore,
+        book: String,
+        files: [SavedEmissions],
+        through: Double,
+        old: Timings?,
+        timingsURL: URL
+    ) async -> Timings? {
+        guard let alignment = try? core.alignRecordingSaved(bookId: book, files: files) else { return nil }
         var t = Timings(alignment, through: through)
-        // Moves made by hand stay.
-        if let old = timings(a) {
+        // Moves made by hand stay (O(N) index lookup instead of O(N²)).
+        if let old {
+            var idxByKey: [UInt64: Int] = Dictionary(minimumCapacity: t.sentences.count)
+            for (i, s) in t.sentences.enumerated() {
+                idxByKey[(UInt64(s.section) << 32) | UInt64(s.sentence)] = i
+            }
             for s in old.sentences where s.adjusted {
-                if let i = t.index(s.section, Int(s.sentence)) { t.sentences[i] = s }
+                let key = (UInt64(s.section) << 32) | UInt64(s.sentence)
+                if let i = idxByKey[key] { t.sentences[i] = s }
             }
         }
-        save(t, for: a)
+        if let data = try? JSONEncoder().encode(t) {
+            try? data.write(to: timingsURL, options: .atomic)
+        }
+        return t
+    }
+
+    private func layOut(_ a: Audiobook, _ files: [SavedEmissions], through: Double, job: Job) async {
+        guard let book = a.book else { return }
+        let old = timings(a)
+        let url = folder(a.id).appending(path: "timings.json")
+        guard let t = await Self.computeLayout(core: core, book: book, files: files, through: through, old: old, timingsURL: url) else { return }
+        timingsCache[a.id] = t
+        recordings[a.id]?.update(t)
+        NotificationCenter.default.post(name: Self.timingsChanged, object: a.id)
+        push(all.first { $0.id == a.id } ?? a, t)
         job.timings = t
     }
 

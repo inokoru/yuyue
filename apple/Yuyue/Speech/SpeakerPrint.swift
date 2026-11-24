@@ -89,7 +89,7 @@ nonisolated enum SpeakerPrint {
     }
 
     /// The print of `samples` at `rate` (mono); nil without the model, or for under half a second.
-    static func print(_ core: YuyueCore, _ dataDir: URL, samples: [Float], rate: Double) async -> [Float]? {
+    @concurrent static func print(_ core: YuyueCore, _ dataDir: URL, samples: [Float], rate: Double) async -> [Float]? {
         guard let m = load(dataDir) else { return nil }
         let f = core.speakerFeatures(samples: samples, rate: UInt32(rate))
         guard f.frames >= 50,
@@ -119,7 +119,7 @@ nonisolated enum SpeakerPrint {
 
     /// Each of `voices` that has no print yet reads the sample sentence once, and its print is
     /// kept (by the core) for 选角 and 回听.
-    static func printVoices(_ core: YuyueCore, _ dataDir: URL, voices: [VoiceInfo], language: String) async {
+    @concurrent static func printVoices(_ core: YuyueCore, _ dataDir: URL, voices: [VoiceInfo], language: String) async {
         guard installed(dataDir) else { return }
         core.speakerModel(model: model)
         // 声音卡自带或造好时已有 embedding，直接写入避免重复试念量取。

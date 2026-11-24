@@ -368,12 +368,16 @@ enum UpdateDevice {
 }
 
 enum UpdateWhen {
+    private static let shortTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .none
+        f.timeStyle = .short
+        return f
+    }()
+
     static func phrase(_ date: Date) -> String {
-        let time = DateFormatter()
-        time.locale = Locale.current
-        time.dateStyle = .none
-        time.timeStyle = .short
-        let clock = time.string(from: date)
+        shortTimeFormatter.locale = Locale.current
+        let clock = shortTimeFormatter.string(from: date)
         if Calendar.current.isDateInToday(date) { return String(localized: "今天 \(clock)") }
         if Calendar.current.isDateInYesterday(date) { return String(localized: "昨天 \(clock)") }
         return "\(monthDay(date)) \(clock)"

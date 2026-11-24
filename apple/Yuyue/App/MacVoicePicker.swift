@@ -129,9 +129,18 @@ nonisolated struct SVGShape: Shape {
     let d: String
     var box: CGFloat = 16
 
+    private static let cache = Mutex<[String: Path]>([:])
+
     func path(in rect: CGRect) -> Path {
         let k = rect.width / box
-        return Self.parse(d).applying(CGAffineTransform(scaleX: k, y: k).translatedBy(x: rect.minX / k, y: rect.minY / k))
+        return Self.cachedPath(d).applying(CGAffineTransform(scaleX: k, y: k).translatedBy(x: rect.minX / k, y: rect.minY / k))
+    }
+
+    private static func cachedPath(_ d: String) -> Path {
+        if let hit = cache.withLock({ $0[d] }) { return hit }
+        let built = parse(d)
+        cache.withLock { $0[d] = built }
+        return built
     }
 
     /// M L H V C Z, either case, numbers run together as SVGs write them.
@@ -740,11 +749,11 @@ struct VoiceSourcePage: View {
                 .scrollIndicators(.never)
                 .id(source)
                 .yyOnScrollOffsetPast(2) { scrolled = $0 }
-                .mask {
-                    // Only once scrolled: the first voice isn't faded where it rests.
-                    VStack(spacing: 0) {
-                        LinearGradient(colors: [.black.opacity(scrolled ? 0 : 1), .black], startPoint: .top, endPoint: .bottom).frame(height: 26)
-                        Rectangle()
+                .overlay(alignment: .top) {
+                    if scrolled {
+                        LinearGradient(colors: [YYColor.bg, YYColor.fade0], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 26)
+                            .allowsHitTesting(false)
                     }
                 }
                 .onChange(of: focus.listening) { _, id in
@@ -1547,7 +1556,7 @@ struct VoiceBubble: View {
         Button {
             ListeningFocus.shared.listen(voice, text: text)
         } label: {
-            TimelineView(.animation(paused: !playing)) { t in
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !playing)) { t in
                 let p = playing ? state.progress(at: t.date) : nil
                 HStack(spacing: 8) {
                     PlayGlyph(playing: playing, size: 8)
@@ -2030,7 +2039,7 @@ private struct VoicePlayer: View {
 
     var body: some View {
         let playing = state.voiceID == voice.id
-        TimelineView(.animation(paused: !playing)) { t in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !playing)) { t in
             let p = playing ? state.progress(at: t.date) ?? 0 : 0
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {

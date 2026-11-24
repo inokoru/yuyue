@@ -1005,34 +1005,42 @@ struct ChapterBar: View {
     var height: CGFloat = 5
     var muted = false
     private var tint: YYTint { YYTint.standard }
-    private let empty = Color.yyDynamic(light: YYRGBA(235, 233, 229), dark: YYRGBA(54, 55, 58))
+    private static let empty = Color.yyDynamic(light: YYRGBA(235, 233, 229), dark: YYRGBA(54, 55, 58))
     private var fillColor: Color { muted ? YYColor.t3.opacity(0.55) : tint.fill }
 
     var body: some View {
-        Group {
+        Canvas { ctx, size in
+            guard size.width > 0, size.height > 0 else { return }
+            let emptyShading = GraphicsContext.Shading.color(Self.empty)
+            let fillShading = GraphicsContext.Shading.color(fillColor)
             if rows.count >= 2 && rows.count <= 40 {
-                HStack(spacing: 2) {
-                    ForEach(rows) { row in
-                        GeometryReader { g in
-                            ZStack(alignment: .leading) {
-                                empty
-                                switch row.state {
-                                case .read: fillColor
-                                case .current(let f): fillColor.frame(width: g.size.width * max(0.15, f))
-                                case .unread: EmptyView()
-                                }
-                            }
+                let count = rows.count
+                let spacing: CGFloat = 2
+                let segW = max(1, (size.width - spacing * CGFloat(count - 1)) / CGFloat(count))
+                for (i, row) in rows.enumerated() {
+                    let x = CGFloat(i) * (segW + spacing)
+                    let bgRect = CGRect(x: x, y: 0, width: segW, height: size.height)
+                    let clipPath = Path(roundedRect: bgRect, cornerRadius: 2)
+                    ctx.fill(clipPath, with: emptyShading)
+                    switch row.state {
+                    case .read:
+                        ctx.fill(clipPath, with: fillShading)
+                    case .current(let f):
+                        let fw = segW * max(0.15, f)
+                        ctx.drawLayer { layer in
+                            layer.clip(to: clipPath)
+                            layer.fill(Path(CGRect(x: x, y: 0, width: fw, height: size.height)), with: fillShading)
                         }
-                        .clipShape(.rect(cornerRadius: 2))
+                    case .unread:
+                        break
                     }
                 }
             } else {
-                GeometryReader { g in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(empty)
-                        Capsule().fill(fillColor).frame(width: max(5, g.size.width * min(1, progress)))
-                    }
-                }
+                let radius = size.height / 2
+                let fullRect = CGRect(origin: .zero, size: size)
+                ctx.fill(Path(roundedRect: fullRect, cornerRadius: radius), with: emptyShading)
+                let fw = min(size.width, max(5, size.width * min(1, progress)))
+                ctx.fill(Path(roundedRect: CGRect(x: 0, y: 0, width: fw, height: size.height), cornerRadius: radius), with: fillShading)
             }
         }
         .frame(height: height)

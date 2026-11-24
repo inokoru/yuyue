@@ -807,7 +807,7 @@ nonisolated final class LiveCastCache: Sendable {
         }
     }
 
-    func plan(core: YuyueCore, dataDir: URL, book: String, language: String, narrator: String?) async -> CastingPlan? {
+    @concurrent func plan(core: YuyueCore, dataDir: URL, book: String, language: String, narrator: String?) async -> CastingPlan? {
         if let existing = lock.withLock({ $0.plans[book] }) { return existing }
         await DramaSynth.syncRoleVoices(core, book: book)
         let voices = await MainActor.run {

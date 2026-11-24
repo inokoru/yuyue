@@ -97,7 +97,13 @@ final class PodcastHub {
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var itemEndObserver: NSObjectProtocol?
     @ObservationIgnored private var clipPlayer: AVAudioPlayer?
-    @ObservationIgnored private let pcmPlayer = PodcastPCMPlayer()
+    @ObservationIgnored private var _pcmPlayer: PodcastPCMPlayer?
+    private var pcmPlayer: PodcastPCMPlayer {
+        if let existing = _pcmPlayer { return existing }
+        let created = PodcastPCMPlayer()
+        _pcmPlayer = created
+        return created
+    }
     @ObservationIgnored private var studioSpeechTask: Task<Void, Never>?
     @ObservationIgnored private var studioSynth: AVSpeechSynthesizer?
     @ObservationIgnored private var studioDelegate: StudioSpeechDelegate?
@@ -223,11 +229,9 @@ final class PodcastHub {
     }
 
     func sentences(for issueID: String) -> [MagazineSentence] {
-        if let cached = transcripts[issueID], !cached.isEmpty { return cached }
+        if let cached = transcripts[issueID] { return cached }
         let loaded = core.podcastTranscript(issueId: issueID)
-        if !loaded.isEmpty {
-            transcripts[issueID] = loaded
-        }
+        transcripts[issueID] = loaded
         return loaded
     }
 
@@ -736,7 +740,7 @@ final class PodcastHub {
         avPlayer?.pause()
         studioSpeechTask?.cancel()
         studioSpeechTask = nil
-        pcmPlayer.stop()
+        _pcmPlayer?.stop()
         studioDelegate?.cancelActive()
         studioSynth?.stopSpeaking(at: .immediate)
         savePlaybackProgress(force: true)
@@ -781,7 +785,7 @@ final class PodcastHub {
         isDucked = duck
         // -24 dB ≈ 0.063 linear gain.
         avPlayer?.volume = duck ? 0.065 : 1.0
-        pcmPlayer.setDucked(duck)
+        _pcmPlayer?.setDucked(duck)
         if duck && studioSynth?.isSpeaking == true {
             studioSynth?.pauseSpeaking(at: .word)
         }
@@ -904,7 +908,7 @@ final class PodcastHub {
     }
 
     func stopSpeakingInterruptAnswer() {
-        pcmPlayer.stop()
+        _pcmPlayer?.stop()
         replySynth?.stopSpeaking(at: .immediate)
         isSpeakingInterruptReply = false
     }
@@ -914,7 +918,7 @@ final class PodcastHub {
     func auditionVoiceCard(id: String, text: String, language: String = "zh-CN") async {
         Voices.stopPreview()
         replySynth?.stopSpeaking(at: .immediate)
-        pcmPlayer.stop()
+        _pcmPlayer?.stop()
         if isPlaying { pause() }
 
         let targetVoice: (any Voice)? = {
@@ -951,7 +955,7 @@ final class PodcastHub {
     }
 
     func stopAudition() {
-        pcmPlayer.stop()
+        _pcmPlayer?.stop()
         studioDelegate?.cancelActive()
         replySynth?.stopSpeaking(at: .immediate)
     }
@@ -1294,7 +1298,7 @@ final class PodcastHub {
                 let sec = time.seconds
                 if sec.isFinite && sec >= 0 {
                     self.currentTime = sec
-                    if let d = self.avPlayer?.currentItem?.duration.seconds, d.isFinite && d > 0 {
+                    if let d = self.avPlayer?.currentItem?.duration.seconds, d.isFinite && d > 0, abs(self.duration - d) > 0.05 {
                         self.duration = d
                     }
                     self.updateActiveSentence()
@@ -1314,7 +1318,7 @@ final class PodcastHub {
 
     private func playStudioScript(issueID: String, from startAt: Double) {
         studioSpeechTask?.cancel()
-        pcmPlayer.stop()
+        _pcmPlayer?.stop()
         studioDelegate?.cancelActive()
         studioSynth?.stopSpeaking(at: .immediate)
         let sents = sentences(for: issueID)
@@ -1428,7 +1432,7 @@ final class PodcastHub {
         avPlayer = nil
         studioSpeechTask?.cancel()
         studioSpeechTask = nil
-        pcmPlayer.stop()
+        _pcmPlayer?.stop()
         studioDelegate?.cancelActive()
         studioSynth?.stopSpeaking(at: .immediate)
         isPlaying = false
@@ -1436,7 +1440,7 @@ final class PodcastHub {
     }
 
     private func applyRate() {
-        pcmPlayer.setRate(rate)
+        _pcmPlayer?.setRate(rate)
         if isPlaying, let avPlayer {
             avPlayer.rate = rate
         }
@@ -1447,12 +1451,21 @@ final class PodcastHub {
         guard let id = activeIssueID else { return }
         let sents = sentences(for: id)
         guard !sents.isEmpty else { return }
-        let spoken = sents.filter { $0.skipReason == nil }
-        let hit = spoken.first(where: { currentTime >= $0.t0 && currentTime <= $0.t1 })
-            ?? spoken.last(where: { currentTime >= $0.t0 })
-            ?? spoken.first
-        if let hit, activeSentenceID != hit.id {
-            activeSentenceID = hit.id
+        var firstSpoken: MagazineSentence?
+        var hit: MagazineSentence?
+        var lastPassed: MagazineSentence?
+        for s in sents where s.skipReason == nil {
+            if firstSpoken == nil { firstSpoken = s }
+            if currentTime >= s.t0 && currentTime <= s.t1 {
+                hit = s
+                break
+            }
+            if currentTime >= s.t0 {
+                lastPassed = s
+            }
+        }
+        if let chosen = hit ?? lastPassed ?? firstSpoken, activeSentenceID != chosen.id {
+            activeSentenceID = chosen.id
         }
     }
 
@@ -1854,6 +1867,12 @@ enum PodcastFormat {
         return String(localized: "\(m) 分")
     }
 
+    private static let monthDayFormatter: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "M月d日"
+        return fmt
+    }()
+
     static func shortDate(_ ms: Int64) -> String {
         guard ms > 0 else { return "" }
         let date = Date(timeIntervalSince1970: Double(ms) / 1000)
@@ -1861,9 +1880,7 @@ enum PodcastFormat {
         if days == 0 { return String(localized: "今天") }
         if days == 1 { return String(localized: "昨天") }
         if days > 1 && days <= 6 { return String(localized: "\(days) 天前") }
-        let fmt = DateFormatter()
-        fmt.dateFormat = "M月d日"
-        return fmt.string(from: date)
+        return monthDayFormatter.string(from: date)
     }
 
     static func remaining(position: Double, duration: Double) -> String {

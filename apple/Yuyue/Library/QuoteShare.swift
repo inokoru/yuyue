@@ -249,16 +249,17 @@ struct QuoteShareSheet: View {
                 }
                 .help("只拷这句话和出处")
                 .buttonStyle(YYButtonStyle(kind: .raised, size: .large, wide: true))
-                Button { saving = render().map(PNGFile.init) } label: {
+                Button { saving = renderPNGData().map(PNGFile.init) } label: {
                     Label("存图", systemImage: "square.and.arrow.down").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(YYButtonStyle(kind: .raised, size: .large, wide: true))
-                if let image = render() {
-                    ShareLink(item: Image(nsImage: image), preview: SharePreview(String(localized: "《\(quote.title)》书摘"), image: Image(nsImage: image))) {
-                        Label("分享", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(YYButtonStyle(kind: .main, size: .large, wide: true))
+                ShareLink(
+                    item: QuoteShareImage { renderPNGData() },
+                    preview: SharePreview(String(localized: "《\(quote.title)》书摘"))
+                ) {
+                    Label("分享", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
                 }
+                .buttonStyle(YYButtonStyle(kind: .main, size: .large, wide: true))
             }
             .padding(18)
         }
@@ -273,14 +274,32 @@ struct QuoteShareSheet: View {
         .onChange(of: withNote) { copied = false }
     }
 
-    /// The picture: three times the card, so it stays sharp on a phone.
-    private func render() -> NSImage? {
+    /// The picture: three times the card, rendered on demand straight to PNG (no intermediate TIFF).
+    private func renderPNGData() -> Data? {
         let renderer = ImageRenderer(content: card)
         renderer.scale = 3
-        return renderer.nsImage
+        if let cg = renderer.cgImage {
+            return NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])
+        }
+        return renderer.nsImage?.tiffRepresentation
+            .flatMap(NSBitmapImageRep.init(data:))?
+            .representation(using: .png, properties: [:])
     }
 
     static func deepColor(_ image: CGImage) -> Color? { QuoteColors.deep(image) }
+}
+
+private nonisolated struct QuoteShareImage: Transferable, Sendable {
+    let makePNG: @MainActor @Sendable () -> Data?
+
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(exportedContentType: .png) { item in
+            guard let data = await item.makePNG() else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+            return data
+        }
+    }
 }
 
 private struct PNGFile: FileDocument {
@@ -288,9 +307,8 @@ private struct PNGFile: FileDocument {
     static var writableContentTypes: [UTType] { [.png] }
     let data: Data
 
-    init(_ image: NSImage) {
-        let rep = image.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:))
-        data = rep?.representation(using: .png, properties: [:]) ?? Data()
+    init(_ data: Data) {
+        self.data = data
     }
 
     init(configuration: ReadConfiguration) throws { throw CocoaError(.fileReadUnsupportedScheme) }

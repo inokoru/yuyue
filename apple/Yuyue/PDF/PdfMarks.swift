@@ -22,10 +22,19 @@ nonisolated final class MarkedPage: PDFPage {
         }
     }
 
+    static func clearNight(for key: ObjectIdentifier) {
+        nightDocuments.withLock { _ = $0.remove(key) }
+    }
+
     private var isNight: Bool {
         guard let document else { return false }
         let key = ObjectIdentifier(document)
         return Self.nightDocuments.withLock { $0.contains(key) }
+    }
+
+    deinit {
+        let key = ObjectIdentifier(self)
+        Self.allFills.withLock { _ = $0.removeValue(forKey: key) }
     }
 
     var fills: [(CGRect, CGColor)] {
@@ -161,12 +170,33 @@ final class MarkPainter {
     /// Where each mark lies, line by line, to find the one under the pointer.
     private var lines: [(page: PDFPage, rect: CGRect, id: String)] = []
     private var filled: Set<PDFPage> = []
-    private var shown: [Mark]?
+    private struct VisualKey: Equatable {
+        let id: String
+        let style: MarkStyle
+        let section: UInt32
+        let startSentence: UInt32
+        let startOffset: UInt32
+        let endSentence: UInt32
+        let endOffset: UInt32
+
+        init(_ m: Mark) {
+            id = m.id
+            style = m.style
+            section = m.section
+            startSentence = m.start.sentence
+            startOffset = m.start.offset
+            endSentence = m.end.sentence
+            endOffset = m.end.offset
+        }
+    }
+
+    private var shown: [VisualKey]?
 
     func paint(_ marks: [Mark], night: Bool, in model: PdfModel, view: PDFView) {
         MarkedPage.setNight(night, for: model.document)
-        guard marks != shown else { return }
-        shown = marks
+        let keys = marks.map(VisualKey.init)
+        guard keys != shown else { return }
+        shown = keys
         var touched = filled
         for a in drawn {
             if let page = a.page { touched.insert(page) }

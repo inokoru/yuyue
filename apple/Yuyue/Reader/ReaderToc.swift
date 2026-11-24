@@ -55,6 +55,7 @@ nonisolated struct TocChapter: Identifiable {
 extension ReaderModel {
     /// The book's own table of contents; with none, the sections that have something to read.
     var tocChapters: [TocChapter] {
+        if let cached = cachedTocChapters { return cached }
         guard let detail else { return [] }
         var items = detail.toc
         if items.isEmpty {
@@ -67,7 +68,7 @@ extension ReaderModel {
             }
         }
         let kinds = detail.sections.map(\.kind)
-        return items.enumerated().map { i, item in
+        let built = items.enumerated().map { i, item in
             let start = Int(item.section)
             let end = items[(i + 1)...].first { Int($0.section) > start }.map { Int($0.section) } ?? detail.sections.count
             let range = start ..< max(start + 1, end)
@@ -80,6 +81,8 @@ extension ReaderModel {
                 isBoilerplate: TocChapter.isBoilerplateRange(range, in: kinds)
             )
         }
+        cachedTocChapters = built
+        return built
     }
 
     /// The chapter being read.

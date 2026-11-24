@@ -11,7 +11,15 @@ import AppKit
 @Observable
 final class ReaderModel {
     let bookID: String
-    private(set) var detail: BookDetail?
+    private(set) var detail: BookDetail? {
+        didSet {
+            cachedTocChapters = nil
+            cachedUnitPrefix = nil
+        }
+    }
+    @ObservationIgnored var cachedTocChapters: [TocChapter]?
+    /// Prefix sums of `units` for `linear && kind == .text` sections: `prefix[i]` = total units in sections `< i`.
+    @ObservationIgnored var cachedUnitPrefix: (prefix: [Double], total: Double)?
     private(set) var settings: ReaderSettings
     /// Whether this book keeps settings of its own (只用于这本书).
     private(set) var ownSettings = false

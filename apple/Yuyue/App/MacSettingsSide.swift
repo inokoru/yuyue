@@ -1013,7 +1013,10 @@ final class SettingsLog {
     }
 
     private func save() {
-        if let data = try? JSONEncoder().encode(entries) { UserDefaults.standard.set(data, forKey: Self.storeKey) }
+        guard let data = try? JSONEncoder().encode(entries) else { return }
+        restoring = true
+        defer { restoring = false }
+        UserDefaults.standard.set(data, forKey: Self.storeKey)
     }
 }
 

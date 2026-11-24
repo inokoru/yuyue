@@ -398,7 +398,7 @@ nonisolated struct KokoroVoice: Voice {
         return speaker.lang.lowercased().hasPrefix(want)
     }
 
-    func render(_ text: String, language: String) async throws -> Speech? {
+    @concurrent func render(_ text: String, language: String) async throws -> Speech? {
         guard text.unicodeScalars.contains(where: { CharacterSet.alphanumerics.contains($0) }) else {
             return nil
         }

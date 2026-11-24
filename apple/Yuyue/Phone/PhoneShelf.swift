@@ -21,7 +21,7 @@ struct PhoneShelf: View {
     /// The places panel, and whether it grew out of the title or the chip.
     @State private var panelFrom: PanelFrom?
     /// The title and the chip, in global coordinates, for the panel to grow out of.
-    @State private var titleFrame: CGRect = .zero
+    @State private var titleFrameBox = ShelfTitleFrameBox()
     @State private var chipFrame: CGRect = .zero
     /// Scrolled past the title: the chip shows at the top left.
     @State private var scrolled = false
@@ -50,9 +50,9 @@ struct PhoneShelf: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     /// The shelf's own width, for the grid's column count and the welcome's stacked rows.
     @State private var width: CGFloat = 0
-    /// iPhone Duo half folded: the fold and the grid's area, both in global coordinates.
+    /// iPhone Duo half folded: the fold and the grid's horizontal span, both in global coordinates.
     @State private var fold: CGRect?
-    @State private var gridArea: CGRect = .zero
+    @State private var gridSpan = HorizontalSpan.zero
     @Environment(\.colorScheme) private var scheme
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
@@ -263,35 +263,36 @@ struct PhoneShelf: View {
     /// The covers. Half folded (iPhone Duo), two grids of 2, one each side of the fold, each
     /// with its own 32 pt sides; otherwise one grid.
     @ViewBuilder private var grid: some View {
-        if regular, let fold, gridArea.width > 0, fold.minX > gridArea.minX, fold.maxX < gridArea.maxX {
-            let left = shown.enumerated().filter { $0.offset % 4 < 2 }.map(\.element)
-            let right = shown.enumerated().filter { $0.offset % 4 >= 2 }.map(\.element)
+        let books = shown
+        if regular, let fold, gridSpan.width > 0, fold.minX > gridSpan.minX, fold.maxX < gridSpan.maxX {
+            let left = books.enumerated().filter { $0.offset % 4 < 2 }.map(\.element)
+            let right = books.enumerated().filter { $0.offset % 4 >= 2 }.map(\.element)
             let half = [GridItem](repeating: GridItem(.flexible(), spacing: 28, alignment: .top), count: 2)
             HStack(alignment: .top, spacing: 0) {
                 LazyVGrid(columns: half, alignment: .leading, spacing: 32) {
                     ForEach(left) { cell($0) }
                 }
                 .padding(.horizontal, inset)
-                .frame(width: max(0, fold.minX - gridArea.minX))
+                .frame(width: max(0, fold.minX - gridSpan.minX))
                 Color.clear.frame(width: fold.width)
                 LazyVGrid(columns: half, alignment: .leading, spacing: 32) {
                     ForEach(right) { cell($0) }
                 }
                 .padding(.horizontal, inset)
-                .frame(width: max(0, gridArea.maxX - fold.maxX))
+                .frame(width: max(0, gridSpan.maxX - fold.maxX))
             }
-            .animation(YYMotion.layout, value: shown.map(\.id))
-            .measuringGridArea($gridArea)
+            .animation(YYMotion.layout, value: books.map(\.id))
+            .measuringGridSpan($gridSpan)
         } else {
             LazyVGrid(columns: columns, alignment: .leading, spacing: regular ? 32 : 22) {
-                ForEach(shown) { book in
+                ForEach(books) { book in
                     cell(book).transition(YYMotion.reduce ? .opacity : .scale(scale: 0.9).combined(with: .opacity))
                 }
             }
             // Sorted or filtered another way, each book moves to its new place.
-            .animation(YYMotion.layout, value: shown.map(\.id))
+            .animation(YYMotion.layout, value: books.map(\.id))
             .padding(.horizontal, inset)
-            .measuringGridArea($gridArea)
+            .measuringGridSpan($gridSpan)
         }
     }
 
@@ -450,7 +451,7 @@ struct PhoneShelf: View {
         }
         .buttonStyle(YYPressStyle(scale: 0.98))
         .opacity(panelFrom == .title ? 0 : 1)
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { titleFrame = $0 }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { titleFrameBox.frame = $0 }
         .accessibilityLabel("\(now.name)，\(now.meta.joined(separator: "，"))，换一处看")
         // Room for the buttons at the right of this row.
         .padding(.trailing, 150)
@@ -524,7 +525,7 @@ struct PhoneShelf: View {
                         .ignoresSafeArea()
                         .onTapGesture { closePanel() }
                     // Under the bar's buttons, never over them; from the title, its head where the title was.
-                    let top = max((from == .title ? titleFrame.minY - 15 : chipFrame.minY) - origin.y, 58)
+                    let top = max((from == .title ? titleFrameBox.frame.minY - 15 : chipFrame.minY) - origin.y, 58)
                     PlacePanel(current: info(place),
                                kinds: ShelfPlace.kinds.map(info),
                                collections: library.collections.map { info(.collection($0.id)) },
@@ -1182,10 +1183,24 @@ struct BookPreview: View {
     }
 }
 
+private final class ShelfTitleFrameBox {
+    var frame: CGRect = .zero
+}
+
+nonisolated private struct HorizontalSpan: Equatable, Sendable {
+    var minX: CGFloat
+    var maxX: CGFloat
+    var width: CGFloat { max(0, maxX - minX) }
+    static let zero = HorizontalSpan(minX: 0, maxX: 0)
+}
+
 private extension View {
-    /// The grid's area in global coordinates, before its own sides.
-    func measuringGridArea(_ area: Binding<CGRect>) -> some View {
-        onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { area.wrappedValue = $0 }
+    /// The grid's horizontal span in global coordinates (ignores vertical scroll y to prevent 120Hz scroll invalidations).
+    func measuringGridSpan(_ span: Binding<HorizontalSpan>) -> some View {
+        onGeometryChange(for: HorizontalSpan.self, of: { proxy in
+            let f = proxy.frame(in: .global)
+            return HorizontalSpan(minX: f.minX.rounded(), maxX: f.maxX.rounded())
+        }) { span.wrappedValue = $0 }
     }
 }
 #endif

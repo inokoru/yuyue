@@ -136,7 +136,7 @@ struct MacUpdateSettings: View {
     @State private var rightHeight: CGFloat = 0
     /// A click on the signature or the line under it writes the signature out.
     @State private var signRun = 0
-    @State private var releases: [Release] = Self.loadBundledReleases()
+    @State private var releases: [Release] = Self.bundledReleases
 
     private static let author = URL(string: "https://github.com/nowtin")!
     private static let source = URL(string: "https://github.com/inokoru/yuyue")!
@@ -513,6 +513,8 @@ struct MacUpdateSettings: View {
             }
         }
     }
+
+    fileprivate static let bundledReleases: [Release] = loadBundledReleases()
 
     fileprivate static func loadBundledReleases() -> [Release] {
         guard let url = Bundle.main.url(forResource: "CHANGELOG", withExtension: "md"),

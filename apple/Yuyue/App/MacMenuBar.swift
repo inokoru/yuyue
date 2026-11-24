@@ -46,6 +46,34 @@ final class MacMenuBar: NSObject, NSMenuDelegate {
     /// The three lines in the 门 move while a voice is playing, and stand still when it stops.
     private var frames: Timer?
     private var playing = false
+    private var screenAsleep = false
+    private var frameIndex = 0
+    nonisolated(unsafe) private var sleepObservers: [NSObjectProtocol] = []
+
+    private func installSleepObserversIfNeeded() {
+        guard sleepObservers.isEmpty else { return }
+        let nc = NSWorkspace.shared.notificationCenter
+        sleepObservers = [
+            nc.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.screenAsleep = true
+                    self?.animate()
+                }
+            },
+            nc.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.screenAsleep = false
+                    self?.animate()
+                }
+            },
+        ]
+    }
+
+    deinit {
+        let nc = NSWorkspace.shared.notificationCenter
+        sleepObservers.forEach { nc.removeObserver($0) }
+    }
+
     private func followPlaying() {
         playing = withObservationTracking { podcastHub.isPlaying || library.nowPlaying?.isPlaying == true } onChange: { [weak self] in
             Task { @MainActor in self?.followPlaying() }
@@ -54,12 +82,15 @@ final class MacMenuBar: NSObject, NSMenuDelegate {
     }
 
     private func animate() {
-        let moving = playing && item != nil && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        installSleepObserversIfNeeded()
+        let moving = playing && item != nil && !screenAsleep && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if moving, frames == nil {
-            let start = Date()
-            let timer = Timer(timeInterval: 1.0 / 12, repeats: true) { [weak self] _ in
-                Task { @MainActor in
-                    self?.item?.button?.image = MenuBarIcon.frame(at: Date().timeIntervalSince(start))
+            let preRendered = MenuBarIcon.loopFrames
+            let timer = Timer(timeInterval: 1.0 / 10, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, !preRendered.isEmpty else { return }
+                    self.frameIndex = (self.frameIndex + 1) % preRendered.count
+                    self.item?.button?.image = preRendered[self.frameIndex]
                 }
             }
             // .common: keeps moving while the menu is open.
@@ -136,6 +167,11 @@ enum MenuBarIcon {
     private static let middle: CGFloat = 18 * 0.59
     private static let width: CGFloat = 18 * 0.064
 
+    /// Pre-rendered looping frames so playback doesn't allocate & redraw an NSImage 10–12×/sec.
+    static let loopFrames: [NSImage] = (0 ..< 30).map { i in
+        frame(at: Double(i) * 0.1)
+    }
+
     /// The icon `t` seconds into playing.
     static func frame(at t: TimeInterval) -> NSImage {
         let image = NSImage(size: size, flipped: true) { rect in
@@ -162,12 +198,40 @@ enum MenuBarIcon {
 /// 开机时打开语阅: a login item, so shows are written at their time after a restart too. Started
 /// that way it opens no window, only the menu bar (see `AppDelegate`).
 enum LoginItem {
-    static var isOn: Bool { SMAppService.mainApp.status == .enabled }
-    /// Turned on, but macOS wants it allowed in 系统设置 › 通用 › 登录项.
-    static var needsApproval: Bool { SMAppService.mainApp.status == .requiresApproval }
+    private static var cachedStatus: SMAppService.Status?
+    private static var refreshTask: Task<SMAppService.Status, Never>?
 
-    static func set(_ on: Bool) throws {
-        if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+    /// Last cached login-item status without blocking the main thread on synchronous XPC.
+    static var cached: SMAppService.Status { cachedStatus ?? .notRegistered }
+    static var isOn: Bool { cached == .enabled }
+    /// Turned on, but macOS wants it allowed in 系统设置 › 通用 › 登录项.
+    static var needsApproval: Bool { cached == .requiresApproval }
+
+    /// Fetches `SMAppService.mainApp.status` off the main thread and updates the cache.
+    @discardableResult
+    static func refresh() async -> SMAppService.Status {
+        if let task = refreshTask { return await task.value }
+        let task = Task { await fetchStatus() }
+        refreshTask = task
+        let status = await task.value
+        cachedStatus = status
+        refreshTask = nil
+        return status
+    }
+
+    @concurrent nonisolated private static func fetchStatus() async -> SMAppService.Status {
+        SMAppService.mainApp.status
+    }
+
+    static func set(_ on: Bool) async throws -> SMAppService.Status {
+        let status = try await setOffMain(on)
+        cachedStatus = status
+        return status
+    }
+
+    @concurrent nonisolated private static func setOffMain(_ on: Bool) async throws -> SMAppService.Status {
+        if on { try SMAppService.mainApp.register() } else { try await SMAppService.mainApp.unregister() }
+        return SMAppService.mainApp.status
     }
 
     static func openSettings() { SMAppService.openSystemSettingsLoginItems() }

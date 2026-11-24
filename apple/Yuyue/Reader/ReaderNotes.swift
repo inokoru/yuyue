@@ -319,20 +319,32 @@ extension ReaderModel {
 
     // MARK: Where the reader is
 
-    private var counted: [(Int, SectionSummary)] {
-        (detail?.sections ?? []).enumerated().filter { $1.linear && $1.kind == .text }
+    private var unitPrefix: (prefix: [Double], total: Double) {
+        if let cached = cachedUnitPrefix { return cached }
+        let sections = detail?.sections ?? []
+        var prefix = [Double](repeating: 0, count: sections.count + 1)
+        var running = 0.0
+        for (i, s) in sections.enumerated() {
+            prefix[i] = running
+            if s.linear && s.kind == .text {
+                running += Double(s.units)
+            }
+        }
+        prefix[sections.count] = running
+        let result = (prefix, running)
+        cachedUnitPrefix = result
+        return result
     }
 
     /// 0–1 through the main text at a sentence, as the core counts it.
     func fraction(section: UInt32, sentence: Int) -> Double {
-        let all = counted
-        let total = all.reduce(0) { $0 + Double($1.1.units) }
-        guard total > 0 else { return 0 }
-        var before = 0.0
-        for (i, s) in all {
-            if i < Int(section) {
-                before += Double(s.units)
-            } else if i == Int(section) {
+        let (prefix, total) = unitPrefix
+        guard total > 0, let sections = detail?.sections else { return 0 }
+        let idx = Int(section)
+        var before = idx < prefix.count ? prefix[idx] : total
+        if sections.indices.contains(idx) {
+            let s = sections[idx]
+            if s.linear && s.kind == .text {
                 before += Double(s.units) * Double(sentence) / Double(max(1, s.sentences))
             }
         }
@@ -397,9 +409,10 @@ extension ReaderModel {
         guard let here = self.section, let s = detail?.sections[safe: Int(here)], s.units > 0 else { return nil }
         let perPage = Double(s.units) / Double(max(1, pageCount))
         guard perPage > 0 else { return nil }
-        var before = 0.0
-        for (i, x) in counted where i < Int(section) { before += Double(x.units) }
-        if let t = detail?.sections[safe: Int(section)] {
+        let (prefix, total) = unitPrefix
+        let idx = Int(section)
+        var before = idx < prefix.count ? prefix[idx] : total
+        if let t = detail?.sections[safe: idx] {
             before += Double(t.units) * Double(sentence) / Double(max(1, t.sentences))
         }
         return Int(before / perPage) + 1
