@@ -212,13 +212,23 @@ object FontShelf {
 
     // MARK: Files
 
+    internal fun sanitizeFontBase(raw: String): String {
+        val cleaned = raw
+            .replace('/', '-')
+            .replace('\\', '-')
+            .replace(Regex("[\"'<>;{}\\r\\n\\u0000]"), "")
+            .trimStart { it == '.' || it.isWhitespace() }
+            .trimEnd()
+        return cleaned.ifEmpty { "font" }
+    }
+
     /** Copies a TTF / OTF into the fonts folder. Its id, or null if it isn't one. */
     fun add(context: Context, uri: Uri): String? {
         val shown = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
             if (c.moveToFirst()) c.getString(0) else null
         } ?: return null
         if (!isFontFile(shown)) return null
-        val base = shown.substringBeforeLast('.').replace('/', '-')
+        val base = sanitizeFontBase(shown.substringBeforeLast('.'))
         val ext = shown.substringAfterLast('.').lowercase()
         var name = "$base.$ext"
         var n = 2

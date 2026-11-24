@@ -225,7 +225,8 @@ final class FontShelf {
         let reading = url.startAccessingSecurityScopedResource()
         defer { if reading { url.stopAccessingSecurityScopedResource() } }
         guard let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor], !descriptors.isEmpty else { return nil }
-        let base = (url.lastPathComponent as NSString).deletingPathExtension.replacingOccurrences(of: "/", with: "-")
+        let rawBase = (url.lastPathComponent as NSString).deletingPathExtension
+        let base = Self.sanitizedBaseName(rawBase)
         let ext = url.pathExtension.lowercased()
         var name = "\(base).\(ext)"
         var n = 2
@@ -329,6 +330,21 @@ final class FontShelf {
         case .kai, .hand: "Kaiti SC"
         case .hei: nil
         }
+    }
+
+    nonisolated static func sanitizedBaseName(_ raw: String) -> String {
+        let stripped: Set<Character> = ["\"", "'", "<", ">", ";", "{", "}"]
+        let replaced = String(raw.compactMap { ch -> Character? in
+            if ch == "/" || ch == "\\" { return "-" }
+            if stripped.contains(ch) { return nil }
+            return ch
+        })
+        var cleaned = replaced.trimmingCharacters(in: .whitespacesAndNewlines)
+        while cleaned.hasPrefix(".") {
+            cleaned.removeFirst()
+            cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return cleaned.isEmpty ? "font" : cleaned
     }
 
     nonisolated static func isFontFile(_ name: String) -> Bool {

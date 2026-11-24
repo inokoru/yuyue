@@ -142,7 +142,16 @@ public sealed class FontShelfService
     {
         Directory.CreateDirectory(_fontsDir);
         string origName = Path.GetFileName(sourcePath);
-        string baseName = Path.GetFileNameWithoutExtension(origName).Trim();
+        string rawBase = Path.GetFileNameWithoutExtension(origName).Trim();
+        var sb = new System.Text.StringBuilder(rawBase.Length);
+        foreach (char ch in rawBase)
+        {
+            if (ch is '/' or '\\' or '"' or '\'' or '<' or '>' or ';' or '{' or '}')
+                sb.Append('-');
+            else
+                sb.Append(ch);
+        }
+        string baseName = sb.ToString().TrimStart('.').Trim();
         string ext = Path.GetExtension(origName);
         if (string.IsNullOrEmpty(baseName)) baseName = "font";
 

@@ -106,17 +106,20 @@ pub fn font_catalog() -> Vec<FontPack> {
     ]
 }
 
+fn quote_family(s: &str) -> String {
+    format!("\"{}\"", s.replace(['"', '\\', '<', '>', ';', '{', '}'], ""))
+}
+
 /// The CSS family a `fontFace` id is drawn with: its own name in `@font-face`, so it never
 /// collides with a face of the same name installed on the device.
 pub fn css_family(face: &str) -> Option<String> {
-    let quote = |s: &str| format!("\"{}\"", s.replace(['"', '\\', '<', '>', ';', '{', '}'], ""));
     if let Some(family) = face.strip_prefix("local:") {
-        return (!family.trim().is_empty()).then(|| quote(family.trim()));
+        return (!family.trim().is_empty()).then(|| quote_family(family.trim()));
     }
     if let Some(name) = face.strip_prefix("file:") {
-        return safe_file(name).then(|| quote(&format!("yy-{face}")));
+        return safe_file(name).then(|| quote_family(&format!("yy-{face}")));
     }
-    font_catalog().iter().any(|f| f.id == face && f.id != "wenkai").then(|| quote(&format!("yy-{face}")))
+    font_catalog().iter().any(|f| f.id == face && f.id != "wenkai").then(|| quote_family(&format!("yy-{face}")))
 }
 
 /// A bare file name in the fonts folder, a font by its extension.
@@ -154,7 +157,8 @@ pub fn faces_css(dir: &Path) -> String {
             .collect();
         added.sort();
         for name in added {
-            css.push_str(&format!("@font-face{{font-family:\"yy-file:{name}\";src:url(\"/fonts/{}\");font-display:swap}}", crate::epub::encode_path(&name)));
+            let family = quote_family(&format!("yy-file:{name}"));
+            css.push_str(&format!("@font-face{{font-family:{family};src:url(\"/fonts/{}\");font-display:swap}}", crate::epub::encode_path(&name)));
         }
     }
     css
@@ -196,6 +200,16 @@ mod tests {
         assert!(css.contains("font-family:\"LXGW WenKai\""));
         assert!(css.contains("font-family:\"yy-file:我的字.ttf\";src:url(\"/fonts/%E6%88%91%E7%9A%84%E5%AD%97.ttf\")"));
         assert!(!css.contains("notes.txt") && !css.contains("Bold"));
+
+        // Special characters allowed by safe_file (; { } < >) must match between faces_css and css_family.
+        let special = "My;Font{1}<2>.ttf";
+        std::fs::write(dir.join(special), b"x").unwrap();
+        let css = faces_css(&dir);
+        let expected_family = css_family(&format!("file:{special}")).unwrap();
+        assert!(
+            css.contains(&format!("font-family:{expected_family};")),
+            "faces_css family must match css_family ({expected_family}): {css}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }
