@@ -4354,6 +4354,14 @@ public sealed partial class SettingsWindow : Window
         await dlgRef.ShowAsync();
     }
 
+#if DEBUG
+    internal void OpenDebugSheet(string kind)
+    {
+        if (kind == "add-provider") _ = ShowAddProviderSheetAsync();
+        else if (kind == "add-voice") _ = ShowAddVoiceSourceDialogAsync();
+    }
+#endif
+
     private async Task ShowAddProviderSheetAsync()
     {
         var p = CurrentPalette;

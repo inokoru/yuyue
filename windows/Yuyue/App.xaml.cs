@@ -257,12 +257,33 @@ public partial class App : Application
 #if DEBUG
     private async Task DumpActiveWindowForDebugAsync(string path)
     {
-        await Task.Delay(1800);
+        await Task.Delay(1200);
+        if (Environment.GetEnvironmentVariable("YUYUE_DEBUG_DIALOG") is { Length: > 0 } dlgKind)
+        {
+            if (_settingsWindow is not null) _settingsWindow.OpenDebugSheet(dlgKind);
+            else _shelfWindow?.OpenDebugSheet(dlgKind);
+            await Task.Delay(900);
+        }
+        else
+        {
+            await Task.Delay(600);
+        }
         UIElement? target = _settingsWindow?.Content
             ?? _audioWindows.Values.LastOrDefault()?.Content
             ?? _pdfWindows.Values.LastOrDefault()?.Content
             ?? _readerWindows.Values.LastOrDefault()?.Content
             ?? _shelfWindow?.Content;
+        if (target?.XamlRoot is { } xr)
+        {
+            foreach (var pop in Microsoft.UI.Xaml.Media.VisualTreeHelper.GetOpenPopupsForXamlRoot(xr))
+            {
+                if (pop.Child is Microsoft.UI.Xaml.Controls.ContentDialog cd && cd.Content is UIElement bodyEl)
+                {
+                    target = bodyEl;
+                    break;
+                }
+            }
+        }
         if (target is not null)
         {
             try { await QuoteShareDialog.SaveElementPngAsync(target, path); } catch { }

@@ -779,6 +779,18 @@ public static class YYChrome
         FrameworkElement body,
         double maxHeight = 760)
     {
+        try
+        {
+            foreach (var pop in VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot))
+            {
+                if (pop.Child is ContentDialog openDlg)
+                {
+                    try { openDlg.Hide(); } catch { }
+                }
+            }
+        }
+        catch { }
+
         var p = ThemeHelper.Palette(dark);
         var dlg = new ContentDialog
         {
@@ -788,16 +800,18 @@ public static class YYChrome
             BorderBrush = ThemeHelper.Brush(dark ? Color.FromArgb(28, 255, 255, 255) : p.Line),
             BorderThickness = new Thickness(0.75),
             CornerRadius = new CornerRadius(18),
-            Width = width,
-            MinWidth = width,
-            MaxWidth = width,
             Content = body,
         };
         dlg.Resources["ContentDialogPadding"] = new Thickness(0);
+        dlg.Resources["ContentDialogTitleMargin"] = new Thickness(0);
         dlg.Resources["ContentDialogMinWidth"] = width;
         dlg.Resources["ContentDialogMaxWidth"] = width;
+        dlg.Resources["ContentDialogMinHeight"] = 0.0;
         dlg.Resources["ContentDialogMaxHeight"] = maxHeight;
-        dlg.Resources["ContentDialogTopOverlay"] = new Thickness(0);
+        dlg.Resources["ContentDialogTopOverlay"] = new SolidColorBrush(Colors.Transparent);
+        dlg.Resources["ContentDialogSeparatorThickness"] = new Thickness(0);
+        dlg.Resources["ContentDialogSeparatorBorderBrush"] = new SolidColorBrush(Colors.Transparent);
+        dlg.Resources["OverlayCornerRadius"] = new CornerRadius(18);
 
         body.Width = width;
         dlg.PreviewKeyDown += (_, e) =>

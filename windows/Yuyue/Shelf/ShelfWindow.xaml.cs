@@ -2181,6 +2181,18 @@ public sealed partial class ShelfWindow : Window
         await dlgRef.ShowAsync();
     }
 
+#if DEBUG
+    internal void OpenDebugSheet(string kind)
+    {
+        if (kind == "edit-book" && _shelfBooks.Count > 0)
+            _ = ShowEditBookDialogAsync(_shelfBooks[0]);
+        else if (kind == "quote-share" && _shelfBooks.Count > 0)
+            _ = QuoteShareDialog.ShowAsync(this, RootGrid.XamlRoot, "赌书消得泼茶香，当时只道是寻常。", "所有的伏笔都在不经意的闲笔里悄然种下。", _shelfBooks[0].Title, _shelfBooks[0].Authors.FirstOrDefault(), _shelfBooks[0].CoverPath, "第一回", _library);
+        else if (kind == "feedback")
+            _ = _library.Updates.ShowFeedbackComposerAsync(this, RootGrid.XamlRoot);
+    }
+#endif
+
     private void RevealOriginalInExplorer(BookSummary book)
     {
         var orig = _library.TryOriginalFile(book.Id);
