@@ -691,6 +691,7 @@ final class Audiobooks {
         showing = a.id
         let job = Job(audiobook: a.id, total: a.total, sections: (try? core.book(id: book.id).sections.filter { $0.sentences > 0 }.count) ?? 0)
         self.job = job
+        AirTraffic.trackAudioFeatureUsed(kind: "audiobook_align")
         job.task = Task { [weak self] in
             await self?.run(job, a, book)
         }

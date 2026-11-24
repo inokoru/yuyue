@@ -143,7 +143,8 @@ final class RemoteSources {
         let ext = file.pathExtension.lowercased()
         let isAudio = RemoteFormats.audio.contains(ext) || Audiobooks.extensions.contains(ext)
         let cover = (isAudio || ext == "pdf") ? await entry.cover.asyncFlatMap { try? await client.data($0) } : nil
-        let imported = try await library.importReceived(file, title: entry.title, author: entry.author, cover: cover)
+        let importSource = source.kind == .opds ? "opds" : "webdav"
+        let imported = try await library.importReceived(file, title: entry.title, author: entry.author, cover: cover, source: importSource)
         got[key] = imported.id
         UserDefaults.standard.set(got, forKey: Self.gotBooksKey)
     }

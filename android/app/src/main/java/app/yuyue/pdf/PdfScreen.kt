@@ -151,6 +151,14 @@ class PdfModel(private val library: Library, val bookID: String, private val con
         page = (position?.sentence?.toInt() ?: 0).coerceIn(0, maxOf(0, pageCount - 1))
         player?.onSentence = { spot, _, _, _ -> if (spot.section != page) { page = spot.section; target = spot.section } }
         player?.onStop = { if (library.listening == bookID) library.listening = null }
+        if (failure == null && pageCount > 0) {
+            val paperThemeRaw = when {
+                app.yuyue.reader.EInk.on -> "eink"
+                night -> "dark"
+                else -> "plain"
+            }
+            app.yuyue.analytics.AirTraffic.trackReadingOpened("pdf", paperThemeRaw)
+        }
     }
     private val initCompleted = true
 

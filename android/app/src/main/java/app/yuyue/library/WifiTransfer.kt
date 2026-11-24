@@ -149,8 +149,15 @@ class WifiTransfer(private val context: Context, private val library: Library) {
         }
         if (!importing) return json(JSONObject().put("received", received))
         return try {
-            withContext(Dispatchers.IO) { library.importPath(f.path) }
+            val had = withContext(Dispatchers.Main) { library.books.filter { it.available }.map { it.id }.toSet() }
+            val book = withContext(Dispatchers.IO) { library.importPath(f.path) }
             withContext(Dispatchers.Main) { library.reload() }
+            if (book.id !in had) {
+                app.yuyue.analytics.AirTraffic.trackBookImported(
+                    app.yuyue.analytics.AirTraffic.resolveBookFormat(book.format, f.name),
+                    "wifi",
+                )
+            }
             update(id) { it.copy(state = Item.State.Done) }
             json(JSONObject().put("received", item.size).put("done", true))
         } catch (e: Exception) {

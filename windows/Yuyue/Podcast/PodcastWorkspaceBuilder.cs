@@ -758,7 +758,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 int ok = 0;
                 foreach (var c in channels)
                 {
-                    try { await _library.Podcasts.AddUrlOrFeedAsync(c.FeedUrl, putLatestOnDesk: false); ok++; } catch { }
+                    try { await _library.Podcasts.AddUrlOrFeedAsync(c.FeedUrl, putLatestOnDesk: false, isRefresh: true); ok++; } catch { }
                 }
                 refBtn.IsEnabled = true;
                 _shelf.RefreshBooks();
@@ -5108,9 +5108,13 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         return _library.Prefs.GetVoiceForLanguage(useEn ? "en-US" : "zh-Hans");
     }
 
-    private void PlayIssueAtTurn(PodcastIssue issue, MagazineSentence[] sentences, int idx, double? exactSeekSec = null)
+    private void PlayIssueAtTurn(PodcastIssue issue, MagazineSentence[] sentences, int idx, double? exactSeekSec = null, bool fromAutoAdvance = false)
     {
         StopDrawerAudioPreviews();
+        bool wasPlaying = _playing;
+        string? prevIssueId = _playingIssueId;
+        bool wasExternalMedia = _usingExternalMedia;
+
         App.CurrentApp.ClaimAudioPlayback(_shelf, CreateShelfPauseCallback());
 
         _playing = true;
@@ -5123,6 +5127,10 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             _readerTurnIdx = _playingTurnIdx;
         }
         SyncEqTimer();
+
+        bool isNewPlayStart = !fromAutoAdvance && (!wasPlaying || prevIssueId != issue.Id);
+        if (isNewPlayStart)
+            _library.Analytics.TrackAudioFeatureUsed("podcast_play");
 
         _library.SystemIntegration.SetAudioPlaying(_shelf, true, issue.Title, () =>
             _shelf.DispatcherQueue.TryEnqueue(() =>
@@ -5181,6 +5189,8 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             _ttsPlayer.SetBookContext(issue.Id, targetLang);
             _ttsPlayer.SetVoice(hostVid);
             _ttsPlayer.SetRate(_rate);
+            if (!fromAutoAdvance && (isNewPlayStart || wasExternalMedia))
+                _library.Analytics.TrackTtsStarted(_ttsPlayer.ActiveTtsEngineKey, "podcast");
 
             string text = _track == PodcastTrack.Dub && !string.IsNullOrWhiteSpace(s.TextTrans)
                 ? s.TextTrans!
@@ -5210,7 +5220,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             if (next < _playingSentences.Length)
             {
                 _playingTurnIdx = next;
-                PlayIssueAtTurn(issue, _playingSentences, next);
+                PlayIssueAtTurn(issue, _playingSentences, next, fromAutoAdvance: true);
                 if (OpenIssueId == issue.Id)
                 {
                     _readerTurnIdx = next;
@@ -5541,7 +5551,11 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 speakBtn.Content = L10n.T("播放中…");
                 try
                 {
-                    await AudioPlayer.PreviewVoiceAsync(_library, PickHostVoiceId(false, replyEn), 1.0, reply.Answer);
+                    string? replyVoice = PickHostVoiceId(false, replyEn);
+                    _library.Analytics.TrackTtsStarted(
+                        AudioPlayer.ResolveTtsEngineKey(_library, replyVoice, replyEn ? "en-US" : "zh-Hans"),
+                        "podcast");
+                    await AudioPlayer.PreviewVoiceAsync(_library, replyVoice, 1.0, reply.Answer);
                 }
                 finally
                 {

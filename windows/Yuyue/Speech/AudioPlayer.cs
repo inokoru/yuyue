@@ -152,6 +152,68 @@ public sealed class AudioPlayer : IDisposable
     public int CurrentSentence => _currentIndex;
     public double Rate => _rate;
     public string VoiceName => IsUsingPairedRecording ? "原声录音" : _voiceDisplayName;
+
+    public string ActiveTtsEngineKey
+    {
+        get
+        {
+            if (!string.IsNullOrEmpty(_selectedKokoroId))
+                return "local_kokoro";
+            if (!string.IsNullOrEmpty(_selectedCloudId) &&
+                CloudVoiceService.TryParseFullId(_selectedCloudId, out var cp, out _))
+            {
+                return CloudVoiceEntry.ProviderKey(cp);
+            }
+            if (!string.IsNullOrEmpty(_selectedCardId))
+            {
+                if (_library is not null &&
+                    _selectedCardId.StartsWith("cloned.", StringComparison.Ordinal) &&
+                    _library.Prefs.ClonedElevenLabsVoiceIds.TryGetValue(_selectedCardId, out var remoteElevenId) &&
+                    !string.IsNullOrEmpty(remoteElevenId) &&
+                    _library.CloudVoices.IsConfigured(CloudTtsProvider.ElevenLabs) &&
+                    (_library.Prefs.ClonedUseElevenLabs.Contains(_selectedCardId) || !_library.LiveVoice.IsModelInstalled))
+                {
+                    return "elevenlabs";
+                }
+                return "other";
+            }
+            return "system";
+        }
+    }
+
+    public static string ResolveTtsEngineKey(LibraryService? library, string? voiceId, string? language = null)
+    {
+        string raw = DramaSynthService.NormalizeVoiceId(voiceId) ?? "";
+        string lang = string.IsNullOrWhiteSpace(language) ? "zh-Hans" : language;
+
+        if (CloudVoiceService.TryParseFullId(raw, out var cp, out _))
+            return CloudVoiceEntry.ProviderKey(cp);
+        if (raw.StartsWith("kokoro.", StringComparison.Ordinal))
+            return "local_kokoro";
+        if (raw.StartsWith("card.", StringComparison.Ordinal) || raw.StartsWith("cloned.", StringComparison.Ordinal))
+        {
+            if (library is not null &&
+                raw.StartsWith("cloned.", StringComparison.Ordinal) &&
+                library.Prefs.ClonedElevenLabsVoiceIds.TryGetValue(raw, out var remoteElevenId) &&
+                !string.IsNullOrEmpty(remoteElevenId) &&
+                library.CloudVoices.IsConfigured(CloudTtsProvider.ElevenLabs) &&
+                (library.Prefs.ClonedUseElevenLabs.Contains(raw) || !library.LiveVoice.IsModelInstalled))
+            {
+                return "elevenlabs";
+            }
+            return "other";
+        }
+        if (string.IsNullOrWhiteSpace(raw) && library is not null)
+        {
+            if (library.Kokoro.IsInstalled && CardVoiceEngine.SpeaksLanguage(lang) && library.Kokoro.DefaultNarrator(lang) is not null)
+                return "local_kokoro";
+            if (library.LiveVoice.IsReady && CardVoiceEngine.SpeaksLanguage(lang) && DramaSynthService.DefaultNarratorCard(library, lang) is not null)
+                return "other";
+            if (library.CloudVoices.IsConfigured(CloudTtsProvider.Free))
+                return "free";
+        }
+        return "system";
+    }
     public bool LoopSingleSentence { get => _loopSingleSentence; set => _loopSingleSentence = value; }
     public int? LoopRangeStart => _loopRangeStart;
     public int? LoopRangeEnd => _loopRangeEnd;
@@ -1056,6 +1118,8 @@ public sealed class AudioPlayer : IDisposable
             ExtraNoticeChanged?.Invoke("原声跳过了几句，正用朗读补上…", null, null);
             tts.SetBookContext(_bookId, _language);
             tts.SetRate(_rate);
+            if (unreadSentenceIndices.Length > 0)
+                _library.Analytics.TrackTtsStarted(tts.ActiveTtsEngineKey, "audiobook");
             foreach (int idx in unreadSentenceIndices)
             {
                 if (!_playing || !ReferenceEquals(_pairedFillTtsPlayer, tts)) return;

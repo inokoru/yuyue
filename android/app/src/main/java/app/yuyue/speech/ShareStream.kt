@@ -89,9 +89,17 @@ class ShareStream(private val context: Context, private val library: Library) {
         val id = core.audioIdParts(parts)
         val known = runCatching { core.audiobookMap(id)?.durations }.getOrNull().orEmpty()
         val import = AudioImport(files.mapIndexed { i, f -> AudioFile(f.name, known.getOrElse(i) { 0.0 }) }, title, emptyList(), emptyList(), null)
+        val had = library.books.filter { it.available }.map { it.id }.toSet()
         val book = withContext(Dispatchers.IO) { core.audiobookReserve(id, import) }
         prefs.edit().putString(id, JSONObject().put("source", source.id).put("files", JSONArray(files.map { JSONObject().put("name", it.name).put("url", it.url).put("size", it.size) })).toString()).apply()
         library.reload()
+        if (book.id !in had) {
+            val sourceTag = if (source.kind == app.yuyue.library.RemoteSource.Kind.OPDS) "opds" else "webdav"
+            app.yuyue.analytics.AirTraffic.trackBookImported(
+                app.yuyue.analytics.AirTraffic.resolveBookFormat(book.format),
+                sourceTag,
+            )
+        }
         run(id)
         return book
     }

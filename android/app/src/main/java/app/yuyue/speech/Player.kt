@@ -195,6 +195,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     private var chapterLiveAllMade: Pair<Int, Boolean>? = null
     private var lastRenderedSection: Int? = null
     private var lastUsingCardVoice = false
+    private var ttsTrackedForSession = false
 
     /** Starts reading at `position`, or at the first sentence after it with something to read.
      *  `word`: in the narrator's voice, the first sentence starts at this moment of the
@@ -306,6 +307,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         thermalFallbackSection = null
         readyOfflineVoice = null
         voices.clear()
+        ttsTrackedForSession = false
         pausedForFocus = false
         stopFade(restoreVolume = false)
         reset()
@@ -361,6 +363,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         val cacheKey = canonicalLanguage(language).ifEmpty { language }
         voices[cacheKey] = voice
         voices[language] = voice
+        ttsTrackedForSession = false
         restartHere()
     }
 
@@ -403,6 +406,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
             val cacheKey = canonicalLanguage(langTag).ifEmpty { langTag }
             voices[cacheKey] = sys
             voices[langTag] = sys
+            ttsTrackedForSession = false
             if (resumeAt != null) play(resumeAt.position) else restartHere()
         }
     }
@@ -605,6 +609,11 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                     }
                     if (generation != g || renderToken != token) return@launch
                     if (played != null) {
+                        if (!ttsTrackedForSession) {
+                            ttsTrackedForSession = true
+                            val engine = if (lastUsingCardVoice) "other" else app.yuyue.analytics.AirTraffic.ttsEngineForVoiceId(chosenNarrator)
+                            app.yuyue.analytics.AirTraffic.trackTtsStarted(engine, "reader")
+                        }
                         nextToRender = after(s)
                         schedule(Line(s, played))
                         continue
@@ -626,7 +635,16 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                     }
                     if (generation != g || renderToken != token) return@launch
                     nextToRender = after(s)
-                    if (speech != null) schedule(Line(s, speech))
+                    if (speech != null) {
+                        if (!ttsTrackedForSession) {
+                            ttsTrackedForSession = true
+                            app.yuyue.analytics.AirTraffic.trackTtsStarted(
+                                app.yuyue.analytics.AirTraffic.ttsEngineForVoice(segPlan.firstOrNull()?.first),
+                                "reader",
+                            )
+                        }
+                        schedule(Line(s, speech))
+                    }
                     continue
                 }
                 var voice = if (forceSystemForHeat) Voices.systemBest(language) ?: voice(language) else voice(language)
@@ -651,7 +669,16 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                 if (generation != g || renderToken != token) return@launch
                 nextToRender = after(s)
                 // A sentence with nothing to say (a lone dash, say) is skipped.
-                if (speech != null) schedule(Line(s, speech))
+                if (speech != null) {
+                    if (!ttsTrackedForSession) {
+                        ttsTrackedForSession = true
+                        app.yuyue.analytics.AirTraffic.trackTtsStarted(
+                            app.yuyue.analytics.AirTraffic.ttsEngineForVoice(voice),
+                            "reader",
+                        )
+                    }
+                    schedule(Line(s, speech))
+                }
             }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e

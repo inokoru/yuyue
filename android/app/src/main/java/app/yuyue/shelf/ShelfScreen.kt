@@ -133,7 +133,7 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
     val scope = rememberCoroutineScope()
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
-        library.importUris(uris, collection)
+        library.importUris(uris, collection, source = "file_picker")
     }
 
     val all = library.shelfBooks

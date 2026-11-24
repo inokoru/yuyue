@@ -264,6 +264,18 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
             if (intent is Library.OpenIntent.Ask) ask(intent.question)
             if (intent == null) offerSleepReturn()
             lookForRecording()
+            val formatRaw = if (d.summary.format == uniffi.yuyue_core.BookFormat.MOBI) {
+                runCatching { library.originalFile(d.summary)?.extension }.getOrNull() ?: d.summary.format.name
+            } else {
+                d.summary.format.name
+            }
+            val paperThemeRaw = if (EInk.on) {
+                "eink"
+            } else {
+                val resolved = PaperAppearance.resolve(settings)
+                if (resolved.custom != null) "other" else resolved.preset.name
+            }
+            app.yuyue.analytics.AirTraffic.trackReadingOpened(formatRaw, paperThemeRaw)
         }
     }
 

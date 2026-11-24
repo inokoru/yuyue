@@ -45776,6 +45776,106 @@
           }
         }
       }
+    },
+    "书库仅存本机 · 可关匿名统计" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On device · Opt-out analytics"
+          }
+        }
+      }
+    },
+    "书库仅存本机，不含身份与广告" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Library stays on device—no accounts, no ads"
+          }
+        }
+      }
+    },
+    "仅记录功能使用形态，不关联身份，绝不收集书名、笔记或搜索词" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Records feature usage shapes only, with no personal identity—never book titles, notes, or search terms."
+          }
+        }
+      }
+    },
+    "免费，书库与笔记留在本地，没有账号与广告。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Free. Your library and notes stay on device—no accounts, no ads."
+          }
+        }
+      }
+    },
+    "匿名使用统计" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anonymous Usage Analytics"
+          }
+        }
+      }
+    },
+    "匿名使用统计：默认开启，仅记录功能使用形态（如导入格式、界面浏览、朗读与音频功能使用），不关联个人身份，绝不收集书名、作者、文件名、笔记、划线、搜索词、网址或邮箱；随时可以在「我的 › 关于」关闭。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anonymous usage analytics: enabled by default to record usage shapes only (such as import formats, screen visits, and speech or audio feature usage) without personal identity. Book titles, authors, filenames, notes, highlights, search terms, URLs, and emails are never collected. You can turn this off anytime in Me › About."
+          }
+        }
+      }
+    },
+    "没有账号，也没有广告" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No accounts, no ads"
+          }
+        }
+      }
+    },
+    "语阅没有账号、没有广告，也不做跨应用追踪。你的书、进度、笔记、划线和搜索词都只留在本地设备。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yuyue has no accounts, no ads, and no cross-app tracking. Your books, progress, notes, highlights, and search terms stay strictly on this device."
+          }
+        }
+      }
+    },
+    "语阅没有账号、没有广告，也不做跨应用追踪。默认开启匿名使用统计，仅记录功能使用形态（如导入格式、界面浏览、朗读与音频功能使用），不关联身份，绝不收集书名、笔记、搜索词、网址或邮箱，可随时在「关于」页关闭。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yuyue has no accounts, no ads, and no cross-app tracking. Anonymous usage analytics are enabled by default to record usage shapes only (such as import formats, screen visits, and speech or audio feature usage) without personal identity—never book titles, notes, search terms, URLs, or emails. You can turn this off anytime in About."
+          }
+        }
+      }
+    },
+    "读着听，听着读，进度接得上。\n没有账号与广告，\n书与笔记都留在你手里。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read and listen seamlessly, right where you left off.\nNo accounts, no ads—\nyour books and notes stay in your hands."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

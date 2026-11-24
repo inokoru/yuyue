@@ -401,6 +401,7 @@ final class AudiobookPlayer {
         if items.isEmpty || moved || queue.currentItem == nil { load(at: time) }
         queue.playImmediately(atRate: rate)
         isPlaying = true
+        AirTraffic.trackAudioFeatureUsed(kind: "audiobook_play")
         library.listening = bookID
         listened()
         startTicking()
@@ -862,6 +863,7 @@ final class AudiobookPlayer {
     private func fill(_ run: UnreadRun) {
         queue.pause()
         notice = Notice(kind: .filling, text: String(localized: "录音里没念这里，朗读补上"), action: nil)
+        AirTraffic.trackTtsStarted(engine: "system", surface: "audiobook")
         let synth = AVSpeechSynthesizer()
         let done = SpokenDone { [weak self] in
             guard let self, self.speaker === synth else { return }

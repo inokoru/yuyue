@@ -125,6 +125,17 @@ public sealed partial class PdfReaderWindow : Window
         _nightPaper = _library.Prefs.PdfNightBooks.Contains(bookId);
         _lastMarkStyle = ParseMarkStyle(_library.Prefs.LastHighlightStyle);
 
+        string pdfPaperTheme = _nightPaper
+            ? "dark"
+            : (_library.Prefs.GlobalEinkMode ? "eink" : "plain");
+        _library.Analytics.TrackScreen("Reader");
+        _library.Analytics.TrackReadingOpened("pdf", pdfPaperTheme);
+        Activated += (_, args) =>
+        {
+            if (args.WindowActivationState != WindowActivationState.Deactivated)
+                _library.Analytics.TrackScreen("Reader");
+        };
+
         InitializeComponent();
         Title = _detail.Summary.Title;
         BookTitleText.Text = _detail.Summary.Title;
@@ -3024,12 +3035,15 @@ public sealed partial class PdfReaderWindow : Window
             if (scanned > 0) startIndex = 0;
         }
 
+        bool wasListening = _isListening;
         _activeSentences = sents;
         _listeningPage = targetPage;
         _isListening = true;
         if (prevLp >= 0 && prevLp != _listeningPage)
             RefreshPageOverlay(prevLp);
         SpeakSentenceAt(Math.Clamp(startIndex, 0, _activeSentences.Length - 1));
+        if (!wasListening)
+            _library.Analytics.TrackTtsStarted(_audio.ActiveTtsEngineKey, "reader");
     }
 
     private void SpeakSentenceAt(int index)

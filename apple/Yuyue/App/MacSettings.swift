@@ -112,6 +112,7 @@ struct MacSettings: View {
         // Keep the window title fixed (hidden visually; the sidebar names the page) so tab
         // switches don't trigger AppKit titlebar relayout and reset the traffic lights.
         .navigationTitle(String(localized: "设置"))
+        .airTrafficScreen(page == .update ? "About" : "Settings")
         .background(SettingsTitlebar { windowBox.window = $0 })
         // At the top of the sidebar, as in the shelf window.
         .trafficLights(CGPoint(x: 22, y: 20))

@@ -36,6 +36,7 @@ public partial class App : Application
     private Action? _pauseActiveAudio;
     private readonly ConditionalWeakTable<object, object> _claimOwners = new();
     private bool _exitingApp;
+    private bool _isHiddenInTray;
 
     /// <summary>
     /// Binds a child audio engine (such as PodcastWorkspaceBuilder's internal TTS player) to its owning surface
@@ -151,6 +152,8 @@ public partial class App : Application
 
         var cliArgs = Environment.GetCommandLineArgs();
         bool startBackground = cliArgs.Any(a => a == "--background");
+        _isHiddenInTray = startBackground;
+        Library.Analytics.TrackAppLaunch(startBackground);
 
         var uiQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         _uiQueue = uiQueue;
@@ -162,7 +165,15 @@ public partial class App : Application
         }
         catch { }
         Library.SystemIntegration.ShowShelfCallback = () => uiQueue.TryEnqueue(ShowShelf);
-        Library.SystemIntegration.OpenSettingsCallback = () => uiQueue.TryEnqueue(() => OpenSettings("general"));
+        Library.SystemIntegration.OpenSettingsCallback = () => uiQueue.TryEnqueue(() =>
+        {
+            if (_isHiddenInTray)
+            {
+                _isHiddenInTray = false;
+                Library.Analytics.TrackAppReopened();
+            }
+            OpenSettings("general");
+        });
         Library.SystemIntegration.PlayPodcastIssueCallback = id => uiQueue.TryEnqueue(() => OpenPodcastIssue(id));
         Library.SystemIntegration.ExitAppCallback = () => uiQueue.TryEnqueue(() =>
         {
@@ -243,7 +254,7 @@ public partial class App : Application
 
         if (files.Count > 0 && _shelfWindow is not null)
         {
-            _ = _shelfWindow.ImportPathsAsync(files, openFirst: true);
+            _ = _shelfWindow.ImportPathsAsync(files, openFirst: true, source: "share_in");
         }
 #if DEBUG
         else if (!string.IsNullOrEmpty(debugOpenQuery))
@@ -528,6 +539,8 @@ public partial class App : Application
                     args.Cancel = true;
                     Library.SystemIntegration.EnsureTrayVisible(forceVisible: true);
                     try { _shelfWindow?.AppWindow.Hide(); } catch { }
+                    _isHiddenInTray = true;
+                    Library.Analytics.TrackAppBackgrounded();
                     return;
                 }
 
@@ -546,6 +559,11 @@ public partial class App : Application
                     Library?.SystemIntegration.ClearAudioSource((object?)null);
                 CheckExitIfAllWindowsClosed();
             };
+        }
+        if (_isHiddenInTray)
+        {
+            _isHiddenInTray = false;
+            Library.Analytics.TrackAppReopened();
         }
         try { _shelfWindow.AppWindow.Show(); } catch { }
         _shelfWindow.Activate();
@@ -874,12 +892,14 @@ public partial class App : Application
 
         _uiQueue?.TryEnqueue(() =>
         {
+            bool wasHidden = _isHiddenInTray;
             ShowShelf();
+            if (!wasHidden) Library.Analytics.TrackAppReopened();
             if (shelfTab is not null) _shelfWindow?.SwitchTab(shelfTab);
             if (settingsPage is not null) OpenSettings(settingsPage);
             if (!string.IsNullOrEmpty(deepLinkUri)) HandleDeepLink(deepLinkUri);
             if (files.Count > 0 && _shelfWindow is not null)
-                _ = _shelfWindow.ImportPathsAsync(files, openFirst: true);
+                _ = _shelfWindow.ImportPathsAsync(files, openFirst: true, source: "share_in");
         });
     }
 

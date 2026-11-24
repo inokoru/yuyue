@@ -275,6 +275,8 @@ final class Player {
         #endif
     }
 
+    @ObservationIgnored private var ttsTrackedForRun = false
+
     // MARK: Controls
 
     /// Starts reading at `position`, or at the first sentence after it with something to read.
@@ -288,6 +290,7 @@ final class Player {
         failedSpot = nil
         if case .until(let date, _) = sleep, date <= Date() { sleep = .off }
         reset()
+        ttsTrackedForRun = false
         startWord = word.map { (Spot(section: position.section, sentence: Int(position.sentence)), $0) }
         guard let start = first(from: Spot(section: position.section, sentence: Int(position.sentence))) else {
             return stop()
@@ -645,6 +648,13 @@ final class Player {
                     case .live:
                         speech = await Self.playLive(self.core, dir, book: self.detail.summary.id, spot, language: language, narrator: chosenNarrator)
                     }
+                    if speech != nil, !self.ttsTrackedForRun {
+                        self.ttsTrackedForRun = true
+                        AirTraffic.trackTtsStarted(
+                            engine: AirTraffic.ttsEngine(forVoiceID: chosenNarrator),
+                            surface: "reader"
+                        )
+                    }
                 }
                 if speech == nil {
                     let customScriptVoice = forceSystemForHeat ? nil : self.script.voice?(spot.section, spot.sentence, language)
@@ -656,6 +666,13 @@ final class Player {
                     if let segPlan {
                         do {
                             speech = try await BookRoles.renderSegments(segPlan, language: language)
+                            if !self.ttsTrackedForRun {
+                                self.ttsTrackedForRun = true
+                                AirTraffic.trackTtsStarted(
+                                    engine: AirTraffic.ttsEngine(for: segPlan.first?.voice),
+                                    surface: "reader"
+                                )
+                            }
                         } catch {
                             if error is CancellationError || Task.isCancelled || self.generation != generation || self.renderToken != token { return }
                             self.failed(String(localized: "朗读出错了（\(error.localizedDescription)）"))
@@ -676,6 +693,13 @@ final class Player {
                         if let cloud = voice as? CloudVoice { self.fetchAhead(cloud, from: spot, language: language) }
                         do {
                             speech = try await voice.render(self.text(at: spot), language: language)
+                            if !self.ttsTrackedForRun {
+                                self.ttsTrackedForRun = true
+                                AirTraffic.trackTtsStarted(
+                                    engine: AirTraffic.ttsEngine(for: voice),
+                                    surface: "reader"
+                                )
+                            }
                         } catch {
                             // Another voice chosen, or a jump: this sentence was called off, nothing failed.
                             if error is CancellationError || Task.isCancelled || self.generation != generation || self.renderToken != token { return }

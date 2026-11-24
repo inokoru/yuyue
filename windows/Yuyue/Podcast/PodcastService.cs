@@ -246,7 +246,7 @@ public sealed class PodcastService
     /// <summary>
     /// Subscribes to an RSS/Atom feed, or extracts a single episode from a webpage / direct audio URL (1:1 <c>PodcastHub.subscribeRSS</c>).
     /// </summary>
-    public async Task<(PodcastChannel? Channel, PodcastIssue? SingleIssue)> AddUrlOrFeedAsync(string rawUrl, bool putLatestOnDesk = true)
+    public async Task<(PodcastChannel? Channel, PodcastIssue? SingleIssue)> AddUrlOrFeedAsync(string rawUrl, bool putLatestOnDesk = true, bool isRefresh = false)
     {
         string url = rawUrl.Trim();
         if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
@@ -262,6 +262,7 @@ public sealed class PodcastService
             if (string.IsNullOrWhiteSpace(fileName)) fileName = "外部音频单集";
             var single = await Task.Run(() => _library.Core.PodcastImportSingleIssue(
                 fileName, "单集直听", "从音频直链放入收听台", "", url, null, null, 900, "zh-CN", PodcastSourceKind.SingleImport));
+            if (!isRefresh) _library.Analytics.TrackAudioFeatureUsed("podcast_added");
             return (null, single);
         }
 
@@ -283,6 +284,7 @@ public sealed class PodcastService
                 var parsed = await Task.Run(() => YuyueCoreMethods.ParsePodcastRss(body));
                 var channel = await Task.Run(() => _library.Core.PodcastUpsertChannelFromFeed(url, parsed, putLatestOnDesk));
                 _ = PrefetchPodcast20TranscriptsAsync(channel.Id, parsed);
+                if (!isRefresh) _library.Analytics.TrackAudioFeatureUsed("podcast_added");
                 return (channel, null);
             }
             catch when (!contentType.Contains("xml"))
@@ -306,18 +308,20 @@ public sealed class PodcastService
                 webEp.DurationSec > 0 ? webEp.DurationSec : 1200u,
                 "zh-CN",
                 PodcastSourceKind.SingleImport));
+            if (!isRefresh) _library.Analytics.TrackAudioFeatureUsed("podcast_added");
             return (null, single);
         }
 
         if (!string.IsNullOrWhiteSpace(webEp.RssUrl) && !string.Equals(webEp.RssUrl, url, StringComparison.OrdinalIgnoreCase))
         {
-            return await AddUrlOrFeedAsync(webEp.RssUrl, putLatestOnDesk);
+            return await AddUrlOrFeedAsync(webEp.RssUrl, putLatestOnDesk, isRefresh);
         }
 
         // Final attempt as RSS so Rust gives a clear parse error
         var rssParsed = await Task.Run(() => YuyueCoreMethods.ParsePodcastRss(body));
         var ch = await Task.Run(() => _library.Core.PodcastUpsertChannelFromFeed(url, rssParsed, putLatestOnDesk));
         _ = PrefetchPodcast20TranscriptsAsync(ch.Id, rssParsed);
+        if (!isRefresh) _library.Analytics.TrackAudioFeatureUsed("podcast_added");
         return (ch, null);
     }
 
@@ -392,13 +396,14 @@ public sealed class PodcastService
             await gate.WaitAsync();
             try
             {
-                var (ch, _) = await AddUrlOrFeedAsync(f.XmlUrl, putLatestOnDesk: false);
+                var (ch, _) = await AddUrlOrFeedAsync(f.XmlUrl, putLatestOnDesk: false, isRefresh: true);
                 if (ch is not null) Interlocked.Increment(ref importedCount);
             }
             catch { }
             finally { gate.Release(); }
         });
         await Task.WhenAll(tasks);
+        if (importedCount > 0) _library.Analytics.TrackAudioFeatureUsed("podcast_added");
         return importedCount;
     }
 
@@ -446,8 +451,10 @@ public sealed class PodcastService
         }
         catch { }
 
-        return await Task.Run(() => _library.Core.PodcastImportSingleIssue(
+        var issue = await Task.Run(() => _library.Core.PodcastImportSingleIssue(
             title, author, "从本机音频文件直接放入收听台", "", null, storedPath, null, durSec, "zh-CN", PodcastSourceKind.LocalAudio));
+        _library.Analytics.TrackAudioFeatureUsed("podcast_added");
+        return issue;
     }
 
     /// <summary>
@@ -711,6 +718,8 @@ public sealed class PodcastService
 
             var sentences = GroupWordsIntoMagazineSentences(words, issue.ShowTitle, lang);
             await Task.Run(() => _library.Core.PodcastSetTranscript(issueId, sentences, PodcastFidelity.L2Magazine), ct);
+            if (sentences.Length > 0)
+                _library.Analytics.TrackAudioFeatureUsed("podcast_transcribe");
             return sentences.Length;
         }
         finally
@@ -848,6 +857,8 @@ public sealed class PodcastService
         }
         var draft = await Task.Run(() => _library.Core.FinalizeStudioScript(brief, rawReply));
         string lang = (kind == StudioKind.VocabRadio || style == "studio-duo-en") ? "en" : "zh-Hans";
-        return await Task.Run(() => _library.Core.PodcastSaveStudioIssue(kind, draft, bookIds, lang));
+        var created = await Task.Run(() => _library.Core.PodcastSaveStudioIssue(kind, draft, bookIds, lang));
+        _library.Analytics.TrackAudioFeatureUsed("podcast_added");
+        return created;
     }
 }

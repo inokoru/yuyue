@@ -80,7 +80,7 @@ data class MeRoute(val page: MePage, val arg: String? = null)
 /** 我的, as on iPhone: this week's reading and listening on top, the year's
  *  totals under it, then the Mac's settings sidebar, in its order and its groups. */
 @Composable
-fun MeScreen(library: Library, pop: Int = 0) {
+fun MeScreen(library: Library, pop: Int = 0, isForeground: Boolean = true) {
     val stack = remember {
         mutableStateListOf<MeRoute>().apply {
             // Made again for a new language: back on 通用, where it was chosen.
@@ -88,6 +88,15 @@ fun MeScreen(library: Library, pop: Int = 0) {
         }
     }
     LaunchedEffect(pop) { if (pop > 0) stack.clear() }
+    val meScreenName = when (stack.lastOrNull()?.page) {
+        null -> "Me"
+        MePage.About, MePage.Privacy, MePage.Licences -> "About"
+        MePage.Feedback -> "Feedback"
+        else -> "Settings"
+    }
+    LaunchedEffect(isForeground, meScreenName) {
+        if (isForeground) app.yuyue.analytics.AirTraffic.screen(meScreenName)
+    }
     val push: (MePage) -> Unit = { stack += MeRoute(it) }
     val open: (MePage, String) -> Unit = { page, arg -> stack += MeRoute(page, arg) }
     val back: () -> Unit = { stack.removeAt(stack.lastIndex) }
@@ -553,7 +562,7 @@ private fun About(push: (MePage) -> Unit) {
             }
             Text(t("语阅"), style = YY.font(17f, FontWeight.Bold), color = YY.c.t1, modifier = Modifier.padding(top = YY.s(10)))
             Text(t("版本 %@", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"), style = YY.font(10f, tnum = true), color = YY.c.t3)
-            Text(t("免费，没有服务器，不收集任何数据。"), style = YY.font(12.5f, FontWeight.SemiBold), color = YY.c.t1, modifier = Modifier.padding(top = YY.s(22), bottom = YY.s(26)))
+            Text(t("免费，书库与笔记留在本地，没有账号与广告。"), style = YY.font(12.5f, FontWeight.SemiBold), color = YY.c.t1, modifier = Modifier.padding(top = YY.s(22), bottom = YY.s(26)))
         }
         val open = androidx.compose.ui.platform.LocalUriHandler.current
         YYGroup {
@@ -564,7 +573,21 @@ private fun About(push: (MePage) -> Unit) {
                 }) { push(MePage.Update) }
             }
             row { YYRow(t("开源许可"), Icons.code, chevron = true) { push(MePage.Licences) } }
-            row { YYRow(t("隐私说明"), Icons.shieldCheck, chevron = true) { push(MePage.Privacy) } }
+            row { YYRow(t("隐私说明"), Icons.shieldCheck, t("书库仅存本机 · 可关匿名统计"), chevron = true) { push(MePage.Privacy) } }
+        }
+        Spacer(Modifier.height(YY.s(12)))
+        var analyticsEnabled by rememberPref(app.yuyue.analytics.AirTraffic.PREF_KEY, true)
+        YYGroup {
+            row {
+                DetailSwitch(
+                    t("匿名使用统计"),
+                    t("仅记录功能使用形态，不关联身份，绝不收集书名、笔记或搜索词"),
+                    analyticsEnabled,
+                ) {
+                    analyticsEnabled = it
+                    app.yuyue.analytics.AirTraffic.setEnabled(it)
+                }
+            }
         }
         Spacer(Modifier.height(YY.s(12)))
         YYGroup {
@@ -588,7 +611,8 @@ private fun TextPage(text: String) {
 }
 
 private val PRIVACY: String
-    get() = t("语阅没有服务器，也不收集任何数据：没有账号、没有统计、没有广告。") + "\n\n" +
+    get() = t("语阅没有账号、没有广告，也不做跨应用追踪。你的书、进度、笔记、划线和搜索词都只留在本地设备。") + "\n\n" +
+        t("匿名使用统计：默认开启，仅记录功能使用形态（如导入格式、界面浏览、朗读与音频功能使用），不关联个人身份，绝不收集书名、作者、文件名、笔记、划线、搜索词、网址或邮箱；随时可以在「我的 › 关于」关闭。") + "\n\n" +
         t("书、进度、笔记和生词都存在这台设备上。打开同步时，它们只在你的设备和你自己选的网盘（WebDAV，Google Drive 即将支持）之间传，语阅看不到。") + "\n\n" +
         t("免费在线语音会把当前要读的句子发给在线语音服务；书伴、自行配置的云端声音和笔记导出只在你选用并填了自己的 Key 时联网，提问、要读的句子或笔记直接发给你选的服务商；Key 只存在这台设备上，加密保存。") + "\n\n" +
         t("本地模型与声音包：对齐模型、离线语音模型、开源字体和内置声音包会在你需要时从 GitHub Releases、魔搭（ModelScope）或 Hugging Face 下载，运行全在这台设备上完成，原文与录音不出本机。") + "\n\n" +

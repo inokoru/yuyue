@@ -187,6 +187,29 @@ public sealed partial class ReaderWindow : Window, IDebugScreenshotCapable
         _settings = bookOwn ?? _library.GetReaderSettings();
         _pendingAutoSpeak = autoListen;
 
+        string resolvedPaperTheme;
+        if (_library.Prefs.GlobalEinkMode)
+        {
+            resolvedPaperTheme = "eink";
+        }
+        else
+        {
+            var resolvedPaper = PaperAppearance.Resolve(_library, _settings);
+            resolvedPaperTheme = resolvedPaper.Custom is not null
+                ? "other"
+                : PaperAppearance.PaperCssId(resolvedPaper.Preset);
+        }
+        _library.Analytics.TrackScreen("Reader");
+        _library.Analytics.TrackReadingOpened(
+            _detail.Summary.Format.ToString(),
+            resolvedPaperTheme,
+            _library.TryOriginalFile(_bookId));
+        Activated += (_, args) =>
+        {
+            if (args.WindowActivationState != WindowActivationState.Deactivated)
+                _library.Analytics.TrackScreen("Reader");
+        };
+
         try { _bubblesOn = _library.Core.BookBubbles(_bookId); } catch { _bubblesOn = false; }
         try { _dramaModeOn = _library.Core.DramaEnabled(_bookId); } catch { _dramaModeOn = false; }
         _translationsActive = _library.Prefs.BookTranslationsActive.TryGetValue(_bookId, out var savedTr) && savedTr;
@@ -3890,8 +3913,10 @@ public sealed partial class ReaderWindow : Window, IDebugScreenshotCapable
 
         if (_pendingAutoSpeak)
         {
+            bool isCont = _autoSpeakFromContinuation;
+            _autoSpeakFromContinuation = false;
             _pendingAutoSpeak = false;
-            StartListeningAt(_currentSentence);
+            StartListeningAt(_currentSentence, isContinuation: isCont);
         }
 #if DEBUG
         if (_debugShowListenBar)
@@ -10902,11 +10927,14 @@ public sealed partial class ReaderWindow : Window, IDebugScreenshotCapable
 
     // ---------- Audio, ListenCapsule & 448px ListenCard (1:1 MacReaderCards.swift:623-1067) ----------
 
-    private void StartListeningAt(int sentenceIndex)
+    private bool _autoSpeakFromContinuation;
+
+    private void StartListeningAt(int sentenceIndex, bool isContinuation = false)
     {
         var sentences = _library.GetSpokenSentences(_bookId, _currentSection);
         if (sentences.Count == 0) return;
 
+        bool wasPlaying = _audio.IsPlaying;
         SleepReturnHost.Visibility = Visibility.Collapsed;
         ReaderRecapAndSleepHelper.ClearSleepReturn(_library, _bookId);
 
@@ -10925,6 +10953,13 @@ public sealed partial class ReaderWindow : Window, IDebugScreenshotCapable
         _audio.StopAfterCurrentSentence = _sleepMode == -2;
         _audio.SetRate(_speechRate);
         _audio.Start(sentences, sentenceIndex);
+        if (!wasPlaying && !isContinuation)
+        {
+            if (_audio.IsUsingPairedRecording)
+                _library.Analytics.TrackAudioFeatureUsed("audiobook_play");
+            else
+                _library.Analytics.TrackTtsStarted(_audio.ActiveTtsEngineKey, "reader");
+        }
         _capsuleAutoHideTimer?.Stop();
         if (!_isFullScreen || _immersivePeeking) ListenCapsule.Visibility = Visibility.Visible;
         UpdateCapsuleText(sentenceIndex);
@@ -11822,6 +11857,7 @@ public sealed partial class ReaderWindow : Window, IDebugScreenshotCapable
             {
                 _hasUserMoved = true;
                 _pendingSentence = 0;
+                _autoSpeakFromContinuation = true;
                 _pendingAutoSpeak = true;
                 LoadSection(s);
             }

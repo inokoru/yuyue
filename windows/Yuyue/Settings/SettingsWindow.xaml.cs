@@ -182,6 +182,11 @@ public sealed partial class SettingsWindow : Window
 
         ApplyAppearanceCore(renderContent: false);
         NavigateTo(_activePage);
+        Activated += (_, args) =>
+        {
+            if (args.WindowActivationState != WindowActivationState.Deactivated)
+                _library.Analytics.TrackScreen(_activePage == "about" ? "About" : "Settings");
+        };
     }
 
     private static string ResolvePageKey(string? raw)
@@ -1271,6 +1276,7 @@ public sealed partial class SettingsWindow : Window
         }
 
         _activePage = page;
+        _library.Analytics.TrackScreen(page == "about" ? "About" : "Settings");
         _companionPickingModel = false;
         _companionEditingKey = false;
         if (_library.Prefs.SettingsLastPage != page)
@@ -11569,7 +11575,7 @@ public sealed partial class SettingsWindow : Window
         });
         leftTop.Children.Add(new TextBlock
         {
-            Text = "读着听，听着读，进度接得上。\n没有服务器，不收集数据，\n书与笔记都留在你手里。",
+            Text = "读着听，听着读，进度接得上。\n没有账号与广告，\n书与笔记都留在你手里。",
             FontFamily = serif,
             FontSize = 13.5,
             LineHeight = 23,
@@ -12031,7 +12037,22 @@ public sealed partial class SettingsWindow : Window
 
         rightStack.Children.Add(MakeCard(
             MakeRow("问题与建议", "可附截图或文件，无需注册账号", feedbackRight),
-            MakeAboutNavRow("隐私说明", "仅存本机 · 无统计", async () => await UpdateAndFeedbackService.ShowPrivacySheetAsync(RootGrid.XamlRoot)),
+            MakeRow("匿名使用统计", "仅记录功能使用形态，不关联身份，绝不收集书名、笔记或搜索词", MakeSwitch(_library.Prefs.AnalyticsEnabled, v =>
+            {
+                bool prev = _library.Prefs.AnalyticsEnabled;
+                if (prev == v) return;
+                _library.Analytics.SetEnabled(v);
+                RecordPrefChange(
+                    nameof(DevicePrefs.AnalyticsEnabled),
+                    "匿名使用统计",
+                    v ? "开" : "关",
+                    prev ? "开" : "关",
+                    prev,
+                    v,
+                    undo: () => { _library.Analytics.SetEnabled(prev); if (_activePage == "about") RenderDynamicPage("about"); },
+                    redo: () => { _library.Analytics.SetEnabled(v); if (_activePage == "about") RenderDynamicPage("about"); });
+            })),
+            MakeAboutNavRow("隐私说明", "书库仅存本机 · 可关匿名统计", async () => await UpdateAndFeedbackService.ShowPrivacySheetAsync(RootGrid.XamlRoot)),
             MakeAboutNavRow("开源许可与致谢", "GPL-3.0 与组件清单", async () => await UpdateAndFeedbackService.ShowLicensesSheetAsync(RootGrid.XamlRoot)),
             MakeRow("源代码", null, srcBtn, compact: true)));
 

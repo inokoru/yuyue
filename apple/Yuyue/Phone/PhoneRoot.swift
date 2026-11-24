@@ -42,7 +42,7 @@ struct PhoneRoot: View {
                         PhoneShelf(library: library).nowPlayingBar(library, allowPodcast: false)
                     } label: { shelfLabel }
                     Tab(value: .notes) {
-                        PhoneNotes(library: library).nowPlayingBar(library, allowPodcast: true)
+                        PhoneNotes(library: library).airTrafficScreen("Notes").nowPlayingBar(library, allowPodcast: true)
                     } label: { tabLabel("笔记", .notes, line: "tab-notes", fill: "tab-notes-fill") }
                     Tab(value: .me) {
                         PhoneMe(library: library).nowPlayingBar(library, allowPodcast: true)
@@ -57,7 +57,7 @@ struct PhoneRoot: View {
                 TabView(selection: tabSelection) {
                     PhoneShelf(library: library).nowPlayingBar(library, allowPodcast: false)
                         .tabItem { shelfLabel }.tag(PhoneTab.shelf)
-                    PhoneNotes(library: library).nowPlayingBar(library, allowPodcast: true)
+                    PhoneNotes(library: library).airTrafficScreen("Notes").nowPlayingBar(library, allowPodcast: true)
                         .tabItem { tabLabel("笔记", .notes, line: "tab-notes", fill: "tab-notes-fill") }.tag(PhoneTab.notes)
                     PhoneMe(library: library).nowPlayingBar(library, allowPodcast: true)
                         .tabItem { meTab }.tag(PhoneTab.me)
@@ -67,6 +67,14 @@ struct PhoneRoot: View {
             }
         }
         .environment(chrome)
+        .onChange(of: tab) { _, new in
+            switch new {
+            case .shelf: AirTraffic.screen(chrome.onPodcasts ? "Podcasts" : "Shelf")
+            case .notes: AirTraffic.screen("Notes")
+            case .me: AirTraffic.screen("Me")
+            case .search: break
+            }
+        }
         .tint(tint.accent)
         .preferredColorScheme(mode.scheme)
         .fullScreenCover(item: Binding(get: { library.presented.map(Presented.init) }, set: { library.presented = $0?.id })) { book in
@@ -83,10 +91,11 @@ struct PhoneRoot: View {
             PodcastReaderView(library: library, issueID: item.id) {
                 library.podcastHub.requestedOpenIssueID = nil
             }
+            .airTrafficScreen("Podcasts")
             .presentationBackground(YYColor.bg)
         }
         .onOpenURL { url in
-            Task { await library.importFiles([url]) }
+            Task { await library.importFiles([url], source: "share_in") }
         }
         // One place for every tab: 书架, 我的 › 书库来源, 数据快照….
         .yyNotice(String(localized: "出了点问题"), message: library.alert ?? "", tone: .warn,

@@ -172,7 +172,7 @@ class MainActivity : ComponentActivity() {
             Intent.ACTION_SEND -> IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let { uris += it }
             Intent.ACTION_SEND_MULTIPLE -> IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let { uris += it }
         }
-        if (uris.isNotEmpty()) library.importUris(uris)
+        if (uris.isNotEmpty()) library.importUris(uris, source = "share_in")
         // Debug builds: `-e listen <书 id>,<章>,<句>` reads the book aloud from there.
         if (BuildConfig.DEBUG) intent.getStringExtra("listen")?.split(',')?.takeIf { it.size == 3 }?.let { (b, sec, n) ->
             runCatching { library.core.saveProgress(b, uniffi.yuyue_core.Position(sec.toUInt(), n.toUInt())) }
@@ -262,6 +262,23 @@ fun Root(library: Library) {
     val haze = rememberHazeState()
     val density = LocalDensity.current
     var barHeight by remember { mutableStateOf(0.dp) }
+    val presentedBook = library.presented?.let { id -> library.books.firstOrNull { it.id == id } }
+    val openPodcastID = if (library.hasPodcastHub) library.podcastHub.requestedOpenIssueID else null
+    val activeScreen: String? = when {
+        openPodcastID != null -> "Podcasts"
+        presentedBook != null -> "Reader"
+        pages.lastOrNull() == Page.Feedback -> "Feedback"
+        pages.isEmpty() -> when (tab) {
+            Tab.Shelf -> if (chrome.place == app.yuyue.shelf.ShelfPlace.Podcasts) "Podcasts" else "Shelf"
+            Tab.Notes -> "Notes"
+            Tab.Me -> null // Tracked inside MeScreen based on its route stack.
+            Tab.Search -> null
+        }
+        else -> null
+    }
+    LaunchedEffect(activeScreen) {
+        activeScreen?.let { app.yuyue.analytics.AirTraffic.screen(it) }
+    }
     Box(Modifier.fillMaxSize().background(YY.c.bg)) {
         // The page runs under the tab bar (and 播放条), which blurs what scrolls beneath it.
         CompositionLocalProvider(LocalTabBarHeight provides barHeight) {
@@ -285,7 +302,11 @@ fun Root(library: Library) {
                     null -> when (currentTab) {
                         Tab.Shelf -> ShelfScreen(library, chrome, openWifi = { pages += Page.Wifi }, openRemote = { pages += Page.Remote }, openWatched = { pages += Page.Watched }, openFeedback = { pages += Page.Feedback }, openRecord = { pages += Page.Record(it) })
                         Tab.Notes -> app.yuyue.notes.NotesScreen(library, notesPop)
-                        Tab.Me -> app.yuyue.me.MeScreen(library, mePop)
+                        Tab.Me -> app.yuyue.me.MeScreen(
+                            library = library,
+                            pop = mePop,
+                            isForeground = tab == Tab.Me && pages.isEmpty() && presentedBook == null && openPodcastID == null,
+                        )
                         Tab.Search -> app.yuyue.search.SearchScreen(library)
                     }
                     Page.Wifi -> app.yuyue.me.SubPage(t("Wi‑Fi 传书"), { pages.removeAt(pages.lastIndex) }) { app.yuyue.shelf.WifiPage(library) }
@@ -316,7 +337,6 @@ fun Root(library: Library) {
         // 有声书 matching its 收起 chevron), and closes the same way back; the last one stays drawn while it goes.
         var shownBook by remember { mutableStateOf<String?>(null) }
         var shownFormat by remember { mutableStateOf<uniffi.yuyue_core.BookFormat?>(null) }
-        val presentedBook = library.presented?.let { id -> library.books.firstOrNull { it.id == id } }
         if (presentedBook != null) {
             shownBook = presentedBook.id
             shownFormat = presentedBook.format
@@ -363,7 +383,6 @@ fun Root(library: Library) {
             }
         }
 
-        val openPodcastID = if (library.hasPodcastHub) library.podcastHub.requestedOpenIssueID else null
         var shownPodcast by remember { mutableStateOf<String?>(null) }
         if (openPodcastID != null) shownPodcast = openPodcastID
         androidx.compose.animation.AnimatedVisibility(

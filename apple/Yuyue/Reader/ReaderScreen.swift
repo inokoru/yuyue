@@ -92,14 +92,28 @@ struct ReaderScreen: View {
                 default: break
                 }
             } else if format == .pdf {
-                pdf = PdfModel(library: library, bookID: bookID)
+                let openedPdf = PdfModel(library: library, bookID: bookID)
+                pdf = openedPdf
+                if openedPdf.opened {
+                    AirTraffic.trackReadingOpened(format: "pdf", paperTheme: openedPdf.night ? "dark" : "plain")
+                }
             } else {
-                model = ReaderModel(library: library, bookID: bookID)
+                let openedModel = ReaderModel(library: library, bookID: bookID)
+                model = openedModel
+                if let detail = openedModel.detail {
+                    let resolved = PaperAppearance.shared.resolve(openedModel.settings)
+                    let paperTheme = resolved.custom != nil ? "other" : resolved.preset.tokens.id
+                    AirTraffic.trackReadingOpened(
+                        format: AirTraffic.resolveBookFormat(detail.summary.format),
+                        paperTheme: paperTheme
+                    )
+                }
                 #if os(macOS)
-                if let model { library.openModels.add(model) }
+                library.openModels.add(openedModel)
                 #endif
             }
         }
+        .airTrafficScreen("Reader")
         .onReceive(NotificationCenter.default.publisher(for: .bookRebuilt)) { n in
             // Read another way (编码和目录): the chapters changed under the open pages.
             guard n.object as? String == bookID, model != nil else { return }

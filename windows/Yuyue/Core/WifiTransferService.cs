@@ -228,13 +228,23 @@ public sealed class WifiTransferService : IDisposable
                             string ext = Path.GetExtension(entry.Name).ToLowerInvariant();
                             BookSummary summary;
                             if (ext == ".zip")
+                            {
                                 summary = await ImportZipArchiveAsync(entry.Id, entry.Name, entry.TempPath);
+                            }
                             else if (AudiobookImporter.Extensions.Contains(ext))
+                            {
                                 summary = await AudiobookImporter.ImportFilesAsync(_library, [entry.TempPath]);
+                                _library.Analytics.TrackBookImported(summary.Format.ToString(), "wifi", entry.Name);
+                            }
                             else if (LibraryService.SupportedExtensions.Contains(ext))
+                            {
                                 summary = await _library.ImportBookWithExtrasAsync(entry.TempPath);
+                                _library.Analytics.TrackBookImported(summary.Format.ToString(), "wifi", entry.Name);
+                            }
                             else
+                            {
                                 throw new InvalidOperationException($"不支持的文件格式：{ext}");
+                            }
 
                             TryCleanupUploadEntry(entry.TempPath);
                             LogEvent?.Invoke($"✓ 已导入《{summary.Title}》");
@@ -501,13 +511,18 @@ public sealed class WifiTransferService : IDisposable
                 foreach (string bp in extractedBooks)
                 {
                     var imported = await _library.ImportBookWithExtrasAsync(bp);
+                    _library.Analytics.TrackBookImported(imported.Format.ToString(), "wifi", bp);
                     first ??= imported;
                 }
                 return first!;
             }
 
             if (extractedAudios.Count > 0)
-                return await AudiobookImporter.ImportFilesAsync(_library, extractedAudios);
+            {
+                var audioBook = await AudiobookImporter.ImportFilesAsync(_library, extractedAudios);
+                _library.Analytics.TrackBookImported(audioBook.Format.ToString(), "wifi", extractedAudios[0]);
+                return audioBook;
+            }
 
             throw new InvalidOperationException("压缩包中未找到受支持的电子书或有声书文件。");
         }

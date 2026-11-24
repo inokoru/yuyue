@@ -591,6 +591,7 @@ class AudiobookPlayer(private val context: Context, private val library: Library
                 @Deprecated("old") override fun onError(id: String?) { if (id == last) main.post { filled(e, run) } }
                 override fun onDone(id: String?) { if (id == last) main.post { filled(e, run) } }
             })
+            app.yuyue.analytics.AirTraffic.trackTtsStarted("system", "audiobook")
             run.texts.forEachIndexed { k, text ->
                 e.speak(text, android.speech.tts.TextToSpeech.QUEUE_ADD, null, if (k == run.texts.lastIndex) last else "fill-$k")
             }
@@ -697,6 +698,7 @@ class AudiobookPlayer(private val context: Context, private val library: Library
         Session.claimAudio(this)
         exo.play()
         isPlaying = true
+        app.yuyue.analytics.AirTraffic.trackAudioFeatureUsed("audiobook_play")
         library.listening = bookID
         listened()
         main.removeCallbacks(tick)

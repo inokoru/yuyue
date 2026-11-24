@@ -24,6 +24,10 @@ packages:
   SnapshotTesting:
     url: https://github.com/pointfreeco/swift-snapshot-testing
     exactVersion: 1.19.7
+  # 匿名使用统计 (AirTraffic / PostHog; pinned to 3.98.2 for /batch compatibility and Swift 6.0).
+  PostHog:
+    url: https://github.com/PostHog/posthog-ios
+    exactVersion: 3.98.2
 
 settings:
   base:
@@ -64,6 +68,8 @@ targets:
         product: OnnxRuntimeC
       - package: Sparkle
         destinationFilters: [macOS]
+      - package: PostHog
+        product: PostHog
     scheme: {}
     info:
       path: Yuyue/Info.plist
