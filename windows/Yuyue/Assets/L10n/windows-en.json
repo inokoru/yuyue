@@ -311,5 +311,12 @@
   "附带最近运行日志（末尾 64 KB，随反馈公开）": "Attach recent runtime log (last 64 KB, posted publicly)",
   "附带最近运行日志（如有，随反馈公开）": "Attach recent runtime log (if present, posted publicly)",
   "正文和附件都会公开在 GitHub Issue 中，方便社区一起排查；不收集邮箱，请勿上传个人隐私或完整版权书。": "Text and attachments are posted publicly on GitHub Issues so the community can help debug. No email is collected; avoid uploading private data or copyrighted books.",
-  "离线扩展包": "Offline Add-ons"
+  "离线扩展包": "Offline Add-ons",
+  "已是最后一章": "Already at the last chapter",
+  "继续向下": "Pull down",
+  "继续向上": "Pull up",
+  "离线语音转写模型 (SenseVoice)": "Offline Speech-to-Text Model (SenseVoice)",
+  "已安装 (sense_voice.int8.onnx · 约 228 MB)": "Installed (sense_voice.int8.onnx · ~228 MB)",
+  "中英日韩粤高精度本机逐字稿与有声书转文字模型，按需下载": "High-accuracy local transcription for podcasts & audiobooks (ZH/EN/JA/KO/YUE), downloaded on demand",
+  "下载 (~228 MB)": "Download (~228 MB)"
 }

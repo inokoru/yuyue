@@ -1193,7 +1193,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                     trSp.Children.Add(new TextBlock { Text = "本机语音转逐字稿", FontSize = 12.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
                     trSp.Children.Add(new TextBlock
                     {
-                        Text = $"当前目标：《{transcribable.Title}》（支持本地 Whisper / 已配置转写 API / 系统离线语音识别）",
+                        Text = $"当前目标：《{transcribable.Title}》（支持 SenseVoice 离线模型 / 本地 Whisper / 已配置转写 API / 系统语音识别）",
                         FontSize = 11,
                         Foreground = ThemeHelper.Brush(p.T3),
                         TextWrapping = TextWrapping.Wrap,

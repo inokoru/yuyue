@@ -603,24 +603,49 @@ public sealed class PodcastService
         Directory.CreateDirectory(scratchDir);
         string lang = string.IsNullOrWhiteSpace(issue.Language) ? "zh-CN" : issue.Language;
 
-        onStatus?.Invoke("正在本机识别语音并生成时间轴文稿…");
-        var words = await WindowsTranscriber.TranscribeFileAsync(
-            _library,
-            localPath,
-            scratchDir,
-            fileIndex: 0,
-            globalOffsetSec: 0,
-            durationSec: Math.Max(1.0, issue.DurationSec),
-            lang: lang,
-            onLocalSecondsDone: sec => onStatus?.Invoke($"已转写 {System.TimeSpan.FromSeconds(sec):mm\\:ss}…"),
-            ct: ct);
+        try
+        {
+            if (!SenseVoiceListener.IsInstalled(_library.DataDir) && !await WindowsTranscriber.HasWhisperEndpointAsync(_library, ct))
+            {
+                try
+                {
+                    onStatus?.Invoke("正在准备 SenseVoice 离线语音转写模型 (~228 MB)…");
+                    await SenseVoiceListener.EnsureAsync(
+                        _library.DataDir,
+                        frac => onStatus?.Invoke($"正在下载 SenseVoice 离线转写模型 {(int)Math.Round(frac * 100)}%…"),
+                        ct);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch
+                {
+                    // Offline or disk full: fall through to built-in Windows SAPI
+                }
+            }
 
-        if (words.Length == 0)
-            throw new InvalidOperationException("转写未识别出有效文字，请确认本机 Whisper 服务或系统语音识别语言包可用。");
+            onStatus?.Invoke("正在本机识别语音并生成时间轴文稿…");
+            var words = await WindowsTranscriber.TranscribeFileAsync(
+                _library,
+                localPath,
+                scratchDir,
+                fileIndex: 0,
+                globalOffsetSec: 0,
+                durationSec: Math.Max(1.0, issue.DurationSec),
+                lang: lang,
+                onLocalSecondsDone: sec => onStatus?.Invoke($"已转写 {System.TimeSpan.FromSeconds(sec):mm\\:ss}…"),
+                ct: ct);
 
-        var sentences = GroupWordsIntoMagazineSentences(words, issue.ShowTitle, lang);
-        await Task.Run(() => _library.Core.PodcastSetTranscript(issueId, sentences, PodcastFidelity.L2Magazine), ct);
-        return sentences.Length;
+            if (words.Length == 0)
+                throw new InvalidOperationException("转写未识别出有效文字，请确认 SenseVoice 离线模型、本机 Whisper 服务或系统语音识别语言包可用。");
+
+            var sentences = GroupWordsIntoMagazineSentences(words, issue.ShowTitle, lang);
+            await Task.Run(() => _library.Core.PodcastSetTranscript(issueId, sentences, PodcastFidelity.L2Magazine), ct);
+            return sentences.Length;
+        }
+        finally
+        {
+            SenseVoiceListener.Unload();
+            try { if (Directory.Exists(scratchDir)) Directory.Delete(scratchDir, recursive: true); } catch { }
+        }
     }
 
     internal static MagazineSentence[] GroupWordsIntoMagazineSentences(HeardWord[] words, string defaultSpeaker, string lang)

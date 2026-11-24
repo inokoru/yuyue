@@ -414,7 +414,7 @@ public sealed class WifiTransferService : IDisposable
         if (body.Length > 0) await stream.WriteAsync(body, ct);
     }
 
-    private static bool TryParseQuery(string query, out Dictionary<string, string> dict)
+    internal static bool TryParseQuery(string query, out Dictionary<string, string> dict)
     {
         dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         try
@@ -422,7 +422,14 @@ public sealed class WifiTransferService : IDisposable
             foreach (var part in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
             {
                 int eq = part.IndexOf('=');
-                if (eq > 0) dict[Uri.UnescapeDataString(part[..eq])] = Uri.UnescapeDataString(part[(eq + 1)..]);
+                if (eq > 0)
+                {
+                    string rawK = part[..eq];
+                    string rawV = part[(eq + 1)..];
+                    if (HasMalformedPercentEscape(rawK) || HasMalformedPercentEscape(rawV))
+                        return false;
+                    dict[Uri.UnescapeDataString(rawK)] = Uri.UnescapeDataString(rawV);
+                }
             }
             return true;
         }
@@ -430,6 +437,20 @@ public sealed class WifiTransferService : IDisposable
         {
             return false;
         }
+    }
+
+    private static bool HasMalformedPercentEscape(string s)
+    {
+        for (int i = 0; i < s.Length; i++)
+        {
+            if (s[i] == '%')
+            {
+                if (i + 2 >= s.Length || !Uri.IsHexDigit(s[i + 1]) || !Uri.IsHexDigit(s[i + 2]))
+                    return true;
+                i += 2;
+            }
+        }
+        return false;
     }
 
     private async Task<BookSummary> ImportZipArchiveAsync(string uploadId, string zipFileName, string zipPath)

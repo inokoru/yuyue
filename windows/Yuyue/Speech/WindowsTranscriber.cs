@@ -57,6 +57,7 @@ public static class WindowsTranscriber
         }
         finally
         {
+            SenseVoiceListener.Unload();
             try { if (Directory.Exists(scratchDir)) Directory.Delete(scratchDir, recursive: true); } catch { }
         }
     }
@@ -140,6 +141,20 @@ public static class WindowsTranscriber
             throw new InvalidOperationException("无法解码音频文件为 16 kHz WAV。");
 
         double actualDur = Math.Max(durationSec, info.SampleCount / (double)Aligner.SampleRate);
+        if (SenseVoiceListener.IsInstalled(library.DataDir))
+        {
+            var svWords = await SenseVoiceListener.TranscribePcm16kWavAsync(
+                library.DataDir,
+                wavPath,
+                info,
+                lang,
+                globalOffsetSec,
+                onLocalSecondsDone,
+                ct);
+            if (svWords is { Length: > 0 })
+                return svWords;
+        }
+
         var endpoint = await ResolveWhisperEndpointAsync(library, ct);
         var allWords = new List<HeardWord>();
 
@@ -199,6 +214,23 @@ public static class WindowsTranscriber
 
         try
         {
+            if (!SenseVoiceListener.IsInstalled(library.DataDir) && await ResolveWhisperEndpointAsync(library, ct) is null)
+            {
+                try
+                {
+                    onProgress?.Invoke(0.01, "正在准备 SenseVoice 离线语音转写模型 (~228 MB)…");
+                    await SenseVoiceListener.EnsureAsync(
+                        library.DataDir,
+                        frac => onProgress?.Invoke(Math.Clamp(frac * 0.25, 0.01, 0.25), $"正在下载 SenseVoice 离线转写模型 {(int)Math.Round(frac * 100)}%…"),
+                        ct);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch
+                {
+                    // Offline or disk full: gracefully fall through to Windows built-in offline SAPI
+                }
+            }
+
             for (int i = 0; i < rec.Files.Length; i++)
             {
                 ct.ThrowIfCancellationRequested();
@@ -236,11 +268,15 @@ public static class WindowsTranscriber
         }
         finally
         {
+            SenseVoiceListener.Unload();
             try { if (Directory.Exists(scratchDir)) Directory.Delete(scratchDir, recursive: true); } catch { }
         }
     }
 
     private sealed record WhisperEndpoint(string Url, string? ApiKey, string Model);
+
+    internal static async Task<bool> HasWhisperEndpointAsync(LibraryService library, CancellationToken ct) =>
+        await ResolveWhisperEndpointAsync(library, ct) is not null;
 
     private static async Task<WhisperEndpoint?> ResolveWhisperEndpointAsync(LibraryService library, CancellationToken ct)
     {

@@ -12,13 +12,14 @@ and writes SHA256SUMS-windows-<arch>.txt + windows-update-<arch>.json.
 param(
     [ValidateSet("x64", "arm64")]
     [string]$Arch = "x64",
-    [string]$Version = "0.1.0",
-    [int]$BuildNumber = 1,
+    [string]$Version = "",
+    [int]$BuildNumber = 0,
     [switch]$SkipCoreBuild,
     [switch]$KeepAllLocales,
     [switch]$BuildInstaller,
     [string]$FeedbackTopic = "",
-    [string]$FeedbackPublicKey = ""
+    [string]$FeedbackPublicKey = "",
+    [string]$SignThumbprint = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,6 +28,41 @@ $WinDir = Join-Path $Root "windows"
 $Proj = Join-Path $WinDir "Yuyue\Yuyue.csproj"
 $Platform = if ($Arch -eq "arm64") { "ARM64" } else { "x64" }
 $Rid = "win-$Arch"
+
+[xml]$projXml = Get-Content $Proj
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = ($projXml.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1)
+    if ([string]::IsNullOrWhiteSpace($Version)) { $Version = "0.1.2" }
+}
+if ($BuildNumber -le 0) {
+    $fileVer = ($projXml.Project.PropertyGroup.FileVersion | Where-Object { $_ } | Select-Object -First 1)
+    if (-not [string]::IsNullOrWhiteSpace($fileVer)) {
+        $parts = $fileVer.Split('.')
+        if ($parts.Length -ge 4 -and ($parts[-1] -as [int]) -gt 0) {
+            $BuildNumber = [int]$parts[-1]
+        }
+    }
+    if ($BuildNumber -le 0) { $BuildNumber = 1 }
+}
+if ([string]::IsNullOrWhiteSpace($SignThumbprint) -and $env:YUYUE_SIGN_THUMBPRINT) {
+    $SignThumbprint = $env:YUYUE_SIGN_THUMBPRINT
+}
+
+function Invoke-OptionalCodeSign([string]$targetFile) {
+    if ([string]::IsNullOrWhiteSpace($SignThumbprint) -or -not (Test-Path $targetFile)) { return }
+    $signtool = Get-Command "signtool.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1
+    if (-not $signtool) {
+        $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | Select-Object -ExpandProperty FullName -First 1
+    }
+    if (-not $signtool) {
+        Write-Warning "signtool.exe not found; skipped Authenticode signing for $targetFile."
+        return
+    }
+    Write-Host "      Signing $(Split-Path -Leaf $targetFile) with certificate $SignThumbprint..."
+    & $signtool sign /sha1 $SignThumbprint /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 $targetFile
+    if ($LASTEXITCODE -ne 0) { throw "signtool.exe failed on $targetFile" }
+}
 
 if ([string]::IsNullOrWhiteSpace($FeedbackTopic) -and $env:YUYUE_FEEDBACK_TOPIC) {
     $FeedbackTopic = $env:YUYUE_FEEDBACK_TOPIC
@@ -119,6 +155,7 @@ if ($missing.Count -gt 0) {
     throw "Release staging verification failed! Missing required files: $($missing -join ', ')"
 }
 Write-Host "      All $($requiredFiles.Count) required runtime assets verified."
+Invoke-OptionalCodeSign (Join-Path $StageDir "Yuyue.exe")
 
 Write-Host "[5/6] Compressing portable archive -> $ZipPath"
 Compress-Archive -Path $StageDir -DestinationPath $ZipPath -CompressionLevel Optimal
@@ -148,6 +185,7 @@ if ($BuildInstaller) {
         if ($LASTEXITCODE -ne 0) { throw "ISCC.exe failed" }
         $setupPath = Join-Path $DistRoot "$StageName-Setup.exe"
         if (Test-Path $setupPath) {
+            Invoke-OptionalCodeSign $setupPath
             $setupMb = [Math]::Round((Get-Item $setupPath).Length / 1MB, 1)
             Write-Host "      Installer ready: $(Split-Path -Leaf $setupPath) ($setupMb MB)"
             $artifacts += $setupPath

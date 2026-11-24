@@ -6362,6 +6362,42 @@ public sealed partial class SettingsWindow : Window
                     alignerInstalled ? "已安装 (mms_fa.int8.onnx · 约 303 MB)" : "本地离线的 MMS 听读自动对齐模型，按需下载",
                     alignerBtn));
 
+                bool svInstalled = SenseVoiceListener.IsInstalled(dataDir);
+                var svBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources[svInstalled ? "YYIconButtonStyle" : "YYPillButtonStyle"],
+                    Content = svInstalled ? "移除" : "下载 (~228 MB)",
+                    Foreground = svInstalled ? ThemeHelper.Brush(pal.Danger) : ThemeHelper.Brush(pal.T1),
+                    FontSize = 11.5,
+                };
+                svBtn.Click += async (_, _) =>
+                {
+                    if (SenseVoiceListener.IsInstalled(dataDir))
+                    {
+                        SenseVoiceListener.DeleteModel(dataDir);
+                        RenderDynamicPage("storage");
+                        return;
+                    }
+                    svBtn.IsEnabled = false;
+                    try
+                    {
+                        await SenseVoiceListener.EnsureAsync(dataDir, frac =>
+                            DispatcherQueue.TryEnqueue(() => svBtn.Content = $"下载中 {Math.Round(frac * 100)}%"),
+                            CancellationToken.None);
+                        RenderDynamicPage("storage");
+                    }
+                    catch (Exception ex)
+                    {
+                        svBtn.IsEnabled = true;
+                        svBtn.Content = "重试下载";
+                        RecordChange("离线转写模型", ex.Message);
+                    }
+                };
+                extRows.Add(MakeRow(
+                    "离线语音转写模型 (SenseVoice)",
+                    svInstalled ? "已安装 (sense_voice.int8.onnx · 约 228 MB)" : "中英日韩粤高精度本机逐字稿与有声书转文字模型，按需下载",
+                    svBtn));
+
                 bool soundsInstalled = SoundLibraryService.IsInstalled(dataDir);
                 var soundsBtn = new Button
                 {
