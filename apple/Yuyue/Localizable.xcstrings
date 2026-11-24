@@ -45526,6 +45526,156 @@
           }
         }
       }
+    },
+    "下好后会提示你切换" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You’ll be prompted to switch once downloaded"
+          }
+        }
+      }
+    },
+    "切换" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switch"
+          }
+        }
+      }
+    },
+    "刷新订阅节目" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh subscriptions"
+          }
+        }
+      }
+    },
+    "打开听书面板可确认切换" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open the Listen card to confirm switching"
+          }
+        }
+      }
+    },
+    "暂不" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not now"
+          }
+        }
+      }
+    },
+    "确认后从当前句切换，不自动打断" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switches from the current sentence after confirmation"
+          }
+        }
+      }
+    },
+    "离线旁白「%@」已下好" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline narrator “%@” is ready"
+          }
+        }
+      }
+    },
+    "离线旁白下载中，下好后会提示你切换" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloading offline narrator; you’ll be prompted when ready"
+          }
+        }
+      }
+    },
+    "离线语音设置与下载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline voice settings & downloads"
+          }
+        }
+      }
+    },
+    "离线默认旁白已下好，可在下方确认切换" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline narrator is ready — confirm below to switch"
+          }
+        }
+      }
+    },
+    "系统语音说明" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About system voices"
+          }
+        }
+      }
+    },
+    "已选择 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Selected %@"
+          }
+        }
+      }
+    },
+    "选择 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose %@"
+          }
+        }
+      }
+    },
+    "%@设置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ settings"
+          }
+        }
+      }
+    },
+    "%@连接与地址" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ connection & URL"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
