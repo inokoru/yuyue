@@ -142,8 +142,8 @@ object LiveVoiceModel {
             state = State.Unsupported
             return
         }
-        scope.launch(Dispatchers.IO) {
-            val isReady = run {
+        scope.launch {
+            val isReady = withContext(Dispatchers.IO) {
                 if (modelInstalled(dataDir)) {
                     runCatching { core.liveVoiceSetDir(folder(dataDir).path) }
                 }
@@ -168,7 +168,11 @@ object LiveVoiceModel {
             VoicePack.register(core, dataDir)
         }
         if (ready(dataDir) && state !is State.Ready) {
-            state = State.Ready
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                state = State.Ready
+            } else {
+                scope.launch { if (state !is State.Ready) state = State.Ready }
+            }
         }
     }
 
