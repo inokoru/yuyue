@@ -1,5 +1,4 @@
 import Foundation
-import Synchronization
 #if canImport(FoundationModels)
 import FoundationModels
 #endif

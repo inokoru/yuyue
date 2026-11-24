@@ -2,7 +2,6 @@ import AVFoundation
 import CryptoKit
 import Foundation
 import os
-import Synchronization
 import YuyueCore
 
 /// 外部语音来源：支持国内主流语音云（小米 MiMo、硅基流动、阿里云百炼、MiniMax）、国际语音云（微软 Azure、

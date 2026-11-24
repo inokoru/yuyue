@@ -209,7 +209,7 @@ struct PhoneSync: View {
             Task {
                 do {
                     try await sync.connectGoogle { url, scheme in
-                        try await webAuthenticationSession.authenticate(using: url, callback: .customScheme(scheme), additionalHeaderFields: [:])
+                        try await webAuthenticationSession.authenticate(using: url, callbackURLScheme: scheme)
                     }
                 } catch {
                     problem = Sync.message(for: error)
@@ -231,7 +231,7 @@ struct PhoneSync: View {
         Image(systemName: symbol)
             .font(YYUI.font(12, .bold))
             .foregroundStyle(color)
-            .symbolEffect(.rotate, isActive: sync.state == .syncing)
+            .yySymbolRotate(isActive: sync.state == .syncing)
             .contentTransition(.symbolEffect(.replace))
             .frame(width: YYUI.s(32), height: YYUI.s(32))
             .background(color.opacity(0.14), in: .circle)

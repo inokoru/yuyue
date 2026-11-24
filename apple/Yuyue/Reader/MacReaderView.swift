@@ -75,8 +75,7 @@ struct MacReaderView: View {
         .tint(tint.accent)
         .toolbar { toolbar }
         .toolbar(model.immersive ? .hidden : .visible, for: .windowToolbar)
-        .toolbar(removing: .title)
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .yyHideWindowToolbarChrome()
         // 18 in, in the middle of the 58-high bar.
         .trafficLights(CGPoint(x: 24, y: 29))
         .navigationTitle(model.detail?.summary.title ?? String(localized: "读书"))
@@ -130,8 +129,7 @@ struct MacReaderView: View {
                 thought = nil
             }
         }
-        .translationPresentation(isPresented: Binding(get: { translating != nil }, set: { if !$0 { translating = nil } }), text: translating ?? "")
-        .translationTask(model.translator.configuration) { session in await model.translator.run(session) }
+        .yySystemTranslation(presented: $translating, translator: model.translator)
         .onAppear {
             // A question from 搜索 · 问 opened this window on 书伴.
             if model.companion.turns.isEmpty {

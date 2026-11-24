@@ -101,8 +101,7 @@ struct MacSettings: View {
             }
         }
         // The title bar is see-through over the three columns; no toolbar, no title in it.
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-        .toolbar(removing: .title)
+        .yyHideWindowToolbarChrome()
         .frame(minWidth: 860, idealWidth: 1020, maxWidth: .infinity, minHeight: 540, idealHeight: height, maxHeight: .infinity)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
         .tint(tint.accent)
@@ -566,11 +565,15 @@ struct SettingsCard<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Group(subviews: content) { rows in
-                ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
-                    if i > 0 { Rectangle().fill(YYColor.line).frame(height: 0.5).padding(.horizontal, 16) }
-                    row
+            if #available(macOS 15.0, iOS 18.0, *) {
+                Group(subviews: content) { rows in
+                    ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
+                        if i > 0 { Rectangle().fill(YYColor.line).frame(height: 0.5).padding(.horizontal, 16) }
+                        row
+                    }
                 }
+            } else {
+                content
             }
         }
         .background(YYColor.card, in: .rect(cornerRadius: 12))

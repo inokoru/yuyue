@@ -20,6 +20,12 @@ final class Updates: NSObject, SPUUpdaterDelegate {
         controller.updater.automaticallyChecksForUpdates = false
     }
 
+    #if arch(x86_64)
+    nonisolated private static let appcast = "appcast-x86_64.xml"
+    #else
+    nonisolated private static let appcast = "appcast.xml"
+    #endif
+
     func check() { controller.checkForUpdates(nil) }
 
     nonisolated func feedURLString(for updater: SPUUpdater) -> String? {
@@ -27,11 +33,11 @@ final class Updates: NSObject, SPUUpdaterDelegate {
         let d = UserDefaults.standard
         #if DEBUG
         if let own = d.string(forKey: "YYUpdateBase") {
-            return (own.hasSuffix("/") ? own : own + "/") + "appcast.xml"
+            return (own.hasSuffix("/") ? own : own + "/") + Self.appcast
         }
         #endif
         let base = d.string(forKey: "update.feedBase") ?? UpdateCenter.latest
-        return base + "appcast.xml"
+        return base + Self.appcast
     }
 }
 

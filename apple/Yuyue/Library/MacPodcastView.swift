@@ -116,8 +116,7 @@ struct MacPodcastView: View {
                 homeCanvas
             }
         }
-        .toolbar(removing: .title)
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .yyHideWindowToolbarChrome()
         .sheet(isPresented: $adding) {
             PodcastAddSheet(library: library, initialQuery: addInitialQuery) {
                 adding = false

@@ -4,7 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "YuyueCore",
-    platforms: [.iOS(.v18), .macOS(.v15)],
+    platforms: [.iOS(.v17), .macOS(.v14)],
     products: [.library(name: "YuyueCore", targets: ["YuyueCore"])],
     targets: [
         .binaryTarget(name: "YuyueCoreFFI", path: "YuyueCoreFFI.xcframework"),

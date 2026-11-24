@@ -147,7 +147,7 @@ struct SyncSettings: View {
         Image(systemName: symbol)
             .font(.yy(size: 14, weight: .bold))
             .foregroundStyle(color)
-            .symbolEffect(.rotate, isActive: sync.state == .syncing)
+            .yySymbolRotate(isActive: sync.state == .syncing)
             .frame(width: 32, height: 32)
             .background(color.opacity(0.13), in: .circle)
     }
@@ -264,7 +264,7 @@ struct SyncSettings: View {
             Task {
                 do {
                     try await sync.connectGoogle { url, scheme in
-                        try await webAuthenticationSession.authenticate(using: url, callback: .customScheme(scheme), additionalHeaderFields: [:])
+                        try await webAuthenticationSession.authenticate(using: url, callbackURLScheme: scheme)
                     }
                 } catch {
                     googleProblem = Sync.message(for: error)

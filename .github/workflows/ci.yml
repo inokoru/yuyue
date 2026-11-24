@@ -126,7 +126,7 @@ jobs:
 
   apple:
     name: Apple 编译
-    # 要能编 macOS 15 / iOS 18 以上、带 Icon Composer 图标的 Xcode；runner 的 Xcode 跟不上本机时改这里。
+    # 要能编 macOS 14 / iOS 17 以上、带 Icon Composer 图标的 Xcode；runner 的 Xcode 跟不上本机时改这里。
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
@@ -135,7 +135,7 @@ jobs:
           xcode-version: latest-stable
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim
+          targets: aarch64-apple-darwin,x86_64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: core
@@ -162,8 +162,8 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project Yuyue.xcodeproj -scheme Yuyue -configuration Debug \
-            -destination 'platform=macOS' -derivedDataPath build/dd \
-            CODE_SIGNING_ALLOWED=NO build > /tmp/xcodebuild-mac.log 2>&1 || {
+            -destination 'generic/platform=macOS' -derivedDataPath build/dd \
+            ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build > /tmp/xcodebuild-mac.log 2>&1 || {
               grep -E '(: error:|fatal error:|\*\* BUILD FAILED \*\*)' /tmp/xcodebuild-mac.log | head -80 || true
               tail -40 /tmp/xcodebuild-mac.log
               exit 1

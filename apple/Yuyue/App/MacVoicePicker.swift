@@ -737,7 +737,7 @@ struct VoiceSourcePage: View {
                 }
                 .scrollIndicators(.never)
                 .id(source)
-                .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y > 2 } action: { _, now in scrolled = now }
+                .yyOnScrollOffsetPast(2) { scrolled = $0 }
                 .mask {
                     // Only once scrolled: the first voice isn't faded where it rests.
                     VStack(spacing: 0) {
@@ -1818,7 +1818,7 @@ private struct PinnedVoice: View {
             }
             .accessibilityLabel(Text("念你的\(book.title)"))
                 .font(.yy(size: 11, weight: .medium))
-                .foregroundStyle(scheme == .dark ? YYColor.t2 : c.ink.mix(with: YYColor.t2, by: 0.2))
+                .foregroundStyle(scheme == .dark ? YYColor.t2 : c.ink.yyMix(with: YYColor.t2, by: 0.2))
                 .lineLimit(1)
         }
         .padding(.leading, 8).padding(.trailing, 10)

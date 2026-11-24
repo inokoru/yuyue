@@ -1,7 +1,6 @@
 import AVFoundation
 import CoreML
 import Foundation
-import Synchronization
 import YuyueCore
 
 /// 声纹: a speaker-embedding model (CAM++ and its kind, as Core ML) that turns a stretch of voice
@@ -103,7 +102,15 @@ nonisolated enum SpeakerPrint {
         var v: [Float] = []
         let n = e.count
         if e.dataType == .float16 {
-            e.withUnsafeBufferPointer(ofType: Float16.self) { p in v = (0..<n).map { Float(p[$0]) } }
+            let step = e.strides.last?.intValue ?? 1
+            e.withUnsafeBytes { raw in
+                let p = raw.bindMemory(to: UInt16.self)
+                #if arch(arm64)
+                v = (0..<n).map { Float(Float16(bitPattern: p[$0 * step])) }
+                #else
+                v = (0..<n).map { Aligner.float(fromHalfBits: p[$0 * step]) }
+                #endif
+            }
         } else {
             e.withUnsafeBufferPointer(ofType: Float.self) { p in v = Array(p.prefix(n)) }
         }

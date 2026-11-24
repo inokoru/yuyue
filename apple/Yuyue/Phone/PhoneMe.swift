@@ -59,7 +59,7 @@ struct PhoneMe: View {
             .navigationTitle("我的")
             .toolbar(InnerDisplay.isOn(sizeClass) ? .automatic : .hidden, for: .navigationBar)
             // Scrolled past the title, 我的 stays at the top, as the system's bar had it.
-            .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 50 } action: { _, past in
+            .yyOnScrollOffsetPast(50, includeTopInset: true) { past in
                 withAnimation(YYMotion.quick) { titlePinned = past }
             }
             .overlay(alignment: .top) {

@@ -59,9 +59,11 @@ if [ "${SKIP_PACKAGE:-}" != 1 ]; then
 fi
 
 DMG="$DIST/Yuyue-$VERSION-mac-arm64.dmg"
+DMG_X64="$DIST/Yuyue-$VERSION-mac-x86_64.dmg"
 IPA="$DIST/Yuyue-$VERSION-ios-unsigned.ipa"
 APK="$DIST/Yuyue-$VERSION-android.apk"
 APP="$ROOT/apple/build/release-mac/Build/Products/Release/Yuyue.app"
+APP_X64="$ROOT/apple/build/release-mac-x86_64/Build/Products/Release/Yuyue.app"
 if [ ! -f "$APK" ]; then
   if [ "$LOCAL" = 1 ] && [ -f "$DIST/Yuyue-$VERSION-android-test.apk" ]; then
     APK="$DIST/Yuyue-$VERSION-android-test.apk"
@@ -70,17 +72,20 @@ if [ ! -f "$APK" ]; then
     exit 1
   fi
 fi
-for f in "$DMG" "$IPA" "$APP"; do [ -e "$f" ] || { echo "缺 $f" >&2; exit 1; }; done
+for f in "$DMG" "$DMG_X64" "$IPA" "$APP" "$APP_X64"; do [ -e "$f" ] || { echo "缺 $f" >&2; exit 1; }; done
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
-# —— Mac：Sparkle 用的 zip、签名、更新日志页、appcast.xml ——
+# —— Mac：Sparkle 用的 zip、签名、更新日志页、appcast.xml（Apple 芯片）与 appcast-x86_64.xml（Intel） ——
 ZIP="Yuyue-$VERSION-mac-arm64.zip"
+ZIP_X64="Yuyue-$VERSION-mac-x86_64.zip"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT/$ZIP"
-SIGN_UPDATE="$(find "$ROOT/apple/build/release-mac/SourcePackages/artifacts" -path '*Sparkle*/bin/sign_update' -type f 2>/dev/null | head -1)"
+ditto -c -k --sequesterRsrc --keepParent "$APP_X64" "$OUT/$ZIP_X64"
+SIGN_UPDATE="$(find "$ROOT/apple/build/release-mac/SourcePackages/artifacts" "$ROOT/apple/build/release-mac-x86_64/SourcePackages/artifacts" -path '*Sparkle*/bin/sign_update' -type f 2>/dev/null | head -1)"
 [ -n "$SIGN_UPDATE" ] || { echo "找不到 Sparkle 的 sign_update（先打一次 Mac 包）" >&2; exit 1; }
 SIG="$("$SIGN_UPDATE" --ed-key-file "$KEY" "$OUT/$ZIP")" # sparkle:edSignature="…" length="…"
+SIG_X64="$("$SIGN_UPDATE" --ed-key-file "$KEY" "$OUT/$ZIP_X64")"
 
 page() { # 语言 标题 → 更新窗口里显示的那页（字体、纸色和 App 一样，深色跟系统）
   cat <<HTML
@@ -108,7 +113,8 @@ page zh-Hans "语阅 $VERSION" "$DATE" "$(yuyue release-notes "$ROOT/CHANGELOG.m
 page en "Yuyue $VERSION" "$DATE" "$(yuyue release-notes "$ROOT/CHANGELOG.md" "$VERSION" html-en)" > "$OUT/notes-en.html"
 
 PUBDATE="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
-cat > "$OUT/appcast.xml" <<XML
+write_appcast() { # out-file zip-name sig-attrs
+  cat > "$1" <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
   <channel>
@@ -118,15 +124,18 @@ cat > "$OUT/appcast.xml" <<XML
       <pubDate>$PUBDATE</pubDate>
       <sparkle:version>$BUILD</sparkle:version>
       <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
-      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
       <sparkle:releaseNotesLink>$BASE/notes-en.html</sparkle:releaseNotesLink>
       <sparkle:releaseNotesLink xml:lang="zh-Hans">$BASE/notes-zh.html</sparkle:releaseNotesLink>
       <sparkle:fullReleaseNotesLink>https://github.com/$REPO/blob/main/CHANGELOG.md</sparkle:fullReleaseNotesLink>
-      <enclosure url="$BASE/$ZIP" type="application/octet-stream" $SIG />
+      <enclosure url="$BASE/$2" type="application/octet-stream" $3 />
     </item>
   </channel>
 </rss>
 XML
+}
+write_appcast "$OUT/appcast.xml" "$ZIP" "$SIG"
+write_appcast "$OUT/appcast-x86_64.xml" "$ZIP_X64" "$SIG_X64"
 
 # —— Android、iPhone：update.json ——
 APK_NAME="Yuyue-$VERSION-android.apk"
@@ -146,7 +155,7 @@ json.dump(u, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 PY
 fi
 
-cp "$DMG" "$IPA" "$ROOT/CHANGELOG.md" "$OUT/"
+cp "$DMG" "$DMG_X64" "$IPA" "$ROOT/CHANGELOG.md" "$OUT/"
 yuyue release-notes "$ROOT/CHANGELOG.md" "$VERSION" md > "$DIST/release-$VERSION-notes.md"
 
 if [ "$LOCAL" = 1 ]; then

@@ -1,5 +1,4 @@
 import Foundation
-import Synchronization
 import YuyueCore
 
 /// 本机模型与字体的统一多源自动下载与断点续传。

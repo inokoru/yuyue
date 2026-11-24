@@ -1,5 +1,4 @@
 import Foundation
-import Synchronization
 
 /// Microsoft Edge Read Aloud WebSocket TTS client (keyless, v2 `Sec-MS-GEC` token).
 ///

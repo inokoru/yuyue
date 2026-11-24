@@ -70,9 +70,9 @@
 
 从 [GitHub Releases](https://github.com/inokoru/yuyue/releases) 下载。语阅目前不上架应用商店，也没有购买 Apple 开发者签名证书，安装时会多几步。现阶段 **Mac 和 Android 最容易装上**（均支持应用内检查更新），iPhone 与 iPad 仅适合愿意自行签名的进阶用户，**Windows 端正在开发中**。
 
-### Mac（Apple 芯片，macOS 15 及以上）
+### Mac（Apple 芯片 / Intel，macOS 14 及以上）
 
-1. 下载 `.dmg`，打开后把语阅拖进“应用程序”。
+1. 下载对应芯片的 `.dmg`（Apple 芯片选 `arm64`，Intel 芯片选 `x86_64`），打开后把语阅拖进“应用程序”。
 2. 第一次打开会被系统拦下，前往“系统设置 → 隐私与安全性”，点一次“仍要打开”。
 
 API Key 与网盘密码保存在 App 沙盒目录内的本机权限文件中（避免无开发者证书签名更新时反复弹出系统钥匙串授权），仅当前系统账号可读，不进同步、不进快照。
@@ -81,7 +81,7 @@ API Key 与网盘密码保存在 App 沙盒目录内的本机权限文件中（�
 
 下载 `.apk`，允许浏览器或文件管理器安装未知来源的应用后即可安装。
 
-### iPhone、iPad（iOS 18 及以上，进阶用户）
+### iPhone、iPad（iOS 17 及以上，进阶用户）
 
 需使用 [Impactor](https://github.com/claration/Impactor) 和你自己的 Apple ID 给未签名 `.ipa` 签名安装，或使用 Xcode 从源码编译：
 

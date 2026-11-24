@@ -15,9 +15,6 @@ struct ForeignSettings: View {
     @AppStorage(ForeignPrefs.glossKey) private var gloss = true
     @AppStorage(ForeignPrefs.levelKey) private var level = 3
     @AppStorage(ForeignPrefs.glossVocabKey) private var glossVocab = false
-    @State private var status: LanguageAvailability.Status?
-    @State private var download: TranslationSession.Configuration?
-    @State private var failed: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -57,17 +54,38 @@ struct ForeignSettings: View {
             }
             .onChange(of: mark) { NotificationCenter.default.post(name: .vocabChanged, object: nil) }
             SettingsHeading(String(localized: "翻译"))
-            SettingsCard {
-                SettingsRow(String(localized: "系统离线翻译"), detail: String(localized: "本地离线运行，原文不上传；供整页译文与双击整句翻译使用")) {
-                    translationState
+            if #available(macOS 15.0, *) {
+                MacTranslationSettingsSection()
+            } else {
+                SettingsCard {
+                    SettingsRow(String(localized: "系统离线翻译"), detail: String(localized: "本地离线运行，原文不上传；供整页译文与双击整句翻译使用")) {
+                        Text("当前系统不支持").font(.yy(size: 12)).foregroundStyle(YYColor.t3)
+                            .lineLimit(1).fixedSize()
+                    }
                 }
             }
-            if let failed {
-                Label(failed, systemImage: "exclamationmark.circle")
-                    .font(.yy(size: 11)).foregroundStyle(YYColor.danger)
-                    .padding(.leading, 16)
-            }
             Spacer(minLength: 0)
+        }
+    }
+
+    private func openDictionary() {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Dictionary") {
+            NSWorkspace.shared.openApplication(at: url, configuration: .init())
+        }
+    }
+}
+
+@available(macOS 15.0, *)
+private struct MacTranslationSettingsSection: View {
+    @State private var status: LanguageAvailability.Status?
+    @State private var download: TranslationSession.Configuration?
+    @State private var failed: String?
+
+    var body: some View {
+        SettingsCard {
+            SettingsRow(String(localized: "系统离线翻译"), detail: String(localized: "本地离线运行，原文不上传；供整页译文与双击整句翻译使用")) {
+                translationState
+            }
         }
         .task { await check() }
         .translationTask(download) { session in
@@ -81,6 +99,11 @@ struct ForeignSettings: View {
             }
             download = nil
             await check()
+        }
+        if let failed {
+            Label(failed, systemImage: "exclamationmark.circle")
+                .font(.yy(size: 11)).foregroundStyle(YYColor.danger)
+                .padding(.leading, 16)
         }
     }
 
@@ -106,12 +129,6 @@ struct ForeignSettings: View {
 
     private func check() async {
         status = await LanguageAvailability().status(from: Locale.Language(identifier: "en"), to: Translator.target)
-    }
-
-    private func openDictionary() {
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Dictionary") {
-            NSWorkspace.shared.openApplication(at: url, configuration: .init())
-        }
     }
 }
 /// 导入 MDict 词典: the ones imported, looked up first and in this order; 导入 reads a `.mdx`

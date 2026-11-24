@@ -43,11 +43,15 @@ struct NoteCard<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Group(subviews: content) { rows in
-                ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
-                    if i > 0 { Rectangle().fill(YYColor.line).frame(height: 0.5) }
-                    row
+            if #available(macOS 15.0, iOS 18.0, *) {
+                Group(subviews: content) { rows in
+                    ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
+                        if i > 0 { Rectangle().fill(YYColor.line).frame(height: 0.5) }
+                        row
+                    }
                 }
+            } else {
+                content
             }
         }
         .padding(.horizontal, 20)

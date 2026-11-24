@@ -1,7 +1,6 @@
 import CoreML
 import AVFoundation
 import Foundation
-import Synchronization
 import YuyueCore
 
 /// 强制对齐: Meta's MMS alignment model, 8-bit, as Core ML. It turns a
@@ -123,8 +122,13 @@ nonisolated enum Aligner {
             // The model gives Float16 (it runs in half precision); read either.
             let s1 = e.strides[1].intValue, s2 = e.strides[2].intValue
             if e.dataType == .float16 {
-                e.withUnsafeBufferPointer(ofType: Float16.self) { p in
-                    for f in lo..<hi { for c in 0..<classes { em.append(Float(p[f * s1 + c * s2])) } }
+                e.withUnsafeBytes { raw in
+                    let p = raw.bindMemory(to: UInt16.self)
+                    #if arch(arm64)
+                    for f in lo..<hi { for c in 0..<classes { em.append(Float(Float16(bitPattern: p[f * s1 + c * s2]))) } }
+                    #else
+                    for f in lo..<hi { for c in 0..<classes { em.append(Self.float(fromHalfBits: p[f * s1 + c * s2])) } }
+                    #endif
                 }
             } else {
                 e.withUnsafeBufferPointer(ofType: Float.self) { p in
@@ -137,6 +141,21 @@ nonisolated enum Aligner {
             progress(Double(min(start, end) - first) / rate)
         }
         return (em, em.count / letters, Double(min(wave.end, stop) - first) / rate)
+    }
+
+    /// IEEE 754 binary16 → binary32, for x86_64 where Swift's `Float16` is unavailable.
+    static func float(fromHalfBits h: UInt16) -> Float {
+        let sign = UInt32(h & 0x8000) << 16
+        let exp = UInt32((h >> 10) & 0x1F)
+        let mant = UInt32(h & 0x03FF)
+        if exp == 0 {
+            if mant == 0 { return Float(bitPattern: sign) }
+            return (sign == 0 ? 1 : -1) * Float(mant) * 0x1p-24
+        }
+        if exp == 31 {
+            return Float(bitPattern: sign | 0x7F80_0000 | (mant << 13))
+        }
+        return Float(bitPattern: sign | ((exp + 112) << 23) | (mant << 13))
     }
 
     /// A file's sound, one channel at 16 kHz, decoded as it's asked for from `from` seconds on;

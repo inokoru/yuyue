@@ -32,7 +32,7 @@ struct PhoneShelf: View {
     @State private var newName = ""
     @State private var renaming: BookCollection?
     /// Back to the top when going to another place.
-    @State private var position = ScrollPosition(edge: .top)
+    @State private var scrollTopTick = 0
     /// 进度's order, the one its cards keep.
     @AppStorage("books.sort") private var bookSort = BookSort.recent
     @State private var editing: BookSummary?
@@ -200,56 +200,61 @@ struct PhoneShelf: View {
 
     /// Everything but the regular-width welcome, in one scroll.
     private var shelf: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                placeHeader
-                    .padding(.horizontal, inset)
-                    .padding(.top, 14)
-                if let book = continuing {
-                    continueRow(book)
+        ScrollViewReader { scrollProxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Color.clear.frame(height: 0).id("shelf-top")
+                    placeHeader
                         .padding(.horizontal, inset)
-                        .padding(.top, 18)
-                }
-                if readingRowShown {
-                    readingRow.padding(.top, 28)
-                }
-                if kind == .podcasts {
-                    Color.clear.frame(height: 18)
-                    PhonePodcasts(library: library, externalOpenedIssueID: $openedPodcastIssueID)
-                } else if kind == .books {
-                    Color.clear.frame(height: 18)
-                    PhoneBooks(library: library, status: $bookStatus, deleting: $deletingRecord) { showing = $0 } read: { open($0, nil) } pick: { picking = $0 }
-                } else if library.shelfBooks.isEmpty, place == .books {
-                    welcome
-                } else if shown.isEmpty {
-                    Color.clear.frame(height: 18)
-                    empty
-                } else {
-                    Color.clear.frame(height: 18)
-                    // 全部, how many, and their order — as 在读's own row above.
-                    HStack {
-                        Text("全部").font(.subheadline.weight(.semibold)).foregroundStyle(YYColor.t1)
-                        Text(String(localized: "\(shown.count) 本")).font(.footnote).foregroundStyle(YYColor.t3)
-                        Spacer()
-                        sortMenu
+                        .padding(.top, 14)
+                    if let book = continuing {
+                        continueRow(book)
+                            .padding(.horizontal, inset)
+                            .padding(.top, 18)
                     }
-                    .padding(.horizontal, inset)
-                    .padding(.bottom, 12)
-                    grid
+                    if readingRowShown {
+                        readingRow.padding(.top, 28)
+                    }
+                    if kind == .podcasts {
+                        Color.clear.frame(height: 18)
+                        PhonePodcasts(library: library, externalOpenedIssueID: $openedPodcastIssueID)
+                    } else if kind == .books {
+                        Color.clear.frame(height: 18)
+                        PhoneBooks(library: library, status: $bookStatus, deleting: $deletingRecord) { showing = $0 } read: { open($0, nil) } pick: { picking = $0 }
+                    } else if library.shelfBooks.isEmpty, place == .books {
+                        welcome
+                    } else if shown.isEmpty {
+                        Color.clear.frame(height: 18)
+                        empty
+                    } else {
+                        Color.clear.frame(height: 18)
+                        // 全部, how many, and their order — as 在读's own row above.
+                        HStack {
+                            Text("全部").font(.subheadline.weight(.semibold)).foregroundStyle(YYColor.t1)
+                            Text(String(localized: "\(shown.count) 本")).font(.footnote).foregroundStyle(YYColor.t3)
+                            Spacer()
+                            sortMenu
+                        }
+                        .padding(.horizontal, inset)
+                        .padding(.bottom, 12)
+                        grid
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
+                .padding(.bottom, 24)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
-            .padding(.bottom, 24)
-        }
-        .scrollPosition($position)
-        // Past the title, its chip takes its place at the top left.
-        .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 72 } action: { _, past in
-            withAnimation(YYMotion.standard) { scrolled = past }
-        }
-        // Past the top active podcast card (> 160pt), the floating `.mob-np` mini player bar slides in above the tab bar.
-        .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 160 } action: { _, past in
-            withAnimation(YYMotion.standard) { podcastScrolled = past }
+            .onChange(of: scrollTopTick) {
+                scrollProxy.scrollTo("shelf-top", anchor: .top)
+            }
+            // Past the title, its chip takes its place at the top left.
+            .yyOnScrollOffsetPast(72, includeTopInset: true) { past in
+                withAnimation(YYMotion.standard) { scrolled = past }
+            }
+            // Past the top active podcast card (> 160pt), the floating `.mob-np` mini player bar slides in above the tab bar.
+            .yyOnScrollOffsetPast(160, includeTopInset: true) { past in
+                withAnimation(YYMotion.standard) { podcastScrolled = past }
+            }
         }
     }
 
@@ -391,7 +396,7 @@ struct PhoneShelf: View {
             case .collection(let id): filter = .collection(id); kind = .all
             }
         }
-        position.scrollTo(edge: .top)
+        scrollTopTick &+= 1
     }
 
     private func info(_ p: ShelfPlace) -> PlaceInfo {

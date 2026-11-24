@@ -2,7 +2,6 @@ import AVFoundation
 import CryptoKit
 import Foundation
 import Observation
-import Synchronization
 import YuyueCore
 #if os(iOS)
 import UIKit

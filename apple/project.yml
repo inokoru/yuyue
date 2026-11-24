@@ -5,8 +5,8 @@ name: Yuyue
 options:
   bundleIdPrefix: app.yuyue
   deploymentTarget:
-    iOS: "18.0"
-    macOS: "15.0"
+    iOS: "17.0"
+    macOS: "14.0"
   developmentLanguage: zh-Hans
   createIntermediateGroups: true
   groupSortPosition: top
@@ -173,8 +173,8 @@ targets:
         # YUYUE_FEEDBACK_TOPIC / _PUBLIC_KEY come only from Config/Feedback.xcconfig (and the
         # local file it includes): a value here would win over the xcconfig. Unset expands to "".
         TARGETED_DEVICE_FAMILY: "1,2"
-        # Mac 只出 Apple 芯片版：Intel Mac 不支持 Float16，也不打算支持。
-        "ARCHS[sdk=macosx*]": arm64
+        # Mac 打包时分别出 Apple 芯片（arm64）与 Intel（x86_64）两个包。
+        "ARCHS[sdk=macosx*]": "$(ARCHS_STANDARD)"
         SUPPORTS_MACCATALYST: NO
         CODE_SIGN_STYLE: Automatic
         "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": Yuyue/Yuyue.entitlements

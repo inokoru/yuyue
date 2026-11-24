@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "OnnxRuntime",
-    platforms: [.iOS(.v18), .macOS(.v15)],
+    platforms: [.iOS(.v17), .macOS(.v14)],
     products: [
         .library(name: "OnnxRuntimeC", targets: ["OnnxRuntimeC"]),
     ],

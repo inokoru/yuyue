@@ -5,7 +5,6 @@ import Network
 import Observation
 import OnnxRuntimeC
 import SwiftUI
-import Synchronization
 import YuyueCore
 
 /// 跨端轻量离线神经旁白模型（`Kokoro-82M-v1.1-zh Int8`，Apache-2.0）。

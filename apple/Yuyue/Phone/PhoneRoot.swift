@@ -24,7 +24,7 @@ struct PhoneRoot: View {
 
     var body: some View {
         // 书架 tapped while already there: the shelf's places stand up over it.
-        TabView(selection: Binding(get: { tab }, set: { new in
+        let tabSelection = Binding<PhoneTab>(get: { tab }, set: { new in
             if new == .shelf, tab == .shelf {
                 let closing = chrome.switching
                 withAnimation(closing ? PhoneChrome.dismissMotion : PhoneChrome.motion) { chrome.switching = !closing }
@@ -34,21 +34,37 @@ struct PhoneRoot: View {
             if new == .notes, tab == .notes { chrome.notesPop &+= 1 }
             if new == .me, tab == .me { chrome.mePop &+= 1 }
             tab = new
-        })) {
-            Tab(value: .shelf) {
-                PhoneShelf(library: library).nowPlayingBar(library, allowPodcast: false)
-            } label: { shelfLabel }
-            Tab(value: .notes) {
-                PhoneNotes(library: library).nowPlayingBar(library, allowPodcast: true)
-            } label: { tabLabel("笔记", .notes, line: "tab-notes", fill: "tab-notes-fill") }
-            Tab(value: .me) {
-                PhoneMe(library: library).nowPlayingBar(library, allowPodcast: true)
-            } label: { meTab }
-            // 搜索 in its own circle on the right, only the icon. iOS 27 no longer sets the search
-            // tab apart by itself; the tab that stands apart is the `.prominent` one.
-            Tab(value: .search, role: Self.searchRole) {
-                PhoneSearch(library: library).nowPlayingBar(library, allowPodcast: true)
-            } label: { searchLabel }
+        })
+        Group {
+            if #available(iOS 18.0, *) {
+                TabView(selection: tabSelection) {
+                    Tab(value: .shelf) {
+                        PhoneShelf(library: library).nowPlayingBar(library, allowPodcast: false)
+                    } label: { shelfLabel }
+                    Tab(value: .notes) {
+                        PhoneNotes(library: library).nowPlayingBar(library, allowPodcast: true)
+                    } label: { tabLabel("笔记", .notes, line: "tab-notes", fill: "tab-notes-fill") }
+                    Tab(value: .me) {
+                        PhoneMe(library: library).nowPlayingBar(library, allowPodcast: true)
+                    } label: { meTab }
+                    // 搜索 in its own circle on the right, only the icon. iOS 27 no longer sets the search
+                    // tab apart by itself; the tab that stands apart is the `.prominent` one.
+                    Tab(value: .search, role: Self.searchRole) {
+                        PhoneSearch(library: library).nowPlayingBar(library, allowPodcast: true)
+                    } label: { searchLabel }
+                }
+            } else {
+                TabView(selection: tabSelection) {
+                    PhoneShelf(library: library).nowPlayingBar(library, allowPodcast: false)
+                        .tabItem { shelfLabel }.tag(PhoneTab.shelf)
+                    PhoneNotes(library: library).nowPlayingBar(library, allowPodcast: true)
+                        .tabItem { tabLabel("笔记", .notes, line: "tab-notes", fill: "tab-notes-fill") }.tag(PhoneTab.notes)
+                    PhoneMe(library: library).nowPlayingBar(library, allowPodcast: true)
+                        .tabItem { meTab }.tag(PhoneTab.me)
+                    PhoneSearch(library: library).nowPlayingBar(library, allowPodcast: true)
+                        .tabItem { searchLabel }.tag(PhoneTab.search)
+                }
+            }
         }
         .environment(chrome)
         .tint(tint.accent)
@@ -246,6 +262,7 @@ struct PhoneRoot: View {
         }
     }
 
+    @available(iOS 18.0, *)
     private static var searchRole: TabRole {
         #if compiler(>=6.4)
         if #available(iOS 27.0, *) { return .prominent }

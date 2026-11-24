@@ -1,5 +1,4 @@
 import AVFoundation
-import Synchronization
 
 /// A voice that comes with the system. AVSpeechSynthesizer renders it into buffers instead of
 /// playing it, so it plays through the same player as every other voice.

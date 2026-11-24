@@ -2,7 +2,6 @@ import AuthenticationServices
 import Foundation
 import Network
 import Security
-import Synchronization
 import YuyueCore
 
 /// 同步, with no server of ours: every device keeps one file in a folder the user owns (a WebDAV

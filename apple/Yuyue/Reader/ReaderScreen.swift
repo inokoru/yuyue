@@ -360,8 +360,7 @@ private struct ReaderContent: View {
                     thought = nil
                 }
             }
-            .translationPresentation(isPresented: Binding(get: { translating != nil }, set: { if !$0 { translating = nil } }), text: translating ?? "")
-            .translationTask(model.translator.configuration) { session in await model.translator.run(session) }
+            .yySystemTranslation(presented: $translating, translator: model.translator)
             .statusBarHidden(model.immersive ? hidesStatusBar : !model.chromeShown)
             .persistentSystemOverlays(model.immersive && !model.chromeShown ? .hidden : .automatic)
             .modifier(SpeakerOthersSheet(model: model))

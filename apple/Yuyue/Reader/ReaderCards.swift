@@ -257,7 +257,11 @@ struct MarkText: View {
 
     var body: some View {
         if mark.style == .wave {
-            Text(mark.text).customAttribute(WavyLine()).textRenderer(WavyLineRenderer())
+            if #available(macOS 15.0, iOS 18.0, *) {
+                Text(mark.text).customAttribute(WavyLine()).textRenderer(WavyLineRenderer())
+            } else {
+                Text(mark.text).underline(true, pattern: .dot, color: YYColor.danger)
+            }
         } else {
             Text(attributed)
         }
@@ -274,9 +278,11 @@ struct MarkText: View {
     }
 }
 
+@available(macOS 15.0, iOS 18.0, *)
 struct WavyLine: TextAttribute {}
 
 /// Draws a red wave under every line of text marked `WavyLine`.
+@available(macOS 15.0, iOS 18.0, *)
 struct WavyLineRenderer: TextRenderer {
     func draw(layout: Text.Layout, in ctx: inout GraphicsContext) {
         for line in layout {

@@ -1,6 +1,6 @@
 #!/bin/bash
-# 打包发布文件到 dist/：Mac 的 .dmg、iPhone 未签名的 .ipa、Android 的 .apk。
-# 用法：scripts/package-release.sh [mac] [ios] [android]     不写就三个都打
+# 打包发布文件到 dist/：Mac 的 .dmg（Apple 芯片 + Intel）、iPhone 未签名的 .ipa、Android 的 .apk。
+# 用法：scripts/package-release.sh [mac | mac-arm64 | mac-x86_64] [ios] [android]     不写就全打
 #
 # Mac 和 iPhone 不用开发者证书：Mac 是临时签名，.ipa 由用户安装时自己签。
 # Android 要 android/keystore.properties。没有的话用调试密钥签，文件名带 -test，只能自己试，
@@ -16,6 +16,9 @@ export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$HOME=~ --remap-path-prefix
 want=("$@")
 [ ${#want[@]} -eq 0 ] && want=(mac ios android)
 wants() { [[ " ${want[*]} " == *" $1 "* ]]; }
+wants_mac_arm64() { wants mac || wants mac-arm64; }
+wants_mac_x86_64() { wants mac || wants mac-x86_64 || wants mac-intel; }
+wants_any_mac() { wants_mac_arm64 || wants_mac_x86_64; }
 
 VERSION="$(sed -n 's/^ *MARKETING_VERSION: *//p' "$ROOT/apple/project.yml" | head -1)"
 ANDROID_VERSION="$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' "$ROOT/android/app/build.gradle.kts" | head -1)"
@@ -25,12 +28,15 @@ if [ "$VERSION" != "$ANDROID_VERSION" ]; then
 fi
 mkdir -p "$DIST"
 
-if wants mac || wants ios || wants android; then
+if wants_any_mac || wants ios || wants android; then
   (cd "$ROOT/reader" && node scripts/build.mjs)
 fi
 
-if wants mac || wants ios; then
+if wants ios; then
   "$ROOT/apple/build-core.sh"
+  (cd "$ROOT/apple" && xcodegen generate --quiet)
+elif wants_any_mac; then
+  "$ROOT/apple/build-core.sh" --mac
   (cd "$ROOT/apple" && xcodegen generate --quiet)
 fi
 
@@ -41,17 +47,26 @@ apple_build() { # destination derived-data-folder [settings…]
     -destination "$destination" -derivedDataPath "$derived" "$@" build -quiet
 }
 
-if wants mac; then
-  derived="$ROOT/apple/build/release-mac"
-  apple_build 'generic/platform=macOS' "$derived" ARCHS=arm64 ONLY_ACTIVE_ARCH=NO
+mac_dmg() { # arch derived-data-folder
+  local arch="$1" derived="$2"
+  apple_build 'generic/platform=macOS' "$derived" "ARCHS=$arch" ONLY_ACTIVE_ARCH=NO
+  local stage out
   stage="$(mktemp -d)"
   ditto "$derived/Build/Products/Release/Yuyue.app" "$stage/Yuyue.app"
   ln -s /Applications "$stage/Applications"
-  out="$DIST/Yuyue-$VERSION-mac-arm64.dmg"
+  out="$DIST/Yuyue-$VERSION-mac-$arch.dmg"
   rm -f "$out"
   hdiutil create -quiet -volname "语阅 $VERSION" -srcfolder "$stage" -format UDZO "$out"
   rm -rf "$stage"
   echo "$out"
+}
+
+if wants_mac_arm64; then
+  mac_dmg arm64 "$ROOT/apple/build/release-mac"
+fi
+
+if wants_mac_x86_64; then
+  mac_dmg x86_64 "$ROOT/apple/build/release-mac-x86_64"
 fi
 
 if wants ios; then

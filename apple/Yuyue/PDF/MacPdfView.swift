@@ -57,8 +57,7 @@ struct MacPdfView: View {
         .preferredColorScheme(model.night ? .dark : nil)
         .tint(tint.accent)
         .toolbar { toolbar }
-        .toolbar(removing: .title)
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .yyHideWindowToolbarChrome()
         // As in the reading window.
         .trafficLights(CGPoint(x: 24, y: 29))
         .navigationTitle(model.title)

@@ -79,8 +79,7 @@ struct MacWordsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .ignoresSafeArea(.container, edges: .top)
         .background(YYColor.bg)
-        .toolbar(removing: .title)
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .yyHideWindowToolbarChrome()
         .task(id: library.books.map(\.id)) { await load() }
         .onReceive(NotificationCenter.default.publisher(for: .vocabChanged)) { _ in Task { await load() } }
         .fileExporter(isPresented: Binding { export != nil } set: { if !$0 { export = nil } },

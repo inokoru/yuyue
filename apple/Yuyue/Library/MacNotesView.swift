@@ -82,8 +82,7 @@ struct MacNotesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .ignoresSafeArea(.container, edges: .top)
         .background(YYColor.bg)
-        .toolbar(removing: .title)
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .yyHideWindowToolbarChrome()
         .task(id: library.books.map(\.id)) { load() }
         .onReceive(NotificationCenter.default.publisher(for: .notesChanged)) { _ in load() }
         .sheet(item: $sharing) { quote in

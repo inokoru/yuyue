@@ -65,8 +65,7 @@ struct AudiobookScreen: View {
                 openWindow(id: "library")
             }
         }
-        .toolbar(removing: .title)
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .yyHideWindowToolbarChrome()
         // 合成 here shows how it's going in this window too.
         .audiobookSheets(library)
         #else

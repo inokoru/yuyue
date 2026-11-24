@@ -4,7 +4,6 @@ import MediaPlayer
 import Observation
 import os
 import Speech
-import Synchronization
 import YuyueCore
 #if os(iOS)
 import UIKit

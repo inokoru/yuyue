@@ -1,5 +1,4 @@
 import SwiftUI
-import Synchronization
 import YuyueCore
 #if os(macOS)
 import AppKit
@@ -288,8 +287,7 @@ struct MacShelfView: View {
                 .padding(.top, Self.lineY - 11)
                 .ignoresSafeArea(.container, edges: .top)
         }
-        .toolbar(removing: .title)
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .yyHideWindowToolbarChrome()
         .trafficLights(CGPoint(x: 30, y: 24), hidden: !sidebarShown)
         .noScrollEdgeFade()
     }
@@ -945,9 +943,7 @@ struct MacShelfView: View {
             }
         }
         }
-        .toolbar(removing: .title)
-        .toolbar(removing: .sidebarToggle)
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .yyHideWindowToolbarChrome(removeSidebarToggle: true)
         .onChange(of: allReading.count <= readingCap) { _, fits in if fits { readingExpanded = false } }
     }
 

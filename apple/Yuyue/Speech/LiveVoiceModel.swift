@@ -1,7 +1,6 @@
 import Foundation
 import Network
 import Observation
-import Synchronization
 import YuyueCore
 
 /// 即时层朗读模型 (`ZipVoice-Distill-Int8` + `Vocos 24 kHz`) 与自带声音包 (`voices-1`)。

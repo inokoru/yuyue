@@ -479,9 +479,6 @@ struct PhoneForeign: View {
     @AppStorage(ForeignPrefs.glossKey) private var gloss = true
     @AppStorage(ForeignPrefs.levelKey) private var level = 3
     @AppStorage(ForeignPrefs.glossVocabKey) private var glossVocab = false
-    @State private var status: LanguageAvailability.Status?
-    @State private var download: TranslationSession.Configuration?
-    @State private var failed: String?
 
     var body: some View {
         YYPage {
@@ -550,40 +547,27 @@ struct PhoneForeign: View {
             YYNote(String(localized: "「在学」生词在所有书中以虚线标出，标为「已掌握」后不再标记。"))
                 .padding(.bottom, YYUI.s(14))
             groupLabel(String(localized: "翻译"))
-            YYGroup {
-                HStack(spacing: YYUI.s(10)) {
-                    VStack(alignment: .leading, spacing: YYUI.s(1)) {
-                        Text("系统离线翻译").font(YYUI.font(11.5, .semibold)).foregroundStyle(YYColor.t1)
-                        Text("本地离线运行，原文不上传；供整页译文与双击整句翻译使用").font(YYUI.font(10)).foregroundStyle(YYColor.t3)
-                            .fixedSize(horizontal: false, vertical: true)
+            if #available(iOS 18.0, *) {
+                PhoneTranslationSettingsSection()
+            } else {
+                YYGroup {
+                    HStack(spacing: YYUI.s(10)) {
+                        VStack(alignment: .leading, spacing: YYUI.s(1)) {
+                            Text("系统离线翻译").font(YYUI.font(11.5, .semibold)).foregroundStyle(YYColor.t1)
+                            Text("本地离线运行，原文不上传；供整页译文与双击整句翻译使用").font(YYUI.font(10)).foregroundStyle(YYColor.t3)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
+                        Text("当前系统不支持").font(YYUI.font(10.5)).foregroundStyle(YYColor.t3)
                     }
-                    Spacer(minLength: 0)
-                    translationState
-                }
-                .padding(.vertical, YYUI.s(8))
-                if let failed {
-                    Label(failed, systemImage: "exclamationmark.circle").font(YYUI.font(10.5)).foregroundStyle(YYColor.danger)
-                        .frame(minHeight: YYUI.s(34))
-                        .transition(.opacity)
+                    .padding(.vertical, YYUI.s(8))
                 }
             }
-            .animation(YYMotion.standard, value: failed)
             YYNote(String(localized: "原文不出这台设备。"))
         }
         .navigationTitle("外文")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: "\(gloss)\(level)\(glossVocab)\(mark)") { NotificationCenter.default.post(name: .vocabChanged, object: nil) }
-        .task { await check() }
-        .translationTask(download) { session in
-            do {
-                try await session.prepareTranslation()
-                failed = nil
-            } catch {
-                failed = Translator.message(for: error)
-            }
-            download = nil
-            await check()
-        }
     }
 
     /// `.gl`: the small grey name over a group.
@@ -612,6 +596,45 @@ struct PhoneForeign: View {
             .padding(.bottom, YYUI.s(6))
         }
         .animation(YYMotion.standard, value: "\(gloss)\(level)\(glossVocab)")
+    }
+}
+
+@available(iOS 18.0, *)
+private struct PhoneTranslationSettingsSection: View {
+    @State private var status: LanguageAvailability.Status?
+    @State private var download: TranslationSession.Configuration?
+    @State private var failed: String?
+
+    var body: some View {
+        YYGroup {
+            HStack(spacing: YYUI.s(10)) {
+                VStack(alignment: .leading, spacing: YYUI.s(1)) {
+                    Text("系统离线翻译").font(YYUI.font(11.5, .semibold)).foregroundStyle(YYColor.t1)
+                    Text("本地离线运行，原文不上传；供整页译文与双击整句翻译使用").font(YYUI.font(10)).foregroundStyle(YYColor.t3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                translationState
+            }
+            .padding(.vertical, YYUI.s(8))
+            if let failed {
+                Label(failed, systemImage: "exclamationmark.circle").font(YYUI.font(10.5)).foregroundStyle(YYColor.danger)
+                    .frame(minHeight: YYUI.s(34))
+                    .transition(.opacity)
+            }
+        }
+        .animation(YYMotion.standard, value: failed)
+        .task { await check() }
+        .translationTask(download) { session in
+            do {
+                try await session.prepareTranslation()
+                failed = nil
+            } catch {
+                failed = Translator.message(for: error)
+            }
+            download = nil
+            await check()
+        }
     }
 
     @ViewBuilder private var translationState: some View {

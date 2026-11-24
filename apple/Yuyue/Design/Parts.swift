@@ -202,11 +202,15 @@ struct YYGroup<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Group(subviews: content) { rows in
-                ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
-                    if i > 0 { Rectangle().fill(YYColor.line).frame(height: 0.5) }
-                    row
+            if #available(macOS 15.0, iOS 18.0, *) {
+                Group(subviews: content) { rows in
+                    ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
+                        if i > 0 { Rectangle().fill(YYColor.line).frame(height: 0.5) }
+                        row
+                    }
                 }
+            } else {
+                content
             }
         }
         .environment(\.yyFieldLabelWidth, fieldLabelWidth)
@@ -1335,7 +1339,7 @@ extension View {
         #if os(macOS)
         return sheet(isPresented: isPresented) {
             card
-                .presentationSizing(.fitted)
+                .yyPresentationSizingFitted()
                 .paperWindow()
         }
         #else
@@ -1360,7 +1364,7 @@ extension View {
         toolbar(.hidden, for: .windowToolbar)
             .presentationBackground(YYColor.bg)
             .presentationCornerRadius(YYUI.s(18))
-            .presentationSizing(.fitted)
+            .yyPresentationSizingFitted()
             .background(DialogChrome())
             .environment(\.yyButtonOnPaper, false)
         #else
@@ -1396,7 +1400,7 @@ private struct YYConfirmModifier: ViewModifier {
                 },
                 panel: true, destructive: true
             )
-            .presentationSizing(.fitted)
+            .yyPresentationSizingFitted()
             .paperWindow()
         }
         #else

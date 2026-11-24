@@ -538,11 +538,15 @@ private struct AboutCard<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Group(subviews: content) { rows in
-                ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
-                    if i > 0 { Rectangle().fill(YYColor.line).frame(height: 0.5).padding(.horizontal, 16) }
-                    row
+            if #available(macOS 15.0, iOS 18.0, *) {
+                Group(subviews: content) { rows in
+                    ForEach(Array(rows.enumerated()), id: \.offset) { i, row in
+                        if i > 0 { Rectangle().fill(YYColor.line).frame(height: 0.5).padding(.horizontal, 16) }
+                        row
+                    }
                 }
+            } else {
+                content
             }
         }
         .background(YYColor.card, in: .rect(cornerRadius: 13))

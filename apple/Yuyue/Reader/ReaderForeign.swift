@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import SwiftUI
 @preconcurrency import Translation
 import YuyueCore
 #if os(macOS)
@@ -202,25 +203,67 @@ enum SystemDictionary {
 /// is also where the system offers to download a language the first time.
 @Observable
 final class Translator {
-    var configuration: TranslationSession.Configuration?
     /// Why the last request failed.
     private(set) var failure: String?
     @ObservationIgnored var source = Locale.Language(identifier: "en")
-    @ObservationIgnored private var queue: [(texts: [String], done: CheckedContinuation<[String?], Never>)] = []
+    @ObservationIgnored fileprivate let system: AnyObject?
 
     static let target = Locale.Language(identifier: "zh-Hans")
 
+    init() {
+        if #available(macOS 15.0, iOS 18.0, *) {
+            system = SystemTranslator()
+        } else {
+            system = nil
+        }
+    }
+
     /// The language pair is downloaded, so a request won't ask for anything.
     func installed() async -> Bool {
-        await LanguageAvailability().status(from: source, to: Self.target) == .installed
+        if #available(macOS 15.0, iOS 18.0, *) {
+            return await LanguageAvailability().status(from: source, to: Self.target) == .installed
+        }
+        return false
     }
 
     func translate(_ texts: [String]) async -> [String?] {
         guard !texts.isEmpty else { return [] }
-        return await withCheckedContinuation { done in
+        if #available(macOS 15.0, iOS 18.0, *), let impl = system as? SystemTranslator {
+            let (out, err) = await impl.translate(texts, source: source)
+            failure = err
+            return out
+        }
+        failure = String(localized: "当前系统不支持")
+        return [String?](repeating: nil, count: texts.count)
+    }
+
+    @available(macOS 15.0, iOS 18.0, *)
+    static func message(for error: Error) -> String {
+        if let e = error as? TranslationError {
+            switch e {
+            case TranslationError.unsupportedLanguagePairing, TranslationError.unsupportedSourceLanguage, TranslationError.unsupportedTargetLanguage:
+                return String(localized: "系统翻译不支持这种语言")
+            case TranslationError.unableToIdentifyLanguage:
+                return String(localized: "认不出是什么语言")
+            default:
+                break
+            }
+        }
+        return String(localized: "翻译没成功：要先在系统设置里下载这种语言")
+    }
+}
+
+@available(macOS 15.0, iOS 18.0, *)
+@Observable
+fileprivate final class SystemTranslator {
+    var configuration: TranslationSession.Configuration?
+    @ObservationIgnored private var queue: [(texts: [String], done: CheckedContinuation<([String?], String?), Never>)] = []
+
+    func translate(_ texts: [String], source: Locale.Language) async -> ([String?], String?) {
+        await withCheckedContinuation { done in
             queue.append((texts, done))
-            if configuration == nil {
-                configuration = .init(source: source, target: Self.target)
+            if configuration == nil || configuration?.source != source {
+                configuration = .init(source: source, target: Translator.target)
             } else {
                 configuration?.invalidate()
             }
@@ -235,11 +278,9 @@ final class Translator {
                 for r in try await session.translations(from: Self.makeRequests(texts)) {
                     if let i = r.clientIdentifier.flatMap(Int.init), out.indices.contains(i) { out[i] = r.targetText }
                 }
-                failure = nil
-                done.resume(returning: out)
+                done.resume(returning: (out, nil))
             } catch {
-                failure = Self.message(for: error)
-                done.resume(returning: [String?](repeating: nil, count: texts.count))
+                done.resume(returning: ([String?](repeating: nil, count: texts.count), Translator.message(for: error)))
             }
         }
     }
@@ -247,19 +288,25 @@ final class Translator {
     nonisolated private static func makeRequests(_ texts: [String]) -> sending [TranslationSession.Request] {
         texts.enumerated().map { TranslationSession.Request(sourceText: $1, clientIdentifier: String($0)) }
     }
+}
 
-    static func message(for error: Error) -> String {
-        if let e = error as? TranslationError {
-            switch e {
-            case TranslationError.unsupportedLanguagePairing, TranslationError.unsupportedSourceLanguage, TranslationError.unsupportedTargetLanguage:
-                return String(localized: "系统翻译不支持这种语言")
-            case TranslationError.unableToIdentifyLanguage:
-                return String(localized: "认不出是什么语言")
-            default:
-                break
+extension View {
+    @ViewBuilder func yySystemTranslation(presented text: Binding<String?>, translator: Translator) -> some View {
+        let base = Group {
+            if #available(macOS 14.4, iOS 17.4, *) {
+                self.translationPresentation(
+                    isPresented: Binding(get: { text.wrappedValue != nil }, set: { if !$0 { text.wrappedValue = nil } }),
+                    text: text.wrappedValue ?? ""
+                )
+            } else {
+                self
             }
         }
-        return String(localized: "翻译没成功：要先在系统设置里下载这种语言")
+        if #available(macOS 15.0, iOS 18.0, *), let impl = translator.system as? SystemTranslator {
+            base.translationTask(impl.configuration) { session in await impl.run(session) }
+        } else {
+            base
+        }
     }
 }
 

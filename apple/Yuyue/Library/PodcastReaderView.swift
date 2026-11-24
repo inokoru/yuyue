@@ -1069,16 +1069,24 @@ struct PodcastReaderView: View {
                     return false
                 }()
 
-                let wordText = Text(matchedStr)
-                    .font(bodyFont)
-                    .foregroundStyle(tint.accent)
-                    .customAttribute(
-                        PodcastDottedWordAttribute(
-                            key: vocabKey,
-                            isHighlighted: isWordHovered || isWordActive,
-                            store: wordRectStore
+                let wordText: Text
+                if #available(macOS 15.0, iOS 18.0, *) {
+                    wordText = Text(matchedStr)
+                        .font(bodyFont)
+                        .foregroundStyle(tint.accent)
+                        .customAttribute(
+                            PodcastDottedWordAttribute(
+                                key: vocabKey,
+                                isHighlighted: isWordHovered || isWordActive,
+                                store: wordRectStore
+                            )
                         )
-                    )
+                } else {
+                    wordText = Text(matchedStr)
+                        .font(bodyFont)
+                        .foregroundStyle(tint.accent)
+                        .underline(true, pattern: .dot, color: tint.accent)
+                }
 
                 result = result + wordText
                 cursor = m.range.upperBound
@@ -1092,8 +1100,14 @@ struct PodcastReaderView: View {
             return result
         }()
 
-        return composedText
-            .textRenderer(PodcastDottedTextRenderer(dotColor: tint.accent))
+        let renderedText = Group {
+            if #available(macOS 15.0, iOS 18.0, *) {
+                composedText.textRenderer(PodcastDottedTextRenderer(dotColor: tint.accent))
+            } else {
+                composedText
+            }
+        }
+        return renderedText
             .contentShape(.rect)
             #if os(macOS)
             .onContinuousHover(coordinateSpace: .local) { phase in
@@ -2428,6 +2442,7 @@ private final class PodcastWordRectStore: @unchecked Sendable {
 }
 
 /// Custom `TextAttribute` marking inline vocabulary words for `1.6pt` dotted accent underlining (`.vocab-w`).
+@available(macOS 15.0, iOS 18.0, *)
 private struct PodcastDottedWordAttribute: TextAttribute, Hashable {
     let key: String
     let isHighlighted: Bool
@@ -2447,6 +2462,7 @@ private struct PodcastDottedWordAttribute: TextAttribute, Hashable {
 /// Custom `TextRenderer` that records the exact typographic bounding box of each vocabulary word,
 /// draws a soft accent wash on hover/active (`.vocab-w:hover`), and strokes a `1.6pt` dotted accent line
 /// (`border-bottom: 1.5px dotted var(--accent)`) directly beneath the word.
+@available(macOS 15.0, iOS 18.0, *)
 private struct PodcastDottedTextRenderer: TextRenderer {
     let dotColor: Color
 
