@@ -116,23 +116,23 @@ public static class PaperAppearance
     /// Picks a preset paper. Returns true if <paramref name="settings"/> should be saved to core
     /// (updating <paramref name="updated"/>), or false if only local night-slot prefs changed.
     /// </summary>
-    public static bool PickPreset(LibraryService library, Paper preset, ReaderSettings settings, out ReaderSettings updated)
-        => Pick(library, new Resolved(preset, null), settings, out updated);
+    public static bool PickPreset(LibraryService library, Paper preset, ReaderSettings settings, out ReaderSettings updated, bool? appDarkOverride = null)
+        => Pick(library, new Resolved(preset, null), settings, out updated, appDarkOverride);
 
     /// <summary>
     /// Picks a custom paper (我的纸).
     /// </summary>
-    public static bool PickCustom(LibraryService library, CustomPaper custom, ReaderSettings settings, out ReaderSettings updated)
+    public static bool PickCustom(LibraryService library, CustomPaper custom, ReaderSettings settings, out ReaderSettings updated, bool? appDarkOverride = null)
     {
         var preset = YuyueCoreMethods.PaperColors(custom).Preset;
-        return Pick(library, new Resolved(preset, custom), settings, out updated);
+        return Pick(library, new Resolved(preset, custom), settings, out updated, appDarkOverride);
     }
 
-    private static bool Pick(LibraryService library, Resolved chosen, ReaderSettings settings, out ReaderSettings updated)
+    private static bool Pick(LibraryService library, Resolved chosen, ReaderSettings settings, out ReaderSettings updated, bool? appDarkOverride = null)
     {
         updated = settings;
         var basePaper = Raw(library, settings);
-        bool dark = IsAppDark(library);
+        bool dark = appDarkOverride ?? IsAppDark(library);
         Remember(library, chosen.ChoiceId, chosen.IsDark);
 
         if (library.Prefs.PaperFollowAppearance)
@@ -174,14 +174,14 @@ public static class PaperAppearance
     /// Turns 跟随外观 on or off. Turning off freezes the currently visible paper so the screen never flashes.
     /// Returns true if <paramref name="updated"/> differs from <paramref name="settings"/> and should be saved.
     /// </summary>
-    public static bool SetFollow(LibraryService library, bool on, ReaderSettings settings, out ReaderSettings updated)
+    public static bool SetFollow(LibraryService library, bool on, ReaderSettings settings, out ReaderSettings updated, bool? appDarkOverride = null)
     {
         updated = settings;
         if (on == library.Prefs.PaperFollowAppearance) return false;
 
         if (!on)
         {
-            var visible = Resolve(library, settings);
+            var visible = Resolve(library, settings, appDarkOverride);
             var basePaper = Raw(library, settings);
             if (basePaper.IsDark != visible.IsDark)
                 Remember(library, basePaper.ChoiceId, basePaper.IsDark);

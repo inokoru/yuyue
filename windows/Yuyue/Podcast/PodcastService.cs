@@ -34,6 +34,8 @@ public sealed class PodcastService
     private static readonly HttpClient DownloadHttp = new() { Timeout = System.TimeSpan.FromMinutes(10) };
 
     private readonly LibraryService _library;
+    private readonly object _clipThoughtsLock = new();
+    private Dictionary<string, string>? _clipThoughtsCache;
     private IReadOnlyList<PodcastSearchHitDto>? _topChartsCache;
 
     public PodcastService(LibraryService library)
@@ -46,6 +48,70 @@ public sealed class PodcastService
     }
 
     public string CacheDir => Path.Combine(_library.DataDir, "podcast-cache");
+    private string ClipThoughtsPath => Path.Combine(_library.DataDir, "podcast-clip-thoughts.json");
+
+    /// <summary>
+    /// Returns the non-destructively edited clip thought if present, falling back to <see cref="PodcastClip.Thought"/>.
+    /// Avoids destructive <c>PodcastDeleteClip</c> + <c>PodcastAddClip</c> cycles so clip IDs, timestamps, and audio slices stay intact.
+    /// </summary>
+    public string GetClipThought(PodcastClip clip)
+    {
+        lock (_clipThoughtsLock)
+        {
+            EnsureClipThoughtsLoadedLocked();
+            if (_clipThoughtsCache!.TryGetValue(clip.Id, out var note))
+                return note;
+            return clip.Thought ?? "";
+        }
+    }
+
+    public void SetClipThought(string clipId, string? thought)
+    {
+        if (string.IsNullOrWhiteSpace(clipId)) return;
+        string normalized = string.IsNullOrWhiteSpace(thought) ? "" : thought.Trim();
+        lock (_clipThoughtsLock)
+        {
+            EnsureClipThoughtsLoadedLocked();
+            if (_clipThoughtsCache!.TryGetValue(clipId, out var prev) && prev == normalized)
+                return;
+            _clipThoughtsCache[clipId] = normalized;
+            SaveClipThoughtsLocked();
+        }
+    }
+
+    private void EnsureClipThoughtsLoadedLocked()
+    {
+        if (_clipThoughtsCache is not null) return;
+        _clipThoughtsCache = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            if (File.Exists(ClipThoughtsPath))
+            {
+                string raw = File.ReadAllText(ClipThoughtsPath, Encoding.UTF8);
+                var parsed = JsonSerializer.Deserialize<Dictionary<string, string>>(raw);
+                if (parsed is not null)
+                {
+                    foreach (var kv in parsed)
+                        _clipThoughtsCache[kv.Key] = kv.Value ?? "";
+                }
+            }
+        }
+        catch { }
+    }
+
+    private void SaveClipThoughtsLocked()
+    {
+        if (_clipThoughtsCache is null) return;
+        try
+        {
+            Directory.CreateDirectory(_library.DataDir);
+            string tmp = ClipThoughtsPath + ".tmp";
+            string json = JsonSerializer.Serialize(_clipThoughtsCache);
+            File.WriteAllText(tmp, json, Encoding.UTF8);
+            File.Move(tmp, ClipThoughtsPath, overwrite: true);
+        }
+        catch { }
+    }
 
     public IReadOnlyList<PodcastChannel> GetChannels()
     {
@@ -537,8 +603,9 @@ public sealed class PodcastService
                         if (wav is { Length: > 64 }) return wav;
                     }
                     catch (OperationCanceledException) { throw; }
-                    catch { }
+                    catch { return null; }
                 }
+                return null;
             }
             else if (CloudVoiceService.TryParseFullId(norm, out _, out _))
             {
@@ -548,11 +615,12 @@ public sealed class PodcastService
                     if (wav is { Length: > 64 }) return wav;
                 }
                 catch (OperationCanceledException) { throw; }
-                catch { }
+                catch { return null; }
+                return null;
             }
-            else if ((norm.StartsWith("card.", StringComparison.Ordinal) || norm.StartsWith("cloned.", StringComparison.Ordinal))
-                     && _library.LiveVoice.IsReady)
+            else if (norm.StartsWith("card.", StringComparison.Ordinal) || norm.StartsWith("cloned.", StringComparison.Ordinal))
             {
+                if (!_library.LiveVoice.IsReady) return null;
                 var card = _library.LiveVoice.GetClonedCards().FirstOrDefault(c => c.Id == norm)
                     ?? _library.LiveVoice.GetBuiltinCards().FirstOrDefault(c => c.Id == norm);
                 if (card is not null)
@@ -564,10 +632,14 @@ public sealed class PodcastService
                         if (wav is { Length: > 64 }) return wav;
                     }
                     catch (OperationCanceledException) { throw; }
-                    catch { }
+                    catch { return null; }
                 }
+                return null;
             }
         }
+
+        if (!string.IsNullOrWhiteSpace(norm) && !norm.StartsWith("sys:", StringComparison.Ordinal))
+            return null;
 
         try
         {

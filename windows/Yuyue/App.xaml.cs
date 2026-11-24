@@ -79,18 +79,22 @@ public partial class App : Application
         if (string.IsNullOrEmpty(bookId)) return;
         if (_readerWindows.Remove(bookId, out var rwin))
         {
+            Library?.SystemIntegration.ClearAudioSource(rwin);
             try { rwin.Close(); } catch { }
         }
         if (_pdfWindows.Remove(bookId, out var pwin))
         {
+            Library?.SystemIntegration.ClearAudioSource(pwin);
             try { pwin.Close(); } catch { }
         }
         if (_audioWindows.Remove(bookId, out var awin))
         {
+            Library?.SystemIntegration.ClearAudioSource(awin);
             try { awin.Close(); } catch { }
         }
         if (_podcastWindows.Remove(bookId, out var podWin))
         {
+            Library?.SystemIntegration.ClearAudioSource(podWin);
             try { podWin.Close(); } catch { }
         }
     }
@@ -484,7 +488,11 @@ public partial class App : Application
             };
             _shelfWindow.Closed += (_, _) =>
             {
+                var closedShelf = _shelfWindow;
                 _shelfWindow = null;
+                Library?.SystemIntegration.ClearAudioSource(closedShelf);
+                if (_readerWindows.Count == 0 && _pdfWindows.Count == 0 && _audioWindows.Count == 0 && _podcastWindows.Count == 0)
+                    Library?.SystemIntegration.ClearAudioSource((object?)null);
                 CheckExitIfAllWindowsClosed();
             };
         }
@@ -497,6 +505,17 @@ public partial class App : Application
     {
         ShowShelf();
         _shelfWindow?.OpenPodcastInline(issueId);
+    }
+
+    public void TryOpenBookFromAnywhere(BookSummary book, bool autoListen = false, uint? section = null, int? sentence = null, string? askQuestion = null, string? searchQuery = null)
+    {
+        if (book.Record || !book.Available)
+        {
+            ShowShelf();
+            _shelfWindow?.TryOpenBook(book, autoListen, section, sentence, askQuestion, searchQuery);
+            return;
+        }
+        OpenBook(book.Id, autoListen, section, sentence, askQuestion, searchQuery);
     }
 
     public void OpenBook(string bookId, bool autoListen = false, uint? section = null, int? sentence = null, string? askQuestion = null, string? searchQuery = null)
@@ -584,6 +603,8 @@ public partial class App : Application
             audioWin.Closed += (_, _) =>
             {
                 _audioWindows.Remove(bookId);
+                Library?.SystemIntegration.ClearAudioSource(audioWin);
+                Library?.SystemIntegration.ClearAudioSource(knownTitle);
                 _shelfWindow?.RefreshBooks();
                 CheckExitIfAllWindowsClosed();
             };
@@ -599,6 +620,8 @@ public partial class App : Application
             pdfWin.Closed += (_, _) =>
             {
                 _pdfWindows.Remove(bookId);
+                Library?.SystemIntegration.ClearAudioSource(pdfWin);
+                Library?.SystemIntegration.ClearAudioSource(knownTitle);
                 _shelfWindow?.RefreshBooks();
                 CheckExitIfAllWindowsClosed();
             };
@@ -611,6 +634,8 @@ public partial class App : Application
         win.Closed += (_, _) =>
         {
             _readerWindows.Remove(bookId);
+            Library?.SystemIntegration.ClearAudioSource(win);
+            Library?.SystemIntegration.ClearAudioSource(knownTitle);
             _shelfWindow?.RefreshBooks();
             CheckExitIfAllWindowsClosed();
         };
@@ -835,6 +860,8 @@ public partial class App : Application
         _shelfWindow?.RefreshBooks();
         foreach (var r in _readerWindows.Values) r.ReloadAfterSnapshotRestore();
         foreach (var p in _pdfWindows.Values) p.ReloadAfterSnapshotRestore();
+        foreach (var a in _audioWindows.Values) a.ApplyAppearance();
+        foreach (var pod in _podcastWindows.Values) pod.ApplyAppearance();
         _settingsWindow?.ApplyAppearance();
     }
 

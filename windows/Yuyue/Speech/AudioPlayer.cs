@@ -47,6 +47,17 @@ public sealed class AudioPlayer : IDisposable
     private static readonly object PreviewGate = new();
     private static CancellationTokenSource? ActivePreviewCts;
     private static AudioPlayer? ActivePreviewPlayer;
+    private static readonly object ActivePlayersGate = new();
+    private static readonly HashSet<AudioPlayer> ActivePlayers = [];
+
+    public static bool IsAnyActivelyPlaying
+    {
+        get
+        {
+            lock (ActivePlayersGate)
+                return ActivePlayers.Count > 0;
+        }
+    }
 
     private readonly LibraryService? _library;
     private readonly MediaPlayer _player;
@@ -111,6 +122,11 @@ public sealed class AudioPlayer : IDisposable
     private uint _pairedLastReportedSection = uint.MaxValue;
     private double _pairedSentenceEndStopSec = -1;
     private double _pairedBaseVolume = 1.0;
+    private DateTime _pairedSkippedHeadUntilUtc = DateTime.MinValue;
+    private bool _pairedHasActiveExtraNotice;
+    private int _lastCloudPrefetchIndex = -100;
+    private string? _lastCloudPrefetchVoice;
+    private uint? _lastCloudPrefetchSection;
 
     private sealed record PreparedClip(MediaSource Source, double RawDurationMs);
 
@@ -126,6 +142,10 @@ public sealed class AudioPlayer : IDisposable
     public event Action<string>? SleepStopped;
     public event Action<uint, int, int, int, bool, int[]?>? PairedSentenceActive;
     public event Action<string?, string?, Action?>? ExtraNoticeChanged;
+    public event Action<string?>? ReadyOfflineVoiceChanged;
+
+    public string? ReadyOfflineVoice { get; private set; }
+    public bool HasReadyOfflineVoice => !string.IsNullOrEmpty(ReadyOfflineVoice);
 
     public bool IsPlaying => _playing;
     public int CurrentSentence => _currentIndex;
@@ -280,7 +300,7 @@ public sealed class AudioPlayer : IDisposable
 
     public AudioPlayer(string? preferredVoiceId = null) : this(null, preferredVoiceId) { }
 
-    private AudioPlayer(LibraryService? library, string? preferredVoiceId)
+    internal AudioPlayer(LibraryService? library, string? preferredVoiceId)
     {
         _library = library;
         _uiQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
@@ -309,6 +329,69 @@ public sealed class AudioPlayer : IDisposable
             _tickTimer = new Microsoft.UI.Xaml.DispatcherTimer { Interval = System.TimeSpan.FromMilliseconds(100) };
             _tickTimer.Tick += OnTickTimer;
         }
+
+        if (_library is not null)
+        {
+            _library.Kokoro.Ready += OnOfflineModelReady;
+            _library.LiveVoice.StateChanged += OnLiveVoiceStateChanged;
+        }
+    }
+
+    private void OnLiveVoiceStateChanged()
+    {
+        if (_library?.LiveVoice.IsReady == true)
+            OnOfflineModelReady();
+    }
+
+    private void OnOfflineModelReady()
+    {
+        void Handle()
+        {
+            if (_library is null || IsUsingPairedRecording) return;
+            if (!_playing && _currentIndex < 0)
+            {
+                ReadyOfflineVoice = null;
+                if (string.IsNullOrWhiteSpace(_library.Prefs.GetVoiceForLanguage(_language)))
+                    SetVoice(null);
+                return;
+            }
+            if (!string.IsNullOrWhiteSpace(_library.Prefs.GetVoiceForLanguage(_language)) && _library.Kokoro.ReadyOfflineVoice is null)
+                return;
+            if (_selectedKokoroId is not null || _selectedCardId is not null)
+                return;
+
+            string? candidate = _library.Kokoro.ReadyOfflineVoice
+                ?? (_library.Kokoro.IsInstalled ? _library.Kokoro.DefaultNarrator(_language)?.Id : null)
+                ?? (_library.LiveVoice.IsReady ? DramaSynthService.DefaultNarratorCard(_library, _language)?.Id : null);
+            if (!string.IsNullOrEmpty(candidate) && ReadyOfflineVoice != candidate)
+            {
+                ReadyOfflineVoice = candidate;
+                ReadyOfflineVoiceChanged?.Invoke(ReadyOfflineVoice);
+            }
+        }
+        if (_uiQueue is not null && !_uiQueue.HasThreadAccess) _uiQueue.TryEnqueue(Handle);
+        else Handle();
+    }
+
+    public void AcceptReadyOfflineVoice()
+    {
+        string? next = ReadyOfflineVoice;
+        ReadyOfflineVoice = null;
+        _library?.Kokoro.AcceptReadyOfflineVoice();
+        ReadyOfflineVoiceChanged?.Invoke(null);
+        if (!string.IsNullOrEmpty(next))
+        {
+            SetVoice(next);
+            if (_playing && !IsUsingPairedRecording)
+                _ = SpeakCurrentAsync();
+        }
+    }
+
+    public void DismissReadyOfflineVoice()
+    {
+        ReadyOfflineVoice = null;
+        _library?.Kokoro.DismissReadyOfflineVoice();
+        ReadyOfflineVoiceChanged?.Invoke(null);
     }
 
     public void SetBookContext(string? bookId, string? language)
@@ -506,6 +589,8 @@ public sealed class AudioPlayer : IDisposable
         _pairedLastReportedSection = uint.MaxValue;
         _pairedLastMomentSkipTarget = -1;
         _pairedIgnoreExtraUntilSec = -1;
+        _pairedSkippedHeadUntilUtc = DateTime.MinValue;
+        _pairedHasActiveExtraNotice = false;
         _pairedSpeakingUnread = false;
 
         if (recording is not null && recording.Files.Length > 0)
@@ -557,14 +642,13 @@ public sealed class AudioPlayer : IDisposable
     {
         if (!IsUsingPairedRecording || _pairedRecording is null || _pairedFileOffsets.Length == 0) return;
         StopPairedFillTts();
-        double total = _pairedRecording.Files.Sum(f => f.Seconds);
+        double total = _pairedRecording.Files.Sum(f => Math.Max(0.1, f.Seconds));
         double target = Math.Clamp(globalSeconds, 0, Math.Max(0, total - 0.1));
         _pairedGlobalPosSec = target;
 
         int fileIdx = 0;
         for (int i = 0; i < _pairedFileOffsets.Length && i < _pairedRecording.Files.Length; i++)
         {
-            if (i > 0 && _pairedRecording.Files[i].Seconds <= 0) break;
             if (target >= _pairedFileOffsets[i]) fileIdx = i;
             else break;
         }
@@ -599,6 +683,8 @@ public sealed class AudioPlayer : IDisposable
             if (m.Extra is { } ex)
             {
                 _pairedIgnoreExtraUntilSec = -1;
+                _pairedSkippedHeadUntilUtc = DateTime.MinValue;
+                _pairedHasActiveExtraNotice = false;
                 SeekRecordingTo(ex.T1 + 0.05);
                 ExtraNoticeChanged?.Invoke(null, null, null);
             }
@@ -615,6 +701,8 @@ public sealed class AudioPlayer : IDisposable
             _pairedIgnoreExtraUntilSec = m.Extra?.T1 ?? (fromSeconds + 30.0);
         }
         catch { _pairedIgnoreExtraUntilSec = fromSeconds + 30.0; }
+        _pairedSkippedHeadUntilUtc = DateTime.MinValue;
+        _pairedHasActiveExtraNotice = false;
         SeekRecordingTo(fromSeconds);
         ExtraNoticeChanged?.Invoke(null, null, null);
     }
@@ -813,12 +901,16 @@ public sealed class AudioPlayer : IDisposable
                         if (ex.Place == ExtraPlace.Tail)
                         {
                             Pause();
+                            _pairedSkippedHeadUntilUtc = DateTime.MinValue;
+                            _pairedHasActiveExtraNotice = true;
                             ExtraNoticeChanged?.Invoke("正文已播完，已跳过片尾", null, null);
                             return;
                         }
                         if (ex.Place == ExtraPlace.Head)
                         {
                             double headStart = ex.T0;
+                            _pairedSkippedHeadUntilUtc = DateTime.UtcNow.AddSeconds(8.0);
+                            _pairedHasActiveExtraNotice = true;
                             ExtraNoticeChanged?.Invoke($"跳过了片头（{(int)Math.Round(delta)} 秒）", "点这里听", () => PlaySkippedHeadNow(headStart));
                         }
                     }
@@ -829,10 +921,13 @@ public sealed class AudioPlayer : IDisposable
             }
             else if (moment.Extra is { } curEx && curEx.Place == ExtraPlace.Middle && _pairedGlobalPosSec >= _pairedIgnoreExtraUntilSec)
             {
+                _pairedSkippedHeadUntilUtc = DateTime.MinValue;
+                _pairedHasActiveExtraNotice = true;
                 ExtraNoticeChanged?.Invoke("这段不在书里", "跳过", SkipExtraNow);
             }
-            else
+            else if (_pairedHasActiveExtraNotice && DateTime.UtcNow >= _pairedSkippedHeadUntilUtc)
             {
+                _pairedHasActiveExtraNotice = false;
                 ExtraNoticeChanged?.Invoke(null, null, null);
             }
 
@@ -1010,20 +1105,14 @@ public sealed class AudioPlayer : IDisposable
         else if (raw.StartsWith("kokoro.", StringComparison.Ordinal))
         {
             var speaker = _library?.Kokoro.FindSpeaker(raw);
-            if (speaker is not null)
-            {
-                _selectedKokoroId = speaker.Id;
-                _voiceDisplayName = $"{speaker.Name} · Kokoro 离线";
-            }
+            _selectedKokoroId = speaker?.Id ?? raw;
+            _voiceDisplayName = speaker is not null ? $"{speaker.Name} · Kokoro 离线" : "Kokoro 离线";
         }
         else if (raw.StartsWith("card.", StringComparison.Ordinal) || raw.StartsWith("cloned.", StringComparison.Ordinal))
         {
             var card = FindCard(raw);
-            if (card is not null)
-            {
-                _selectedCardId = card.Id;
-                _voiceDisplayName = $"{card.Name} · 离线人声";
-            }
+            _selectedCardId = card?.Id ?? raw;
+            _voiceDisplayName = card is not null ? $"{card.Name} · 离线人声" : "离线人声";
         }
         else if (string.IsNullOrWhiteSpace(raw) && _library?.Kokoro.IsInstalled == true && CardVoiceEngine.SpeaksLanguage(_language))
         {
@@ -1485,12 +1574,15 @@ public sealed class AudioPlayer : IDisposable
     {
         if (playing)
         {
+            lock (ActivePlayersGate) ActivePlayers.Add(this);
             try { App.CurrentApp.ClaimAudioPlayback(this, Pause); } catch { }
             SyncAmbientPlayback(true);
             EnsureTickTimer();
         }
         else
         {
+            lock (ActivePlayersGate) ActivePlayers.Remove(this);
+            _library?.Kokoro.FlushDeferredVoiceIfIdle();
             SyncAmbientPlayback(false);
         }
         try
@@ -1655,16 +1747,16 @@ public sealed class AudioPlayer : IDisposable
                 if (_prefetchTasks.ContainsKey(idx)) continue;
                 int capIdx = idx;
                 string capTxt = txt;
-                _prefetchTasks[capIdx] = PrepareClipAsync(capIdx, capTxt, ct, throwOnError: false);
+                _prefetchTasks[capIdx] = PrepareClipAsync(capIdx, capTxt, ct, throwOnError: false, isLookahead: true);
             }
         }
     }
 
-    private async Task<PreparedClip?> PrepareClipAsync(int sentenceIdx, string text, CancellationToken ct, bool throwOnError = false)
+    private async Task<PreparedClip?> PrepareClipAsync(int sentenceIdx, string text, CancellationToken ct, bool throwOnError = false, bool isLookahead = false)
     {
         try
         {
-            var src = await SynthesizeMediaSourceAsync(sentenceIdx, text, ct);
+            var src = await SynthesizeMediaSourceAsync(sentenceIdx, text, ct, isLookahead);
             if (src is null || ct.IsCancellationRequested)
             {
                 src?.Dispose();
@@ -1699,6 +1791,9 @@ public sealed class AudioPlayer : IDisposable
         ClearPrefetch();
         StopPairedFillTts();
         _playing = false;
+        lock (ActivePlayersGate) ActivePlayers.Remove(this);
+        ReadyOfflineVoice = null;
+        _library?.Kokoro.FlushDeferredVoiceIfIdle();
         _currentRawDurationMs = 0;
         _isSleepFading = false;
         RestoreVolume();
@@ -1724,7 +1819,7 @@ public sealed class AudioPlayer : IDisposable
     }
 
     internal Task<byte[]?> SynthesizeClipForDramaAsync(string annotatedText, string plainText, string? voiceOverride, DramaAct? acting, CancellationToken ct) =>
-        SynthesizeSingleWavBytesAsync(annotatedText, voiceOverride, acting, ct, plainOverride: plainText);
+        SynthesizeSingleWavBytesAsync(annotatedText, voiceOverride, acting, ct, plainOverride: plainText, reportErrors: false);
 
     private async Task<byte[]?> TrySynthesizeRoleSegmentedWavAsync(int sentenceIdx, CancellationToken ct)
     {
@@ -1833,7 +1928,7 @@ public sealed class AudioPlayer : IDisposable
     }
 
     private async Task<byte[]?> SynthesizeSingleWavBytesAsync(
-        string text, string? overrideVoiceId, DramaAct? acting, CancellationToken ct, string? plainOverride = null)
+        string text, string? overrideVoiceId, DramaAct? acting, CancellationToken ct, string? plainOverride = null, bool reportErrors = true)
     {
         string? cloudId = _selectedCloudId;
         string? kokoroId = _selectedKokoroId;
@@ -1870,36 +1965,40 @@ public sealed class AudioPlayer : IDisposable
             }
         }
 
-        if (!string.IsNullOrEmpty(kokoroId) && _library is not null)
+        if (!string.IsNullOrEmpty(kokoroId))
         {
+            if (_library is null)
+                return null;
             var speaker = _library.Kokoro.FindSpeaker(kokoroId)
                 ?? throw new InvalidOperationException("找不到所选的离线语音，请重新选择声音");
             if (!_library.Kokoro.IsInstalled)
             {
                 if (_library.Kokoro.State is KokoroStateKind.Idle or KokoroStateKind.Failed)
-                    _ = _library.Kokoro.DownloadAsync();
+                    _ = _library.Kokoro.StartIfUnmeteredAsync();
                 throw new InvalidOperationException("离线语音包还在下载中，下好后即可离线朗读");
             }
-            if (CardVoiceEngine.SpeaksLanguage(_language))
+            if (!CardVoiceEngine.SpeaksLanguage(_language))
+                throw new InvalidOperationException("当前离线语音暂不支持该语种，请更换音色");
+
+            byte[]? wav;
+            try
             {
-                byte[]? wav;
-                try
-                {
-                    wav = await KokoroEngine.Instance.SynthesizeWavAsync(
-                        _library.Core, _library.Kokoro, _library.DataDir, speaker, text, _language, ct);
-                }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
-                {
-                    throw new InvalidOperationException($"Kokoro 离线朗读出错：{ex.Message}", ex);
-                }
-                if (wav is { Length: > 44 }) return wav;
-                throw new InvalidOperationException("Kokoro 离线语音这一句合成失败，请重试或换一个声音");
+                wav = await KokoroEngine.Instance.SynthesizeWavAsync(
+                    _library.Core, _library.Kokoro, _library.DataDir, speaker, text, _language, ct);
             }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Kokoro 离线朗读出错：{ex.Message}", ex);
+            }
+            if (wav is { Length: > 44 }) return wav;
+            throw new InvalidOperationException("Kokoro 离线语音这一句合成失败，请重试或换一个声音");
         }
 
-        if (!string.IsNullOrEmpty(cloudId) && _library is not null)
+        if (!string.IsNullOrEmpty(cloudId))
         {
+            if (_library is null)
+                return null;
             byte[]? wav;
             try
             {
@@ -1919,16 +2018,14 @@ public sealed class AudioPlayer : IDisposable
 
         if (!string.IsNullOrEmpty(cardId) && _library is not null)
         {
-            var card = FindCard(cardId)
-                ?? throw new InvalidOperationException("找不到所选的声音卡，请重新选择声音");
-            // Fixed priority (1:1 ClonedVoice.swift): prefer local ZipVoice unless user explicitly opted into ElevenLabs or local model isn't installed
-            bool preferEleven = card.Id.StartsWith("cloned.", StringComparison.Ordinal) &&
-                                _library.Prefs.ClonedElevenLabsVoiceIds.TryGetValue(card.Id, out var remoteElevenId) &&
+            bool isCloned = cardId.StartsWith("cloned.", StringComparison.Ordinal);
+            bool preferEleven = isCloned &&
+                                _library.Prefs.ClonedElevenLabsVoiceIds.TryGetValue(cardId, out var remoteElevenId) &&
                                 !string.IsNullOrEmpty(remoteElevenId) &&
                                 _library.CloudVoices.IsConfigured(CloudTtsProvider.ElevenLabs) &&
-                                (_library.Prefs.ClonedUseElevenLabs.Contains(card.Id) || !_library.LiveVoice.IsModelInstalled);
+                                (_library.Prefs.ClonedUseElevenLabs.Contains(cardId) || !_library.LiveVoice.IsModelInstalled);
 
-            if (preferEleven && _library.Prefs.ClonedElevenLabsVoiceIds.TryGetValue(card.Id, out var elId))
+            if (preferEleven && _library.Prefs.ClonedElevenLabsVoiceIds.TryGetValue(cardId, out var elId))
             {
                 byte[]? wav;
                 try
@@ -1937,41 +2034,49 @@ public sealed class AudioPlayer : IDisposable
                         ? _library.CloudVoices.MapDramaActing(acting, _language.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
                         : null;
                     wav = await _library.CloudVoices.SynthesizeWavAsync($"cloud.elevenlabs.{elId}", text, _language, cloudActing, ct);
+                    if (wav is { Length: > 44 }) return wav;
+                    if (!_library.LiveVoice.IsModelInstalled)
+                        throw new InvalidOperationException("克隆云端语音未返回有效音频，已暂停朗读");
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
-                    throw new InvalidOperationException($"克隆云端语音暂不可用（{ex.Message}），已暂停朗读", ex);
+                    if (!_library.LiveVoice.IsModelInstalled)
+                        throw new InvalidOperationException($"克隆云端语音暂不可用（{ex.Message}），已暂停朗读", ex);
                 }
-                if (wav is { Length: > 44 }) return wav;
-                throw new InvalidOperationException("克隆云端语音未返回有效音频，已暂停朗读");
             }
 
-            if (CardVoiceEngine.SpeaksLanguage(_language))
+            bool localReady = isCloned ? _library.LiveVoice.IsModelInstalled : _library.LiveVoice.IsReady;
+            if (!localReady)
             {
-                if (!_library.LiveVoice.IsModelInstalled)
-                    throw new InvalidOperationException("本机声音卡模型尚未准备好，请先下载完成或改用其他声音");
-
-                byte[]? wav;
-                try
-                {
-                    CardStyle style = CardStyle.Neutral;
-                    if (acting is not null)
-                    {
-                        try { style = _library.Core.CardStyleFor(acting); } catch { }
-                    }
-                    wav = await CardVoiceEngine.Instance.SynthesizeWavAsync(
-                        _library.Core, _library.LiveVoice, _library.DataDir,
-                        card, _bookId, text, _language, style, ct);
-                }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
-                {
-                    throw new InvalidOperationException($"本机声音卡朗读出错：{ex.Message}", ex);
-                }
-                if (wav is { Length: > 44 }) return wav;
-                throw new InvalidOperationException("本机声音卡这一句合成失败，请重试或换一个声音");
+                _ = _library.LiveVoice.StartIfUnmeteredAsync();
+                throw new InvalidOperationException("离线自然人声模型尚未安装，请在「设置 › 存储」或「朗读」中下载后使用");
             }
+
+            var card = FindCard(cardId)
+                ?? throw new InvalidOperationException("找不到所选的声音卡，请重新选择声音");
+            if (!CardVoiceEngine.SpeaksLanguage(_language))
+                throw new InvalidOperationException("当前离线人声暂不支持该语种，请更换音色");
+
+            byte[]? localWav;
+            try
+            {
+                CardStyle style = CardStyle.Neutral;
+                if (acting is not null)
+                {
+                    try { style = _library.Core.CardStyleFor(acting); } catch { }
+                }
+                localWav = await CardVoiceEngine.Instance.SynthesizeWavAsync(
+                    _library.Core, _library.LiveVoice, _library.DataDir,
+                    card, _bookId, text, _language, style, ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"本机声音卡朗读出错：{ex.Message}", ex);
+            }
+            if (localWav is { Length: > 44 }) return localWav;
+            throw new InvalidOperationException("本机声音卡这一句合成失败，请重试或换一个声音");
         }
 
         string plain = plainOverride ?? CardVoiceEngine.PlainSpokenText(text);
@@ -2039,7 +2144,7 @@ public sealed class AudioPlayer : IDisposable
         return (outSamples, rate);
     }
 
-    private async Task<MediaSource?> SynthesizeMediaSourceAsync(int sentenceIdx, string text, CancellationToken ct)
+    private async Task<MediaSource?> SynthesizeMediaSourceAsync(int sentenceIdx, string text, CancellationToken ct, bool isLookahead = false)
     {
         if (!_singleSentenceMode && _dramaMode)
         {
@@ -2067,25 +2172,37 @@ public sealed class AudioPlayer : IDisposable
 
         var acting = GetDramaActForSentence(sentenceIdx);
 
-        if (!string.IsNullOrEmpty(_selectedCloudId) && _library is not null)
+        if (!string.IsNullOrEmpty(_selectedCloudId))
         {
-            byte[]? wav = await SynthesizeSingleWavBytesAsync(text, _selectedCloudId, acting, ct);
+            if (_library is null) return null;
+            byte[]? wav = await SynthesizeSingleWavBytesAsync(text, _selectedCloudId, acting, ct, reportErrors: !isLookahead);
             if (wav is { Length: > 44 })
             {
-                if (!_singleSentenceMode && _playing && sentenceIdx + 1 < _sentences.Count)
+                // Sliding cloud prefetch window ONLY from foreground playback (never duplicate inside ScheduleLookahead!)
+                if (!isLookahead && !_singleSentenceMode && _playing && sentenceIdx + 1 < _sentences.Count)
                 {
-                    var upcoming = _sentences.Skip(sentenceIdx + 1).Take(4).ToArray();
-                    string cid = _selectedCloudId;
-                    string langCap = _language;
-                    CancellationToken prefetchToken;
-                    lock (_prefetchLock)
+                    bool alreadyPrefetched = _lastCloudPrefetchSection == _sectionIndex &&
+                                             _lastCloudPrefetchVoice == _selectedCloudId &&
+                                             sentenceIdx >= _lastCloudPrefetchIndex &&
+                                             sentenceIdx <= _lastCloudPrefetchIndex + 1;
+                    if (!alreadyPrefetched)
                     {
-                        _prefetchCts ??= new CancellationTokenSource();
-                        prefetchToken = _prefetchCts.Token;
-                    }
-                    if (!prefetchToken.IsCancellationRequested)
-                    {
-                        _ = Task.Run(() => _library.CloudVoices.PrefetchAsync(cid, upcoming, langCap, prefetchToken), prefetchToken);
+                        _lastCloudPrefetchSection = _sectionIndex;
+                        _lastCloudPrefetchVoice = _selectedCloudId;
+                        _lastCloudPrefetchIndex = sentenceIdx;
+                        var upcoming = _sentences.Skip(sentenceIdx + 1).Take(4).ToArray();
+                        string cid = _selectedCloudId;
+                        string langCap = _language;
+                        CancellationToken prefetchToken;
+                        lock (_prefetchLock)
+                        {
+                            _prefetchCts ??= new CancellationTokenSource();
+                            prefetchToken = _prefetchCts.Token;
+                        }
+                        if (!prefetchToken.IsCancellationRequested)
+                        {
+                            _ = Task.Run(() => _library.CloudVoices.PrefetchAsync(cid, upcoming, langCap, prefetchToken), prefetchToken);
+                        }
                     }
                 }
                 var mem = new InMemoryRandomAccessStream();
@@ -2096,9 +2213,9 @@ public sealed class AudioPlayer : IDisposable
             throw new InvalidOperationException("云端语音未返回有效音频，已暂停朗读");
         }
 
-        if (!string.IsNullOrEmpty(_selectedKokoroId) && _library is not null)
+        if (!string.IsNullOrEmpty(_selectedKokoroId))
         {
-            byte[]? wav = await SynthesizeSingleWavBytesAsync(text, _selectedKokoroId, acting, ct);
+            byte[]? wav = await SynthesizeSingleWavBytesAsync(text, _selectedKokoroId, acting, ct, reportErrors: !isLookahead);
             if (wav is { Length: > 44 })
             {
                 var mem = new InMemoryRandomAccessStream();
@@ -2106,13 +2223,12 @@ public sealed class AudioPlayer : IDisposable
                 mem.Seek(0);
                 return MediaSource.CreateFromStream(mem, "audio/wav");
             }
-            if (CardVoiceEngine.SpeaksLanguage(_language))
-                throw new InvalidOperationException("Kokoro 离线语音这一句合成失败，请重试或换一个声音");
+            throw new InvalidOperationException("Kokoro 离线语音这一句合成失败，请重试或换一个声音");
         }
 
         if (!string.IsNullOrEmpty(_selectedCardId) && _library is not null)
         {
-            byte[]? wav = await SynthesizeSingleWavBytesAsync(text, _selectedCardId, acting, ct);
+            byte[]? wav = await SynthesizeSingleWavBytesAsync(text, _selectedCardId, acting, ct, reportErrors: !isLookahead);
             if (wav is { Length: > 44 })
             {
                 var mem = new InMemoryRandomAccessStream();
@@ -2120,8 +2236,7 @@ public sealed class AudioPlayer : IDisposable
                 mem.Seek(0);
                 return MediaSource.CreateFromStream(mem, "audio/wav");
             }
-            if (CardVoiceEngine.SpeaksLanguage(_language))
-                throw new InvalidOperationException("本机声音卡这一句合成失败，请重试或换一个声音");
+            throw new InvalidOperationException("本机声音卡这一句合成失败，请重试或换一个声音");
         }
 
         string plain = CardVoiceEngine.PlainSpokenText(text);
@@ -2173,7 +2288,7 @@ public sealed class AudioPlayer : IDisposable
                     try { clip = await prefetched.WaitAsync(cts.Token); } catch { clip = null; }
                 }
 
-                clip ??= await PrepareClipAsync(_currentIndex, text, cts.Token, throwOnError: true);
+                clip ??= await PrepareClipAsync(_currentIndex, text, cts.Token, throwOnError: true, isLookahead: false);
                 if (cts.IsCancellationRequested || !_playing)
                 {
                     clip?.Source.Dispose();
@@ -2228,7 +2343,7 @@ public sealed class AudioPlayer : IDisposable
             void NextTrack()
             {
                 int nextFile = _pairedFileIndex + 1;
-                if (nextFile < _pairedRecording.Files.Length && _pairedRecording.Files[nextFile].Seconds > 0)
+                if (nextFile < _pairedRecording.Files.Length)
                 {
                     LoadAndPlayPairedFile(nextFile, 0, autoPlay: true);
                 }
@@ -2438,6 +2553,11 @@ public sealed class AudioPlayer : IDisposable
 
     public void Dispose()
     {
+        if (_library is not null)
+        {
+            _library.Kokoro.Ready -= OnOfflineModelReady;
+            _library.LiveVoice.StateChanged -= OnLiveVoiceStateChanged;
+        }
         try { _tickTimer?.Stop(); } catch { }
         StopInternal(notify: false);
         try { _ambientPlayer?.Pause(); _ambientPlayer?.Dispose(); } catch { }

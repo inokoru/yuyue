@@ -64,6 +64,11 @@ public sealed partial class PdfReaderWindow : Window
     private readonly List<Grid> _continuousPageGrids = [];
     private readonly HashSet<int> _renderedContinuous = [];
     private int _zoomRenderVersion;
+    private double _lastContinuousBaseW;
+    private DispatcherTimer? _continuousResizeDebounce;
+    private MarkStyle _lastMarkStyle = MarkStyle.Yellow;
+    private Windows.Foundation.Point _lastSelectionAnchorInHost = new(180, 120);
+    private CancellationTokenSource? _inlinePopoverCts;
 
     // Page text geometry, inline mark overlays & drag-selection state (supports cross-page marks)
     private readonly Dictionary<int, PdfPageLayout> _layoutCache = new();
@@ -129,7 +134,8 @@ public sealed partial class PdfReaderWindow : Window
         SidePanelResizeHandle.ApplyWidth = w =>
         {
             SidePanelColumn.Width = new GridLength(w);
-            if (_layoutMode != "scroll") UpdatePagedFitSize();
+            if (_layoutMode == "scroll") UpdateContinuousFitSize();
+            else UpdatePagedFitSize();
         };
         SidePanelResizeHandle.CommitWidth = w =>
         {
@@ -149,6 +155,13 @@ public sealed partial class PdfReaderWindow : Window
         _audio.SentenceFinished += OnAudioSentenceFinished;
         _audio.PlayStateChanged += OnAudioPlayStateChanged;
         _audio.MarkHeardRequested += OnAudioMarkHeardRequested;
+        _audio.SynthesisError += msg => DispatcherQueue.TryEnqueue(() =>
+        {
+            _isListening = false;
+            ApplyTintAndChrome();
+            if (!string.IsNullOrWhiteSpace(msg))
+                ShowBriefToast(msg);
+        });
 
         _readingTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         _readingTimer.Tick += (_, _) =>
@@ -180,7 +193,9 @@ public sealed partial class PdfReaderWindow : Window
         Closed += OnWindowClosed;
         CanvasHost.SizeChanged += (_, _) =>
         {
-            if (_layoutMode != "scroll" && _doc is not null) UpdatePagedFitSize();
+            if (_doc is null) return;
+            if (_layoutMode == "scroll") UpdateContinuousFitSize();
+            else UpdatePagedFitSize();
         };
 
         ApplyTintAndChrome();
@@ -310,14 +325,74 @@ public sealed partial class PdfReaderWindow : Window
         CapsulePlayBtn.Background = ThemeHelper.Brush(tint.Fill);
         CapsulePlayBtn.Content = YYIcons.Make(_isListening && _audio.IsPlaying ? "pause" : "play", 13, new SolidColorBrush(Colors.White), filled: true);
 
+        ToastIconBadge.Background = ThemeHelper.Brush(_toastUndo is not null ? tint.Fill : p.Ok);
         ToastCheckIcon.Content = YYIcons.Make("checkmark", 9.5, new SolidColorBrush(Colors.White));
-        PdfSelDeleteBtn.Content = YYIcons.Make("trash", 12, ThemeHelper.Brush(p.Danger));
-        RefreshVisibleOverlays();
         ToastUndoBtn.Content = YYIcons.Make("arrow-undo", 11.5, t1);
+        ToastUndoBtn.Visibility = _toastUndo is not null ? Visibility.Visible : Visibility.Collapsed;
+
+        UpdatePdfSelectionCardChrome(dark, p, tint);
+        RefreshVisibleOverlays();
 
         UpdateCapsuleState();
         ThemeHelper.ConfigureTitleBar(this, dark);
         L10n.ApplyTree(RootGrid);
+    }
+
+    private void UpdatePdfSelectionCardChrome(bool dark, YYPalette p, YYTintColors tint)
+    {
+        var t1 = ThemeHelper.Brush(p.T1);
+        var t3 = ThemeHelper.Brush(p.T3);
+        var accent = ThemeHelper.Brush(tint.Accent);
+        var soft = ThemeHelper.Brush(tint.Soft);
+        var inset = ThemeHelper.Brush(p.Inset);
+        var line = ThemeHelper.Brush(p.Line);
+        var clear = new SolidColorBrush(Colors.Transparent);
+
+        MarkStyle activeStyle = _editingMark?.Style ?? _lastMarkStyle;
+
+        void StyleSwatch(Border ring, TextBlock keyTb, MarkStyle st)
+        {
+            bool ringed = activeStyle == st;
+            ring.BorderBrush = ringed ? accent : clear;
+            keyTb.Foreground = ringed ? t1 : t3;
+        }
+
+        StyleSwatch(PdfSwatchYellowRing, PdfSwatchKey1, MarkStyle.Yellow);
+        StyleSwatch(PdfSwatchBlueRing, PdfSwatchKey2, MarkStyle.Blue);
+        StyleSwatch(PdfSwatchPinkRing, PdfSwatchKey3, MarkStyle.Pink);
+        StyleSwatch(PdfSwatchWaveRing, PdfSwatchKey4, MarkStyle.Wave);
+
+        bool ulOn = activeStyle == MarkStyle.Underline;
+        PdfLineUnderlineBtn.Background = ulOn ? soft : inset;
+        PdfLineUnderlineBtn.BorderBrush = ulOn ? accent : line;
+        PdfLineUnderlineBtn.BorderThickness = new Thickness(ulOn ? 1.5 : 0.75);
+        PdfLineUnderlineAText.FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily());
+        PdfLineUnderlineAText.Foreground = ulOn ? accent : t1;
+        PdfLineUnderlineBar.Background = ulOn ? accent : t1;
+
+        bool dotOn = activeStyle == MarkStyle.Dotted;
+        var dotInk = dotOn ? accent : t1;
+        PdfLineDottedBtn.Background = dotOn ? soft : inset;
+        PdfLineDottedBtn.BorderBrush = dotOn ? accent : line;
+        PdfLineDottedBtn.BorderThickness = new Thickness(dotOn ? 1.5 : 0.75);
+        PdfLineDottedAText.FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily());
+        PdfLineDottedAText.Foreground = dotInk;
+        PdfLineDot1.Fill = dotInk;
+        PdfLineDot2.Fill = dotInk;
+        PdfLineDot3.Fill = dotInk;
+        PdfLineDot4.Fill = dotInk;
+
+        bool hasNote = _editingMark is not null && !string.IsNullOrWhiteSpace(_editingMark.Note);
+        PdfSelNotePencilIcon.Content = YYIcons.Make("pencil", 12, accent);
+        PdfSelDeleteBtn.Content = YYIcons.Make("trash", 12.5, ThemeHelper.Brush(p.Danger));
+        PdfSelNoteIcon.Content = YYIcons.Make("square.and.pencil", 14, hasNote ? accent : t1);
+        PdfSelNoteLabel.Text = L10n.T(hasNote ? "改想法" : "写想法");
+        PdfSelNoteLabel.Foreground = hasNote ? accent : t1;
+        PdfSelNoteLabel.FontWeight = hasNote ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
+        PdfSelCopyIcon.Content = YYIcons.Make("copy", 13.5, t1);
+        PdfSelSpeakIcon.Content = YYIcons.Make("speaker", 14, t1);
+        PdfSelLookupIcon.Content = YYIcons.Make("char-book", 13.5, t1);
+        PdfSelTranslateIcon.Content = YYIcons.Make("a-wen", 14, t1);
     }
 
     private void UpdateCapsuleState()
@@ -513,6 +588,7 @@ public sealed partial class PdfReaderWindow : Window
         if (_doc is null) return;
 
         double baseW = Math.Clamp((CanvasHost.ActualWidth > 0 ? CanvasHost.ActualWidth : 940) - 100, 440, 880) * _zoom;
+        _lastContinuousBaseW = baseW;
 
         Color hairline = _nightPaper ? Color.FromArgb(24, 255, 255, 255) : Color.FromArgb(20, 0, 0, 0);
         for (int i = 0; i < _pageCount; i++)
@@ -561,13 +637,121 @@ public sealed partial class PdfReaderWindow : Window
         }
     }
 
+    private double GetContinuousCardHeight(int i)
+    {
+        if (i < 0 || i >= _continuousImages.Count) return 0;
+        if (i < ContinuousStack.Children.Count && ContinuousStack.Children[i] is FrameworkElement fe && fe.ActualHeight > 0)
+            return fe.ActualHeight;
+        double imgH = _continuousImages[i].Height > 0 ? _continuousImages[i].Height : 0;
+        double borderBottom = i + 1 < _pageCount ? 1.0 : 0.0;
+        return imgH + 12.0 + borderBottom;
+    }
+
+    private double GetContinuousCardStride(int i) =>
+        GetContinuousCardHeight(i) + ContinuousStack.Spacing;
+
+    private void UpdateContinuousFitSize()
+    {
+        if (_doc is null || _pageCount <= 0 || _continuousImages.Count != _pageCount || _continuousPageGrids.Count != _pageCount)
+            return;
+
+        double baseW = Math.Clamp((CanvasHost.ActualWidth > 0 ? CanvasHost.ActualWidth : 940) - 100, 440, 880) * _zoom;
+        if (Math.Abs(baseW - _lastContinuousBaseW) < 0.5)
+            return;
+
+        // Capture current reading page + intra-page fractional position before resizing
+        double curOffset = ContinuousScroller.VerticalOffset;
+        double topPad = ContinuousStack.Padding.Top;
+        int anchorPage = 0;
+        double anchorFrac = 0.0;
+        if (curOffset > topPad)
+        {
+            double acc = topPad;
+            for (int i = 0; i < _continuousImages.Count; i++)
+            {
+                double stride = Math.Max(1.0, GetContinuousCardStride(i));
+                if (curOffset < acc + stride || i + 1 == _continuousImages.Count)
+                {
+                    anchorPage = i;
+                    anchorFrac = Math.Clamp((curOffset - acc) / stride, 0.0, 1.0);
+                    break;
+                }
+                acc += stride;
+            }
+        }
+
+        double prevBaseW = _lastContinuousBaseW;
+        _lastContinuousBaseW = baseW;
+        HidePdfSelectionCard();
+
+        for (int i = 0; i < _pageCount; i++)
+        {
+            double pageH = Math.Round(baseW * GetPageAspect(i));
+            _continuousImages[i].Width = baseW;
+            _continuousImages[i].Height = pageH;
+            _continuousOverlays[i].Width = baseW;
+            _continuousOverlays[i].Height = pageH;
+            _continuousPageGrids[i].Width = baseW;
+            _continuousPageGrids[i].Height = pageH;
+        }
+
+        RefreshVisibleOverlays();
+        ContinuousScroller.UpdateLayout();
+
+        if (curOffset > topPad)
+        {
+            double newAcc = topPad;
+            for (int i = 0; i < anchorPage && i < _continuousImages.Count; i++)
+                newAcc += GetContinuousCardStride(i);
+            double newStride = anchorPage < _continuousImages.Count ? GetContinuousCardStride(anchorPage) : 0;
+            ContinuousScroller.ChangeView(null, newAcc + anchorFrac * newStride, null, disableAnimation: true);
+        }
+
+        // If width grew noticeably, debounce a crisp bitmap re-render of visible pages
+        if (baseW > prevBaseW * 1.08)
+        {
+            _continuousResizeDebounce ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(220) };
+            _continuousResizeDebounce.Stop();
+            _continuousResizeDebounce.Tick -= OnContinuousResizeDebounceTick;
+            _continuousResizeDebounce.Tick += OnContinuousResizeDebounceTick;
+            _continuousResizeDebounce.Start();
+        }
+    }
+
+    private async void OnContinuousResizeDebounceTick(object? sender, object e)
+    {
+        _continuousResizeDebounce?.Stop();
+        if (_doc is null || _layoutMode != "scroll") return;
+        int ver = ++_zoomRenderVersion;
+        _renderedContinuous.Clear();
+        int from = Math.Max(0, _currentPage - 2);
+        int to = Math.Min(_pageCount - 1, _currentPage + 3);
+        for (int i = from; i <= to; i++)
+        {
+            if (ver != _zoomRenderVersion) return;
+            _renderedContinuous.Add(i);
+            var bmp = await RenderPageBitmapAsync(i, _zoom);
+            if (ver != _zoomRenderVersion) return;
+            if (bmp is not null && i < _continuousImages.Count)
+            {
+                _continuousImages[i].Source = bmp;
+                RefreshPageOverlay(i);
+            }
+        }
+    }
+
     private void ScrollContinuousToPage(int pageIndex)
     {
         if (pageIndex < 0 || pageIndex >= _continuousImages.Count) return;
-        double y = 0;
+        if (pageIndex == 0)
+        {
+            ContinuousScroller.ChangeView(null, 0, null, disableAnimation: true);
+            return;
+        }
+        double y = ContinuousStack.Padding.Top;
         for (int i = 0; i < pageIndex; i++)
         {
-            if (_continuousImages[i].Height > 0) y += _continuousImages[i].Height + 24;
+            y += GetContinuousCardStride(i);
         }
         ContinuousScroller.ChangeView(null, y, null, disableAnimation: true);
     }
@@ -736,7 +920,7 @@ public sealed partial class PdfReaderWindow : Window
                 Height = 64,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 Background = ThemeHelper.Brush(on ? p.Inset : p.Card),
-                BorderBrush = ThemeHelper.Brush(on ? Color.FromArgb(255, 118, 116, 112) : p.Line),
+                BorderBrush = ThemeHelper.Brush(on ? Color.FromArgb(153, p.T1.R, p.T1.G, p.T1.B) : p.Line),
                 BorderThickness = new Thickness(on ? 1.5 : 0.75),
                 CornerRadius = new CornerRadius(11),
                 Padding = new Thickness(0),
@@ -1052,7 +1236,8 @@ public sealed partial class PdfReaderWindow : Window
             RenderSidePanel();
         }
         ApplyTintAndChrome();
-        if (_layoutMode != "scroll") UpdatePagedFitSize();
+        if (_layoutMode == "scroll") UpdateContinuousFitSize();
+        else UpdatePagedFitSize();
     }
 
     private void PdfToc_Click(object sender, RoutedEventArgs e) => ToggleSidePanel("toc");
@@ -1388,29 +1573,199 @@ public sealed partial class PdfReaderWindow : Window
     {
         var sents = GetSentencesForPage(_currentPage);
         string seed = sents.FirstOrDefault()?.Text.Trim() ?? $"第 {_currentPage + 1} 页摘录";
-        var quoteBox = new TextBox { Header = "原文摘录", Text = seed, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MaxHeight = 110 };
-        var noteBox = new TextBox { Header = "想法（可选）", PlaceholderText = "记下此刻的想法…", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 72 };
-        var sp = new StackPanel { Spacing = 10, Width = 380 };
-        sp.Children.Add(quoteBox);
-        sp.Children.Add(noteBox);
+        var (action, quoteText, noteText) = await ShowPdfThoughtSheetAsync(
+            initialQuote: seed,
+            initialNote: null,
+            pageZeroBased: _currentPage,
+            editableQuote: true,
+            canDeleteNote: false);
 
-        var dlg = new ContentDialog
+        if (action == "save" && !string.IsNullOrWhiteSpace(quoteText))
         {
-            XamlRoot = RootGrid.XamlRoot,
-            Title = $"第 {_currentPage + 1} 页 · 划线与想法",
-            Content = sp,
-            PrimaryButtonText = "保存",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary,
-        };
-        if (await dlg.ShowAsync() == ContentDialogResult.Primary && !string.IsNullOrWhiteSpace(quoteBox.Text))
-        {
-            string q = quoteBox.Text.Trim();
-            string? n = string.IsNullOrWhiteSpace(noteBox.Text) ? null : noteBox.Text.Trim();
-            _library.AddMark(_bookId, 0, new TextPoint((uint)_currentPage, 0), new TextPoint((uint)_currentPage, (uint)q.Length), q, MarkStyle.Yellow, n);
+            string q = quoteText.Trim();
+            string? n = string.IsNullOrWhiteSpace(noteText) ? null : noteText.Trim();
+            _library.AddMark(_bookId, 0, new TextPoint((uint)_currentPage, 0), new TextPoint((uint)_currentPage, (uint)q.Length), q, _lastMarkStyle, n);
             RefreshPageOverlay(_currentPage);
             if (_sideMode == "notes") RenderSidePanel();
             App.CurrentApp.NotifyShelfRefresh();
+        }
+    }
+
+    private async Task<(string Action, string Quote, string? Note)> ShowPdfThoughtSheetAsync(
+        string initialQuote,
+        string? initialNote,
+        int pageZeroBased,
+        bool editableQuote,
+        bool canDeleteNote)
+    {
+        bool dark = _nightPaper || ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
+        var p = ThemeHelper.Palette(dark);
+        var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+        string subtitle = $"{_detail.Summary.Title} · 第 {pageZeroBased + 1} 页";
+
+        string curQuote = initialQuote;
+        string curNote = initialNote ?? "";
+
+        while (true)
+        {
+            string actionTaken = "cancel";
+            ContentDialog? dialog = null;
+
+            FrameworkElement quoteElement;
+            TextBox? quoteBox = null;
+            if (editableQuote)
+            {
+                quoteBox = new TextBox
+                {
+                    Text = curQuote,
+                    PlaceholderText = L10n.T("原文摘录"),
+                    AcceptsReturn = true,
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxHeight = 96,
+                    BorderThickness = new Thickness(0),
+                    Background = new SolidColorBrush(Colors.Transparent),
+                    FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
+                    FontSize = 13.5,
+                    Padding = new Thickness(12, 9, 12, 9),
+                };
+                quoteElement = new Border
+                {
+                    CornerRadius = new CornerRadius(11),
+                    Background = ThemeHelper.Brush(p.Inset),
+                    BorderBrush = ThemeHelper.Brush(p.Line),
+                    BorderThickness = new Thickness(0.5),
+                    Child = quoteBox,
+                };
+            }
+            else
+            {
+                var quoteBar = new Grid { ColumnSpacing = 10, Margin = new Thickness(2, 2, 2, 2) };
+                quoteBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2.5) });
+                quoteBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                quoteBar.Children.Add(new Border { CornerRadius = new CornerRadius(1.25), Background = ThemeHelper.Brush(tint.Accent) });
+                var qText = new TextBlock
+                {
+                    Text = $"“{curQuote.Trim()}”",
+                    FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
+                    FontSize = 14,
+                    LineHeight = 22,
+                    Foreground = ThemeHelper.Brush(p.T2),
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxLines = 4,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                };
+                Grid.SetColumn(qText, 1);
+                quoteBar.Children.Add(qText);
+                quoteElement = quoteBar;
+            }
+
+            var input = new TextBox
+            {
+                Text = curNote,
+                PlaceholderText = L10n.T("写下此刻的想法…"),
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                MinHeight = 104,
+                BorderThickness = new Thickness(0),
+                Background = new SolidColorBrush(Colors.Transparent),
+                FontSize = 13.5,
+                Padding = new Thickness(12, 10, 12, 10),
+            };
+            var inputCard = new Border
+            {
+                CornerRadius = new CornerRadius(12),
+                Background = ThemeHelper.Brush(p.Card),
+                BorderBrush = ThemeHelper.Brush(p.Line),
+                BorderThickness = new Thickness(0.75),
+                Child = input,
+            };
+
+            var counterTb = new TextBlock
+            {
+                Text = $"{input.Text.Length} 字",
+                FontSize = 12,
+                Foreground = ThemeHelper.Brush(p.T3),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            input.TextChanged += (_, _) => counterTb.Text = $"{input.Text.Length} 字";
+            input.KeyDown += (_, ke) =>
+            {
+                bool ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control)
+                    .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+                if (ctrl && ke.Key == VirtualKey.Enter)
+                {
+                    ke.Handled = true;
+                    actionTaken = "save";
+                    dialog?.Hide();
+                }
+            };
+
+            var footLeft = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
+            footLeft.Children.Add(counterTb);
+            if (canDeleteNote)
+            {
+                var delNoteBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
+                    Content = L10n.T("删掉想法"),
+                    Foreground = ThemeHelper.Brush(p.Danger),
+                    FontSize = 12,
+                    Padding = new Thickness(6, 2, 6, 2),
+                };
+                delNoteBtn.Click += (_, _) =>
+                {
+                    actionTaken = "confirm-delete";
+                    dialog?.Hide();
+                };
+                footLeft.Children.Add(delNoteBtn);
+            }
+
+            var saveSp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+            saveSp.Children.Add(new TextBlock { Text = L10n.T("保存"), FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(tint.Accent) });
+            saveSp.Children.Add(new TextBlock { Text = "Ctrl+↵", FontSize = 11, Foreground = ThemeHelper.Brush(tint.Accent), Opacity = 0.72, VerticalAlignment = VerticalAlignment.Center });
+
+            var footRight = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, HorizontalAlignment = HorizontalAlignment.Right };
+            footRight.Children.Add(YYChrome.MakeSheetPillButton(L10n.T("取消"), () => dialog?.Hide(), dark, _library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 18));
+            footRight.Children.Add(YYChrome.MakeSheetPillButton(saveSp, () => { actionTaken = "save"; dialog?.Hide(); }, dark, _library.Prefs.Tint, "warm", height: 36, horizontalPadding: 18));
+
+            var footRow = new Grid { Margin = new Thickness(2, 2, 0, 0) };
+            footRow.Children.Add(footLeft);
+            footRow.Children.Add(footRight);
+
+            var body = new StackPanel
+            {
+                Spacing = 12,
+                Padding = new Thickness(22, 18, 22, 18),
+            };
+            body.Children.Add(YYChrome.MakeSheetHeader(L10n.T("想法"), subtitle, () => dialog?.Hide(), dark, titleSize: 18));
+            body.Children.Add(quoteElement);
+            body.Children.Add(inputCard);
+            body.Children.Add(footRow);
+
+            dialog = YYChrome.CreateMacSheet(RootGrid.XamlRoot, dark, 472, body, tint: _library.Prefs.Tint);
+            dialog.Opened += (_, _) => input.Focus(FocusState.Programmatic);
+            await dialog.ShowSafeAsync(_library.Prefs.Tint);
+
+            curQuote = quoteBox is not null ? quoteBox.Text : curQuote;
+            curNote = input.Text;
+
+            if (actionTaken == "confirm-delete")
+            {
+                bool confirmed = await YYChrome.ShowConfirmAsync(
+                    RootGrid.XamlRoot,
+                    dark,
+                    L10n.T("删掉这条想法？"),
+                    L10n.T("划线还在，只删写下的想法。"),
+                    confirmText: L10n.T("删掉"),
+                    cancelText: L10n.T("取消"),
+                    destructive: true,
+                    tint: _library.Prefs.Tint);
+                if (confirmed)
+                    return ("delete", curQuote, null);
+                continue;
+            }
+
+            return (actionTaken, curQuote, curNote);
         }
     }
 
@@ -1907,10 +2262,14 @@ public sealed partial class PdfReaderWindow : Window
             var topPt = xform.TransformPoint(new Windows.Foundation.Point((first.X + first.W * 0.5) * ow, first.Y * oh));
             var botPt = xform.TransformPoint(new Windows.Foundation.Point((last.X + last.W * 0.5) * ow, (last.Y + last.H) * oh));
 
-            double cardW = 328;
-            double cardH = _editingMark is not null && !string.IsNullOrWhiteSpace(_editingMark.Note) ? 148 : 96;
+            double cardW = 344;
+            double cardH = _editingMark is not null && !string.IsNullOrWhiteSpace(_editingMark.Note) ? 162 : 112;
             double hostW = CanvasHost.ActualWidth > 0 ? CanvasHost.ActualWidth : 900;
             double hostH = CanvasHost.ActualHeight > 0 ? CanvasHost.ActualHeight : 640;
+
+            double anchorX = Math.Clamp(topPt.X, 32, Math.Max(32, hostW - 32));
+            double anchorY = Math.Clamp(botPt.Y + 4, 60, Math.Max(60, hostH - 48));
+            _lastSelectionAnchorInHost = new Windows.Foundation.Point(anchorX, anchorY);
 
             double x = Math.Clamp(topPt.X - cardW * 0.5, 16, Math.Max(16, hostW - cardW - 16));
             double y = topPt.Y - cardH - 12;
@@ -1920,8 +2279,12 @@ public sealed partial class PdfReaderWindow : Window
         }
         catch
         {
+            _lastSelectionAnchorInHost = new Windows.Foundation.Point(180, 120);
             PdfSelectionCard.Margin = new Thickness(24, 72, 0, 0);
         }
+
+        bool dark = _nightPaper || ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
+        UpdatePdfSelectionCardChrome(dark, ThemeHelper.Palette(dark), ThemeHelper.TintColors(_library.Prefs.Tint, dark));
 
         bool hasNote = _editingMark is not null && !string.IsNullOrWhiteSpace(_editingMark.Note);
         PdfSelNotePreviewBox.Visibility = hasNote ? Visibility.Visible : Visibility.Collapsed;
@@ -1972,6 +2335,7 @@ public sealed partial class PdfReaderWindow : Window
 
     private void ApplyPdfMarkStyle(MarkStyle style)
     {
+        _lastMarkStyle = style;
         if (_editingMark is not null)
         {
             int p0 = (int)_editingMark.Start.Sentence;
@@ -2025,6 +2389,15 @@ public sealed partial class PdfReaderWindow : Window
         DeletePdfMarkWithUndo(mk);
     }
 
+    private async void PdfSelNotePreview_Pressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (_editingMark is null) return;
+        e.Handled = true;
+        var mk = _editingMark;
+        HidePdfSelectionCard();
+        await EditPdfMarkNoteAsync(mk);
+    }
+
     private async void PdfSelNote_Click(object sender, RoutedEventArgs e)
     {
         if (_editingMark is not null)
@@ -2043,20 +2416,17 @@ public sealed partial class PdfReaderWindow : Window
         HidePdfSelectionCard();
         if (pageStart < 0 || string.IsNullOrWhiteSpace(text)) return;
 
-        var noteBox = new TextBox { PlaceholderText = "记下此刻的想法…", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 84, Width = 360 };
-        var dlg = new ContentDialog
+        var (action, _, noteText) = await ShowPdfThoughtSheetAsync(
+            initialQuote: text,
+            initialNote: null,
+            pageZeroBased: pageStart,
+            editableQuote: false,
+            canDeleteNote: false);
+
+        if (action == "save")
         {
-            XamlRoot = RootGrid.XamlRoot,
-            Title = "写想法",
-            Content = noteBox,
-            PrimaryButtonText = "保存",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary,
-        };
-        if (await dlg.ShowAsync() == ContentDialogResult.Primary)
-        {
-            string? note = string.IsNullOrWhiteSpace(noteBox.Text) ? null : noteBox.Text.Trim();
-            _library.AddMark(_bookId, 0, new TextPoint((uint)pageStart, (uint)c0), new TextPoint((uint)pageEnd, (uint)c1), text, MarkStyle.Yellow, note);
+            string? note = string.IsNullOrWhiteSpace(noteText) ? null : noteText.Trim();
+            _library.AddMark(_bookId, 0, new TextPoint((uint)pageStart, (uint)c0), new TextPoint((uint)pageEnd, (uint)c1), text, _lastMarkStyle, note);
             for (int pi = pageStart; pi <= pageEnd; pi++) RefreshPageOverlay(pi);
             if (_sideMode == "notes") RenderSidePanel();
             App.CurrentApp.NotifyShelfRefresh();
@@ -2077,7 +2447,7 @@ public sealed partial class PdfReaderWindow : Window
     private async void PdfSelSpeak_Click(object sender, RoutedEventArgs e)
     {
         int pageIdx = _selPage >= 0 ? _selPage : _currentPage;
-        int charAt = Math.Max(0, _selStart);
+        int charAt = _editingMark is not null ? (int)_editingMark.Start.Offset : Math.Max(0, _selStart);
         HidePdfSelectionCard();
         if (pageIdx != _currentPage) await GoToPageAsync(pageIdx);
 
@@ -2091,84 +2461,351 @@ public sealed partial class PdfReaderWindow : Window
         StartListeningCurrentPage(hitIdx);
     }
 
-    private async void PdfSelLookup_Click(object sender, RoutedEventArgs e)
+    private Style CreateInlinePopoverFlyoutStyle(bool dark, YYPalette p)
+    {
+        var style = new Style(typeof(FlyoutPresenter));
+        style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(16, 14, 16, 14)));
+        style.Setters.Add(new Setter(Control.CornerRadiusProperty, new CornerRadius(16)));
+        style.Setters.Add(new Setter(FrameworkElement.MinWidthProperty, 320.0));
+        style.Setters.Add(new Setter(FrameworkElement.MaxWidthProperty, 368.0));
+        style.Setters.Add(new Setter(Control.BackgroundProperty, ThemeHelper.Brush(p.Card)));
+        style.Setters.Add(new Setter(Control.BorderBrushProperty, ThemeHelper.Brush(p.Line)));
+        style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
+        style.Setters.Add(new Setter(FrameworkElement.RequestedThemeProperty, dark ? ElementTheme.Dark : ElementTheme.Light));
+        return style;
+    }
+
+    private void PlaceInlinePopoverAnchor()
+    {
+        double hostW = CanvasHost.ActualWidth > 0 ? CanvasHost.ActualWidth : 900;
+        double hostH = CanvasHost.ActualHeight > 0 ? CanvasHost.ActualHeight : 640;
+        double x = Math.Clamp(_lastSelectionAnchorInHost.X, 24, Math.Max(24, hostW - 24));
+        double y = Math.Clamp(_lastSelectionAnchorInHost.Y, 64, Math.Max(64, hostH - 64));
+        PdfPopoverAnchor.Margin = new Thickness(x, y, 0, 0);
+    }
+
+    private void PdfSelLookup_Click(object sender, RoutedEventArgs e)
     {
         int pageIdx = _selPage >= 0 ? _selPage : _currentPage;
         string text = GetSelectedPdfText();
+        PlaceInlinePopoverAnchor();
         HidePdfSelectionCard();
         if (string.IsNullOrWhiteSpace(text)) return;
 
-        string word = text.Split([' ', '\t', ',', '.', ';', ':', '!', '?', '(', ')', '"', '\''], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? text;
-        var res = _library.LookUpWordRich(word);
-        var sp = new StackPanel { Spacing = 8, Width = 380 };
-        if (res is not null)
-        {
-            string head = string.IsNullOrWhiteSpace(res.Phonetic) ? res.Headword : $"{res.Headword}  /{res.Phonetic}/";
-            sp.Children.Add(new TextBlock { Text = head, FontSize = 15, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-            sp.Children.Add(new TextBlock { Text = res.Summary, FontSize = 13, TextWrapping = TextWrapping.Wrap, LineHeight = 20 });
-            sp.Children.Add(new TextBlock { Text = $"词典来源：{res.Source}", FontSize = 11, Opacity = 0.65 });
-        }
-        else
-        {
-            sp.Children.Add(new TextBlock { Text = $"本地词典未找到 “{word}”", FontSize = 13, TextWrapping = TextWrapping.Wrap });
-        }
+        try { _inlinePopoverCts?.Cancel(); _inlinePopoverCts?.Dispose(); } catch { }
+        _inlinePopoverCts = new CancellationTokenSource();
+        var ct = _inlinePopoverCts.Token;
 
-        var dlg = new ContentDialog
+        string word = text.Split([' ', '\t', ',', '.', ';', ':', '!', '?', '(', ')', '"', '\'', '“', '”', '‘', '’'], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? text.Trim();
+        var res = _library.LookUpWordRich(word);
+
+        bool dark = _nightPaper || ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
+        var p = ThemeHelper.Palette(dark);
+        var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+        string headword = res?.Headword ?? word;
+        string? curPhonetic = res?.Phonetic;
+        string curSummary = res?.Summary ?? "";
+
+        var flyout = new Flyout
         {
-            XamlRoot = RootGrid.XamlRoot,
-            Title = "查词",
-            Content = sp,
-            PrimaryButtonText = res is not null ? "加入生词本" : "",
-            CloseButtonText = "关闭",
+            Placement = FlyoutPlacementMode.Bottom,
+            FlyoutPresenterStyle = CreateInlinePopoverFlyoutStyle(dark, p),
         };
-        if (await dlg.ShowAsync() == ContentDialogResult.Primary && res is not null)
+
+        var sp = new StackPanel { Spacing = 9, Width = 324 };
+        var headGrid = new Grid { ColumnSpacing = 8 };
+        headGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        headGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        headGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var wordStack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        wordStack.Children.Add(new TextBlock
         {
+            Text = headword,
+            FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
+            FontSize = 17,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush(p.T1),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        if (!string.IsNullOrWhiteSpace(curPhonetic))
+        {
+            wordStack.Children.Add(new TextBlock
+            {
+                Text = $"/{curPhonetic.Trim('/', '[', ']')}/",
+                FontSize = 12,
+                Foreground = ThemeHelper.Brush(p.T2),
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+        }
+        headGrid.Children.Add(wordStack);
+
+        var speakBtn = new Button
+        {
+            Style = (Style)Application.Current.Resources["YYIconButtonStyle"],
+            Width = 28,
+            Height = 28,
+            CornerRadius = new CornerRadius(14),
+            Content = YYIcons.Make("speaker", 13, ThemeHelper.Brush(tint.Accent)),
+        };
+        ToolTipService.SetToolTip(speakBtn, L10n.T("发音"));
+        speakBtn.Click += async (_, _) =>
+        {
+            try { await AudioPlayer.SpeakForeignWordAsync(_library, headword, ResolvePdfSpeechLanguage(headword)); }
+            catch { }
+        };
+        Grid.SetColumn(speakBtn, 1);
+        headGrid.Children.Add(speakBtn);
+
+        var closeBtn = YYChrome.MakeSheetCloseButton(() => flyout.Hide(), dark, size: 24);
+        Grid.SetColumn(closeBtn, 2);
+        headGrid.Children.Add(closeBtn);
+        sp.Children.Add(headGrid);
+
+        var meaningTb = new TextBlock
+        {
+            Text = res is not null
+                ? res.Summary
+                : (_library.Companion.IsConfigured ? L10n.T("正在结合语境释义…") : $"本地词典暂无 “{word}”。可在「设置 → 外文」导入词典，或配置书伴进行语境释义。"),
+            FontSize = 13,
+            LineHeight = 20,
+            Foreground = ThemeHelper.Brush(res is not null ? p.T1 : p.T2),
+            TextWrapping = TextWrapping.Wrap,
+            MaxHeight = 160,
+        };
+        sp.Children.Add(meaningTb);
+
+        var sourceTb = new TextBlock
+        {
+            Text = res is not null ? $"词典来源：{res.Source}" : "",
+            Visibility = res is not null ? Visibility.Visible : Visibility.Collapsed,
+            FontSize = 11,
+            Foreground = ThemeHelper.Brush(p.T3),
+        };
+        sp.Children.Add(sourceTb);
+
+        bool alreadySaved = false;
+        try { alreadySaved = _library.GetWords().Any(w => w.Word.Equals(headword, StringComparison.OrdinalIgnoreCase)); }
+        catch { }
+
+        var footRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
+        var saveWordLabel = new TextBlock
+        {
+            Text = L10n.T(alreadySaved ? "已在生词本" : "加入生词本"),
+            FontSize = 12,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush(alreadySaved ? p.T2 : tint.Accent),
+        };
+        Button? saveWordBtn = null;
+        saveWordBtn = YYChrome.MakeSheetPillButton(saveWordLabel, () =>
+        {
+            if (alreadySaved || string.IsNullOrWhiteSpace(curSummary)) return;
             try
             {
-                _library.AddWord(res.Headword, res.Phonetic, res.Summary, _bookId, 0, (uint)Math.Max(0, pageIdx), text);
-                ShowBriefToast($"已加入生词本：{res.Headword}");
+                _library.AddWord(headword, curPhonetic, curSummary, _bookId, 0, (uint)Math.Max(0, pageIdx), text);
+                alreadySaved = true;
+                saveWordLabel.Text = L10n.T("已在生词本");
+                saveWordLabel.Foreground = ThemeHelper.Brush(p.T2);
+                ShowBriefToast($"已加入生词本：{headword}");
                 App.CurrentApp.NotifyShelfRefresh();
             }
             catch { }
+        }, dark, _library.Prefs.Tint, alreadySaved ? "secondary" : "warm", height: 30, horizontalPadding: 14);
+        saveWordBtn.IsEnabled = !alreadySaved && !string.IsNullOrWhiteSpace(curSummary);
+        footRow.Children.Add(saveWordBtn);
+        sp.Children.Add(footRow);
+
+        flyout.Content = sp;
+        flyout.ShowAt(PdfPopoverAnchor);
+
+        if (res is null && _library.Companion.IsConfigured)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    string aiDef = await _library.Companion.ChatAsync(
+                        $"请简明解释词语“{word}”在下面句子中的含义（不超过 60 字）：\n{text}",
+                        "你是精准简洁的双语词典助手。",
+                        ct: ct);
+                    if (ct.IsCancellationRequested) return;
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        curSummary = aiDef.Trim();
+                        meaningTb.Text = curSummary;
+                        meaningTb.Foreground = ThemeHelper.Brush(p.T1);
+                        sourceTb.Text = "书伴语境释义";
+                        sourceTb.Visibility = Visibility.Visible;
+                        if (!alreadySaved && !string.IsNullOrWhiteSpace(curSummary))
+                            saveWordBtn.IsEnabled = true;
+                    });
+                }
+                catch (Exception ex)
+                {
+                    if (ct.IsCancellationRequested) return;
+                    DispatcherQueue.TryEnqueue(() => meaningTb.Text = $"释义失败：{ex.Message}");
+                }
+            }, ct);
         }
     }
 
-    private void ShowBriefToast(string message)
+    private void PdfSelTranslate_Click(object sender, RoutedEventArgs e)
     {
-        _toastUndo = null;
-        ToastUndoBtn.Visibility = Visibility.Collapsed;
+        string text = GetSelectedPdfText();
+        PlaceInlinePopoverAnchor();
+        HidePdfSelectionCard();
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        try { _inlinePopoverCts?.Cancel(); _inlinePopoverCts?.Dispose(); } catch { }
+        _inlinePopoverCts = new CancellationTokenSource();
+        var ct = _inlinePopoverCts.Token;
+
+        bool dark = _nightPaper || ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
+        var p = ThemeHelper.Palette(dark);
+        var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+
+        var flyout = new Flyout
+        {
+            Placement = FlyoutPlacementMode.Bottom,
+            FlyoutPresenterStyle = CreateInlinePopoverFlyoutStyle(dark, p),
+        };
+
+        var sp = new StackPanel { Spacing = 9, Width = 336 };
+        var headGrid = new Grid();
+        headGrid.Children.Add(new TextBlock
+        {
+            Text = L10n.T("翻译"),
+            FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
+            FontSize = 15,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush(p.T1),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        var closeBtn = YYChrome.MakeSheetCloseButton(() => flyout.Hide(), dark, size: 24);
+        closeBtn.HorizontalAlignment = HorizontalAlignment.Right;
+        headGrid.Children.Add(closeBtn);
+        sp.Children.Add(headGrid);
+
+        sp.Children.Add(new TextBlock
+        {
+            Text = text,
+            FontSize = 12,
+            Foreground = ThemeHelper.Brush(p.T2),
+            MaxLines = 3,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        sp.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) });
+
+        string translatedResult = "";
+        var transTb = new TextBlock
+        {
+            Text = _library.Companion.IsConfigured
+                ? L10n.T("正在翻译…")
+                : "尚未配置书伴翻译服务。可在「设置 → 书伴」填写 API Key 或连接本地 Ollama 后即时翻译。",
+            FontSize = 13,
+            LineHeight = 20,
+            Foreground = ThemeHelper.Brush(_library.Companion.IsConfigured ? p.T1 : p.T2),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        sp.Children.Add(transTb);
+
+        var footRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
+        if (!_library.Companion.IsConfigured)
+        {
+            footRow.Children.Add(YYChrome.MakeSheetPillButton(L10n.T("去设置"), () =>
+            {
+                flyout.Hide();
+                App.CurrentApp.OpenSettings("companion");
+            }, dark, _library.Prefs.Tint, "warm", height: 30, horizontalPadding: 14));
+        }
+        else
+        {
+            var copyBtn = YYChrome.MakeSheetPillButton(L10n.T("复制译文"), () =>
+            {
+                if (string.IsNullOrWhiteSpace(translatedResult)) return;
+                var dp = new DataPackage();
+                dp.SetText($"{text}\n{translatedResult}");
+                Clipboard.SetContent(dp);
+                flyout.Hide();
+                ShowBriefToast("已复制原文与译文");
+            }, dark, _library.Prefs.Tint, "warm", height: 30, horizontalPadding: 14);
+            copyBtn.IsEnabled = false;
+            footRow.Children.Add(copyBtn);
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    string tr = await _library.Companion.ChatAsync(
+                        $"请把下面这段文字准确自然地译为简体中文（若是中文则译为英文），只输出译文：\n\n{text}",
+                        "你是专业的文学与学术翻译家，只输出译文正文。",
+                        ct: ct);
+                    if (ct.IsCancellationRequested) return;
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        translatedResult = tr.Trim();
+                        transTb.Text = translatedResult;
+                        copyBtn.IsEnabled = !string.IsNullOrWhiteSpace(translatedResult);
+                    });
+                }
+                catch (Exception ex)
+                {
+                    if (ct.IsCancellationRequested) return;
+                    DispatcherQueue.TryEnqueue(() => transTb.Text = $"翻译失败：{ex.Message}");
+                }
+            }, ct);
+        }
+        sp.Children.Add(footRow);
+
+        flyout.Content = sp;
+        flyout.ShowAt(PdfPopoverAnchor);
+    }
+
+    private void ShowPdfToast(string message, Action? undo = null, double seconds = 2.5)
+    {
+        bool dark = _nightPaper || ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
+        var p = ThemeHelper.Palette(dark);
+        var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+
+        _toastUndo = undo;
+        ToastIconBadge.Background = ThemeHelper.Brush(undo is not null ? tint.Fill : p.Ok);
+        ToastUndoBtn.Visibility = undo is not null ? Visibility.Visible : Visibility.Collapsed;
         ToastText.Text = message;
         ToastBanner.Visibility = Visibility.Visible;
         _toastTimer?.Stop();
-        _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.5) };
-        _toastTimer.Tick += (_, _) => { _toastTimer.Stop(); ToastBanner.Visibility = Visibility.Collapsed; ToastUndoBtn.Visibility = Visibility.Visible; };
+        _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(seconds) };
+        _toastTimer.Tick += (_, _) =>
+        {
+            _toastTimer.Stop();
+            _toastUndo = null;
+            ToastUndoBtn.Visibility = Visibility.Collapsed;
+            ToastBanner.Visibility = Visibility.Collapsed;
+        };
         _toastTimer.Start();
     }
 
+    private void ShowBriefToast(string message) => ShowPdfToast(message, undo: null, seconds: 2.5);
+
     private async Task EditPdfMarkNoteAsync(Mark mk)
     {
-        var noteBox = new TextBox { Text = mk.Note ?? "", PlaceholderText = "写下你的想法…", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 84, Width = 360 };
-        var dlg = new ContentDialog
-        {
-            XamlRoot = RootGrid.XamlRoot,
-            Title = "想法",
-            Content = noteBox,
-            PrimaryButtonText = "保存",
-            SecondaryButtonText = string.IsNullOrWhiteSpace(mk.Note) ? "" : "删掉想法",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary,
-        };
-        var res = await dlg.ShowAsync();
         int p0 = (int)mk.Start.Sentence;
         int p1 = Math.Max(p0, (int)mk.End.Sentence);
-        if (res == ContentDialogResult.Primary)
+        var (action, _, noteText) = await ShowPdfThoughtSheetAsync(
+            initialQuote: mk.Text,
+            initialNote: mk.Note,
+            pageZeroBased: p0,
+            editableQuote: false,
+            canDeleteNote: !string.IsNullOrWhiteSpace(mk.Note));
+
+        if (action == "save")
         {
-            _library.SetMarkNote(_bookId, mk.Id, string.IsNullOrWhiteSpace(noteBox.Text) ? null : noteBox.Text.Trim());
+            _library.SetMarkNote(_bookId, mk.Id, string.IsNullOrWhiteSpace(noteText) ? null : noteText.Trim());
             for (int pi = p0; pi <= p1; pi++) RefreshPageOverlay(pi);
             if (_sideMode == "notes") RenderSidePanel();
             App.CurrentApp.NotifyShelfRefresh();
         }
-        else if (res == ContentDialogResult.Secondary)
+        else if (action == "delete")
         {
             _library.SetMarkNote(_bookId, mk.Id, null);
             for (int pi = p0; pi <= p1; pi++) RefreshPageOverlay(pi);
@@ -2187,7 +2824,7 @@ public sealed partial class PdfReaderWindow : Window
         if (_sideMode == "notes") RenderSidePanel();
         App.CurrentApp.NotifyShelfRefresh();
 
-        _toastUndo = () =>
+        ShowPdfToast("已删除划线", undo: () =>
         {
             try
             {
@@ -2197,14 +2834,7 @@ public sealed partial class PdfReaderWindow : Window
                 App.CurrentApp.NotifyShelfRefresh();
             }
             catch { }
-        };
-        ToastUndoBtn.Visibility = Visibility.Visible;
-        ToastText.Text = "已删除划线";
-        ToastBanner.Visibility = Visibility.Visible;
-        _toastTimer?.Stop();
-        _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
-        _toastTimer.Tick += (_, _) => { _toastTimer.Stop(); ToastBanner.Visibility = Visibility.Collapsed; };
-        _toastTimer.Start();
+        }, seconds: 5.0);
     }
 
     private void ToastUndo_Click(object sender, RoutedEventArgs e)
@@ -2453,7 +3083,8 @@ public sealed partial class PdfReaderWindow : Window
             double scrollRatio = ContinuousScroller.VerticalOffset / prevExtent;
 
             double baseW = Math.Clamp((CanvasHost.ActualWidth > 0 ? CanvasHost.ActualWidth : 940) - 100, 440, 880) * _zoom;
-            double newTotalH = 0;
+            _lastContinuousBaseW = baseW;
+            double newTotalH = ContinuousStack.Padding.Top + ContinuousStack.Padding.Bottom;
             for (int i = 0; i < _pageCount; i++)
             {
                 double pageH = Math.Round(baseW * GetPageAspect(i));
@@ -2463,7 +3094,7 @@ public sealed partial class PdfReaderWindow : Window
                 _continuousOverlays[i].Height = pageH;
                 _continuousPageGrids[i].Width = baseW;
                 _continuousPageGrids[i].Height = pageH;
-                newTotalH += pageH + 24;
+                newTotalH += pageH + 12.0 + (i + 1 < _pageCount ? 1.0 : 0.0) + (i + 1 < _pageCount ? ContinuousStack.Spacing : 0.0);
             }
 
             RefreshVisibleOverlays();
@@ -2534,13 +3165,13 @@ public sealed partial class PdfReaderWindow : Window
     {
         if (_layoutMode != "scroll" || _continuousImages.Count == 0) return;
         double y = ContinuousScroller.VerticalOffset + ContinuousScroller.ViewportHeight * 0.35;
-        double acc = 0;
+        double acc = ContinuousStack.Padding.Top;
         int hit = 0;
         for (int i = 0; i < _continuousImages.Count; i++)
         {
-            double h = _continuousImages[i].Height + 24;
-            if (y < acc + h) { hit = i; break; }
-            acc += h;
+            double stride = GetContinuousCardStride(i);
+            if (y < acc + stride) { hit = i; break; }
+            acc += stride;
             hit = i;
         }
         if (hit != _currentPage)
@@ -2660,14 +3291,10 @@ public sealed partial class PdfReaderWindow : Window
             {
                 string delId = existing.Id;
                 _library.DeleteBookmark(_bookId, delId);
-                _toastUndo = () => { try { _library.Core.RestoreBookmark(_bookId, delId); } catch { } };
-                ToastUndoBtn.Visibility = Visibility.Visible;
-                ToastText.Text = $"已移掉第 {_currentPage + 1} 页书签";
-                ToastBanner.Visibility = Visibility.Visible;
-                _toastTimer?.Stop();
-                _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
-                _toastTimer.Tick += (_, _) => { _toastTimer.Stop(); ToastBanner.Visibility = Visibility.Collapsed; };
-                _toastTimer.Start();
+                ShowPdfToast($"已移掉第 {_currentPage + 1} 页书签", undo: () =>
+                {
+                    try { _library.Core.RestoreBookmark(_bookId, delId); } catch { }
+                }, seconds: 5.0);
             }
             else
             {
@@ -2683,7 +3310,10 @@ public sealed partial class PdfReaderWindow : Window
         _readingTimer.Stop();
         _sleepTimer.Stop();
         _searchDebounce.Stop();
+        _continuousResizeDebounce?.Stop();
+        try { _inlinePopoverCts?.Cancel(); _inlinePopoverCts?.Dispose(); } catch { }
         SaveCurrentProgress();
+        PdfInfoReader.CloseCachedDocument(_filePath);
         _audio.Dispose();
     }
 }

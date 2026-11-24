@@ -108,15 +108,30 @@ public static class QuoteShareDialog
             grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            grid.Children.Add(new TextBlock
+            if (shape == "wide")
             {
-                Text = "“",
-                FontFamily = new FontFamily("Georgia, SimSun"),
-                FontSize = 34,
-                Foreground = ThemeHelper.Brush(accent),
-                Opacity = 0.75,
-                Margin = new Thickness(0, -6, 0, -16),
-            });
+                grid.Children.Add(new Border
+                {
+                    Width = 28,
+                    Height = 1,
+                    Background = ThemeHelper.Brush(accent),
+                    Opacity = 0.78,
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    Margin = new Thickness(0, 4, 0, 2),
+                });
+            }
+            else
+            {
+                grid.Children.Add(new TextBlock
+                {
+                    Text = "“",
+                    FontFamily = new FontFamily("Georgia, SimSun"),
+                    FontSize = 34,
+                    Foreground = ThemeHelper.Brush(accent),
+                    Opacity = 0.75,
+                    Margin = new Thickness(0, -6, 0, -16),
+                });
+            }
 
             var bodyStack = new StackPanel { Spacing = 12, VerticalAlignment = VerticalAlignment.Center };
             string trimmedQuote = quote.Trim();
@@ -154,9 +169,6 @@ public static class QuoteShareDialog
             }
             Grid.SetRow(bodyStack, 1);
             grid.Children.Add(bodyStack);
-
-            var footStack = new StackPanel { Spacing = 10 };
-            footStack.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(rule) });
 
             var footRow = new Grid { ColumnSpacing = 8 };
             footRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -211,19 +223,30 @@ public static class QuoteShareDialog
             };
             Grid.SetColumn(brand, 2);
             footRow.Children.Add(brand);
-            footStack.Children.Add(footRow);
 
-            Grid.SetRow(footStack, 2);
-            grid.Children.Add(footStack);
+            Grid.SetRow(footRow, 2);
+            grid.Children.Add(footRow);
 
-            var innerBorder = new Border
+            if (look == "cover")
             {
-                CornerRadius = new CornerRadius(4),
-                BorderBrush = ThemeHelper.Brush(rule),
-                BorderThickness = new Thickness(0.75),
-                Padding = new Thickness(20, 20, 20, 16),
-                Child = grid,
-            };
+                var innerBorder = new Border
+                {
+                    CornerRadius = new CornerRadius(4),
+                    BorderBrush = ThemeHelper.Brush(rule),
+                    BorderThickness = new Thickness(0.75),
+                    Padding = new Thickness(20, 20, 20, 16),
+                    Child = grid,
+                };
+                return new Border
+                {
+                    Width = w,
+                    MinHeight = minH,
+                    CornerRadius = new CornerRadius(10),
+                    Background = ThemeHelper.Brush(bg),
+                    Padding = new Thickness(9),
+                    Child = innerBorder,
+                };
+            }
 
             return new Border
             {
@@ -231,8 +254,10 @@ public static class QuoteShareDialog
                 MinHeight = minH,
                 CornerRadius = new CornerRadius(10),
                 Background = ThemeHelper.Brush(bg),
-                Padding = new Thickness(9),
-                Child = innerBorder,
+                BorderBrush = look == "plain" ? ThemeHelper.Brush(rule) : null,
+                BorderThickness = new Thickness(look == "plain" ? 0.5 : 0),
+                Padding = new Thickness(29, 29, 29, 25),
+                Child = grid,
             };
         }
 
@@ -388,28 +413,33 @@ public static class QuoteShareDialog
         rootStack.Children.Add(dotsRow);
         rootStack.Children.Add(shapeWrap);
 
-        if (!string.IsNullOrWhiteSpace(thought))
+        bool hasThought = !string.IsNullOrWhiteSpace(thought);
+        var thRow = new Grid
         {
-            var thRow = new Grid
-            {
-                Padding = new Thickness(14, 8, 14, 8),
-                MinHeight = 42,
-                Background = ThemeHelper.Brush(uiPalette.Card),
-                BorderBrush = ThemeHelper.Brush(uiPalette.Line),
-                BorderThickness = new Thickness(0.5),
-                CornerRadius = new CornerRadius(11),
-            };
-            thRow.Children.Add(new TextBlock { Text = "带上想法", FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(uiPalette.T1), VerticalAlignment = VerticalAlignment.Center });
-            var sw = new ToggleSwitch { IsOn = includeThought, HorizontalAlignment = HorizontalAlignment.Right };
-            sw.Toggled += (_, _) =>
-            {
-                includeThought = sw.IsOn;
-                if (prefs is not null) { prefs.QuoteShareIncludeThought = includeThought; libSvc?.SavePrefs(); }
-                RebuildCard();
-            };
-            thRow.Children.Add(sw);
-            rootStack.Children.Add(thRow);
-        }
+            Padding = new Thickness(14, 8, 14, 8),
+            MinHeight = 42,
+            Background = ThemeHelper.Brush(uiPalette.Card),
+            BorderBrush = ThemeHelper.Brush(uiPalette.Line),
+            BorderThickness = new Thickness(0.5),
+            CornerRadius = new CornerRadius(11),
+            Opacity = hasThought ? 1.0 : 0.4,
+        };
+        thRow.Children.Add(new TextBlock { Text = "带上想法", FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(uiPalette.T1), VerticalAlignment = VerticalAlignment.Center });
+        var sw = new ToggleSwitch
+        {
+            IsOn = hasThought && includeThought,
+            IsEnabled = hasThought,
+            HorizontalAlignment = HorizontalAlignment.Right,
+        };
+        sw.Toggled += (_, _) =>
+        {
+            if (!hasThought) return;
+            includeThought = sw.IsOn;
+            if (prefs is not null) { prefs.QuoteShareIncludeThought = includeThought; libSvc?.SavePrefs(); }
+            RebuildCard();
+        };
+        thRow.Children.Add(sw);
+        rootStack.Children.Add(thRow);
 
         var statusText = new TextBlock { FontSize = 11.5, Foreground = ThemeHelper.Brush(uiPalette.T3), HorizontalAlignment = HorizontalAlignment.Center, Visibility = Visibility.Collapsed };
 
@@ -423,10 +453,11 @@ public static class QuoteShareDialog
 
         string BuildPlainShareText()
         {
-            string cite = string.IsNullOrWhiteSpace(author) ? $"——《{bookTitle}》" : $"——《{bookTitle}》 {author}";
+            string chapterPart = string.IsNullOrWhiteSpace(chapter) ? "" : chapter.Trim();
+            string cite = $"——《{bookTitle}》{chapterPart}";
             return includeThought && !string.IsNullOrWhiteSpace(thought)
-                ? $"“{quote.Trim()}”\n{thought.Trim()}\n{cite}"
-                : $"“{quote.Trim()}”\n{cite}";
+                ? $"「{quote.Trim()}」\n\n{thought.Trim()}\n\n{cite}"
+                : $"「{quote.Trim()}」\n\n{cite}";
         }
 
         var tc = ThemeHelper.TintColors(tint, darkUi);
@@ -508,8 +539,8 @@ public static class QuoteShareDialog
         rootStack.Children.Add(statusText);
         L10n.ApplyTree(rootStack);
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, darkUi, 456, rootStack, maxHeight: 820);
-        await dlgRef.ShowAsync();
+        dlgRef = YYChrome.CreateMacSheet(xamlRoot, darkUi, 456, rootStack, maxHeight: 820, tint: tint);
+        await dlgRef.ShowSafeAsync(tint);
     }
 
     private static string SanitizeFileName(string raw)

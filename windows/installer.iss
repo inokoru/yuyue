@@ -2,16 +2,16 @@
 ; Build via: .\windows\package-release.ps1 -Version 0.1.0 -BuildNumber 1 -BuildInstaller
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.2"
+  #define MyAppVersion "0.1.3"
 #endif
 #ifndef MyBuildNumber
-  #define MyBuildNumber "4"
+  #define MyBuildNumber "5"
 #endif
 #ifndef MyArch
   #define MyArch "x64"
 #endif
 #ifndef StageDir
-  #define StageDir "dist\Yuyue-0.1.2-windows-x64"
+  #define StageDir "dist\Yuyue-0.1.3-windows-x64"
 #endif
 #ifndef OutDir
   #define OutDir "dist"

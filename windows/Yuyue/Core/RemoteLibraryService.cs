@@ -813,8 +813,8 @@ public sealed class RemoteLibraryService
         string? currentSearchTpl = null;
         string? editingSourceId = null;
 
-        var root = new Grid { Width = 620, Height = 470, ColumnSpacing = 12 };
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(178) });
+        var root = new Grid { Height = 450, ColumnSpacing = 14 };
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(190) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         var leftList = new StackPanel { Spacing = 4 };
@@ -827,9 +827,38 @@ public sealed class RemoteLibraryService
         topBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         topBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         topBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var backBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "‹ 上级", Visibility = Visibility.Collapsed };
+        var backBtn = new Button
+        {
+            Content = L10n.T("‹ 上级"),
+            Height = 28,
+            MinHeight = 28,
+            Padding = new Thickness(10, 0, 10, 0),
+            CornerRadius = new CornerRadius(14),
+            Background = ThemeHelper.Brush(p.Card),
+            Foreground = ThemeHelper.Brush(p.T1),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(0.5),
+            FontSize = 12,
+            UseSystemFocusVisuals = false,
+            Visibility = Visibility.Collapsed,
+        };
         var searchBox = new TextBox { PlaceholderText = "搜索 OPDS 书目（回车）…", Visibility = Visibility.Collapsed };
-        var streamAllBtn = new Button { Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"], Content = "边下边听整本", Height = 26, FontSize = 11, Visibility = Visibility.Collapsed };
+        var streamAllBtn = new Button
+        {
+            Content = L10n.T("边下边听整本"),
+            Height = 26,
+            MinHeight = 26,
+            Padding = new Thickness(12, 0, 12, 0),
+            CornerRadius = new CornerRadius(13),
+            Background = ThemeHelper.Brush(tint.Soft),
+            Foreground = ThemeHelper.Brush(tint.Accent),
+            BorderBrush = ThemeHelper.Brush(tint.Edge),
+            BorderThickness = new Thickness(0.5),
+            FontSize = 11.5,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            UseSystemFocusVisuals = false,
+            Visibility = Visibility.Collapsed,
+        };
         topBar.Children.Add(backBtn);
         Grid.SetColumn(searchBox, 1);
         topBar.Children.Add(searchBox);
@@ -940,13 +969,21 @@ public sealed class RemoteLibraryService
                     Grid.SetColumn(meta, 1);
                     row.Children.Add(meta);
 
+                    bool primaryEntryAction = !entry.IsFolder && !alreadyOwned;
                     var actBtn = new Button
                     {
-                        Style = (Style)Application.Current.Resources[entry.IsFolder || alreadyOwned ? "YYPillButtonStyle" : "YYPrimaryPillButtonStyle"],
                         Content = entry.IsFolder ? "打开 ›" : (alreadyOwned ? "✓ 已在书架" : "放入书架"),
                         Height = 25,
                         MinHeight = 25,
+                        Padding = new Thickness(10, 0, 10, 0),
+                        CornerRadius = new CornerRadius(12.5),
+                        Background = ThemeHelper.Brush(primaryEntryAction ? tint.Soft : p.Inset),
+                        Foreground = ThemeHelper.Brush(primaryEntryAction ? tint.Accent : p.T2),
+                        BorderBrush = ThemeHelper.Brush(primaryEntryAction ? tint.Edge : p.Line),
+                        BorderThickness = new Thickness(0.5),
                         FontSize = 11,
+                        FontWeight = primaryEntryAction ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
+                        UseSystemFocusVisuals = false,
                         IsEnabled = !alreadyOwned,
                     };
                     actBtn.Click += async (_, _) =>
@@ -967,7 +1004,9 @@ public sealed class RemoteLibraryService
                                     actBtn.DispatcherQueue.TryEnqueue(() => actBtn.Content = $"{Math.Round(frac * 100)}%");
                                 });
                                 actBtn.Content = "✓ 已在书架";
-                                actBtn.Style = (Style)Application.Current.Resources["YYPillButtonStyle"];
+                                actBtn.Background = ThemeHelper.Brush(p.Inset);
+                                actBtn.Foreground = ThemeHelper.Brush(p.T2);
+                                actBtn.BorderBrush = ThemeHelper.Brush(p.Line);
                                 statusText.Text = $"已导入《{b.Title}》";
                                 onImported();
                             }
@@ -987,16 +1026,16 @@ public sealed class RemoteLibraryService
                         CornerRadius = new CornerRadius(8),
                         Background = ThemeHelper.Brush(p.Card),
                         BorderBrush = ThemeHelper.Brush(p.Line),
-                        BorderThickness = new Thickness(1),
+                        BorderThickness = new Thickness(0.5),
                         Child = row,
                     });
                 }
 
                 if (!string.IsNullOrEmpty(nextUrl))
                 {
-                    var moreBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], HorizontalAlignment = HorizontalAlignment.Center, Content = "下一页 ›" };
                     string nu = nextUrl!;
-                    moreBtn.Click += async (_, _) => { navStack.Push(url ?? reqSrc.Url); await LoadUrlAsync(nu); };
+                    var moreBtn = YYChrome.MakeSheetPillButton("下一页 ›", () => { navStack.Push(url ?? reqSrc.Url); _ = LoadUrlAsync(nu); }, dark, _library.Prefs.Tint, "secondary", height: 28, horizontalPadding: 14);
+                    moreBtn.HorizontalAlignment = HorizontalAlignment.Center;
                     entriesPanel.Children.Add(moreBtn);
                 }
             }
@@ -1082,11 +1121,18 @@ public sealed class RemoteLibraryService
 
             var addSrcBtn = new Button
             {
-                Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"],
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 Content = editing is not null ? "保存修改" : "＋ 检测并添加",
-                Height = 26,
+                Height = 28,
+                MinHeight = 28,
+                CornerRadius = new CornerRadius(14),
+                Background = ThemeHelper.Brush(tint.Soft),
+                Foreground = ThemeHelper.Brush(tint.Accent),
+                BorderBrush = ThemeHelper.Brush(tint.Edge),
+                BorderThickness = new Thickness(0.5),
                 FontSize = 11.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                UseSystemFocusVisuals = false,
             };
             addSrcBtn.Click += async (_, _) =>
             {
@@ -1154,15 +1200,27 @@ public sealed class RemoteLibraryService
         Grid.SetColumn(rightStack, 1);
         root.Children.Add(rightStack);
 
+        ContentDialog? dlgRef = null;
+        var doneBtn = YYChrome.MakeSheetPillButton("完成", () => dlgRef?.Hide(), dark, _library.Prefs.Tint, "dark", height: 34, horizontalPadding: 20);
+        doneBtn.HorizontalAlignment = HorizontalAlignment.Right;
+
+        var sheetBody = new StackPanel
+        {
+            Spacing = 14,
+            Padding = new Thickness(22, 18, 22, 18),
+            Children =
+            {
+                YYChrome.MakeSheetHeader("OPDS 与 WebDAV 远程书库", "连接 Calibre-Web、Komga 或 WebDAV 云端书库", () => dlgRef?.Hide(), dark, titleSize: 17),
+                new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) },
+                root,
+                doneBtn,
+            },
+        };
+
         try
         {
-            await new ContentDialog
-            {
-                XamlRoot = xamlRoot,
-                Title = "OPDS 与 WebDAV 远程书库",
-                Content = root,
-                CloseButtonText = "完成",
-            }.ShowAsync();
+            dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 668, sheetBody, maxHeight: 740, tint: _library.Prefs.Tint);
+            await dlgRef.ShowSafeAsync(_library.Prefs.Tint);
         }
         finally
         {

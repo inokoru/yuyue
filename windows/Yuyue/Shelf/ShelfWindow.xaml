@@ -373,14 +373,14 @@
                                     </ItemsRepeater.Layout>
                                 </ItemsRepeater>
 
-                                <!-- 空书架（1:1 testMacShelfEmpty.1.png） -->
+                                <!-- 空书架 / 有声空态（1:1 MacShelfView.swift:1104-1130） -->
                                 <StackPanel
                                     x:Name="EmptyStatePanel"
                                     Visibility="Collapsed"
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center"
-                                    Margin="0,180,0,0"
-                                    Spacing="12">
+                                    Margin="0,150,0,0"
+                                    Spacing="10">
                                     <ContentPresenter x:Name="EmptyIconHost" HorizontalAlignment="Center" />
                                     <TextBlock
                                         x:Name="EmptyTitleText"
@@ -388,6 +388,25 @@
                                         FontSize="12.5"
                                         Foreground="{ThemeResource YYText2Brush}"
                                         HorizontalAlignment="Center" />
+                                    <TextBlock
+                                        x:Name="EmptySubtitleText"
+                                        Visibility="Collapsed"
+                                        FontSize="12"
+                                        MaxWidth="340"
+                                        TextWrapping="Wrap"
+                                        TextAlignment="Center"
+                                        Foreground="{ThemeResource YYText2Brush}"
+                                        HorizontalAlignment="Center" />
+                                    <Button
+                                        x:Name="EmptyActionBtn"
+                                        Visibility="Collapsed"
+                                        Style="{StaticResource YYPillButtonStyle}"
+                                        Height="28"
+                                        MinHeight="28"
+                                        Margin="0,4,0,0"
+                                        Padding="12,0"
+                                        HorizontalAlignment="Center"
+                                        Click="ImportButton_Click" />
                                 </StackPanel>
                             </StackPanel>
                         </StackPanel>
@@ -406,15 +425,17 @@
                         HorizontalAlignment="Center"
                         Margin="22,0,28,14" />
 
-                    <!-- 顶部撤销/提示横幅（对齐 UndoToast.swift：40px 白瓷胶囊 + 左圆底对勾 + 右 24x24 圆形撤销钮） -->
+                    <!-- 顶部撤销/提示横幅（对齐 UndoToast.swift e42fcb6：自适应单行/双行白瓷胶囊 + 胶囊动作按钮 + 独立关闭按钮） -->
                     <Border
                         x:Name="ToastBanner"
                         Visibility="Collapsed"
                         VerticalAlignment="Top"
                         HorizontalAlignment="Center"
                         Margin="0,8,0,0"
-                        Height="38"
-                        Padding="11,0,8,0"
+                        Height="Auto"
+                        MinHeight="38"
+                        MaxWidth="460"
+                        Padding="12,8"
                         CornerRadius="19"
                         Background="{ThemeResource YYCardBrush}"
                         BorderBrush="{ThemeResource YYLineBrush}"
@@ -422,28 +443,48 @@
                         PointerEntered="ToastBanner_PointerEntered"
                         PointerExited="ToastBanner_PointerExited">
                         <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
-                            <Border x:Name="ToastDisc" Width="17" Height="17" CornerRadius="8.5" Background="#2DBE60">
+                            <Border x:Name="ToastDisc" Width="17" Height="17" CornerRadius="8.5" Background="#2DBE60" VerticalAlignment="Center">
                                 <ContentPresenter x:Name="ToastCheckIcon" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Border>
-                            <TextBlock x:Name="ToastText" FontSize="12.5" FontWeight="Medium" VerticalAlignment="Center" Foreground="{ThemeResource YYText1Brush}" />
+                            <StackPanel Spacing="1" VerticalAlignment="Center">
+                                <TextBlock x:Name="ToastText" FontSize="12.5" FontWeight="Medium" Foreground="{ThemeResource YYText1Brush}" TextWrapping="Wrap" MaxWidth="310" />
+                                <TextBlock x:Name="ToastDetailText" Visibility="Collapsed" FontSize="11.5" Foreground="{ThemeResource YYText2Brush}" TextWrapping="Wrap" MaxWidth="310" />
+                            </StackPanel>
                             <Button
                                 x:Name="ToastUndoButton"
                                 Visibility="Collapsed"
-                                Width="24"
-                                Height="24"
-                                Padding="0"
-                                CornerRadius="12"
+                                Height="26"
+                                MinHeight="26"
+                                Padding="10,0"
+                                CornerRadius="13"
                                 Background="{ThemeResource YYInsetBrush}"
+                                Foreground="{ThemeResource YYText1Brush}"
+                                FontSize="11.5"
+                                FontWeight="Medium"
                                 BorderThickness="0"
+                                VerticalAlignment="Center"
                                 ToolTipService.ToolTip="撤销 (Ctrl+Z)"
                                 Click="ToastUndo_Click" />
+                            <Button
+                                x:Name="ToastCloseButton"
+                                Width="22"
+                                Height="22"
+                                MinWidth="22"
+                                MinHeight="22"
+                                Padding="0"
+                                CornerRadius="11"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                VerticalAlignment="Center"
+                                Click="ToastClose_Click" />
                         </StackPanel>
                     </Border>
 
-                    <!-- 拖入文件提示蒙层（对齐 MacImport.swift MacDropHint） -->
+                    <!-- 拖入文件提示蒙层（对齐 MacImport.swift MacDropHint，穿透命中保证合集卡片接收拖拽不闪断） -->
                     <Border
                         x:Name="DropOverlay"
                         Visibility="Collapsed"
+                        IsHitTestVisible="False"
                         Background="{ThemeResource YYBgBrush}"
                         Padding="22"
                         CornerRadius="12">
@@ -488,7 +529,7 @@
             PointerPressed="QuickSearchBackdrop_Pressed">
             <Border
                 x:Name="QuickSearchCard"
-                Width="580"
+                Width="540"
                 MaxHeight="520"
                 VerticalAlignment="Top"
                 Margin="0,68,0,0"

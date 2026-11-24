@@ -652,13 +652,28 @@ public sealed class CloudVoiceService
 
     public static readonly (string Id, string Name, string Locale, string Gender)[] VolcengineBuiltinVoices =
     [
-        ("zh_female_cancan_mars_bigtts", "灿灿 · 温暖女声", "zh-CN", "female"),
-        ("zh_female_shuangkuaisisi_moon_bigtts", "思思 · 爽快自然", "zh-CN", "female"),
-        ("zh_male_wennuanahu_moon_bigtts", "阿虎 · 温暖男声", "zh-CN", "male"),
-        ("zh_male_shaonianzixin_moon_bigtts", "梓新 · 少年男声", "zh-CN", "male"),
-        ("zh_female_wanwanxiaohe_moon_bigtts", "小荷 · 温婉旁白", "zh-CN", "female"),
-        ("en_female_anna_mars_bigtts", "Anna · English Narrator", "en-US", "female"),
+        ("BV700_V2_streaming", "灿灿 2.0 · 自然温暖女声", "zh-CN", "female"),
+        ("BV705_streaming", "炀炀 · 阳光自然男声", "zh-CN", "male"),
+        ("BV406_V2_streaming", "梓梓 2.0 · 灵动清亮女声", "zh-CN", "female"),
+        ("BV001_V2_streaming", "通用女声 2.0 · 沉稳旁白", "zh-CN", "female"),
+        ("BV002_V2_streaming", "通用男声 2.0 · 醇厚旁白", "zh-CN", "male"),
+        ("BV102_streaming", "儒雅青年 · 温和男声", "zh-CN", "male"),
     ];
+
+    public static string NormalizeVolcengineVoiceId(string? voiceId)
+    {
+        string v = (voiceId ?? "").Trim();
+        return v switch
+        {
+            "" or "zh_female_cancan_mars_bigtts" => "BV700_V2_streaming",
+            "zh_female_shuangkuaisisi_moon_bigtts" => "BV406_V2_streaming",
+            "zh_male_wennuanahu_moon_bigtts" => "BV002_V2_streaming",
+            "zh_male_shaonianzixin_moon_bigtts" => "BV705_streaming",
+            "zh_female_wanwanxiaohe_moon_bigtts" or "en_female_anna_mars_bigtts" => "BV001_V2_streaming",
+            _ when v.EndsWith("_bigtts", StringComparison.OrdinalIgnoreCase) => "BV700_V2_streaming",
+            _ => v,
+        };
+    }
 
     public static readonly (string Id, string Name, string Locale, string Gender)[] FishBuiltinVoices =
     [
@@ -846,7 +861,13 @@ public sealed class CloudVoiceService
 
             case CloudTtsProvider.Volcengine:
                 return VolcengineBuiltinVoices
-                    .Select(v => new CloudVoiceEntry(provider, v.Id, v.Name, v.Locale, v.Gender, null))
+                    .Select(v => new CloudVoiceEntry(
+                        provider,
+                        v.Id,
+                        v.Name,
+                        v.Locale,
+                        v.Gender,
+                        v.Id is "BV001_V2_streaming" or "BV002_V2_streaming" ? "middle_aged" : "young"))
                     .ToArray();
 
             case CloudTtsProvider.Fish:
@@ -980,9 +1001,9 @@ public sealed class CloudVoiceService
                     var probeBody = new
                     {
                         app = new { appid = appId, token = token, cluster = "volcano_tts" },
-                        user = new { uid = "yuyue-win-probe" },
-                        audio = new { voice_type = "zh_female_cancan_mars_bigtts", encoding = "wav", rate = 24000 },
-                        request = new { reqid = Guid.NewGuid().ToString(), text = "好", text_type = "plain", operation = "query" },
+                        user = new { uid = "yuyue" },
+                        audio = new { voice_type = "BV700_V2_streaming", encoding = "mp3", speed_ratio = 1.0 },
+                        request = new { reqid = Guid.NewGuid().ToString(), text = "好", operation = "query" },
                     };
                     using var req = new HttpRequestMessage(HttpMethod.Post, "https://openspeech.bytedance.com/api/v1/tts");
                     req.Headers.TryAddWithoutValidation("Authorization", $"Bearer;{token}");
@@ -1252,6 +1273,11 @@ public sealed class CloudVoiceService
             voiceId = NormalizeFreeVoiceId(voiceId, language);
             fullVoiceId = $"cloud.free.{voiceId}";
         }
+        else if (provider == CloudTtsProvider.Volcengine)
+        {
+            voiceId = NormalizeVolcengineVoiceId(voiceId);
+            fullVoiceId = $"cloud.volcengine.{voiceId}";
+        }
         string apiKey = GetApiKey(provider);
         if (NeedsKey(provider) && string.IsNullOrEmpty(apiKey)) return null;
 
@@ -1383,12 +1409,13 @@ public sealed class CloudVoiceService
                 var (appId, token) = ResolveVolcengineCredentials(apiKey);
                 if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(token))
                     throw new InvalidOperationException("请先填写火山引擎 AppID 与 Access Token");
+                string volcVoiceId = NormalizeVolcengineVoiceId(voiceId);
                 var body = new
                 {
                     app = new { appid = appId, token = token, cluster = "volcano_tts" },
-                    user = new { uid = "yuyue-reader" },
-                    audio = new { voice_type = voiceId, encoding = "wav", rate = 24000, speed_ratio = 1.0 },
-                    request = new { reqid = Guid.NewGuid().ToString(), text = plain, text_type = "plain", operation = "query" },
+                    user = new { uid = "yuyue" },
+                    audio = new { voice_type = volcVoiceId, encoding = "mp3", speed_ratio = 1.0 },
+                    request = new { reqid = Guid.NewGuid().ToString(), text = plain, operation = "query" },
                 };
                 using var req = new HttpRequestMessage(HttpMethod.Post, "https://openspeech.bytedance.com/api/v1/tts");
                 req.Headers.TryAddWithoutValidation("Authorization", $"Bearer;{token}");
@@ -1396,6 +1423,13 @@ public sealed class CloudVoiceService
                 using var resp = await Http.SendAsync(req, ct);
                 if (!resp.IsSuccessStatusCode) throw new InvalidOperationException(await FormatHttpErrorAsync("火山豆包", resp));
                 using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+                if (doc.RootElement.TryGetProperty("code", out var cProp) && cProp.ValueKind == JsonValueKind.Number && cProp.GetInt32() is int apiCode && apiCode != 3000)
+                {
+                    string apiMsg = doc.RootElement.TryGetProperty("message", out var mp) ? mp.GetString() ?? "" : "";
+                    if (apiCode is 3001 or 3003)
+                        throw new InvalidOperationException("火山引擎 AppID 或 Access Token 无效");
+                    throw new InvalidOperationException(string.IsNullOrWhiteSpace(apiMsg) ? $"火山豆包返回错误 ({apiCode})" : $"火山豆包返回错误 ({apiCode})：{apiMsg}");
+                }
                 string b64 = doc.RootElement.TryGetProperty("data", out var dp) ? dp.GetString() ?? "" : "";
                 if (string.IsNullOrEmpty(b64)) throw new InvalidOperationException("火山豆包返回空音频数据");
                 return Convert.FromBase64String(b64);
@@ -1830,7 +1864,7 @@ public sealed class CloudVoiceService
         if (data[0] == 0x4F && data[1] == 0x67 && data[2] == 0x67 && data[3] == 0x53) return true; // OggS
         if (data[0] == 0x49 && data[1] == 0x44 && data[2] == 0x33) return true; // ID3
         if (data[0] == 0xFF && (data[1] & 0xE0) == 0xE0) return true; // MPEG sync
-        return true;
+        return false;
     }
 
     /// <summary>

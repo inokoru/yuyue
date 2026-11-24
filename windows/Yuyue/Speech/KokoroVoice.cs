@@ -75,6 +75,11 @@ public sealed class KokoroVoiceModel
     public KokoroStateKind State { get; private set; } = KokoroStateKind.Idle;
     public double DownloadProgress { get; private set; }
     public string StatusMessage { get; private set; } = "";
+    /// <summary>
+    /// Offline narrator voice that finished downloading while <see cref="AudioPlayer"/> was actively playing;
+    /// held here instead of forcing a mid-sentence voice swap until playback stops or the user accepts switching.
+    /// </summary>
+    public string? ReadyOfflineVoice { get; private set; }
 
     public event Action? StateChanged;
     public event Action? Ready;
@@ -359,11 +364,54 @@ public sealed class KokoroVoiceModel
         catch { }
         State = KokoroStateKind.Idle;
         DownloadProgress = 0;
+        ReadyOfflineVoice = null;
         StatusMessage = "已移除 Kokoro 离线语音模型";
         Notify();
     }
 
+    public void AcceptReadyOfflineVoice()
+    {
+        ReadyOfflineVoice = null;
+        FlushPendingVoicesImmediate();
+        Notify();
+    }
+
+    public void DismissReadyOfflineVoice()
+    {
+        ReadyOfflineVoice = null;
+        lock (_pendingVoices) _pendingVoices.Clear();
+        Notify();
+    }
+
+    internal void FlushDeferredVoiceIfIdle()
+    {
+        if (AudioPlayer.IsAnyActivelyPlaying || !IsInstalled) return;
+        bool hadPending;
+        lock (_pendingVoices) hadPending = _pendingVoices.Count > 0;
+        if (hadPending)
+        {
+            ReadyOfflineVoice = null;
+            FlushPendingVoicesImmediate();
+        }
+    }
+
     private void ApplyPendingVoices()
+    {
+        if (AudioPlayer.IsAnyActivelyPlaying)
+        {
+            string? candidate = null;
+            lock (_pendingVoices)
+            {
+                candidate = _pendingVoices.Values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+            }
+            ReadyOfflineVoice = candidate ?? DefaultNarrator("zh")?.Id ?? "kokoro.zf_001";
+            return;
+        }
+        ReadyOfflineVoice = null;
+        FlushPendingVoicesImmediate();
+    }
+
+    private void FlushPendingVoicesImmediate()
     {
         KeyValuePair<string, string>[] items;
         lock (_pendingVoices)

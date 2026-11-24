@@ -223,21 +223,21 @@ public static class ReaderRecapAndSleepHelper
     {
         var root = new StackPanel { Spacing = 0 };
 
-        // Header: icon + 前情提要 + N 天没读了
+        // 1:1 ReaderRecap.swift:207-294 — clock.arrow.circlepath + 前情提要 both in tint.Accent
         var head = new Grid();
         var headLeft = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
-        headLeft.Children.Add(YYIcons.Make("sparkle", 12, ThemeHelper.Brush(tint.Accent)));
+        headLeft.Children.Add(YYIcons.Make("clock-history", 12, ThemeHelper.Brush(tint.Accent)));
         headLeft.Children.Add(new TextBlock
         {
-            Text = "前情提要",
-            FontSize = 13,
+            Text = L10n.T("前情提要"),
+            FontSize = 12,
             FontWeight = FontWeights.SemiBold,
-            Foreground = ThemeHelper.Brush(p.T1),
+            Foreground = ThemeHelper.Brush(tint.Accent),
         });
         head.Children.Add(headLeft);
         head.Children.Add(new TextBlock
         {
-            Text = manualOpened ? "截至当前位置" : $"{recap.Days} 天没读了",
+            Text = manualOpened ? L10n.T("截至当前") : $"{recap.Days} {L10n.T("天没读")}",
             FontSize = 11,
             Foreground = ThemeHelper.Brush(p.T3),
             HorizontalAlignment = HorizontalAlignment.Right,
@@ -245,8 +245,15 @@ public static class ReaderRecapAndSleepHelper
         });
         root.Children.Add(head);
 
+        root.Children.Add(new Border
+        {
+            Height = 0.5,
+            Background = ThemeHelper.Brush(Windows.UI.Color.FromArgb(128, p.Line.R, p.Line.G, p.Line.B)),
+            Margin = new Thickness(0, 9, 0, 0),
+        });
+
         // 3 spoiler-free lines
-        var linesStack = new StackPanel { Spacing = 6, Margin = new Thickness(0, 11, 0, 11) };
+        var linesStack = new StackPanel { Spacing = 7, Margin = new Thickness(0, 10, 0, 10) };
         for (int i = 0; i < recap.Lines.Length; i++)
         {
             var g = new Grid { ColumnSpacing = 7 };
@@ -263,10 +270,10 @@ public static class ReaderRecapAndSleepHelper
             var lineTb = new TextBlock
             {
                 Text = recap.Lines[i],
-                FontSize = 13.5,
+                FontSize = 13,
                 Foreground = ThemeHelper.Brush(p.T1),
                 TextWrapping = TextWrapping.Wrap,
-                LineHeight = 20,
+                LineHeight = 19.5,
             };
             Grid.SetColumn(lineTb, 1);
             g.Children.Add(lineTb);
@@ -274,28 +281,32 @@ public static class ReaderRecapAndSleepHelper
         }
         root.Children.Add(linesStack);
 
-        root.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) });
+        root.Children.Add(new Border
+        {
+            Height = 0.5,
+            Background = ThemeHelper.Brush(Windows.UI.Color.FromArgb(128, p.Line.R, p.Line.G, p.Line.B)),
+        });
 
-        // Footer: 只提要你读过的部分 + 接着读
-        var foot = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+        // Footer: 只根据你读过的部分 + borderless tint.Accent "接着读"
+        var foot = new Grid { Margin = new Thickness(0, 8, 0, 0) };
         foot.Children.Add(new TextBlock
         {
-            Text = "只提要你读过的部分",
-            FontSize = 11,
+            Text = L10n.T("只根据你读过的部分"),
+            FontSize = 10.5,
             Foreground = ThemeHelper.Brush(p.T3),
             VerticalAlignment = VerticalAlignment.Center,
         });
         var doneBtn = new Button
         {
-            Content = "接着读",
-            Height = 30,
-            MinHeight = 30,
-            Padding = new Thickness(15, 0, 15, 0),
-            CornerRadius = new CornerRadius(10),
-            Background = ThemeHelper.Brush(tint.Black),
-            Foreground = ThemeHelper.Brush(tint.OnBlack),
+            Content = L10n.T("接着读"),
+            Height = 26,
+            MinHeight = 26,
+            Padding = new Thickness(8, 0, 4, 0),
+            CornerRadius = new CornerRadius(7),
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Foreground = ThemeHelper.Brush(tint.Accent),
             BorderThickness = new Thickness(0),
-            FontSize = 12.5,
+            FontSize = 12,
             FontWeight = FontWeights.SemiBold,
             HorizontalAlignment = HorizontalAlignment.Right,
             UseSystemFocusVisuals = false,
@@ -306,12 +317,12 @@ public static class ReaderRecapAndSleepHelper
 
         return new Border
         {
-            Width = 372,
-            CornerRadius = new CornerRadius(16),
+            Width = 360,
+            CornerRadius = new CornerRadius(14),
             Background = ThemeHelper.Brush(p.Card),
             BorderBrush = ThemeHelper.Brush(p.Line),
-            BorderThickness = new Thickness(1),
-            Padding = new Thickness(16, 14, 16, 12),
+            BorderThickness = new Thickness(0.75),
+            Padding = new Thickness(15, 13, 15, 11),
             Child = root,
         };
     }
@@ -516,33 +527,43 @@ public static class ReaderRecapAndSleepHelper
         string failDetail,
         Func<string, Task>? onReimported = null)
     {
-        var dlg = new ContentDialog
+        bool dark = xamlRoot.Content is FrameworkElement fe && ThemeHelper.IsDark(fe.ActualTheme);
+        var p = ThemeHelper.Palette(dark);
+        ContentDialog? dlgRef = null;
+        bool wantReimport = false;
+
+        var foot = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 6, 0, 0) };
+        foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var stayBtn = YYChrome.MakeSheetPillButton(L10n.T("先放着"), () => dlgRef?.Hide(), dark, library.Prefs.Tint, "secondary", height: 36, stretch: true);
+        var reimportBtn = YYChrome.MakeSheetPillButton(L10n.T("重新导入…"), () => { wantReimport = true; dlgRef?.Hide(); }, dark, library.Prefs.Tint, "warm", height: 36, stretch: true);
+        Grid.SetColumn(stayBtn, 0);
+        Grid.SetColumn(reimportBtn, 1);
+        foot.Children.Add(stayBtn);
+        foot.Children.Add(reimportBtn);
+
+        var body = new StackPanel
         {
-            XamlRoot = xamlRoot,
-            Title = failTitle,
-            Content = new StackPanel
+            Spacing = 10,
+            Padding = new Thickness(22, 18, 22, 18),
+            Children =
             {
-                Spacing = 8,
-                MaxWidth = 380,
-                Children =
+                YYChrome.MakeSheetHeader(failTitle, $"《{bookTitle}》", () => dlgRef?.Hide(), dark, titleSize: 17),
+                new TextBlock
                 {
-                    new TextBlock { Text = $"《{bookTitle}》", FontSize = 13, FontWeight = FontWeights.SemiBold },
-                    new TextBlock
-                    {
-                        Text = failDetail,
-                        FontSize = 12.5,
-                        Foreground = (Brush)Application.Current.Resources["YYText2Brush"],
-                        TextWrapping = TextWrapping.Wrap,
-                        LineHeight = 20,
-                    },
+                    Text = failDetail,
+                    FontSize = 12.5,
+                    Foreground = ThemeHelper.Brush(p.T2),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 20,
                 },
+                foot,
             },
-            PrimaryButtonText = "重新导入…",
-            CloseButtonText = "先放着",
-            DefaultButton = ContentDialogButton.Primary,
         };
 
-        if (await dlg.ShowAsync() != ContentDialogResult.Primary) return;
+        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 400, body, tint: library.Prefs.Tint);
+        await dlgRef.ShowSafeAsync(library.Prefs.Tint);
+        if (!wantReimport) return;
 
         var picker = new FileOpenPicker { ViewMode = PickerViewMode.List };
         foreach (var ext in LibraryService.SupportedExtensions) picker.FileTypeFilter.Add(ext);
@@ -561,14 +582,7 @@ public static class ReaderRecapAndSleepHelper
         }
         catch (Exception ex)
         {
-            var errDlg = new ContentDialog
-            {
-                XamlRoot = xamlRoot,
-                Title = "导入没成功",
-                Content = ex.Message,
-                CloseButtonText = "知道了",
-            };
-            await errDlg.ShowAsync();
+            await YYChrome.ShowNoticeAsync(xamlRoot, dark, L10n.T("导入没成功"), ex.Message, L10n.T("知道了"), library.Prefs.Tint);
         }
     }
 
@@ -703,13 +717,18 @@ public static class ReaderRecapAndSleepHelper
         };
     }
 
-    public static Border BuildDoubtPill(string doubt, YYPalette p, Action onOpen, Action onDismiss)
+    public static Border BuildDoubtPill(string doubt, YYPalette p, Action onOpen, Action onDismiss, YYPaper? paper = null)
     {
+        var bgCol = paper?.Glass ?? p.Card;
+        var lineCol = paper?.Line ?? p.Line;
+        var inkCol = paper?.Ink ?? p.T1;
+        var subCol = paper?.Ink2 ?? p.T3;
+
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-        var openSp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        var openSp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
         openSp.Children.Add(new TextBlock { Text = "⚠", FontSize = 11.5, Foreground = ThemeHelper.Brush(Windows.UI.Color.FromArgb(255, 217, 148, 38)) });
-        openSp.Children.Add(new TextBlock { Text = doubt, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1), MaxWidth = 260, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
-        openSp.Children.Add(new TextBlock { Text = "去看看", FontSize = 12, Foreground = ThemeHelper.Brush(p.T3) });
+        openSp.Children.Add(new TextBlock { Text = doubt, FontSize = 11.5, FontWeight = FontWeights.Medium, Foreground = ThemeHelper.Brush(inkCol), MaxWidth = 260, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
+        openSp.Children.Add(new TextBlock { Text = L10n.T("去看看"), FontSize = 11.5, Foreground = ThemeHelper.Brush(subCol) });
 
         var openBtn = new Button
         {
@@ -725,7 +744,7 @@ public static class ReaderRecapAndSleepHelper
 
         var closeBtn = new Button
         {
-            Content = YYIcons.Make("xmark", 9.5, ThemeHelper.Brush(p.T3)),
+            Content = YYIcons.Make("xmark", 9.5, ThemeHelper.Brush(subCol)),
             Width = 28,
             Height = 32,
             MinHeight = 32,
@@ -741,24 +760,65 @@ public static class ReaderRecapAndSleepHelper
 
         return new Border
         {
-            CornerRadius = new CornerRadius(17),
-            Background = ThemeHelper.Brush(p.Card),
-            BorderBrush = ThemeHelper.Brush(p.Line),
-            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(16),
+            Background = ThemeHelper.Brush(bgCol),
+            BorderBrush = ThemeHelper.Brush(lineCol),
+            BorderThickness = new Thickness(0.5),
             Child = row,
         };
     }
 
-    // ---------- 5. 读完归档卡片 FinishedSheet (MacReaderView.swift:54-58) ----------
+    // ---------- 5. 读完归档卡片 FinishedSheet (1:1 BookRecord.swift:1343-1412) ----------
 
     public static async Task ShowFinishedSheetAsync(XamlRoot xamlRoot, LibraryService library, BookDetail detail)
     {
-        bool dark = ThemeHelper.IsDark(library.Prefs.ToElementTheme());
+        bool dark = xamlRoot.Content is FrameworkElement fe
+            ? ThemeHelper.IsDark(fe.ActualTheme)
+            : ThemeHelper.IsDark(library.Prefs.ToElementTheme());
         var p = ThemeHelper.Palette(dark);
-        var tint = ThemeHelper.TintColors(library.Prefs.Tint, dark);
+        ContentDialog? dlgRef = null;
+        bool markFinished = false;
 
-        byte? pickedRating = detail.Summary.Rating;
-        var starsPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Center };
+        var book = library.GetBooks().FirstOrDefault(b => b.Id == detail.Summary.Id) ?? detail.Summary;
+        byte? pickedRating = book.Rating;
+
+        // Reading stats subtitle: "12 天 · 9 小时 20 分 · 21 条笔记"
+        var statParts = new List<string>();
+        if (book.StartedAt is long startedMs && startedMs > 0)
+        {
+            long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            int days = Math.Max(1, (int)((nowMs - startedMs) / 86_400_000L) + 1);
+            statParts.Add($"{days} {L10n.T("天")}");
+        }
+        uint totalMins = book.ReadMinutes + book.ListenMinutes;
+        if (totalMins > 0)
+        {
+            if (totalMins >= 60)
+            {
+                uint h = totalMins / 60;
+                uint m = totalMins % 60;
+                statParts.Add(m > 0 ? $"{h} {L10n.T("小时")} {m} {L10n.T("分")}" : $"{h} {L10n.T("小时")}");
+            }
+            else
+            {
+                statParts.Add($"{totalMins} {L10n.T("分钟")}");
+            }
+        }
+        try
+        {
+            int noteCount = library.GetMarks(book.Id).Count;
+            if (noteCount > 0)
+                statParts.Add($"{noteCount} {L10n.T("条笔记")}");
+        }
+        catch { }
+
+        var starsPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 12,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 6, 0, 2),
+        };
         var starBtns = new List<Button>();
 
         void RefreshStars()
@@ -776,8 +836,10 @@ public static class ReaderRecapAndSleepHelper
             byte val = (byte)s;
             var sb = new Button
             {
-                FontSize = 22,
-                Padding = new Thickness(4, 0, 4, 0),
+                FontSize = 28,
+                Width = 38,
+                Height = 38,
+                Padding = new Thickness(0),
                 Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 BorderThickness = new Thickness(0),
                 UseSystemFocusVisuals = false,
@@ -794,48 +856,73 @@ public static class ReaderRecapAndSleepHelper
 
         var commentBox = new TextBox
         {
-            PlaceholderText = "写一句读完后的感想（可选，保存在「进度」页）…",
-            Text = detail.Summary.Comment ?? "",
+            PlaceholderText = L10n.T("写一句短评（可以不写）"),
+            Text = book.Comment ?? "",
+            FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
+            FontSize = 13.5,
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             MinHeight = 76,
-            FontSize = 12.5,
+            CornerRadius = new CornerRadius(12),
         };
 
-        var dlg = new ContentDialog
+        var foot = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 4, 0, 0) };
+        foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var notYetBtn = YYChrome.MakeSheetPillButton(L10n.T("还没读完"), () => dlgRef?.Hide(), dark, library.Prefs.Tint, "secondary", height: 38, stretch: true);
+        var confirmBtn = YYChrome.MakeSheetPillButton(L10n.T("记为读过"), () => { markFinished = true; dlgRef?.Hide(); }, dark, library.Prefs.Tint, "dark", height: 38, stretch: true);
+        Grid.SetColumn(notYetBtn, 0);
+        Grid.SetColumn(confirmBtn, 1);
+        foot.Children.Add(notYetBtn);
+        foot.Children.Add(confirmBtn);
+
+        var body = new StackPanel
         {
-            XamlRoot = xamlRoot,
-            Title = $"读完了《{detail.Summary.Title}》",
-            Content = new StackPanel
+            Spacing = 12,
+            Padding = new Thickness(20),
+            Children =
             {
-                Spacing = 12,
-                Width = 360,
-                Children =
+                new TextBlock
                 {
-                    new TextBlock
-                    {
-                        Text = "标为「读过」并留下一颗星或一句话，随时可在书架「进度」页翻看。",
-                        FontSize = 12,
-                        Foreground = ThemeHelper.Brush(p.T2),
-                        TextWrapping = TextWrapping.Wrap,
-                    },
-                    starsPanel,
-                    commentBox,
+                    Text = $"{L10n.T("读完了")}《{book.Title}》",
+                    FontSize = 17,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = ThemeHelper.Brush(p.T1),
+                    TextAlignment = TextAlignment.Center,
+                    TextWrapping = TextWrapping.Wrap,
+                    HorizontalAlignment = HorizontalAlignment.Center,
                 },
             },
-            PrimaryButtonText = "标为读过",
-            CloseButtonText = "先不标",
-            DefaultButton = ContentDialogButton.Primary,
         };
+        if (statParts.Count > 0)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = string.Join(" · ", statParts),
+                FontSize = 12.5,
+                Foreground = ThemeHelper.Brush(p.T2),
+                TextAlignment = TextAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, -6, 0, 0),
+            });
+        }
+        body.Children.Add(starsPanel);
+        body.Children.Add(commentBox);
+        body.Children.Add(foot);
 
-        if (await dlg.ShowAsync() == ContentDialogResult.Primary)
+        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 420, body, tint: library.Prefs.Tint);
+        await dlgRef.ShowSafeAsync(library.Prefs.Tint);
+
+        if (markFinished)
         {
             try
             {
-                library.SetStatus(detail.Summary.Id, ReadingStatus.Finished);
-                library.Core.SetRating(detail.Summary.Id, pickedRating);
+                library.SetStatus(book.Id, ReadingStatus.Finished);
+                if (pickedRating is not null)
+                    library.Core.SetRating(book.Id, pickedRating);
                 string cmt = commentBox.Text.Trim();
-                library.Core.SetComment(detail.Summary.Id, string.IsNullOrEmpty(cmt) ? null : cmt);
+                if (!string.IsNullOrEmpty(cmt))
+                    library.Core.SetComment(book.Id, cmt);
                 App.CurrentApp.NotifyShelfRefresh();
             }
             catch { }

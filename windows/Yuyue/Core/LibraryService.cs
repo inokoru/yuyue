@@ -5,6 +5,7 @@ using Yuyue.Audiobook;
 using Yuyue.Design;
 using Yuyue.Pdf;
 using Yuyue.Podcast;
+using Yuyue.Settings;
 using Yuyue.Speech;
 
 namespace Yuyue.Core;
@@ -87,6 +88,7 @@ public sealed class DevicePrefs
     public bool GlobalEinkMode { get; set; } = false;
     public bool GlobalEinkGray { get; set; } = true;
     public double SettingsInspectorWidth { get; set; } = 304.0;
+    public string SettingsLastPage { get; set; } = "general";
     public double ReaderPanelWidth { get; set; } = 320.0;
     public int ReaderWindowWidth { get; set; } = 1080;
     public int ReaderWindowHeight { get; set; } = 740;
@@ -223,6 +225,7 @@ public sealed class LibraryService : IDisposable
     public SystemIntegrationService SystemIntegration { get; }
     public RemoteLibraryService RemoteLibraries { get; }
     public RecordingShareServer RecordingShare { get; }
+    public SettingsHistoryStore SettingsHistory { get; }
 
     private readonly string _prefsPath;
 
@@ -277,6 +280,10 @@ public sealed class LibraryService : IDisposable
         RemoteLibraries = new RemoteLibraryService(this);
         RecordingShare = new RecordingShareServer(this);
         RecordingShare.Start();
+        SettingsHistory = new SettingsHistoryStore(DataDir)
+        {
+            PersistentActuator = ApplyPersistedHistoryRecord,
+        };
 
         // Register downloaded sound library if present (1:1 SoundLibrary.swift)
         try
@@ -486,6 +493,36 @@ public sealed class LibraryService : IDisposable
     public SnapshotAbout PeekSnapshot(string path) => Core.PeekSnapshot(path);
     public uint RestoreSnapshot(string path, bool replace) => Core.RestoreSnapshot(path, replace);
     public void ExportEpub(string bookId, bool includeNotes, string path) => Core.ExportEpub(bookId, includeNotes, path);
+
+    private bool ApplyPersistedHistoryRecord(SettingsHistoryRecord rec, bool applyUndo)
+    {
+        try
+        {
+            string? raw = applyUndo ? rec.OldRawJson : rec.NewRawJson;
+            if (string.IsNullOrEmpty(rec.PrefKey) || raw is null) return false;
+
+            if (rec.PrefKey == "reader:settings")
+            {
+                var restored = JsonSerializer.Deserialize<ReaderSettings>(raw);
+                if (restored is null) return false;
+                Core.SetReaderSettings(restored);
+                return true;
+            }
+
+            if (rec.PrefKey.StartsWith("prefs:", StringComparison.Ordinal))
+            {
+                string propName = rec.PrefKey["prefs:".Length..];
+                var prop = typeof(DevicePrefs).GetProperty(propName);
+                if (prop is null || !prop.CanWrite) return false;
+                object? val = JsonSerializer.Deserialize(raw, prop.PropertyType);
+                prop.SetValue(Prefs, val);
+                SavePrefs();
+                return true;
+            }
+        }
+        catch { }
+        return false;
+    }
 
     public void Dispose()
     {

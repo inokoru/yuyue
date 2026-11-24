@@ -71,11 +71,21 @@
                     TextWrapping="Wrap"
                     MaxWidth="420" />
 
-                <!-- 划选 / 编辑 PDF 标注浮卡（对齐 ReaderWindow SelectionCard + MacPdfView.swift） -->
+                <!-- 内联查词 / 翻译浮层锚点（避免隐藏 PdfSelectionCard 时导致 Flyout 自动关闭） -->
+                <Border
+                    x:Name="PdfPopoverAnchor"
+                    Width="1"
+                    Height="1"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    IsHitTestVisible="False"
+                    Background="Transparent" />
+
+                <!-- 划选 / 编辑 PDF 标注浮卡（对齐 dfdd801 ReaderCards.swift SelectionCard + MacPdfView.swift） -->
                 <Border
                     x:Name="PdfSelectionCard"
                     Visibility="Collapsed"
-                    Width="328"
+                    Width="344"
                     HorizontalAlignment="Left"
                     VerticalAlignment="Top"
                     Padding="10,8"
@@ -84,78 +94,128 @@
                     BorderBrush="{ThemeResource YYLineBrush}"
                     BorderThickness="1">
                     <StackPanel Spacing="7">
-                        <StackPanel x:Name="PdfSelNotePreviewBox" Visibility="Collapsed" Spacing="5">
+                        <StackPanel x:Name="PdfSelNotePreviewBox" Visibility="Collapsed" Spacing="6" PointerPressed="PdfSelNotePreview_Pressed">
                             <Grid ColumnSpacing="8">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="2" />
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <Border Background="{ThemeResource YYAccentBrush}" CornerRadius="1" />
-                                <TextBlock x:Name="PdfSelNotePreviewText" Grid.Column="1" FontSize="12" Foreground="{ThemeResource YYText2Brush}" MaxLines="3" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" />
+                                <TextBlock x:Name="PdfSelNotePreviewText" Grid.Column="1" FontSize="12" Foreground="{ThemeResource YYText1Brush}" MaxLines="3" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" />
+                                <ContentPresenter x:Name="PdfSelNotePencilIcon" Grid.Column="2" VerticalAlignment="Center" Opacity="0.78" />
                             </Grid>
                             <Border Height="0.5" Background="{ThemeResource YYLineBrush}" />
                         </StackPanel>
 
                         <Grid>
-                            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                                 <Button Tag="yellow" Padding="2" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="黄色划线 (1)" Click="PdfMarkStyle_Click">
-                                    <StackPanel Spacing="2" HorizontalAlignment="Center">
-                                        <Border Width="18" Height="18" CornerRadius="9" Background="#FBE7A0" BorderBrush="#22000000" BorderThickness="0.5" />
-                                        <TextBlock Text="1" FontSize="9" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Center" />
+                                    <StackPanel Spacing="3" HorizontalAlignment="Center">
+                                        <Border x:Name="PdfSwatchYellowRing" Width="22" Height="22" CornerRadius="11" Padding="1.5" BorderThickness="1.5" BorderBrush="Transparent">
+                                            <Border CornerRadius="9" Background="#FBE7A0" BorderBrush="#22000000" BorderThickness="0.5" />
+                                        </Border>
+                                        <Border Width="16" Height="15" CornerRadius="4" Background="{ThemeResource YYInsetBrush}" HorizontalAlignment="Center">
+                                            <TextBlock x:Name="PdfSwatchKey1" Text="1" FontSize="9.5" FontWeight="SemiBold" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
                                     </StackPanel>
                                 </Button>
                                 <Button Tag="blue" Padding="2" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="蓝色划线 (2)" Click="PdfMarkStyle_Click">
-                                    <StackPanel Spacing="2" HorizontalAlignment="Center">
-                                        <Border Width="18" Height="18" CornerRadius="9" Background="#CFE6F4" BorderBrush="#22000000" BorderThickness="0.5" />
-                                        <TextBlock Text="2" FontSize="9" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Center" />
+                                    <StackPanel Spacing="3" HorizontalAlignment="Center">
+                                        <Border x:Name="PdfSwatchBlueRing" Width="22" Height="22" CornerRadius="11" Padding="1.5" BorderThickness="1.5" BorderBrush="Transparent">
+                                            <Border CornerRadius="9" Background="#CFE6F4" BorderBrush="#22000000" BorderThickness="0.5" />
+                                        </Border>
+                                        <Border Width="16" Height="15" CornerRadius="4" Background="{ThemeResource YYInsetBrush}" HorizontalAlignment="Center">
+                                            <TextBlock x:Name="PdfSwatchKey2" Text="2" FontSize="9.5" FontWeight="SemiBold" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
                                     </StackPanel>
                                 </Button>
                                 <Button Tag="pink" Padding="2" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="粉色划线 (3)" Click="PdfMarkStyle_Click">
-                                    <StackPanel Spacing="2" HorizontalAlignment="Center">
-                                        <Border Width="18" Height="18" CornerRadius="9" Background="#F6C7C0" BorderBrush="#22000000" BorderThickness="0.5" />
-                                        <TextBlock Text="3" FontSize="9" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Center" />
+                                    <StackPanel Spacing="3" HorizontalAlignment="Center">
+                                        <Border x:Name="PdfSwatchPinkRing" Width="22" Height="22" CornerRadius="11" Padding="1.5" BorderThickness="1.5" BorderBrush="Transparent">
+                                            <Border CornerRadius="9" Background="#F6C7C0" BorderBrush="#22000000" BorderThickness="0.5" />
+                                        </Border>
+                                        <Border Width="16" Height="15" CornerRadius="4" Background="{ThemeResource YYInsetBrush}" HorizontalAlignment="Center">
+                                            <TextBlock x:Name="PdfSwatchKey3" Text="3" FontSize="9.5" FontWeight="SemiBold" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
                                     </StackPanel>
                                 </Button>
                                 <Button Tag="wave" Padding="2" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="波浪线 (4)" Click="PdfMarkStyle_Click">
-                                    <StackPanel Spacing="2" HorizontalAlignment="Center">
-                                        <Border Width="18" Height="18" CornerRadius="9" Background="Transparent" BorderBrush="#EF7F71" BorderThickness="1.5">
-                                            <TextBlock Text="~" FontSize="11" FontWeight="Bold" Foreground="#EF7F71" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
+                                    <StackPanel Spacing="3" HorizontalAlignment="Center">
+                                        <Border x:Name="PdfSwatchWaveRing" Width="22" Height="22" CornerRadius="11" Padding="1.5" BorderThickness="1.5" BorderBrush="Transparent">
+                                            <Border CornerRadius="9" Background="{ThemeResource YYInsetBrush}" BorderThickness="0">
+                                                <TextBlock Text="~" FontSize="12" FontWeight="Bold" Foreground="#EF7F71" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
+                                            </Border>
                                         </Border>
-                                        <TextBlock Text="4" FontSize="9" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Center" />
+                                        <Border Width="16" Height="15" CornerRadius="4" Background="{ThemeResource YYInsetBrush}" HorizontalAlignment="Center">
+                                            <TextBlock x:Name="PdfSwatchKey4" Text="4" FontSize="9.5" FontWeight="SemiBold" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
                                     </StackPanel>
                                 </Button>
                             </StackPanel>
 
-                            <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right" VerticalAlignment="Center">
-                                <Button Tag="underline" Width="28" Height="26" Padding="0" CornerRadius="6" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="实线下划线" Click="PdfMarkStyle_Click">
-                                    <StackPanel Spacing="1" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                        <TextBlock Text="A" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" />
-                                        <Border Width="12" Height="1.5" Background="{ThemeResource YYText1Brush}" />
+                            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <Button x:Name="PdfLineUnderlineBtn" Tag="underline" Width="32" Height="30" Padding="0" CornerRadius="8" Background="{ThemeResource YYInsetBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.75" UseSystemFocusVisuals="False" ToolTipService.ToolTip="实线下划线" Click="PdfMarkStyle_Click">
+                                    <StackPanel Spacing="3" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <TextBlock x:Name="PdfLineUnderlineAText" Text="A" FontSize="13" FontWeight="SemiBold" LineHeight="13" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" />
+                                        <Border x:Name="PdfLineUnderlineBar" Width="18" Height="2" CornerRadius="1" Background="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
-                                <Button Tag="dotted" Width="28" Height="26" Padding="0" CornerRadius="6" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="点线下划线" Click="PdfMarkStyle_Click">
-                                    <StackPanel Spacing="0" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                        <TextBlock Text="A" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" />
-                                        <TextBlock Text="···" FontSize="9" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,-4,0,0" />
+                                <Button x:Name="PdfLineDottedBtn" Tag="dotted" Width="32" Height="30" Padding="0" CornerRadius="8" Background="{ThemeResource YYInsetBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.75" UseSystemFocusVisuals="False" ToolTipService.ToolTip="点线下划线" Click="PdfMarkStyle_Click">
+                                    <StackPanel Spacing="3" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <TextBlock x:Name="PdfLineDottedAText" Text="A" FontSize="13" FontWeight="SemiBold" LineHeight="13" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" />
+                                        <StackPanel Orientation="Horizontal" Spacing="2.5" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                            <Ellipse x:Name="PdfLineDot1" Width="2.6" Height="2.6" Fill="{ThemeResource YYText1Brush}" />
+                                            <Ellipse x:Name="PdfLineDot2" Width="2.6" Height="2.6" Fill="{ThemeResource YYText1Brush}" />
+                                            <Ellipse x:Name="PdfLineDot3" Width="2.6" Height="2.6" Fill="{ThemeResource YYText1Brush}" />
+                                            <Ellipse x:Name="PdfLineDot4" Width="2.6" Height="2.6" Fill="{ThemeResource YYText1Brush}" />
+                                        </StackPanel>
                                     </StackPanel>
                                 </Button>
-                                <Button x:Name="PdfSelDeleteBtn" Visibility="Collapsed" Width="28" Height="26" Padding="0" CornerRadius="6" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="删除划线" Click="PdfSelDelete_Click" />
+                                <Button x:Name="PdfSelDeleteBtn" Visibility="Collapsed" Width="28" Height="28" Padding="0" CornerRadius="8" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="删除划线" Click="PdfSelDelete_Click" />
                             </StackPanel>
                         </Grid>
 
                         <Border Height="0.5" Background="{ThemeResource YYLineBrush}" />
 
-                        <Grid ColumnSpacing="4">
+                        <Grid ColumnSpacing="2">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <Button Grid.Column="0" HorizontalAlignment="Stretch" Height="26" Padding="0" CornerRadius="7" Background="Transparent" BorderThickness="0" FontSize="11.5" Foreground="{ThemeResource YYText1Brush}" UseSystemFocusVisuals="False" Content="写想法" Click="PdfSelNote_Click" />
-                            <Button Grid.Column="1" HorizontalAlignment="Stretch" Height="26" Padding="0" CornerRadius="7" Background="Transparent" BorderThickness="0" FontSize="11.5" Foreground="{ThemeResource YYText1Brush}" UseSystemFocusVisuals="False" Content="复制" Click="PdfSelCopy_Click" />
-                            <Button Grid.Column="2" HorizontalAlignment="Stretch" Height="26" Padding="0" CornerRadius="7" Background="Transparent" BorderThickness="0" FontSize="11.5" Foreground="{ThemeResource YYText1Brush}" UseSystemFocusVisuals="False" Content="从这读" Click="PdfSelSpeak_Click" />
-                            <Button Grid.Column="3" HorizontalAlignment="Stretch" Height="26" Padding="0" CornerRadius="7" Background="Transparent" BorderThickness="0" FontSize="11.5" Foreground="{ThemeResource YYText1Brush}" UseSystemFocusVisuals="False" Content="查词" Click="PdfSelLookup_Click" />
+                            <Button Grid.Column="0" HorizontalAlignment="Stretch" Height="41" Padding="0" CornerRadius="8" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" Click="PdfSelNote_Click">
+                                <StackPanel Spacing="3" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <ContentPresenter x:Name="PdfSelNoteIcon" HorizontalAlignment="Center" />
+                                    <TextBlock x:Name="PdfSelNoteLabel" Text="写想法" FontSize="11" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="1" HorizontalAlignment="Stretch" Height="41" Padding="0" CornerRadius="8" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" Click="PdfSelCopy_Click">
+                                <StackPanel Spacing="3" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <ContentPresenter x:Name="PdfSelCopyIcon" HorizontalAlignment="Center" />
+                                    <TextBlock Text="复制" FontSize="11" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="2" HorizontalAlignment="Stretch" Height="41" Padding="0" CornerRadius="8" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" Click="PdfSelSpeak_Click">
+                                <StackPanel Spacing="3" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <ContentPresenter x:Name="PdfSelSpeakIcon" HorizontalAlignment="Center" />
+                                    <TextBlock Text="从这听" FontSize="11" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="3" HorizontalAlignment="Stretch" Height="41" Padding="0" CornerRadius="8" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" Click="PdfSelLookup_Click">
+                                <StackPanel Spacing="3" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <ContentPresenter x:Name="PdfSelLookupIcon" HorizontalAlignment="Center" />
+                                    <TextBlock Text="查词" FontSize="11" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="4" HorizontalAlignment="Stretch" Height="41" Padding="0" CornerRadius="8" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" Click="PdfSelTranslate_Click">
+                                <StackPanel Spacing="3" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <ContentPresenter x:Name="PdfSelTranslateIcon" HorizontalAlignment="Center" />
+                                    <TextBlock Text="翻译" FontSize="11" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
                         </Grid>
                     </StackPanel>
                 </Border>
@@ -168,18 +228,19 @@
                     VerticalAlignment="Top"
                     Margin="0,62,0,0"
                     Height="38"
-                    Padding="12,0,8,0"
+                    Padding="12,0,10,0"
                     CornerRadius="19"
                     Background="{ThemeResource YYCardBrush}"
                     BorderBrush="{ThemeResource YYLineBrush}"
                     BorderThickness="1">
                     <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
-                        <Border Width="17" Height="17" CornerRadius="8.5" Background="{ThemeResource YYDangerBrush}">
+                        <Border x:Name="ToastIconBadge" Width="17" Height="17" CornerRadius="8.5" Background="{ThemeResource YYAccentBrush}">
                             <ContentPresenter x:Name="ToastCheckIcon" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <TextBlock x:Name="ToastText" FontSize="12.5" FontWeight="Medium" Foreground="{ThemeResource YYText1Brush}" VerticalAlignment="Center" />
                         <Button
                             x:Name="ToastUndoBtn"
+                            Visibility="Collapsed"
                             Width="24"
                             Height="24"
                             Padding="0"

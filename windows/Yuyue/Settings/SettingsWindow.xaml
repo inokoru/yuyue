@@ -102,7 +102,7 @@
             </ScrollViewer>
         </Border>
 
-        <!-- 中栏：固定页面头 + 滚动内容区 + 无检查器页右上角 SettingsCorner -->
+        <!-- 中栏：固定页面头 + 滚动内容区 + 朗读 VoiceSourcePage 宿主 + 无检查器页右上角 SettingsCorner -->
         <Grid Grid.Column="1">
             <Grid.RowDefinitions>
                 <RowDefinition Height="32" />
@@ -119,13 +119,14 @@
             </Grid>
 
             <ScrollViewer
+                x:Name="MainScrollViewer"
                 Grid.Row="2"
                 Padding="26,4,24,28"
                 VerticalScrollBarVisibility="Auto"
                 HorizontalScrollMode="Disabled"
                 HorizontalScrollBarVisibility="Disabled">
                 <StackPanel Spacing="12" HorizontalAlignment="Stretch">
-                    <!-- 外观页（1:1 对齐 Mac AppearanceSettings & settings-appearance/1.png） -->
+                    <!-- 外观页（1:1 对齐 Mac AppearanceSettings & ModeThumbnail） -->
                     <StackPanel x:Name="AppearancePage" Visibility="Collapsed" Spacing="12">
                         <Border CornerRadius="12" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.5" Padding="16,14">
                             <Grid>
@@ -135,60 +136,89 @@
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="界面" FontSize="12.5" FontWeight="Medium" VerticalAlignment="Center" Foreground="{ThemeResource YYText1Brush}" />
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
-                                    <Button Tag="light" Background="Transparent" BorderThickness="0" Padding="0" UseSystemFocusVisuals="False" Click="ThemeMode_Click">
+                                    <Button Tag="light" Background="Transparent" BorderThickness="0" Padding="0" UseSystemFocusVisuals="False" Click="ThemeMode_Click" PointerEntered="ThemeMode_PointerEntered" PointerExited="ThemeMode_PointerExited">
                                         <StackPanel Spacing="6" HorizontalAlignment="Center">
-                                            <Border x:Name="ThemeLightPreview" Width="88" Height="56" CornerRadius="9" Background="#F6F3EB" BorderThickness="2" BorderBrush="#E7E5E1">
-                                                <Grid Padding="12,10,8,8">
-                                                    <Border Width="4" Height="9" CornerRadius="0,0,1.5,1.5" Background="{ThemeResource YYAccentBrush}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-10,2,0" />
-                                                    <StackPanel Spacing="4.5" VerticalAlignment="Top" Margin="0,2,0,0">
-                                                        <Border Height="3" Width="24" CornerRadius="1.5" Background="#552A2B2E" HorizontalAlignment="Left" />
-                                                        <Border Height="2" Width="50" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
-                                                        <Border Height="2" Width="44" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
-                                                        <Border Height="2" Width="34" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
-                                                    </StackPanel>
-                                                    <Border Height="1.5" Width="10" CornerRadius="1" Background="#408A8682" HorizontalAlignment="Left" VerticalAlignment="Bottom" />
-                                                </Grid>
+                                            <Border x:Name="ThemeLightPreview" Width="90" Height="60" CornerRadius="9.5" Background="Transparent" BorderThickness="2" BorderBrush="Transparent" Padding="1">
+                                                <Border CornerRadius="7" Background="#F6F3EB" BorderBrush="#1A2A2B2E" BorderThickness="0.5">
+                                                    <Grid>
+                                                        <Border Width="4.5" HorizontalAlignment="Left" CornerRadius="6.5,0,0,6.5">
+                                                            <Border.Background>
+                                                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                                                    <GradientStop Color="#14000000" Offset="0" />
+                                                                    <GradientStop Color="#00000000" Offset="1" />
+                                                                </LinearGradientBrush>
+                                                            </Border.Background>
+                                                        </Border>
+                                                        <Border Width="4" Height="9" CornerRadius="0,0,1.5,1.5" Background="{ThemeResource YYAccentBrush}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,0,10,0" />
+                                                        <StackPanel Spacing="4.5" VerticalAlignment="Top" Margin="11,11,8,0">
+                                                            <Border Height="2.5" Width="24" CornerRadius="1.25" Background="#552A2B2E" HorizontalAlignment="Left" />
+                                                            <Border Height="2" Width="48" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
+                                                            <Border Height="2" Width="42" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
+                                                            <Border Height="2" Width="32" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
+                                                        </StackPanel>
+                                                        <Border Height="1.5" Width="10" CornerRadius="1" Background="#408A8682" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="11,0,0,7" />
+                                                    </Grid>
+                                                </Border>
                                             </Border>
                                             <TextBlock x:Name="ThemeLightLabel" Text="浅色" FontSize="11.5" HorizontalAlignment="Center" Foreground="{ThemeResource YYText2Brush}" />
                                         </StackPanel>
                                     </Button>
 
-                                    <Button Tag="dark" Background="Transparent" BorderThickness="0" Padding="0" UseSystemFocusVisuals="False" Click="ThemeMode_Click">
+                                    <Button Tag="dark" Background="Transparent" BorderThickness="0" Padding="0" UseSystemFocusVisuals="False" Click="ThemeMode_Click" PointerEntered="ThemeMode_PointerEntered" PointerExited="ThemeMode_PointerExited">
                                         <StackPanel Spacing="6" HorizontalAlignment="Center">
-                                            <Border x:Name="ThemeDarkPreview" Width="88" Height="56" CornerRadius="9" Background="#1D1E21" BorderThickness="2" BorderBrush="#2C2D30">
-                                                <Grid Padding="12,10,8,8">
-                                                    <Border Width="4" Height="9" CornerRadius="0,0,1.5,1.5" Background="{ThemeResource YYAccentBrush}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-10,2,0" />
-                                                    <StackPanel Spacing="4.5" VerticalAlignment="Top" Margin="0,2,0,0">
-                                                        <Border Height="3" Width="24" CornerRadius="1.5" Background="#B8EDEDEE" HorizontalAlignment="Left" />
-                                                        <Border Height="2" Width="50" CornerRadius="1" Background="#689A9895" HorizontalAlignment="Left" />
-                                                        <Border Height="2" Width="44" CornerRadius="1" Background="#689A9895" HorizontalAlignment="Left" />
-                                                        <Border Height="2" Width="34" CornerRadius="1" Background="#689A9895" HorizontalAlignment="Left" />
-                                                    </StackPanel>
-                                                    <Border Height="1.5" Width="10" CornerRadius="1" Background="#509A9895" HorizontalAlignment="Left" VerticalAlignment="Bottom" />
-                                                </Grid>
+                                            <Border x:Name="ThemeDarkPreview" Width="90" Height="60" CornerRadius="9.5" Background="Transparent" BorderThickness="2" BorderBrush="Transparent" Padding="1">
+                                                <Border CornerRadius="7" Background="#1D1E21" BorderBrush="#1AFFFFFF" BorderThickness="0.5">
+                                                    <Grid>
+                                                        <Border Width="4.5" HorizontalAlignment="Left" CornerRadius="6.5,0,0,6.5">
+                                                            <Border.Background>
+                                                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                                                    <GradientStop Color="#52000000" Offset="0" />
+                                                                    <GradientStop Color="#00000000" Offset="1" />
+                                                                </LinearGradientBrush>
+                                                            </Border.Background>
+                                                        </Border>
+                                                        <Border Width="4" Height="9" CornerRadius="0,0,1.5,1.5" Background="{ThemeResource YYAccentBrush}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,0,10,0" />
+                                                        <StackPanel Spacing="4.5" VerticalAlignment="Top" Margin="11,11,8,0">
+                                                            <Border Height="2.5" Width="24" CornerRadius="1.25" Background="#B8EDEDEE" HorizontalAlignment="Left" />
+                                                            <Border Height="2" Width="48" CornerRadius="1" Background="#689A9895" HorizontalAlignment="Left" />
+                                                            <Border Height="2" Width="42" CornerRadius="1" Background="#689A9895" HorizontalAlignment="Left" />
+                                                            <Border Height="2" Width="32" CornerRadius="1" Background="#689A9895" HorizontalAlignment="Left" />
+                                                        </StackPanel>
+                                                        <Border Height="1.5" Width="10" CornerRadius="1" Background="#509A9895" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="11,0,0,7" />
+                                                    </Grid>
+                                                </Border>
                                             </Border>
                                             <TextBlock x:Name="ThemeDarkLabel" Text="深色" FontSize="11.5" HorizontalAlignment="Center" Foreground="{ThemeResource YYText2Brush}" />
                                         </StackPanel>
                                     </Button>
 
-                                    <Button Tag="system" Background="Transparent" BorderThickness="0" Padding="0" UseSystemFocusVisuals="False" Click="ThemeMode_Click">
+                                    <Button Tag="system" Background="Transparent" BorderThickness="0" Padding="0" UseSystemFocusVisuals="False" Click="ThemeMode_Click" PointerEntered="ThemeMode_PointerEntered" PointerExited="ThemeMode_PointerExited">
                                         <StackPanel Spacing="6" HorizontalAlignment="Center">
-                                            <Border x:Name="ThemeSystemPreview" Width="88" Height="56" CornerRadius="9" BorderThickness="2" BorderBrush="#8A653F" Padding="1" Background="{ThemeResource YYCardBrush}">
-                                                <Border CornerRadius="7" Background="#F6F3EB">
+                                            <Border x:Name="ThemeSystemPreview" Width="90" Height="60" CornerRadius="9.5" Background="Transparent" BorderThickness="2" BorderBrush="Transparent" Padding="1">
+                                                <Border CornerRadius="7" Background="#F6F3EB" BorderBrush="#1A2A2B2E" BorderThickness="0.5">
                                                     <Grid>
-                                                        <StackPanel Spacing="4.5" VerticalAlignment="Top" Margin="10,11,0,0">
-                                                            <Border Height="3" Width="24" CornerRadius="1.5" Background="#552A2B2E" HorizontalAlignment="Left" />
-                                                            <Border Height="2" Width="46" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
-                                                            <Border Height="2" Width="42" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
-                                                            <Border Height="2" Width="32" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
+                                                        <Border Width="4.5" HorizontalAlignment="Left" CornerRadius="6.5,0,0,6.5">
+                                                            <Border.Background>
+                                                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                                                    <GradientStop Color="#14000000" Offset="0" />
+                                                                    <GradientStop Color="#00000000" Offset="1" />
+                                                                </LinearGradientBrush>
+                                                            </Border.Background>
+                                                        </Border>
+                                                        <StackPanel Spacing="4.5" VerticalAlignment="Top" Margin="11,11,0,0">
+                                                            <Border Height="2.5" Width="24" CornerRadius="1.25" Background="#552A2B2E" HorizontalAlignment="Left" />
+                                                            <Border Height="2" Width="44" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
+                                                            <Border Height="2" Width="40" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
+                                                            <Border Height="2" Width="30" CornerRadius="1" Background="#488A8682" HorizontalAlignment="Left" />
                                                         </StackPanel>
-                                                        <Border Height="1.5" Width="10" CornerRadius="1" Background="#408A8682" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="10,0,0,7" />
-                                                        <Path Fill="#1D1E21" Data="M14,0 H43 A6.5,6.5 0 0,1 49.5,6.5 V43.5 A6.5,6.5 0 0,1 43,50 H0 Z" Stretch="Fill" HorizontalAlignment="Right" Width="51" />
-                                                        <StackPanel Spacing="4.5" VerticalAlignment="Top" Margin="44,19,0,0">
-                                                            <Border Height="2" Width="17" CornerRadius="1" Background="#689A9895" HorizontalAlignment="Left" />
-                                                            <Border Height="2" Width="13" CornerRadius="1" Background="#689A9895" HorizontalAlignment="Left" />
+                                                        <Border Height="1.5" Width="10" CornerRadius="1" Background="#408A8682" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="11,0,0,7" />
+                                                        <Path Fill="#1D1E21" Data="M50.4,0 L77,0 A7,7 0 0,1 84,7 L84,47 A7,7 0 0,1 77,54 L33.6,54 Z" Stretch="Fill" />
+                                                        <Path Stroke="#26000000" StrokeThickness="0.75" Data="M50.4,0 L33.6,54" Stretch="Fill" />
+                                                        <StackPanel Spacing="4.5" VerticalAlignment="Top" Margin="48,18,0,0">
+                                                            <Border Height="2" Width="15" CornerRadius="1" Background="#689A9895" HorizontalAlignment="Left" />
+                                                            <Border Height="2" Width="12" CornerRadius="1" Background="#689A9895" HorizontalAlignment="Left" />
                                                         </StackPanel>
-                                                        <Border Width="4" Height="9" CornerRadius="0,0,1.5,1.5" Background="{ThemeResource YYAccentBrush}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,0,9,0" />
+                                                        <Border Width="4" Height="9" CornerRadius="0,0,1.5,1.5" Background="{ThemeResource YYAccentBrush}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,0,10,0" />
                                                     </Grid>
                                                 </Border>
                                             </Border>
@@ -263,28 +293,14 @@
                                         <TextBlock Text="每行本数随窗口宽度自动排布" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" />
                                     </StackPanel>
                                     <Border Grid.Column="1" Width="8" Height="11" CornerRadius="2" Background="{ThemeResource YYText3Brush}" Opacity="0.62" VerticalAlignment="Center" />
-                                    <Grid Grid.Column="2" VerticalAlignment="Center">
-                                        <Slider
-                                            x:Name="CoverSizeSlider"
-                                            Minimum="76"
-                                            Maximum="140"
-                                            StepFrequency="4"
-                                            VerticalAlignment="Center"
-                                            ValueChanged="CoverSizeSlider_ValueChanged" />
-                                        <Grid Margin="8,24,8,0" VerticalAlignment="Top" IsHitTestVisible="False">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <Ellipse Grid.Column="0" Width="2.5" Height="2.5" Fill="{ThemeResource YYText3Brush}" Opacity="0.45" HorizontalAlignment="Left" />
-                                            <Ellipse Grid.Column="1" Width="2.5" Height="2.5" Fill="{ThemeResource YYText3Brush}" Opacity="0.45" HorizontalAlignment="Left" />
-                                            <Ellipse Grid.Column="2" Width="2.5" Height="2.5" Fill="{ThemeResource YYText3Brush}" Opacity="0.45" HorizontalAlignment="Left" />
-                                            <Ellipse Grid.Column="3" Width="2.5" Height="2.5" Fill="{ThemeResource YYText3Brush}" Opacity="0.45" HorizontalAlignment="Left" />
-                                            <Ellipse Grid.Column="3" Width="2.5" Height="2.5" Fill="{ThemeResource YYText3Brush}" Opacity="0.45" HorizontalAlignment="Right" />
-                                        </Grid>
-                                    </Grid>
+                                    <Slider
+                                        x:Name="CoverSizeSlider"
+                                        Grid.Column="2"
+                                        Minimum="80"
+                                        Maximum="130"
+                                        StepFrequency="10"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="CoverSizeSlider_ValueChanged" />
                                     <Border Grid.Column="3" Width="11" Height="16" CornerRadius="2.5" Background="{ThemeResource YYText3Brush}" Opacity="0.68" VerticalAlignment="Center" />
                                 </Grid>
 
@@ -306,17 +322,35 @@
                 </StackPanel>
             </ScrollViewer>
 
+            <!-- 朗读页内嵌二级声音页（1:1 MacVoicePicker.swift VoiceSourcePage：顶栏与底栏固定，中间聊天气泡滚动） -->
+            <Grid x:Name="VoiceSourceHost" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed" Padding="24,4,24,14" />
+
             <!-- 无右栏检查器的页面（通用 / 外观 / 同步 / 关于）右上角 SettingsCorner -->
             <StackPanel x:Name="CenterCornerStack" Grid.Row="1" Grid.RowSpan="2" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,4,22,0">
                 <TextBlock x:Name="CenterSavedFlashText" FontSize="11.5" Foreground="{ThemeResource YYOkBrush}" VerticalAlignment="Center" />
-                <Button
-                    x:Name="CornerHistoryBtn"
-                    Style="{StaticResource YYIconButtonStyle}"
-                    Width="28"
-                    Height="28"
-                    CornerRadius="14"
-                    ToolTipService.ToolTip="最近修改的设置 (Ctrl+Z 撤销)"
-                    Click="HistoryBtn_Click" />
+                <Grid>
+                    <Button
+                        x:Name="CornerHistoryBtn"
+                        Style="{StaticResource YYIconButtonStyle}"
+                        Width="28"
+                        Height="28"
+                        CornerRadius="14"
+                        ToolTipService.ToolTip="最近修改的设置 (Ctrl+Z 撤销)"
+                        Click="HistoryBtn_Click" />
+                    <Border
+                        x:Name="CornerHistoryBadge"
+                        Visibility="Collapsed"
+                        IsHitTestVisible="False"
+                        MinWidth="15"
+                        Height="15"
+                        CornerRadius="7.5"
+                        Padding="3.5,0"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Top"
+                        Margin="0,-3,-3,0">
+                        <TextBlock x:Name="CornerHistoryCountText" FontSize="9.5" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                </Grid>
             </StackPanel>
         </Grid>
 
@@ -336,15 +370,29 @@
                 </Grid.RowDefinitions>
                 <Grid Grid.Row="0">
                     <TextBlock x:Name="SavedFlashText" FontSize="11.5" Foreground="{ThemeResource YYOkBrush}" VerticalAlignment="Center" MaxWidth="190" TextTrimming="CharacterEllipsis" />
-                    <Button
-                        x:Name="InspectorHistoryBtn"
-                        HorizontalAlignment="Right"
-                        Style="{StaticResource YYIconButtonStyle}"
-                        Width="26"
-                        Height="26"
-                        CornerRadius="13"
-                        ToolTipService.ToolTip="最近修改的设置 (Ctrl+Z 撤销)"
-                        Click="HistoryBtn_Click" />
+                    <Grid HorizontalAlignment="Right">
+                        <Button
+                            x:Name="InspectorHistoryBtn"
+                            Style="{StaticResource YYIconButtonStyle}"
+                            Width="26"
+                            Height="26"
+                            CornerRadius="13"
+                            ToolTipService.ToolTip="最近修改的设置 (Ctrl+Z 撤销)"
+                            Click="HistoryBtn_Click" />
+                        <Border
+                            x:Name="InspectorHistoryBadge"
+                            Visibility="Collapsed"
+                            IsHitTestVisible="False"
+                            MinWidth="14"
+                            Height="14"
+                            CornerRadius="7"
+                            Padding="3,0"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Margin="0,-3,-3,0">
+                            <TextBlock x:Name="InspectorHistoryCountText" FontSize="9" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </Grid>
                 </Grid>
                 <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Hidden" HorizontalScrollMode="Disabled">
                     <StackPanel x:Name="InspectorHost" Spacing="12" />

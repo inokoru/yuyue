@@ -188,6 +188,10 @@ public static class AlignCheckAndPolishService
                     if (!File.Exists(trackPath)) return;
                     double inTrackStart = Math.Max(0, globalStart - accum);
                     previewEndInTrackSec = Math.Min(f.Seconds, globalEnd - accum);
+                    App.CurrentApp.ClaimAudioPlayback(win, () => win.DispatcherQueue.TryEnqueue(() =>
+                    {
+                        try { previewPlayer.Pause(); stopPreviewTimer.Stop(); } catch { }
+                    }));
                     previewPlayer.Source = MediaSource.CreateFromUri(new Uri(trackPath));
                     previewPlayer.PlaybackSession.Position = TimeSpan.FromSeconds(inTrackStart);
                     previewPlayer.Play();
@@ -806,32 +810,34 @@ public static class AlignCheckAndPolishService
 
         if (asks.Length == 0)
         {
-            var infoDlg = new ContentDialog
-            {
-                XamlRoot = xamlRoot,
-                Title = "整理错字",
-                Content = "这本书不是录音转写的「文字版」，或当前没有可整理的段落。",
-                CloseButtonText = "好",
-            };
-            await infoDlg.ShowAsync();
+            await YYChrome.ShowNoticeAsync(
+                xamlRoot,
+                dark,
+                L10n.T("整理错字"),
+                L10n.T("这本书不是录音转写的「文字版」，或当前没有可整理的段落。"),
+                okText: L10n.T("好"),
+                tint: library.Prefs.Tint);
             return;
         }
 
         var job = PolishJobs.GetOrAdd(bookId, _ => new PolishJobState { Total = asks.Length });
+        ContentDialog? dlgRef = null;
         var statusTb = new TextBlock
         {
             Text = $"共 {asks.Length} 段（每段约 2,000 字），仅修正同音错字与人名，不会破坏语音对齐。关闭窗口后仍可在后台继续。",
             FontSize = 12,
+            LineHeight = 19,
             Foreground = ThemeHelper.Brush(p.T2),
             TextWrapping = TextWrapping.Wrap,
         };
         var bar = new ProgressBar { Minimum = 0, Maximum = Math.Max(1, asks.Length), Value = job.Done };
         var detailTb = new TextBlock { FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), TextWrapping = TextWrapping.Wrap };
-        var startBtn = new Button
+        string startBtnLabelText = job.Running ? "停止后台整理" : "开始整理文字版";
+        var startBtnLabel = new TextBlock
         {
-            Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"],
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            Content = job.Running ? "停止后台整理" : "开始整理文字版",
+            Text = L10n.T(startBtnLabelText),
+            FontSize = 13,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         };
 
         void RefreshUi()
@@ -840,17 +846,17 @@ public static class AlignCheckAndPolishService
             bar.Value = job.Done;
             if (job.Running)
             {
-                startBtn.Content = "停止后台整理";
+                startBtnLabel.Text = L10n.T("停止后台整理");
                 detailTb.Text = $"正在后台整理第 {Math.Min(job.Done + 1, job.Total)} / {job.Total} 段 · 已修正 {job.Fixed} 处…";
             }
             else if (!string.IsNullOrEmpty(job.Error))
             {
-                startBtn.Content = "重试整理文字版";
+                startBtnLabel.Text = L10n.T("重试整理文字版");
                 detailTb.Text = $"整理中断：{job.Error}";
             }
             else if (job.Done > 0)
             {
-                startBtn.Content = "再次整理文字版";
+                startBtnLabel.Text = L10n.T("再次整理文字版");
                 statusTb.Text = job.Failed > 0
                     ? $"整理完成：共修正 {job.Fixed} 处同音错字（{job.Failed} 段请求未成功）。"
                     : $"✓ 整理完成：共修正 {job.Fixed} 处同音错字与人名。";
@@ -870,7 +876,7 @@ public static class AlignCheckAndPolishService
         };
         PolishStateChanged += onChanged;
 
-        startBtn.Click += (_, _) =>
+        var startBtn = YYChrome.MakeSheetPillButton(startBtnLabel, () =>
         {
             if (job.Running)
             {
@@ -932,24 +938,42 @@ public static class AlignCheckAndPolishService
                     dispatcher?.TryEnqueue(() => onFinished?.Invoke());
                 }
             });
-        };
+        }, dark, library.Prefs.Tint, "primary", height: 38, stretch: true);
+        startBtnLabel.Foreground = startBtn.Foreground;
 
         RefreshUi();
 
-        var dlg = new ContentDialog
+        var cardBody = new StackPanel
         {
-            XamlRoot = xamlRoot,
-            Title = "整理文字版错字",
-            Content = new StackPanel
-            {
-                Spacing = 12,
-                Width = 380,
-                Children = { statusTb, bar, detailTb, startBtn },
-            },
-            CloseButtonText = "关闭",
+            Spacing = 10,
+            Padding = new Thickness(14, 12, 14, 12),
+            Children = { statusTb, bar, detailTb },
         };
-        await dlg.ShowAsync();
-        PolishStateChanged -= onChanged;
+        var sheetBody = new StackPanel
+        {
+            Spacing = 14,
+            Padding = new Thickness(22, 18, 22, 18),
+        };
+        sheetBody.Children.Add(YYChrome.MakeSheetHeader(L10n.T("整理文字版错字"), null, () => dlgRef?.Hide(), dark, titleSize: 17));
+        sheetBody.Children.Add(new Border
+        {
+            CornerRadius = new CornerRadius(12),
+            Background = ThemeHelper.Brush(p.Card),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(0.75),
+            Child = cardBody,
+        });
+        sheetBody.Children.Add(startBtn);
+
+        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 420, sheetBody, tint: library.Prefs.Tint);
+        try
+        {
+            await dlgRef.ShowSafeAsync(library.Prefs.Tint);
+        }
+        finally
+        {
+            PolishStateChanged -= onChanged;
+        }
     }
 
     private static bool IsFatalPolishError(Exception ex)
@@ -1275,13 +1299,20 @@ public sealed class RecordingShareServer : IDisposable
             }
 
             var rec = _library.Core.AudioRecording(bookId);
+            string ResolveRecFile(string rawPath) =>
+                Path.IsPathRooted(rawPath) ? rawPath : Path.Combine(_library.DataDir, rawPath);
+
             if (path == "/has")
             {
-                var files = rec.Files.Select(f => new
+                var files = rec.Files.Select(f =>
                 {
-                    name = Path.GetFileName(f.Path),
-                    size = File.Exists(f.Path) ? new FileInfo(f.Path).Length : 0L,
-                    seconds = f.Seconds,
+                    string resolved = ResolveRecFile(f.Path);
+                    return new
+                    {
+                        name = Path.GetFileName(resolved),
+                        size = File.Exists(resolved) ? new FileInfo(resolved).Length : 0L,
+                        seconds = f.Seconds,
+                    };
                 }).ToArray();
                 string title = "";
                 try { title = _library.Core.Book(bookId).Summary.Title; } catch { }
@@ -1293,7 +1324,7 @@ public sealed class RecordingShareServer : IDisposable
                     return (404, "application/json", []);
                 if (!query.TryGetValue("from", out var fs) || !long.TryParse(fs, out long offset) || offset < 0)
                     return (404, "application/json", []);
-                string fp = rec.Files[idx].Path;
+                string fp = ResolveRecFile(rec.Files[idx].Path);
                 if (!File.Exists(fp)) return (404, "application/json", []);
 
                 using var file = new FileStream(fp, FileMode.Open, FileAccess.Read, FileShare.Read);

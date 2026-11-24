@@ -30,12 +30,15 @@ public sealed class FontShelfService
 
     private readonly string _fontsDir;
     private readonly object _gate = new();
+    private readonly object _sysFontsGate = new();
     private readonly Dictionary<string, double> _downloading = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, CancellationTokenSource> _downloadCts = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (string? Family, string? Localized)> _familyCache = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<SystemFontEntry>? _cachedSystemFonts;
 
     public IReadOnlyList<FontPack> Catalog { get; }
     public string FontsDir => _fontsDir;
+    public IReadOnlyList<SystemFontEntry>? CachedSystemCjkFonts => _cachedSystemFonts;
     public event Action? Changed;
 
     public FontShelfService(string fontsDir)
@@ -478,7 +481,91 @@ public sealed class FontShelfService
         }
     }
 
+    public static FontKind ClassifyFontKind(string? rawNameOrFamily)
+    {
+        if (string.IsNullOrWhiteSpace(rawNameOrFamily)) return FontKind.Hei;
+        string s = rawNameOrFamily;
+        if (s.Contains("仿宋", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("仿", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("FangSong", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Fangsong", StringComparison.OrdinalIgnoreCase))
+            return FontKind.Fang;
+        if (s.Contains("楷", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Kai", StringComparison.OrdinalIgnoreCase))
+            return FontKind.Kai;
+        if (s.Contains("手", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("行", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("草", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("隶", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("LiSu", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Brush", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Script", StringComparison.OrdinalIgnoreCase))
+            return FontKind.Hand;
+        if (s.Contains("黑", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("雅黑", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("等线", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("圆", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Sans", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Gothic", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Hei", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("PingFang", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("MiSans", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("HarmonyOS", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("DengXian", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("YouYuan", StringComparison.OrdinalIgnoreCase))
+            return FontKind.Hei;
+        if (s.Contains("宋", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("明", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Serif", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Song", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Ming", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("SimSun", StringComparison.OrdinalIgnoreCase))
+            return FontKind.Song;
+        return FontKind.Hei;
+    }
+
+    public FontKind GetFontKind(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return FontKind.Hei;
+        if (id == "system") return FontKind.Hei;
+        if (id == "serif") return FontKind.Song;
+        if (id is "kai" or "wenkai") return FontKind.Kai;
+        if (Catalog.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase)) is { } pack)
+            return pack.Kind;
+        if (id.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+        {
+            string fn = id[5..];
+            return ClassifyFontKind($"{GetFontFileDisplayName(fn)} {GetFontFileFamily(fn)} {fn}");
+        }
+        if (id.StartsWith("sys:", StringComparison.OrdinalIgnoreCase))
+            return ClassifyFontKind(id[4..]);
+        if (id.StartsWith("local:", StringComparison.OrdinalIgnoreCase))
+            return ClassifyFontKind(id[6..]);
+        return ClassifyFontKind(id);
+    }
+
+    public Task<IReadOnlyList<SystemFontEntry>> LoadSystemCjkFontsAsync() =>
+        _cachedSystemFonts is { } ready
+            ? Task.FromResult(ready)
+            : Task.Run(() => DiscoverSystemCjkFonts());
+
     public IReadOnlyList<SystemFontEntry> DiscoverSystemCjkFonts()
+    {
+        if (_cachedSystemFonts is { } existing)
+            return existing;
+
+        lock (_sysFontsGate)
+        {
+            if (_cachedSystemFonts is { } lockedHit)
+                return lockedHit;
+
+            var scanned = ScanSystemCjkFontsCore();
+            _cachedSystemFonts = scanned;
+            return scanned;
+        }
+    }
+
+    private IReadOnlyList<SystemFontEntry> ScanSystemCjkFontsCore()
     {
         var results = new List<SystemFontEntry>();
         var seenFamilies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -634,6 +721,8 @@ public sealed class FontShelfService
 
                 var urls = ModelDownload.CandidateUrls(file.File, officialUrl: file.Url, mirrorPath: $"fonts/{file.File}");
                 ulong baseDone = doneOffset;
+                long lastEmitTick = 0;
+                double lastEmitProg = 0;
                 await ModelDownload.DownloadWithResumeAsync(
                     urls,
                     tmp,
@@ -643,12 +732,19 @@ public sealed class FontShelfService
                     {
                         if (totalBytes > 0)
                         {
+                            double prog = Math.Clamp((double)(baseDone + (ulong)Math.Max(0, got)) / totalBytes, 0.01, 0.99);
                             lock (_gate)
                             {
                                 if (_downloading.ContainsKey(packId))
-                                    _downloading[packId] = Math.Clamp((double)(baseDone + (ulong)Math.Max(0, got)) / totalBytes, 0.01, 0.99);
+                                    _downloading[packId] = prog;
                             }
-                            Changed?.Invoke();
+                            long nowTick = Environment.TickCount64;
+                            if (Math.Abs(prog - lastEmitProg) >= 0.015 && nowTick - lastEmitTick >= 100)
+                            {
+                                lastEmitProg = prog;
+                                lastEmitTick = nowTick;
+                                Changed?.Invoke();
+                            }
                         }
                     },
                     token);

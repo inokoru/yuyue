@@ -4,6 +4,7 @@ using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Shapes;
 using Windows.Foundation;
 using Windows.UI;
 using Yuyue.Core;
@@ -13,9 +14,10 @@ namespace Yuyue.Reader;
 
 /// <summary>
 /// 1:1 implementation of macOS <c>CustomPapers.swift</c> (<c>调纸 PaperEditor</c> — 白天/夜里,
-/// 6-column PaperTile swatches, collapsible <c>微调颜色</c> HSL sliders with colored gradient tracks,
-/// 4 textures, <c>字色</c> auto + palette inks, duplicate, and live reader page preview)
-/// plus Book Record dialogs.
+/// 6-column PaperTile swatches with 15pt serif "文" + grain texture + outer selection ring,
+/// collapsible <c>微调颜色</c> HSL sliders with colored gradient tracks, 4 textures,
+/// <c>字色</c> auto + palette inks, duplicate, and live reader page preview)
+/// plus frameless warm-paper Book Record sheets.
 /// </summary>
 public static class CustomPaperDialog
 {
@@ -34,7 +36,6 @@ public static class CustomPaperDialog
             }
             if (s.Length == 8)
             {
-                // Swift #RRGGBBAA or #AARRGGBB: Rust emits #RRGGBBAA for glass/hl
                 byte c0 = Convert.ToByte(s[..2], 16);
                 byte c1 = Convert.ToByte(s.Substring(2, 2), 16);
                 byte c2 = Convert.ToByte(s.Substring(4, 2), 16);
@@ -44,6 +45,79 @@ public static class CustomPaperDialog
         }
         catch { }
         return fallback;
+    }
+
+    /// <summary>
+    /// Builds a 1:1 macOS <c>PaperTile</c> swatch (<c>46×38</c> or custom size) with 15pt serif "文",
+    /// subtle grain dot overlay when <paramref name="textured"/> is true, and outer <c>tc.Accent</c> selection ring.
+    /// </summary>
+    public static FrameworkElement BuildPaperSwatchTile(
+        Color bgCol,
+        Color inkCol,
+        Color lineCol,
+        Color ringCol,
+        bool selected,
+        bool textured = false,
+        double width = 46,
+        double height = 38,
+        double fontSize = 15)
+    {
+        var innerGrid = new Grid();
+        if (textured)
+        {
+            var grainCanvas = new Canvas { IsHitTestVisible = false, Opacity = 0.20 };
+            (double X, double Y)[] dots =
+            [
+                (7, 7), (18, 5), (31, 8), (39, 13),
+                (11, 16), (24, 14), (35, 20), (8, 26),
+                (19, 29), (29, 25), (38, 30), (14, 32),
+            ];
+            foreach (var (dx, dy) in dots)
+            {
+                var dot = new Ellipse
+                {
+                    Width = 1.4,
+                    Height = 1.4,
+                    Fill = ThemeHelper.Brush(inkCol),
+                };
+                Canvas.SetLeft(dot, dx * (width / 46.0));
+                Canvas.SetTop(dot, dy * (height / 38.0));
+                grainCanvas.Children.Add(dot);
+            }
+            innerGrid.Children.Add(grainCanvas);
+        }
+
+        innerGrid.Children.Add(new TextBlock
+        {
+            Text = "文",
+            FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
+            FontSize = fontSize,
+            FontWeight = FontWeights.Medium,
+            Foreground = ThemeHelper.Brush(inkCol),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+
+        var innerTile = new Border
+        {
+            Width = width > 0 ? width : double.NaN,
+            Height = height,
+            CornerRadius = new CornerRadius(9),
+            Background = ThemeHelper.Brush(bgCol),
+            BorderBrush = ThemeHelper.Brush(lineCol),
+            BorderThickness = new Thickness(0.75),
+            Child = innerGrid,
+        };
+
+        return new Border
+        {
+            Padding = new Thickness(2),
+            CornerRadius = new CornerRadius(11.5),
+            BorderBrush = selected ? ThemeHelper.Brush(ringCol) : new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(1.6),
+            HorizontalAlignment = width > 0 ? HorizontalAlignment.Center : HorizontalAlignment.Stretch,
+            Child = innerTile,
+        };
     }
 
     public static CustomPaper? DuplicateCustomPaper(LibraryService library, CustomPaper mine)
@@ -98,52 +172,67 @@ public static class CustomPaperDialog
             Texture: preset == Paper.Eink ? PaperTexture.Grain : PaperTexture.None);
     }
 
-    public static async Task<CustomPaper?> ShowEditorAsync(
-        XamlRoot xamlRoot,
-        LibraryService library,
-        CustomPaper? existing = null,
-        Action<CustomPaper?>? onPreview = null,
-        ReaderSettings? currentSettings = null)
+    public sealed class PaperEditorHandle
     {
-        var initial = existing ?? NewDraftFromSettings(library, currentSettings ?? library.GetReaderSettings());
+        public required StackPanel Root { get; init; }
+        public required Func<CustomPaper> GetDraft { get; init; }
+    }
+
+    /// <summary>
+    /// Reusable <c>PaperEditor</c> body used both inside <see cref="ReaderWindow"/>'s inline 308px <c>TypesetFlyout</c>
+    /// (<paramref name="showReadingSample"/> = false, live-updating the reader page behind it) and inside the standalone
+    /// 340px <see cref="ShowEditorAsync"/> sheet (<paramref name="showReadingSample"/> = true).
+    /// </summary>
+    public static PaperEditorHandle BuildPaperEditorBody(
+        LibraryService library,
+        bool darkUi,
+        CustomPaper initial,
+        bool showReadingSample,
+        Action<CustomPaper>? onDraftChanged = null,
+        Action<CustomPaper>? onDuplicatePicked = null,
+        Action? onDeleteRequested = null)
+    {
         var draft = initial;
         bool night = YuyueCoreMethods.PaperColors(draft).Dark;
         var hsl = YuyueCoreMethods.PaperHsl(draft.Bg);
         bool tuningOpen = false;
         bool updatingSliders = false;
-        CustomPaper? duplicatedPaper = null;
-        ContentDialog? dlgRef = null;
 
-        bool darkUi = xamlRoot.Content is FrameworkElement fe && ThemeHelper.IsDark(fe.ActualTheme);
         var p = ThemeHelper.Palette(darkUi);
         var tint = ThemeHelper.TintColors(library.Prefs.Tint, darkUi);
 
-        var root = new StackPanel { Spacing = 12, Width = 388 };
+        var root = new StackPanel { Spacing = 11 };
 
-        // Live preview banner inside dialog (in addition to live reader page preview behind dialog)
-        var previewTitle = new TextBlock
+        TextBlock? previewTitle = null;
+        TextBlock? previewSub = null;
+        Border? previewBox = null;
+        if (showReadingSample)
         {
-            Text = "春江潮水连海平，海上明月共潮生。",
-            FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
-            FontSize = 15,
-            FontWeight = FontWeights.SemiBold,
-        };
-        var previewSub = new TextBlock { FontSize = 11 };
-        var previewBox = new Border
-        {
-            CornerRadius = new CornerRadius(12),
-            BorderThickness = new Thickness(1),
-            Padding = new Thickness(15, 12, 15, 12),
-            Child = new StackPanel { Spacing = 4, Children = { previewTitle, previewSub } },
-        };
-        root.Children.Add(previewBox);
+            previewTitle = new TextBlock
+            {
+                Text = L10n.T("春江潮水连海平，海上明月共潮生。\n滟滟随波千万里，何处春江无月明。"),
+                FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
+                FontSize = 14,
+                LineHeight = 23,
+                TextWrapping = TextWrapping.Wrap,
+            };
+            previewSub = new TextBlock { FontSize = 10.5 };
+            previewBox = new Border
+            {
+                CornerRadius = new CornerRadius(12),
+                BorderThickness = new Thickness(0.75),
+                Padding = new Thickness(14, 11, 14, 11),
+                Child = new StackPanel { Spacing = 5, Children = { previewTitle, previewSub } },
+            };
+            root.Children.Add(previewBox);
+        }
 
         // 1. 白天 | 夜里 segmented switch (1:1 CustomPapers.swift:229-230)
         var sideGrid = new Grid { ColumnSpacing = 3 };
         sideGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         sideGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var dayBtn = new Button { Content = "白天", HorizontalAlignment = HorizontalAlignment.Stretch, Height = 26, MinHeight = 26, FontSize = 11.5, BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(7), UseSystemFocusVisuals = false };
-        var nightBtn = new Button { Content = "夜里", HorizontalAlignment = HorizontalAlignment.Stretch, Height = 26, MinHeight = 26, FontSize = 11.5, BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(7), UseSystemFocusVisuals = false };
+        var dayBtn = new Button { Content = L10n.T("白天"), HorizontalAlignment = HorizontalAlignment.Stretch, Height = 26, MinHeight = 26, FontSize = 11.5, BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(7), UseSystemFocusVisuals = false };
+        var nightBtn = new Button { Content = L10n.T("夜里"), HorizontalAlignment = HorizontalAlignment.Stretch, Height = 26, MinHeight = 26, FontSize = 11.5, BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(7), UseSystemFocusVisuals = false };
         Grid.SetColumn(dayBtn, 0);
         Grid.SetColumn(nightBtn, 1);
         sideGrid.Children.Add(dayBtn);
@@ -156,20 +245,19 @@ public static class CustomPaperDialog
             Child = sideGrid,
         });
 
-        // 2. 6-column PaperTile swatch grid (1:1 CustomPapers.swift:232-240)
-        var swatchGrid = new Grid { ColumnSpacing = 6, RowSpacing = 8 };
+        // 2. 6-column PaperTile swatch grid
+        var swatchGrid = new Grid { ColumnSpacing = 4, RowSpacing = 6 };
         for (int c = 0; c < 6; c++) swatchGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         root.Children.Add(swatchGrid);
 
-        // 3. Settings group card: 微调颜色 (collapsible) + 纹理 + 字色 (1:1 CustomPapers.swift:243-321)
+        // 3. Settings group card: 微调颜色 (collapsible) + 纹理 + 字色 + 版式
         var groupStack = new StackPanel { Spacing = 0 };
 
-        // 3a. 微调颜色 header button
         var tuneChevTb = new TextBlock { Text = "›", FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center };
         var tuneHeaderGrid = new Grid { Height = 36 };
-        tuneHeaderGrid.Children.Add(new TextBlock { Text = "微调颜色", FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center });
+        tuneHeaderGrid.Children.Add(new TextBlock { Text = L10n.T("微调颜色"), FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center });
         var tuneRight = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
-        tuneRight.Children.Add(new TextBlock { Text = "色调、浓淡、深浅", FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center });
+        tuneRight.Children.Add(new TextBlock { Text = L10n.T("色调、浓淡、深浅"), FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center });
         tuneRight.Children.Add(tuneChevTb);
         tuneHeaderGrid.Children.Add(tuneRight);
 
@@ -185,7 +273,6 @@ public static class CustomPaperDialog
         };
         groupStack.Children.Add(tuneToggleBtn);
 
-        // Collapsible HSL sliders panel
         var tunePanel = new StackPanel { Spacing = 6, Padding = new Thickness(0, 0, 0, 10), Visibility = Visibility.Collapsed };
         var hueTrack = new Border { Height = 6, CornerRadius = new CornerRadius(3), VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
         var satTrack = new Border { Height = 6, CornerRadius = new CornerRadius(3), VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
@@ -193,7 +280,6 @@ public static class CustomPaperDialog
 
         var hueSlider = new Slider { Minimum = 0, Maximum = 359, StepFrequency = 1 };
         var satSlider = new Slider { Minimum = 0, Maximum = 30, StepFrequency = 0.5 };
-        // Reversed slider: 0..100 where 0 = LightnessMax (lightest left) and 100 = LightnessMin (darkest right)
         var lightSlider = new Slider { Minimum = 0, Maximum = 100, StepFrequency = 0.5 };
 
         Grid MakeSliderRow(string label, Border trackBg, Slider slider)
@@ -201,7 +287,7 @@ public static class CustomPaperDialog
             var g = new Grid { ColumnSpacing = 10, Height = 30 };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            g.Children.Add(new TextBlock { Text = label, FontSize = 11, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center });
+            g.Children.Add(new TextBlock { Text = L10n.T(label), FontSize = 11, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center });
             var trackWrap = new Grid();
             trackWrap.Children.Add(trackBg);
             trackWrap.Children.Add(slider);
@@ -214,67 +300,88 @@ public static class CustomPaperDialog
         tunePanel.Children.Add(MakeSliderRow("深浅", lightTrack, lightSlider));
         groupStack.Children.Add(tunePanel);
 
-        // 3b. 纹理 row
         groupStack.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) });
-        var texRow = new Grid { MinHeight = 42 };
-        texRow.Children.Add(new TextBlock { Text = "纹理", FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center });
-        var texHost = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+        var texRow = new Grid { MinHeight = 40 };
+        texRow.Children.Add(new TextBlock { Text = L10n.T("纹理"), FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center });
+        var texHost = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         texRow.Children.Add(texHost);
         groupStack.Children.Add(texRow);
 
-        // 3c. 字色 row
         groupStack.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) });
-        var inkRow = new Grid { MinHeight = 42 };
-        inkRow.Children.Add(new TextBlock { Text = "字色", FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center });
-        var inkHost = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+        var inkRow = new Grid { MinHeight = 40 };
+        inkRow.Children.Add(new TextBlock { Text = L10n.T("字色"), FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center });
+        var inkHost = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         inkRow.Children.Add(inkHost);
         groupStack.Children.Add(inkRow);
 
-        // 3d. 版式 row (素白段距 / 纸本缩进)
         groupStack.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) });
-        var layoutRow = new Grid { MinHeight = 40 };
-        layoutRow.Children.Add(new TextBlock { Text = "版式", FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center });
+        var layoutRow = new Grid { MinHeight = 38 };
+        layoutRow.Children.Add(new TextBlock { Text = L10n.T("版式"), FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center });
         var layoutHost = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         layoutRow.Children.Add(layoutHost);
         groupStack.Children.Add(layoutRow);
 
         root.Children.Add(new Border
         {
-            CornerRadius = new CornerRadius(14),
+            CornerRadius = new CornerRadius(13),
             Background = ThemeHelper.Brush(p.Card),
             BorderBrush = ThemeHelper.Brush(p.Line),
-            BorderThickness = new Thickness(1),
+            BorderThickness = new Thickness(0.75),
             Padding = new Thickness(12, 2, 12, 2),
             Child = groupStack,
         });
 
-        // Optional custom name & existing-paper actions (复制一张)
         var nameBox = new TextBox
         {
             Text = draft.Name,
-            PlaceholderText = "纸张名称（留空则按最接近的纸色自动命名）",
+            PlaceholderText = L10n.T("纸张名称（留空自动命名）"),
             FontSize = 12,
         };
         nameBox.TextChanged += (_, _) => draft = draft with { Name = nameBox.Text.Trim() };
         root.Children.Add(nameBox);
 
-        if (existing is not null && !string.IsNullOrEmpty(existing.Id))
+        if (!string.IsNullOrEmpty(initial.Id))
         {
-            var dupBtn = new Button
+            var existingActRow = new Grid { ColumnSpacing = 8 };
+            existingActRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            existingActRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            existingActRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            if (onDuplicatePicked is not null)
             {
-                Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
-                Content = "复制一张新纸",
-                Height = 26,
-                MinHeight = 26,
-                FontSize = 11.5,
-                HorizontalAlignment = HorizontalAlignment.Left,
-            };
-            dupBtn.Click += (_, _) =>
+                var dupBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+                    Content = L10n.T("复制一张"),
+                    Height = 26,
+                    MinHeight = 26,
+                    FontSize = 11,
+                };
+                dupBtn.Click += (_, _) =>
+                {
+                    var duplicated = DuplicateCustomPaper(library, draft with { Name = string.IsNullOrWhiteSpace(draft.Name) ? initial.Name : draft.Name });
+                    if (duplicated is not null) onDuplicatePicked(duplicated);
+                };
+                existingActRow.Children.Add(dupBtn);
+            }
+
+            if (onDeleteRequested is not null)
             {
-                duplicatedPaper = DuplicateCustomPaper(library, draft with { Name = string.IsNullOrWhiteSpace(draft.Name) ? existing.Name : draft.Name });
-                if (duplicatedPaper is not null) dlgRef?.Hide();
-            };
-            root.Children.Add(dupBtn);
+                var delBtn = new Button
+                {
+                    Background = new SolidColorBrush(Colors.Transparent),
+                    BorderThickness = new Thickness(0),
+                    Padding = new Thickness(6, 2, 6, 2),
+                    FontSize = 11,
+                    Foreground = ThemeHelper.Brush(p.Danger),
+                    Content = L10n.T("删除这张纸"),
+                    UseSystemFocusVisuals = false,
+                };
+                delBtn.Click += (_, _) => onDeleteRequested();
+                Grid.SetColumn(delBtn, 2);
+                existingActRow.Children.Add(delBtn);
+            }
+            root.Children.Add(existingActRow);
         }
 
         static LinearGradientBrush MakeGradient(params Color[] stops)
@@ -306,8 +413,8 @@ public static class CustomPaperDialog
             satSlider.Value = Math.Clamp(hsl.S, 0, pal.SaturationMax);
 
             double span = Math.Max(0.001, pal.LightnessMax - pal.LightnessMin);
-            double norm = (hsl.L - pal.LightnessMin) / span; // 0 = dark, 1 = light
-            lightSlider.Value = Math.Clamp((1.0 - norm) * 100.0, 0, 100); // reversed: 0 left = lightest, 100 right = darkest
+            double norm = (hsl.L - pal.LightnessMin) / span;
+            lightSlider.Value = Math.Clamp((1.0 - norm) * 100.0, 0, 100);
             updatingSliders = false;
 
             hueTrack.Background = MakeGradient(
@@ -338,20 +445,22 @@ public static class CustomPaperDialog
             nightBtn.FontWeight = night ? FontWeights.SemiBold : FontWeights.Normal;
             nightBtn.Foreground = ThemeHelper.Brush(night ? p.T1 : p.T2);
 
-            previewBox.Background = ThemeHelper.Brush(bgCol);
-            previewBox.BorderBrush = ThemeHelper.Brush(lineCol);
-            previewTitle.Foreground = ThemeHelper.Brush(inkCol);
-            previewSub.Foreground = ThemeHelper.Brush(ink2Col);
-            string texLabel = draft.Texture switch
+            if (previewBox is not null && previewTitle is not null && previewSub is not null)
             {
-                PaperTexture.Grain => "细颗粒",
-                PaperTexture.Xuan => "宣纸",
-                PaperTexture.Linen => "亚麻",
-                _ => "无纹理",
-            };
-            previewSub.Text = $"{colors.Bg.ToUpperInvariant()} · {texLabel} · 对比度 {colors.Contrast:0.1}:1";
+                previewBox.Background = ThemeHelper.Brush(bgCol);
+                previewBox.BorderBrush = ThemeHelper.Brush(lineCol);
+                previewTitle.Foreground = ThemeHelper.Brush(inkCol);
+                previewSub.Foreground = ThemeHelper.Brush(ink2Col);
+                string texLabel = draft.Texture switch
+                {
+                    PaperTexture.Grain => L10n.T("细颗粒"),
+                    PaperTexture.Xuan => L10n.T("宣纸"),
+                    PaperTexture.Linen => L10n.T("亚麻"),
+                    _ => L10n.T("无纹理"),
+                };
+                previewSub.Text = $"{colors.Bg.ToUpperInvariant()} · {texLabel} · {L10n.T("对比度")} {colors.Contrast:0.1}:1";
+            }
 
-            // 6-col swatches
             swatchGrid.Children.Clear();
             swatchGrid.RowDefinitions.Clear();
             int rows = (pal.Swatches.Length + 5) / 6;
@@ -364,30 +473,23 @@ public static class CustomPaperDialog
                 var swColors = YuyueCoreMethods.PaperColors(swPaper);
                 bool selected = string.Equals(draft.Bg, sw.Color, StringComparison.OrdinalIgnoreCase);
 
-                var tileBox = new Border
-                {
-                    Height = 34,
-                    CornerRadius = new CornerRadius(10),
-                    Background = ThemeHelper.Brush(ParseHexColor(swColors.Bg, Colors.Beige)),
-                    BorderBrush = selected ? ThemeHelper.Brush(p.T1) : ThemeHelper.Brush(p.Line),
-                    BorderThickness = new Thickness(selected ? 2 : 0.75),
-                    Child = new TextBlock
-                    {
-                        Text = "文",
-                        FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
-                        FontSize = 14.5,
-                        Foreground = ThemeHelper.Brush(ParseHexColor(swColors.Ink, Colors.Black)),
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        VerticalAlignment = VerticalAlignment.Center,
-                    },
-                };
+                var tile = BuildPaperSwatchTile(
+                    ParseHexColor(swColors.Bg, Colors.Beige),
+                    ParseHexColor(swColors.Ink, Colors.Black),
+                    p.Line,
+                    tint.Accent,
+                    selected,
+                    textured: draft.Texture != PaperTexture.None,
+                    width: 0,
+                    height: 32,
+                    fontSize: 14);
 
-                var sp = new StackPanel { Spacing = 4 };
-                sp.Children.Add(tileBox);
+                var sp = new StackPanel { Spacing = 3 };
+                sp.Children.Add(tile);
                 sp.Children.Add(new TextBlock
                 {
                     Text = sw.Name,
-                    FontSize = 10,
+                    FontSize = 9.5,
                     FontWeight = selected ? FontWeights.SemiBold : FontWeights.Normal,
                     Foreground = ThemeHelper.Brush(selected ? p.T1 : p.T2),
                     HorizontalAlignment = HorizontalAlignment.Center,
@@ -417,7 +519,6 @@ public static class CustomPaperDialog
                 swatchGrid.Children.Add(btn);
             }
 
-            // Textures (4 swatch tiles)
             texHost.Children.Clear();
             foreach (var (tx, lbl, mark) in new[]
             {
@@ -430,15 +531,15 @@ public static class CustomPaperDialog
                 bool on = draft.Texture == tx;
                 var tb = new Border
                 {
-                    Width = 36,
-                    Height = 26,
+                    Width = 34,
+                    Height = 25,
                     CornerRadius = new CornerRadius(7),
                     Background = ThemeHelper.Brush(bgCol),
-                    BorderBrush = on ? ThemeHelper.Brush(p.T1) : ThemeHelper.Brush(p.Line),
-                    BorderThickness = new Thickness(on ? 1.8 : 0.75),
+                    BorderBrush = on ? ThemeHelper.Brush(tint.Accent) : ThemeHelper.Brush(p.Line),
+                    BorderThickness = new Thickness(on ? 1.6 : 0.75),
                     Child = new TextBlock
                     {
-                        Text = string.IsNullOrEmpty(mark) ? lbl[..1] : mark,
+                        Text = string.IsNullOrEmpty(mark) ? L10n.T(lbl)[..1] : mark,
                         FontSize = 10.5,
                         Foreground = ThemeHelper.Brush(ink2Col),
                         HorizontalAlignment = HorizontalAlignment.Center,
@@ -453,29 +554,28 @@ public static class CustomPaperDialog
                     UseSystemFocusVisuals = false,
                     Content = tb,
                 };
-                ToolTipService.SetToolTip(b, lbl);
+                ToolTipService.SetToolTip(b, L10n.T(lbl));
                 var targetTex = tx;
                 b.Click += (_, _) => { draft = draft with { Texture = targetTex }; RebuildControlsAndPreview(); };
                 texHost.Children.Add(b);
             }
 
-            // Inks: 自动 + palette.Inks circles (1:1 CustomPapers.swift:289-317)
             inkHost.Children.Clear();
             bool autoInk = draft.Ink is null;
             var autoBtn = new Button
             {
                 Height = 24,
                 MinHeight = 24,
-                Padding = new Thickness(9, 0, 9, 0),
+                Padding = new Thickness(8, 0, 8, 0),
                 CornerRadius = new CornerRadius(12),
                 Background = ThemeHelper.Brush(p.Inset),
-                BorderBrush = autoInk ? ThemeHelper.Brush(p.T1) : new SolidColorBrush(Colors.Transparent),
+                BorderBrush = autoInk ? ThemeHelper.Brush(tint.Accent) : new SolidColorBrush(Colors.Transparent),
                 BorderThickness = new Thickness(1.5),
                 FontSize = 10.5,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = ThemeHelper.Brush(autoInk ? p.T1 : p.T2),
                 UseSystemFocusVisuals = false,
-                Content = "自动",
+                Content = L10n.T("自动"),
             };
             autoBtn.Click += (_, _) => { draft = draft with { Ink = null }; RebuildControlsAndPreview(); };
             inkHost.Children.Add(autoBtn);
@@ -485,12 +585,12 @@ public static class CustomPaperDialog
                 bool on = string.Equals(draft.Ink, inkSw.Color, StringComparison.OrdinalIgnoreCase);
                 var circle = new Border
                 {
-                    Width = 24,
-                    Height = 24,
-                    CornerRadius = new CornerRadius(12),
+                    Width = 23,
+                    Height = 23,
+                    CornerRadius = new CornerRadius(11.5),
                     Background = ThemeHelper.Brush(bgCol),
-                    BorderBrush = on ? ThemeHelper.Brush(p.T1) : ThemeHelper.Brush(p.Line),
-                    BorderThickness = new Thickness(on ? 1.8 : 0.75),
+                    BorderBrush = on ? ThemeHelper.Brush(tint.Accent) : ThemeHelper.Brush(p.Line),
+                    BorderThickness = new Thickness(on ? 1.6 : 0.75),
                     Child = new TextBlock
                     {
                         Text = inkSw.Name,
@@ -515,7 +615,6 @@ public static class CustomPaperDialog
                 inkHost.Children.Add(ib);
             }
 
-            // Layout pills
             layoutHost.Children.Clear();
             foreach (var (lk, ll) in new[] { (Paper.Kami, "纸本缩进"), (Paper.Plain, "素白段距") })
             {
@@ -523,7 +622,7 @@ public static class CustomPaperDialog
                 var lb = new Button
                 {
                     Style = (Style)Application.Current.Resources[on ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"],
-                    Content = ll,
+                    Content = L10n.T(ll),
                     Height = 24,
                     MinHeight = 24,
                     FontSize = 10.5,
@@ -533,7 +632,7 @@ public static class CustomPaperDialog
                 layoutHost.Children.Add(lb);
             }
 
-            onPreview?.Invoke(draft);
+            onDraftChanged?.Invoke(draft);
         }
 
         void SwitchSide(bool toNight)
@@ -579,18 +678,76 @@ public static class CustomPaperDialog
         SyncSlidersFromHsl();
         RebuildControlsAndPreview();
 
-        dlgRef = new ContentDialog
+        return new PaperEditorHandle
         {
-            XamlRoot = xamlRoot,
-            Title = string.IsNullOrEmpty(initial.Id) ? "调纸" : $"调整“{initial.Name}”",
-            Content = new ScrollViewer { MaxHeight = 520, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = root },
-            PrimaryButtonText = "完成",
-            SecondaryButtonText = !string.IsNullOrEmpty(initial.Id) ? "删除这张纸" : "",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary,
+            Root = root,
+            GetDraft = () => draft,
         };
+    }
 
-        var res = await dlgRef.ShowAsync();
+    public static Task<CustomPaper?> ShowAsync(
+        XamlRoot xamlRoot,
+        LibraryService library,
+        CustomPaper? existing = null,
+        Action<CustomPaper?>? onPreview = null,
+        ReaderSettings? currentSettings = null) =>
+        ShowEditorAsync(xamlRoot, library, existing, onPreview, currentSettings);
+
+    public static async Task<CustomPaper?> ShowEditorAsync(
+        XamlRoot xamlRoot,
+        LibraryService library,
+        CustomPaper? existing = null,
+        Action<CustomPaper?>? onPreview = null,
+        ReaderSettings? currentSettings = null)
+    {
+        var initial = existing ?? NewDraftFromSettings(library, currentSettings ?? library.GetReaderSettings());
+        CustomPaper? duplicatedPaper = null;
+        bool deletedPaper = false;
+        bool confirmedSave = false;
+        ContentDialog? dlgRef = null;
+
+        bool darkUi = xamlRoot.Content is FrameworkElement fe && ThemeHelper.IsDark(fe.ActualTheme);
+
+        var handle = BuildPaperEditorBody(
+            library,
+            darkUi,
+            initial,
+            showReadingSample: true,
+            onDraftChanged: d => onPreview?.Invoke(d),
+            onDuplicatePicked: dup =>
+            {
+                duplicatedPaper = dup;
+                dlgRef?.Hide();
+            },
+            onDeleteRequested: () =>
+            {
+                deletedPaper = true;
+                dlgRef?.Hide();
+            });
+
+        string sheetTitle = string.IsNullOrEmpty(initial.Id) ? L10n.T("调纸") : $"{L10n.T("调整")}“{initial.Name}”";
+        var outer = new StackPanel { Spacing = 12, Padding = new Thickness(18, 16, 18, 16) };
+        outer.Children.Add(YYChrome.MakeSheetHeader(sheetTitle, null, () => dlgRef?.Hide(), darkUi, titleSize: 16));
+        outer.Children.Add(new ScrollViewer
+        {
+            MaxHeight = 500,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = handle.Root,
+        });
+
+        var footGrid = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 2, 0, 0) };
+        footGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        footGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var cancelBtn = YYChrome.MakeSheetPillButton(L10n.T("取消"), () => dlgRef?.Hide(), darkUi, library.Prefs.Tint, "secondary", height: 34, stretch: true);
+        var saveBtn = YYChrome.MakeSheetPillButton(L10n.T("完成"), () => { confirmedSave = true; dlgRef?.Hide(); }, darkUi, library.Prefs.Tint, "warm", height: 34, stretch: true);
+        Grid.SetColumn(cancelBtn, 0);
+        Grid.SetColumn(saveBtn, 1);
+        footGrid.Children.Add(cancelBtn);
+        footGrid.Children.Add(saveBtn);
+        outer.Children.Add(footGrid);
+
+        dlgRef = YYChrome.CreateMacSheet(xamlRoot, darkUi, 340, outer, maxHeight: 740, tint: library.Prefs.Tint);
+        await dlgRef.ShowSafeAsync(library.Prefs.Tint);
 
         if (duplicatedPaper is not null)
         {
@@ -598,7 +755,7 @@ public static class CustomPaperDialog
             return duplicatedPaper;
         }
 
-        if (res == ContentDialogResult.Secondary && !string.IsNullOrEmpty(initial.Id))
+        if (deletedPaper && !string.IsNullOrEmpty(initial.Id))
         {
             try { library.Core.DeleteCustomPaper(initial.Id); } catch { }
             PaperAppearance.Forget(library, initial.Id);
@@ -606,7 +763,7 @@ public static class CustomPaperDialog
             return null;
         }
 
-        if (res != ContentDialogResult.Primary)
+        if (!confirmedSave)
         {
             onPreview?.Invoke(null);
             return null;
@@ -614,7 +771,7 @@ public static class CustomPaperDialog
 
         try
         {
-            var saved = library.Core.SaveCustomPaper(draft);
+            var saved = library.Core.SaveCustomPaper(handle.GetDraft());
             onPreview?.Invoke(null);
             return saved;
         }
@@ -630,8 +787,13 @@ public static class CustomPaperDialog
     /// </summary>
     public static async Task<BookSummary?> ShowAddRecordBookDialogAsync(XamlRoot xamlRoot, LibraryService library)
     {
-        var titleBox = new TextBox { Header = "书名", PlaceholderText = "例如：乡土中国" };
-        var authorBox = new TextBox { Header = "作者（可选）", PlaceholderText = "例如：费孝通" };
+        bool dark = xamlRoot.Content is FrameworkElement fe && ThemeHelper.IsDark(fe.ActualTheme);
+        var p = ThemeHelper.Palette(dark);
+        ContentDialog? dlgRef = null;
+        bool confirmed = false;
+
+        var titleBox = new TextBox { Header = L10n.T("书名"), PlaceholderText = L10n.T("例如：乡土中国") };
+        var authorBox = new TextBox { Header = L10n.T("作者（可选）"), PlaceholderText = L10n.T("例如：费孝通") };
         ReadingStatus status = ReadingStatus.Reading;
 
         var statusRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
@@ -639,7 +801,7 @@ public static class CustomPaperDialog
         foreach (var (st, lbl) in new[] { (ReadingStatus.Reading, "在读"), (ReadingStatus.Want, "想读"), (ReadingStatus.Finished, "读过") })
         {
             var s = st;
-            var b = new Button { Content = lbl };
+            var b = new Button { Content = L10n.T(lbl) };
             b.Click += (_, _) =>
             {
                 status = s;
@@ -652,28 +814,47 @@ public static class CustomPaperDialog
         foreach (var (itemSt, itemBtn) in statusBtns)
             itemBtn.Style = (Style)Application.Current.Resources[itemSt == status ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
 
-        var dlg = new ContentDialog
+        var foot = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 4, 0, 0) };
+        foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var cancelBtn = YYChrome.MakeSheetPillButton(L10n.T("取消"), () => dlgRef?.Hide(), dark, library.Prefs.Tint, "secondary", height: 36, stretch: true);
+        var okBtn = YYChrome.MakeSheetPillButton(L10n.T("加入进度架"), () =>
         {
-            XamlRoot = xamlRoot,
-            Title = "记一本纸书 / 外部书",
-            Content = new StackPanel
+            if (!string.IsNullOrWhiteSpace(titleBox.Text))
             {
-                Spacing = 12,
-                MinWidth = 380,
-                Children =
+                confirmed = true;
+                dlgRef?.Hide();
+            }
+        }, dark, library.Prefs.Tint, "warm", height: 36, stretch: true);
+        Grid.SetColumn(cancelBtn, 0);
+        Grid.SetColumn(okBtn, 1);
+        foot.Children.Add(cancelBtn);
+        foot.Children.Add(okBtn);
+
+        var body = new StackPanel
+        {
+            Spacing = 12,
+            Padding = new Thickness(22, 18, 22, 18),
+            Children =
+            {
+                YYChrome.MakeSheetHeader(L10n.T("记一本纸书 / 外部书"), null, () => dlgRef?.Hide(), dark, titleSize: 17),
+                new TextBlock
                 {
-                    new TextBlock { Text = "无需电子书文件，也能在语阅里记录页码进度、评分与读后短评，并跨端同步。", FontSize = 12, Foreground = (Brush)Application.Current.Resources["YYText3Brush"], TextWrapping = TextWrapping.Wrap },
-                    titleBox,
-                    authorBox,
-                    statusRow,
+                    Text = L10n.T("无需电子书文件，也能在语阅里记录页码进度、评分与读后短评，并跨端同步。"),
+                    FontSize = 12,
+                    Foreground = ThemeHelper.Brush(p.T3),
+                    TextWrapping = TextWrapping.Wrap,
                 },
+                titleBox,
+                authorBox,
+                statusRow,
+                foot,
             },
-            PrimaryButtonText = "加入进度架",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary,
         };
 
-        if (await dlg.ShowAsync() != ContentDialogResult.Primary || string.IsNullOrWhiteSpace(titleBox.Text))
+        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 412, body, tint: library.Prefs.Tint);
+        await dlgRef.ShowSafeAsync(library.Prefs.Tint);
+        if (!confirmed || string.IsNullOrWhiteSpace(titleBox.Text))
             return null;
 
         var authors = authorBox.Text.Split([',', '，', '/', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -686,8 +867,14 @@ public static class CustomPaperDialog
     /// </summary>
     public static async Task<bool> ShowBookRecordDialogAsync(XamlRoot xamlRoot, LibraryService library, BookSummary book)
     {
+        bool dark = xamlRoot.Content is FrameworkElement fe && ThemeHelper.IsDark(fe.ActualTheme);
+        var p = ThemeHelper.Palette(dark);
+        ContentDialog? dlgRef = null;
+        bool confirmed = false;
+
         byte? rating = book.Rating;
-        var root = new StackPanel { Spacing = 12, MinWidth = 420 };
+        var root = new StackPanel { Spacing = 12, Padding = new Thickness(22, 18, 22, 18) };
+        root.Children.Add(YYChrome.MakeSheetHeader(L10n.T("阅读档案"), book.Title, () => dlgRef?.Hide(), dark, titleSize: 17));
 
         var starRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         var starBtns = new List<(byte Val, Button Btn)>();
@@ -709,10 +896,10 @@ public static class CustomPaperDialog
             starRow.Children.Add(btn);
         }
         RefreshStars();
-        root.Children.Add(new StackPanel { Spacing = 6, Children = { new TextBlock { Text = "我的评分", FontSize = 12.5, FontWeight = FontWeights.Medium }, starRow } });
+        root.Children.Add(new StackPanel { Spacing = 6, Children = { new TextBlock { Text = L10n.T("我的评分"), FontSize = 12.5, FontWeight = FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) }, starRow } });
 
-        var curValBox = new NumberBox { Header = "当前已读页数", Value = book.Manual?.Value ?? 0, Minimum = 0, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline, Width = 170 };
-        var totalValBox = new NumberBox { Header = "总页数", Value = book.Manual?.Total ?? 300, Minimum = 1, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline, Width = 170 };
+        var curValBox = new NumberBox { Header = L10n.T("当前已读页数"), Value = book.Manual?.Value ?? 0, Minimum = 0, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline, Width = 186 };
+        var totalValBox = new NumberBox { Header = L10n.T("总页数"), Value = book.Manual?.Total ?? 300, Minimum = 1, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline, Width = 186 };
         if (book.Record || book.Manual is not null)
         {
             root.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Children = { curValBox, totalValBox } });
@@ -720,9 +907,9 @@ public static class CustomPaperDialog
 
         var commentBox = new TextBox
         {
-            Header = "短评 / 读后记",
+            Header = L10n.T("短评 / 读后记"),
             Text = book.Comment ?? "",
-            PlaceholderText = "写几句读这本书的感受…",
+            PlaceholderText = L10n.T("写几句读这本书的感受…"),
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             MinHeight = 76,
@@ -731,23 +918,26 @@ public static class CustomPaperDialog
 
         var tagBox = new TextBox
         {
-            Header = "标签（用逗号分隔）",
+            Header = L10n.T("标签（用逗号分隔）"),
             Text = book.Tags is { Length: > 0 } ? string.Join("，", book.Tags) : "",
-            PlaceholderText = "例如：文学，年度十佳，社科",
+            PlaceholderText = L10n.T("例如：文学，年度十佳，社科"),
         };
         root.Children.Add(tagBox);
 
-        var dlg = new ContentDialog
-        {
-            XamlRoot = xamlRoot,
-            Title = $"阅读档案 · {book.Title}",
-            Content = root,
-            PrimaryButtonText = "保存",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary,
-        };
+        var foot = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 4, 0, 0) };
+        foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var cancelBtn = YYChrome.MakeSheetPillButton(L10n.T("取消"), () => dlgRef?.Hide(), dark, library.Prefs.Tint, "secondary", height: 36, stretch: true);
+        var saveBtn = YYChrome.MakeSheetPillButton(L10n.T("保存"), () => { confirmed = true; dlgRef?.Hide(); }, dark, library.Prefs.Tint, "warm", height: 36, stretch: true);
+        Grid.SetColumn(cancelBtn, 0);
+        Grid.SetColumn(saveBtn, 1);
+        foot.Children.Add(cancelBtn);
+        foot.Children.Add(saveBtn);
+        root.Children.Add(foot);
 
-        if (await dlg.ShowAsync() != ContentDialogResult.Primary) return false;
+        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 440, root, tint: library.Prefs.Tint);
+        await dlgRef.ShowSafeAsync(library.Prefs.Tint);
+        if (!confirmed) return false;
 
         try
         {

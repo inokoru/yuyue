@@ -200,6 +200,26 @@ public static class DailyQuote
         }
     }
 
+    public static string PickBookOrFallbackLine(LibraryService library, string? language = null)
+    {
+        string lang = Norm(language);
+        try
+        {
+            var kept = library.GetKeptBooks();
+            foreach (var b in kept)
+            {
+                bool isEnBook = b.Title.All(ch => ch < 128) && b.Title.Any(char.IsLetter);
+                if ((lang == "en") != isEnBook) continue;
+                var marks = library.GetMarks(b.Id);
+                var hl = marks.FirstOrDefault(n => !string.IsNullOrWhiteSpace(n.Text) && n.Text.Trim().Length is >= 8 and <= 96);
+                if (hl is not null)
+                    return hl.Text.Trim();
+            }
+        }
+        catch { }
+        return Current(library, lang).Text;
+    }
+
     private static string FormatSource(string? rawWho, string? rawFrom)
     {
         string who = (rawWho ?? "").Trim();

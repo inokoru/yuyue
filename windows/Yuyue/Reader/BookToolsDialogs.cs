@@ -1,11 +1,15 @@
+using System.Runtime.InteropServices;
+using System.Text.Json;
 using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
+using Windows.Storage.Pickers;
 using Windows.UI;
 using Windows.UI.Text;
+using WinRT.Interop;
 using Yuyue.Core;
 using Yuyue.Design;
 
@@ -15,10 +19,72 @@ namespace Yuyue.Reader;
 /// 1:1 alignment with macOS <c>ReplaceRules.swift</c> (<c>替换规则</c>) and
 /// <c>TxtLayout.swift</c> (<c>编码和目录</c>):
 /// live 250ms debounced rule preview with strikethrough before/after sample,
-/// midpoint reordering, 5-second undo, cross-scope banner, TXT long-chapter anomaly warning &amp; jump.
+/// Legado / JSON replace-rule import, midpoint reordering, 5-second undo,
+/// cross-scope banner, TXT re-chaptering reset, and long-chapter anomaly warning &amp; jump.
 /// </summary>
 public static class BookToolsDialogs
 {
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetActiveWindow();
+
+    private static int ImportReplaceRulesFromJson(LibraryService library, string json, string? targetBookId)
+    {
+        using var doc = JsonDocument.Parse(json);
+        int imported = 0;
+
+        void TrySaveElement(JsonElement el)
+        {
+            if (el.ValueKind != JsonValueKind.Object) return;
+            string? find = null;
+            string replace = "";
+            bool isRegex = false;
+            bool speechOnly = false;
+            bool enabled = true;
+
+            foreach (var prop in el.EnumerateObject())
+            {
+                string key = prop.Name;
+                if (key.Equals("pattern", StringComparison.OrdinalIgnoreCase) || key.Equals("find", StringComparison.OrdinalIgnoreCase))
+                    find = prop.Value.ValueKind == JsonValueKind.String ? prop.Value.GetString() : null;
+                else if (key.Equals("replacement", StringComparison.OrdinalIgnoreCase) || key.Equals("replace", StringComparison.OrdinalIgnoreCase))
+                    replace = prop.Value.ValueKind == JsonValueKind.String ? (prop.Value.GetString() ?? "") : "";
+                else if (key.Equals("isRegex", StringComparison.OrdinalIgnoreCase) || key.Equals("regex", StringComparison.OrdinalIgnoreCase))
+                    isRegex = prop.Value.ValueKind == JsonValueKind.True || (prop.Value.ValueKind == JsonValueKind.Number && prop.Value.TryGetInt32(out int rv) && rv != 0);
+                else if (key.Equals("speechOnly", StringComparison.OrdinalIgnoreCase) || key.Equals("speech_only", StringComparison.OrdinalIgnoreCase))
+                    speechOnly = prop.Value.ValueKind == JsonValueKind.True;
+                else if (key.Equals("isEnabled", StringComparison.OrdinalIgnoreCase) || key.Equals("enabled", StringComparison.OrdinalIgnoreCase))
+                    enabled = prop.Value.ValueKind != JsonValueKind.False && !(prop.Value.ValueKind == JsonValueKind.Number && prop.Value.TryGetInt32(out int ev) && ev == 0);
+            }
+
+            if (string.IsNullOrEmpty(find)) return;
+            try
+            {
+                library.Core.SaveReplaceRule(new ReplaceRule("", targetBookId, find, replace, isRegex, speechOnly, enabled, 0));
+                imported++;
+            }
+            catch { }
+        }
+
+        if (doc.RootElement.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in doc.RootElement.EnumerateArray())
+                TrySaveElement(item);
+        }
+        else if (doc.RootElement.ValueKind == JsonValueKind.Object)
+        {
+            if (doc.RootElement.TryGetProperty("rules", out var rulesArr) && rulesArr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in rulesArr.EnumerateArray())
+                    TrySaveElement(item);
+            }
+            else
+            {
+                TrySaveElement(doc.RootElement);
+            }
+        }
+
+        return imported;
+    }
     public static async Task<bool> ShowReplaceRulesDialogAsync(
         XamlRoot xamlRoot, LibraryService library, string bookId, string bookTitle, Action? onRulesChanged = null)
     {
@@ -395,11 +461,55 @@ public static class BookToolsDialogs
                 TextWrapping = TextWrapping.Wrap,
             });
 
+            var importNoticeTb = new TextBlock
+            {
+                FontSize = 11,
+                Foreground = ThemeHelper.Brush(tint.Accent),
+                Visibility = Visibility.Collapsed,
+                TextWrapping = TextWrapping.Wrap,
+            };
+            root.Children.Add(importNoticeTb);
+
             var footRow = new Grid { Margin = new Thickness(0, 4, 0, 0) };
-            var commonPill = YYChrome.MakeSheetPillButton("＋  常用规则", () => { subMode = "common"; RenderHost(); }, dark, library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 15);
-            var donePill = YYChrome.MakeSheetPillButton("好了", () => dlgRef?.Hide(), dark, library.Prefs.Tint, "warm", height: 36, horizontalPadding: 20);
+            var leftActs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Left };
+            var commonPill = YYChrome.MakeSheetPillButton(L10n.T("＋  常用规则"), () => { subMode = "common"; RenderHost(); }, dark, library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 14);
+            var importJsonPill = YYChrome.MakeSheetPillButton(L10n.T("导入 JSON…"), async () =>
+            {
+                try
+                {
+                    var picker = new FileOpenPicker { ViewMode = PickerViewMode.List };
+                    picker.FileTypeFilter.Add(".json");
+                    picker.FileTypeFilter.Add(".txt");
+                    IntPtr hwnd = GetActiveWindow();
+                    if (hwnd != IntPtr.Zero)
+                        InitializeWithWindow.Initialize(picker, hwnd);
+                    var file = await picker.PickSingleFileAsync();
+                    if (file is null) return;
+                    string raw = await File.ReadAllTextAsync(file.Path);
+                    int count = ImportReplaceRulesFromJson(library, raw, scopeBook ? bookId : null);
+                    if (count > 0)
+                    {
+                        NotifyRulesChanged();
+                        RenderHost();
+                    }
+                    else
+                    {
+                        importNoticeTb.Text = L10n.T("未在所选文件中识别到可用的替换规则（支持阅读 Legado 净化规则 JSON）。");
+                        importNoticeTb.Visibility = Visibility.Visible;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    importNoticeTb.Text = $"{L10n.T("导入失败：")}{ex.Message}";
+                    importNoticeTb.Visibility = Visibility.Visible;
+                }
+            }, dark, library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 14);
+            leftActs.Children.Add(commonPill);
+            leftActs.Children.Add(importJsonPill);
+
+            var donePill = YYChrome.MakeSheetPillButton(L10n.T("好了"), () => dlgRef?.Hide(), dark, library.Prefs.Tint, "warm", height: 36, horizontalPadding: 20);
             donePill.HorizontalAlignment = HorizontalAlignment.Right;
-            footRow.Children.Add(commonPill);
+            footRow.Children.Add(leftActs);
             footRow.Children.Add(donePill);
             root.Children.Add(footRow);
 
@@ -788,8 +898,8 @@ public static class BookToolsDialogs
 
         RenderHost();
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 472, host);
-        await dlgRef.ShowAsync();
+        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 472, host, tint: library.Prefs.Tint);
+        await dlgRef.ShowSafeAsync(library.Prefs.Tint);
         previewCts?.Cancel();
         return anyChanged;
     }
@@ -1287,7 +1397,22 @@ public static class BookToolsDialogs
             });
 
             resetRuleBtn.Visibility = !string.IsNullOrWhiteSpace(ruleText) ? Visibility.Visible : Visibility.Collapsed;
-            sp.Children.Add(resetRuleBtn);
+            var repaginateBtn = new Button
+            {
+                Background = new SolidColorBrush(Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(4, 2, 4, 2),
+                FontSize = 11,
+                FontWeight = FontWeights.Medium,
+                Foreground = ThemeHelper.Brush(tint.Accent),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                UseSystemFocusVisuals = false,
+                Content = L10n.T("重新分章"),
+            };
+            var ruleResetRow = new Grid();
+            ruleResetRow.Children.Add(resetRuleBtn);
+            ruleResetRow.Children.Add(repaginateBtn);
+            sp.Children.Add(ruleResetRow);
             sp.Children.Add(warningHost);
 
             var workingRow = new StackPanel
@@ -1301,7 +1426,7 @@ public static class BookToolsDialogs
                     new ProgressRing { IsActive = true, Width = 16, Height = 16 },
                     new TextBlock
                     {
-                        Text = "正在按新的方式整理这本书…",
+                        Text = L10n.T("正在按新的方式整理这本书…"),
                         FontSize = 12,
                         Foreground = ThemeHelper.Brush(p.T2),
                         VerticalAlignment = VerticalAlignment.Center,
@@ -1334,7 +1459,41 @@ public static class BookToolsDialogs
                 ruleBox.IsEnabled = !busy;
                 encHost.IsHitTestVisible = !busy;
                 resetRuleBtn.IsEnabled = !busy;
+                repaginateBtn.IsEnabled = !busy;
             }
+
+            repaginateBtn.Click += async (_, _) =>
+            {
+                if (working) return;
+                selectedEnc = null;
+                ruleText = "";
+                ruleBox.Text = "";
+                resetRuleBtn.Visibility = Visibility.Collapsed;
+                applyErrorTb.Visibility = Visibility.Collapsed;
+                SetSheetWorking(true);
+                try
+                {
+                    beforeRebuild?.Invoke();
+                    var autoChoice = new TxtChoice(null, null);
+                    await Task.Run(() => library.Core.SetTxtChoice(bookId, autoChoice));
+                    applied = autoChoice;
+                    confirmedSave = true;
+                    SetSheetWorking(false);
+                    dlgRef?.Hide();
+                }
+                catch (CoreException.Invalid inv)
+                {
+                    SetSheetWorking(false);
+                    applyErrorTb.Text = inv.detail;
+                    applyErrorTb.Visibility = Visibility.Visible;
+                }
+                catch (Exception ex)
+                {
+                    SetSheetWorking(false);
+                    applyErrorTb.Text = ex.Message;
+                    applyErrorTb.Visibility = Visibility.Visible;
+                }
+            };
 
             cancelSheetBtn = YYChrome.MakeSheetPillButton("取消", () => { if (!working) dlgRef?.Hide(); }, dark, library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 18);
             saveSheetBtn = YYChrome.MakeSheetPillButton(saveSp, async () =>
@@ -1404,12 +1563,12 @@ public static class BookToolsDialogs
         RenderMainContent();
         RefreshLayout(debounce: false);
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 504, host, maxHeight: 780);
+        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 504, host, maxHeight: 780, tint: library.Prefs.Tint);
         dlgRef.Closing += (_, args) =>
         {
             if (working) args.Cancel = true;
         };
-        await dlgRef.ShowAsync();
+        await dlgRef.ShowSafeAsync(library.Prefs.Tint);
         debounceCts?.Cancel();
 
         if (pendingJumpSection is uint jumpSec)

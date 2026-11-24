@@ -20,6 +20,7 @@ public sealed class ReaderPagerHost : IDisposable
         public uint? Section { get; set; }
         public bool IsReady { get; set; }
         public bool JoinAtEnd { get; set; }
+        public object? PendingSettings { get; set; }
         public SectionLayout? Layout { get; set; }
     }
 
@@ -72,6 +73,11 @@ public sealed class ReaderPagerHost : IDisposable
         var slot = new Slot { View = wv, Host = host };
         host.MessageReceived += msg => OnSlotMessage(slot, msg);
         await host.InitializeAsync();
+        if (_disposed)
+        {
+            host.Dispose();
+            throw new ObjectDisposedException(nameof(ReaderPagerHost));
+        }
         _pool.Add(slot);
         return slot;
     }
@@ -92,7 +98,7 @@ public sealed class ReaderPagerHost : IDisposable
     /// Opens <paramref name="section"/>. If already preloaded in a neighbor slot and <paramref name="forceReload"/>
     /// is false, swaps it into view immediately and fires a synthetic <c>ready</c> message for zero-flash chapter turns!
     /// </summary>
-    public bool OpenSection(uint section, bool forceReload = false)
+    public bool OpenSection(uint section, bool forceReload = false, bool joinAtEnd = false)
     {
         if (_disposed || _current is null) return false;
 
@@ -101,9 +107,25 @@ public sealed class ReaderPagerHost : IDisposable
             var preloaded = _pool.FirstOrDefault(s => !ReferenceEquals(s, _current) && s.Section == section);
             if (preloaded is not null)
             {
+                var prevSlot = _current;
+                if (prevSlot.IsReady)
+                    _ = prevSlot.Host.ClearTransientOverlaysAsync();
+
+                preloaded.JoinAtEnd = joinAtEnd;
                 SetActiveSlot(preloaded);
                 if (preloaded.IsReady && preloaded.Layout is { } lay)
                 {
+                    _ = preloaded.Host.ClearTransientOverlaysAsync();
+                    if (preloaded.PendingSettings is { } pending)
+                    {
+                        preloaded.PendingSettings = null;
+                        _ = preloaded.Host.ApplySettingsAsync(pending);
+                    }
+                    if (joinAtEnd)
+                        _ = preloaded.Host.ScrollToEndOfSectionAsync(lay.PageCount);
+                    else
+                        _ = preloaded.Host.ScrollToStartOfSectionAsync();
+
                     MessageReceived?.Invoke(new ReaderMessage
                     {
                         Type = "ready",
@@ -114,6 +136,8 @@ public sealed class ReaderPagerHost : IDisposable
                     });
                     return true;
                 }
+
+                preloaded.PendingSettings ??= _lastSettingsPayload;
                 return false;
             }
         }
@@ -124,13 +148,15 @@ public sealed class ReaderPagerHost : IDisposable
             s.Section = null;
             s.IsReady = false;
             s.Layout = null;
+            s.PendingSettings = null;
             s.Host.ClearBlank();
         }
 
         _current.Section = section;
         _current.IsReady = false;
         _current.Layout = null;
-        _current.JoinAtEnd = false;
+        _current.JoinAtEnd = joinAtEnd;
+        _current.PendingSettings = _lastSettingsPayload;
         _current.Host.LoadSection(_bookId, section);
         return false;
     }
@@ -158,6 +184,7 @@ public sealed class ReaderPagerHost : IDisposable
             s.Section = null;
             s.IsReady = false;
             s.Layout = null;
+            s.PendingSettings = null;
         }
 
         foreach (var (sec, atEnd) in targets)
@@ -169,8 +196,19 @@ public sealed class ReaderPagerHost : IDisposable
                 existing.JoinAtEnd = atEnd;
                 if (existing.IsReady && existing.Layout is { } lay)
                 {
-                    int targetPage = atEnd ? Math.Max(0, lay.PageCount - 1) : 0;
-                    _ = existing.Host.ScrollToPageAsync(targetPage, animated: false);
+                    if (existing.PendingSettings is { } pending)
+                    {
+                        existing.PendingSettings = null;
+                        _ = existing.Host.ApplySettingsAsync(pending);
+                    }
+                    if (atEnd)
+                        _ = existing.Host.ScrollToEndOfSectionAsync(lay.PageCount);
+                    else
+                        _ = existing.Host.ScrollToStartOfSectionAsync();
+                }
+                else
+                {
+                    existing.PendingSettings ??= _lastSettingsPayload;
                 }
                 continue;
             }
@@ -181,18 +219,20 @@ public sealed class ReaderPagerHost : IDisposable
                 try { free = await CreateSlotAsync(); }
                 catch { continue; }
             }
-            if (free is null) continue;
+            if (_disposed || free is null) return;
 
             free.Section = sec;
             free.IsReady = false;
             free.Layout = null;
             free.JoinAtEnd = atEnd;
+            free.PendingSettings = _lastSettingsPayload;
             free.Host.LoadSection(_bookId, sec);
         }
     }
 
     /// <summary>
     /// Applies settings to the active slot AND any preloaded neighbor slots so chapter flips stay visually identical.
+    /// In-flight unready slots store <see cref="Slot.PendingSettings"/> and apply them immediately on <c>ready</c>.
     /// </summary>
     public Task ApplySettingsAllAsync(object settingsPayload)
     {
@@ -201,7 +241,14 @@ public sealed class ReaderPagerHost : IDisposable
         foreach (var s in _pool)
         {
             if (s.Host.IsInitialized && (ReferenceEquals(s, _current) || s.IsReady))
+            {
+                s.PendingSettings = null;
                 tasks.Add(s.Host.ApplySettingsAsync(settingsPayload));
+            }
+            else if (s.Section is not null)
+            {
+                s.PendingSettings = settingsPayload;
+            }
         }
         return Task.WhenAll(tasks);
     }
@@ -217,15 +264,28 @@ public sealed class ReaderPagerHost : IDisposable
 
         if (ReferenceEquals(slot, _current))
         {
+            if (msg.Type == "ready" && slot.PendingSettings is { } pending)
+            {
+                slot.PendingSettings = null;
+                _ = slot.Host.ApplySettingsAsync(pending);
+            }
             MessageReceived?.Invoke(msg);
         }
         else if (msg.Type is "ready" or "layout" && slot.Layout is { } lay)
         {
             // Keep preloaded neighbor synced with latest settings and positioned on its joining edge
-            if (msg.Type == "ready" && _lastSettingsPayload is not null)
-                _ = slot.Host.ApplySettingsAsync(_lastSettingsPayload);
-            int edgePage = slot.JoinAtEnd ? Math.Max(0, lay.PageCount - 1) : 0;
-            _ = slot.Host.ScrollToPageAsync(edgePage, animated: false);
+            if (msg.Type == "ready")
+            {
+                var payload = slot.PendingSettings ?? _lastSettingsPayload;
+                slot.PendingSettings = null;
+                if (payload is not null)
+                    _ = slot.Host.ApplySettingsAsync(payload);
+                _ = slot.Host.ClearTransientOverlaysAsync();
+            }
+            if (slot.JoinAtEnd)
+                _ = slot.Host.ScrollToEndOfSectionAsync(lay.PageCount);
+            else
+                _ = slot.Host.ScrollToStartOfSectionAsync();
         }
     }
 
