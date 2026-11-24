@@ -565,20 +565,19 @@ public static class ReaderRecapAndSleepHelper
         await dlgRef.ShowSafeAsync(library.Prefs.Tint);
         if (!wantReimport) return;
 
-        var picker = new FileOpenPicker { ViewMode = PickerViewMode.List };
-        foreach (var ext in LibraryService.SupportedExtensions) picker.FileTypeFilter.Add(ext);
-        foreach (var ext in Yuyue.Audiobook.AudiobookImporter.Extensions) picker.FileTypeFilter.Add(ext);
-        picker.FileTypeFilter.Add(".zip");
-        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(ownerWindow));
-        var picked = await picker.PickSingleFileAsync();
-        if (picked is null) return;
+        var allExts = LibraryService.SupportedExtensions
+            .Concat(Yuyue.Audiobook.AudiobookImporter.Extensions)
+            .Concat([".zip"])
+            .ToArray();
+        string? pickedPath = await NativePickerHelper.PickSingleFileAsync(ownerWindow, allExts);
+        if (string.IsNullOrEmpty(pickedPath)) return;
 
         try
         {
-            var imported = Yuyue.Audiobook.AudiobookImporter.IsAudiobookOrArchivePath(picked.Path)
-                ? await Yuyue.Audiobook.AudiobookImporter.ImportFilesAsync(library, [picked.Path])
-                : await library.ImportBookWithExtrasAsync(picked.Path);
-            library.Analytics.TrackBookImported(imported.Format.ToString(), "file_picker", picked.Path);
+            var imported = Yuyue.Audiobook.AudiobookImporter.IsAudiobookOrArchivePath(pickedPath)
+                ? await Yuyue.Audiobook.AudiobookImporter.ImportFilesAsync(library, [pickedPath])
+                : await library.ImportBookWithExtrasAsync(pickedPath);
+            library.Analytics.TrackBookImported(imported.Format.ToString(), "file_picker", pickedPath);
             if (onReimported is not null) await onReimported(imported.Id);
         }
         catch (Exception ex)

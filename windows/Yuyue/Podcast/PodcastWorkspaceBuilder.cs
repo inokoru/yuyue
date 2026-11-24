@@ -1633,17 +1633,11 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
     private async Task PickAndImportLocalAudioAsync()
     {
-        var picker = new FileOpenPicker();
-        picker.FileTypeFilter.Add(".mp3");
-        picker.FileTypeFilter.Add(".m4a");
-        picker.FileTypeFilter.Add(".wav");
-        picker.FileTypeFilter.Add(".flac");
-        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(_shelf));
-        var f = await picker.PickSingleFileAsync();
-        if (f is null) return;
+        string? path = await NativePickerHelper.PickSingleFileAsync(_shelf, [".mp3", ".m4a", ".wav", ".flac"]);
+        if (string.IsNullOrEmpty(path)) return;
         try
         {
-            var iss = await _library.Podcasts.ImportLocalAudioAsync(f.Path);
+            var iss = await _library.Podcasts.ImportLocalAudioAsync(path);
             _shelf.RefreshBooks();
             _shelf.ShowToast($"已将《{iss.Title}》放上收听台", canUndo: false);
         }
@@ -1655,15 +1649,11 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
     private async Task PickAndImportOpmlAsync()
     {
-        var picker = new FileOpenPicker();
-        picker.FileTypeFilter.Add(".opml");
-        picker.FileTypeFilter.Add(".xml");
-        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(_shelf));
-        var f = await picker.PickSingleFileAsync();
-        if (f is null) return;
+        string? path = await NativePickerHelper.PickSingleFileAsync(_shelf, [".opml", ".xml"]);
+        if (string.IsNullOrEmpty(path)) return;
         try
         {
-            int cnt = await _library.Podcasts.ImportOpmlAsync(f.Path);
+            int cnt = await _library.Podcasts.ImportOpmlAsync(path);
             _shelf.RefreshBooks();
             _shelf.ShowToast($"已导入 {cnt} 档播客订阅", canUndo: false);
         }
@@ -7242,18 +7232,14 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         opmlBtn.Height = 28;
         opmlBtn.Click += async (_, _) =>
         {
-            var picker = new FileOpenPicker();
-            picker.FileTypeFilter.Add(".opml");
-            picker.FileTypeFilter.Add(".xml");
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(_shelf));
-            var f = await picker.PickSingleFileAsync();
-            if (f is null) return;
+            string? path = await NativePickerHelper.PickSingleFileAsync(_shelf, [".opml", ".xml"]);
+            if (string.IsNullOrEmpty(path)) return;
             statusTb.Text = L10n.T("正在批量导入 OPML 订阅源…");
             statusTb.Foreground = ThemeHelper.Brush(tint.Accent);
             statusTb.Visibility = Visibility.Visible;
             try
             {
-                int cnt = await _library.Podcasts.ImportOpmlAsync(f.Path);
+                int cnt = await _library.Podcasts.ImportOpmlAsync(path);
                 statusTb.Text = $"已导入 {cnt} 档播客到报刊栏";
                 _shelf.RefreshBooks();
             }
@@ -7268,17 +7254,11 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         localAudioBtn.Height = 28;
         localAudioBtn.Click += async (_, _) =>
         {
-            var picker = new FileOpenPicker();
-            picker.FileTypeFilter.Add(".mp3");
-            picker.FileTypeFilter.Add(".m4a");
-            picker.FileTypeFilter.Add(".wav");
-            picker.FileTypeFilter.Add(".flac");
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(_shelf));
-            var f = await picker.PickSingleFileAsync();
-            if (f is null) return;
+            string? path = await NativePickerHelper.PickSingleFileAsync(_shelf, [".mp3", ".m4a", ".wav", ".flac"]);
+            if (string.IsNullOrEmpty(path)) return;
             try
             {
-                var iss = await _library.Podcasts.ImportLocalAudioAsync(f.Path);
+                var iss = await _library.Podcasts.ImportLocalAudioAsync(path);
                 dlgRef?.Hide();
                 OpenIssueAt(iss.Id);
                 _shelf.RefreshBooks();

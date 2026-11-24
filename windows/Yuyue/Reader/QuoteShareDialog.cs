@@ -479,18 +479,18 @@ public static class QuoteShareDialog
         {
             try
             {
-                var picker = new FileSavePicker { SuggestedFileName = $"{SanitizeFileName(bookTitle)}-{L10n.T("书摘")}" };
-                picker.FileTypeChoices.Add(L10n.T("PNG 图片"), [".png"]);
-                InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(ownerWindow));
-                var file = await picker.PickSaveFileAsync();
-                if (file is null) return;
+                string? outPath = await NativePickerHelper.PickSaveFileAsync(
+                    ownerWindow,
+                    $"{SanitizeFileName(bookTitle)}-{L10n.T("书摘")}",
+                    [(L10n.T("PNG 图片"), [".png"])]);
+                if (string.IsNullOrEmpty(outPath)) return;
 
                 using var pngStream = await RenderHighResCardStreamAsync();
                 pngStream.Seek(0);
                 byte[] bytes = new byte[pngStream.Size];
                 await pngStream.ReadAsync(bytes.AsBuffer(), (uint)bytes.Length, InputStreamOptions.None);
-                await File.WriteAllBytesAsync(file.Path, bytes);
-                statusText.Text = L10n.T($"✓ 已保存到 {file.Name}");
+                await File.WriteAllBytesAsync(outPath, bytes);
+                statusText.Text = L10n.T($"✓ 已保存到 {Path.GetFileName(outPath)}");
                 statusText.Visibility = Visibility.Visible;
             }
             catch (Exception ex) { statusText.Text = L10n.T($"保存失败：{ex.Message}"); statusText.Visibility = Visibility.Visible; }

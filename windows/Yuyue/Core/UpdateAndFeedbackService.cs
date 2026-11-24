@@ -1356,19 +1356,20 @@ public sealed class UpdateAndFeedbackService
                 ShowError(L10n.T("最多只能添加 4 张图片。"));
                 return;
             }
-            var picker = new FileOpenPicker();
-            picker.FileTypeFilter.Add(".png");
-            picker.FileTypeFilter.Add(".jpg");
-            picker.FileTypeFilter.Add(".jpeg");
-            picker.FileTypeFilter.Add(".webp");
-            picker.FileTypeFilter.Add(".bmp");
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(ownerWindow));
-            var pickedFiles = await picker.PickMultipleFilesAsync();
-            if (pickedFiles is null || pickedFiles.Count == 0) return;
-            foreach (var f in pickedFiles)
+            var pickedPaths = await NativePickerHelper.PickMultipleFilesAsync(ownerWindow, [".png", ".jpg", ".jpeg", ".webp", ".bmp"]);
+            if (pickedPaths.Count == 0) return;
+            foreach (var pickedPath in pickedPaths)
             {
                 if (attachments.Count >= AirFeedbackClient.MaxImages) break;
-                await TryAttachImageFileAsync(f);
+                try
+                {
+                    var f = await Windows.Storage.StorageFile.GetFileFromPathAsync(pickedPath);
+                    await TryAttachImageFileAsync(f);
+                }
+                catch
+                {
+                    ShowError(L10n.T("无法读取该图片，请换一张常见格式的图片。"));
+                }
             }
         }, dark, _library.Prefs.Tint, "secondary", height: 26, horizontalPadding: 10);
 

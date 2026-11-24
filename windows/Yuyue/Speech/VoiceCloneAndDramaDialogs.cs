@@ -873,17 +873,11 @@ public static class VoiceCloneAndDramaDialogs
                 importLink.Click += async (_, _) =>
                 {
                     if (!consented || isRecording) return;
-                    var picker = new FileOpenPicker();
-                    picker.FileTypeFilter.Add(".wav");
-                    picker.FileTypeFilter.Add(".mp3");
-                    picker.FileTypeFilter.Add(".m4a");
-                    picker.FileTypeFilter.Add(".flac");
-                    InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(ownerWindow));
-                    var file = await picker.PickSingleFileAsync();
-                    if (file is null) return;
+                    string? filePath = await NativePickerHelper.PickSingleFileAsync(ownerWindow, [".wav", ".mp3", ".m4a", ".flac"]);
+                    if (string.IsNullOrEmpty(filePath)) return;
                     if (cardName is "我的声音" or "My Voice")
-                        cardName = System.IO.Path.GetFileNameWithoutExtension(file.Name);
-                    await EvaluateAudioFileAsync(file.Path, isImported: true);
+                        cardName = System.IO.Path.GetFileNameWithoutExtension(filePath);
+                    await EvaluateAudioFileAsync(filePath, isImported: true);
                 };
                 bottomRow.Children.Add(importLink);
                 outerRoot.Children.Add(bottomRow);
@@ -1949,15 +1943,12 @@ public static class VoiceCloneAndDramaDialogs
             impLink.Click += async (_, _) =>
             {
                 if (recording) return;
-                var picker = new FileOpenPicker();
-                picker.FileTypeFilter.Add(".wav"); picker.FileTypeFilter.Add(".mp3"); picker.FileTypeFilter.Add(".m4a"); picker.FileTypeFilter.Add(".flac");
-                InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(ownerWindow));
-                var f = await picker.PickSingleFileAsync();
-                if (f is null) return;
+                string? filePath = await NativePickerHelper.PickSingleFileAsync(ownerWindow, [".wav", ".mp3", ".m4a", ".flac"]);
+                if (string.IsNullOrEmpty(filePath)) return;
                 try
                 {
-                    samples24k = await Task.Run(() => library.Core.CardDecodeClip(f.Path, 24_000));
-                    string? heard = await WindowsTranscriber.TranscribeAsync(library, f.Path, card.Lang);
+                    samples24k = await Task.Run(() => library.Core.CardDecodeClip(filePath, 24_000));
+                    string? heard = await WindowsTranscriber.TranscribeAsync(library, filePath, card.Lang);
                     imported = true;
                     if (!string.IsNullOrWhiteSpace(heard)) transcript = heard.Trim();
                     chk = await Task.Run(() => library.Core.CardCheck(samples24k, 24_000, transcript.Trim(), null));

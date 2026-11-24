@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Documents;
@@ -1381,6 +1382,7 @@ public sealed partial class AudiobookWindow : Window
                 ContextFlyout = ctx,
                 Content = row,
             };
+            AutomationProperties.SetName(itemBtn, ChapterTitle(idx));
             itemBtn.Click += async (_, _) =>
             {
                 int? explicitTrack = _recording is not null && _recording.Chapters.Length == _recording.Files.Length ? idx : null;
@@ -1448,10 +1450,12 @@ public sealed partial class AudiobookWindow : Window
                     ContextFlyout = ctx,
                     Content = bRow,
                 };
+                AutomationProperties.SetName(bmBtn, $"{L10n.T("书签")} {ChapterTitle(chIdx)} {FormatTime(inChSec)}");
                 bmBtn.Click += async (_, _) => await SeekGlobalAsync(targetGlobal, startPlaying: _playing);
                 ChapterListPanel.Children.Add(bmBtn);
             }
         }
+        L10n.ApplyTree(ChapterListPanel);
     }
 
     private void DismissSleepReturnCard(bool clearSaved)
@@ -1560,6 +1564,7 @@ public sealed partial class AudiobookWindow : Window
                 Child = cardStack,
             };
             ElsewhereCardHost.Visibility = Visibility.Visible;
+            L10n.ApplyTree(ElsewhereCardHost);
         }
         else
         {
@@ -1578,6 +1583,7 @@ public sealed partial class AudiobookWindow : Window
             });
             SleepReturnCardHost.Child = card;
             SleepReturnCardHost.Visibility = Visibility.Visible;
+            L10n.ApplyTree(SleepReturnCardHost);
         }
         else
         {
@@ -1628,16 +1634,16 @@ public sealed partial class AudiobookWindow : Window
         if (epochMs <= 0) return "";
         double mins = Math.Max(0, (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - epochMs) / 60000.0);
         if (mins < 2) return L10n.T("刚刚");
-        if (mins < 60) return $"{(int)Math.Round(mins)} 分钟前";
+        if (mins < 60) return L10n.T($"{(int)Math.Round(mins)} 分钟前");
         double hours = mins / 60.0;
-        if (hours < 24) return $"{(int)Math.Round(hours)} 小时前";
-        return $"{(int)Math.Round(hours / 24.0)} 天前";
+        if (hours < 24) return L10n.T($"{(int)Math.Round(hours)} 小时前");
+        return L10n.T($"{(int)Math.Round(hours / 24.0)} 天前");
     }
 
     private static string FormatChineseLength(double sec)
     {
         int mins = Math.Max(1, (int)Math.Round(sec / 60.0));
-        return mins >= 60 ? $"{mins / 60} 小时 {mins % 60} 分" : $"{mins} 分钟";
+        return L10n.T(mins >= 60 ? $"{mins / 60} 小时 {mins % 60} 分" : $"{mins} 分钟");
     }
 
     private static string FormatBookFormatBadge(BookFormat format) => format switch
@@ -3458,16 +3464,13 @@ public sealed partial class AudiobookWindow : Window
         };
         exportBtn.Click += async (_, _) =>
         {
-            var picker = new FileSavePicker { SuggestedFileName = _summary.Title };
-            picker.FileTypeChoices.Add("EPUB 电子书", [".epub"]);
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-            var outFile = await picker.PickSaveFileAsync();
-            if (outFile is null) return;
+            var outPath = await NativePickerHelper.PickSaveFileAsync(this, _summary.Title, [(L10n.T("EPUB 电子书"), [".epub"])]);
+            if (string.IsNullOrEmpty(outPath)) return;
             _exportingStatus = L10n.T("正在打包，录音大的要一会儿");
             RebuildRecordingSettings();
             try
             {
-                await Task.Run(() => _library.Core.AudiobookExportEpub(_bookId, outFile.Path));
+                await Task.Run(() => _library.Core.AudiobookExportEpub(_bookId, outPath));
                 _exportingStatus = null;
                 RebuildRecordingSettings();
                 ShowToast("✓ 已导出有声电子书 (.epub)");
@@ -3483,6 +3486,7 @@ public sealed partial class AudiobookWindow : Window
             "导出带朗读时间的电子书",
             _exportingStatus ?? L10n.T("一个 EPUB，别的阅读器也能跟读"),
             exportBtn));
+        L10n.ApplyTree(RecordingSettingsHost);
     }
 
     private async Task RenameChapterAsync(int chapterIdx)

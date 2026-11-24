@@ -3782,17 +3782,11 @@ public sealed partial class SettingsWindow : Window
 
         importFileBtn.Click += async (_, _) =>
         {
-            var picker = new FileOpenPicker { ViewMode = PickerViewMode.List };
-            picker.FileTypeFilter.Add(".ttf");
-            picker.FileTypeFilter.Add(".otf");
-            picker.FileTypeFilter.Add(".ttc");
-            picker.FileTypeFilter.Add(".woff2");
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-            var f = await picker.PickSingleFileAsync();
-            if (f is null) return;
+            string? fontPath = await NativePickerHelper.PickSingleFileAsync(this, [".ttf", ".otf", ".ttc", ".woff2"]);
+            if (string.IsNullOrEmpty(fontPath)) return;
             try
             {
-                string fn = _library.Fonts.ImportFontFile(f.Path);
+                string fn = _library.Fonts.ImportFontFile(fontPath);
                 string newId = $"file:{fn}";
                 PinIfExternal(newId);
                 selectedCategory = "all";
@@ -3981,18 +3975,14 @@ public sealed partial class SettingsWindow : Window
         var pickMdxBtn = new Button { Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"], Content = "选择文件…" };
         pickMdxBtn.Click += async (_, _) =>
         {
-            var picker = new FileOpenPicker { ViewMode = PickerViewMode.List };
-            picker.FileTypeFilter.Add(".mdx");
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-            var f = await picker.PickSingleFileAsync();
-            if (f is null) return;
+            string? path = await NativePickerHelper.PickSingleFileAsync(this, [".mdx"]);
+            if (string.IsNullOrEmpty(path)) return;
             pickMdxBtn.IsEnabled = false;
             pickMdxBtn.Content = L10n.T("正在导入…");
             mdxSpinner.Visibility = Visibility.Visible;
             mdxSpinner.IsActive = true;
             try
             {
-                string path = f.Path;
                 await Task.Run(() => _library.ImportDictionary(path));
                 RenderDynamicPage("foreign");
             }
@@ -9568,14 +9558,11 @@ public sealed partial class SettingsWindow : Window
                 {
                     _editingWebDav = false;
                     _editingGDrive = false;
-                    var picker = new FolderPicker();
-                    picker.FileTypeFilter.Add("*");
-                    InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-                    var folder = await picker.PickSingleFolderAsync();
-                    if (folder is not null)
+                    string? folderPath = await NativePickerHelper.PickSingleFolderAsync(this);
+                    if (!string.IsNullOrEmpty(folderPath))
                     {
                         _library.Prefs.SyncMethod = "folder";
-                        _library.Prefs.SyncLocalFolder = folder.Path;
+                        _library.Prefs.SyncLocalFolder = folderPath;
                         _library.SavePrefs();
                         RecordChange("同步", "个人云盘");
                         await _library.Sync.SyncNowAsync();
@@ -9861,13 +9848,10 @@ public sealed partial class SettingsWindow : Window
             var changeFolderBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "更换文件夹" };
             changeFolderBtn.Click += async (_, _) =>
             {
-                var picker = new FolderPicker();
-                picker.FileTypeFilter.Add("*");
-                InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-                var picked = await picker.PickSingleFolderAsync();
-                if (picked is not null)
+                string? pickedPath = await NativePickerHelper.PickSingleFolderAsync(this);
+                if (!string.IsNullOrEmpty(pickedPath))
                 {
-                    _library.Prefs.SyncLocalFolder = picked.Path;
+                    _library.Prefs.SyncLocalFolder = pickedPath;
                     _library.SavePrefs();
                     await _library.Sync.SyncNowAsync();
                     App.CurrentApp.NotifyShelfRefresh();
@@ -10561,15 +10545,12 @@ public sealed partial class SettingsWindow : Window
                 };
                 pickBtn.Click += async (_, _) =>
                 {
-                    var picker = new FolderPicker();
-                    picker.FileTypeFilter.Add("*");
-                    InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-                    var f = await picker.PickSingleFolderAsync();
-                    if (f is null || _closed) return;
-                    _library.Prefs.ObsidianFolder = f.Path;
+                    string? folderPath = await NativePickerHelper.PickSingleFolderAsync(this);
+                    if (string.IsNullOrEmpty(folderPath) || _closed) return;
+                    _library.Prefs.ObsidianFolder = folderPath;
                     _library.Prefs.ObsidianExportOn = true;
                     _library.SavePrefs();
-                    RecordChange("Obsidian 目录", Path.GetFileName(f.Path));
+                    RecordChange("Obsidian 目录", Path.GetFileName(folderPath));
                     RenderDynamicPage("export");
                     RenderInspector("export");
                 };
@@ -11188,14 +11169,11 @@ public sealed partial class SettingsWindow : Window
                         if (_activePage == "storage") RenderDynamicPage("storage");
                         return;
                     }
-                    var picker = new FileOpenPicker();
-                    picker.FileTypeFilter.Add(".zip");
-                    InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-                    var zip = await picker.PickSingleFileAsync();
-                    if (zip is null) return;
+                    string? zipPath = await NativePickerHelper.PickSingleFileAsync(this, [".zip"]);
+                    if (string.IsNullOrEmpty(zipPath)) return;
                     try
                     {
-                        uint count = await SoundLibraryService.ImportLocalZipAsync(_library.Core, dataDir, zip.Path);
+                        uint count = await SoundLibraryService.ImportLocalZipAsync(_library.Core, dataDir, zipPath);
                         RecordChange("音效素材库", $"已加载 {count} 条素材");
                         RenderDynamicPage("storage");
                     }
@@ -11416,15 +11394,12 @@ public sealed partial class SettingsWindow : Window
 
                     async Task ExportSnapshotAsync()
                     {
-                        var picker = new FileSavePicker
-                        {
-                            SuggestedFileName = Path.GetFileNameWithoutExtension(fullPath),
-                        };
-                        picker.FileTypeChoices.Add("语阅数据快照", [".yuyue"]);
-                        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-                        var dest = await picker.PickSaveFileAsync();
-                        if (dest is null) return;
-                        await Task.Run(() => File.Copy(fullPath, dest.Path, overwrite: true));
+                        string? destPath = await NativePickerHelper.PickSaveFileAsync(
+                            this,
+                            Path.GetFileNameWithoutExtension(fullPath),
+                            [(L10n.T("语阅数据快照"), [".yuyue"])]);
+                        if (string.IsNullOrEmpty(destPath)) return;
+                        await Task.Run(() => File.Copy(fullPath, destPath, overwrite: true));
                         ShowFlashBanner("✓ 已导出快照");
                     }
 
@@ -11994,7 +11969,7 @@ public sealed partial class SettingsWindow : Window
         var chBtn = new Button
         {
             Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
-            Content = (_library.Prefs.UpdateChannel == "beta" ? "测试版" : "正式版") + " ⇕",
+            Content = L10n.T(_library.Prefs.UpdateChannel == "beta" ? "测试版" : "正式版") + " ⇕",
             Flyout = chMenu,
         };
 

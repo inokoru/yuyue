@@ -478,17 +478,11 @@ public static class AudiobookImporter
         };
         changeCoverBtn.Click += async (_, _) =>
         {
-            var picker = new FileOpenPicker { ViewMode = PickerViewMode.Thumbnail };
-            picker.FileTypeFilter.Add(".jpg");
-            picker.FileTypeFilter.Add(".jpeg");
-            picker.FileTypeFilter.Add(".png");
-            picker.FileTypeFilter.Add(".webp");
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(ownerWindow));
-            var f = await picker.PickSingleFileAsync();
-            if (f is null) return;
+            string? path = await NativePickerHelper.PickSingleFileAsync(ownerWindow, [".jpg", ".jpeg", ".png", ".webp"], viewMode: PickerViewMode.Thumbnail);
+            if (string.IsNullOrEmpty(path)) return;
             try
             {
-                coverBytes = await File.ReadAllBytesAsync(f.Path);
+                coverBytes = await File.ReadAllBytesAsync(path);
                 await RefreshCoverPreviewAsync();
             }
             catch { }

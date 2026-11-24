@@ -3020,17 +3020,11 @@ public sealed partial class ReaderWindow : Window, IDebugScreenshotCapable
         };
         importFontBtn.Click += async (_, _) =>
         {
-            var picker = new FileOpenPicker();
-            picker.FileTypeFilter.Add(".ttf");
-            picker.FileTypeFilter.Add(".otf");
-            picker.FileTypeFilter.Add(".ttc");
-            picker.FileTypeFilter.Add(".woff2");
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-            var f = await picker.PickSingleFileAsync();
-            if (f is null || _closed) return;
+            string? fontPath = await NativePickerHelper.PickSingleFileAsync(this, [".ttf", ".otf", ".ttc", ".woff2"]);
+            if (string.IsNullOrEmpty(fontPath) || _closed) return;
             try
             {
-                string importedName = _library.Fonts.ImportFontFile(f.Path);
+                string importedName = _library.Fonts.ImportFontFile(fontPath);
                 _cachedCustomFontFiles = null;
                 string disp = _library.Fonts.GetFontFileDisplayName(importedName);
                 var kind = InferFontKindFromName($"{disp} {importedName}");
@@ -6622,13 +6616,10 @@ public sealed partial class ReaderWindow : Window, IDebugScreenshotCapable
         {
             try
             {
-                var picker = new FileSavePicker { SuggestedFileName = $"{_detail.Summary.Title} 笔记" };
-                picker.FileTypeChoices.Add("Markdown", [".md"]);
-                InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-                var f = await picker.PickSaveFileAsync();
-                if (f is not null)
+                string? outPath = await NativePickerHelper.PickSaveFileAsync(this, $"{_detail.Summary.Title} 笔记", [("Markdown", [".md"])]);
+                if (!string.IsNullOrEmpty(outPath))
                 {
-                    await File.WriteAllTextAsync(f.Path, NoteExporter.BuildBookMarkdown(_library, _detail.Summary));
+                    await File.WriteAllTextAsync(outPath, NoteExporter.BuildBookMarkdown(_library, _detail.Summary));
                     ShowReaderToast("已导出 Markdown 笔记");
                 }
             }
@@ -6643,13 +6634,9 @@ public sealed partial class ReaderWindow : Window, IDebugScreenshotCapable
             {
                 try
                 {
-                    var picker = new FileSavePicker { SuggestedFileName = $"{_detail.Summary.Title}（带笔记）" };
-                    picker.FileTypeChoices.Add("EPUB 电子书", [".epub"]);
-                    InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-                    var f = await picker.PickSaveFileAsync();
-                    if (f is not null)
+                    string? outPath = await NativePickerHelper.PickSaveFileAsync(this, $"{_detail.Summary.Title}（带笔记）", [(L10n.T("EPUB 电子书"), [".epub"])]);
+                    if (!string.IsNullOrEmpty(outPath))
                     {
-                        string outPath = f.Path;
                         await Task.Run(() => _library.ExportEpub(_bookId, includeNotes: true, outPath));
                         ShowReaderToast("已导出带笔记的 EPUB");
                     }
@@ -8530,14 +8517,11 @@ public sealed partial class ReaderWindow : Window, IDebugScreenshotCapable
                 };
                 exportM4bBtn.Click += async (_, _) =>
                 {
-                    var picker = new FileSavePicker { SuggestedFileName = $"{_detail.Summary.Title}（广播剧）" };
-                    picker.FileTypeChoices.Add("M4B 有声书", [".m4b"]);
-                    InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-                    var outFile = await picker.PickSaveFileAsync();
-                    if (outFile is null || _closed) return;
+                    string? outPath = await NativePickerHelper.PickSaveFileAsync(this, $"{_detail.Summary.Title}（广播剧）", [(L10n.T("M4B 有声书"), [".m4b"])]);
+                    if (string.IsNullOrEmpty(outPath) || _closed) return;
                     exportM4bBtn.IsEnabled = false;
                     exportM4bBtn.Content = L10n.T("正在混音并封装 .m4b…");
-                    bool ok = await DramaSynthService.ExportM4bAsync(_library, _bookId, outFile.Path, (cur, tot) =>
+                    bool ok = await DramaSynthService.ExportM4bAsync(_library, _bookId, outPath, (cur, tot) =>
                         DispatcherQueue.TryEnqueue(() =>
                         {
                             if (_closed) return;
@@ -8545,7 +8529,7 @@ public sealed partial class ReaderWindow : Window, IDebugScreenshotCapable
                         }));
                     if (_closed) return;
                     exportM4bBtn.IsEnabled = true;
-                    ShowReaderToast(ok ? $"{L10n.T("已导出有声书：")}{outFile.Name}" : L10n.T("导出有声书失败"));
+                    ShowReaderToast(ok ? $"{L10n.T("已导出有声书：")}{Path.GetFileName(outPath)}" : L10n.T("导出有声书失败"));
                     if (_activePanel == "cast") RenderSidePanel();
                 };
                 dramaStack.Children.Add(exportM4bBtn);

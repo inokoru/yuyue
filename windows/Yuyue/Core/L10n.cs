@@ -457,6 +457,22 @@ public static partial class L10n
         m = RxHerePct().Match(s);
         if (m.Success) return $"Here {m.Groups[1].Value}%";
 
+        m = RxChangelogItemsCount().Match(s);
+        if (m.Success) return m.Groups[1].Value == "1" ? "1 item" : $"{m.Groups[1].Value} items";
+
+        m = RxYuyueVer().Match(s);
+        if (m.Success) return $"Yuyue {m.Groups[1].Value}";
+
+        m = RxCheckedTodayAt().Match(s);
+        if (m.Success) return $"Checked today at {m.Groups[1].Value}";
+
+        m = RxCheckedMonthDayAt().Match(s);
+        if (m.Success && int.TryParse(m.Groups[1].Value, out int cm) && cm >= 1 && cm <= 12)
+        {
+            string[] months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            return $"Checked {months[cm - 1]} {m.Groups[2].Value} at {m.Groups[3].Value}";
+        }
+
         return null;
     }
 
@@ -1096,4 +1112,16 @@ public static partial class L10n
 
     [GeneratedRegex(@"^这台在\s*(\d+)%$")]
     private static partial Regex RxHerePct();
+
+    [GeneratedRegex(@"^(\d+)\s*项$")]
+    private static partial Regex RxChangelogItemsCount();
+
+    [GeneratedRegex(@"^语阅\s+(.+)$")]
+    private static partial Regex RxYuyueVer();
+
+    [GeneratedRegex(@"^今天\s*(\d{1,2}:\d{2})\s*检查过$")]
+    private static partial Regex RxCheckedTodayAt();
+
+    [GeneratedRegex(@"^(\d{1,2})\s*月\s*(\d{1,2})\s*日\s*(\d{1,2}:\d{2})\s*检查过$")]
+    private static partial Regex RxCheckedMonthDayAt();
 }

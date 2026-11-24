@@ -477,15 +477,9 @@ public static class BookToolsDialogs
             {
                 try
                 {
-                    var picker = new FileOpenPicker { ViewMode = PickerViewMode.List };
-                    picker.FileTypeFilter.Add(".json");
-                    picker.FileTypeFilter.Add(".txt");
-                    IntPtr hwnd = GetActiveWindow();
-                    if (hwnd != IntPtr.Zero)
-                        InitializeWithWindow.Initialize(picker, hwnd);
-                    var file = await picker.PickSingleFileAsync();
-                    if (file is null) return;
-                    string raw = await File.ReadAllTextAsync(file.Path);
+                    string? filePath = await NativePickerHelper.PickSingleFileAsync(GetActiveWindow(), [".json", ".txt"]);
+                    if (string.IsNullOrEmpty(filePath)) return;
+                    string raw = await File.ReadAllTextAsync(filePath);
                     int count = ImportReplaceRulesFromJson(library, raw, scopeBook ? bookId : null);
                     if (count > 0)
                     {

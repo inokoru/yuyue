@@ -234,15 +234,17 @@ public static class YYChrome
     public static Button MakeSettingsActionButton(string text, Action onClick, bool dark, bool destructive = false, bool enabled = true)
     {
         var palette = ThemeHelper.Palette(dark);
+        string label = L10n.T(text);
         var btn = new Button
         {
-            Content = text,
+            Content = label,
             Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
             Foreground = ThemeHelper.Brush(destructive ? palette.Danger : palette.T1),
             IsEnabled = enabled,
             Opacity = enabled ? 1.0 : 0.36,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        AutomationProperties.SetName(btn, label);
         btn.Click += (_, _) => onClick();
         return btn;
     }
@@ -1245,7 +1247,7 @@ public static class YYChrome
             VerticalAlignment = VerticalAlignment.Center,
             Content = YYIcons.Make("xmark", Math.Round(size * 0.39), ThemeHelper.Brush(p.T2)),
         };
-        AutomationProperties.SetName(btn, L10n.T("关闭"));
+        AutomationProperties.SetName(btn, L10n.T("关闭面板"));
         btn.Click += (_, _) => onClose();
         return btn;
     }
@@ -1288,7 +1290,7 @@ public static class YYChrome
         {
             left.Children.Add(new TextBlock
             {
-                Text = subtitle,
+                Text = L10n.T(subtitle),
                 FontSize = 12.5,
                 Foreground = ThemeHelper.Brush(p.T3),
                 VerticalAlignment = VerticalAlignment.Center,
@@ -1341,9 +1343,11 @@ public static class YYChrome
                 bg = p.T1;
                 bgHover = Color.FromArgb(255, (byte)Math.Clamp(bg.R + (dark ? -18 : 22), 0, 255), (byte)Math.Clamp(bg.G + (dark ? -18 : 22), 0, 255), (byte)Math.Clamp(bg.B + (dark ? -18 : 22), 0, 255));
                 bgPress = Color.FromArgb(255, (byte)Math.Clamp(bg.R + (dark ? -32 : 38), 0, 255), (byte)Math.Clamp(bg.G + (dark ? -32 : 38), 0, 255), (byte)Math.Clamp(bg.B + (dark ? -32 : 38), 0, 255));
-                bgDisabled = Color.FromArgb(dark ? (byte)76 : (byte)96, p.T1.R, p.T1.G, p.T1.B);
+                bgDisabled = Color.FromArgb(dark ? (byte)48 : (byte)96, p.T1.R, p.T1.G, p.T1.B);
                 fg = p.Card;
-                fgDisabled = Color.FromArgb(dark ? (byte)165 : (byte)235, p.Card.R, p.Card.G, p.Card.B);
+                fgDisabled = dark
+                    ? Color.FromArgb(118, p.T1.R, p.T1.G, p.T1.B)
+                    : Color.FromArgb(235, p.Card.R, p.Card.G, p.Card.B);
                 edge = p.T1;
                 borderW = 0;
                 fw = FontWeights.SemiBold;
@@ -1380,6 +1384,8 @@ public static class YYChrome
             UseSystemFocusVisuals = false,
             Content = child,
         };
+        if (content is string labelStr)
+            AutomationProperties.SetName(btn, L10n.T(labelStr));
         btn.Resources["ButtonBackground"] = ThemeHelper.Brush(bg);
         btn.Resources["ButtonBackgroundPointerOver"] = ThemeHelper.Brush(bgHover);
         btn.Resources["ButtonBackgroundPressed"] = ThemeHelper.Brush(bgPress);

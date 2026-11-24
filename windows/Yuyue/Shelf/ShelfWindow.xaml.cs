@@ -1236,11 +1236,11 @@ public sealed partial class ShelfWindow : Window
                 var mdItem = new MenuFlyoutItem { Text = chosenBook is not null ? "导出这本书的 Markdown…" : "导出为 Markdown…" };
                 mdItem.Click += async (_, _) =>
                 {
-                    var picker = new FileSavePicker { SuggestedFileName = chosenBook is not null ? $"{chosenBook.Title}-笔记" : $"语阅笔记-{DateTime.Now:yyyyMMdd}" };
-                    picker.FileTypeChoices.Add("Markdown", [".md"]);
-                    InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-                    var f = await picker.PickSaveFileAsync();
-                    if (f is null) return;
+                    string? outPath = await NativePickerHelper.PickSaveFileAsync(
+                        this,
+                        chosenBook is not null ? $"{chosenBook.Title}-笔记" : $"语阅笔记-{DateTime.Now:yyyyMMdd}",
+                        [("Markdown", [".md"])]);
+                    if (string.IsNullOrEmpty(outPath)) return;
                     string chipSnap = _notesChip;
                     string querySnap = _notesQuery;
                     var keptSnap = _keptBooks.ToArray();
@@ -1248,8 +1248,8 @@ public sealed partial class ShelfWindow : Window
                     try
                     {
                         string md = await Task.Run(() => BuildFilteredNotesMarkdownCore(chosenBook, keptSnap, chipSnap, querySnap));
-                        await File.WriteAllTextAsync(f.Path, md);
-                        if (!_closed) ShowToast($"已导出笔记到 {f.Name}", canUndo: false);
+                        await File.WriteAllTextAsync(outPath, md);
+                        if (!_closed) ShowToast($"已导出笔记到 {Path.GetFileName(outPath)}", canUndo: false);
                     }
                     catch (Exception ex) { if (!_closed) ShowToast(ex.Message, canUndo: false, isDelete: true); }
                     finally { SetNotesExportBusy(false); }
@@ -1343,16 +1343,13 @@ public sealed partial class ShelfWindow : Window
                     var epubItem = new MenuFlyoutItem { Text = "导出带笔记的 EPUB (.epub)…" };
                     epubItem.Click += async (_, _) =>
                     {
-                        var picker = new FileSavePicker { SuggestedFileName = $"{chosenBook.Title}（带笔记）" };
-                        picker.FileTypeChoices.Add("EPUB 电子书", [".epub"]);
-                        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-                        var f = await picker.PickSaveFileAsync();
-                        if (f is null) return;
+                        string? outPath = await NativePickerHelper.PickSaveFileAsync(this, $"{chosenBook.Title}（带笔记）", [(L10n.T("EPUB 电子书"), [".epub"])]);
+                        if (string.IsNullOrEmpty(outPath)) return;
                         SetNotesExportBusy(true);
                         try
                         {
-                            await _library.NoteExports.ExportAnnotatedEpubAsync(chosenBook.Id, f.Path);
-                            if (!_closed) ShowToast($"已导出 {f.Name}", canUndo: false);
+                            await _library.NoteExports.ExportAnnotatedEpubAsync(chosenBook.Id, outPath);
+                            if (!_closed) ShowToast($"已导出 {Path.GetFileName(outPath)}", canUndo: false);
                         }
                         catch (Exception ex) { if (!_closed) ShowToast($"导出失败：{ex.Message}", canUndo: false, isDelete: true); }
                         finally { SetNotesExportBusy(false); }
@@ -1451,11 +1448,8 @@ public sealed partial class ShelfWindow : Window
                 var ankiItem = new MenuFlyoutItem { Text = "Anki 卡片 (.txt)…" };
                 ankiItem.Click += async (_, _) =>
                 {
-                    var picker = new FileSavePicker { SuggestedFileName = "语阅生词 Anki" };
-                    picker.FileTypeChoices.Add("Anki 制表符卡片", [".txt"]);
-                    InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-                    var f = await picker.PickSaveFileAsync();
-                    if (f is null) return;
+                    string? outPath = await NativePickerHelper.PickSaveFileAsync(this, "语阅生词 Anki", [(L10n.T("Anki 制表符卡片"), [".txt"])]);
+                    if (string.IsNullOrEmpty(outPath)) return;
                     var sb = new System.Text.StringBuilder("#separator:tab\n#html:true\n#tags column:3\n");
                     foreach (var w in GetFilteredWords())
                     {
@@ -1475,17 +1469,14 @@ public sealed partial class ShelfWindow : Window
                         string back = System.Net.WebUtility.HtmlEncode(w.Meaning ?? "").Replace("\n", "<br>") + ctxHtml + citeHtml;
                         sb.AppendLine($"{front}\t{back}\t语阅");
                     }
-                    await File.WriteAllTextAsync(f.Path, sb.ToString());
-                    ShowToast($"已导出 Anki 卡片到 {f.Name}", canUndo: false);
+                    await File.WriteAllTextAsync(outPath, sb.ToString());
+                    ShowToast($"已导出 Anki 卡片到 {Path.GetFileName(outPath)}", canUndo: false);
                 };
                 var csvItem = new MenuFlyoutItem { Text = "CSV 表格 (.csv)…" };
                 csvItem.Click += async (_, _) =>
                 {
-                    var picker = new FileSavePicker { SuggestedFileName = "语阅生词" };
-                    picker.FileTypeChoices.Add("CSV", [".csv"]);
-                    InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-                    var f = await picker.PickSaveFileAsync();
-                    if (f is null) return;
+                    string? outPath = await NativePickerHelper.PickSaveFileAsync(this, "语阅生词", [("CSV", [".csv"])]);
+                    if (string.IsNullOrEmpty(outPath)) return;
                     static string CsvCell(string? s)
                     {
                         string v = (s ?? "").Replace("\r\n", " ").Replace('\n', ' ').Replace("\"", "\"\"");
@@ -1513,8 +1504,8 @@ public sealed partial class ShelfWindow : Window
                             CsvCell(added),
                             CsvCell(L10n.T(w.Known ? "是" : "否"))));
                     }
-                    await File.WriteAllTextAsync(f.Path, csvSb.ToString(), new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-                    ShowToast($"已导出 CSV 到 {f.Name}", canUndo: false);
+                    await File.WriteAllTextAsync(outPath, csvSb.ToString(), new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+                    ShowToast($"已导出 CSV 到 {Path.GetFileName(outPath)}", canUndo: false);
                 };
                 expMenu.Items.Add(ankiItem);
                 expMenu.Items.Add(csvItem);
@@ -2682,19 +2673,16 @@ public sealed partial class ShelfWindow : Window
         await dlgRef.ShowSafeAsync(_library.Prefs.Tint);
         if (wantImportAudio)
         {
-            var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.MusicLibrary };
-            foreach (var ext in AudiobookImporter.Extensions) picker.FileTypeFilter.Add(ext);
-            picker.FileTypeFilter.Add(".zip");
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-            var files = await picker.PickMultipleFilesAsync();
-            if (files is not null && files.Count > 0)
+            var audioExts = AudiobookImporter.Extensions.Concat([".zip"]).ToArray();
+            var files = await NativePickerHelper.PickMultipleFilesAsync(this, audioExts, PickerLocationId.MusicLibrary);
+            if (files.Count > 0)
             {
                 try
                 {
-                    var imported = await AudiobookImporter.ShowImportSheetAsync(this, RootGrid.XamlRoot, _library, files.Select(f => f.Path).ToArray());
+                    var imported = await AudiobookImporter.ShowImportSheetAsync(this, RootGrid.XamlRoot, _library, files.ToArray());
                     if (imported is not null)
                     {
-                        _library.Analytics.TrackBookImported(imported.Format.ToString(), "file_picker", files.FirstOrDefault()?.Path);
+                        _library.Analytics.TrackBookImported(imported.Format.ToString(), "file_picker", files.FirstOrDefault());
                         try { _library.Core.AudiobookPair(imported.Id, book.Id); } catch { }
                         RefreshBooks();
                         ShowToast($"已导入并配对《{imported.Title}》", canUndo: false);
@@ -2844,14 +2832,8 @@ public sealed partial class ShelfWindow : Window
 
         pickCoverBtn.Click += async (_, _) =>
         {
-            var picker = new FileOpenPicker { ViewMode = PickerViewMode.Thumbnail };
-            picker.FileTypeFilter.Add(".jpg");
-            picker.FileTypeFilter.Add(".jpeg");
-            picker.FileTypeFilter.Add(".png");
-            picker.FileTypeFilter.Add(".webp");
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-            var f = await picker.PickSingleFileAsync();
-            if (f is not null) await LoadPickedCoverAsync(f.Path);
+            string? path = await NativePickerHelper.PickSingleFileAsync(this, [".jpg", ".jpeg", ".png", ".webp"], viewMode: PickerViewMode.Thumbnail);
+            if (!string.IsNullOrEmpty(path)) await LoadPickedCoverAsync(path);
         };
 
         // 1:1 shelf-edit/2.png: two-row white table card (书名 | ... / 作者 | 几位作者用顿号隔开)
@@ -7114,32 +7096,19 @@ public sealed partial class ShelfWindow : Window
 
     private async void ImportButton_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary, ViewMode = PickerViewMode.List };
-        if (_activeFilter == "audio")
-        {
-            foreach (var ext in AudiobookImporter.Extensions) picker.FileTypeFilter.Add(ext);
-            picker.FileTypeFilter.Add(".zip");
-        }
-        else
-        {
-            foreach (var ext in EbookImportExtensions) picker.FileTypeFilter.Add(ext);
-            foreach (var ext in AudiobookImporter.Extensions) picker.FileTypeFilter.Add(ext);
-            picker.FileTypeFilter.Add(".zip");
-        }
-        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-        var files = await picker.PickMultipleFilesAsync();
-        if (files is null || files.Count == 0) return;
-        await ImportPathsAsync(files.Select(f => f.Path).ToArray(), openFirst: false);
+        var exts = _activeFilter == "audio"
+            ? AudiobookImporter.Extensions.Concat([".zip"]).ToArray()
+            : EbookImportExtensions.Concat(AudiobookImporter.Extensions).Concat([".zip"]).ToArray();
+        var files = await NativePickerHelper.PickMultipleFilesAsync(this, exts, PickerLocationId.DocumentsLibrary, PickerViewMode.List);
+        if (files.Count == 0 || _closed) return;
+        await ImportPathsAsync(files.ToArray(), openFirst: false);
     }
 
     private async void ImportAudioFolder_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.MusicLibrary };
-        picker.FileTypeFilter.Add("*");
-        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
-        var folder = await picker.PickSingleFolderAsync();
-        if (folder is null) return;
-        await ImportPathsAsync([folder.Path], openFirst: false);
+        string? folder = await NativePickerHelper.PickSingleFolderAsync(this, PickerLocationId.MusicLibrary);
+        if (string.IsNullOrEmpty(folder) || _closed) return;
+        await ImportPathsAsync([folder], openFirst: false);
     }
 
     // 1:1 Library.swift:825-835 (booksInside): recursively enumerate ebook files inside a directory, skipping hidden entries

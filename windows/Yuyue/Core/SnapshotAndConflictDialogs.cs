@@ -24,12 +24,8 @@ public static class SnapshotAndConflictDialogs
         string? snapPath = presetPath;
         if (string.IsNullOrEmpty(snapPath) || !File.Exists(snapPath))
         {
-            var picker = new FileOpenPicker();
-            picker.FileTypeFilter.Add(".yuyue");
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(ownerWindow));
-            var f = await picker.PickSingleFileAsync();
-            if (f is null) return false;
-            snapPath = f.Path;
+            snapPath = await NativePickerHelper.PickSingleFileAsync(ownerWindow, [".yuyue"]);
+            if (string.IsNullOrEmpty(snapPath)) return false;
         }
 
         bool dark = ThemeHelper.IsDark(xamlRoot.Content is FrameworkElement fe0 ? fe0.ActualTheme : ElementTheme.Light);
@@ -424,15 +420,12 @@ public static class SnapshotAndConflictDialogs
 
         if (saveCsv)
         {
-            var picker = new FileSavePicker
-            {
-                SuggestedFileName = site == ReadingSite.Goodreads ? "语阅-goodreads" : "语阅-storygraph",
-            };
-            picker.FileTypeChoices.Add(L10n.T("CSV 表格"), [".csv"]);
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(ownerWindow));
-            var f = await picker.PickSaveFileAsync();
-            if (f is not null)
-                await File.WriteAllTextAsync(f.Path, currentExport.Csv, Encoding.UTF8);
+            string? outPath = await NativePickerHelper.PickSaveFileAsync(
+                ownerWindow,
+                site == ReadingSite.Goodreads ? "语阅-goodreads" : "语阅-storygraph",
+                [(L10n.T("CSV 表格"), [".csv"])]);
+            if (!string.IsNullOrEmpty(outPath))
+                await File.WriteAllTextAsync(outPath, currentExport.Csv, Encoding.UTF8);
         }
     }
 
