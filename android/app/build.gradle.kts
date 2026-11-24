@@ -148,6 +148,8 @@ dependencies {
     implementation("com.google.android.gms:play-services-auth:21.3.0")
     // UniFFI's Kotlin bindings call the core through JNA.
     implementation("net.java.dev.jna:jna:5.18.1@aar")
+    // Anonymous usage analytics (AirTraffic / PostHog; pinned to 3.77.1 for /batch compatibility).
+    implementation("com.posthog:posthog-android:3.77.1")
     testImplementation("junit:junit:4.13.2")
     // @PreviewTest renders on the host JVM (layoutlib), not on a device. Previews live in
     // src/screenshotTest and call the app's composables with fixture data.

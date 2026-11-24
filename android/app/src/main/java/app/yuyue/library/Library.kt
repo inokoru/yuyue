@@ -310,15 +310,16 @@ class Library(private val context: Context) {
     // MARK: Importing
 
     /** Imports the files the system picker or another app handed over, into the collection when given. */
-    fun importUris(uris: List<Uri>, collection: String? = null, folder: String? = null) {
+    fun importUris(uris: List<Uri>, collection: String? = null, folder: String? = null, source: String = "other") {
         if (uris.isEmpty()) return
-        importUrisJob(uris, collection, folder)
+        importUrisJob(uris, collection, folder, source = source)
     }
 
     internal fun importUrisJob(
         uris: List<Uri>,
         collection: String? = null,
         folder: String? = null,
+        source: String = "other",
         onHandled: ((Uri) -> Unit)? = null,
     ): Job = scope.launch {
         importing++
@@ -335,7 +336,7 @@ class Library(private val context: Context) {
                 // A zip of sound files is a recording, brought in as a folder would be.
                 if (name.endsWith(".zip", ignoreCase = true)) {
                     try {
-                        val unzipped = withContext(Dispatchers.IO) { unzipRecording(uri, name) }
+                        val unzipped = withContext(Dispatchers.IO) { unzipRecording(uri, name, source) }
                         if (unzipped != null) {
                             zippedRecordings += unzipped
                             onHandled?.invoke(uri)
@@ -366,6 +367,10 @@ class Library(private val context: Context) {
                     if (book.id !in had) {
                         imported += book
                         if (collection != null) runCatching { core.setInCollection(collection, book.id, true) }
+                        app.yuyue.analytics.AirTraffic.trackBookImported(
+                            app.yuyue.analytics.AirTraffic.resolveBookFormat(book.format, name),
+                            source,
+                        )
                     } else {
                         skippedExisting = true
                     }
@@ -402,7 +407,7 @@ class Library(private val context: Context) {
         for (recording in m4b.map { listOf(it) } + listOfNotNull(loose.takeIf { it.isNotEmpty() })) {
             importing++
             val pending = try {
-                withContext(Dispatchers.IO) { readRecording(recording) }
+                withContext(Dispatchers.IO) { readRecording(recording, source) }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -427,10 +432,15 @@ class Library(private val context: Context) {
     /** A recording read and waiting on 导入有声书: its name, author, cover
      *  and the order of its files can be changed before it goes onto the shelf. Its files sit in
      *  `scratch` till then. */
-    data class PendingRecording(val audio: uniffi.yuyue_core.AudioImport, val scratch: File, val names: List<String>)
+    data class PendingRecording(
+        val audio: uniffi.yuyue_core.AudioImport,
+        val scratch: File,
+        val names: List<String>,
+        val source: String = "other",
+    )
 
     /** A recording's files copied next to the library and read. */
-    private fun readRecording(files: List<Pair<Uri, String>>): PendingRecording {
+    private fun readRecording(files: List<Pair<Uri, String>>, source: String = "other"): PendingRecording {
         val tmp = File(context.cacheDir, "import-${UUID.randomUUID()}").apply { mkdirs() }
         try {
             val copied = files.map { (uri, name) ->
@@ -439,7 +449,7 @@ class Library(private val context: Context) {
                 }
             }
             val audio = AudioImporter.read(core, copied, null)
-            return PendingRecording(audio, tmp, audio.files.map { File(it.path).name })
+            return PendingRecording(audio, tmp, audio.files.map { File(it.path).name }, source)
         } catch (e: Exception) {
             tmp.deleteRecursively()
             throw e
@@ -448,7 +458,7 @@ class Library(private val context: Context) {
 
     /** A zip's sound files taken out and read as one recording named for the zip; null when it
      *  holds none (it's a book, or something else). */
-    private fun unzipRecording(uri: Uri, name: String): PendingRecording? {
+    private fun unzipRecording(uri: Uri, name: String, source: String = "other"): PendingRecording? {
         val tmp = File(context.cacheDir, "import-${UUID.randomUUID()}").apply { mkdirs() }
         try {
             val zip = File(tmp, "in.zip")
@@ -461,7 +471,7 @@ class Library(private val context: Context) {
                 return null
             }
             val audio = AudioImporter.read(core, files, folder)
-            return PendingRecording(audio, tmp, audio.files.map { File(it.path).name })
+            return PendingRecording(audio, tmp, audio.files.map { File(it.path).name }, source)
         } catch (e: Exception) {
             tmp.deleteRecursively()
             throw e
@@ -477,6 +487,10 @@ class Library(private val context: Context) {
                 val book = withContext(Dispatchers.IO) { core.importAudiobook(p.audio) }
                 reload()
                 if (book.id !in had) {
+                    app.yuyue.analytics.AirTraffic.trackBookImported(
+                        app.yuyue.analytics.AirTraffic.resolveBookFormat(book.format),
+                        p.source,
+                    )
                     show(Toast(Toast.Icon.Add, t("已导入《%@》", book.title), t("在书架最前面")) {
                         runCatching { core.deleteBook(book.id) }
                         reload()

@@ -154,6 +154,7 @@ class Recordings(private val context: Context, private val library: Library) {
         val recording = runCatching { library.core.audioRecording(audio.id) }.getOrElse { return }
         val m = Making(ebook.id, audio.id, recording.seconds)
         making = m
+        app.yuyue.analytics.AirTraffic.trackAudioFeatureUsed("audiobook_align")
         val f = folder(ebook.id).apply { mkdirs() }
         File(f, "audio").writeText(audio.id)
         val started = System.currentTimeMillis()

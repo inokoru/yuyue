@@ -188,6 +188,7 @@ object Feedback {
         return try {
             post(body)
             flush()
+            app.yuyue.analytics.AirTraffic.trackFeedbackSubmitted(files.take(FILES_MAX).count { it.isShot }, withInfo)
             Outcome.Sent
         } catch (e: Exception) {
             // At most 10, the newest kept.
