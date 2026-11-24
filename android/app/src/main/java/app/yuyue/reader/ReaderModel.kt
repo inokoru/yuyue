@@ -1062,6 +1062,10 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
     override fun tapped(m: ReaderMessage) {
         if (selection != null || openMark != null) return dismissCards()
         if (lookup != null) return closeLookup()
+        if (chromeShown) {
+            chromeShown = false
+            return
+        }
         m.mark?.let { id -> marks.firstOrNull { it.id == id }?.let { openMark = OpenMark(it, m.x ?: 0.0, m.y ?: 0.0); return } }
         m.word?.takeIf { isForeign && m.link == null }?.let { w -> library.scope.launch { look(w) }; return }
         m.link?.let { link ->

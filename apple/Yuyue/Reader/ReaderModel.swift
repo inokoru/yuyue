@@ -994,6 +994,14 @@ extension ReaderModel: ReaderPagerDelegate {
             sentenceTranslation = nil
             return
         }
+        #if os(iOS)
+        if chromeShown {
+            if openMark != nil { openMark = nil }
+            if openNote != nil { openNote = nil }
+            chromeShown = false
+            return
+        }
+        #endif
         if let id = m.mark, let mark = marks.first(where: { $0.id == id }) {
             selection = nil
             if openMark?.mark.id == id {
@@ -1024,12 +1032,6 @@ extension ReaderModel: ReaderPagerDelegate {
             }
             return
         }
-        #if os(iOS)
-        if chromeShown {
-            chromeShown = false
-            return
-        }
-        #endif
         // The outer thirds turn pages, the middle brings up the controls.
         let x = m.x ?? 0, width = m.width ?? 0
         if settings.mode == .paginated, width > 0, x < width * 0.3 || x > width * 0.7 {
