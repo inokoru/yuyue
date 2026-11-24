@@ -116,4 +116,56 @@ class RemoteLibraryTest {
             RemoteClient.name(audioEntry, "https://books.example.com/media/beiying-short.m4a?v=2", "audio/mp4", null),
         )
     }
+
+    private fun bookSummary(
+        id: String,
+        title: String,
+        available: Boolean = true,
+        record: Boolean = false,
+    ) = uniffi.yuyue_core.BookSummary(
+        id = id,
+        title = title,
+        authors = listOf("F. Scott Fitzgerald"),
+        language = "en",
+        format = uniffi.yuyue_core.BookFormat.EPUB,
+        coverPath = null,
+        addedAt = 1L,
+        openedAt = null,
+        finishedAt = null,
+        progress = 0.0,
+        status = uniffi.yuyue_core.ReadingStatus.WANT,
+        collections = emptyList(),
+        readMinutes = 0u,
+        listenMinutes = 0u,
+        available = available,
+        page = 0u,
+        record = record,
+    )
+
+    @Test
+    fun remoteHasEntryClearsAfterDeletionAndRestoresOnUndo() {
+        val got = RemoteSources.parseGot("src1/entry-gatsby\tbook-123\nlegacy-without-tab")
+        assertEquals(mapOf("src1/entry-gatsby" to "book-123"), got)
+
+        val imported = bookSummary(id = "book-123", title = "The Great Gatsby")
+        // Matches by book ID even when WebDAV entry title is a filename stem.
+        org.junit.Assert.assertTrue(
+            RemoteSources.hasEntry("entry-gatsby", "1925_gatsby_scan", "src1", got, listOf(imported)),
+        )
+        // Once deleted from library, `hasEntry` must allow re-downloading (#25).
+        org.junit.Assert.assertFalse(
+            RemoteSources.hasEntry("entry-gatsby", "The Great Gatsby", "src1", got, emptyList()),
+        )
+        // Record-only or unavailable synced entries must not block downloading the file locally.
+        org.junit.Assert.assertFalse(
+            RemoteSources.hasEntry("entry-gatsby", "The Great Gatsby", "src1", got, listOf(bookSummary("book-123", "The Great Gatsby", record = true))),
+        )
+        org.junit.Assert.assertFalse(
+            RemoteSources.hasEntry("entry-gatsby", "The Great Gatsby", "src1", got, listOf(bookSummary("book-123", "The Great Gatsby", available = false))),
+        )
+        // Restoring the book via Undo immediately marks it back on the shelf.
+        org.junit.Assert.assertTrue(
+            RemoteSources.hasEntry("entry-gatsby", "1925_gatsby_scan", "src1", got, listOf(imported)),
+        )
+    }
 }

@@ -66,8 +66,8 @@ class RemoteSources {
     val all = mutableStateListOf<RemoteSource>()
     /** How far each download is, by `source/entry`. */
     val downloading = mutableStateMapOf<String, Float>()
-    /** Taken from a library before, so it says 在书架. */
-    var got by mutableStateOf(Prefs.string(GOT).split('\n').filter { it.isNotEmpty() }.toSet())
+    /** Taken from a library before (`source/entry` → `book.id`), so it says 在书架 while kept. */
+    var got by mutableStateOf(parseGot(Prefs.string(GOT_BOOKS)))
         private set
 
     init {
@@ -91,14 +91,9 @@ class RemoteSources {
 
     fun key(s: RemoteSource, e: RemoteEntry) = "${s.id}/${e.id}"
 
-    /** Already on the shelf: taken from here before, or a book there by the same name. */
-    fun has(e: RemoteEntry, s: RemoteSource, library: Library): Boolean {
-        if (key(s, e) in got) return true
-        val title = plain(e.title)
-        return library.books.any { plain(it.title) == title }
-    }
-
-    private fun plain(s: String) = s.lowercase().filter { !it.isWhitespace() && it.isLetterOrDigit() }
+    /** Already on the shelf: taken from here and still on the shelf, or a book there by the same name. */
+    fun has(e: RemoteEntry, s: RemoteSource, library: Library): Boolean =
+        hasEntry(e.id, e.title, s.id, got, library.books)
 
     /** Downloads a book and puts it on the shelf. */
     suspend fun take(e: RemoteEntry, s: RemoteSource, library: Library, context: Context) {
@@ -108,16 +103,17 @@ class RemoteSources {
         try {
             val client = RemoteClient(s)
             val file = client.download(e, File(context.cacheDir, "remote-${UUID.randomUUID()}")) { f -> downloading[k] = f }
-            try {
+            val imported = try {
                 val needsCover = AudioImporter.isAudio(file.name) || file.extension.equals("pdf", ignoreCase = true)
                 val cover = if (needsCover) e.cover?.let { runCatching { client.data(it) }.getOrNull() } else null
-                withContext(Dispatchers.IO) { library.importPath(file.path, title = e.title, author = e.author, cover = cover) }
+                val book = withContext(Dispatchers.IO) { library.importPath(file.path, title = e.title, author = e.author, cover = cover) }
                 library.reload()
+                book
             } finally {
                 file.parentFile?.deleteRecursively()
             }
-            got = got + k
-            Prefs.set(GOT, got.joinToString("\n"))
+            got = got + (k to imported.id)
+            Prefs.set(GOT_BOOKS, got.entries.joinToString("\n") { "${it.key}\t${it.value}" })
         } finally {
             downloading.remove(k)
         }
@@ -125,7 +121,33 @@ class RemoteSources {
 
     companion object {
         private const val KEY = "remote.sources"
-        private const val GOT = "remote.got"
+        private const val GOT_BOOKS = "remote.gotBooks"
+
+        internal fun plain(s: String) = s.lowercase().filter { !it.isWhitespace() && it.isLetterOrDigit() }
+
+        internal fun parseGot(raw: String): Map<String, String> =
+            raw.lineSequence()
+                .mapNotNull { line ->
+                    val tab = line.indexOf('\t')
+                    if (tab <= 0 || tab >= line.lastIndex) null
+                    else line.substring(0, tab) to line.substring(tab + 1)
+                }
+                .toMap()
+
+        internal fun hasEntry(
+            entryId: String,
+            entryTitle: String,
+            sourceId: String,
+            got: Map<String, String>,
+            books: List<uniffi.yuyue_core.BookSummary>,
+        ): Boolean {
+            val present = books.filter { it.available && !it.record }
+            got["$sourceId/$entryId"]?.let { id ->
+                if (present.any { it.id == id }) return true
+            }
+            val title = plain(entryTitle)
+            return title.isNotEmpty() && present.any { plain(it.title) == title }
+        }
     }
 }
 

@@ -75,16 +75,16 @@ final class RemoteSources {
     private(set) var all: [RemoteSource] = []
     /// How far each download is, by `source/entry`.
     private(set) var downloading: [String: Double] = [:]
-    /// Taken from a library before, by `source/entry`, so it says 在书架.
-    private(set) var got: Set<String> = []
+    /// Taken from a library before (`source/entry` → `book.id`), so it says 在书架 while kept.
+    private(set) var got: [String: String] = [:]
     private static let key = "remote.sources"
-    private static let gotKey = "remote.got"
+    private static let gotBooksKey = "remote.gotBooks"
 
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.key) {
             all = (try? JSONDecoder().decode([RemoteSource].self, from: data)) ?? []
         }
-        got = Set(UserDefaults.standard.stringArray(forKey: Self.gotKey) ?? [])
+        got = (UserDefaults.standard.dictionary(forKey: Self.gotBooksKey) as? [String: String]) ?? [:]
     }
 
     func save(_ source: RemoteSource, password: String) {
@@ -105,14 +105,27 @@ final class RemoteSources {
 
     static func key(_ source: RemoteSource, _ entry: RemoteEntry) -> String { "\(source.id)/\(entry.id)" }
 
-    /// Already on the shelf: taken from here before, or a book there by the same name.
+    /// Already on the shelf: taken from here and still on the shelf, or a book there by the same name.
     func has(_ entry: RemoteEntry, from source: RemoteSource, in library: Library) -> Bool {
-        if got.contains(Self.key(source, entry)) { return true }
-        let title = Self.plain(entry.title)
-        return library.books.contains { Self.plain($0.title) == title }
+        Self.hasEntry(entryID: entry.id, entryTitle: entry.title, sourceID: source.id, got: got, books: library.books)
     }
 
-    private static func plain(_ s: String) -> String {
+    nonisolated static func hasEntry(
+        entryID: String,
+        entryTitle: String,
+        sourceID: String,
+        got: [String: String],
+        books: [BookSummary]
+    ) -> Bool {
+        let present = books.filter { $0.available && !$0.record }
+        if let id = got["\(sourceID)/\(entryID)"], present.contains(where: { $0.id == id }) {
+            return true
+        }
+        let title = plain(entryTitle)
+        return !title.isEmpty && present.contains { plain($0.title) == title }
+    }
+
+    nonisolated static func plain(_ s: String) -> String {
         s.lowercased().filter { !$0.isWhitespace && !$0.isPunctuation }
     }
 
@@ -130,9 +143,9 @@ final class RemoteSources {
         let ext = file.pathExtension.lowercased()
         let isAudio = RemoteFormats.audio.contains(ext) || Audiobooks.extensions.contains(ext)
         let cover = (isAudio || ext == "pdf") ? await entry.cover.asyncFlatMap { try? await client.data($0) } : nil
-        _ = try await library.importReceived(file, title: entry.title, author: entry.author, cover: cover)
-        got.insert(key)
-        UserDefaults.standard.set(Array(got), forKey: Self.gotKey)
+        let imported = try await library.importReceived(file, title: entry.title, author: entry.author, cover: cover)
+        got[key] = imported.id
+        UserDefaults.standard.set(got, forKey: Self.gotBooksKey)
     }
 }
 

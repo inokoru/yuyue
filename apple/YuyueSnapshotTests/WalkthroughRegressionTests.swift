@@ -242,4 +242,41 @@ struct WalkthroughRegressionTests {
         FontShelf.shared.apply("local:Yuanti SC", to: &s)
         #expect(s.script()["font"] as? String == "\"Yuanti SC\", var(--yy-sans)")
     }
+
+    @Test func `remote library hasEntry clears after deletion and restores on undo`() {
+        func summary(id: String, title: String, available: Bool = true, record: Bool = false) -> BookSummary {
+            BookSummary(
+                id: id,
+                title: title,
+                authors: ["F. Scott Fitzgerald"],
+                language: "en",
+                format: .epub,
+                coverPath: nil,
+                addedAt: 1,
+                openedAt: nil,
+                finishedAt: nil,
+                progress: 0,
+                status: .want,
+                collections: [],
+                readMinutes: 0,
+                listenMinutes: 0,
+                available: available,
+                page: 0,
+                record: record,
+                rating: nil,
+                comment: nil,
+                tags: [],
+                startedAt: nil,
+                manual: nil
+            )
+        }
+
+        let got = ["src1/entry-gatsby": "book-123"]
+        let book = summary(id: "book-123", title: "The Great Gatsby")
+        #expect(RemoteSources.hasEntry(entryID: "entry-gatsby", entryTitle: "1925_gatsby", sourceID: "src1", got: got, books: [book]) == true)
+        #expect(RemoteSources.hasEntry(entryID: "entry-gatsby", entryTitle: "The Great Gatsby", sourceID: "src1", got: got, books: []) == false)
+        #expect(RemoteSources.hasEntry(entryID: "entry-gatsby", entryTitle: "The Great Gatsby", sourceID: "src1", got: got, books: [summary(id: "book-123", title: "The Great Gatsby", record: true)]) == false)
+        #expect(RemoteSources.hasEntry(entryID: "entry-gatsby", entryTitle: "The Great Gatsby", sourceID: "src1", got: got, books: [summary(id: "book-123", title: "The Great Gatsby", available: false)]) == false)
+    }
+
 }

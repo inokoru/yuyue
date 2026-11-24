@@ -421,7 +421,7 @@ public sealed class RemoteLibraryService
                         fallbackCover: coverBytes);
                 }
 
-                _library.Prefs.RemoteAcquiredUrls.Add(item.Url);
+                _library.Prefs.RemoteAcquiredBooks[item.Url] = imported.Id;
                 _library.SavePrefs();
                 return imported;
         }
@@ -517,7 +517,7 @@ public sealed class RemoteLibraryService
         _wantedTrack.TryAdd(bookId, 1);
         StartBackgroundStreamLoop(bookId);
 
-        _library.Prefs.RemoteAcquiredUrls.Add(audioTracks[0].Url);
+        _library.Prefs.RemoteAcquiredBooks[audioTracks[0].Url] = summary.Id;
         _library.SavePrefs();
         return summary;
     }
@@ -916,7 +916,7 @@ public sealed class RemoteLibraryService
                 foreach (var it in items)
                 {
                     var entry = it;
-                    bool alreadyOwned = IsAlreadyOwned(entry, shelfBooks, _library.Prefs.RemoteAcquiredUrls);
+                    bool alreadyOwned = IsAlreadyOwned(entry, shelfBooks, _library.Prefs.RemoteAcquiredBooks);
 
                     var row = new Grid { ColumnSpacing = 10, Padding = new Thickness(10, 7, 10, 7) };
                     row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
@@ -1213,10 +1213,12 @@ public sealed class RemoteLibraryService
     internal static bool IsAlreadyOwned(
         RemoteEntryItem entry,
         IReadOnlyList<BookSummary> shelfBooks,
-        IReadOnlySet<string>? acquiredUrls = null)
+        IReadOnlyDictionary<string, string>? acquiredBooks = null)
     {
         if (entry.IsFolder) return false;
-        if (acquiredUrls is not null && acquiredUrls.Contains(entry.Url)) return true;
+        var present = shelfBooks.Where(b => b.Available && !b.Record).ToArray();
+        if (acquiredBooks is not null && acquiredBooks.TryGetValue(entry.Url, out string? bookId) && present.Any(b => b.Id == bookId))
+            return true;
 
         string entryTitle = NormalizePlain(entry.Title);
         if (string.IsNullOrEmpty(entryTitle)) return false;
@@ -1226,7 +1228,7 @@ public sealed class RemoteLibraryService
             .Where(a => a.Length > 0)
             .ToArray();
 
-        foreach (var b in shelfBooks)
+        foreach (var b in present)
         {
             if (!string.Equals(NormalizePlain(b.Title), entryTitle, StringComparison.Ordinal))
                 continue;
