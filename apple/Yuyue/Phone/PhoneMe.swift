@@ -116,6 +116,7 @@ struct PhoneMe: View {
         .sheet(isPresented: $feedbackShown) {
             FeedbackForm { feedbackShown = false }
         }
+        .airTrafficScreen("Me")
     }
 
     // MARK: Pieces
@@ -269,7 +270,9 @@ struct PhoneMe: View {
 
     private func link<Destination: View>(_ title: String, _ symbol: String, _ value: String?,
                                          @ViewBuilder _ destination: @escaping () -> Destination) -> some View {
-        NavigationLink(destination: destination) {
+        NavigationLink {
+            destination().airTrafficScreen("Settings")
+        } label: {
             YYRow(title, icon: symbol, value: value, chevron: true).frame(minHeight: YYUI.s(36))
         }
         .buttonStyle(.plain)

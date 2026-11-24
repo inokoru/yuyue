@@ -207,7 +207,7 @@ struct MacUpdateSettings: View {
                 .frame(width: 24, height: 1.5)
                 .padding(.top, 18)
                 .padding(.bottom, 16)
-            Text("读着听，听着读，进度接得上。\n没有服务器，不收集数据，\n书与笔记都留在你手里。")
+            Text("读着听，听着读，进度接得上。\n没有账号与广告，\n书与笔记都留在你手里。")
                 .font(isEn ? .system(size: 13, design: .serif) : YYUI.serif(13.5))
                 .lineSpacing(isEn ? 5.5 : 7.5)
                 .foregroundStyle(YYColor.t2)
@@ -246,6 +246,8 @@ struct MacUpdateSettings: View {
     }
 
     // MARK: Right Folio (牌记与操作)
+
+    @AppStorage(AirTraffic.prefKey) private var analyticsEnabled = true
 
     private var rightFolio: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -310,8 +312,18 @@ struct MacUpdateSettings: View {
                         }
                     }
                 }
+                AboutRow(String(localized: "匿名使用统计"),
+                         detail: String(localized: "仅记录功能使用形态，不关联身份，绝不收集书名、笔记或搜索词")) {
+                    SettingsSwitch(isOn: Binding(
+                        get: { analyticsEnabled },
+                        set: { newValue in
+                            analyticsEnabled = newValue
+                            AirTraffic.setEnabled(newValue)
+                        }
+                    ))
+                }
                 AboutNavRow(title: String(localized: "隐私说明"),
-                            value: String(localized: "仅存本机 · 无统计")) {
+                            value: String(localized: "书库仅存本机 · 可关匿名统计")) {
                     activeSheet = .privacy
                 }
                 AboutNavRow(title: String(localized: "开源许可与致谢"),
@@ -513,7 +525,7 @@ struct MacUpdateSettings: View {
                 .paperWindow()
         case .privacy:
             AboutPaperSheet(title: String(localized: "隐私说明"),
-                            subtitle: String(localized: "没有服务器，不收集任何数据"),
+                            subtitle: String(localized: "书库仅存本机，不含身份与广告"),
                             close: { activeSheet = nil }) {
                 PrivacySheetContent()
             }
@@ -808,8 +820,8 @@ private struct ChangelogSheetContent: View {
 private struct PrivacySheetContent: View {
     private var items: [(String, String)] {
         [
-            (String(localized: "没有账号，没有统计"),
-             String(localized: "语阅没有服务器，也不收集任何数据：没有账号、没有统计、没有广告。")),
+            (String(localized: "没有账号，也没有广告"),
+             String(localized: "语阅没有账号、没有广告，也不做跨应用追踪。默认开启匿名使用统计，仅记录功能使用形态（如导入格式、界面浏览、朗读与音频功能使用），不关联身份，绝不收集书名、笔记、搜索词、网址或邮箱，可随时在「关于」页关闭。")),
             (String(localized: "书与笔记留在本地"),
              String(localized: "书、进度、笔记和生词都存在这台设备上。打开同步时，它们只在你的设备和你自己选的网盘（iCloud 云盘、WebDAV，Google Drive 即将支持）之间传，语阅看不到。")),
             (String(localized: "你自己的服务密钥"),

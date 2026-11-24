@@ -144,7 +144,7 @@ final class WifiTransfer {
         guard item.state == .importing else { return .json(["received": item.received] as [String: Any]) }
 
         do {
-            _ = try await library.importReceived(url)
+            _ = try await library.importReceived(url, source: "wifi")
             update(id) { $0.state = .done }
             try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
             return .json(["received": item.size, "done": true] as [String: Any])

@@ -599,7 +599,7 @@ final class Library {
 
     /// Imports the files, into the collection when given; `folder` names the watched folder
     /// they came from.
-    func importFiles(_ urls: [URL], into collection: String? = nil, from folder: String? = nil) async {
+    func importFiles(_ urls: [URL], into collection: String? = nil, from folder: String? = nil, source: String = "file_picker") async {
         importing += 1
         defer { importing -= 1 }
         // A folder of books brings in each of them.
@@ -626,7 +626,7 @@ final class Library {
         defer {
             // After the books, so they come first on the shelf.
             if !recordings.isEmpty {
-                Task { for files in recordings { await importRecording(files) } }
+                Task { for files in recordings { await importRecording(files, source: source) } }
             }
         }
         let urls = rest.flatMap(Self.booksInside)
@@ -661,6 +661,10 @@ final class Library {
                     setImport(row, .already(book.id))
                 } else {
                     imported.append(book)
+                    AirTraffic.trackBookImported(
+                        format: AirTraffic.resolveBookFormat(book.format, fileNameOrExt: url.lastPathComponent),
+                        source: source
+                    )
                     if let collection { try? core.setInCollection(collection: collection, book: book.id, inside: true) }
                     setImport(row, .added(book.id, line: Self.importedLine(book, place: place)))
                 }
@@ -729,12 +733,14 @@ final class Library {
         var names: [String]
         /// The e-book on the shelf with the same name, to make 听读书 with afterwards.
         let match: BookSummary?
+        /// Analytics import source enum (`file_picker`, `share_in`, `other`).
+        let source: String
     }
 
     var pendingRecording: PendingRecording?
 
     /// A recording read: copied aside, then onto 导入有声书 to look over.
-    private func importRecording(_ files: [URL]) async {
+    private func importRecording(_ files: [URL], source: String = "file_picker") async {
         let scoped = files.filter { $0.startAccessingSecurityScopedResource() }
         defer { scoped.forEach { $0.stopAccessingSecurityScopedResource() } }
         let scratch = FileManager.default.temporaryDirectory.appending(path: "recording-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -754,7 +760,8 @@ final class Library {
             let pending = PendingRecording(
                 audio: audio, scratch: scratch,
                 names: audio.files.map { URL(filePath: $0.path).lastPathComponent },
-                match: audiobooks.match(probe, in: books))
+                match: audiobooks.match(probe, in: books),
+                source: source)
             #if DEBUG
             // `-debugImportDirect 1`: straight onto the shelf, as 完成 would.
             if UserDefaults.standard.bool(forKey: "debugImportDirect") {
@@ -781,6 +788,10 @@ final class Library {
             let book = try core.importAudiobook(import: pending.audio)
             reload()
             if !had.contains(book.id) {
+                AirTraffic.trackBookImported(
+                    format: AirTraffic.resolveBookFormat(book.format, fileNameOrExt: pending.names.first),
+                    source: pending.source
+                )
                 show(Toast(icon: "headphones", title: String(localized: "已导入《\(book.title)》"), detail: String(localized: "在书架最前面")) { [weak self] in
                     try? self?.core.deleteBook(id: book.id)
                     self?.reload()
@@ -875,9 +886,10 @@ final class Library {
     }
 
     /// One file that came over Wi‑Fi 传书 or 远程书库: into the library, or why not.
-    func importReceived(_ url: URL, title: String? = nil, author: String? = nil, cover: Data? = nil) async throws -> BookSummary {
+    func importReceived(_ url: URL, title: String? = nil, author: String? = nil, cover: Data? = nil, source: String = "other") async throws -> BookSummary {
         importing += 1
         defer { importing -= 1 }
+        let had = Set(books.map(\.id))
         let ext = url.pathExtension.lowercased()
         let cleanTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
         let fallbackTitle = (cleanTitle?.isEmpty == false) ? cleanTitle : nil
@@ -895,6 +907,12 @@ final class Library {
                 audio.cover = Self.coverJPEG(cover) ?? cover
             }
             let book = try await Self.importAudiobook(core, audio: audio)
+            if !had.contains(book.id) {
+                AirTraffic.trackBookImported(
+                    format: AirTraffic.resolveBookFormat(book.format, fileNameOrExt: url.lastPathComponent),
+                    source: source
+                )
+            }
             reload()
             return book
         }
@@ -905,6 +923,12 @@ final class Library {
             fallbackAuthors: fallbackAuthors,
             fallbackCover: cover
         )
+        if !had.contains(book.id) {
+            AirTraffic.trackBookImported(
+                format: AirTraffic.resolveBookFormat(book.format, fileNameOrExt: url.lastPathComponent),
+                source: source
+            )
+        }
         reload()
         return book
     }

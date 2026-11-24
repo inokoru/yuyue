@@ -196,6 +196,10 @@ struct PhoneShelf: View {
                 .presentationBackground(YYColor.bg)
         }
         .yyConfirm($confirming)
+        .airTrafficScreen(kind == .podcasts ? "Podcasts" : "Shelf")
+        .onChange(of: kind, initial: true) { _, new in
+            chrome.onPodcasts = (new == .podcasts)
+        }
     }
 
     /// Everything but the regular-width welcome, in one scroll.

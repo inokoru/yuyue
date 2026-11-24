@@ -376,6 +376,7 @@ private final class ShareExchange {
                 }
                 let title = (try? core.book(id: id).summary.title) ?? offer.device
                 try await Self.importAudiobook(core, files: paths, title: title)
+                AirTraffic.trackBookImported(format: "audio", source: "share_in")
                 try? FileManager.default.removeItem(at: dir)
                 taking[id] = nil
                 library.reload()

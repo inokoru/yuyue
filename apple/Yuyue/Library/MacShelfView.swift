@@ -62,6 +62,14 @@ struct MacShelfView: View {
     @State private var reopened = false
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
 
+    private var shelfScreenName: String {
+        switch filter {
+        case .podcasts: "Podcasts"
+        case .notes, .words: "Notes"
+        default: "Shelf"
+        }
+    }
+
     var body: some View {
         deskCanvas
             .fileImporter(isPresented: $importerShown, allowedContentTypes: Library.importTypes, allowsMultipleSelection: true) { result in
@@ -101,6 +109,7 @@ struct MacShelfView: View {
                   isPresented: Binding(get: { library.alert != nil }, set: { if !$0 { library.alert = nil } }))
         .bookBlocked(library) { importerShown = true }
         .updateDialog()
+        .airTrafficScreen(shelfScreenName)
         .tint(tint.accent)
         .onAppear {
             AppAppearance.apply()
@@ -1295,7 +1304,7 @@ struct MacShelfView: View {
         let urls = AppDelegate.waiting
         guard !urls.isEmpty else { return }
         AppDelegate.waiting = []
-        Task { await library.importFiles(urls) }
+        Task { await library.importFiles(urls, source: "share_in") }
     }
 
     private func open(_ book: BookSummary, _ intent: Library.OpenIntent?) {

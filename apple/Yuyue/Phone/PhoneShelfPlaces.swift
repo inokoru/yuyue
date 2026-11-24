@@ -114,6 +114,8 @@ final class PhoneChrome {
     /// Where the shelf is, for the first tab to wear: its name, and its symbol (nil: 书架's own).
     var shelfName: String?
     var shelfSymbol: String?
+    /// Whether the shelf tab is currently showing 播客 (for semantic `$screen` tracking).
+    var onPodcasts = false
 
     static var motion: Animation? { YYMotion.reduce ? nil : .spring(duration: 0.26, bounce: 0) }
     static var dismissMotion: Animation? { YYMotion.reduce ? nil : YYMotion.exit }

@@ -426,7 +426,7 @@ final class PodcastHub {
     }
 
     @discardableResult
-    func subscribeRSS(urlString: String, putLatestOnDesk: Bool = true) async -> Bool {
+    func subscribeRSS(urlString: String, putLatestOnDesk: Bool = true, trackAdd: Bool = true) async -> Bool {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed) else {
             addError = String(localized: "链接格式不正确")
@@ -460,6 +460,7 @@ final class PodcastHub {
                     source: .singleImport
                 )
                 reload()
+                if trackAdd { AirTraffic.trackAudioFeatureUsed(kind: "podcast_added") }
                 return true
             }
 
@@ -467,6 +468,7 @@ final class PodcastHub {
             if let feed = try? parsePodcastRss(xml: body), !feed.episodes.isEmpty {
                 _ = try core.podcastUpsertChannelFromFeed(feedUrl: trimmed, feed: feed, putLatestOnDesk: putLatestOnDesk)
                 reload()
+                if trackAdd { AirTraffic.trackAudioFeatureUsed(kind: "podcast_added") }
                 // Prefetch Podcasting 2.0 transcript if the top episode provides one.
                 if let firstEp = feed.episodes.first, let tx = firstEp.transcripts.first,
                    let issue = deskIssues.first(where: { $0.audioUrl == firstEp.audioUrl }) ?? newsstandIssues.first(where: { $0.audioUrl == firstEp.audioUrl }) {
@@ -490,10 +492,11 @@ final class PodcastHub {
                     source: .singleImport
                 )
                 reload()
+                if trackAdd { AirTraffic.trackAudioFeatureUsed(kind: "podcast_added") }
                 return true
             }
             if let rss = web.rssUrl, let resolved = URL(string: rss, relativeTo: url)?.absoluteString {
-                return await subscribeRSS(urlString: resolved, putLatestOnDesk: putLatestOnDesk)
+                return await subscribeRSS(urlString: resolved, putLatestOnDesk: putLatestOnDesk, trackAdd: trackAdd)
             }
             addError = String(localized: "没在这个链接里找到音频或 RSS 订阅源")
             return false
@@ -505,7 +508,7 @@ final class PodcastHub {
 
     func refreshAllChannels() async {
         for ch in channels {
-            _ = await subscribeRSS(urlString: ch.feedUrl, putLatestOnDesk: false)
+            _ = await subscribeRSS(urlString: ch.feedUrl, putLatestOnDesk: false, trackAdd: false)
         }
     }
 
@@ -521,10 +524,11 @@ final class PodcastHub {
         }
         var okCount = 0
         for item in feeds.prefix(25) {
-            if await subscribeRSS(urlString: item.xmlUrl, putLatestOnDesk: okCount < 2) {
+            if await subscribeRSS(urlString: item.xmlUrl, putLatestOnDesk: okCount < 2, trackAdd: false) {
                 okCount += 1
             }
         }
+        if okCount > 0 { AirTraffic.trackAudioFeatureUsed(kind: "podcast_added") }
         return okCount
     }
 
@@ -552,6 +556,7 @@ final class PodcastHub {
                 source: .localAudio
             )
             reload()
+            AirTraffic.trackAudioFeatureUsed(kind: "podcast_added")
             return issue
         } catch {
             addError = error.localizedDescription
@@ -581,6 +586,7 @@ final class PodcastHub {
         let locale = Locale(identifier: iss.language.hasPrefix("en") ? "en-US" : "zh-CN")
         let auth = await Self.requestSpeechAuthorization()
         guard auth == .authorized else { return }
+        AirTraffic.trackAudioFeatureUsed(kind: "podcast_transcribe")
         let segments = await Self.recognizeLocalFile(url: URL(filePath: path), locale: locale)
         guard !segments.isEmpty else { return }
         var sentences: [MagazineSentence] = []
@@ -684,6 +690,7 @@ final class PodcastHub {
             let issue = try core.podcastSaveStudioIssue(kind: kind, draft: draft, bookIds: bookIDs, language: lang)
             transcripts[issue.id] = draft.sentences
             reload()
+            AirTraffic.trackAudioFeatureUsed(kind: "podcast_added")
             start(issue, from: 0)
             return issue
         } catch {
@@ -707,6 +714,7 @@ final class PodcastHub {
         stopAudioOnly()
         claimRemote()
         activeIssueID = issue.id
+        AirTraffic.trackAudioFeatureUsed(kind: "podcast_play")
         let startAt = seconds ?? issue.positionSec
         currentTime = max(0, startAt)
         duration = Double(issue.durationSec)
@@ -886,11 +894,13 @@ final class PodcastHub {
             if let voice = self.resolveStudioVoices(for: language).primary,
                let speech = try? await voice.render(text, language: language),
                !Task.isCancelled, self.isSpeakingInterruptReply {
+                AirTraffic.trackTtsStarted(engine: AirTraffic.ttsEngine(for: voice), surface: "podcast")
                 await self.pcmPlayer.play(speech, rate: 1.0, ducked: false)
                 self.isSpeakingInterruptReply = false
                 return
             }
             guard !Task.isCancelled, self.isSpeakingInterruptReply else { return }
+            AirTraffic.trackTtsStarted(engine: "system", surface: "podcast")
             let synth = self.replySynth ?? AVSpeechSynthesizer()
             self.replySynth = synth
             let utterance = AVSpeechUtterance(string: text)
@@ -1368,16 +1378,18 @@ final class PodcastHub {
         studioSpeechTask = Task { [weak self] in
             guard let self else { return }
             let sysVoices = Self.distinctSystemVoices(for: baseSpokenLang)
-            var prefetched: (index: Int, task: Task<Speech?, Never>)?
+            var prefetched: (index: Int, engine: String, task: Task<Speech?, Never>)?
+            var trackedTts = false
 
-            @MainActor func startRender(at i: Int) -> Task<Speech?, Never>? {
+            @MainActor func startRender(at i: Int) -> (engine: String, task: Task<Speech?, Never>)? {
                 guard i < sents.count, sents[i].skipReason == nil else { return nil }
                 let info = sentenceSpeechInput(sents[i], index: i)
                 let pair = self.resolveStudioVoices(for: info.lang)
                 guard let voice = info.secondSpeaker ? (pair.secondary ?? pair.primary) : pair.primary else {
                     return nil
                 }
-                return Task { try? await voice.render(info.text, language: info.lang) }
+                let engine = AirTraffic.ttsEngine(for: voice)
+                return (engine, Task { try? await voice.render(info.text, language: info.lang) })
             }
 
             for idx in startIndex ..< sents.count {
@@ -1389,21 +1401,29 @@ final class PodcastHub {
                 if let iss = self.issue(issueID) { self.updateNowPlaying(iss) }
 
                 let info = sentenceSpeechInput(s, index: idx)
-                let currentTask: Task<Speech?, Never>? = if let pre = prefetched, pre.index == idx {
-                    pre.task
+                let currentRender: (engine: String, task: Task<Speech?, Never>)? = if let pre = prefetched, pre.index == idx {
+                    (pre.engine, pre.task)
                 } else {
                     startRender(at: idx)
                 }
                 if let nextIdx = ((idx + 1) ..< sents.count).first(where: { sents[$0].skipReason == nil }),
-                   let nextTask = startRender(at: nextIdx) {
-                    prefetched = (nextIdx, nextTask)
+                   let nextRender = startRender(at: nextIdx) {
+                    prefetched = (nextIdx, nextRender.engine, nextRender.task)
                 } else {
                     prefetched = nil
                 }
 
-                if let rendered = await currentTask?.value, !Task.isCancelled {
+                if let currentRender, let rendered = await currentRender.task.value, !Task.isCancelled {
+                    if !trackedTts {
+                        trackedTts = true
+                        AirTraffic.trackTtsStarted(engine: currentRender.engine, surface: "podcast")
+                    }
                     await self.pcmPlayer.play(rendered, rate: self.rate, ducked: self.isDucked)
                 } else if !Task.isCancelled {
+                    if !trackedTts {
+                        trackedTts = true
+                        AirTraffic.trackTtsStarted(engine: "system", surface: "podcast")
+                    }
                     let chosenSys = (info.secondSpeaker && self.studioVoiceStyle != "studio-solo-zh") ? sysVoices.secondary : sysVoices.primary
                     let fallbackPitch: Float = (info.secondSpeaker && chosenSys?.identifier == sysVoices.primary?.identifier && self.studioVoiceStyle != "studio-solo-zh") ? 1.06 : 1.0
                     await delegate.speak(synthesizer: synth, text: info.text, voice: chosenSys, rate: self.rate, pitch: fallbackPitch)

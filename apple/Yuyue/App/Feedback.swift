@@ -548,6 +548,7 @@ struct FeedbackForm: View {
             pasteMonitor = nil
         }
         #endif
+        .airTrafficScreen("Feedback")
         #if DEBUG
         .task { await debugFill() }
         #endif
@@ -1230,6 +1231,10 @@ struct FeedbackForm: View {
                 switch try await feedback.send(category, title: title, text: text, withInfo: withInfo,
                                                files: files) {
                 case .sent:
+                    AirTraffic.trackFeedbackSubmitted(
+                        imageCount: files.prefix(Feedback.filesMax).count { $0.isShot },
+                        includeDeviceInfo: withInfo
+                    )
                     feedback.clearDraft()
                     withAnimation(.easeOut(duration: YYMotion.reduce ? 0.01 : 0.25)) {
                         done = true
