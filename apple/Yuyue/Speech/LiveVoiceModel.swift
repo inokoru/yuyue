@@ -99,12 +99,13 @@ nonisolated enum LiveVoiceModel {
         }
     }
 
-    @concurrent private static func registerAsync(_ core: YuyueCore, _ dataDir: URL) async {
+    @concurrent static func registerAsync(_ core: YuyueCore, _ dataDir: URL) async {
         register(core, dataDir)
         KokoroModel.register(core, dataDir)
     }
 
     /// 下载并解压单个组件压缩包（支持多源自动回退、HTTP Range 断点续传与 `-debugLiveVoiceURL` / `-debugVoicePackURL` 覆盖）。
+    @concurrent
     static func ensureArchive(
         into target: URL,
         folderName: String,
@@ -139,16 +140,19 @@ nonisolated enum LiveVoiceModel {
             expectedBlake3: want
         ) { done, total in
             let denom = max(total, expectedBytes, 1)
-            progress(min(1, max(0, Double(done) / Double(denom))))
+            progress(min(0.96, max(0, Double(done) / Double(denom) * 0.96)))
         }
+        progress(0.97)
         let unpack = dir.appending(path: "unpack-\(UUID().uuidString)", directoryHint: .isDirectory)
         defer { try? FileManager.default.removeItem(at: unpack) }
         try unpackModel(zip: partFile.path(percentEncoded: false), to: unpack.path(percentEncoded: false))
+        progress(0.99)
         let nested = unpack.appending(path: folderName, directoryHint: .isDirectory)
         let source = FileManager.default.fileExists(atPath: nested.path(percentEncoded: false)) ? nested : unpack
         try? FileManager.default.removeItem(at: target)
         try FileManager.default.moveItem(at: source, to: target)
         try? FileManager.default.removeItem(at: partFile)
+        progress(1.0)
     }
 }
 
@@ -255,8 +259,10 @@ final class LiveVoiceDownload {
         }
         guard let ctx = LiveVoiceModel.context else { return }
         if LiveVoiceModel.installed(ctx.dataDir) {
-            LiveVoiceModel.register(ctx.core, ctx.dataDir)
             phase = .ready
+            let core = ctx.core
+            let dataDir = ctx.dataDir
+            Task { await LiveVoiceModel.registerAsync(core, dataDir) }
         } else if case .ready = phase {
             phase = .idle
         }
@@ -283,13 +289,19 @@ final class LiveVoiceDownload {
     func start() {
         guard !LiveVoiceModel.deviceUnsupported, task == nil, let ctx = LiveVoiceModel.context else { return }
         if LiveVoiceModel.installed(ctx.dataDir) {
-            LiveVoiceModel.register(ctx.core, ctx.dataDir)
             phase = .ready
+            let core = ctx.core
+            let dataDir = ctx.dataDir
+            Task { await LiveVoiceModel.registerAsync(core, dataDir) }
             return
         }
         phase = .downloading(0)
         let core = ctx.core
         let dataDir = ctx.dataDir
+        let relay = ModelDownload.ProgressRelay { [weak self] frac in
+            guard let self, case .downloading = self.phase else { return }
+            self.phase = .downloading(frac)
+        }
         task = Task { [weak self] in
             defer { self?.task = nil }
             let needModel = !LiveVoiceModel.modelInstalled(dataDir)
@@ -305,11 +317,8 @@ final class LiveVoiceDownload {
                         digest: LiveVoiceModel.modelDigest,
                         debugKey: "debugLiveVoiceURL",
                         expectedBytes: LiveVoiceModel.modelBytes
-                    ) { [weak self] frac in
-                        Task { @MainActor in
-                            guard let self, case .downloading = self.phase else { return }
-                            self.phase = .downloading(frac * modelWeight)
-                        }
+                    ) { frac in
+                        relay.send(frac * modelWeight)
                     }
                 }
                 if needPack {
@@ -321,14 +330,11 @@ final class LiveVoiceDownload {
                         digest: LiveVoiceModel.packDigest,
                         debugKey: "debugVoicePackURL",
                         expectedBytes: LiveVoiceModel.packBytes
-                    ) { [weak self] frac in
-                        Task { @MainActor in
-                            guard let self, case .downloading = self.phase else { return }
-                            self.phase = .downloading(min(0.99, base + frac * packWeight))
-                        }
+                    ) { frac in
+                        relay.send(min(0.99, base + frac * packWeight))
                     }
                 }
-                LiveVoiceModel.register(core, dataDir)
+                await LiveVoiceModel.registerAsync(core, dataDir)
                 guard let self else { return }
                 self.phase = .ready
                 DramaWork.tellCore(core)

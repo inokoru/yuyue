@@ -155,6 +155,10 @@ final class FontShelf {
         failure[id] = nil
         progress[id] = progress[id] ?? 0
         let total = Double(max(1, info.totalBytes))
+        let relay = ModelDownload.ProgressRelay { [weak self] frac in
+            guard let self, self.tasks[id] != nil else { return }
+            self.progress[id] = min(0.99, frac)
+        }
         tasks[id] = Task { [weak self] in
             defer { self?.tasks[id] = nil }
             guard let self else { return }
@@ -179,11 +183,8 @@ final class FontShelf {
                         urls: urls,
                         to: partFile,
                         expectedBytes: Int64(f.bytes)
-                    ) { [weak self] got, _ in
-                        Task { @MainActor in
-                            guard let self, self.tasks[id] != nil else { return }
-                            self.progress[id] = min(0.99, (before + Double(got)) / total)
-                        }
+                    ) { got, _ in
+                        relay.send((before + Double(got)) / total)
                     }
                     try Task.checkCancellation()
                     try? FileManager.default.removeItem(at: target)

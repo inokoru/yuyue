@@ -12,8 +12,6 @@ struct ListeningPage: View {
 
     var body: some View {
         let _ = focus.tick
-        let _ = KokoroDownload.shared.phase
-        let _ = LiveVoiceDownload.shared.phase
         Group {
             if let source = focus.source {
                 VoiceSourcePage(source: source)
@@ -445,8 +443,6 @@ private struct SourceRow: View {
 
     var body: some View {
         let _ = SettingsLog.shared.entries
-        let _ = KokoroDownload.shared.phase
-        let _ = LiveVoiceDownload.shared.phase
         let on = source.isSetUp
         let localOffline: Bool = {
             if case .cloud(let p) = source, p.isLocal, on {
@@ -628,8 +624,6 @@ struct VoiceSourcePage: View {
     var body: some View {
         let _ = focus.tick
         let _ = cloneRefresh
-        let _ = KokoroDownload.shared.phase
-        let _ = LiveVoiceDownload.shared.phase
         // ⌘Z or 最近改过 can change who's reading from outside this page.
         let _ = SettingsLog.shared.entries
         let book = focus.book
@@ -699,7 +693,7 @@ struct VoiceSourcePage: View {
             }
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         if source == .neural {
                             HStack {
                                 Button {
@@ -1710,7 +1704,16 @@ private struct VoiceMessage: View {
                             HStack(spacing: 7) {
                                 switch phase {
                                 case .downloading(let frac):
-                                    ProgressView().controlSize(.mini)
+                                    ZStack {
+                                        Circle()
+                                            .stroke(YYColor.line, lineWidth: 1.5)
+                                        Circle()
+                                            .trim(from: 0, to: max(0.08, min(1, frac)))
+                                            .stroke(isQueued ? YYTint.standard.accent : YYColor.t2,
+                                                    style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                                            .rotationEffect(.degrees(-90))
+                                    }
+                                    .frame(width: 12, height: 12)
                                     Text(isQueued
                                         ? String(localized: "下载中 \(Int((frac * 100).rounded()))% · 下好后自动启用")
                                         : String(localized: "下载中 \(Int((frac * 100).rounded()))% · 点此预约选用"))

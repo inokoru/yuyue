@@ -65,8 +65,6 @@ struct MacVoicePickerPanel: View {
 
     var body: some View {
         let _ = refreshTick
-        let _ = KokoroDownload.shared.phase
-        let _ = LiveVoiceDownload.shared.phase
         let catalog = Voices.catalog(for: language, bookID: bookID)
         let groups = rows(catalog)
 
@@ -246,7 +244,7 @@ struct MacVoicePickerPanel: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if let follow { followRow(follow) }
                     ForEach(sections(catalog)) { section in
-                        header(section).id(section)
+                        header(section, catalog: catalog).id(section)
                         sectionBody(section, catalog, groups[section] ?? [])
                     }
                 }
@@ -273,11 +271,11 @@ struct MacVoicePickerPanel: View {
         }
     }
 
-    private func header(_ s: Section) -> some View {
+    private func header(_ s: Section, catalog: Voices.Catalog) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(title(s)).font(.yy(size: 10.5, weight: .semibold))
             Spacer()
-            if let note = headerNote(s) {
+            if let note = headerNote(s, catalog: catalog) {
                 Text(note).font(.yy(size: 10.5))
             }
         }
@@ -287,10 +285,10 @@ struct MacVoicePickerPanel: View {
         .padding(.bottom, 4)
     }
 
-    private func headerNote(_ s: Section) -> String? {
+    private func headerNote(_ s: Section, catalog: Voices.Catalog) -> String? {
         switch s {
         case .recommended:
-            if case .needsDownload = Voices.catalog(for: language, bookID: bookID).recommended {
+            if case .needsDownload = catalog.recommended {
                 String(localized: "Kokoro 轻量离线 · \(KokoroModel.totalMegabytes) MB")
             } else {
                 String(localized: "跨端离线好声音")

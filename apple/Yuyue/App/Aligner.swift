@@ -32,6 +32,7 @@ nonisolated enum Aligner {
     }
 
     /// Fetched, checked and unpacked unless it's here. `progress` hears 0–1.
+    @concurrent
     static func ensure(_ dataDir: URL, progress: @escaping @Sendable (Double) -> Void) async throws {
         if installed(dataDir) { return }
         let dir = folder(dataDir)

@@ -70,6 +70,11 @@ nonisolated enum KokoroModel {
         _ = core.kokoroSetDir(dir: folder(dataDir).path(percentEncoded: false))
     }
 
+    @concurrent
+    static func registerAsync(_ core: YuyueCore, _ dataDir: URL) async {
+        register(core, dataDir)
+    }
+
     /// 静态兜底音色元数据（供设置页在未加载权重或首次打开时展示完整音色数量与名称）。
     static let fallbackSpeakers: [KokoroSpeaker] = [
         KokoroSpeaker(id: "kokoro.zf_001", voiceId: "zf_001", sid: 3, name: "清禾", lang: "zh", gender: .f, narrator: true, summary: "温润清朗 · 默认中文女声"),
@@ -122,6 +127,7 @@ nonisolated enum KokoroModel {
         return allSpeakers().first(where: { $0.id == id }).map(KokoroVoice.init(speaker:))
     }
 
+    @concurrent
     static func ensureInstalled(
         into dataDir: URL,
         progress: @escaping @Sendable (Double) -> Void
@@ -202,6 +208,18 @@ final class KokoroDownload {
         case downloading(Double)
         case ready
         case failed
+
+        enum Kind: Equatable { case unsupported, idle, downloading, ready, failed }
+
+        var kind: Kind {
+            switch self {
+            case .unsupported: .unsupported
+            case .idle: .idle
+            case .downloading: .downloading
+            case .ready: .ready
+            case .failed: .failed
+            }
+        }
     }
 
     private(set) var phase: Phase = KokoroModel.deviceUnsupported ? .unsupported : .idle
@@ -248,8 +266,10 @@ final class KokoroDownload {
         }
         guard let ctx = LiveVoiceModel.context else { return }
         if KokoroModel.installed(ctx.dataDir) {
-            KokoroModel.register(ctx.core, ctx.dataDir)
             phase = .ready
+            let core = ctx.core
+            let dataDir = ctx.dataDir
+            Task { await KokoroModel.registerAsync(core, dataDir) }
         } else if case .ready = phase {
             phase = .idle
         }
@@ -272,23 +292,26 @@ final class KokoroDownload {
     func start() {
         guard !KokoroModel.deviceUnsupported, task == nil, let ctx = LiveVoiceModel.context else { return }
         if KokoroModel.installed(ctx.dataDir) {
-            KokoroModel.register(ctx.core, ctx.dataDir)
             phase = .ready
+            let core = ctx.core
+            let dataDir = ctx.dataDir
+            Task { await KokoroModel.registerAsync(core, dataDir) }
             return
         }
         phase = .downloading(0)
         let core = ctx.core
         let dataDir = ctx.dataDir
+        let relay = ModelDownload.ProgressRelay { [weak self] frac in
+            guard let self, case .downloading = self.phase else { return }
+            self.phase = .downloading(frac)
+        }
         task = Task { [weak self] in
             defer { self?.task = nil }
             do {
-                try await KokoroModel.ensureInstalled(into: dataDir) { [weak self] frac in
-                    Task { @MainActor in
-                        guard let self, case .downloading = self.phase else { return }
-                        self.phase = .downloading(frac)
-                    }
+                try await KokoroModel.ensureInstalled(into: dataDir) { frac in
+                    relay.send(frac)
                 }
-                KokoroModel.register(core, dataDir)
+                await KokoroModel.registerAsync(core, dataDir)
                 guard let self else { return }
                 if !self.pendingVoice.isEmpty {
                     for (bookKey, voiceID) in self.pendingVoice {
@@ -501,7 +524,7 @@ struct KokoroPrepBanner: View {
 
     var body: some View {
         Group { content }
-            .animation(YYMotion.standard, value: download.phase)
+            .animation(YYMotion.standard, value: download.phase.kind)
     }
 
     @ViewBuilder private var content: some View {
@@ -527,6 +550,7 @@ struct KokoroPrepBanner: View {
                         Capsule()
                             .fill(YYTint.standard.fill)
                             .frame(width: max(4, 88 * CGFloat(min(1, max(0, frac)))))
+                            .animation(YYMotion.reduce ? nil : .linear(duration: 0.12), value: frac)
                     }
                     .frame(width: 88, height: 4)
                 }

@@ -27,6 +27,7 @@ nonisolated enum SpeakerPrint {
     }
 
     /// Fetched, checked and unpacked unless it's here; quietly not, offline.
+    @concurrent
     static func ensure(_ dataDir: URL) async {
         #if DEBUG
         if UserDefaults.standard.string(forKey: "debugSpeakerURL") != nil { return await debugInstall(dataDir) }
@@ -52,6 +53,7 @@ nonisolated enum SpeakerPrint {
 
     #if DEBUG
     /// `-debugSpeakerURL <zip>` (a file or `~/…` in the app's folder): unpacked beside the library.
+    @concurrent
     static func debugInstall(_ dataDir: URL) async {
         guard !installed(dataDir), let from = UserDefaults.standard.string(forKey: "debugSpeakerURL").flatMap(debugURL) else { return }
         let dir = Aligner.folder(dataDir)

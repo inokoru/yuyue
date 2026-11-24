@@ -50,6 +50,7 @@ nonisolated enum ModelDownload {
 
     /// 支持多源回退、HTTP Range 断点续传与 BLAKE3 校验的文件下载。
     /// 下载中断或暂停时保留 `partFile`，下次重试直接从断点继续；仅在校验不匹配时清理重下。
+    @concurrent
     static func downloadWithResume(
         urls: [URL],
         to partFile: URL,
@@ -233,6 +234,7 @@ nonisolated enum ModelDownload {
             var written: Int64 = 0
             var total: Int64 = 0
             var lastReported: Int64 = 0
+            var lastReportTime: ContinuousClock.Instant?
             var outcome: StreamOutcome = .ok
             var failedError: Error?
         }
@@ -307,11 +309,13 @@ nonisolated enum ModelDownload {
                     try handle.truncate(atOffset: 0)
                     startPos = 0
                 }
+                let now = ContinuousClock.now
                 lock.withLock { st in
                     st.handle = handle
                     st.written = startPos
                     st.total = max(totalBytes, startPos)
                     st.lastReported = startPos
+                    st.lastReportTime = startPos > 0 ? now : nil
                 }
                 if startPos > 0 {
                     progress(startPos, max(totalBytes, startPos))
@@ -331,8 +335,12 @@ nonisolated enum ModelDownload {
                     st.written += Int64(data.count)
                     let total = max(st.total, st.written)
                     st.total = total
-                    if st.written - st.lastReported >= 131_072 {
+                    let now = ContinuousClock.now
+                    let dueByTime = st.lastReportTime.map { now - $0 >= .milliseconds(100) } ?? true
+                    let isDone = total > 0 && st.written >= total
+                    if (dueByTime && st.written - st.lastReported >= 65_536) || isDone {
                         st.lastReported = st.written
+                        st.lastReportTime = now
                         return (st.written, total)
                     }
                     return nil
@@ -413,5 +421,63 @@ nonisolated enum ModelDownload {
             }
         }
         return true
+    }
+
+    /// 合并高频后台下载进度回调，确保同一时刻最多只有一个 `@MainActor` 更新排队，
+    /// 避免高速宽带下密集刷新把主线程事件循环堵死。
+    final class ProgressRelay: @unchecked Sendable {
+        private struct State {
+            var latest: Double = -1
+            var delivered: Double = -1
+            var scheduled = false
+        }
+
+        private let state = Mutex(State())
+        private let minStep: Double
+        private let deliver: @MainActor @Sendable (Double) -> Void
+
+        init(minStep: Double = 0.005, deliver: @escaping @MainActor @Sendable (Double) -> Void) {
+            self.minStep = minStep
+            self.deliver = deliver
+        }
+
+        func send(_ raw: Double) {
+            let value = min(1, max(0, raw))
+            let shouldSchedule = state.withLock { st -> Bool in
+                st.latest = value
+                guard !st.scheduled else { return false }
+                if st.delivered >= 0, value < 1, abs(value - st.delivered) < minStep {
+                    return false
+                }
+                st.scheduled = true
+                return true
+            }
+            guard shouldSchedule else { return }
+            Task { @MainActor in
+                while true {
+                    let next = self.state.withLock { st -> Double? in
+                        let v = st.latest
+                        if st.delivered >= 0, v < 1, abs(v - st.delivered) < self.minStep {
+                            st.scheduled = false
+                            return nil
+                        }
+                        st.delivered = v
+                        return v
+                    }
+                    guard let next else { break }
+                    self.deliver(next)
+                    let more = self.state.withLock { st -> Bool in
+                        if st.latest != st.delivered,
+                           st.latest >= 1 || abs(st.latest - st.delivered) >= self.minStep {
+                            return true
+                        }
+                        st.scheduled = false
+                        return false
+                    }
+                    if !more { break }
+                    await Task.yield()
+                }
+            }
+        }
     }
 }

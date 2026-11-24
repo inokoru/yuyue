@@ -24,6 +24,7 @@ nonisolated enum SoundLibrary {
     }
 
     /// Fetched, checked and unpacked unless it's here; quietly not, offline.
+    @concurrent
     static func ensure(_ core: YuyueCore, _ dataDir: URL) async {
         defer { register(core, dataDir) }
         guard !installed(dataDir) else { return }

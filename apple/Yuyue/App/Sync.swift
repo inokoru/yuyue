@@ -2,6 +2,7 @@ import AuthenticationServices
 import Foundation
 import Network
 import Security
+import Synchronization
 import YuyueCore
 
 /// 同步, with no server of ours: every device keeps one file in a folder the user owns (a WebDAV
@@ -868,7 +869,7 @@ struct LocalFolder: SyncFolder {
 /// would ask for the login password once per key. The file is plain text, readable only by this
 /// user, and outside the library so it's never in a snapshot or a sync.
 nonisolated enum Keychain {
-    private static let lock = NSLock()
+    private static let store = Mutex<[String: String]?>(nil)
 
     private static var file: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -884,7 +885,7 @@ nonisolated enum Keychain {
         #endif
     }
 
-    private static func load() -> [String: String] {
+    private static func loadFromDisk() -> [String: String] {
         guard let data = try? Data(contentsOf: file),
               let decoded = try? JSONDecoder().decode([String: String].self, from: data) else { return [:] }
         return decoded
@@ -899,27 +900,35 @@ nonisolated enum Keychain {
 
     static func read(_ key: String) -> String? {
         if off { return nil }
-        lock.lock()
-        defer { lock.unlock() }
-        return load()[key]
+        return store.withLock { cached in
+            if let cached { return cached[key] }
+            let loaded = loadFromDisk()
+            cached = loaded
+            return loaded[key]
+        }
     }
 
     static func write(_ key: String, _ value: String) {
         if off { return }
-        lock.lock()
-        defer { lock.unlock() }
-        var secrets = load()
-        secrets[key] = value
-        save(secrets)
+        store.withLock { cached in
+            var secrets = cached ?? loadFromDisk()
+            secrets[key] = value
+            cached = secrets
+            save(secrets)
+        }
     }
 
     static func delete(_ key: String) {
         if off { return }
-        lock.lock()
-        defer { lock.unlock() }
-        var secrets = load()
-        guard secrets.removeValue(forKey: key) != nil else { return }
-        save(secrets)
+        store.withLock { cached in
+            var secrets = cached ?? loadFromDisk()
+            guard secrets.removeValue(forKey: key) != nil else {
+                cached = secrets
+                return
+            }
+            cached = secrets
+            save(secrets)
+        }
     }
 }
 #else
