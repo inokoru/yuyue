@@ -146,7 +146,8 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
     }
     // A downloaded or added font arrived: the open sections load again, now with its @font-face.
     val fonts = WenKai.version + FontShelf.version
-    LaunchedEffect(fonts) { if (fonts > 0) model.pager.reload() }
+    val initialFonts = remember(model) { fonts }
+    LaunchedEffect(fonts) { if (fonts != initialFonts) model.pager.reload() }
     BackHandler {
         when {
             model.selection != null || model.openMark != null -> model.dismissCards()

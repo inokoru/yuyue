@@ -30,7 +30,7 @@ use crate::txt;
 
 /// Bumped whenever an import would come out differently; books from older versions are
 /// re-imported from their original file.
-pub const FORMAT_VERSION: u32 = 2;
+pub const FORMAT_VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -363,7 +363,15 @@ fn build_epub(tmp: &Path, id: &str, original: &Path, fallback_title: &str, forma
     let sections = std::mem::take(&mut book.sections);
     let mut built = Vec::with_capacity(sections.len());
     for s in sections {
-        let lang = s.lang.as_deref().unwrap_or(&book.language).to_string();
+        let sample = s.body.text_content();
+        let refined = s.lang.as_deref().map(|l| {
+            if sample.chars().any(text::is_speakable) {
+                text::refine_language(Some(l), &sample)
+            } else {
+                book.language.clone()
+            }
+        });
+        let lang = refined.as_deref().unwrap_or(&book.language).to_string();
         let resource = |src: &str| book.resource_url(src);
         let link = |href: &str| book.link(href);
         let ctx = Context { lang: &lang, resource: &resource, link: &link };
@@ -372,7 +380,7 @@ fn build_epub(tmp: &Path, id: &str, original: &Path, fallback_title: &str, forma
         built.push(Built {
             info: SectionInfo {
                 title: s.title,
-                lang: own_lang(s.lang.as_deref(), &book.language),
+                lang: own_lang(refined.as_deref(), &book.language),
                 styles: s.styles,
                 body_class: s.body_class,
                 linear: s.linear,

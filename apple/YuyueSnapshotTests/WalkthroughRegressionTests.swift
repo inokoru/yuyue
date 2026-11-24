@@ -222,4 +222,24 @@ struct WalkthroughRegressionTests {
         #expect(nightCustom.contains(#"data-yy-texture="linen""#))
         #expect(nightCustom.contains(#"style="--yy-fs:18px;--yy-p-bg:#18202B;--yy-p-ink:#C9D3DE;color-scheme:dark""#))
     }
+
+    @MainActor @Test func `font settings forward fontFace and system sans to reader script`() {
+        var s = ReaderSettings.standard
+        s.paper = .kami
+        // With font == nil on serif-default kami (when follow is off), default id reflects serif,
+        // and explicitly choosing "system" applies .sans so the reading page switches to sans.
+        FontShelf.shared.apply("system", to: &s)
+        #expect(s.font == .sans)
+        #expect(s.script()["font"] as? String == "sans")
+
+        FontShelf.shared.apply("notoserif", to: &s)
+        #expect(s.fontFace == "notoserif")
+        #expect(s.script()["font"] as? String == "\"yy-notoserif\", var(--yy-serif)")
+
+        FontShelf.shared.apply("file:我的字.ttf", to: &s)
+        #expect(s.script()["font"] as? String == "\"yy-file:我的字.ttf\", var(--yy-serif)")
+
+        FontShelf.shared.apply("local:Yuanti SC", to: &s)
+        #expect(s.script()["font"] as? String == "\"Yuanti SC\", var(--yy-sans)")
+    }
 }

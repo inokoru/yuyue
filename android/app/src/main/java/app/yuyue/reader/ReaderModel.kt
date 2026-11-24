@@ -1213,13 +1213,49 @@ fun ReaderSettings.script(g: uniffi.yuyue_core.PageGeometry): JSONObject = JSONO
     put("justify", justify ?: JSONObject.NULL)
     put("indent", indent ?: JSONObject.NULL)
     put("compress", compress)
-    put("font", when (font) { Font.SANS -> "sans"; Font.SERIF -> "serif"; Font.KAI -> "kai"; Font.WEN_KAI -> "wenkai"; null -> JSONObject.NULL })
+    put("font", cssFont() ?: JSONObject.NULL)
     put("margin", g.margin)
     put("top", g.top)
     put("bottom", g.bottom)
     put("motion", if (g.reducedMotion) "reduced" else "full")
     put("eink", EInk.on)
     put("einkGray", EInk.grayscaleImages)
+}
+
+/** Matches `document.rs` + `fonts.rs`: `fontFace` CSS family first (when set), followed by the
+ *  built-in fallback stack, or the built-in keyword alone. */
+fun ReaderSettings.cssFont(): String? {
+    val face = fontFace?.takeIf { it.isNotEmpty() }
+    val family = face?.let { raw ->
+        fun quote(s: String) = "\"${s.filterNot { it in "\"\\<>;{}" }}\""
+        when {
+            raw.startsWith("local:") -> raw.removePrefix("local:").trim().takeIf { it.isNotEmpty() }?.let(::quote)
+            raw.startsWith("file:") -> raw.removePrefix("file:").takeIf {
+                it.isNotEmpty() && !it.startsWith(".") && it.none { c -> c in "/\\\"'" } &&
+                    it.substringAfterLast('.', "").lowercase() in setOf("ttf", "otf", "ttc")
+            }?.let { quote("yy-$raw") }
+            raw == "notoserif" || raw == "notosans" ||
+                runCatching { FontShelf.catalog }.getOrDefault(emptyList()).any { it.id == raw && it.id != "wenkai" } -> quote("yy-$raw")
+            else -> null
+        }
+    }
+    if (family != null) {
+        val fallback = when (font) {
+            Font.SANS -> "sans"
+            Font.SERIF -> "serif"
+            Font.KAI -> "kaiti"
+            Font.WEN_KAI -> "wenkai"
+            null -> "p-font"
+        }
+        return "$family, var(--yy-$fallback)"
+    }
+    return when (font) {
+        Font.SANS -> "sans"
+        Font.SERIF -> "serif"
+        Font.KAI -> "kai"
+        Font.WEN_KAI -> "wenkai"
+        null -> null
+    }
 }
 
 /** A message on the reading capsule with something to do. */

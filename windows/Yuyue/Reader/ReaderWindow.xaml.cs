@@ -1134,10 +1134,12 @@ public sealed partial class ReaderWindow : Window
         FontTilesHost.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         bool wenkaiInstalled = _library.Fonts.IsPackInstalled("wenkai");
+        var resolvedPreset = PaperAppearance.Resolve(_library, _settings).Preset;
+        bool defaultIsSans = resolvedPreset is Paper.Plain or Paper.Dark;
         var tiles = new (string Key, string Label, string SampleFont, bool Active)[]
         {
-            ("default", "系统", "Microsoft YaHei UI", _settings.Font is null && string.IsNullOrEmpty(_settings.FontFace)),
-            ("serif", "宋体", "SimSun", _settings.Font == Font.Serif && string.IsNullOrEmpty(_settings.FontFace)),
+            ("default", "系统", "Microsoft YaHei UI", string.IsNullOrEmpty(_settings.FontFace) && (_settings.Font == Font.Sans || (_settings.Font is null && defaultIsSans))),
+            ("serif", "宋体", "SimSun", string.IsNullOrEmpty(_settings.FontFace) && (_settings.Font == Font.Serif || (_settings.Font is null && !defaultIsSans))),
             ("kai", "楷体", "KaiTi", _settings.Font == Font.Kai && string.IsNullOrEmpty(_settings.FontFace)),
             ("wenkai", wenkaiInstalled ? "霞鹜文楷" : "文楷 ↓", "KaiTi", _settings.Font == Font.WenKai),
         };
@@ -1175,7 +1177,7 @@ public sealed partial class ReaderWindow : Window
                     LoadSection(_currentSection);
                     return;
                 }
-                Font? f = key switch { "serif" => Font.Serif, "kai" => Font.Kai, _ => null };
+                Font? f = key switch { "serif" => Font.Serif, "kai" => Font.Kai, _ => Font.Sans };
                 _settings = _settings with { Font = f, FontFace = null };
                 PushSettingsToReader();
             };
@@ -1185,7 +1187,7 @@ public sealed partial class ReaderWindow : Window
         }
 
         // Row 1 Col 0: 更多（打开字样册 FontBook）
-        bool customFaceActive = !string.IsNullOrEmpty(_settings.FontFace) || _settings.Font == Font.Sans;
+        bool customFaceActive = !string.IsNullOrEmpty(_settings.FontFace);
         var moreSp = new StackPanel { Spacing = 1, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         moreSp.Children.Add(new TextBlock { Text = "永永", FontFamily = new FontFamily("SimSun"), FontSize = 13, Foreground = ThemeHelper.Brush(p.T2), HorizontalAlignment = HorizontalAlignment.Center });
         moreSp.Children.Add(new TextBlock { Text = "更多", FontSize = 10, Foreground = ThemeHelper.Brush(customFaceActive ? tint.Accent : p.T3), HorizontalAlignment = HorizontalAlignment.Center });
@@ -1228,7 +1230,7 @@ public sealed partial class ReaderWindow : Window
             ("霞鹜文楷", "开源现代楷书，兼顾楷体刀锋与黑体清晰度", Font.WenKai, null, "KaiTi"),
             ("思源宋体 (Noto Serif SC)", "开源现代人文衬线字体", Font.Serif, "notoserif", "SimSun"),
             ("思源黑体 (Noto Sans SC)", "开源现代无衬线字体", Font.Sans, "notosans", "Microsoft YaHei UI"),
-            ("仿宋", "清朗古籍刻本风味", Font.Serif, "FangSong, serif", "FangSong"),
+            ("仿宋", "清朗古籍刻本风味", Font.Serif, "local:FangSong", "FangSong"),
         };
 
         foreach (var item in faces)
@@ -6257,13 +6259,21 @@ public sealed partial class ReaderWindow : Window
         // Match exact @font-face family names emitted by core/yuyue-core/src/fonts.rs:111-161
         if (!string.IsNullOrWhiteSpace(fontFace))
         {
+            string fallback = font switch
+            {
+                Font.Sans => "sans",
+                Font.Serif => "serif",
+                Font.Kai => "kaiti",
+                Font.WenKai => "wenkai",
+                _ => "p-font",
+            };
             if (fontFace is "notoserif" or "notosans")
-                return $"\"yy-{fontFace}\", var(--yy-{(fontFace == "notoserif" ? "serif" : "sans")})";
+                return $"\"yy-{fontFace}\", var(--yy-{fallback})";
             if (fontFace.StartsWith("file:", StringComparison.Ordinal))
-                return $"\"yy-{fontFace}\", var(--yy-serif)";
+                return $"\"yy-{fontFace}\", var(--yy-{fallback})";
             if (fontFace.StartsWith("local:", StringComparison.Ordinal))
-                return $"\"{fontFace[6..].Trim()}\", var(--yy-serif)";
-            return fontFace;
+                return $"\"{fontFace[6..].Trim()}\", var(--yy-{fallback})";
+            return $"\"{fontFace.Trim()}\", var(--yy-{fallback})";
         }
         return font switch
         {

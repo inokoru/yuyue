@@ -117,4 +117,19 @@ class PaperAppearanceTest {
         assertTrue(nightCustom.contains("""data-yy-texture="linen""""))
         assertTrue(nightCustom.contains("""style="--yy-fs:18px;--yy-p-bg:#18202B;--yy-p-ink:#C9D3DE;color-scheme:dark""""))
     }
+
+    @Test
+    fun fontSettingsForwardFontFaceAndSystemSansToReaderScript() {
+        var s = settings(Paper.KAMI)
+        s = FontShelf.apply("system", s)
+        assertEquals(uniffi.yuyue_core.Font.SANS, s.font)
+        assertEquals("sans", s.cssFont())
+
+        s = FontShelf.apply("notoserif", s)
+        assertEquals("notoserif", s.fontFace)
+        assertEquals("\"yy-notoserif\", var(--yy-serif)", s.cssFont())
+
+        s = s.copy(fontFace = "file:我的字.ttf", font = uniffi.yuyue_core.Font.SERIF)
+        assertEquals("\"yy-file:我的字.ttf\", var(--yy-serif)", s.cssFont())
+    }
 }

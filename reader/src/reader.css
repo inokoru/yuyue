@@ -239,7 +239,11 @@ html[data-yy-kind="image"][data-yy-mode="paginated"] body { -webkit-column-count
    yy-l  letter spacing              yy-c  text colour                                   */
 #yy-content .yy-b { font-size: var(--yy-base) !important; line-height: var(--yy-lh-eff) !important; }
 #yy-content .yy-r { font-size: calc(var(--yy-base) * var(--yy-fr, 1)) !important; line-height: var(--yy-lh-eff) !important; }
-#yy-content .yy-f { font-family: var(--yy-font-eff) !important; }
+html:not([data-yy-raw]) body #yy-content .yy-f,
+html:not([data-yy-raw])[data-yy-font="1"] body #yy-content .yy-f-pub { font-family: var(--yy-font-eff) !important; }
+html:not([data-yy-raw]) #yy-content .s,
+html:not([data-yy-raw]) #yy-content .pz-r,
+html:not([data-yy-raw]) #yy-content .pz-l { font-family: inherit !important; }
 #yy-content .yy-m { margin-top: 0 !important; margin-bottom: var(--yy-ps-eff) !important; }
 #yy-content .yy-i { text-indent: var(--yy-ind) !important; }
 #yy-content .yy-j { text-align: var(--yy-al) !important; }
@@ -250,7 +254,8 @@ html[data-yy-kind="image"][data-yy-mode="paginated"] body { -webkit-column-count
 /* English (.r-text.en): Georgia, ragged right, no tracking, taller lines. */
 #yy-content .yy-b:lang(en) { font-size: var(--yy-base-en) !important; line-height: var(--yy-lh, var(--yy-lt-lh)) !important; }
 #yy-content .yy-r:lang(en) { font-size: calc(var(--yy-base-en) * var(--yy-fr, 1)) !important; line-height: var(--yy-lh, var(--yy-lt-lh)) !important; }
-#yy-content .yy-f:lang(en) { font-family: var(--yy-font-en, var(--yy-lt-font)) !important; }
+html:not([data-yy-raw]) body #yy-content .yy-f:lang(en),
+html:not([data-yy-raw])[data-yy-font="1"] body #yy-content .yy-f-pub:lang(en) { font-family: var(--yy-font-en, var(--yy-lt-font)) !important; }
 #yy-content .yy-j:lang(en) { text-align: var(--yy-al-en) !important; }
 #yy-content .yy-l:lang(en) { letter-spacing: var(--yy-lt-ls) !important; }
 
@@ -260,7 +265,7 @@ html[data-yy-kind="image"][data-yy-mode="paginated"] body { -webkit-column-count
 #yy-content .yy-h:lang(en) { font-size: calc(var(--yy-base-en) * var(--yy-fr, 1.2)) !important; }
 
 /* Section title (.r-title / .r-rule). */
-#yy-content .yy-t {
+html:not([data-yy-raw]) body #yy-content .yy-t {
   font-family: var(--yy-font, var(--yy-p-title-font)) !important;
   font-size: calc(var(--yy-fs) * var(--yy-p-title-size)) !important;
   font-weight: var(--yy-p-title-weight) !important;
@@ -277,7 +282,8 @@ html[data-yy-kind="image"][data-yy-mode="paginated"] body { -webkit-column-count
   -webkit-column-break-after: avoid;
   break-after: avoid;
 }
-#yy-content .yy-t:lang(en) { font-family: var(--yy-font-en, var(--yy-p-title-font-en)) !important; }
+html:not([data-yy-raw]) body #yy-content .yy-t:lang(en) { font-family: var(--yy-font-en, var(--yy-p-title-font-en)) !important; }
+html:not([data-yy-raw]) body #yy-content .yy-t *:not(rt):not(rp):not(.yy-noteref) { font-family: inherit !important; }
 #yy-content .yy-t.yy-t-m { margin-bottom: 0 !important; }
 #yy-content .yy-t:not(.yy-a) { text-align: start !important; }
 #yy-content .yy-t::after {
@@ -380,7 +386,7 @@ html[data-yy-kind="image"][data-yy-mode="paginated"] body { -webkit-column-count
 }
 #yy-content .yy-footnote:lang(en) { font-family: var(--yy-font-en, var(--yy-lt-font)) !important; font-size: calc(var(--yy-base-en) * .8) !important; }
 #yy-content .yy-footnote + .yy-footnote { margin-top: calc(var(--yy-fs) * .4) !important; padding-top: 0 !important; border-top: 0 !important; }
-#yy-content .yy-footnote * { font-size: inherit !important; line-height: inherit !important; color: inherit !important; text-indent: 0 !important; }
+#yy-content .yy-footnote *:not(code):not(pre):not(rt) { font-family: inherit !important; font-size: inherit !important; line-height: inherit !important; color: inherit !important; text-indent: 0 !important; }
 #yy-content .yy-footnote p { margin: 0 !important; }
 
 /* Dark papers: publisher colours and backgrounds would be unreadable, so text inherits. */
@@ -731,12 +737,13 @@ html[data-yy-eink="1"] #yy-content p.yy-pod-line:has(.s.yy-ink) { box-shadow: 0 
   grid-row: 1;
   max-width: 82% !important;
   min-width: 0;
-  font-family: var(--yy-sans, system-ui);
+  font-family: var(--yy-sans, system-ui) !important;
   font-size: .72em;
   line-height: 1.4;
   color: var(--yy-p-ink-2);
   padding: 0 .25em;
 }
+html:not([data-yy-raw]) body #yy-content .yy-bq-nm * { font-family: inherit !important; }
 #yy-content .yy-bq-r .yy-bq-nm { grid-column: 1; text-align: right; }
 #yy-content .yy-bq-nm b { font-weight: 600; color: color-mix(in srgb, var(--yy-c) 75%, var(--yy-p-ink)); margin-right: .2em; }
 #yy-content .yy-bq-unk .yy-bq-nm {
@@ -786,12 +793,14 @@ html[data-yy-eink="1"] #yy-content p.yy-pod-line:has(.s.yy-ink) { box-shadow: 0 
 #yy-content .yy-bq-nm ~ .yy-bq-av,
 #yy-content .yy-bq-nm ~ .yy-bq-bx { grid-row: 2; }
 #yy-content .yy-bq-bu {
+  font-family: var(--yy-font-eff) !important;
   padding: .4em .8em;
   border-radius: .2em 1em 1em 1em;
   background: color-mix(in srgb, var(--yy-c) 13%, var(--yy-p-bg));
   line-height: 1.75;
   text-align: left;
 }
+#yy-content .yy-bq-bu:lang(en) { font-family: var(--yy-font-en, var(--yy-lt-font)) !important; }
 #yy-content .yy-bq-r .yy-bq-bu { border-radius: 1em .2em 1em 1em; }
 #yy-content .yy-bq-unk .yy-bq-av { background: color-mix(in srgb, var(--yy-p-ink) 7%, var(--yy-p-bg)); color: var(--yy-p-ink-2); }
 #yy-content .yy-bq-unk .yy-bq-nm b { color: var(--yy-p-ink-2); font-weight: 500; margin-right: 0; }

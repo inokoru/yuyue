@@ -220,14 +220,20 @@ fn sanitize(el: &mut Element, ctx: &Context) {
 
 fn clean_attrs(e: &mut Element, ctx: &Context) {
     let attrs = std::mem::take(&mut e.attrs);
+    let has_explicit_lang = attrs.iter().any(|(k, v)| k.eq_ignore_ascii_case("lang") && keep_lang(v, e));
     for (k, v) in attrs {
         let lower = k.to_ascii_lowercase();
         if lower.starts_with("on") || lower.starts_with("xmlns") || lower == "srcset" || lower == "contenteditable" {
             continue;
         }
         match lower.as_str() {
+            "lang" => {
+                if keep_lang(&v, e) {
+                    e.attrs.push(("lang".into(), v));
+                }
+            }
             "xml:lang" => {
-                if e.attr("lang").is_none() {
+                if !has_explicit_lang && e.attr("lang").is_none() && keep_lang(&v, e) {
                     e.attrs.push(("lang".into(), v));
                 }
             }
@@ -260,6 +266,20 @@ fn clean_attrs(e: &mut Element, ctx: &Context) {
     if e.is("aside") && (e.has_epub_type("footnote") || e.has_epub_type("endnote") || e.has_epub_type("rearnote")) {
         e.add_class("yy-footnote");
     }
+}
+
+/// Drops empty, `und`, or boilerplate non-CJK `lang` attributes (e.g. Word/Calibre `lang="EN-US"`)
+/// on elements whose own text is plainly CJK, so `:lang(en)` typography never hijacks Chinese text.
+fn keep_lang(declared: &str, e: &Element) -> bool {
+    let d = declared.trim();
+    if d.is_empty() || d.eq_ignore_ascii_case("und") {
+        return false;
+    }
+    let primary = d.split(['-', '_']).next().unwrap_or(d).to_ascii_lowercase();
+    if !matches!(primary.as_str(), "zh" | "ja" | "ko") && text::looks_cjk(&e.text_content()) {
+        return false;
+    }
+    true
 }
 
 fn filter_style(style: &str) -> Option<String> {
@@ -676,5 +696,16 @@ mod tests {
             to_html(&n.content),
             r#"<p><span class="s" data-s="0">床前明月光</span><br><span class="s" data-s="1">疑是地上霜</span></p>"#
         );
+    }
+
+    #[test]
+    fn drops_bogus_english_lang_on_chinese_elements() {
+        let n = run(
+            r#"<p lang="EN-US">我与父亲不相见已二年余了。</p><p xml:lang="en">他只说，“不要紧！”</p><p lang="en">Hello world.</p>"#,
+            "zh-CN",
+        );
+        let html = to_html(&n.content);
+        assert!(!html.contains(r#"lang="EN-US""#) && !html.contains(r#"lang="en"><span class="s" data-s="1""#), "{html}");
+        assert!(html.contains(r#"<p lang="en"><span class="s" data-s="2">Hello world.</span></p>"#), "{html}");
     }
 }

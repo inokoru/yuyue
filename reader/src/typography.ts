@@ -38,13 +38,39 @@ function hasDirectText(el: Element): number {
 }
 
 const OWN_CLASS = /(^|\s)(s|pz-[rl]|hl|wave|yy-[\w-]+)(?=\s|$)/g;
+const NON_TEXT_INLINE = /^(BR|WBR|IMG|SVG|MATH|RT|RP|CODE|KBD|SAMP|TT)$/;
 
-/** Inline elements whose size the publisher may have changed: big/font, a style attribute, or a
- *  class that is not one of core's or the reader's. Sentence spans are skipped (thousands). */
-function isStyledInline(el: HTMLElement, tag: string): boolean {
-  if (tag === 'BIG' || tag === 'FONT' || el.hasAttribute('style')) return true;
+/** Publisher inline elements that may carry their own font or size. Generated sentence and
+ *  punctuation spans (`.s`, `.pz-*`) have no publisher class/style and are skipped (thousands). */
+function isPublisherInline(el: HTMLElement, tag: string): boolean {
+  if (NON_TEXT_INLINE.test(tag) || el.classList.contains('yy-noteref')) return false;
+  if (tag !== 'SPAN') return true;
+  if (el.hasAttribute('style')) return true;
   const c = el.getAttribute('class');
   return !!c && !!c.replace(OWN_CLASS, ' ').trim();
+}
+
+/** When a paragraph wraps all of its text in one publisher inline element (e.g. Calibre's
+ *  `<p class="calibre1"><span class="calibre2">…</span></p>`), its effective font is that wrapper's. */
+function blockFamily(el: HTMLElement, cs: CSSStyleDeclaration): string {
+  let only: HTMLElement | null = null;
+  for (let c = el.firstChild; c; c = c.nextSibling) {
+    if (c.nodeType === 3) {
+      if (/\S/.test((c as Text).data)) return cs.fontFamily;
+      continue;
+    }
+    if (c.nodeType !== 1) continue;
+    const ce = c as HTMLElement;
+    const t = ce.nodeName.toUpperCase();
+    if (t === 'BR' || t === 'WBR' || ce.classList.contains('yy-noteref')) continue;
+    if (ce.classList.contains('s')) return cs.fontFamily;
+    if (only) return cs.fontFamily;
+    only = ce;
+  }
+  if (only && !NON_TEXT_INLINE.test(only.nodeName.toUpperCase())) {
+    return getComputedStyle(only).fontFamily;
+  }
+  return cs.fontFamily;
 }
 
 function alignOf(v: string, rtl: boolean): Block['align'] {
@@ -100,7 +126,7 @@ export function classify(content: HTMLElement): void {
     const el = all[i] as HTMLElement;
     const tag = el.nodeName.toUpperCase();
     if (INLINE.test(tag)) {
-      if (isStyledInline(el, tag)) styled.push(el);
+      if (isPublisherInline(el, tag)) styled.push(el);
       continue;
     }
     if (tag === 'YY-PAGES' || el.classList.contains('yy-meta')) continue;
@@ -115,7 +141,7 @@ export function classify(content: HTMLElement): void {
       tag,
       len,
       size,
-      family: cs.fontFamily,
+      family: blockFamily(el, cs),
       indent: round(px(cs.textIndent) / size),
       mt: round(px(cs.marginTop) / size),
       mb: round(px(cs.marginBottom) / size),
@@ -126,10 +152,13 @@ export function classify(content: HTMLElement): void {
   }
   // Raised initials and other inline runs set much larger than their paragraph (Gutenberg's
   // `.letra { font-size: 250% }`) inherit the paragraph's tall unitless line height and would push
-  // their line far down; they get line-height 1 (.yy-lh1).
+  // their line far down; they get line-height 1 (.yy-lh1). Also record inline font families so
+  // publisher `<span>` font rules cannot silently override reader font settings.
   const blockOf = new Map<Element, Block>();
   for (const b of blocks) blockOf.set(b.el, b);
+  const inlineRuns: { el: HTMLElement; b: Block; family: string }[] = [];
   for (const el of styled) {
+    if (el.closest('pre, code, kbd, samp, tt, rt, rp, .yy-meta, .yy-footnote, a.yy-noteref')) continue;
     let p = el.parentElement;
     while (p && p !== content && !blockOf.has(p)) p = p.parentElement;
     const b = p && blockOf.get(p);
@@ -138,6 +167,7 @@ export function classify(content: HTMLElement): void {
     if (px(cs.fontSize) > b.size * 1.3 && cs.cssFloat === 'none' && cs.display.indexOf('inline') === 0) {
       el.classList.add('yy-lh1');
     }
+    inlineRuns.push({ el, b, family: cs.fontFamily });
   }
   root.removeAttribute('data-yy-raw');
   if (!blocks.length) return;
@@ -184,7 +214,7 @@ export function classify(content: HTMLElement): void {
       c.add('yy-r');
       b.el.style.setProperty('--yy-fr', String(Math.round(ratio * 1000) / 1000));
     }
-    if (b.family === mFamily && b.tag !== 'PRE') c.add('yy-f');
+    if (b.tag !== 'PRE') c.add(b.family === mFamily ? 'yy-f' : 'yy-f-pub');
     if (b.color === mColor) c.add('yy-c');
     if (heading) continue;
     if (b.ls === mLs) c.add('yy-l');
@@ -195,6 +225,10 @@ export function classify(content: HTMLElement): void {
       if (b.indent === mIndent) c.add('yy-i');
       if (b.mt + '/' + b.mb === mMargins) c.add('yy-m');
     }
+  }
+  for (const r of inlineRuns) {
+    if (r.b.el === title || r.b.tag === 'PRE') continue;
+    r.el.classList.add(r.family === mFamily ? 'yy-f' : 'yy-f-pub');
   }
   decorateMeta(content);
 }

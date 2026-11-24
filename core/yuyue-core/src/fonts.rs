@@ -144,7 +144,7 @@ pub fn faces_css(dir: &Path) -> String {
                 continue;
             }
             let family = if info.id == "wenkai" { "\"LXGW WenKai\"".to_string() } else { format!("\"yy-{}\"", info.id) };
-            css.push_str(&format!("@font-face{{font-family:{family};src:url(\"/fonts/{}\");font-weight:{};font-display:swap}}", f.file, f.weight));
+            css.push_str(&format!("@font-face{{font-family:{family};src:url(\"/fonts/{}\");font-weight:{};font-display:swap}}", crate::epub::encode_path(&f.file), f.weight));
         }
     }
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -154,7 +154,7 @@ pub fn faces_css(dir: &Path) -> String {
             .collect();
         added.sort();
         for name in added {
-            css.push_str(&format!("@font-face{{font-family:\"yy-file:{name}\";src:url(\"/fonts/{name}\");font-display:swap}}"));
+            css.push_str(&format!("@font-face{{font-family:\"yy-file:{name}\";src:url(\"/fonts/{}\");font-display:swap}}", crate::epub::encode_path(&name)));
         }
     }
     css
@@ -194,7 +194,7 @@ mod tests {
         let css = faces_css(&dir);
         assert!(css.contains("font-family:\"yy-notoserif\";src:url(\"/fonts/NotoSerifSC-Regular.otf\")"));
         assert!(css.contains("font-family:\"LXGW WenKai\""));
-        assert!(css.contains("font-family:\"yy-file:我的字.ttf\""));
+        assert!(css.contains("font-family:\"yy-file:我的字.ttf\";src:url(\"/fonts/%E6%88%91%E7%9A%84%E5%AD%97.ttf\")"));
         assert!(!css.contains("notes.txt") && !css.contains("Bold"));
         std::fs::remove_dir_all(&dir).ok();
     }

@@ -1561,7 +1561,7 @@ public sealed partial class SettingsWindow : Window
 
         var tileEntries = new List<(string Id, string Label, Font? Kind, string? Face, string Fam)>
         {
-            ("system", "系统", null, null, YYFontFamily.Sans.WindowsFamily()),
+            ("system", "系统", Font.Sans, null, YYFontFamily.Sans.WindowsFamily()),
             ("serif", "宋体", Font.Serif, null, YYFontFamily.Serif.WindowsFamily()),
             ("kai", "楷体", Font.Kai, null, YYFontFamily.Kaiti.WindowsFamily()),
             ("wenkai", _library.Fonts.IsDownloading("wenkai") ? "下载中…" : "霞鹜文楷", Font.WenKai, null, YYFontFamily.Wenkai.WindowsFamily()),
@@ -1579,7 +1579,7 @@ public sealed partial class SettingsWindow : Window
             else if (pinId.StartsWith("sys:", StringComparison.Ordinal))
             {
                 string fam = pinId[4..];
-                tileEntries.Add((pinId, fam, Font.Serif, fam, $"{fam}, {YYFontFamily.Serif.WindowsFamily()}"));
+                tileEntries.Add((pinId, fam, Font.Serif, $"local:{fam}", $"{fam}, {YYFontFamily.Serif.WindowsFamily()}"));
             }
             else if (_library.Fonts.Catalog.FirstOrDefault(c => c.Id == pinId) is { } pk)
             {
@@ -1595,13 +1595,16 @@ public sealed partial class SettingsWindow : Window
         for (int i = 0; i < fontCols; i++) fontGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         for (int r = 0; r < fontRows; r++) fontGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
+        var resolvedFontPreset = PaperAppearance.Resolve(_library, rs).Preset;
+        bool defaultFontSans = resolvedFontPreset is Paper.Plain or Paper.Dark;
         bool matchedTile = false;
         for (int i = 0; i < tileEntries.Count; i++)
         {
             var fc = tileEntries[i];
             bool on = string.IsNullOrEmpty(fc.Face)
-                ? (string.IsNullOrEmpty(rs.FontFace) && rs.Font == fc.Kind)
-                : string.Equals(rs.FontFace, fc.Face, StringComparison.OrdinalIgnoreCase);
+                ? (string.IsNullOrEmpty(rs.FontFace) && (rs.Font == fc.Kind || (rs.Font is null && fc.Id == (defaultFontSans ? "system" : "serif"))))
+                : (string.Equals(rs.FontFace, fc.Face, StringComparison.OrdinalIgnoreCase) ||
+                   (fc.Face.StartsWith("local:", StringComparison.Ordinal) && string.Equals(rs.FontFace, fc.Face[6..], StringComparison.OrdinalIgnoreCase)));
             if (on) matchedTile = true;
 
             var tile = new StackPanel { Spacing = 3, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
@@ -1641,7 +1644,7 @@ public sealed partial class SettingsWindow : Window
         }
 
         // 最后一格：更多字体（1:1 settings-reading/2.png unified pure white tile）
-        bool extraFontOn = !matchedTile && (!string.IsNullOrEmpty(rs.FontFace) || rs.Font == Font.Sans);
+        bool extraFontOn = !matchedTile && !string.IsNullOrEmpty(rs.FontFace);
         var moreSp = new StackPanel { Spacing = 4, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         moreSp.Children.Add(new Border
         {
@@ -1958,7 +1961,7 @@ public sealed partial class SettingsWindow : Window
                     var useBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "选用", Height = 25, MinHeight = 25, FontSize = 11 };
                     useBtn.Click += (_, _) =>
                     {
-                        updateFn("字体", entry.DisplayName, s => s with { Font = Font.Serif, FontFace = entry.FamilyName });
+                        updateFn("字体", entry.DisplayName, s => s with { Font = Font.Serif, FontFace = $"local:{entry.FamilyName}" });
                         dlgRef?.Hide();
                         RenderDynamicPage("reading");
                     };

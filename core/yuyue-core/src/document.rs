@@ -141,7 +141,7 @@ pub fn section_document(manifest: &Manifest, n: u32, content: &str, settings: &P
     html.push_str("<!DOCTYPE html>\n");
     let _ = write!(
         html,
-        r#"<html lang="{}" data-yy-paper="{}" data-yy-mode="{}" data-yy-paging="{}" data-yy-justify="{}" data-yy-indent="{}" data-yy-compress="{}" data-yy-motion="{}"{} style="{}">"#,
+        r#"<html lang="{}" data-yy-paper="{}" data-yy-mode="{}" data-yy-paging="{}" data-yy-justify="{}" data-yy-indent="{}" data-yy-compress="{}" data-yy-motion="{}"{}{} style="{}">"#,
         escape(&html_lang(manifest.section_lang(n))),
         s.paper.css(),
         match s.mode {
@@ -156,6 +156,7 @@ pub fn section_document(manifest: &Manifest, n: u32, content: &str, settings: &P
         tristate(s.indent),
         u8::from(s.compress),
         if s.reduced_motion { "reduced" } else { "full" },
+        if s.font.is_some() || s.font_face.is_some() { r#" data-yy-font="1""# } else { "" },
         s.texture.map(|t| format!(r#" data-yy-texture="{t}""#)).unwrap_or_default(),
         escape(&custom_properties(s)),
     );
@@ -226,7 +227,7 @@ fn custom_properties(s: &PageSettings) -> String {
         };
         // A face of its own goes first; the built-in one it reads like fills in what it lacks.
         let face = s.font_face.as_deref().map(|f| format!("{f},")).unwrap_or_default();
-        let _ = write!(css, ";--yy-font:{face}var(--yy-{name});--yy-font-en:var(--yy-{latin})");
+        let _ = write!(css, ";--yy-font:{face}var(--yy-{name});--yy-font-en:{face}var(--yy-{latin})");
     }
     if let Some(style) = &s.paper_style {
         let _ = write!(css, ";{style}");

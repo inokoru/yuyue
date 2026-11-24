@@ -256,3 +256,72 @@ test('墨水屏模式 overrides presets and 我的纸 to pure white/black, decou
   expect(restored.bg).toBe('rgb(24, 32, 43)');
   expect(restored.texture).toContain('repeating-linear-gradient');
 });
+
+test('EPUB publisher CSS on spans, wildcards, and secondary classes honors reader font settings', async ({ page }) => {
+  const customHtml = `<!DOCTYPE html>
+<html lang="zh-CN" data-yy-paper="plain" data-yy-mode="paginated" data-yy-paging="snap"
+      data-yy-justify="auto" data-yy-indent="auto" data-yy-compress="1" data-yy-motion="full"
+      style="--yy-fs:18px;--yy-margin:24px;--yy-top:56px;--yy-bottom:88px;--yy-cols:1">
+<head>
+<meta charset="utf-8">
+<style>
+  * { font-family: "PublisherWildcard", fantasy; }
+  span.calibre2 { font-family: "PublisherBody", cursive; }
+  p.quote { font-family: "PublisherQuote", monospace; }
+  span.inline-accent { font-family: "PublisherInline", monospace; }
+</style>
+<link rel="stylesheet" href="/app/reader.css">
+</head>
+<body>
+<main id="yy-content" class="yy-section" data-section="0">
+  <h2><span class="calibre2"><span class="s" data-s="0">第一章</span></span></h2>
+  <div class="yy-meta">读 1 分钟 · 听 1 分钟</div>
+  <p class="calibre1"><span class="calibre2"><span class="s" data-s="1">这是第一段正文内容，用来测试出版社内联字体样式覆盖。</span></span></p>
+  <p class="calibre1"><span class="calibre2"><span class="s" data-s="2">这是第二段正文内容，包含更多文字以确保成为主导正文样式。</span></span></p>
+  <p class="quote"><span class="s" data-s="3">这是一段引文。</span><span class="inline-accent"><span class="s" data-s="4">强调句。</span></span></p>
+</main>
+<script src="/app/reader.js"></script>
+</body>
+</html>`;
+
+  await page.route('**/book/epub-font-test/s/0.html', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: customHtml }),
+  );
+  await open(page, 'epub-font-test/s/0.html');
+
+  const families = () =>
+    page.evaluate(() => {
+      const f = (sel: string) => getComputedStyle(document.querySelector(sel) as Element).fontFamily;
+      return {
+        title: f('#yy-content h2 .s'),
+        body: f('#yy-content p.calibre1 .s'),
+        quote: f('#yy-content p.quote .s[data-s="3"]'),
+        accent: f('#yy-content span.inline-accent .s'),
+        meta: f('#yy-content .yy-meta'),
+      };
+    });
+
+  // Paper default (no explicit user font): dominant Calibre span is overridden by paper sans,
+  // while deliberate publisher quote/inline variations keep their publisher font.
+  const initial = await families();
+  expect(initial.body).not.toContain('PublisherBody');
+  expect(initial.body).not.toContain('PublisherWildcard');
+  expect(initial.quote).toContain('PublisherQuote');
+  expect(initial.accent).toContain('PublisherInline');
+
+  // Explicit user font (`kai` or custom `fontFace` stack): overrides all text blocks and spans,
+  // while keeping `.yy-meta` in UI sans.
+  await apply(page, { font: '"yy-notoserif", var(--yy-serif)' });
+  const chosen = await families();
+  expect(chosen.title).toContain('yy-notoserif');
+  expect(chosen.body).toContain('yy-notoserif');
+  expect(chosen.quote).toContain('yy-notoserif');
+  expect(chosen.accent).toContain('yy-notoserif');
+  expect(chosen.meta).not.toContain('yy-notoserif');
+
+  // Resetting font to null restores paper default and publisher deliberate quote font.
+  await apply(page, { font: null });
+  const reset = await families();
+  expect(reset.body).not.toContain('PublisherBody');
+  expect(reset.quote).toContain('PublisherQuote');
+});

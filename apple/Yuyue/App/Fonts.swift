@@ -119,12 +119,15 @@ final class FontShelf {
 
     /// The face the settings are in.
     static func id(of s: ReaderSettings) -> String {
-        if let face = s.fontFace { return face }
+        if let face = s.fontFace, !face.isEmpty { return face }
         switch s.font {
         case .serif?: return "serif"
         case .kai?: return "kai"
         case .wenKai?: return "wenkai"
-        case .sans?, nil: return "system"
+        case .sans?: return "system"
+        case nil:
+            let preset = PaperAppearance.shared.resolve(s).preset
+            return (preset == .plain || preset == .dark) ? "system" : "serif"
         }
     }
 
@@ -133,7 +136,7 @@ final class FontShelf {
     func apply(_ id: String, to s: inout ReaderSettings) {
         s.fontFace = nil
         switch id {
-        case "system": s.font = nil
+        case "system": s.font = .sans
         case "serif": s.font = .serif
         case "kai": s.font = .kai
         case "wenkai": s.font = .wenKai

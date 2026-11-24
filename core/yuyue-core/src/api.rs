@@ -901,13 +901,14 @@ impl YuyueCore {
 
     fn try_serve(&self, path: &str, geometry: &PageGeometry) -> Result<Served> {
         let path = path.split(['?', '#']).next().unwrap_or("");
-        if let Some(name) = path.strip_prefix("/fonts/") {
-            // A bare file name in the fonts folder, nothing else.
-            if name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.') {
+        if let Some(raw) = path.strip_prefix("/fonts/") {
+            // A bare file name in the fonts folder (percent-decoded for non-ASCII / space names).
+            let name = percent_decode_str(raw).decode_utf8_lossy();
+            if !crate::fonts::safe_file(&name) {
                 return Ok(Served::NotFound);
             }
-            let file = self.fonts_path().join(name);
-            return Ok(if file.is_file() { Served::File { path: file.to_string_lossy().into_owned(), mime: crate::fonts::mime(name).into() } } else { Served::NotFound });
+            let file = self.fonts_path().join(name.as_ref());
+            return Ok(if file.is_file() { Served::File { path: file.to_string_lossy().into_owned(), mime: crate::fonts::mime(&name).into() } } else { Served::NotFound });
         }
         let Some(rest) = path.strip_prefix("/book/") else { return Ok(Served::NotFound) };
         let Some((id, rest)) = rest.split_once('/') else { return Ok(Served::NotFound) };

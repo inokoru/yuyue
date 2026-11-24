@@ -42,10 +42,12 @@ object FontShelf {
     private var cachedCatalog: List<FontPack> = emptyList()
     val catalog: List<FontPack>
         get() {
-            val zh = app.yuyue.L10n.chinese
+            val zh = runCatching { app.yuyue.L10n.chinese }.getOrDefault(true)
             if (catalogLang != zh) {
-                cachedCatalog = fontCatalog()
-                catalogLang = zh
+                runCatching { fontCatalog() }.onSuccess {
+                    cachedCatalog = it
+                    catalogLang = zh
+                }
             }
             return cachedCatalog
         }
@@ -108,16 +110,20 @@ object FontShelf {
 
     // MARK: Choosing
 
-    fun id(of: ReaderSettings): String = of.fontFace ?: when (of.font) {
+    fun id(of: ReaderSettings): String = of.fontFace?.takeIf { it.isNotEmpty() } ?: when (of.font) {
         Font.SERIF -> "serif"
         Font.KAI, Font.WEN_KAI -> "wenkai"
-        Font.SANS, null -> "system"
+        Font.SANS -> "system"
+        null -> {
+            val preset = PaperAppearance.resolve(of).preset
+            if (preset == uniffi.yuyue_core.Paper.PLAIN || preset == uniffi.yuyue_core.Paper.DARK) "system" else "serif"
+        }
     }
 
     /** The settings with this face: `font` is the built-in face it reads like, so a device without it
      *  shows something close. 霞鹜文楷 is `WEN_KAI`, as before. */
     fun apply(id: String, to: ReaderSettings): ReaderSettings = when (id) {
-        "system" -> to.copy(font = null, fontFace = null)
+        "system" -> to.copy(font = Font.SANS, fontFace = null)
         "serif" -> to.copy(font = Font.SERIF, fontFace = null)
         "wenkai" -> to.copy(font = Font.WEN_KAI, fontFace = null)
         else -> to.copy(fontFace = id, font = when (kind(id)) { FontKind.HEI -> Font.SANS; FontKind.KAI, FontKind.HAND -> Font.WEN_KAI; else -> Font.SERIF })

@@ -136,10 +136,13 @@ export function applyToRoot(s: Settings): boolean {
     if (isAuto(f)) {
       setVar('--yy-font', null);
       setVar('--yy-font-en', null);
+      setAttr('data-yy-font', null);
     } else {
-      const k = FONTS[String(f)] ? String(f) : keywordOf(String(f));
-      setVar('--yy-font', k ? FONTS[k][0] : String(f));
-      setVar('--yy-font-en', k ? FONTS[k][1] : String(f));
+      const str = String(f);
+      const k = FONTS[str] ? str : keywordOf(str);
+      setVar('--yy-font', k ? FONTS[k][0] : str);
+      setVar('--yy-font-en', k ? FONTS[k][1] : latinStackOf(str));
+      setAttr('data-yy-font', '1');
     }
   }
   return changed;
@@ -151,14 +154,25 @@ function keywordOf(stack: string): string | null {
   return null;
 }
 
-/** Core writes only --yy-font into the document; derive the Latin face the same way
- *  applySettings does. */
+/** Custom CJK stacks (`"yy-notoserif", var(--yy-serif)`) pair their leading face with a Latin
+ *  fallback (`var(--yy-latin-serif)`) for `:lang(en)`, matching core's `document.rs`. */
+function latinStackOf(stack: string): string {
+  return stack.replace(/,\s*var\(--yy-(?:serif|kaiti|wenkai|p-font)\)\s*$/, ', var(--yy-latin-serif)');
+}
+
+/** Core writes --yy-font into the document; ensure data-yy-font and --yy-font-en match
+ *  applySettings. */
 export function normalizeRoot(): void {
   const root = document.documentElement;
   const f = root.style.getPropertyValue('--yy-font').trim();
-  if (!f || root.style.getPropertyValue('--yy-font-en').trim()) return;
+  if (!f) {
+    root.removeAttribute('data-yy-font');
+    return;
+  }
+  root.setAttribute('data-yy-font', '1');
+  if (root.style.getPropertyValue('--yy-font-en').trim()) return;
   const k = keywordOf(f);
-  root.style.setProperty('--yy-font-en', k ? FONTS[k][1] : f);
+  root.style.setProperty('--yy-font-en', k ? FONTS[k][1] : latinStackOf(f));
 }
 
 /** The effective settings, for debugging and the demo. */
