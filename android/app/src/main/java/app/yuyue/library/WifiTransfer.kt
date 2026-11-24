@@ -66,7 +66,7 @@ class WifiTransfer(private val context: Context, private val library: Library) {
         Thread {
             while (!s.isClosed) {
                 val socket = runCatching { s.accept() }.getOrNull() ?: break
-                Thread { serve(socket) }.apply { isDaemon = true }.start()
+                Thread { runCatching { serve(socket) } }.apply { isDaemon = true }.start()
             }
         }.apply { isDaemon = true }.start()
     }
@@ -78,44 +78,9 @@ class WifiTransfer(private val context: Context, private val library: Library) {
 
     // MARK: HTTP, just enough
 
-    private class Request(val method: String, val path: String, val query: Map<String, String>, val headers: Map<String, String>, val body: ByteArray)
+    internal class Request(val method: String, val path: String, val query: Map<String, String>, val headers: Map<String, String>, val body: ByteArray)
 
-    private fun serve(socket: Socket) = socket.use {
-        val input = BufferedInputStream(socket.getInputStream())
-        val out = socket.getOutputStream()
-        val head = StringBuilder()
-        while (!head.endsWith("\r\n\r\n")) {
-            val c = input.read()
-            if (c < 0 || head.length > 64 * 1024) return
-            head.append(c.toChar())
-        }
-        val lines = String(head.toString().toByteArray(Charsets.ISO_8859_1), Charsets.UTF_8).split("\r\n")
-        val parts = lines.first().split(" ")
-        if (parts.size < 2) return send(out, 400, "text/plain", ByteArray(0))
-        val headers = lines.drop(1).mapNotNull { l -> l.indexOf(':').takeIf { it > 0 }?.let { l.substring(0, it).lowercase() to l.substring(it + 1).trim() } }.toMap()
-        val length = headers["content-length"]?.toIntOrNull() ?: 0
-        // The page sends pieces of 4 MB; anything far bigger is not from it.
-        if (length > 16 shl 20) return send(out, 413, "text/plain", ByteArray(0))
-        val body = ByteArray(length)
-        var read = 0
-        while (read < length) {
-            val n = input.read(body, read, length - read)
-            if (n < 0) return
-            read += n
-        }
-        val target = parts[1]
-        val path = target.substringBefore('?')
-        val query = target.substringAfter('?', "").split('&').filter { '=' in it }.associate { p -> p.substringBefore('=') to URLDecoder.decode(p.substringAfter('='), "UTF-8") }
-        val (status, type, data) = runBlocking { respond(Request(parts[0], path, query, headers, body)) }
-        send(out, status, type, data)
-    }
-
-    private fun send(out: OutputStream, status: Int, type: String, body: ByteArray) {
-        val reason = mapOf(200 to "OK", 400 to "Bad Request", 404 to "Not Found", 413 to "Payload Too Large")[status] ?: "OK"
-        out.write("HTTP/1.1 $status $reason\r\nContent-Type: $type\r\nContent-Length: ${body.size}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".toByteArray())
-        out.write(body)
-        out.flush()
-    }
+    private fun serve(socket: Socket) = serveWith(socket) { req -> runBlocking { respond(req) } }
 
     private fun json(o: Any) = Triple(200, "application/json", o.toString().toByteArray())
 
@@ -136,10 +101,11 @@ class WifiTransfer(private val context: Context, private val library: Library) {
         val wanted = runCatching { JSONArray(String(body)) }.getOrNull() ?: return Triple(400, "text/plain", ByteArray(0))
         val have = JSONObject()
         for (i in 0 until wanted.length()) {
-            val w = wanted.getJSONObject(i)
+            val w = wanted.optJSONObject(i) ?: continue
             val id = w.optString("id")
             if (!validID(id)) continue
-            val size = w.optLong("size")
+            val size = w.optLong("size", -1L)
+            if (size < 0L) continue
             val known = items.indexOfFirst { it.id == id }
             if (known >= 0) {
                 have.put(id, if (items[known].state == Item.State.Done) size else items[known].received)
@@ -156,7 +122,7 @@ class WifiTransfer(private val context: Context, private val library: Library) {
     /** One piece of a file, put after what is already here; once whole, into the library. */
     private suspend fun chunk(r: Request): Triple<Int, String, ByteArray> {
         val id = r.query["id"] ?: return Triple(404, "text/plain", ByteArray(0))
-        val offset = r.query["offset"]?.toLongOrNull() ?: return Triple(404, "text/plain", ByteArray(0))
+        val offset = r.query["offset"]?.toLongOrNull()?.takeIf { it >= 0L } ?: return Triple(400, "text/plain", ByteArray(0))
         val item = withContext(Dispatchers.Main) { items.firstOrNull { it.id == id } } ?: return Triple(404, "text/plain", ByteArray(0))
         if (item.state == Item.State.Done) return json(JSONObject().put("received", item.size).put("done", true))
         if (offset != item.received) return json(JSONObject().put("received", item.received))
@@ -236,6 +202,100 @@ class WifiTransfer(private val context: Context, private val library: Library) {
     }
 
     companion object {
+        private const val MAX_BODY_BYTES = 16 shl 20
+
+        internal fun parseQuery(rawQuery: String): Map<String, String>? {
+            if (rawQuery.isEmpty()) return emptyMap()
+            val out = LinkedHashMap<String, String>()
+            for (part in rawQuery.split('&')) {
+                val eq = part.indexOf('=')
+                if (eq < 0) continue
+                val key = try {
+                    URLDecoder.decode(part.substring(0, eq), "UTF-8")
+                } catch (_: IllegalArgumentException) {
+                    return null
+                }
+                val value = try {
+                    URLDecoder.decode(part.substring(eq + 1), "UTF-8")
+                } catch (_: IllegalArgumentException) {
+                    return null
+                }
+                out[key] = value
+            }
+            return out
+        }
+
+        internal fun serveWith(socket: Socket, handle: (Request) -> Triple<Int, String, ByteArray>) {
+            runCatching {
+                socket.use { sock ->
+                    runCatching { sock.soTimeout = 30_000 }
+                    val input = BufferedInputStream(sock.getInputStream())
+                    val out = sock.getOutputStream()
+                    val head = StringBuilder()
+                    while (!head.endsWith("\r\n\r\n")) {
+                        val c = input.read()
+                        if (c < 0) return
+                        if (head.length > 64 * 1024) {
+                            runCatching { sendResponse(out, 400, "text/plain", ByteArray(0)) }
+                            return
+                        }
+                        head.append(c.toChar())
+                    }
+                    val lines = String(head.toString().toByteArray(Charsets.ISO_8859_1), Charsets.UTF_8).split("\r\n")
+                    val parts = lines.first().split(" ")
+                    if (parts.size < 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
+                        sendResponse(out, 400, "text/plain", ByteArray(0))
+                        return
+                    }
+                    val headers = lines.drop(1).mapNotNull { l ->
+                        l.indexOf(':').takeIf { it > 0 }?.let { l.substring(0, it).lowercase() to l.substring(it + 1).trim() }
+                    }.toMap()
+                    val rawLength = headers["content-length"]
+                    val lengthLong = if (rawLength == null) 0L else rawLength.toLongOrNull() ?: run {
+                        sendResponse(out, 400, "text/plain", ByteArray(0))
+                        return
+                    }
+                    if (lengthLong < 0L) {
+                        sendResponse(out, 400, "text/plain", ByteArray(0))
+                        return
+                    }
+                    // The page sends pieces of 4 MB; anything far bigger is not from it.
+                    if (lengthLong > MAX_BODY_BYTES.toLong()) {
+                        sendResponse(out, 413, "text/plain", ByteArray(0))
+                        return
+                    }
+                    val length = lengthLong.toInt()
+                    val target = parts[1]
+                    val path = target.substringBefore('?')
+                    val rawQuery = target.substringAfter('?', "")
+                    val query = parseQuery(rawQuery) ?: run {
+                        sendResponse(out, 400, "text/plain", ByteArray(0))
+                        return
+                    }
+                    val body = ByteArray(length)
+                    var read = 0
+                    while (read < length) {
+                        val n = input.read(body, read, length - read)
+                        if (n < 0) return
+                        read += n
+                    }
+                    val (status, type, data) = try {
+                        handle(Request(parts[0], path, query, headers, body))
+                    } catch (_: Throwable) {
+                        Triple(400, "text/plain", ByteArray(0))
+                    }
+                    sendResponse(out, status, type, data)
+                }
+            }
+        }
+
+        private fun sendResponse(out: OutputStream, status: Int, type: String, body: ByteArray) {
+            val reason = mapOf(200 to "OK", 400 to "Bad Request", 404 to "Not Found", 413 to "Payload Too Large")[status] ?: "OK"
+            out.write("HTTP/1.1 $status $reason\r\nContent-Type: $type\r\nContent-Length: ${body.size}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".toByteArray())
+            out.write(body)
+            out.flush()
+        }
+
         /** `46% · 还要 20 秒`, from how fast this stretch has gone. */
         fun progress(item: Item): String {
             val percent = (item.received.toDouble() / maxOf(item.size, 1) * 100).toInt()

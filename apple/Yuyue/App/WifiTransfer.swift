@@ -257,6 +257,7 @@ private final class HTTPExchange {
     private var buffer = Data()
     private var request: HTTPRequest?
     private var length = 0
+    private var finished = false
     /// The page sends pieces of 4 MB; anything far bigger is not from it.
     private static let largest = 16 << 20
 
@@ -273,9 +274,11 @@ private final class HTTPExchange {
     private func read() {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { data, _, complete, error in
             MainActor.assumeIsolated {
+                guard !self.finished else { return }
                 if let data { self.buffer.append(data) }
                 if error != nil { return self.connection.cancel() }
                 if self.request == nil, !self.parseHead() {
+                    if self.finished { return }
                     return complete ? self.connection.cancel() : self.read()
                 }
                 if self.buffer.count >= self.length {
@@ -305,12 +308,26 @@ private final class HTTPExchange {
             guard let colon = line.firstIndex(of: ":") else { continue }
             headers[line[..<colon].lowercased()] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
         }
-        let target = URLComponents(string: String(parts[1]))
+        guard let target = URLComponents(string: String(parts[1])) else {
+            send(HTTPResponse(status: 400, body: Data()))
+            return false
+        }
         var query: [String: String] = [:]
-        for item in target?.queryItems ?? [] { query[item.name] = item.value }
-        length = Int(headers["content-length"] ?? "") ?? 0
-        guard length <= Self.largest else { send(HTTPResponse(status: 413, body: Data())); return false }
-        request = HTTPRequest(method: String(parts[0]), path: target?.path ?? "/", query: query, headers: headers)
+        for item in target.queryItems ?? [] { query[item.name] = item.value }
+        if let rawLength = headers["content-length"] {
+            guard let parsed = Int(rawLength), parsed >= 0 else {
+                send(HTTPResponse(status: 400, body: Data()))
+                return false
+            }
+            guard parsed <= Self.largest else {
+                send(HTTPResponse(status: 413, body: Data()))
+                return false
+            }
+            length = parsed
+        } else {
+            length = 0
+        }
+        request = HTTPRequest(method: String(parts[0]), path: target.path.isEmpty ? "/" : target.path, query: query, headers: headers)
         return true
     }
 
@@ -322,6 +339,8 @@ private final class HTTPExchange {
     }
 
     private func send(_ response: HTTPResponse) {
+        guard !finished else { return }
+        finished = true
         connection.send(content: response.data, completion: .contentProcessed { _ in
             MainActor.assumeIsolated { self.connection.cancel() }
         })
