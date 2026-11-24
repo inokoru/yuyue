@@ -127,16 +127,21 @@ public static class CustomPaperDialog
             var all = library.Core.CustomPapers();
             var taken = all.Select(x => x.Name).ToHashSet(StringComparer.Ordinal);
             string baseName = Regex.Replace(mine.Name, @" \d+$", "");
+            if (baseName.Length > 16) baseName = baseName[..16];
             string candidate = baseName;
             for (int n = 2; n < 200; n++)
             {
-                string next = $"{baseName} {n}";
+                string suffix = $" {n}";
+                int maxBase = Math.Max(1, 20 - suffix.Length);
+                string trimmedBase = baseName.Length > maxBase ? baseName[..maxBase] : baseName;
+                string next = $"{trimmedBase}{suffix}";
                 if (!taken.Contains(next))
                 {
                     candidate = next;
                     break;
                 }
             }
+            if (candidate.Length > 20) candidate = candidate[..20];
             return library.Core.SaveCustomPaper(mine with { Id = "", Name = candidate });
         }
         catch
@@ -190,7 +195,8 @@ public static class CustomPaperDialog
         bool showReadingSample,
         Action<CustomPaper>? onDraftChanged = null,
         Action<CustomPaper>? onDuplicatePicked = null,
-        Action? onDeleteRequested = null)
+        Action? onDeleteRequested = null,
+        bool compactInline = false)
     {
         var draft = initial;
         bool night = YuyueCoreMethods.PaperColors(draft).Dark;
@@ -314,12 +320,15 @@ public static class CustomPaperDialog
         inkRow.Children.Add(inkHost);
         groupStack.Children.Add(inkRow);
 
-        groupStack.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) });
-        var layoutRow = new Grid { MinHeight = 38 };
-        layoutRow.Children.Add(new TextBlock { Text = L10n.T("版式"), FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center });
         var layoutHost = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
-        layoutRow.Children.Add(layoutHost);
-        groupStack.Children.Add(layoutRow);
+        if (!compactInline)
+        {
+            groupStack.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) });
+            var layoutRow = new Grid { MinHeight = 38 };
+            layoutRow.Children.Add(new TextBlock { Text = L10n.T("版式"), FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center });
+            layoutRow.Children.Add(layoutHost);
+            groupStack.Children.Add(layoutRow);
+        }
 
         root.Children.Add(new Border
         {
@@ -331,14 +340,23 @@ public static class CustomPaperDialog
             Child = groupStack,
         });
 
-        var nameBox = new TextBox
+        if (!compactInline)
         {
-            Text = draft.Name,
-            PlaceholderText = L10n.T("纸张名称（留空自动命名）"),
-            FontSize = 12,
-        };
-        nameBox.TextChanged += (_, _) => draft = draft with { Name = nameBox.Text.Trim() };
-        root.Children.Add(nameBox);
+            var nameBox = new TextBox
+            {
+                Text = draft.Name,
+                MaxLength = 20,
+                PlaceholderText = L10n.T("纸张名称（留空自动命名）"),
+                FontSize = 12,
+            };
+            nameBox.TextChanged += (_, _) =>
+            {
+                string trimmed = nameBox.Text.Trim();
+                if (trimmed.Length > 20) trimmed = trimmed[..20];
+                draft = draft with { Name = trimmed };
+            };
+            root.Children.Add(nameBox);
+        }
 
         if (!string.IsNullOrEmpty(initial.Id))
         {

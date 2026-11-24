@@ -67,7 +67,7 @@ public static class SnapshotAndConflictDialogs
             Child = YYIcons.Make("cube", 16, ThemeHelper.Brush(tint.Accent)),
         });
         var fileMeta = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-        fileMeta.Children.Add(new TextBlock
+        fileMeta.Children.Add(L10n.Skip(new TextBlock
         {
             Text = Path.GetFileName(snapPath),
             FontSize = 13,
@@ -75,7 +75,7 @@ public static class SnapshotAndConflictDialogs
             Foreground = ThemeHelper.Brush(p.T1),
             MaxLines = 1,
             TextTrimming = TextTrimming.CharacterEllipsis,
-        });
+        }));
         fileMeta.Children.Add(new TextBlock
         {
             Text = $"来自 {info.DeviceName} ({info.Platform}) · {madeTime:yyyy-MM-dd HH:mm} · {sizeStr}",
@@ -171,14 +171,14 @@ public static class SnapshotAndConflictDialogs
         Grid.SetColumn(replaceBtn, 1);
         modeGrid.Children.Add(replaceBtn);
 
-        var diffText = new TextBlock
+        var diffText = L10n.Skip(new TextBlock
         {
             FontSize = 11.5,
             Foreground = ThemeHelper.Brush(p.T2),
             TextWrapping = TextWrapping.Wrap,
             TextAlignment = TextAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Center,
-        };
+        });
 
         bool IsMergeNoOp()
         {
@@ -227,7 +227,7 @@ public static class SnapshotAndConflictDialogs
             else
             {
                 string modeTag = replaceMode ? "覆盖后" : "合并后";
-                diffText.Text = $"{modeTag}：书 {FormatDelta(info.Now.Books, target.Books)} · 进度 {FormatDelta(info.Now.Read, target.Read)} · 笔记 {FormatDelta(info.Now.Notes, target.Notes)} · 生词 {FormatDelta(info.Now.Words, target.Words)}";
+                diffText.Text = L10n.T($"{modeTag}：书 {FormatDelta(info.Now.Books, target.Books)} · 进度 {FormatDelta(info.Now.Read, target.Read)} · 笔记 {FormatDelta(info.Now.Notes, target.Notes)} · 生词 {FormatDelta(info.Now.Words, target.Words)}");
                 diffText.Foreground = ThemeHelper.Brush(replaceMode ? p.Danger : p.T2);
             }
 
@@ -328,19 +328,21 @@ public static class SnapshotAndConflictDialogs
             },
         };
 
-        var previewText = new TextBlock
+        var previewText = L10n.Skip(new TextBlock
         {
             FontFamily = new FontFamily(YYFontFamily.Mono.WindowsFamily()),
             FontSize = 10.5,
             Foreground = ThemeHelper.Brush(p.T2),
             TextTrimming = TextTrimming.CharacterEllipsis,
             MaxLines = 4,
-        };
-        var isbnNote = new TextBlock { FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), TextWrapping = TextWrapping.Wrap };
-        ReadingExport currentExport = library.Core.ReadingExport(site, utcOffsetMin);
+        });
+        var isbnNote = L10n.Skip(new TextBlock { FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), TextWrapping = TextWrapping.Wrap });
+        ReadingExport currentExport = await Task.Run(() => library.Core.ReadingExport(site, utcOffsetMin));
         var exportBtn = YYChrome.MakeSheetPillButton("导出 CSV", () => { saveCsv = true; dlgRef?.Hide(); }, dark, library.Prefs.Tint, "dark", height: 40, stretch: true);
+        bool sheetClosed = false;
+        int exportReqSeq = 0;
 
-        void RebuildExportPreview()
+        void RenderSegmentedBar()
         {
             string activeKey = site == ReadingSite.Goodreads ? "goodreads" : "storygraph";
             var bar = YYChrome.MakeSegmentedBar(
@@ -349,30 +351,43 @@ public static class SnapshotAndConflictDialogs
                 nextKey =>
                 {
                     site = nextKey == "storygraph" ? ReadingSite.StoryGraph : ReadingSite.Goodreads;
-                    RebuildExportPreview();
+                    _ = RefreshExportPreviewAsync(site);
                 },
                 dark,
                 fontSize: 12.5,
                 height: 32);
             bar.HorizontalAlignment = HorizontalAlignment.Left;
             segHost.Content = bar;
+        }
 
-            currentExport = library.Core.ReadingExport(site, utcOffsetMin);
-            uint totalBooks = currentExport.Want + currentExport.Reading + currentExport.Finished;
-            wantRightTb.Text = $"{currentExport.Want} 本";
-            readingRightTb.Text = $"{currentExport.Reading} 本";
-            finishedRightTb.Text = $"{currentExport.Finished} 本 · 带读完日期";
-            previewText.Text = string.Join("\n", currentExport.Csv.Split('\n').Take(4));
-            isbnNote.Text = currentExport.WithoutIsbn > 0
-                ? $"其中 {currentExport.WithoutIsbn} 本没有 ISBN，导入后将按书名和作者匹配。"
-                : "全部书目均包含标准书名与阅读状态字段。";
+        void ApplyExportPreview(ReadingExport exp)
+        {
+            uint totalBooks = exp.Want + exp.Reading + exp.Finished;
+            wantRightTb.Text = L10n.T($"{exp.Want} 本");
+            readingRightTb.Text = L10n.T($"{exp.Reading} 本");
+            finishedRightTb.Text = L10n.T($"{exp.Finished} 本 · 带读完日期");
+            previewText.Text = string.Join("\n", exp.Csv.Split('\n').Take(4));
+            isbnNote.Text = L10n.T(exp.WithoutIsbn > 0
+                ? $"其中 {exp.WithoutIsbn} 本没有 ISBN，导入后将按书名和作者匹配。"
+                : "全部书目均包含标准书名与阅读状态字段。");
             if (exportBtn.Content is TextBlock tb)
-                tb.Text = $"导出 {totalBooks} 本 · CSV";
+                tb.Text = L10n.T($"导出 {totalBooks} 本 · CSV");
             exportBtn.IsEnabled = totalBooks > 0;
             exportBtn.Opacity = totalBooks > 0 ? 1.0 : 0.42;
         }
 
-        RebuildExportPreview();
+        async Task RefreshExportPreviewAsync(ReadingSite targetSite)
+        {
+            int mySeq = ++exportReqSeq;
+            RenderSegmentedBar();
+            var exp = await Task.Run(() => library.Core.ReadingExport(targetSite, utcOffsetMin));
+            if (sheetClosed || mySeq != exportReqSeq) return;
+            currentExport = exp;
+            ApplyExportPreview(exp);
+        }
+
+        RenderSegmentedBar();
+        ApplyExportPreview(currentExport);
 
         var root = new StackPanel
         {
@@ -397,8 +412,15 @@ public static class SnapshotAndConflictDialogs
             },
         };
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 400, root, tint: library.Prefs.Tint);
-        await dlgRef.ShowSafeAsync(library.Prefs.Tint);
+        try
+        {
+            dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 400, root, tint: library.Prefs.Tint);
+            await dlgRef.ShowSafeAsync(library.Prefs.Tint);
+        }
+        finally
+        {
+            sheetClosed = true;
+        }
 
         if (saveCsv)
         {
@@ -406,7 +428,7 @@ public static class SnapshotAndConflictDialogs
             {
                 SuggestedFileName = site == ReadingSite.Goodreads ? "语阅-goodreads" : "语阅-storygraph",
             };
-            picker.FileTypeChoices.Add("CSV 表格", [".csv"]);
+            picker.FileTypeChoices.Add(L10n.T("CSV 表格"), [".csv"]);
             InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(ownerWindow));
             var f = await picker.PickSaveFileAsync();
             if (f is not null)
@@ -470,6 +492,11 @@ public static class SnapshotAndConflictDialogs
             var matchBook = library.GetKeptBooks().FirstOrDefault(b => b.Id == c.Book);
             if (matchBook is not null && !string.IsNullOrEmpty(matchBook.CoverPath) && File.Exists(matchBook.CoverPath))
             {
+                var bmp = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage
+                {
+                    DecodePixelWidth = 48,
+                    UriSource = new Uri(matchBook.CoverPath),
+                };
                 srcRow.Children.Add(new Border
                 {
                     Width = 13,
@@ -477,7 +504,7 @@ public static class SnapshotAndConflictDialogs
                     CornerRadius = new CornerRadius(2),
                     BorderBrush = ThemeHelper.Brush(p.Line),
                     BorderThickness = new Thickness(0.5),
-                    Child = new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(matchBook.CoverPath)), Stretch = Stretch.UniformToFill },
+                    Child = new Image { Source = bmp, Stretch = Stretch.UniformToFill },
                 });
             }
             else
@@ -492,15 +519,15 @@ public static class SnapshotAndConflictDialogs
                     BorderThickness = new Thickness(0.5),
                 });
             }
-            srcRow.Children.Add(new TextBlock
+            srcRow.Children.Add(L10n.Skip(new TextBlock
             {
-                Text = $"{c.BookTitle} · 划线的想法",
+                Text = $"{c.BookTitle} · {L10n.T("划线的想法")}",
                 FontSize = 11.5,
                 Foreground = ThemeHelper.Brush(p.T2),
                 VerticalAlignment = VerticalAlignment.Center,
                 MaxLines = 1,
                 TextTrimming = TextTrimming.CharacterEllipsis,
-            });
+            }));
             host.Children.Add(srcRow);
 
             // Yellow highlighted passage
@@ -509,7 +536,7 @@ public static class SnapshotAndConflictDialogs
                 CornerRadius = new CornerRadius(10),
                 Background = ThemeHelper.Brush(Color.FromArgb(dark ? (byte)55 : (byte)90, p.HlY.R, p.HlY.G, p.HlY.B)),
                 Padding = new Thickness(12, 9, 12, 9),
-                Child = new TextBlock
+                Child = L10n.Skip(new TextBlock
                 {
                     Text = c.Text,
                     FontFamily = serif,
@@ -517,7 +544,7 @@ public static class SnapshotAndConflictDialogs
                     Foreground = ThemeHelper.Brush(p.T1),
                     TextWrapping = TextWrapping.Wrap,
                     LineHeight = 20,
-                },
+                }),
             });
 
             // This device on top, other device below (1:1 ConflictSheet.swift)
@@ -535,14 +562,14 @@ public static class SnapshotAndConflictDialogs
                 var head = new Grid();
                 var devLabel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
                 devLabel.Children.Add(YYIcons.Make("laptop", 12, ThemeHelper.Brush(p.T2)));
-                devLabel.Children.Add(new TextBlock
+                devLabel.Children.Add(L10n.Skip(new TextBlock
                 {
-                    Text = side.ThisDevice ? $"这台电脑（{side.DeviceName}）" : side.DeviceName,
+                    Text = side.ThisDevice ? L10n.T($"这台电脑（{side.DeviceName}）") : side.DeviceName,
                     FontSize = 12,
                     FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                     Foreground = ThemeHelper.Brush(p.T1),
                     VerticalAlignment = VerticalAlignment.Center,
-                });
+                }));
                 if (isNewer)
                 {
                     devLabel.Children.Add(new Border
@@ -572,14 +599,14 @@ public static class SnapshotAndConflictDialogs
                 diffRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 diffRow.Children.Add(new Border { Background = ThemeHelper.Brush(tint.Accent), CornerRadius = new CornerRadius(1) });
 
-                var rtb = new TextBlock
+                var rtb = L10n.Skip(new TextBlock
                 {
                     FontFamily = kaiti,
                     FontSize = 13,
                     Foreground = ThemeHelper.Brush(p.T1),
                     TextWrapping = TextWrapping.Wrap,
                     LineHeight = 20,
-                };
+                });
                 if (string.IsNullOrEmpty(side.Note))
                 {
                     rtb.Text = L10n.T("（清空了想法）");
@@ -632,6 +659,7 @@ public static class SnapshotAndConflictDialogs
             bottomActions.Children.Add(bothBtn);
             bottomActions.Children.Add(newerBtn);
             host.Children.Add(bottomActions);
+            L10n.ApplyTree(host);
         }
 
         RebuildConflicts();

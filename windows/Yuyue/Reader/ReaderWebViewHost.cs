@@ -218,12 +218,13 @@ public sealed class ReaderWebViewHost : IDisposable
                     const c = e.code || '';
                     if (ctrl && (k === 'c' || k === 'C' || k === 'a' || k === 'A')) return;
                     const isCtrlShortcut = ctrl && (
-                        ['f','F','k','K','g','G','d','D','b','B','z','Z','[',']','=','+','-','_',','].includes(k) ||
-                        c === 'BracketLeft' || c === 'BracketRight' ||
+                        ['f','F','k','K','g','G','d','D','b','B','z','Z','w','W','0','[',']','=','+','-','_',','].includes(k) ||
+                        c === 'BracketLeft' || c === 'BracketRight' || c === 'Digit0' || c === 'Numpad0' ||
                         (alt && ['t','T','n','N','ArrowUp','ArrowDown'].includes(k))
                     );
                     const isNavKey = !ctrl && !alt && (
-                        ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','PageUp','PageDown',' ','Escape','F11','1','2','3','4'].includes(k)
+                        ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','PageUp','PageDown',' ','Escape','F11','1','2','3','4','c','C','n','N','Delete','Backspace'].includes(k) ||
+                        c === 'Numpad1' || c === 'Numpad2' || c === 'Numpad3' || c === 'Numpad4'
                     );
                     if (isCtrlShortcut || isNavKey) {
                         e.preventDefault();

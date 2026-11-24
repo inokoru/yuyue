@@ -1,5 +1,6 @@
 using Microsoft.UI;
 using Microsoft.UI.Text;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -10,6 +11,7 @@ using Windows.System;
 using Windows.UI;
 using Yuyue.Core;
 using Yuyue.Design;
+using Yuyue.Shelf;
 using Yuyue.Speech;
 using XamlLine = Microsoft.UI.Xaml.Shapes.Line;
 
@@ -24,6 +26,10 @@ public sealed partial class PodcastReaderWindow : Window
 
     private readonly MediaPlayer _streamPlayer;
     private readonly AudioPlayer _ttsPlayer;
+    private bool _closed;
+    private bool _isFullScreen;
+    private int _renderIssueGen;
+    private int _renderClipsGen;
     private bool _playingStream;
     private bool _playingTts;
     private bool _transcribing;
@@ -39,12 +45,13 @@ public sealed partial class PodcastReaderWindow : Window
 
         InitializeComponent();
         Title = _issue.Title;
-        ThemeHelper.ResizeWindow(this, 1020, 680);
+        ThemeHelper.ResizeWindow(this, 1020, 680, minWidthDip: 760, minHeightDip: 500);
         SetTitleBar(TitleDragRegion);
 
         _streamPlayer = new MediaPlayer { AudioCategory = MediaPlayerAudioCategory.Speech, AutoPlay = false };
         _streamPlayer.MediaEnded += (_, _) => DispatcherQueue.TryEnqueue(() =>
         {
+            if (_closed) return;
             _playingStream = false;
             _library.SystemIntegration.SetAudioPlaying(this, false);
             UpdatePlayButton();
@@ -55,6 +62,7 @@ public sealed partial class PodcastReaderWindow : Window
         _ttsPlayer.SetRate(_rate);
         _ttsPlayer.SectionFinished += () => DispatcherQueue.TryEnqueue(() =>
         {
+            if (_closed) return;
             _playingTts = false;
             _library.SystemIntegration.SetAudioPlaying(this, false);
             UpdatePlayButton();
@@ -63,8 +71,8 @@ public sealed partial class PodcastReaderWindow : Window
         Closed += OnWindowClosed;
 
         ApplyAppearance();
-        RenderIssue();
-        RenderClips();
+        _ = RenderIssueAsync();
+        _ = RenderClipsAsync();
     }
 
     public void ApplyAppearance()
@@ -82,19 +90,28 @@ public sealed partial class PodcastReaderWindow : Window
         L10n.ApplyTree(RootGrid);
     }
 
-    private void RenderIssue()
+    private async Task RenderIssueAsync()
     {
-        bool dark = ThemeHelper.IsDark(RootGrid.ActualTheme);
-        var p = ThemeHelper.Palette(dark);
-
+        if (_closed) return;
+        int gen = ++_renderIssueGen;
         ShowNameTopText.Text = _issue.ShowTitle;
         IssueShowBadge.Text = _issue.Source == PodcastSourceKind.Studio ? $"✦ 书房电台 · {_issue.ShowTitle}" : _issue.ShowTitle;
         IssueTitleText.Text = _issue.Title;
         IssueSummaryText.Text = _issue.Summary;
         IssueSummaryText.Visibility = string.IsNullOrWhiteSpace(_issue.Summary) ? Visibility.Collapsed : Visibility.Visible;
 
+        var loaded = await Task.Run(() =>
+        {
+            try { return _library.Core.PodcastTranscript(_issueId); }
+            catch { return Array.Empty<MagazineSentence>(); }
+        });
+        if (_closed || gen != _renderIssueGen) return;
+
+        bool dark = ThemeHelper.IsDark(RootGrid.ActualTheme);
+        var p = ThemeHelper.Palette(dark);
+
         TranscriptStack.Children.Clear();
-        _transcript = _library.Core.PodcastTranscript(_issueId);
+        _transcript = loaded;
 
         if (_transcript.Length > 0)
         {
@@ -133,12 +150,12 @@ public sealed partial class PodcastReaderWindow : Window
                     Padding = new Thickness(7, 0, 7, 0),
                     HorizontalAlignment = HorizontalAlignment.Right,
                 };
-                clipBtn.Click += (_, _) =>
+                clipBtn.Click += async (_, _) =>
                 {
                     try
                     {
-                        _library.Core.PodcastAddClip(_issueId, sent.T0, sent.T1, sent.Speaker, sent.TextOrig, null, null);
-                        RenderClips();
+                        await Task.Run(() => _library.Core.PodcastAddClip(_issueId, sent.T0, sent.T1, sent.Speaker, sent.TextOrig, null, null));
+                        if (!_closed) await RenderClipsAsync();
                     }
                     catch { }
                 };
@@ -224,18 +241,23 @@ public sealed partial class PodcastReaderWindow : Window
                 };
                 trBtn.Click += async (_, _) =>
                 {
-                    if (_transcribing) return;
+                    if (_transcribing || _closed) return;
                     _transcribing = true;
                     _transcribeStatus = L10n.T("正在准备单集音频…");
-                    RenderIssue();
+                    await RenderIssueAsync();
                     try
                     {
                         await _library.Podcasts.TranscribeIssueOnDeviceAsync(_issueId, msg =>
                         {
                             _transcribeStatus = msg;
-                            DispatcherQueue.TryEnqueue(RenderIssue);
+                            DispatcherQueue.TryEnqueue(() =>
+                            {
+                                if (_closed) return;
+                                _ = RenderIssueAsync();
+                            });
                         });
-                        _issue = _library.Core.PodcastIssue(_issueId);
+                        if (!_closed)
+                            _issue = await Task.Run(() => _library.Core.PodcastIssue(_issueId));
                     }
                     catch (Exception ex)
                     {
@@ -244,7 +266,7 @@ public sealed partial class PodcastReaderWindow : Window
                     finally
                     {
                         _transcribing = false;
-                        RenderIssue();
+                        if (!_closed) await RenderIssueAsync();
                     }
                 };
                 Grid.SetColumn(trBtn, 2);
@@ -277,17 +299,22 @@ public sealed partial class PodcastReaderWindow : Window
         }
     }
 
-    private void RenderClips()
+    private async Task RenderClipsAsync()
     {
+        if (_closed) return;
+        int gen = ++_renderClipsGen;
+        PodcastClip[] clips = await Task.Run(() =>
+        {
+            try { return _library.Core.PodcastClips(_issueId); }
+            catch { return Array.Empty<PodcastClip>(); }
+        });
+        if (_closed || gen != _renderClipsGen) return;
+
         ClipsStack.Children.Clear();
         bool dark = ThemeHelper.IsDark(RootGrid.ActualTheme);
         var p = ThemeHelper.Palette(dark);
         var serif = new FontFamily(YYFontFamily.Serif.WindowsFamily());
         Color leafSurface = dark ? Color.FromArgb(255, 31, 30, 28) : Color.FromArgb(255, 248, 245, 239);
-
-        PodcastClip[] clips;
-        try { clips = _library.Core.PodcastClips(_issueId); }
-        catch { clips = Array.Empty<PodcastClip>(); }
 
         if (clips.Length == 0)
         {
@@ -333,6 +360,7 @@ public sealed partial class PodcastReaderWindow : Window
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(0, 2, 0, 2),
             };
+            YYChrome.StripTextBoxChrome(noteBox);
             noteBox.LostFocus += (_, _) => _library.Podcasts.SetClipThought(cid, noteBox.Text);
             noteBox.KeyDown += (_, ke) =>
             {
@@ -354,7 +382,15 @@ public sealed partial class PodcastReaderWindow : Window
                 Padding = new Thickness(6, 0, 6, 0),
                 HorizontalAlignment = HorizontalAlignment.Right,
             };
-            del.Click += (_, _) => { try { _library.Core.PodcastDeleteClip(cid); RenderClips(); } catch { } };
+            del.Click += async (_, _) =>
+            {
+                try
+                {
+                    await Task.Run(() => _library.Core.PodcastDeleteClip(cid));
+                    if (!_closed) await RenderClipsAsync();
+                }
+                catch { }
+            };
             sp.Children.Add(del);
 
             ClipsStack.Children.Add(new Border
@@ -375,6 +411,7 @@ public sealed partial class PodcastReaderWindow : Window
     {
         DispatcherQueue.TryEnqueue(() =>
         {
+            if (_closed) return;
             if (_playingStream)
             {
                 try { _streamPlayer.Pause(); } catch { }
@@ -460,11 +497,80 @@ public sealed partial class PodcastReaderWindow : Window
 
     private void UpdatePlayButton()
     {
+        if (_closed) return;
         PlayBtn.Content = (_playingStream || _playingTts) ? L10n.Tr("⏸ 暂停", "⏸ Pause") : L10n.Tr("▶ 收听", "▶ Listen");
+    }
+
+    private void ToggleFullScreen()
+    {
+        _isFullScreen = !_isFullScreen;
+        try
+        {
+            AppWindow?.SetPresenter(_isFullScreen ? AppWindowPresenterKind.FullScreen : AppWindowPresenterKind.Default);
+        }
+        catch { }
+        TopBar.Visibility = _isFullScreen ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void RootGrid_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (_closed || YYChrome.HasBlockingModalOrFlyoutOpen(RootGrid.XamlRoot)) return;
+
+        bool ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+        bool alt = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+
+        if (ctrl && !alt)
+        {
+            if (e.Key == VirtualKey.W)
+            {
+                e.Handled = true;
+                Close();
+                return;
+            }
+            if (e.Key == (VirtualKey)188)
+            {
+                e.Handled = true;
+                App.CurrentApp.OpenSettings();
+                return;
+            }
+            if (e.Key == VirtualKey.K)
+            {
+                e.Handled = true;
+                string linkedBookId = _transcript.FirstOrDefault(s => !string.IsNullOrEmpty(s.BookId))?.BookId ?? "";
+                _ = QuickSearchDialog.ShowAsync(RootGrid.XamlRoot, _library, linkedBookId);
+                return;
+            }
+        }
+
+        if (e.Key == VirtualKey.F11)
+        {
+            e.Handled = true;
+            ToggleFullScreen();
+            return;
+        }
+
+        if (FocusManager.GetFocusedElement(RootGrid.XamlRoot) is TextBox)
+            return;
+
+        if (e.Key == VirtualKey.Space && !ctrl && !alt)
+        {
+            e.Handled = true;
+            Play_Click(sender, e);
+            return;
+        }
+        if (e.Key == VirtualKey.Escape && _isFullScreen)
+        {
+            e.Handled = true;
+            ToggleFullScreen();
+        }
     }
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
+        _closed = true;
+        _library.SystemIntegration.SetAudioPlaying(this, false);
         if (_playingStream)
         {
             try
@@ -474,7 +580,14 @@ public sealed partial class PodcastReaderWindow : Window
             }
             catch { }
         }
-        try { _streamPlayer.Pause(); _streamPlayer.Dispose(); } catch { }
+        try
+        {
+            _streamPlayer.Pause();
+            _streamPlayer.Source = null;
+            _streamPlayer.Dispose();
+        }
+        catch { }
+        try { _ttsPlayer.Stop(); } catch { }
         _ttsPlayer.Dispose();
     }
 }

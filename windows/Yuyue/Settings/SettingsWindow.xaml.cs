@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Microsoft.UI;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -32,13 +33,16 @@ public sealed partial class SettingsWindow : Window
     private readonly LibraryService _library;
     private string _activePage;
     private bool _initializing = true;
+    private bool _closed;
     private string? _hoveredThemeMode;
 
     // 同步页状态
     private bool _editingWebDav;
     private bool _editingGDrive;
+    private CancellationTokenSource? _gdriveAuthCts;
     // 朗读页状态 ("" = overview, "kokoro" | "edge" | "free" | "pc" | cloud/local provider keys)
     private string _focusedVoiceSource = "";
+    private double _voiceChatScrollOffset;
     private string _voiceBookLang = "zh";
     private bool _voiceSourceConfigOpen;
     private string _selectedInspectorVoiceId = "";
@@ -48,6 +52,7 @@ public sealed partial class SettingsWindow : Window
     private double _auditionEstimatedSecs = 3.0;
     private DispatcherTimer? _voicePlayTimer;
     private readonly HashSet<string> _heardVoiceIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _queuedKokoroVoiceIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _customVoiceLines = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _draftVoiceLines = new(StringComparer.OrdinalIgnoreCase);
     private (string Lang, string OldId, string OldName, string NewName, DateTimeOffset At)? _recentVoiceSwap;
@@ -57,19 +62,34 @@ public sealed partial class SettingsWindow : Window
     private string _lastVoiceStructureSig = "";
     private string _lastFontStructureSig = "";
     private Action? _liveVoiceProgressUpdater;
+    private Action? _inspectorVoiceProgressUpdater;
     private Action? _fontProgressUpdater;
     private Action? _fontBookProgressUpdater;
+    private Action? _activeFontBookRebuild;
 
     // 书伴页状态
     private string _focusedCompanionId;
     private bool _companionPickingModel;
     private bool _companionEditingKey;
+    private DispatcherTimer? _companionDebounceTimer;
+    private CancellationTokenSource? _openRouterAuthCts;
     private readonly HashSet<string> _newlyAddedCompanionIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, IReadOnlyList<string>> _cachedCompanionModels = new();
     private Dictionary<string, IReadOnlyList<string>> _liveLocalCompanions = new();
     private bool _localCompanionProbeStarted;
     // 笔记导出页状态 ("obsidian" | "notion" | "flomo" | "xinzhi")
     private string _focusedExportTarget = "obsidian";
+    // 存储页离线扩展模型下载状态
+    private CancellationTokenSource? _alignerDlCts;
+    private double _alignerDlProgress;
+    private Action? _alignerProgressUiUpdater;
+    private CancellationTokenSource? _senseVoiceDlCts;
+    private double _senseVoiceDlProgress;
+    private Action? _senseVoiceProgressUiUpdater;
+    // 关于页内联更新检查状态
+    private bool _aboutCheckingInline;
+    private string? _aboutLastInlineCheckError;
+    private bool _aboutJustCheckedUpToDate;
     // 数据快照分项勾选
     private bool _snapProgress = true;
     private bool _snapNotes = true;
@@ -100,7 +120,12 @@ public sealed partial class SettingsWindow : Window
 
         InitializeComponent();
 
-        ThemeHelper.ResizeWindow(this, 980, 660);
+        ThemeHelper.ResizeWindow(
+            this,
+            _library.Prefs.SettingsWindowWidth,
+            _library.Prefs.SettingsWindowHeight,
+            minWidthDip: 860,
+            minHeightDip: 540);
         SetTitleBar(TitleDragRegion);
 
         InspectorResizeHandle.MinWidthLimit = 252.0;
@@ -122,9 +147,29 @@ public sealed partial class SettingsWindow : Window
         _library.Fonts.Changed += OnFontsChanged;
         _library.Sync.StatusChanged += OnSyncStatusChanged;
         _library.Usage.Changed += OnUsageChanged;
+        _library.Updates.StateChanged += OnUpdatesStateChanged;
         Closed += (_, _) =>
         {
+            _closed = true;
+            if (ThemeHelper.TryGetRestoredDipSize(this, out int dipW, out int dipH))
+            {
+                if (_library.Prefs.SettingsWindowWidth != dipW || _library.Prefs.SettingsWindowHeight != dipH)
+                {
+                    _library.Prefs.SettingsWindowWidth = dipW;
+                    _library.Prefs.SettingsWindowHeight = dipH;
+                    _library.SavePrefs();
+                }
+            }
             _flashTimer?.Stop();
+            _companionDebounceTimer?.Stop();
+            try { _openRouterAuthCts?.Cancel(); _openRouterAuthCts?.Dispose(); } catch { }
+            _openRouterAuthCts = null;
+            try { _gdriveAuthCts?.Cancel(); _gdriveAuthCts?.Dispose(); } catch { }
+            _gdriveAuthCts = null;
+            try { _alignerDlCts?.Cancel(); _alignerDlCts?.Dispose(); } catch { }
+            _alignerDlCts = null;
+            try { _senseVoiceDlCts?.Cancel(); _senseVoiceDlCts?.Dispose(); } catch { }
+            _senseVoiceDlCts = null;
             StopVoicePreviewUi();
             AudioPlayer.StopActivePreview();
             _library.Kokoro.StateChanged -= OnLiveVoiceStateChanged;
@@ -132,6 +177,7 @@ public sealed partial class SettingsWindow : Window
             _library.Fonts.Changed -= OnFontsChanged;
             _library.Sync.StatusChanged -= OnSyncStatusChanged;
             _library.Usage.Changed -= OnUsageChanged;
+            _library.Updates.StateChanged -= OnUpdatesStateChanged;
         };
 
         ApplyAppearanceCore(renderContent: false);
@@ -155,10 +201,26 @@ public sealed partial class SettingsWindow : Window
         _voicePlayTimer?.Stop();
         _voicePlayTimer = null;
         _auditioningVoiceId = "";
+        _auditioningLineText = "";
     }
 
-    private string ComputeVoiceStructureSig() =>
-        $"{_library.Kokoro.State}|{_library.Kokoro.IsInstalled}|{_library.LiveVoice.State}|{_library.LiveVoice.IsReady}|{_library.LiveVoice.GetClonedCards().Count}";
+    private void SetFocusedVoiceSource(string nextSource)
+    {
+        if (!string.Equals(_focusedVoiceSource, nextSource, StringComparison.OrdinalIgnoreCase))
+            _voiceChatScrollOffset = 0;
+        _focusedVoiceSource = nextSource;
+    }
+
+    private string ComputeVoiceStructureSig()
+    {
+        if (_library.Kokoro.IsInstalled && _queuedKokoroVoiceIds.Count > 0)
+            _queuedKokoroVoiceIds.Clear();
+        string koFail = _library.Kokoro.State == KokoroStateKind.Failed ? _library.Kokoro.StatusMessage : "";
+        string lvFail = _library.LiveVoice.State == LiveVoiceStateKind.Failed ? _library.LiveVoice.StatusMessage : "";
+        string pendZh = _library.Kokoro.GetPendingVoiceName("zh") ?? "";
+        string pendEn = _library.Kokoro.GetPendingVoiceName("en") ?? "";
+        return $"{_library.Kokoro.State}|{_library.Kokoro.IsInstalled}|{koFail}|{pendZh}|{pendEn}|{_library.LiveVoice.State}|{_library.LiveVoice.IsReady}|{lvFail}|{_library.LiveVoice.GetClonedCards().Count}";
+    }
 
     private string ComputeFontStructureSig()
     {
@@ -254,15 +316,90 @@ public sealed partial class SettingsWindow : Window
 
     private void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.OriginalSource is TextBox or PasswordBox or RichEditBox) return;
-        if (RootGrid.XamlRoot is not null && FocusManager.GetFocusedElement(RootGrid.XamlRoot) is TextBox or PasswordBox or RichEditBox) return;
+        if (YYChrome.HasBlockingModalOrFlyoutOpen(RootGrid.XamlRoot)) return;
 
         bool ctrl = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(CoreVirtualKeyStates.Down);
         bool shift = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(CoreVirtualKeyStates.Down);
         bool alt = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu).HasFlag(CoreVirtualKeyStates.Down);
 
+        if (ctrl && !shift && !alt && e.Key == VirtualKey.W)
+        {
+            e.Handled = true;
+            Close();
+            return;
+        }
+
+        if (!ctrl && !shift && !alt && e.Key == VirtualKey.Escape)
+        {
+            if (_activePage == "listening" && _voiceSourceConfigOpen)
+            {
+                _voiceSourceConfigOpen = false;
+                RenderDynamicPage("listening");
+                RenderInspector("listening");
+                e.Handled = true;
+                return;
+            }
+            if (_activePage == "listening" && !string.IsNullOrEmpty(_focusedVoiceSource))
+            {
+                SetFocusedVoiceSource("");
+                _voiceSourceConfigOpen = false;
+                StopVoicePreviewUi();
+                AudioPlayer.StopActivePreview();
+                NavigateTo("listening");
+                e.Handled = true;
+                return;
+            }
+            if (_activePage == "companion" && _companionPickingModel)
+            {
+                _companionPickingModel = false;
+                RenderInspector("companion");
+                e.Handled = true;
+                return;
+            }
+            if (_activePage == "companion" && _companionEditingKey)
+            {
+                _companionEditingKey = false;
+                RenderInspector("companion");
+                e.Handled = true;
+                return;
+            }
+            if (_activePage == "sync" && _editingWebDav)
+            {
+                _editingWebDav = false;
+                RenderDynamicPage("sync");
+                e.Handled = true;
+                return;
+            }
+            if (_activePage == "sync" && _editingGDrive)
+            {
+                try { _gdriveAuthCts?.Cancel(); } catch { }
+                _editingGDrive = false;
+                RenderDynamicPage("sync");
+                e.Handled = true;
+                return;
+            }
+
+            e.Handled = true;
+            Close();
+            return;
+        }
+
+        if (e.OriginalSource is TextBox or PasswordBox or RichEditBox) return;
+        if (RootGrid.XamlRoot is not null && FocusManager.GetFocusedElement(RootGrid.XamlRoot) is TextBox or PasswordBox or RichEditBox) return;
+
         if (ctrl && !alt)
         {
+            if (!shift && e.Key is >= VirtualKey.Number1 and <= VirtualKey.Number9)
+            {
+                int idx = (int)e.Key - (int)VirtualKey.Number1;
+                if (idx >= 0 && idx < SidebarPageOrder.Length)
+                {
+                    NavigateTo(SidebarPageOrder[idx]);
+                    e.Handled = true;
+                }
+                return;
+            }
+
             if ((e.Key == VirtualKey.Z && shift) || e.Key == VirtualKey.Y)
             {
                 if (History.TryRedo() is { } redone)
@@ -288,30 +425,16 @@ public sealed partial class SettingsWindow : Window
             }
         }
 
-        if (!ctrl && !shift && !alt)
+        if (!ctrl && !shift && !alt && e.Key is VirtualKey.Up or VirtualKey.Down)
         {
-            if (e.Key == VirtualKey.Escape && _activePage == "listening" && !string.IsNullOrEmpty(_focusedVoiceSource))
+            int curIdx = Array.IndexOf(SidebarPageOrder, _activePage);
+            if (curIdx >= 0)
             {
-                _focusedVoiceSource = "";
-                _voiceSourceConfigOpen = false;
-                StopVoicePreviewUi();
-                AudioPlayer.StopActivePreview();
-                NavigateTo("listening");
-                e.Handled = true;
-                return;
-            }
-
-            if (e.Key is VirtualKey.Up or VirtualKey.Down)
-            {
-                int curIdx = Array.IndexOf(SidebarPageOrder, _activePage);
-                if (curIdx >= 0)
+                int nextIdx = Math.Clamp(curIdx + (e.Key == VirtualKey.Down ? 1 : -1), 0, SidebarPageOrder.Length - 1);
+                if (nextIdx != curIdx)
                 {
-                    int nextIdx = Math.Clamp(curIdx + (e.Key == VirtualKey.Down ? 1 : -1), 0, SidebarPageOrder.Length - 1);
-                    if (nextIdx != curIdx)
-                    {
-                        NavigateTo(SidebarPageOrder[nextIdx]);
-                        e.Handled = true;
-                    }
+                    NavigateTo(SidebarPageOrder[nextIdx]);
+                    e.Handled = true;
                 }
             }
         }
@@ -963,7 +1086,9 @@ public sealed partial class SettingsWindow : Window
     {
         DispatcherQueue.TryEnqueue(() =>
         {
+            if (_closed) return;
             _liveVoiceProgressUpdater?.Invoke();
+            _inspectorVoiceProgressUpdater?.Invoke();
             string sig = ComputeVoiceStructureSig();
             if (sig == _lastVoiceStructureSig) return;
             _lastVoiceStructureSig = sig;
@@ -979,11 +1104,13 @@ public sealed partial class SettingsWindow : Window
     {
         DispatcherQueue.TryEnqueue(() =>
         {
+            if (_closed) return;
             _fontProgressUpdater?.Invoke();
             _fontBookProgressUpdater?.Invoke();
             string sig = ComputeFontStructureSig();
             if (sig == _lastFontStructureSig) return;
             _lastFontStructureSig = sig;
+            _activeFontBookRebuild?.Invoke();
             if (_activePage == "reading")
             {
                 RenderDynamicPage("reading");
@@ -996,6 +1123,7 @@ public sealed partial class SettingsWindow : Window
     {
         DispatcherQueue.TryEnqueue(() =>
         {
+            if (_closed) return;
             if (_activePage == "sync" && !_editingWebDav && !_editingGDrive)
                 RenderDynamicPage("sync");
         });
@@ -1005,8 +1133,20 @@ public sealed partial class SettingsWindow : Window
     {
         DispatcherQueue.TryEnqueue(() =>
         {
+            if (_closed) return;
             if (_activePage == "companion")
                 RenderDynamicPage("companion");
+        });
+    }
+
+    private void OnUpdatesStateChanged()
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_closed) return;
+            MountIcons();
+            if (_activePage == "about" && !_aboutCheckingInline)
+                RenderDynamicPage("about");
         });
     }
 
@@ -1097,6 +1237,10 @@ public sealed partial class SettingsWindow : Window
 
         CoverSizeSlider.Value = Math.Clamp(_library.Prefs.CoverWidth, 80, 130);
         ShowProgressToggle.IsOn = _library.Prefs.ShowProgress;
+        AutomationProperties.SetName(CoverSizeSlider, L10n.T("书架封面大小"));
+        AutomationProperties.SetName(ShowProgressToggle, L10n.T("封面下显示进度"));
+        AutomationProperties.SetName(CornerHistoryBtn, L10n.T("最近修改的设置"));
+        AutomationProperties.SetName(InspectorHistoryBtn, L10n.T("最近修改的设置"));
         _initializing = false;
 
         if (!renderContent) return;
@@ -1182,6 +1326,8 @@ public sealed partial class SettingsWindow : Window
     {
         _liveVoiceProgressUpdater = null;
         _fontProgressUpdater = null;
+        _alignerProgressUiUpdater = null;
+        _senseVoiceProgressUiUpdater = null;
         DynamicPageHost.Children.Clear();
         VoiceSourceHost.Children.Clear();
         UpdateMiddleHostVisibility(page);
@@ -1283,6 +1429,11 @@ public sealed partial class SettingsWindow : Window
 
         if (right is not null)
         {
+            if (right is DependencyObject rightObj && right is ToggleSwitch or ComboBox or Button or Slider)
+            {
+                if (string.IsNullOrEmpty(AutomationProperties.GetName(rightObj)))
+                    AutomationProperties.SetName(rightObj, L10n.T(title));
+            }
             right.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(right, 1);
             g.Children.Add(right);
@@ -1456,6 +1607,7 @@ public sealed partial class SettingsWindow : Window
 
     private void RenderInspector(string page)
     {
+        _inspectorVoiceProgressUpdater = null;
         InspectorHost.Children.Clear();
         var p = CurrentPalette;
         var tint = CurrentTint;
@@ -1731,7 +1883,7 @@ public sealed partial class SettingsWindow : Window
                     var latest = t.Result;
                     DispatcherQueue.TryEnqueue(() =>
                     {
-                        if (_activePage != "data") return;
+                        if (_closed || _activePage != "data") return;
                         var pal = CurrentPalette;
                         if (latest is { } item)
                         {
@@ -1770,6 +1922,9 @@ public sealed partial class SettingsWindow : Window
         !string.IsNullOrEmpty(rs.FontFace)
             ? rs.FontFace switch
             {
+                "serif" => "宋体",
+                "kai" => "楷体",
+                "system" => "系统",
                 "notoserif" => "思源宋体",
                 "notosans" => "思源黑体",
                 "wenkai" => "霞鹜文楷",
@@ -2223,6 +2378,7 @@ public sealed partial class SettingsWindow : Window
             RenderInspector("reading");
             RenderDynamicPage("reading");
         });
+        AutomationProperties.SetName(followSwitch, L10n.T("纸色跟随外观"));
         followBox.Children.Add(followSwitch);
         paperHeader.Children.Add(followBox);
         paperWrap.Children.Add(paperHeader);
@@ -2327,7 +2483,7 @@ public sealed partial class SettingsWindow : Window
             var tileCard = MakePaperTileCard(CustomPaperDialog.ParseHexColor(pc.Bg, Colors.Beige), CustomPaperDialog.ParseHexColor(pc.Ink, Colors.Black), p.Line, cpItem.Name, on);
 
             var ctx = new MenuFlyout();
-            var editMi = new MenuFlyoutItem { Text = "调整颜色…" };
+            var editMi = new MenuFlyoutItem { Text = L10n.T("调整颜色…") };
             editMi.Click += async (_, _) =>
             {
                 var edited = await CustomPaperDialog.ShowEditorAsync(RootGrid.XamlRoot, _library, cpItem);
@@ -2339,7 +2495,7 @@ public sealed partial class SettingsWindow : Window
                 }
                 RenderDynamicPage("reading");
             };
-            var renameMi = new MenuFlyoutItem { Text = "重命名…" };
+            var renameMi = new MenuFlyoutItem { Text = L10n.T("重命名…") };
             renameMi.Click += async (_, _) =>
             {
                 string? newName = await YYChrome.ShowPromptAsync(
@@ -2365,7 +2521,7 @@ public sealed partial class SettingsWindow : Window
                     await ShowInfoDialogAsync("重命名失败", ex.Message);
                 }
             };
-            var dupMi = new MenuFlyoutItem { Text = "复制一张" };
+            var dupMi = new MenuFlyoutItem { Text = L10n.T("复制一张") };
             dupMi.Click += (_, _) =>
             {
                 var copy = CustomPaperDialog.DuplicateCustomPaper(_library, cpItem);
@@ -2377,7 +2533,7 @@ public sealed partial class SettingsWindow : Window
                 }
                 RenderDynamicPage("reading");
             };
-            var delMi = new MenuFlyoutItem { Text = "删除…", Foreground = ThemeHelper.Brush(p.Danger) };
+            var delMi = new MenuFlyoutItem { Text = L10n.T("删除…"), Foreground = ThemeHelper.Brush(p.Danger) };
             delMi.Click += async (_, _) =>
             {
                 bool confirmed = await YYChrome.ShowConfirmAsync(
@@ -2544,7 +2700,7 @@ public sealed partial class SettingsWindow : Window
             if (!fc.BuiltIn)
             {
                 tileCtx = new MenuFlyout();
-                var unpinMi = new MenuFlyoutItem { Text = "从格子里拿掉" };
+                var unpinMi = new MenuFlyoutItem { Text = L10n.T("从格子里拿掉") };
                 string pinIdCapture = fc.Id;
                 bool activeCapture = on;
                 unpinMi.Click += (_, _) =>
@@ -2637,6 +2793,7 @@ public sealed partial class SettingsWindow : Window
         var fsPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         var fsLabel = new TextBlock { Text = $"{(int)Math.Round(rs.FontSize)}", FontSize = 12.5, Width = 24, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center };
         var fsSlider = new Slider { Minimum = 12, Maximum = 34, StepFrequency = 1, Value = Math.Clamp(rs.FontSize, 12, 34), Width = 176 };
+        AutomationProperties.SetName(fsSlider, L10n.T("字号"));
         fsSlider.ValueChanged += (_, e) =>
         {
             int v = (int)Math.Round(e.NewValue);
@@ -2948,14 +3105,6 @@ public sealed partial class SettingsWindow : Window
         searchWrap.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         searchWrap.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         searchWrap.Children.Add(YYIcons.Make("search", 12, ThemeHelper.Brush(p.T3)));
-        static void StripTextBoxChrome(TextBox tb)
-        {
-            tb.Resources["TextControlBorderThemeThickness"] = new Thickness(0);
-            tb.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
-            tb.Resources["TextControlBackground"] = new SolidColorBrush(Colors.Transparent);
-            tb.Resources["TextControlBackgroundPointerOver"] = new SolidColorBrush(Colors.Transparent);
-            tb.Resources["TextControlBackgroundFocused"] = new SolidColorBrush(Colors.Transparent);
-        }
 
         var searchBox = new TextBox
         {
@@ -2966,7 +3115,8 @@ public sealed partial class SettingsWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(0, 4, 0, 4),
         };
-        StripTextBoxChrome(searchBox);
+        YYChrome.StripTextBoxChrome(searchBox);
+        AutomationProperties.SetName(searchBox, L10n.T("搜字体名称"));
         Grid.SetColumn(searchBox, 1);
         searchWrap.Children.Add(searchBox);
         col2Grid.Children.Add(searchWrap);
@@ -3047,10 +3197,19 @@ public sealed partial class SettingsWindow : Window
         var dlProgressBar = new ProgressBar { Minimum = 0, Maximum = 100, Height = 4 };
         dlProgressPanel.Children.Add(dlProgressTb);
         dlProgressPanel.Children.Add(dlProgressBar);
+        var dlErrorTb = new TextBlock
+        {
+            FontSize = 11.5,
+            Foreground = ThemeHelper.Brush(p.Danger),
+            TextWrapping = TextWrapping.Wrap,
+            Visibility = Visibility.Collapsed,
+            Margin = new Thickness(0, 2, 0, 0),
+        };
 
         specimenMetaStack.Children.Add(specimenTitleTb);
         specimenMetaStack.Children.Add(specimenSubTb);
         specimenMetaStack.Children.Add(dlProgressPanel);
+        specimenMetaStack.Children.Add(dlErrorTb);
         Grid.SetColumn(specimenMetaStack, 1);
         topSpecimenHead.Children.Add(specimenMetaStack);
 
@@ -3072,7 +3231,9 @@ public sealed partial class SettingsWindow : Window
             Padding = new Thickness(0),
             VerticalAlignment = VerticalAlignment.Stretch,
         };
-        StripTextBoxChrome(specimenEditor);
+        YYChrome.StripTextBoxChrome(specimenEditor);
+        specimenEditor.Foreground = ThemeHelper.Brush(p.T1);
+        AutomationProperties.SetName(specimenEditor, L10n.T("字体预览样张"));
         Grid.SetRow(specimenEditor, 1);
         col3Grid.Children.Add(specimenEditor);
 
@@ -3116,8 +3277,27 @@ public sealed partial class SettingsWindow : Window
         importFileBtn.VerticalAlignment = VerticalAlignment.Center;
         footerGrid.Children.Add(importFileBtn);
 
+        bool fontBookClosed = false;
+        var sessionDownloads = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var fontDownloadErrors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        void CancelInFlightFontBookDownloads()
+        {
+            foreach (string pid in sessionDownloads.ToArray())
+            {
+                sessionDownloads.Remove(pid);
+                if (_library.Fonts.IsDownloading(pid))
+                    _library.Fonts.CancelDownload(pid);
+            }
+        }
+
         var rightFootBtns = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
-        var cancelSheetBtn = YYChrome.MakeSheetPillButton("取消", () => dlgRef?.Hide(), IsDark, _library.Prefs.Tint, kind: "secondary", height: 34, horizontalPadding: 16);
+        var cancelSheetBtn = YYChrome.MakeSheetPillButton("取消", () =>
+        {
+            fontBookClosed = true;
+            CancelInFlightFontBookDownloads();
+            dlgRef?.Hide();
+        }, IsDark, _library.Prefs.Tint, kind: "secondary", height: 34, horizontalPadding: 16);
         var applyFontBtn = YYChrome.MakeSheetPillButton("选用", () => { }, IsDark, _library.Prefs.Tint, kind: "dark", height: 34, horizontalPadding: 18);
         rightFootBtns.Children.Add(cancelSheetBtn);
         rightFootBtns.Children.Add(applyFontBtn);
@@ -3125,6 +3305,14 @@ public sealed partial class SettingsWindow : Window
         footerGrid.Children.Add(rightFootBtns);
         Grid.SetRow(footerGrid, 2);
         rootGrid.Children.Add(footerGrid);
+
+        void SetApplyFontButtonLabel(string label)
+        {
+            if (applyFontBtn.Content is TextBlock tb)
+                tb.Text = L10n.T(label);
+            else
+                applyFontBtn.Content = L10n.T(label);
+        }
 
         void PinIfExternal(string id)
         {
@@ -3138,26 +3326,54 @@ public sealed partial class SettingsWindow : Window
             }
         }
 
+        void RebuildFontBookAndTree()
+        {
+            if (fontBookClosed || _closed) return;
+            RebuildFontBook();
+            L10n.ApplyTree(col1Stack);
+            L10n.ApplyTree(fontListStack);
+        }
+
         async Task ApplySelectedFontAsync(FontBookItem item)
         {
             if (item.GroupKey == "catalog" && !_library.Fonts.IsPackInstalled(item.Id))
             {
-                if (_library.Fonts.IsDownloading(item.Id)) return;
-                applyFontBtn.IsEnabled = false;
+                if (_library.Fonts.IsDownloading(item.Id))
+                {
+                    sessionDownloads.Remove(item.Id);
+                    _library.Fonts.CancelDownload(item.Id);
+                    RebuildFontBookAndTree();
+                    return;
+                }
+
+                fontDownloadErrors.Remove(item.Id);
+                sessionDownloads.Add(item.Id);
+                RebuildFontBookAndTree();
                 try
                 {
                     await _library.Fonts.DownloadPackAsync(item.Id);
                 }
                 catch (Exception ex)
                 {
-                    dlgRef?.Hide();
-                    await ShowInfoDialogAsync("字体下载失败", ex.Message);
+                    sessionDownloads.Remove(item.Id);
+                    if (!fontBookClosed && !_closed)
+                    {
+                        fontDownloadErrors[item.Id] = ex.Message;
+                        RebuildFontBookAndTree();
+                    }
                     return;
                 }
-                if (!_library.Fonts.IsPackInstalled(item.Id))
+
+                bool wasActiveSession = sessionDownloads.Remove(item.Id);
+                if (fontBookClosed || _closed || !wasActiveSession || !_library.Fonts.IsPackInstalled(item.Id))
+                {
+                    if (!fontBookClosed && !_closed)
+                        RebuildFontBookAndTree();
                     return;
+                }
             }
 
+            if (fontBookClosed || _closed) return;
             PinIfExternal(item.Id);
             updateFn("字体", item.Name, s => item.Id switch
             {
@@ -3171,6 +3387,7 @@ public sealed partial class SettingsWindow : Window
                     s with { Font = item.Kind == FontKind.Hei ? Font.Sans : Font.Serif, FontFace = item.Id },
                 _ => s with { Font = item.Kind == FontKind.Hei ? Font.Sans : Font.Serif, FontFace = item.Id },
             });
+            fontBookClosed = true;
             dlgRef?.Hide();
             RenderDynamicPage("reading");
         }
@@ -3196,27 +3413,39 @@ public sealed partial class SettingsWindow : Window
                 dlProgressPanel.Visibility = Visibility.Visible;
                 dlProgressTb.Text = L10n.T($"正在下载字体包 {pct}%…");
                 dlProgressBar.Value = pct;
-                applyFontBtn.Content = L10n.T($"下载中 {pct}%");
-                applyFontBtn.IsEnabled = false;
+                dlErrorTb.Visibility = Visibility.Collapsed;
+                SetApplyFontButtonLabel($"取消下载 ({pct}%)");
+                applyFontBtn.IsEnabled = true;
             }
             else
             {
                 dlProgressPanel.Visibility = Visibility.Collapsed;
-                if (isCurrent)
+                if (!isInstalled && fontDownloadErrors.TryGetValue(item.Id, out var errMsg) && !string.IsNullOrWhiteSpace(errMsg))
                 {
-                    applyFontBtn.Content = L10n.T("正在用");
-                    applyFontBtn.IsEnabled = false;
-                }
-                else if (!isInstalled)
-                {
-                    int mb = Math.Max(1, (int)Math.Round(item.SizeBytes / 1048576.0));
-                    applyFontBtn.Content = L10n.T($"下载并选用 · {mb} MB");
+                    dlErrorTb.Text = errMsg;
+                    dlErrorTb.Visibility = Visibility.Visible;
+                    SetApplyFontButtonLabel("重试下载");
                     applyFontBtn.IsEnabled = true;
                 }
                 else
                 {
-                    applyFontBtn.Content = L10n.T("选用");
-                    applyFontBtn.IsEnabled = true;
+                    dlErrorTb.Visibility = Visibility.Collapsed;
+                    if (isCurrent)
+                    {
+                        SetApplyFontButtonLabel("正在用");
+                        applyFontBtn.IsEnabled = false;
+                    }
+                    else if (!isInstalled)
+                    {
+                        int mb = Math.Max(1, (int)Math.Round(item.SizeBytes / 1048576.0));
+                        SetApplyFontButtonLabel($"下载并选用 · {mb} MB");
+                        applyFontBtn.IsEnabled = true;
+                    }
+                    else
+                    {
+                        SetApplyFontButtonLabel("选用");
+                        applyFontBtn.IsEnabled = true;
+                    }
                 }
             }
         }
@@ -3265,7 +3494,7 @@ public sealed partial class SettingsWindow : Window
 
                 UIElement badgeChild = cBadge == "pc"
                     ? YYIcons.Make("laptop", 11, ThemeHelper.Brush(activeCat ? tint.Accent : p.T2))
-                    : new TextBlock
+                    : L10n.Skip(new TextBlock
                     {
                         Text = cBadge,
                         FontFamily = new FontFamily(cKey == "hei" ? YYFontFamily.Sans.WindowsFamily() : (cKey == "kai" ? YYFontFamily.Kaiti.WindowsFamily() : YYFontFamily.Serif.WindowsFamily())),
@@ -3274,7 +3503,7 @@ public sealed partial class SettingsWindow : Window
                         Foreground = ThemeHelper.Brush(activeCat ? tint.Accent : p.T2),
                         HorizontalAlignment = HorizontalAlignment.Center,
                         VerticalAlignment = VerticalAlignment.Center,
-                    };
+                    });
 
                 row.Children.Add(new Border
                 {
@@ -3426,20 +3655,44 @@ public sealed partial class SettingsWindow : Window
                             cancelText: L10n.T("取消"),
                             destructive: true,
                             tint: _library.Prefs.Tint);
-                        if (!ok) return;
+                        if (!ok || _closed) return;
+
+                        string? deletedFam = capItem.GroupKey == "custom" && capItem.Id.StartsWith("file:", StringComparison.OrdinalIgnoreCase)
+                            ? _library.Fonts.GetFontFileFamily(capItem.Id[5..])
+                            : _library.Fonts.Catalog.FirstOrDefault(c => c.Id == capItem.Id)?.PreviewFamily;
 
                         if (capItem.GroupKey == "custom" && capItem.Id.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
                         {
-                            _library.Fonts.DeleteCustomFont(capItem.Id[5..]);
-                            _library.Prefs.PinnedFontIds.Remove(capItem.Id);
-                            _library.SavePrefs();
+                            string fn = capItem.Id[5..];
+                            await Task.Run(() => _library.Fonts.DeleteCustomFont(fn));
                         }
                         else if (capItem.GroupKey == "catalog")
                         {
-                            _library.Fonts.DeletePack(capItem.Id);
+                            string packId = capItem.Id;
+                            await Task.Run(() => _library.Fonts.DeletePack(packId));
                         }
+                        if (_closed) return;
+
+                        if (_library.Prefs.PinnedFontIds.Remove(capItem.Id))
+                            _library.SavePrefs();
+
+                        var curRs = _library.GetReaderSettings();
+                        bool wasActive =
+                            (!string.IsNullOrEmpty(curRs.FontFace) && (
+                                string.Equals(curRs.FontFace, capItem.Id, StringComparison.OrdinalIgnoreCase) ||
+                                (!string.IsNullOrEmpty(deletedFam) && string.Equals(curRs.FontFace, deletedFam, StringComparison.OrdinalIgnoreCase)) ||
+                                (!string.IsNullOrEmpty(deletedFam) && string.Equals(curRs.FontFace, $"local:{deletedFam}", StringComparison.OrdinalIgnoreCase)))) ||
+                            (string.Equals(capItem.Id, "wenkai", StringComparison.OrdinalIgnoreCase) && curRs.Font == Font.WenKai);
+
+                        if (wasActive)
+                        {
+                            currentActiveId = "serif";
+                            updateFn("字体", "宋体", s => s with { Font = Font.Serif, FontFace = null });
+                        }
+                        fontDownloadErrors.Remove(capItem.Id);
                         RenderDynamicPage("reading");
-                        RebuildFontBook();
+                        if (!fontBookClosed)
+                            RebuildFontBookAndTree();
                     };
                     rowCtx.Items.Add(delMi);
                 }
@@ -3538,28 +3791,31 @@ public sealed partial class SettingsWindow : Window
                 PinIfExternal(newId);
                 selectedCategory = "all";
                 selectedFontId = newId;
-                RebuildFontBook();
+                fontDownloadErrors.Remove(newId);
+                RebuildFontBookAndTree();
                 RenderDynamicPage("reading");
             }
             catch (Exception ex)
             {
-                dlgRef?.Hide();
-                await ShowInfoDialogAsync("导入字体失败", ex.Message);
+                dlErrorTb.Text = ex.Message;
+                dlErrorTb.Visibility = Visibility.Visible;
             }
         };
 
         searchBox.TextChanged += (_, _) =>
         {
             searchQuery = searchBox.Text;
-            RebuildFontBook();
+            RebuildFontBookAndTree();
         };
 
         _fontBookProgressUpdater = () =>
         {
+            if (fontBookClosed || _closed) return;
             var allItems = BuildAllItems();
             var cur = allItems.FirstOrDefault(x => string.Equals(x.Id, selectedFontId, StringComparison.OrdinalIgnoreCase));
             UpdateSpecimenPane(cur);
         };
+        _activeFontBookRebuild = RebuildFontBookAndTree;
 
         if (loadingSysFonts)
         {
@@ -3569,9 +3825,10 @@ public sealed partial class SettingsWindow : Window
                 {
                     DispatcherQueue.TryEnqueue(() =>
                     {
+                        if (_closed || fontBookClosed) return;
                         sysFonts = t.Result;
                         loadingSysFonts = false;
-                        RebuildFontBook();
+                        RebuildFontBookAndTree();
                     });
                 }
             });
@@ -3581,13 +3838,23 @@ public sealed partial class SettingsWindow : Window
         L10n.ApplyTree(rootGrid);
 
         dlgRef = YYChrome.CreateMacSheet(RootGrid.XamlRoot, IsDark, 800, rootGrid, maxHeight: 540, tint: _library.Prefs.Tint);
+        dlgRef.Closed += (_, _) =>
+        {
+            fontBookClosed = true;
+            _fontBookProgressUpdater = null;
+            _activeFontBookRebuild = null;
+            CancelInFlightFontBookDownloads();
+        };
         try
         {
             await dlgRef.ShowSafeAsync(_library.Prefs.Tint);
         }
         finally
         {
+            fontBookClosed = true;
             _fontBookProgressUpdater = null;
+            _activeFontBookRebuild = null;
+            CancelInFlightFontBookDownloads();
         }
     }
 
@@ -3680,7 +3947,7 @@ public sealed partial class SettingsWindow : Window
             right.Children.Add(MakeSwitch(d.Enabled, on => _library.SetDictionaryEnabled(did, on)));
             var rowEl = MakeRow(d.Title, $"{d.Entries:N0} 个词条", right);
             var ctx = new MenuFlyout();
-            var rmItem = new MenuFlyoutItem { Text = "移除…", Foreground = ThemeHelper.Brush(p.Danger) };
+            var rmItem = new MenuFlyoutItem { Text = L10n.T("移除…"), Foreground = ThemeHelper.Brush(p.Danger) };
             rmItem.Click += async (_, _) =>
             {
                 bool confirmed = await YYChrome.ShowConfirmAsync(
@@ -3982,6 +4249,24 @@ public sealed partial class SettingsWindow : Window
         var items = new List<VoiceCatalogItem>();
         bool wantEn = bookLang == "en";
 
+        if (srcKey == "cloned")
+        {
+            foreach (var cloned in _library.LiveVoice.GetClonedCards())
+            {
+                int styles = Math.Max(0, cloned.Clips.Length - 1);
+                string sub = styles > 0 ? $"本机克隆声音卡 · 已录 {styles}/6 种情绪" : "本机克隆声音卡 · 中英双语";
+                items.Add(new VoiceCatalogItem(
+                    cloned.Id,
+                    cloned.Name,
+                    sub,
+                    "kokoro",
+                    "我的克隆声音",
+                    "bi",
+                    "我的克隆"));
+            }
+            return items;
+        }
+
         if (srcKey == "kokoro")
         {
             var ko = _library.Kokoro;
@@ -4222,17 +4507,41 @@ public sealed partial class SettingsWindow : Window
         return wrap;
     }
 
+    private bool IsKokoroVoiceQueuedForLang(VoiceCatalogItem item, string lang)
+    {
+        if (_library.Kokoro.IsInstalled || !item.Id.StartsWith("kokoro", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (_queuedKokoroVoiceIds.TryGetValue(lang, out var qid) &&
+            string.Equals(qid, item.Id, StringComparison.OrdinalIgnoreCase))
+            return true;
+        string? pendingName = _library.Kokoro.GetPendingVoiceName(lang);
+        if (!string.IsNullOrEmpty(pendingName))
+        {
+            var sp = _library.Kokoro.FindSpeaker(item.Id);
+            if (sp is not null && string.Equals(sp.Name, pendingName, StringComparison.Ordinal))
+                return true;
+        }
+        return false;
+    }
+
     private void SelectVoiceForBookLang(VoiceCatalogItem item, string lang)
     {
         if (item.SourceKey == "kokoro"
             && item.Id.StartsWith("kokoro", StringComparison.OrdinalIgnoreCase)
             && !_library.Kokoro.IsInstalled)
         {
+            _queuedKokoroVoiceIds[lang] = item.Id;
             _library.Kokoro.QueueSelection(item.Id, lang);
-            ShowFlashBanner($"开始下载 Kokoro，下好后自动启用「{item.Name}」");
+            ShowFlashBanner(L10n.T($"开始下载 Kokoro，下好后自动启用「{item.Name}」"));
+            if (_activePage == "listening")
+            {
+                RenderDynamicPage("listening");
+                RenderInspector("listening");
+            }
             return;
         }
 
+        _queuedKokoroVoiceIds.Remove(lang);
         string oldId = lang == "en" ? _library.Prefs.VoiceIdEn : _library.Prefs.VoiceId;
         var oldItem = ResolveVoiceItemById(oldId, lang);
         if (string.Equals(oldId, item.Id, StringComparison.OrdinalIgnoreCase))
@@ -4276,9 +4585,16 @@ public sealed partial class SettingsWindow : Window
         RenderInspector("listening");
     }
 
-    private async Task StartVoiceAuditionAsync(VoiceCatalogItem item, string lineText)
+    private async Task StartVoiceAuditionAsync(VoiceCatalogItem item, string lineText, bool forceRestart = false)
     {
-        if (string.Equals(_auditioningVoiceId, item.Id, StringComparison.OrdinalIgnoreCase))
+        string fallbackLang = _voiceBookLang == "en" ? "en" : "zh";
+        string effectiveText = string.IsNullOrWhiteSpace(lineText)
+            ? GetActiveVoiceSampleLine(fallbackLang)
+            : lineText.Trim();
+
+        if (!forceRestart
+            && string.Equals(_auditioningVoiceId, item.Id, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(_auditioningLineText, effectiveText, StringComparison.Ordinal))
         {
             StopVoicePreviewUi();
             AudioPlayer.StopActivePreview();
@@ -4296,7 +4612,23 @@ public sealed partial class SettingsWindow : Window
         {
             if (_library.Kokoro.State != KokoroStateKind.Downloading)
                 _ = _library.Kokoro.DownloadAsync();
-            ShowFlashBanner("正在下载 Kokoro 轻量离线语音…");
+            ShowFlashBanner(L10n.T("正在下载 Kokoro 轻量离线语音…"));
+            return;
+        }
+
+        if (item.Id.StartsWith("cloned.", StringComparison.OrdinalIgnoreCase)
+            && !_library.Prefs.ClonedUseElevenLabs.Contains(item.Id)
+            && !_library.LiveVoice.IsReady)
+        {
+            _selectedInspectorVoiceId = item.Id;
+            if (_library.LiveVoice.State != LiveVoiceStateKind.Downloading)
+                _ = _library.LiveVoice.DownloadAsync();
+            ShowFlashBanner(L10n.T("正在下载 160 MB 本地克隆语音引擎，下好后即可朗读任意句子…"));
+            if (_activePage == "listening")
+            {
+                RenderDynamicPage("listening");
+                RenderInspector("listening");
+            }
             return;
         }
 
@@ -4306,9 +4638,9 @@ public sealed partial class SettingsWindow : Window
         _heardVoiceIds.Add(item.Id);
         _selectedInspectorVoiceId = item.Id;
         _auditioningVoiceId = item.Id;
-        _auditioningLineText = lineText;
+        _auditioningLineText = effectiveText;
         _auditionStartAt = DateTimeOffset.Now;
-        _auditionEstimatedSecs = Math.Max(1.8, EstimateSpeakSeconds(lineText, _library.Prefs.SpeechRate));
+        _auditionEstimatedSecs = Math.Max(1.8, EstimateSpeakSeconds(effectiveText, _library.Prefs.SpeechRate));
         string capturedId = item.Id;
 
         if (_activePage == "listening")
@@ -4319,16 +4651,18 @@ public sealed partial class SettingsWindow : Window
 
         try
         {
-            await AudioPlayer.PreviewVoiceAsync(_library, item.Id, _library.Prefs.SpeechRate, lineText);
+            await AudioPlayer.PreviewVoiceAsync(_library, item.Id, _library.Prefs.SpeechRate, effectiveText);
         }
         catch (Exception ex)
         {
-            if (_activePage == "listening")
+            if (!_closed && _activePage == "listening")
                 ShowFlashBanner(ex.Message);
         }
         finally
         {
-            if (string.Equals(_auditioningVoiceId, capturedId, StringComparison.OrdinalIgnoreCase))
+            if (!_closed
+                && string.Equals(_auditioningVoiceId, capturedId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(_auditioningLineText, effectiveText, StringComparison.Ordinal))
             {
                 StopVoicePreviewUi();
                 if (_activePage == "listening")
@@ -4348,6 +4682,7 @@ public sealed partial class SettingsWindow : Window
         {
             DispatcherQueue.TryEnqueue(() =>
             {
+                if (_closed) return;
                 if (quoteBodyTb is not null) quoteBodyTb.Text = updated.Text;
                 if (quoteHeaderTb is not null)
                     quoteHeaderTb.Text = string.IsNullOrEmpty(updated.Source) ? L10n.T("每日一言") : $"{L10n.T("每日一言")} · {updated.Source}";
@@ -4369,6 +4704,7 @@ public sealed partial class SettingsWindow : Window
                 {
                     DispatcherQueue.TryEnqueue(() =>
                     {
+                        if (_closed) return;
                         if (_activePage == "listening")
                         {
                             RenderDynamicPage("listening");
@@ -4475,7 +4811,7 @@ public sealed partial class SettingsWindow : Window
             btn.Click += (_, _) =>
             {
                 if (customClick is not null) { customClick(); return; }
-                _focusedVoiceSource = sk;
+                SetFocusedVoiceSource(sk);
                 _voiceSourceConfigOpen = false;
                 RenderDynamicPage("listening");
                 RenderInspector("listening");
@@ -4564,6 +4900,7 @@ public sealed partial class SettingsWindow : Window
         double curRate = Math.Clamp(Math.Round(_library.Prefs.SpeechRate, 1), 0.8, 2.0);
         bool updatingSpeed = false;
         var speedSlider = new Slider { Minimum = 0.8, Maximum = 2.0, StepFrequency = 0.1, Value = curRate };
+        AutomationProperties.SetName(speedSlider, L10n.T("语速"));
         var speedBtn = new Button
         {
             Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
@@ -4574,6 +4911,7 @@ public sealed partial class SettingsWindow : Window
             Margin = new Thickness(4, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center,
         };
+        AutomationProperties.SetName(speedBtn, L10n.T("语速预设"));
 
         void BuildSpeedMenu()
         {
@@ -4665,9 +5003,10 @@ public sealed partial class SettingsWindow : Window
             Content = YYIcons.Make("chevron-left", 12, ThemeHelper.Brush(p.T1)),
         };
         ToolTipService.SetToolTip(backBtn, L10n.T("返回声音来源"));
+        AutomationProperties.SetName(backBtn, L10n.T("返回声音来源"));
         backBtn.Click += (_, _) =>
         {
-            _focusedVoiceSource = "";
+            SetFocusedVoiceSource("");
             _voiceSourceConfigOpen = false;
             StopVoicePreviewUi();
             AudioPlayer.StopActivePreview();
@@ -4718,7 +5057,7 @@ public sealed partial class SettingsWindow : Window
             tabBtn.Click += (_, _) =>
             {
                 if (_focusedVoiceSource == capTab) return;
-                _focusedVoiceSource = capTab;
+                SetFocusedVoiceSource(capTab);
                 _voiceSourceConfigOpen = false;
                 RenderDynamicPage("listening");
                 RenderInspector("listening");
@@ -4736,7 +5075,7 @@ public sealed partial class SettingsWindow : Window
                 var mi = new MenuFlyoutItem { Text = L10n.T(SourceTitleOfKey(capExt)) };
                 mi.Click += (_, _) =>
                 {
-                    _focusedVoiceSource = capExt;
+                    SetFocusedVoiceSource(capExt);
                     _voiceSourceConfigOpen = false;
                     RenderDynamicPage("listening");
                     RenderInspector("listening");
@@ -4748,7 +5087,7 @@ public sealed partial class SettingsWindow : Window
             addMi.Click += (_, _) => _ = ShowAddVoiceSourceDialogAsync();
             moreMenu.Items.Add(addMi);
 
-            tabsRow.Children.Add(new Button
+            var moreTabsBtn = new Button
             {
                 Width = 26,
                 Height = 26,
@@ -4759,7 +5098,9 @@ public sealed partial class SettingsWindow : Window
                 UseSystemFocusVisuals = false,
                 Content = YYIcons.Make("chevron-down", 10, ThemeHelper.Brush(p.T2)),
                 Flyout = moreMenu,
-            });
+            };
+            AutomationProperties.SetName(moreTabsBtn, L10n.T("更多声音来源"));
+            tabsRow.Children.Add(moreTabsBtn);
         }
         else
         {
@@ -4775,6 +5116,7 @@ public sealed partial class SettingsWindow : Window
                 Content = YYIcons.Make("plus", 11, ThemeHelper.Brush(p.T2)),
             };
             ToolTipService.SetToolTip(addTabBtn, L10n.T("添加声音来源"));
+            AutomationProperties.SetName(addTabBtn, L10n.T("添加声音来源"));
             addTabBtn.Click += (_, _) => _ = ShowAddVoiceSourceDialogAsync();
             tabsRow.Children.Add(addTabBtn);
         }
@@ -4803,6 +5145,7 @@ public sealed partial class SettingsWindow : Window
             Content = YYIcons.Make("sliders", 12.5, ThemeHelper.Brush(_voiceSourceConfigOpen ? tint.Accent : p.T2)),
         };
         ToolTipService.SetToolTip(gearBtn, L10n.T("此声音来源设置"));
+        AutomationProperties.SetName(gearBtn, L10n.T("此声音来源设置"));
         gearBtn.Click += (_, _) =>
         {
             _voiceSourceConfigOpen = !_voiceSourceConfigOpen;
@@ -4931,7 +5274,7 @@ public sealed partial class SettingsWindow : Window
             Child = pinGrid,
         });
 
-        // 4. KokoroPrepBanner or System warning banner
+        // 4. KokoroPrepBanner, LiveVoice 160 MB PrepBanner, or System warning banner
         if (srcKey == "kokoro" && !_library.Kokoro.IsInstalled)
         {
             var ko = _library.Kokoro;
@@ -4950,11 +5293,15 @@ public sealed partial class SettingsWindow : Window
                 Foreground = ThemeHelper.Brush(ko.State == KokoroStateKind.Downloading ? tint.Accent : p.T1),
             };
             prepLeft.Children.Add(prepTitleTb);
+            bool koHasFailMsg = ko.State == KokoroStateKind.Failed && !string.IsNullOrWhiteSpace(ko.StatusMessage);
             prepLeft.Children.Add(new TextBlock
             {
-                Text = L10n.T("16 个中英自然旁白 · 断点续传 · 下载好后永久免联网"),
+                Text = koHasFailMsg
+                    ? L10n.T(ko.StatusMessage)
+                    : L10n.T("16 个中英自然旁白 · 断点续传 · 下载好后永久免联网"),
                 FontSize = 10.5,
-                Foreground = ThemeHelper.Brush(p.T3),
+                Foreground = ThemeHelper.Brush(koHasFailMsg ? p.Danger : p.T3),
+                TextWrapping = TextWrapping.Wrap,
             });
             ProgressBar? prepBar = null;
             if (ko.State == KokoroStateKind.Downloading)
@@ -4981,7 +5328,7 @@ public sealed partial class SettingsWindow : Window
             Grid.SetColumn(prepBtn, 1);
             prepGrid.Children.Add(prepBtn);
 
-            _liveVoiceProgressUpdater = () =>
+            _liveVoiceProgressUpdater += () =>
             {
                 if (ko.State == KokoroStateKind.Downloading)
                 {
@@ -4995,7 +5342,7 @@ public sealed partial class SettingsWindow : Window
             {
                 CornerRadius = new CornerRadius(11),
                 Background = ThemeHelper.Brush(p.Card),
-                BorderBrush = ThemeHelper.Brush(p.Line),
+                BorderBrush = ThemeHelper.Brush(koHasFailMsg ? p.Danger : p.Line),
                 BorderThickness = new Thickness(0.75),
                 Child = prepGrid,
             });
@@ -5023,7 +5370,7 @@ public sealed partial class SettingsWindow : Window
             };
             switchKoBtn.Click += (_, _) =>
             {
-                _focusedVoiceSource = "kokoro";
+                SetFocusedVoiceSource("kokoro");
                 _voiceSourceConfigOpen = false;
                 RenderDynamicPage("listening");
                 RenderInspector("listening");
@@ -5037,6 +5384,89 @@ public sealed partial class SettingsWindow : Window
                 BorderBrush = ThemeHelper.Brush(Color.FromArgb(64, 210, 145, 32)),
                 BorderThickness = new Thickness(0.75),
                 Child = warnGrid,
+            });
+        }
+
+        bool hasLocalClonedVoice = _library.LiveVoice.GetClonedCards()
+            .Any(c => !_library.Prefs.ClonedUseElevenLabs.Contains(c.Id));
+        bool focusedLocalClone =
+            (pinnedVoice.Id.StartsWith("cloned.", StringComparison.OrdinalIgnoreCase) && !_library.Prefs.ClonedUseElevenLabs.Contains(pinnedVoice.Id)) ||
+            (_selectedInspectorVoiceId.StartsWith("cloned.", StringComparison.OrdinalIgnoreCase) && !_library.Prefs.ClonedUseElevenLabs.Contains(_selectedInspectorVoiceId));
+        if ((srcKey is "kokoro" or "cloned")
+            && !_library.LiveVoice.IsReady
+            && (srcKey == "cloned"
+                || hasLocalClonedVoice
+                || focusedLocalClone
+                || _library.LiveVoice.State is LiveVoiceStateKind.Downloading or LiveVoiceStateKind.Failed))
+        {
+            var lv = _library.LiveVoice;
+            var lvPrepGrid = new Grid { ColumnSpacing = 10, Padding = new Thickness(12, 9, 12, 9) };
+            lvPrepGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            lvPrepGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var lvPrepLeft = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
+            var lvPrepTitleTb = new TextBlock
+            {
+                Text = lv.State == LiveVoiceStateKind.Downloading
+                    ? L10n.T($"正在下载本地克隆语音引擎 {(int)Math.Round(lv.DownloadProgress * 100)}%")
+                    : L10n.T("下载本地克隆语音引擎 · 约 160 MB"),
+                FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = ThemeHelper.Brush(lv.State == LiveVoiceStateKind.Downloading ? tint.Accent : p.T1),
+            };
+            lvPrepLeft.Children.Add(lvPrepTitleTb);
+            bool lvHasFailMsg = lv.State == LiveVoiceStateKind.Failed && !string.IsNullOrWhiteSpace(lv.StatusMessage);
+            lvPrepLeft.Children.Add(new TextBlock
+            {
+                Text = lvHasFailMsg
+                    ? L10n.T(lv.StatusMessage)
+                    : L10n.T("本地克隆声音合成新句子所需 · 24kHz 离线运行，声音不出本机"),
+                FontSize = 10.5,
+                Foreground = ThemeHelper.Brush(lvHasFailMsg ? p.Danger : p.T3),
+                TextWrapping = TextWrapping.Wrap,
+            });
+            ProgressBar? lvPrepBar = null;
+            if (lv.State == LiveVoiceStateKind.Downloading)
+            {
+                lvPrepBar = new ProgressBar { Minimum = 0, Maximum = 100, Value = Math.Round(lv.DownloadProgress * 100), Height = 4, Margin = new Thickness(0, 2, 0, 0) };
+                lvPrepLeft.Children.Add(lvPrepBar);
+            }
+            lvPrepGrid.Children.Add(lvPrepLeft);
+
+            var lvPrepBtn = new Button
+            {
+                Style = (Style)Application.Current.Resources[lv.State == LiveVoiceStateKind.Downloading ? "YYPillButtonStyle" : "YYPrimaryPillButtonStyle"],
+                Content = L10n.T(lv.State == LiveVoiceStateKind.Downloading ? "取消" : (lv.State == LiveVoiceStateKind.Failed ? "继续下载" : "一键下载")),
+                Height = 26,
+                MinHeight = 26,
+                FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            lvPrepBtn.Click += (_, _) =>
+            {
+                if (lv.State == LiveVoiceStateKind.Downloading) lv.CancelDownload();
+                else _ = lv.DownloadAsync();
+            };
+            Grid.SetColumn(lvPrepBtn, 1);
+            lvPrepGrid.Children.Add(lvPrepBtn);
+
+            _liveVoiceProgressUpdater += () =>
+            {
+                if (lv.State == LiveVoiceStateKind.Downloading)
+                {
+                    int pct = (int)Math.Round(lv.DownloadProgress * 100);
+                    lvPrepTitleTb.Text = L10n.T($"正在下载本地克隆语音引擎 {pct}%");
+                    if (lvPrepBar is not null) lvPrepBar.Value = pct;
+                }
+            };
+
+            topStack.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(11),
+                Background = ThemeHelper.Brush(p.Card),
+                BorderBrush = ThemeHelper.Brush(lvHasFailMsg ? p.Danger : p.Line),
+                BorderThickness = new Thickness(0.75),
+                Child = lvPrepGrid,
             });
         }
 
@@ -5169,7 +5599,7 @@ public sealed partial class SettingsWindow : Window
         // 6. Middle Row: Scrollable WeChat/iMessage-style VoiceBubble List
         var chatStack = new StackPanel { Spacing = 8, Padding = new Thickness(2, 4, 4, 8) };
 
-        if (srcKey == "kokoro")
+        if (srcKey is "kokoro" or "cloned")
         {
             var clonePillSp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             clonePillSp.Children.Add(YYIcons.Make("mic", 12.5, ThemeHelper.Brush(tint.Accent)));
@@ -5195,10 +5625,12 @@ public sealed partial class SettingsWindow : Window
             clonePillBtn.Click += async (_, _) =>
             {
                 var saved = await VoiceCloneAndDramaDialogs.ShowCloneVoiceDialogAsync(this, RootGrid.XamlRoot, _library);
-                if (saved is not null)
+                if (saved is not null && !_closed)
                 {
-                    var clonedItem = new VoiceCatalogItem(saved.Id, saved.Name, "本机克隆声音卡", "kokoro", "我的克隆声音", "bi", "我的克隆");
-                    SelectVoiceForBookLang(clonedItem, lang);
+                    _lastVoiceStructureSig = ComputeVoiceStructureSig();
+                    _selectedInspectorVoiceId = saved.Id;
+                    RenderDynamicPage("listening");
+                    RenderInspector("listening");
                 }
             };
             chatStack.Children.Add(clonePillBtn);
@@ -5372,6 +5804,7 @@ public sealed partial class SettingsWindow : Window
                         rightActs.Children.Add(moreClonedBtn);
                     }
 
+                    bool isQueuedPending = !isChosen && IsKokoroVoiceQueuedForLang(vItem, lang);
                     if (isChosen)
                     {
                         rightActs.Children.Add(new Border
@@ -5386,6 +5819,26 @@ public sealed partial class SettingsWindow : Window
                                 FontSize = 11,
                                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                                 Foreground = ThemeHelper.Brush(p.Ok),
+                                VerticalAlignment = VerticalAlignment.Center,
+                            },
+                        });
+                    }
+                    else if (isQueuedPending)
+                    {
+                        rightActs.Children.Add(new Border
+                        {
+                            Height = 26,
+                            CornerRadius = new CornerRadius(13),
+                            Padding = new Thickness(10, 0, 10, 0),
+                            Background = ThemeHelper.Brush(tint.Soft),
+                            BorderBrush = ThemeHelper.Brush(tint.Edge),
+                            BorderThickness = new Thickness(0.5),
+                            Child = new TextBlock
+                            {
+                                Text = L10n.T("下好即启用"),
+                                FontSize = 11,
+                                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                                Foreground = ThemeHelper.Brush(tint.Accent),
                                 VerticalAlignment = VerticalAlignment.Center,
                             },
                         });
@@ -5418,6 +5871,20 @@ public sealed partial class SettingsWindow : Window
             HorizontalScrollMode = ScrollMode.Disabled,
             Content = chatStack,
         };
+        chatScroll.ViewChanged += (_, _) =>
+        {
+            _voiceChatScrollOffset = chatScroll.VerticalOffset;
+        };
+        if (_voiceChatScrollOffset > 0)
+        {
+            double savedOffset = _voiceChatScrollOffset;
+            chatScroll.Loaded += (_, _) =>
+            {
+                if (_closed) return;
+                chatScroll.UpdateLayout();
+                chatScroll.ChangeView(null, savedOffset, null, disableAnimation: true);
+            };
+        }
         Grid.SetRow(chatScroll, 1);
         pageGrid.Children.Add(chatScroll);
 
@@ -5449,6 +5916,8 @@ public sealed partial class SettingsWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(2, 6, 2, 6),
         };
+        YYChrome.StripTextBoxChrome(composerBox);
+        AutomationProperties.SetName(composerBox, L10n.T("试听句子"));
         var counterTb = new TextBlock
         {
             Text = string.IsNullOrEmpty(draftInit) ? "" : $"{draftInit.Length}/120",
@@ -5472,7 +5941,7 @@ public sealed partial class SettingsWindow : Window
             var targetVoice = !string.IsNullOrEmpty(_selectedInspectorVoiceId)
                 ? ResolveVoiceItemById(_selectedInspectorVoiceId, lang)
                 : pinnedVoice;
-            await StartVoiceAuditionAsync(targetVoice, txt);
+            await StartVoiceAuditionAsync(targetVoice, txt, forceRestart: true);
         }
 
         var quickMenu = new MenuFlyout();
@@ -5502,19 +5971,12 @@ public sealed partial class SettingsWindow : Window
             mi.Click += async (_, _) =>
             {
                 string picked = capFn();
-                if (capTitle == "每日一言")
-                {
-                    RenderDynamicPage("listening");
-                    RenderInspector("listening");
-                    var target = !string.IsNullOrEmpty(_selectedInspectorVoiceId) ? ResolveVoiceItemById(_selectedInspectorVoiceId, lang) : pinnedVoice;
-                    await StartVoiceAuditionAsync(target, picked);
-                }
-                else
-                {
+                if (capTitle != "每日一言")
                     _customVoiceLines[lang] = picked;
-                    var target = !string.IsNullOrEmpty(_selectedInspectorVoiceId) ? ResolveVoiceItemById(_selectedInspectorVoiceId, lang) : pinnedVoice;
-                    await StartVoiceAuditionAsync(target, picked);
-                }
+                var target = !string.IsNullOrEmpty(_selectedInspectorVoiceId)
+                    ? ResolveVoiceItemById(_selectedInspectorVoiceId, lang)
+                    : pinnedVoice;
+                await StartVoiceAuditionAsync(target, picked, forceRestart: true);
             };
             quickMenu.Items.Add(mi);
         }
@@ -5532,6 +5994,7 @@ public sealed partial class SettingsWindow : Window
             Flyout = quickMenu,
         };
         ToolTipService.SetToolTip(quickBtn, L10n.T("换试听句子"));
+        AutomationProperties.SetName(quickBtn, L10n.T("换试听句子"));
         composerGrid.Children.Add(quickBtn);
 
         composerBox.TextChanged += (_, _) =>
@@ -5565,6 +6028,7 @@ public sealed partial class SettingsWindow : Window
             Content = new TextBlock { Text = "↑", FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = ThemeHelper.Brush(p.Card), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, -1, 0, 0) },
         };
         ToolTipService.SetToolTip(sendBtn, L10n.T("试听这一句"));
+        AutomationProperties.SetName(sendBtn, L10n.T("试听这一句"));
         sendBtn.Click += async (_, _) => await TriggerComposerSendAsync();
         Grid.SetColumn(sendBtn, 3);
         composerGrid.Children.Add(sendBtn);
@@ -5680,6 +6144,22 @@ public sealed partial class SettingsWindow : Window
                 Grid.SetColumn(selPill, 2);
                 headRow.Children.Add(selPill);
             }
+            else if (IsKokoroVoiceQueuedForLang(targetVoice, lang))
+            {
+                var queuedPill = new Border
+                {
+                    CornerRadius = new CornerRadius(12),
+                    Height = 24,
+                    Padding = new Thickness(9, 0, 9, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Background = ThemeHelper.Brush(tint.Soft),
+                    BorderBrush = ThemeHelper.Brush(tint.Edge),
+                    BorderThickness = new Thickness(0.5),
+                    Child = new TextBlock { Text = L10n.T("下好即启用"), FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(tint.Accent), VerticalAlignment = VerticalAlignment.Center },
+                };
+                Grid.SetColumn(queuedPill, 2);
+                headRow.Children.Add(queuedPill);
+            }
             else
             {
                 var chooseBtn = new Button
@@ -5720,6 +6200,7 @@ public sealed partial class SettingsWindow : Window
                 UseSystemFocusVisuals = false,
                 Content = YYIcons.Make(isPlayingThis ? "pause" : "play", 11.5, ThemeHelper.Brush(p.Card)),
             };
+            AutomationProperties.SetName(playCircle, L10n.T(isPlayingThis ? "暂停试听" : "播放试听"));
             playCircle.Click += async (_, _) => await StartVoiceAuditionAsync(targetVoice, sampleText);
             playRow.Children.Add(playCircle);
 
@@ -5836,7 +6317,7 @@ public sealed partial class SettingsWindow : Window
             InspectorHost.Children.Add(backToPlayerBtn);
         }
 
-        if (_focusedVoiceSource == "kokoro")
+        if (_focusedVoiceSource is "kokoro" or "cloned")
         {
             var ko = _library.Kokoro;
             var lv = _library.LiveVoice;
@@ -5852,14 +6333,39 @@ public sealed partial class SettingsWindow : Window
             kHead.Children.Add(kMeta);
             InspectorHost.Children.Add(kHead);
 
+            int koInitPct = (int)Math.Round(ko.DownloadProgress * 100);
+            bool koFailed = ko.State == KokoroStateKind.Failed && !string.IsNullOrWhiteSpace(ko.StatusMessage);
+            var koSubTb = new TextBlock
+            {
+                Text = ko.IsInstalled
+                    ? L10n.T("已就绪 · 16 个中英音色")
+                    : (ko.State == KokoroStateKind.Downloading
+                        ? L10n.T($"正在下载轻量离线语音 {koInitPct}%…")
+                        : (koFailed ? L10n.T(ko.StatusMessage) : L10n.T("断网秒出声，低内存占用"))),
+                FontSize = 10.5,
+                Foreground = ThemeHelper.Brush(koFailed ? p.Danger : (ko.State == KokoroStateKind.Downloading ? tint.Accent : p.T3)),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 16,
+            };
+            var koBar = new ProgressBar
+            {
+                Minimum = 0,
+                Maximum = 100,
+                Value = koInitPct,
+                Height = 4,
+                Visibility = ko.State == KokoroStateKind.Downloading ? Visibility.Visible : Visibility.Collapsed,
+                Margin = new Thickness(0, 2, 0, 0),
+            };
             var koActionBtn = new Button
             {
-                Style = (Style)Application.Current.Resources[ko.IsInstalled ? "YYPillButtonStyle" : "YYPrimaryPillButtonStyle"],
-                Content = ko.IsInstalled ? "移除" : (ko.State == KokoroStateKind.Downloading ? "取消" : $"下载 ({KokoroVoiceModel.TotalMb} MB)"),
+                Style = (Style)Application.Current.Resources[ko.IsInstalled || ko.State == KokoroStateKind.Downloading ? "YYPillButtonStyle" : "YYPrimaryPillButtonStyle"],
+                Content = L10n.T(ko.IsInstalled ? "移除" : (ko.State == KokoroStateKind.Downloading ? $"取消 ({koInitPct}%)" : (ko.State == KokoroStateKind.Failed ? "重试下载" : $"下载 ({KokoroVoiceModel.TotalMb} MB)"))),
                 Height = 25,
                 MinHeight = 25,
                 FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Center,
             };
+            AutomationProperties.SetName(koActionBtn, L10n.T("Kokoro 轻量旁白"));
             if (ko.IsInstalled) koActionBtn.Foreground = ThemeHelper.Brush(p.Danger);
             koActionBtn.Click += async (_, _) =>
             {
@@ -5869,13 +6375,15 @@ public sealed partial class SettingsWindow : Window
                         RootGrid.XamlRoot,
                         IsDark,
                         L10n.T("移除 Kokoro 离线语音包？"),
-                        L10n.T("移除后将释放约 115 MB 空间，随时可重新免费下载。"),
+                        L10n.T("移除后将释放约 125 MB 空间，随时可重新免费下载。"),
                         confirmText: L10n.T("移除"),
                         cancelText: L10n.T("取消"),
                         destructive: true,
                         tint: _library.Prefs.Tint);
-                    if (!ok) return;
-                    ko.DeleteInstalledModel();
+                    if (!ok || _closed) return;
+                    koActionBtn.IsEnabled = false;
+                    await Task.Run(() => ko.DeleteInstalledModel());
+                    if (_closed) return;
                     App.CurrentApp.BroadcastVoiceChanged();
                 }
                 else if (ko.State == KokoroStateKind.Downloading)
@@ -5888,14 +6396,50 @@ public sealed partial class SettingsWindow : Window
                 }
             };
 
+            var koRow = new Grid { ColumnSpacing = 12, Padding = new Thickness(16, 8, 16, 8), MinHeight = 42 };
+            koRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            koRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var koLeft = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+            koLeft.Children.Add(new TextBlock { Text = L10n.T("Kokoro 轻量旁白"), FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) });
+            koLeft.Children.Add(koSubTb);
+            koLeft.Children.Add(koBar);
+            koRow.Children.Add(koLeft);
+            Grid.SetColumn(koActionBtn, 1);
+            koRow.Children.Add(koActionBtn);
+
+            int lvInitPct = (int)Math.Round(lv.DownloadProgress * 100);
+            bool lvFailed = lv.State == LiveVoiceStateKind.Failed && !string.IsNullOrWhiteSpace(lv.StatusMessage);
+            var lvSubTb = new TextBlock
+            {
+                Text = lv.IsReady
+                    ? L10n.T("已就绪 · 支持声音克隆与多角色")
+                    : (lv.State == LiveVoiceStateKind.Downloading
+                        ? L10n.T($"正在下载克隆与角色引擎 {lvInitPct}%…")
+                        : (lvFailed ? L10n.T(lv.StatusMessage) : L10n.T("本地 24kHz 模型，供声音克隆与广播剧使用"))),
+                FontSize = 10.5,
+                Foreground = ThemeHelper.Brush(lvFailed ? p.Danger : (lv.State == LiveVoiceStateKind.Downloading ? tint.Accent : p.T3)),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 16,
+            };
+            var lvBar = new ProgressBar
+            {
+                Minimum = 0,
+                Maximum = 100,
+                Value = lvInitPct,
+                Height = 4,
+                Visibility = lv.State == LiveVoiceStateKind.Downloading ? Visibility.Visible : Visibility.Collapsed,
+                Margin = new Thickness(0, 2, 0, 0),
+            };
             var lvActionBtn = new Button
             {
                 Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
-                Content = lv.IsReady ? "移除" : (lv.State == LiveVoiceStateKind.Downloading ? "取消" : "下载 (160 MB)"),
+                Content = L10n.T(lv.IsReady ? "移除" : (lv.State == LiveVoiceStateKind.Downloading ? $"取消 ({lvInitPct}%)" : (lv.State == LiveVoiceStateKind.Failed ? "重试下载" : "下载 (160 MB)"))),
                 Height = 25,
                 MinHeight = 25,
                 FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Center,
             };
+            AutomationProperties.SetName(lvActionBtn, L10n.T("广播剧与克隆引擎"));
             if (lv.IsReady) lvActionBtn.Foreground = ThemeHelper.Brush(p.Danger);
             lvActionBtn.Click += async (_, _) =>
             {
@@ -5910,8 +6454,10 @@ public sealed partial class SettingsWindow : Window
                         cancelText: L10n.T("取消"),
                         destructive: true,
                         tint: _library.Prefs.Tint);
-                    if (!ok) return;
-                    lv.DeleteInstalledModels();
+                    if (!ok || _closed) return;
+                    lvActionBtn.IsEnabled = false;
+                    await Task.Run(() => lv.DeleteInstalledModels());
+                    if (_closed) return;
                     App.CurrentApp.BroadcastVoiceChanged();
                 }
                 else if (lv.State == LiveVoiceStateKind.Downloading)
@@ -5921,6 +6467,37 @@ public sealed partial class SettingsWindow : Window
                 else
                 {
                     _ = lv.DownloadAsync();
+                }
+            };
+
+            var lvRow = new Grid { ColumnSpacing = 12, Padding = new Thickness(16, 8, 16, 8), MinHeight = 42 };
+            lvRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            lvRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var lvLeft = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+            lvLeft.Children.Add(new TextBlock { Text = L10n.T("广播剧与克隆引擎"), FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) });
+            lvLeft.Children.Add(lvSubTb);
+            lvLeft.Children.Add(lvBar);
+            lvRow.Children.Add(lvLeft);
+            Grid.SetColumn(lvActionBtn, 1);
+            lvRow.Children.Add(lvActionBtn);
+
+            _inspectorVoiceProgressUpdater = () =>
+            {
+                if (ko.State == KokoroStateKind.Downloading)
+                {
+                    int pct = (int)Math.Round(ko.DownloadProgress * 100);
+                    koSubTb.Text = L10n.T($"正在下载轻量离线语音 {pct}%…");
+                    koBar.Visibility = Visibility.Visible;
+                    koBar.Value = pct;
+                    koActionBtn.Content = L10n.T($"取消 ({pct}%)");
+                }
+                if (lv.State == LiveVoiceStateKind.Downloading)
+                {
+                    int pct = (int)Math.Round(lv.DownloadProgress * 100);
+                    lvSubTb.Text = L10n.T($"正在下载克隆与角色引擎 {pct}%…");
+                    lvBar.Visibility = Visibility.Visible;
+                    lvBar.Value = pct;
+                    lvActionBtn.Content = L10n.T($"取消 ({pct}%)");
                 }
             };
 
@@ -5941,8 +6518,8 @@ public sealed partial class SettingsWindow : Window
             });
 
             InspectorHost.Children.Add(MakeCard(
-                MakeRow("Kokoro 轻量旁白", ko.IsInstalled ? "已就绪 · 16 个中英音色" : "断网秒出声，低内存占用", koActionBtn, compact: true),
-                MakeRow("广播剧与克隆引擎", lv.IsReady ? "已就绪 · 支持声音克隆与多角色" : "本地 24kHz 模型，供声音克隆与广播剧使用", lvActionBtn, compact: true),
+                koRow,
+                lvRow,
                 MakeRow("给我的手机提前做好", "接电源时为附近手机自动预合成后续章节", preRenderSw, compact: true)));
             return;
         }
@@ -6164,7 +6741,7 @@ public sealed partial class SettingsWindow : Window
             hideBtn.Click += (_, _) =>
             {
                 _library.Secrets.Set(dKey, "1");
-                _focusedVoiceSource = "";
+                SetFocusedVoiceSource("");
                 _voiceSourceConfigOpen = false;
                 App.CurrentApp.BroadcastVoiceChanged();
                 RenderDynamicPage("listening");
@@ -6200,7 +6777,7 @@ public sealed partial class SettingsWindow : Window
                 if (isLocal) _library.Prefs.CloudVoiceDismissed.Add(pKey);
                 LocalVoiceProbe.Shared.Clear(cloudProv);
                 _library.SavePrefs();
-                _focusedVoiceSource = "";
+                SetFocusedVoiceSource("");
                 _voiceSourceConfigOpen = false;
                 App.CurrentApp.BroadcastVoiceChanged();
                 RenderDynamicPage("listening");
@@ -6316,6 +6893,33 @@ public sealed partial class SettingsWindow : Window
         string pKey = _library.Secrets.Get($"ai.key.{pid}");
         _library.Secrets.Set("ai.apiKey", pKey);
         _library.SavePrefs();
+    }
+
+    private void ScheduleCompanionPageRefresh()
+    {
+        if (_closed) return;
+        if (_companionDebounceTimer is null)
+        {
+            _companionDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
+            _companionDebounceTimer.Tick += (_, _) =>
+            {
+                _companionDebounceTimer.Stop();
+                if (!_closed && _activePage == "companion")
+                    RenderDynamicPage("companion");
+            };
+        }
+        _companionDebounceTimer.Stop();
+        _companionDebounceTimer.Start();
+    }
+
+    private void FlushCompanionPageRefresh()
+    {
+        if (_companionDebounceTimer is { IsEnabled: true })
+        {
+            _companionDebounceTimer.Stop();
+            if (!_closed && _activePage == "companion")
+                RenderDynamicPage("companion");
+        }
     }
 
     private void BuildCompanionPage()
@@ -6438,6 +7042,7 @@ public sealed partial class SettingsWindow : Window
                 {
                     DispatcherQueue.TryEnqueue(() =>
                     {
+                        if (_closed) return;
                         _liveLocalCompanions = found;
                         if (_activePage == "companion") RenderDynamicPage("companion");
                     });
@@ -6782,6 +7387,8 @@ public sealed partial class SettingsWindow : Window
                 VerticalAlignment = VerticalAlignment.Center,
                 Padding = new Thickness(0, 6, 0, 6),
             };
+            YYChrome.StripTextBoxChrome(sBox);
+            AutomationProperties.SetName(sBox, L10n.T("搜索语音服务"));
             Grid.SetColumn(sBox, 1);
             searchRow.Children.Add(sBox);
             wrap.Children.Add(searchRow);
@@ -6844,7 +7451,7 @@ public sealed partial class SettingsWindow : Window
                         {
                             string dismissKey = capturedFree == CloudTtsProvider.Edge ? "tts.edge.dismissed" : "tts.free.dismissed";
                             _library.Secrets.Set(dismissKey, "");
-                            _focusedVoiceSource = CloudVoiceEntry.ProviderKey(capturedFree);
+                            SetFocusedVoiceSource(CloudVoiceEntry.ProviderKey(capturedFree));
                             _voiceSourceConfigOpen = false;
                             App.CurrentApp.BroadcastVoiceChanged();
                             dlgRef?.Hide();
@@ -7006,6 +7613,8 @@ public sealed partial class SettingsWindow : Window
                         TextAlignment = TextAlignment.Right,
                         VerticalAlignment = VerticalAlignment.Center,
                     };
+                    YYChrome.StripTextBoxChrome(customNameField);
+                    AutomationProperties.SetName(customNameField, L10n.T("名称"));
                     cardStack.Children.Add(MakeRecessedFieldRow("名称", customNameField));
                 }
 
@@ -7019,6 +7628,8 @@ public sealed partial class SettingsWindow : Window
                     TextAlignment = TextAlignment.Right,
                     VerticalAlignment = VerticalAlignment.Center,
                 };
+                YYChrome.StripTextBoxChrome(urlBox);
+                AutomationProperties.SetName(urlBox, L10n.T("地址"));
                 cardStack.Children.Add(MakeRecessedFieldRow("地址", urlBox));
             }
             else
@@ -7035,6 +7646,8 @@ public sealed partial class SettingsWindow : Window
                         TextAlignment = TextAlignment.Right,
                         VerticalAlignment = VerticalAlignment.Center,
                     };
+                    YYChrome.StripTextBoxChrome(extraBox);
+                    AutomationProperties.SetName(extraBox, "AppID");
                     cardStack.Children.Add(MakeRecessedFieldRow("AppID", extraBox));
                 }
                 else if (prov == CloudTtsProvider.Azure)
@@ -7049,6 +7662,8 @@ public sealed partial class SettingsWindow : Window
                         TextAlignment = TextAlignment.Right,
                         VerticalAlignment = VerticalAlignment.Center,
                     };
+                    YYChrome.StripTextBoxChrome(extraBox);
+                    AutomationProperties.SetName(extraBox, L10n.T("区域"));
                     cardStack.Children.Add(MakeRecessedFieldRow("区域", extraBox));
                 }
 
@@ -7062,6 +7677,8 @@ public sealed partial class SettingsWindow : Window
                     FontSize = 12.5,
                     VerticalAlignment = VerticalAlignment.Center,
                 };
+                YYChrome.StripPasswordBoxChrome(keyBox);
+                AutomationProperties.SetName(keyBox, "API Key");
                 cardStack.Children.Add(MakeRecessedFieldRow("Key", keyBox));
             }
 
@@ -7120,7 +7737,7 @@ public sealed partial class SettingsWindow : Window
                 verifyBtn.IsEnabled = true;
                 if (ok)
                 {
-                    _focusedVoiceSource = pk;
+                    SetFocusedVoiceSource(pk);
                     _voiceSourceConfigOpen = false;
                     App.CurrentApp.BroadcastVoiceChanged();
                     dlgRef?.Hide();
@@ -7235,7 +7852,7 @@ public sealed partial class SettingsWindow : Window
         else if (kind == "fontbook") _ = ShowSettingsFontBookAsync((_, _, _) => { });
         else if (kind == "voice-source")
         {
-            _focusedVoiceSource = "edge";
+            SetFocusedVoiceSource("edge");
             RenderDynamicPage("listening");
             RenderInspector("listening");
         }
@@ -7265,7 +7882,15 @@ public sealed partial class SettingsWindow : Window
         var tint = CurrentTint;
         ContentDialog? dlgRef = null;
         string? connectedProviderId = null;
+        bool sheetClosed = false;
+        CancellationTokenSource? sheetOrAuthCts = null;
         var stageHost = new Grid();
+
+        void CancelSheetOrAuth()
+        {
+            try { sheetOrAuthCts?.Cancel(); sheetOrAuthCts?.Dispose(); } catch { }
+            sheetOrAuthCts = null;
+        }
 
         void CommitConnectedProvider(string pid, string? customName, string baseUrl, string modelId, string apiKey)
         {
@@ -7317,6 +7942,7 @@ public sealed partial class SettingsWindow : Window
 
         void RenderPickerStep()
         {
+            CancelSheetOrAuth();
             stageHost.Children.Clear();
 
             var searchRow = new Grid
@@ -7339,6 +7965,8 @@ public sealed partial class SettingsWindow : Window
                 VerticalAlignment = VerticalAlignment.Center,
                 Padding = new Thickness(0, 6, 0, 6),
             };
+            YYChrome.StripTextBoxChrome(searchBox);
+            AutomationProperties.SetName(searchBox, L10n.T("搜索服务商"));
             Grid.SetColumn(searchBox, 1);
             searchRow.Children.Add(searchBox);
 
@@ -7485,6 +8113,7 @@ public sealed partial class SettingsWindow : Window
 
         void RenderConnectStep(string pid, bool isCustomNew)
         {
+            CancelSheetOrAuth();
             stageHost.Children.Clear();
             var preset = ResolveCompanionPreset(pid);
             bool isLocal = preset.Group == "local";
@@ -7517,7 +8146,7 @@ public sealed partial class SettingsWindow : Window
             Grid.SetColumn(headMeta, 1);
             headRow.Children.Add(headMeta);
 
-            var closeBtn = YYChrome.MakeSheetCloseButton(() => dlgRef?.Hide(), IsDark);
+            var closeBtn = YYChrome.MakeSheetCloseButton(() => { CancelSheetOrAuth(); dlgRef?.Hide(); }, IsDark);
             Grid.SetColumn(closeBtn, 2);
             headRow.Children.Add(closeBtn);
             wrap.Children.Add(headRow);
@@ -7554,6 +8183,8 @@ public sealed partial class SettingsWindow : Window
                     FontSize = 12.5,
                     VerticalAlignment = VerticalAlignment.Center,
                 };
+                YYChrome.StripTextBoxChrome(customNameBox);
+                AutomationProperties.SetName(customNameBox, L10n.T("服务名称"));
                 AddFormRow("服务名称", customNameBox, withDivider: true);
             }
 
@@ -7566,6 +8197,8 @@ public sealed partial class SettingsWindow : Window
                 FontSize = 12.5,
                 VerticalAlignment = VerticalAlignment.Center,
             };
+            YYChrome.StripPasswordBoxChrome(keyBox);
+            AutomationProperties.SetName(keyBox, "API Key");
             if (!isLocal || isCustomNew)
                 AddFormRow("API Key", keyBox, withDivider: true);
 
@@ -7579,6 +8212,8 @@ public sealed partial class SettingsWindow : Window
                 FontFamily = new FontFamily(YYFontFamily.Mono.WindowsFamily()),
                 VerticalAlignment = VerticalAlignment.Center,
             };
+            YYChrome.StripTextBoxChrome(urlBox);
+            AutomationProperties.SetName(urlBox, L10n.T("接口地址"));
             AddFormRow("接口地址", urlBox, withDivider: true);
 
             var modelRowGrid = new Grid { ColumnSpacing = 6 };
@@ -7595,6 +8230,8 @@ public sealed partial class SettingsWindow : Window
                 FontFamily = new FontFamily(YYFontFamily.Mono.WindowsFamily()),
                 VerticalAlignment = VerticalAlignment.Center,
             };
+            YYChrome.StripTextBoxChrome(modelBox);
+            AutomationProperties.SetName(modelBox, L10n.T("模型"));
             modelRowGrid.Children.Add(modelBox);
 
             var modelListBtn = new Button
@@ -7609,7 +8246,7 @@ public sealed partial class SettingsWindow : Window
             modelListBtn.Click += async (_, _) =>
             {
                 modelListBtn.IsEnabled = false;
-                modelListBtn.Content = "拉取…";
+                modelListBtn.Content = L10n.T("拉取…");
                 var menu = new MenuFlyout();
                 var candidates = new List<string>();
                 foreach (var r in GetRecommendedModelsForProvider(pid, preset.DefaultModel))
@@ -7617,6 +8254,7 @@ public sealed partial class SettingsWindow : Window
                 try
                 {
                     var remote = await _library.Companion.ListModelsAsync(pid, urlBox.Text.Trim(), keyBox.Password.Trim());
+                    if (_closed || sheetClosed) return;
                     if (remote.Count > 0)
                     {
                         _cachedCompanionModels[pid] = remote;
@@ -7627,10 +8265,14 @@ public sealed partial class SettingsWindow : Window
                 catch { }
                 finally
                 {
-                    modelListBtn.IsEnabled = true;
-                    modelListBtn.Content = "列表 ▾";
+                    if (!_closed && !sheetClosed)
+                    {
+                        modelListBtn.IsEnabled = true;
+                        modelListBtn.Content = L10n.T("列表 ▾");
+                    }
                 }
 
+                if (_closed || sheetClosed) return;
                 if (candidates.Count == 0)
                 {
                     menu.Items.Add(new MenuFlyoutItem { Text = L10n.T("未拉取到模型，请直接输入模型 ID"), IsEnabled = false });
@@ -7644,7 +8286,7 @@ public sealed partial class SettingsWindow : Window
                         string label = string.Equals(friendly, capM, StringComparison.OrdinalIgnoreCase)
                             ? capM
                             : $"{friendly} ({capM})";
-                        var mi = new MenuFlyoutItem { Text = string.Equals(modelBox.Text.Trim(), capM, StringComparison.OrdinalIgnoreCase) ? $"✓ {label}" : label };
+                        var mi = new MenuFlyoutItem { Text = L10n.T(string.Equals(modelBox.Text.Trim(), capM, StringComparison.OrdinalIgnoreCase) ? $"✓ {label}" : label) };
                         mi.Click += (_, _) => modelBox.Text = capM;
                         menu.Items.Add(mi);
                     }
@@ -7655,15 +8297,6 @@ public sealed partial class SettingsWindow : Window
             modelRowGrid.Children.Add(modelListBtn);
             AddFormRow("模型", modelRowGrid, withDivider: false);
 
-            wrap.Children.Add(new Border
-            {
-                CornerRadius = new CornerRadius(12),
-                Background = ThemeHelper.Brush(p.Card),
-                BorderBrush = ThemeHelper.Brush(p.Line),
-                BorderThickness = new Thickness(0.75),
-                Child = formStack,
-            });
-
             var statusNote = new TextBlock
             {
                 FontSize = 11.5,
@@ -7672,40 +8305,26 @@ public sealed partial class SettingsWindow : Window
                 Visibility = Visibility.Collapsed,
             };
 
-            if (pid == "openrouter")
+            var connectBtn = new Button
             {
-                var orBtn = new Button
-                {
-                    Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                    Height = 34,
-                    Content = "用 OpenRouter 账号一键登录并添加…",
-                };
-                orBtn.Click += async (_, _) =>
-                {
-                    orBtn.IsEnabled = false;
-                    statusNote.Text = L10n.T("已在浏览器打开授权页，登录完成后自动回到语阅…");
-                    statusNote.Foreground = ThemeHelper.Brush(p.T3);
-                    statusNote.Visibility = Visibility.Visible;
-                    try
-                    {
-                        string gotKey = await CompanionClient.SignInWithOpenRouterAsync();
-                        CommitConnectedProvider("openrouter", null, urlBox.Text.Trim(), modelBox.Text.Trim(), gotKey);
-                    }
-                    catch (Exception ex)
-                    {
-                        statusNote.Text = ex.Message;
-                        statusNote.Foreground = ThemeHelper.Brush(p.Danger);
-                        orBtn.IsEnabled = true;
-                    }
-                };
-                wrap.Children.Add(orBtn);
-            }
+                Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"],
+                Content = "检查并添加",
+                MinWidth = 112,
+            };
 
+            var manualSection = new StackPanel { Spacing = 10 };
+            manualSection.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(12),
+                Background = ThemeHelper.Brush(p.Card),
+                BorderBrush = ThemeHelper.Brush(p.Line),
+                BorderThickness = new Thickness(0.75),
+                Child = formStack,
+            });
             if (!string.IsNullOrEmpty(preset.KeyUrl))
             {
                 string kurl = preset.KeyUrl;
-                wrap.Children.Add(new HyperlinkButton
+                manualSection.Children.Add(new HyperlinkButton
                 {
                     Content = $"去 {preset.Name} 控制台获取 API Key ↗",
                     FontSize = 11.5,
@@ -7714,6 +8333,105 @@ public sealed partial class SettingsWindow : Window
                 });
             }
 
+            if (pid == "openrouter")
+            {
+                var orRow = new Grid { ColumnSpacing = 8 };
+                orRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                orRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var orBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"],
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    Height = 38,
+                    Content = "用 OpenRouter 账号一键登录并添加…",
+                };
+                var orCancelBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+                    Height = 38,
+                    Content = "取消",
+                    Visibility = Visibility.Collapsed,
+                };
+                orCancelBtn.Click += (_, _) => CancelSheetOrAuth();
+                orBtn.Click += async (_, _) =>
+                {
+                    CancelSheetOrAuth();
+                    var cts = new CancellationTokenSource();
+                    sheetOrAuthCts = cts;
+                    orBtn.IsEnabled = false;
+                    orBtn.Content = L10n.T("等待浏览器授权…");
+                    orCancelBtn.Visibility = Visibility.Visible;
+                    statusNote.Text = L10n.T("已在浏览器打开授权页，登录完成后自动回到语阅…");
+                    statusNote.Foreground = ThemeHelper.Brush(p.T3);
+                    statusNote.Visibility = Visibility.Visible;
+                    try
+                    {
+                        string gotKey = await CompanionClient.SignInWithOpenRouterAsync(cts.Token);
+                        if (_closed || sheetClosed) return;
+                        CommitConnectedProvider("openrouter", null, urlBox.Text.Trim(), modelBox.Text.Trim(), gotKey);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        if (!_closed && !sheetClosed)
+                        {
+                            statusNote.Text = L10n.T("已取消授权");
+                            statusNote.Foreground = ThemeHelper.Brush(p.T3);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!_closed && !sheetClosed)
+                        {
+                            statusNote.Text = ex.Message;
+                            statusNote.Foreground = ThemeHelper.Brush(p.Danger);
+                        }
+                    }
+                    finally
+                    {
+                        if (ReferenceEquals(sheetOrAuthCts, cts))
+                        {
+                            try { cts.Dispose(); } catch { }
+                            sheetOrAuthCts = null;
+                        }
+                        if (!_closed && !sheetClosed)
+                        {
+                            orBtn.IsEnabled = true;
+                            orBtn.Content = L10n.T("用 OpenRouter 账号一键登录并添加…");
+                            orCancelBtn.Visibility = Visibility.Collapsed;
+                        }
+                    }
+                };
+                orRow.Children.Add(orBtn);
+                Grid.SetColumn(orCancelBtn, 1);
+                orRow.Children.Add(orCancelBtn);
+                wrap.Children.Add(orRow);
+
+                bool manualExpanded = !string.IsNullOrEmpty(keyBox.Password);
+                manualSection.Visibility = manualExpanded ? Visibility.Visible : Visibility.Collapsed;
+                connectBtn.Visibility = manualExpanded ? Visibility.Visible : Visibility.Collapsed;
+
+                var disclosureBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
+                    Content = manualExpanded ? "我有 Key，直接填 ▴" : "我有 Key，直接填 ▾",
+                    FontSize = 12,
+                    Foreground = ThemeHelper.Brush(p.T2),
+                    Padding = new Thickness(2, 2, 6, 2),
+                };
+                disclosureBtn.Click += (_, _) =>
+                {
+                    manualExpanded = !manualExpanded;
+                    manualSection.Visibility = manualExpanded ? Visibility.Visible : Visibility.Collapsed;
+                    connectBtn.Visibility = manualExpanded ? Visibility.Visible : Visibility.Collapsed;
+                    disclosureBtn.Content = L10n.T(manualExpanded ? "我有 Key，直接填 ▴" : "我有 Key，直接填 ▾");
+                    if (manualExpanded)
+                        keyBox.Focus(FocusState.Programmatic);
+                };
+                wrap.Children.Add(disclosureBtn);
+            }
+
+            wrap.Children.Add(manualSection);
             wrap.Children.Add(statusNote);
 
             var footRow = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 2, 0, 0) };
@@ -7728,15 +8446,9 @@ public sealed partial class SettingsWindow : Window
                 FontSize = 12,
                 Foreground = ThemeHelper.Brush(p.T2),
             };
-            backBtn.Click += (_, _) => RenderPickerStep();
+            backBtn.Click += (_, _) => { CancelSheetOrAuth(); RenderPickerStep(); };
             footRow.Children.Add(backBtn);
 
-            var connectBtn = new Button
-            {
-                Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"],
-                Content = "检查并添加",
-                MinWidth = 112,
-            };
             connectBtn.Click += async (_, _) =>
             {
                 string testBase = urlBox.Text.Trim();
@@ -7768,6 +8480,7 @@ public sealed partial class SettingsWindow : Window
                 statusNote.Visibility = Visibility.Visible;
 
                 var (ok, msg) = await _library.Companion.TestProviderAsync(pid, testBase, testModel, trimmedKey);
+                if (_closed || sheetClosed) return;
                 if (ok)
                 {
                     CommitConnectedProvider(pid, customNameBox?.Text, testBase, testModel, trimmedKey);
@@ -7791,6 +8504,11 @@ public sealed partial class SettingsWindow : Window
 
         RenderPickerStep();
         dlgRef = YYChrome.CreateMacSheet(RootGrid.XamlRoot, IsDark, 480, stageHost, tint: _library.Prefs.Tint);
+        dlgRef.Closed += (_, _) =>
+        {
+            sheetClosed = true;
+            CancelSheetOrAuth();
+        };
         await dlgRef.ShowSafeAsync(_library.Prefs.Tint);
         if (!string.IsNullOrEmpty(connectedProviderId))
         {
@@ -7999,6 +8717,7 @@ public sealed partial class SettingsWindow : Window
                         Content = new TextBlock { Text = starred ? "★" : "☆", FontSize = 12, Foreground = ThemeHelper.Brush(starred ? tint.Accent : p.T3) },
                     };
                     ToolTipService.SetToolTip(starBtn, starred ? "取消收藏模型" : "收藏常用模型");
+                    AutomationProperties.SetName(starBtn, L10n.T(starred ? "取消收藏模型" : "收藏常用模型"));
                     starBtn.Click += (_, _) =>
                     {
                         _library.Companion.ToggleStarModel(preset.Id, nextM);
@@ -8065,18 +8784,22 @@ public sealed partial class SettingsWindow : Window
             fetchBtn.Click += async (_, _) =>
             {
                 fetchBtn.IsEnabled = false;
-                fetchBtn.Content = "拉取中…";
+                fetchBtn.Content = L10n.T("拉取中…");
                 try
                 {
                     var found = await _library.Companion.ListModelsAsync(preset.Id);
+                    if (_closed) return;
                     if (found.Count > 0) _cachedCompanionModels[preset.Id] = found;
                     PopulateModels(filterBox.Text);
                 }
                 catch { }
                 finally
                 {
-                    fetchBtn.IsEnabled = true;
-                    fetchBtn.Content = "↻ 拉取列表";
+                    if (!_closed)
+                    {
+                        fetchBtn.IsEnabled = true;
+                        fetchBtn.Content = L10n.T("↻ 拉取列表");
+                    }
                 }
             };
 
@@ -8091,6 +8814,7 @@ public sealed partial class SettingsWindow : Window
                         {
                             DispatcherQueue.TryEnqueue(() =>
                             {
+                                if (_closed) return;
                                 _cachedCompanionModels[preset.Id] = found;
                                 if (_companionPickingModel && _focusedCompanionId == preset.Id)
                                     PopulateModels(filterBox.Text);
@@ -8108,11 +8832,21 @@ public sealed partial class SettingsWindow : Window
             var customBox = new TextBox { Header = "或输入自定义模型 ID", Text = curModel, FontFamily = monoFamily, FontSize = 11.5 };
             customBox.TextChanged += (_, _) =>
             {
-                _library.Prefs.AiProviderModels[preset.Id] = customBox.Text.Trim();
+                string nextM = customBox.Text.Trim();
+                if (string.IsNullOrWhiteSpace(nextM))
+                {
+                    _library.Prefs.AiProviderModels.Remove(preset.Id);
+                    if (inUse) _library.Prefs.AiModel = preset.DefaultModel;
+                }
+                else
+                {
+                    _library.Prefs.AiProviderModels[preset.Id] = nextM;
+                }
                 if (inUse) ActivateCompanionProvider(preset.Id);
                 else _library.SavePrefs();
-                RenderDynamicPage("companion");
+                ScheduleCompanionPageRefresh();
             };
+            customBox.LostFocus += (_, _) => FlushCompanionPageRefresh();
             InspectorHost.Children.Add(customBox);
             return;
         }
@@ -8196,49 +8930,118 @@ public sealed partial class SettingsWindow : Window
             {
                 _library.Prefs.AiCustomProviderNames[preset.Id] = nameBox.Text.Trim();
                 _library.SavePrefs();
-                RenderDynamicPage("companion");
+                ScheduleCompanionPageRefresh();
             };
+            nameBox.LostFocus += (_, _) => FlushCompanionPageRefresh();
             credStack.Children.Add(nameBox);
         }
 
         string savedKey = _library.Secrets.Get($"ai.key.{preset.Id}");
         PasswordBox? activeKeyBox = null;
 
-        // 1:1 OpenRouterSignIn.swift：一键浏览器 PKCE 授权获取专属 Key
+        // 1:1 OpenRouterSignIn.swift：一键浏览器 PKCE 授权获取专属 Key（支持随时取消）
         if (preset.Id == "openrouter")
         {
-            var orStatus = new TextBlock { FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+            bool orSigningIn = _openRouterAuthCts is { IsCancellationRequested: false };
+            string defaultOrBtnTitle = string.IsNullOrEmpty(savedKey) ? "用 OpenRouter 登录…" : "重新用 OpenRouter 登录…";
+            var orStatus = new TextBlock
+            {
+                Text = orSigningIn ? L10n.T("已在浏览器打开授权页，登录完成后自动回到语阅…") : "",
+                FontSize = 11,
+                Foreground = ThemeHelper.Brush(p.T3),
+                TextWrapping = TextWrapping.Wrap,
+                Visibility = orSigningIn ? Visibility.Visible : Visibility.Collapsed,
+            };
+            var orRow = new Grid { ColumnSpacing = 8 };
+            orRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            orRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
             var orBtn = new Button
             {
                 Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"],
                 HorizontalAlignment = HorizontalAlignment.Stretch,
-                Content = string.IsNullOrEmpty(savedKey) ? "用 OpenRouter 登录…" : "重新用 OpenRouter 登录…",
+                Content = orSigningIn ? "等待浏览器授权…" : defaultOrBtnTitle,
+                IsEnabled = !orSigningIn,
+            };
+            var orCancelBtn = new Button
+            {
+                Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+                Content = "取消",
+                Visibility = orSigningIn ? Visibility.Visible : Visibility.Collapsed,
+            };
+            orCancelBtn.Click += (_, _) =>
+            {
+                try { _openRouterAuthCts?.Cancel(); _openRouterAuthCts?.Dispose(); } catch { }
+                _openRouterAuthCts = null;
+                orBtn.IsEnabled = true;
+                orBtn.Content = L10n.T(defaultOrBtnTitle);
+                orCancelBtn.Visibility = Visibility.Collapsed;
+                orStatus.Text = L10n.T("已取消授权");
+                orStatus.Foreground = ThemeHelper.Brush(p.T3);
+                orStatus.Visibility = Visibility.Visible;
             };
             orBtn.Click += async (_, _) =>
             {
+                try { _openRouterAuthCts?.Cancel(); _openRouterAuthCts?.Dispose(); } catch { }
+                var cts = new CancellationTokenSource();
+                _openRouterAuthCts = cts;
+
                 orBtn.IsEnabled = false;
+                orBtn.Content = L10n.T("等待浏览器授权…");
+                orCancelBtn.Visibility = Visibility.Visible;
                 orStatus.Text = L10n.T("已在浏览器打开授权页，登录完成后自动回到语阅…");
                 orStatus.Foreground = ThemeHelper.Brush(p.T3);
                 orStatus.Visibility = Visibility.Visible;
                 try
                 {
-                    string gotKey = await CompanionClient.SignInWithOpenRouterAsync();
+                    string gotKey = await CompanionClient.SignInWithOpenRouterAsync(cts.Token);
+                    if (_closed) return;
                     _library.Secrets.Set("ai.key.openrouter", gotKey);
                     _newlyAddedCompanionIds.Remove("openrouter");
                     _companionEditingKey = false;
                     ActivateCompanionProvider("openrouter");
                     RecordChange("OpenRouter", "已登录");
-                    RenderDynamicPage("companion");
-                    RenderInspector("companion");
+                    if (_activePage == "companion")
+                    {
+                        RenderDynamicPage("companion");
+                        RenderInspector("companion");
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    if (!_closed)
+                    {
+                        orStatus.Text = L10n.T("已取消授权");
+                        orStatus.Foreground = ThemeHelper.Brush(p.T3);
+                        orBtn.IsEnabled = true;
+                        orBtn.Content = L10n.T(defaultOrBtnTitle);
+                        orCancelBtn.Visibility = Visibility.Collapsed;
+                    }
                 }
                 catch (Exception ex)
                 {
-                    orStatus.Text = ex.Message;
-                    orStatus.Foreground = ThemeHelper.Brush(p.Danger);
-                    orBtn.IsEnabled = true;
+                    if (!_closed)
+                    {
+                        orStatus.Text = ex.Message;
+                        orStatus.Foreground = ThemeHelper.Brush(p.Danger);
+                        orBtn.IsEnabled = true;
+                        orBtn.Content = L10n.T(defaultOrBtnTitle);
+                        orCancelBtn.Visibility = Visibility.Collapsed;
+                    }
+                }
+                finally
+                {
+                    if (ReferenceEquals(_openRouterAuthCts, cts))
+                    {
+                        try { cts.Dispose(); } catch { }
+                        _openRouterAuthCts = null;
+                    }
                 }
             };
-            credStack.Children.Add(orBtn);
+            orRow.Children.Add(orBtn);
+            Grid.SetColumn(orCancelBtn, 1);
+            orRow.Children.Add(orCancelBtn);
+            credStack.Children.Add(orRow);
             credStack.Children.Add(orStatus);
         }
 
@@ -8301,8 +9104,9 @@ public sealed partial class SettingsWindow : Window
                     string nextK = activeKeyBox.Password.Trim();
                     _library.Secrets.Set($"ai.key.{preset.Id}", nextK);
                     if (inUse) _library.Secrets.Set("ai.apiKey", nextK);
-                    RenderDynamicPage("companion");
+                    ScheduleCompanionPageRefresh();
                 };
+                activeKeyBox.LostFocus += (_, _) => FlushCompanionPageRefresh();
                 credStack.Children.Add(activeKeyBox);
 
                 var keySubBar = new Grid();
@@ -8349,7 +9153,16 @@ public sealed partial class SettingsWindow : Window
         };
         urlBox.TextChanged += (_, _) =>
         {
-            _library.Prefs.AiProviderUrls[preset.Id] = urlBox.Text.Trim();
+            string nextU = urlBox.Text.Trim();
+            if (string.IsNullOrWhiteSpace(nextU))
+            {
+                _library.Prefs.AiProviderUrls.Remove(preset.Id);
+                if (inUse) _library.Prefs.AiBaseUrl = preset.BaseUrl;
+            }
+            else
+            {
+                _library.Prefs.AiProviderUrls[preset.Id] = nextU;
+            }
             if (inUse) ActivateCompanionProvider(preset.Id);
             else _library.SavePrefs();
         };
@@ -8387,16 +9200,24 @@ public sealed partial class SettingsWindow : Window
             testResult.Foreground = ThemeHelper.Brush(p.T3);
             testResult.Visibility = Visibility.Visible;
             var sw = Stopwatch.StartNew();
-            string testBase = urlBox.Text.Trim();
-            if (string.IsNullOrEmpty(testBase)) testBase = preset.BaseUrl;
+            string rawUrlInput = urlBox.Text.Trim();
+            string testBase = string.IsNullOrEmpty(rawUrlInput) ? preset.BaseUrl : rawUrlInput;
             string testModel = GetProviderModel(preset.Id, preset.DefaultModel);
             string trimmedKey = activeKeyBox is not null ? activeKeyBox.Password.Trim() : _library.Secrets.Get($"ai.key.{preset.Id}");
             if (!string.IsNullOrEmpty(trimmedKey))
                 _library.Secrets.Set($"ai.key.{preset.Id}", trimmedKey);
-            if (!string.IsNullOrEmpty(urlBox.Text.Trim()))
-                _library.Prefs.AiProviderUrls[preset.Id] = urlBox.Text.Trim();
+            if (string.IsNullOrEmpty(rawUrlInput))
+            {
+                _library.Prefs.AiProviderUrls.Remove(preset.Id);
+                if (inUse) _library.Prefs.AiBaseUrl = preset.BaseUrl;
+            }
+            else
+            {
+                _library.Prefs.AiProviderUrls[preset.Id] = rawUrlInput;
+            }
 
             var (ok, msg) = await _library.Companion.TestProviderAsync(preset.Id, testBase, testModel, trimmedKey);
+            if (_closed) return;
             sw.Stop();
             bool autoActivated = false;
             if (ok && !inUse &&
@@ -8712,7 +9533,7 @@ public sealed partial class SettingsWindow : Window
             if (on)
             {
                 ctx = new MenuFlyout();
-                var stopMi = new MenuFlyoutItem { Text = "停止同步", Foreground = ThemeHelper.Brush(p.Danger) };
+                var stopMi = new MenuFlyoutItem { Text = L10n.T("停止同步"), Foreground = ThemeHelper.Brush(p.Danger) };
                 stopMi.Click += (_, _) =>
                 {
                     _library.Sync.StopSync();
@@ -8783,48 +9604,105 @@ public sealed partial class SettingsWindow : Window
 
         if (_editingGDrive)
         {
+            bool gdriveWaiting = _gdriveAuthCts is { IsCancellationRequested: false };
+            string defaultGLoginLabel = _library.Prefs.SyncMethod == "gdrive" ? "重新登录 Google 账号" : "用 Google 账号登录并开启同步";
             var gStatus = new TextBlock
             {
-                Text = "数据加密存放在你的 Google Drive 应用专属目录，语阅无法看到云盘里的其他文件。",
+                Text = gdriveWaiting
+                    ? L10n.T("已在浏览器打开 Google 授权页，完成授权后自动开启同步…")
+                    : "数据加密存放在你的 Google Drive 应用专属目录，语阅无法看到云盘里的其他文件。",
                 FontSize = 11.5,
                 Foreground = ThemeHelper.Brush(p.T3),
                 VerticalAlignment = VerticalAlignment.Center,
                 TextWrapping = TextWrapping.Wrap,
+            };
+            var gCancelBtn = new Button
+            {
+                Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+                Content = "取消",
+                Visibility = gdriveWaiting ? Visibility.Visible : Visibility.Collapsed,
+                VerticalAlignment = VerticalAlignment.Center,
             };
             var gLoginBtn = new Button
             {
                 Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"],
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Center,
-                Content = _library.Prefs.SyncMethod == "gdrive" ? "重新登录 Google 账号" : "用 Google 账号登录并开启同步",
+                Content = gdriveWaiting ? "等待授权…" : defaultGLoginLabel,
+                IsEnabled = !gdriveWaiting,
+            };
+            gCancelBtn.Click += (_, _) =>
+            {
+                try { _gdriveAuthCts?.Cancel(); _gdriveAuthCts?.Dispose(); } catch { }
+                _gdriveAuthCts = null;
+                gCancelBtn.Visibility = Visibility.Collapsed;
+                gLoginBtn.IsEnabled = true;
+                gLoginBtn.Content = L10n.T(defaultGLoginLabel);
+                gStatus.Text = L10n.T("已取消 Google 授权");
+                gStatus.Foreground = ThemeHelper.Brush(p.T3);
             };
             gLoginBtn.Click += async (_, _) =>
             {
+                try { _gdriveAuthCts?.Cancel(); _gdriveAuthCts?.Dispose(); } catch { }
+                var cts = new CancellationTokenSource();
+                _gdriveAuthCts = cts;
+
                 gLoginBtn.IsEnabled = false;
+                gLoginBtn.Content = L10n.T("等待授权…");
+                gCancelBtn.Visibility = Visibility.Visible;
                 gStatus.Text = L10n.T("已在浏览器打开 Google 授权页，完成授权后自动开启同步…");
                 gStatus.Foreground = ThemeHelper.Brush(p.T3);
                 try
                 {
-                    await _library.Sync.ConnectGoogleDriveAsync();
+                    await _library.Sync.ConnectGoogleDriveAsync(cts.Token);
+                    if (_closed) return;
                     _editingGDrive = false;
                     RecordChange("同步", "Google Drive");
                     App.CurrentApp.NotifyShelfRefresh();
-                    RenderDynamicPage("sync");
+                    if (_activePage == "sync") RenderDynamicPage("sync");
+                }
+                catch (OperationCanceledException)
+                {
+                    if (!_closed)
+                    {
+                        gStatus.Text = L10n.T("已取消 Google 授权");
+                        gStatus.Foreground = ThemeHelper.Brush(p.T3);
+                        gLoginBtn.IsEnabled = true;
+                        gLoginBtn.Content = L10n.T(defaultGLoginLabel);
+                        gCancelBtn.Visibility = Visibility.Collapsed;
+                    }
                 }
                 catch (Exception ex)
                 {
-                    gStatus.Text = ex.Message;
-                    gStatus.Foreground = ThemeHelper.Brush(p.Danger);
-                    gLoginBtn.IsEnabled = true;
+                    if (!_closed)
+                    {
+                        gStatus.Text = ex.Message;
+                        gStatus.Foreground = ThemeHelper.Brush(p.Danger);
+                        gLoginBtn.IsEnabled = true;
+                        gLoginBtn.Content = L10n.T(defaultGLoginLabel);
+                        gCancelBtn.Visibility = Visibility.Collapsed;
+                    }
+                }
+                finally
+                {
+                    if (ReferenceEquals(_gdriveAuthCts, cts))
+                    {
+                        try { cts.Dispose(); } catch { }
+                        _gdriveAuthCts = null;
+                    }
                 }
             };
+
+            var gBtnGroup = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+            gBtnGroup.Children.Add(gCancelBtn);
+            gBtnGroup.Children.Add(gLoginBtn);
 
             var gFoot = new Grid { Padding = new Thickness(16, 12, 16, 12), ColumnSpacing = 12 };
             gFoot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             gFoot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             gFoot.Children.Add(gStatus);
-            Grid.SetColumn(gLoginBtn, 1);
-            gFoot.Children.Add(gLoginBtn);
+            Grid.SetColumn(gBtnGroup, 1);
+            gFoot.Children.Add(gBtnGroup);
 
             if (string.IsNullOrWhiteSpace(_library.Sync.EffectiveGoogleClientId))
             {
@@ -8878,10 +9756,12 @@ public sealed partial class SettingsWindow : Window
                         ct: cts.Token,
                         onProgress: steps => DispatcherQueue.TryEnqueue(() =>
                         {
+                            if (_closed) return;
                             if (_activePage == "sync" && _editingWebDav)
                                 checkCardHost.Content = WebDavCheckService.BuildCheckCard(steps, p, tint, isRunning: true);
                         }));
 
+                    if (_closed) return;
                     checkCardHost.Content = WebDavCheckService.BuildCheckCard(report, p, tint);
                     checkNote.Text = report.AllPassed ? $"✓ 四项检查全部通过（{report.ElapsedSeconds:0.1} 秒）" : L10n.T("请根据下方检查结果修正后重试");
                     checkNote.Foreground = ThemeHelper.Brush(report.AllPassed ? p.Ok : p.Danger);
@@ -8891,20 +9771,27 @@ public sealed partial class SettingsWindow : Window
                         _library.SavePrefs();
                         RecordChange("同步", "WebDAV");
                         await _library.Sync.SyncNowAsync();
+                        if (_closed) return;
                         _editingWebDav = false;
                         App.CurrentApp.NotifyShelfRefresh();
-                        RenderDynamicPage("sync");
+                        if (_activePage == "sync") RenderDynamicPage("sync");
                     }
                 }
                 catch (OperationCanceledException)
                 {
-                    checkNote.Text = L10n.T("已取消检查");
-                    checkNote.Foreground = ThemeHelper.Brush(p.T3);
+                    if (!_closed)
+                    {
+                        checkNote.Text = L10n.T("已取消检查");
+                        checkNote.Foreground = ThemeHelper.Brush(p.T3);
+                    }
                 }
                 finally
                 {
-                    cancelCheckBtn.Visibility = Visibility.Collapsed;
-                    connectBtn.IsEnabled = true;
+                    if (!_closed)
+                    {
+                        cancelCheckBtn.Visibility = Visibility.Collapsed;
+                        connectBtn.IsEnabled = true;
+                    }
                 }
             };
 
@@ -9027,6 +9914,7 @@ public sealed partial class SettingsWindow : Window
             if (_library.Sync.IsEnabled) _ = _library.Sync.SyncNowAsync();
         }, enabled: isOn);
         filesSw.VerticalAlignment = VerticalAlignment.Center;
+        AutomationProperties.SetName(filesSw, L10n.T("书文件"));
         var filesRow = new Grid { ColumnSpacing = 12, Padding = new Thickness(16, 4, 16, 4), MinHeight = 36 };
         filesRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         filesRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -9064,6 +9952,7 @@ public sealed partial class SettingsWindow : Window
             if (_library.Sync.IsEnabled) _ = _library.Sync.SyncNowAsync();
         }, enabled: isOn);
         recSw.VerticalAlignment = VerticalAlignment.Center;
+        AutomationProperties.SetName(recSw, L10n.T("有声书录音"));
         var recRow = new Grid { ColumnSpacing = 12, Padding = new Thickness(16, 4, 16, 4), MinHeight = 36 };
         recRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         recRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -9083,7 +9972,7 @@ public sealed partial class SettingsWindow : Window
             var (bytes, recBytes) = t.Result;
             DispatcherQueue.TryEnqueue(() =>
             {
-                if (_activePage != "sync") return;
+                if (_closed || _activePage != "sync") return;
                 filesRowSub.Text = L10n.T($"{FormatBytes(bytes)} · 占用你的{placeName}空间；播客单集体积很小，始终同步");
                 if (recBytes > 0)
                     recRowSub.Text = $"{FormatBytes(recBytes)} · {L10n.T(recBaseHint)}";
@@ -9174,18 +10063,37 @@ public sealed partial class SettingsWindow : Window
             if (idx > 0) rows.Children.Add(new Border { Height = 1, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(12, 0, 12, 0) });
             bool sel = _focusedExportTarget == key;
 
-            var g = new Grid { ColumnSpacing = 12, MinHeight = 48, Padding = new Thickness(12, 8, 12, 8) };
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-            g.Children.Add(YYChrome.MakeServiceTile(key, IsDark, 32));
+            var leftGrid = new Grid { ColumnSpacing = 12 };
+            leftGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });
+            leftGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            leftGrid.Children.Add(YYChrome.MakeServiceTile(key, IsDark, 32));
 
             var mid = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
             mid.Children.Add(new TextBlock { Text = title, FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) });
             mid.Children.Add(new TextBlock { Text = detail, FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
             Grid.SetColumn(mid, 1);
-            g.Children.Add(mid);
+            leftGrid.Children.Add(mid);
+
+            var selectBtn = new Button
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                Padding = new Thickness(12, 8, 8, 8),
+                CornerRadius = new CornerRadius(9, 0, 0, 9),
+                Background = new SolidColorBrush(Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                UseSystemFocusVisuals = false,
+                Content = leftGrid,
+            };
+            AutomationProperties.SetName(selectBtn, L10n.T(title));
+            selectBtn.Click += (_, _) =>
+            {
+                if (_focusedExportTarget == key) return;
+                _focusedExportTarget = key;
+                RenderDynamicPage("export");
+                RenderInspector("export");
+            };
 
             ToggleSwitch sw = null!;
             sw = MakeSwitch(connected && isOn, v =>
@@ -9203,7 +10111,14 @@ public sealed partial class SettingsWindow : Window
                 RenderInspector("export");
             });
             sw.VerticalAlignment = VerticalAlignment.Center;
-            Grid.SetColumn(sw, 2);
+            sw.Margin = new Thickness(0, 0, 12, 0);
+            AutomationProperties.SetName(sw, L10n.T(title));
+
+            var g = new Grid { ColumnSpacing = 8, MinHeight = 48 };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.Children.Add(selectBtn);
+            Grid.SetColumn(sw, 1);
             g.Children.Add(sw);
 
             var wrap = new Border
@@ -9211,12 +10126,6 @@ public sealed partial class SettingsWindow : Window
                 CornerRadius = new CornerRadius(9),
                 Background = sel ? ThemeHelper.Brush(Color.FromArgb(16, p.T1.R, p.T1.G, p.T1.B)) : new SolidColorBrush(Colors.Transparent),
                 Child = g,
-            };
-            wrap.PointerPressed += (_, _) =>
-            {
-                _focusedExportTarget = key;
-                RenderDynamicPage("export");
-                RenderInspector("export");
             };
             rows.Children.Add(wrap);
         }
@@ -9372,7 +10281,7 @@ public sealed partial class SettingsWindow : Window
                         {
                             try
                             {
-                                if (_activePage != "export" || _focusedExportTarget != "notion")
+                                if (_closed || _activePage != "export" || _focusedExportTarget != "notion")
                                 {
                                     tcs.TrySetResult(null);
                                     return;
@@ -9394,8 +10303,8 @@ public sealed partial class SettingsWindow : Window
                     if (!isTok && !isPage) return;
                     DispatcherQueue.TryEnqueue(() =>
                     {
-                        if (_activePage != "export" || _focusedExportTarget != "notion") return;
-                        clipBtn.Content = isTok ? "✨ 填入剪贴板中的 Notion Token" : "✨ 填入剪贴板中的 Notion 页面链接";
+                        if (_closed || _activePage != "export" || _focusedExportTarget != "notion") return;
+                        clipBtn.Content = L10n.T(isTok ? "✨ 填入剪贴板中的 Notion Token" : "✨ 填入剪贴板中的 Notion 页面链接");
                         clipBtn.Visibility = Visibility.Visible;
                         clipBtn.Click += (_, _) =>
                         {
@@ -9410,8 +10319,9 @@ public sealed partial class SettingsWindow : Window
                 verifyBtn.Click += async (_, _) =>
                 {
                     verifyBtn.IsEnabled = false;
-                    SetExportStatus("正在校验 Notion Token 与父页面权限…", p.T3);
+                    SetExportStatus(L10n.T("正在校验 Notion Token 与父页面权限…"), p.T3);
                     var (ok, pageTitle, msg) = await _library.NoteExports.VerifyNotionAsync(tkBox.Password, pgBox.Text);
+                    if (_closed) return;
                     SetExportStatus(msg, ok ? p.Ok : p.Danger);
                     verifyBtn.IsEnabled = true;
                     if (ok)
@@ -9446,10 +10356,11 @@ public sealed partial class SettingsWindow : Window
                         try
                         {
                             var (bCnt, mCnt) = await _library.NoteExports.ExportToNotionAsync();
-                            SetExportStatus(mCnt > 0 ? $"✓ 已同步 {mCnt} 条笔记（{bCnt} 本书）" : "✓ 所有划线均已同步过，已是最新", p.Ok);
+                            if (_closed) return;
+                            SetExportStatus(mCnt > 0 ? $"✓ 已同步 {mCnt} 条笔记（{bCnt} 本书）" : L10n.T("✓ 所有划线均已同步过，已是最新"), p.Ok);
                         }
-                        catch (Exception ex) { SetExportStatus(ex.Message, p.Danger); }
-                        finally { sendBtn.IsEnabled = true; }
+                        catch (Exception ex) { if (!_closed) SetExportStatus(ex.Message, p.Danger); }
+                        finally { if (!_closed) sendBtn.IsEnabled = true; }
                     };
                     var openAppBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = "在 Notion 中打开目标页面 ↗" };
                     openAppBtn.Click += (_, _) => _ = Launcher.LaunchUriAsync(new Uri($"https://www.notion.so/{_library.Prefs.NotionPageId}"));
@@ -9490,7 +10401,7 @@ public sealed partial class SettingsWindow : Window
                             if (!NoteExportService.ValidateFlomoWebhook(cand) || string.Equals(cand, curUrl, StringComparison.OrdinalIgnoreCase)) return;
                             DispatcherQueue.TryEnqueue(() =>
                             {
-                                if (_activePage != "export" || _focusedExportTarget != "flomo") return;
+                                if (_closed || _activePage != "export" || _focusedExportTarget != "flomo") return;
                                 flomoClipBtn.Visibility = Visibility.Visible;
                                 flomoClipBtn.Click += (_, _) =>
                                 {
@@ -9509,7 +10420,7 @@ public sealed partial class SettingsWindow : Window
                     string u = wbBox.Text.Trim();
                     if (!NoteExportService.ValidateFlomoWebhook(u))
                     {
-                        SetExportStatus("请输入以 https://flomoapp.com/iwh/ 开头的专属 API 地址", p.Danger);
+                        SetExportStatus(L10n.T("请输入以 https://flomoapp.com/iwh/ 开头的专属 API 地址"), p.Danger);
                         return;
                     }
                     _library.Secrets.Set("export.flomo.url", u);
@@ -9539,10 +10450,11 @@ public sealed partial class SettingsWindow : Window
                         try
                         {
                             var (_, mCnt) = await _library.NoteExports.ExportToFlomoAsync();
-                            SetExportStatus(mCnt > 0 ? $"✓ 已发送 {mCnt} 条卡片到 flomo" : "✓ 已是最新，没有未发过的新划线", p.Ok);
+                            if (_closed) return;
+                            SetExportStatus(mCnt > 0 ? $"✓ 已发送 {mCnt} 条卡片到 flomo" : L10n.T("✓ 已是最新，没有未发过的新划线"), p.Ok);
                         }
-                        catch (Exception ex) { SetExportStatus(ex.Message, p.Danger); }
-                        finally { sendBtn.IsEnabled = true; }
+                        catch (Exception ex) { if (!_closed) SetExportStatus(ex.Message, p.Danger); }
+                        finally { if (!_closed) sendBtn.IsEnabled = true; }
                     };
                     var openFlomoBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = "打开 flomo ↗" };
                     openFlomoBtn.Click += (_, _) => _ = Launcher.LaunchUriAsync(new Uri("https://v.flomoapp.com"));
@@ -9563,8 +10475,9 @@ public sealed partial class SettingsWindow : Window
                 verifyBtn.Click += async (_, _) =>
                 {
                     verifyBtn.IsEnabled = false;
-                    SetExportStatus("正在验证新枝账号…", p.T3);
+                    SetExportStatus(L10n.T("正在验证新枝账号…"), p.T3);
                     var (ok, uName, msg) = await _library.NoteExports.VerifyXinzhiAsync(xzBox.Password);
+                    if (_closed) return;
                     SetExportStatus(msg, ok ? p.Ok : p.Danger);
                     verifyBtn.IsEnabled = true;
                     if (ok)
@@ -9596,10 +10509,11 @@ public sealed partial class SettingsWindow : Window
                         try
                         {
                             var (_, mCnt) = await _library.NoteExports.ExportToXinzhiAsync();
-                            SetExportStatus(mCnt > 0 ? $"✓ 已发送 {mCnt} 条笔记到新枝" : "✓ 已是最新，没有未发过的新划线", p.Ok);
+                            if (_closed) return;
+                            SetExportStatus(mCnt > 0 ? $"✓ 已发送 {mCnt} 条笔记到新枝" : L10n.T("✓ 已是最新，没有未发过的新划线"), p.Ok);
                         }
-                        catch (Exception ex) { SetExportStatus(ex.Message, p.Danger); }
-                        finally { sendBtn.IsEnabled = true; }
+                        catch (Exception ex) { if (!_closed) SetExportStatus(ex.Message, p.Danger); }
+                        finally { if (!_closed) sendBtn.IsEnabled = true; }
                     };
                     var openXzBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = "打开新枝 ↗" };
                     openXzBtn.Click += (_, _) => _ = Launcher.LaunchUriAsync(new Uri("https://xinzhi.zone"));
@@ -9645,7 +10559,7 @@ public sealed partial class SettingsWindow : Window
                     picker.FileTypeFilter.Add("*");
                     InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
                     var f = await picker.PickSingleFolderAsync();
-                    if (f is null) return;
+                    if (f is null || _closed) return;
                     _library.Prefs.ObsidianFolder = f.Path;
                     _library.Prefs.ObsidianExportOn = true;
                     _library.SavePrefs();
@@ -9660,12 +10574,15 @@ public sealed partial class SettingsWindow : Window
                     var sendBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = "立即生成全部书籍 Markdown" };
                     sendBtn.Click += async (_, _) =>
                     {
+                        sendBtn.IsEnabled = false;
                         try
                         {
                             var (bCnt, mCnt) = await _library.NoteExports.ExportToObsidianAsync();
-                            SetExportStatus(mCnt > 0 ? $"✓ 已写入 {bCnt} 本书共 {mCnt} 条笔记" : "✓ 已是最新", p.Ok);
+                            if (_closed) return;
+                            SetExportStatus(mCnt > 0 ? $"✓ 已写入 {bCnt} 本书共 {mCnt} 条笔记" : L10n.T("✓ 已是最新"), p.Ok);
                         }
-                        catch (Exception ex) { SetExportStatus(ex.Message, p.Danger); }
+                        catch (Exception ex) { if (!_closed) SetExportStatus(ex.Message, p.Danger); }
+                        finally { if (!_closed) sendBtn.IsEnabled = true; }
                     };
                     var openObsBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = "在 Obsidian 中打开 ↗" };
                     openObsBtn.Click += async (_, _) =>
@@ -9779,38 +10696,114 @@ public sealed partial class SettingsWindow : Window
 
         _ = Task.Run(() =>
         {
-            string booksRoot = Path.Combine(dataDir, "books");
             long booksBytes = 0;
-            long audioBytes = DirSize(Path.Combine(dataDir, "audiobooks")) + DirSize(Path.Combine(dataDir, "recordings"));
-            long deletedBytes = DirSize(Path.Combine(dataDir, "trash"));
+            long audioBytes = 0;
+            long deletedBytes = 0;
+            long voiceBytes = 0;
+            long qaBytes = 0;
+            long totalBytes = 0;
             int deletedCount = 0;
             var perBookSizes = new List<(string Title, long Bytes)>();
+            var titleMap = kept.ToDictionary(b => b.Id, b => b.Title, StringComparer.Ordinal);
 
-            if (Directory.Exists(booksRoot))
+            static long TopFilesSize(string dir)
             {
-                var titleMap = kept.ToDictionary(b => b.Id, b => b.Title, StringComparer.Ordinal);
-                foreach (var sub in Directory.EnumerateDirectories(booksRoot))
+                long sum = 0;
+                try
                 {
-                    string id = Path.GetFileName(sub);
-                    long sz = DirSize(sub);
-                    if (keptIds.Contains(id))
+                    foreach (var f in Directory.EnumerateFiles(dir))
                     {
-                        if (audioIds.Contains(id)) audioBytes += sz;
-                        else booksBytes += sz;
-                        if (sz > 0 && titleMap.TryGetValue(id, out var ttl))
-                            perBookSizes.Add((ttl, sz));
-                    }
-                    else
-                    {
-                        deletedBytes += sz;
-                        deletedCount++;
+                        try { sum += new FileInfo(f).Length; } catch { }
                     }
                 }
+                catch { }
+                return sum;
             }
 
-            long voiceBytes = DirSize(Path.Combine(dataDir, "models")) + DirSize(Path.Combine(dataDir, "cache", "kokoro"));
-            long qaBytes = DirSize(Path.Combine(dataDir, "companion")) + DirSize(Path.Combine(dataDir, "companion-cache"));
-            long totalBytes = DirSize(dataDir);
+            if (Directory.Exists(dataDir))
+            {
+                totalBytes += TopFilesSize(dataDir);
+                try
+                {
+                    foreach (var topSub in Directory.EnumerateDirectories(dataDir))
+                    {
+                        string topName = Path.GetFileName(topSub);
+                        if (topName.Equals("books", StringComparison.OrdinalIgnoreCase))
+                        {
+                            totalBytes += TopFilesSize(topSub);
+                            try
+                            {
+                                foreach (var sub in Directory.EnumerateDirectories(topSub))
+                                {
+                                    string id = Path.GetFileName(sub);
+                                    long sz = DirSize(sub);
+                                    totalBytes += sz;
+                                    if (keptIds.Contains(id))
+                                    {
+                                        if (audioIds.Contains(id)) audioBytes += sz;
+                                        else booksBytes += sz;
+                                        if (sz > 0 && titleMap.TryGetValue(id, out var ttl))
+                                            perBookSizes.Add((ttl, sz));
+                                    }
+                                    else
+                                    {
+                                        deletedBytes += sz;
+                                        deletedCount++;
+                                    }
+                                }
+                            }
+                            catch { }
+                        }
+                        else if (topName.Equals("audiobooks", StringComparison.OrdinalIgnoreCase) ||
+                                 topName.Equals("recordings", StringComparison.OrdinalIgnoreCase))
+                        {
+                            long sz = DirSize(topSub);
+                            audioBytes += sz;
+                            totalBytes += sz;
+                        }
+                        else if (topName.Equals("trash", StringComparison.OrdinalIgnoreCase))
+                        {
+                            long sz = DirSize(topSub);
+                            deletedBytes += sz;
+                            totalBytes += sz;
+                        }
+                        else if (topName.Equals("models", StringComparison.OrdinalIgnoreCase))
+                        {
+                            long sz = DirSize(topSub);
+                            voiceBytes += sz;
+                            totalBytes += sz;
+                        }
+                        else if (topName.Equals("cache", StringComparison.OrdinalIgnoreCase))
+                        {
+                            totalBytes += TopFilesSize(topSub);
+                            try
+                            {
+                                foreach (var cSub in Directory.EnumerateDirectories(topSub))
+                                {
+                                    long sz = DirSize(cSub);
+                                    totalBytes += sz;
+                                    if (Path.GetFileName(cSub).Equals("kokoro", StringComparison.OrdinalIgnoreCase))
+                                        voiceBytes += sz;
+                                }
+                            }
+                            catch { }
+                        }
+                        else if (topName.Equals("companion", StringComparison.OrdinalIgnoreCase) ||
+                                 topName.Equals("companion-cache", StringComparison.OrdinalIgnoreCase))
+                        {
+                            long sz = DirSize(topSub);
+                            qaBytes += sz;
+                            totalBytes += sz;
+                        }
+                        else
+                        {
+                            totalBytes += DirSize(topSub);
+                        }
+                    }
+                }
+                catch { }
+            }
+
             long otherBytes = Math.Max(0, totalBytes - booksBytes - audioBytes - voiceBytes - deletedBytes);
             long freeBytes = 0;
             try { freeBytes = new DriveInfo(Path.GetPathRoot(dataDir) ?? "C:\\").AvailableFreeSpace; } catch { }
@@ -9823,7 +10816,7 @@ public sealed partial class SettingsWindow : Window
             var s = t.Result;
             DispatcherQueue.TryEnqueue(() =>
             {
-                if (_activePage != "storage") return;
+                if (_closed || _activePage != "storage") return;
                 storageHost.Children.Clear();
                 var pal = CurrentPalette;
                 var tnt = CurrentTint;
@@ -9893,9 +10886,16 @@ public sealed partial class SettingsWindow : Window
                         cancelText: L10n.T("取消"),
                         destructive: true,
                         tint: _library.Prefs.Tint);
-                    if (ok)
+                    if (ok && !_closed)
                     {
-                        try { _library.Core.PurgeDeleted(0); RecordChange("最近删除", "已清空"); RenderDynamicPage("storage"); } catch { }
+                        try
+                        {
+                            await Task.Run(() => _library.Core.PurgeDeleted(0));
+                            if (_closed) return;
+                            RecordChange("最近删除", "已清空");
+                            if (_activePage == "storage") RenderDynamicPage("storage");
+                        }
+                        catch { }
                     }
                 }, IsDark, destructive: true, enabled: s.deletedBytes > 0 || deletedCount > 0);
 
@@ -9912,18 +10912,22 @@ public sealed partial class SettingsWindow : Window
                         cancelText: L10n.T("取消"),
                         destructive: true,
                         tint: _library.Prefs.Tint);
-                    if (!ok) return;
-                    foreach (var dName in new[] { "companion", "companion-cache" })
+                    if (!ok || _closed) return;
+                    await Task.Run(() =>
                     {
-                        try
+                        foreach (var dName in new[] { "companion", "companion-cache" })
                         {
-                            string dir = Path.Combine(dataDir, dName);
-                            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+                            try
+                            {
+                                string dir = Path.Combine(dataDir, dName);
+                                if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+                            }
+                            catch { }
                         }
-                        catch { }
-                    }
+                    });
+                    if (_closed) return;
                     RecordChange("书伴问答缓存", "已清理");
-                    RenderDynamicPage("storage");
+                    if (_activePage == "storage") RenderDynamicPage("storage");
                 }, IsDark, destructive: true, enabled: s.qaBytes > 0));
 
                 var cleanupRows = new List<UIElement>
@@ -9944,11 +10948,15 @@ public sealed partial class SettingsWindow : Window
                             cancelText: L10n.T("取消"),
                             destructive: true,
                             tint: _library.Prefs.Tint);
-                        if (!ok) return;
-                        _library.Kokoro.DeleteInstalledModel();
-                        _library.LiveVoice.DeleteInstalledModels();
+                        if (!ok || _closed) return;
+                        await Task.Run(() =>
+                        {
+                            _library.Kokoro.DeleteInstalledModel();
+                            _library.LiveVoice.DeleteInstalledModels();
+                        });
+                        if (_closed) return;
                         RecordChange("语音合成模型", "已移除");
-                        RenderDynamicPage("storage");
+                        if (_activePage == "storage") RenderDynamicPage("storage");
                     }, IsDark, destructive: true);
                     cleanupRows.Add(MakeRow("语音合成模型", FormatBytes(s.voiceBytes), rmModelBtn));
                 }
@@ -9965,15 +10973,29 @@ public sealed partial class SettingsWindow : Window
                 // 可选离线扩展包（放在「各书占用空间」之后，保持首屏 1:1 对齐 settings-storage/1.png）
                 var extRows = new List<UIElement>();
                 bool alignerInstalled = Aligner.IsInstalled(dataDir);
+                bool alignerDownloading = !alignerInstalled && _alignerDlCts is { IsCancellationRequested: false };
                 var alignerBtn = new Button
                 {
                     Style = (Style)Application.Current.Resources[alignerInstalled ? "YYIconButtonStyle" : "YYPillButtonStyle"],
-                    Content = alignerInstalled ? "移除" : "下载 (~303 MB)",
+                    Content = alignerInstalled
+                        ? "移除"
+                        : (alignerDownloading ? $"{L10n.T("取消")} ({Math.Round(_alignerDlProgress * 100)}%)" : "下载 (~303 MB)"),
                     Foreground = alignerInstalled ? ThemeHelper.Brush(pal.Danger) : ThemeHelper.Brush(pal.T1),
                     FontSize = 11.5,
                 };
+                _alignerProgressUiUpdater = () =>
+                {
+                    if (_closed || _activePage != "storage") return;
+                    if (_alignerDlCts is { IsCancellationRequested: false })
+                        alignerBtn.Content = $"{L10n.T("取消")} ({Math.Round(_alignerDlProgress * 100)}%)";
+                };
                 alignerBtn.Click += async (_, _) =>
                 {
+                    if (_alignerDlCts is { IsCancellationRequested: false })
+                    {
+                        try { _alignerDlCts.Cancel(); } catch { }
+                        return;
+                    }
                     if (Aligner.IsInstalled(dataDir))
                     {
                         bool ok = await YYChrome.ShowConfirmAsync(
@@ -9985,25 +11007,55 @@ public sealed partial class SettingsWindow : Window
                             cancelText: L10n.T("取消"),
                             destructive: true,
                             tint: _library.Prefs.Tint);
-                        if (!ok) return;
-                        Aligner.DeleteModel(dataDir);
+                        if (!ok || _closed) return;
+                        await Task.Run(() => Aligner.DeleteModel(dataDir));
+                        if (_closed) return;
                         RecordChange("对齐模型", "已移除");
-                        RenderDynamicPage("storage");
+                        if (_activePage == "storage") RenderDynamicPage("storage");
                         return;
                     }
-                    alignerBtn.IsEnabled = false;
+
+                    try { _alignerDlCts?.Cancel(); _alignerDlCts?.Dispose(); } catch { }
+                    var cts = new CancellationTokenSource();
+                    _alignerDlCts = cts;
+                    _alignerDlProgress = 0;
+                    alignerBtn.Content = $"{L10n.T("取消")} (0%)";
                     try
                     {
                         await Aligner.EnsureAsync(dataDir, frac =>
-                            DispatcherQueue.TryEnqueue(() => alignerBtn.Content = $"下载中 {Math.Round(frac * 100)}%"),
-                            CancellationToken.None);
-                        RenderDynamicPage("storage");
+                        {
+                            _alignerDlProgress = frac;
+                            DispatcherQueue.TryEnqueue(() =>
+                            {
+                                if (_closed) return;
+                                _alignerProgressUiUpdater?.Invoke();
+                            });
+                        }, cts.Token);
+                        if (_closed) return;
+                        RecordChange("对齐模型", "已安装");
+                        if (_activePage == "storage") RenderDynamicPage("storage");
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        if (!_closed && _activePage == "storage")
+                            alignerBtn.Content = L10n.T("下载 (~303 MB)");
                     }
                     catch (Exception ex)
                     {
-                        alignerBtn.IsEnabled = true;
-                        alignerBtn.Content = "重试下载";
-                        RecordChange("对齐模型", ex.Message);
+                        if (!_closed)
+                        {
+                            if (_activePage == "storage") alignerBtn.Content = L10n.T("重试下载");
+                            RecordChange("对齐模型", ex.Message);
+                        }
+                    }
+                    finally
+                    {
+                        if (ReferenceEquals(_alignerDlCts, cts))
+                        {
+                            try { cts.Dispose(); } catch { }
+                            _alignerDlCts = null;
+                            _alignerDlProgress = 0;
+                        }
                     }
                 };
                 extRows.Add(MakeRow(
@@ -10012,15 +11064,29 @@ public sealed partial class SettingsWindow : Window
                     alignerBtn));
 
                 bool svInstalled = SenseVoiceListener.IsInstalled(dataDir);
+                bool svDownloading = !svInstalled && _senseVoiceDlCts is { IsCancellationRequested: false };
                 var svBtn = new Button
                 {
                     Style = (Style)Application.Current.Resources[svInstalled ? "YYIconButtonStyle" : "YYPillButtonStyle"],
-                    Content = svInstalled ? "移除" : "下载 (~228 MB)",
+                    Content = svInstalled
+                        ? "移除"
+                        : (svDownloading ? $"{L10n.T("取消")} ({Math.Round(_senseVoiceDlProgress * 100)}%)" : "下载 (~228 MB)"),
                     Foreground = svInstalled ? ThemeHelper.Brush(pal.Danger) : ThemeHelper.Brush(pal.T1),
                     FontSize = 11.5,
                 };
+                _senseVoiceProgressUiUpdater = () =>
+                {
+                    if (_closed || _activePage != "storage") return;
+                    if (_senseVoiceDlCts is { IsCancellationRequested: false })
+                        svBtn.Content = $"{L10n.T("取消")} ({Math.Round(_senseVoiceDlProgress * 100)}%)";
+                };
                 svBtn.Click += async (_, _) =>
                 {
+                    if (_senseVoiceDlCts is { IsCancellationRequested: false })
+                    {
+                        try { _senseVoiceDlCts.Cancel(); } catch { }
+                        return;
+                    }
                     if (SenseVoiceListener.IsInstalled(dataDir))
                     {
                         bool ok = await YYChrome.ShowConfirmAsync(
@@ -10032,25 +11098,55 @@ public sealed partial class SettingsWindow : Window
                             cancelText: L10n.T("取消"),
                             destructive: true,
                             tint: _library.Prefs.Tint);
-                        if (!ok) return;
-                        SenseVoiceListener.DeleteModel(dataDir);
+                        if (!ok || _closed) return;
+                        await Task.Run(() => SenseVoiceListener.DeleteModel(dataDir));
+                        if (_closed) return;
                         RecordChange("离线转写模型", "已移除");
-                        RenderDynamicPage("storage");
+                        if (_activePage == "storage") RenderDynamicPage("storage");
                         return;
                     }
-                    svBtn.IsEnabled = false;
+
+                    try { _senseVoiceDlCts?.Cancel(); _senseVoiceDlCts?.Dispose(); } catch { }
+                    var cts = new CancellationTokenSource();
+                    _senseVoiceDlCts = cts;
+                    _senseVoiceDlProgress = 0;
+                    svBtn.Content = $"{L10n.T("取消")} (0%)";
                     try
                     {
                         await SenseVoiceListener.EnsureAsync(dataDir, frac =>
-                            DispatcherQueue.TryEnqueue(() => svBtn.Content = $"下载中 {Math.Round(frac * 100)}%"),
-                            CancellationToken.None);
-                        RenderDynamicPage("storage");
+                        {
+                            _senseVoiceDlProgress = frac;
+                            DispatcherQueue.TryEnqueue(() =>
+                            {
+                                if (_closed) return;
+                                _senseVoiceProgressUiUpdater?.Invoke();
+                            });
+                        }, cts.Token);
+                        if (_closed) return;
+                        RecordChange("离线转写模型", "已安装");
+                        if (_activePage == "storage") RenderDynamicPage("storage");
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        if (!_closed && _activePage == "storage")
+                            svBtn.Content = L10n.T("下载 (~228 MB)");
                     }
                     catch (Exception ex)
                     {
-                        svBtn.IsEnabled = true;
-                        svBtn.Content = "重试下载";
-                        RecordChange("离线转写模型", ex.Message);
+                        if (!_closed)
+                        {
+                            if (_activePage == "storage") svBtn.Content = L10n.T("重试下载");
+                            RecordChange("离线转写模型", ex.Message);
+                        }
+                    }
+                    finally
+                    {
+                        if (ReferenceEquals(_senseVoiceDlCts, cts))
+                        {
+                            try { cts.Dispose(); } catch { }
+                            _senseVoiceDlCts = null;
+                            _senseVoiceDlProgress = 0;
+                        }
                     }
                 };
                 extRows.Add(MakeRow(
@@ -10079,10 +11175,11 @@ public sealed partial class SettingsWindow : Window
                             cancelText: L10n.T("取消"),
                             destructive: true,
                             tint: _library.Prefs.Tint);
-                        if (!ok) return;
-                        SoundLibraryService.DeleteLibrary(dataDir);
+                        if (!ok || _closed) return;
+                        await Task.Run(() => SoundLibraryService.DeleteLibrary(dataDir));
+                        if (_closed) return;
                         RecordChange("音效素材库", "已移除");
-                        RenderDynamicPage("storage");
+                        if (_activePage == "storage") RenderDynamicPage("storage");
                         return;
                     }
                     var picker = new FileOpenPicker();
@@ -10190,12 +11287,17 @@ public sealed partial class SettingsWindow : Window
                 string filePath = Path.Combine(snapDir, $"语阅快照-{DateTime.Now:yyyyMMdd-HHmmss}.yuyue");
                 var parts = new SnapshotParts(_snapProgress, _snapNotes, _snapWords, _snapSettings, _snapFiles);
                 ulong bytes = await Task.Run(() => _library.MakeSnapshot(filePath, parts));
+                if (_closed) return;
                 RecordChange("备份快照", FormatBytes((long)bytes));
-                RenderDynamicPage("data");
-                RenderInspector("data");
+                if (_activePage == "data")
+                {
+                    RenderDynamicPage("data");
+                    RenderInspector("data");
+                }
             }
             catch (Exception ex)
             {
+                if (_closed) return;
                 importExtBtn.IsEnabled = true;
                 makeBtn.Content = L10n.T("生成快照");
                 RefreshEstimate();
@@ -10212,6 +11314,8 @@ public sealed partial class SettingsWindow : Window
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.Children.Add(left);
+            if (string.IsNullOrEmpty(AutomationProperties.GetName(sw)))
+                AutomationProperties.SetName(sw, L10n.T(title));
             sw.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(sw, 1);
             g.Children.Add(sw);
@@ -10268,7 +11372,7 @@ public sealed partial class SettingsWindow : Window
             var (c, savedSnaps) = t.Result;
             DispatcherQueue.TryEnqueue(() =>
             {
-                if (_activePage != "data") return;
+                if (_closed || _activePage != "data") return;
                 loadedCounts = c;
                 readSubTb.Text = L10n.T($"读过 {c.Read} 本");
                 notesSubTb.Text = L10n.T($"{c.Notes} 条");
@@ -10356,11 +11460,11 @@ public sealed partial class SettingsWindow : Window
 
                     var rowEl = MakeRow(whenTitle, subDetail, rightActs, compact: true);
                     var ctx = new MenuFlyout();
-                    var expMi = new MenuFlyoutItem { Text = "导出…" };
+                    var expMi = new MenuFlyoutItem { Text = L10n.T("导出…") };
                     expMi.Click += async (_, _) => await ExportSnapshotAsync();
-                    var revMi = new MenuFlyoutItem { Text = "在资源管理器中显示" };
+                    var revMi = new MenuFlyoutItem { Text = L10n.T("在资源管理器中显示") };
                     revMi.Click += (_, _) => Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{fullPath}\"") { UseShellExecute = true });
-                    var delMi = new MenuFlyoutItem { Text = "删除…", Foreground = ThemeHelper.Brush(p.Danger) };
+                    var delMi = new MenuFlyoutItem { Text = L10n.T("删除…"), Foreground = ThemeHelper.Brush(p.Danger) };
                     delMi.Click += async (_, _) => await ConfirmDeleteSnapshotAsync();
                     ctx.Items.Add(expMi);
                     ctx.Items.Add(revMi);
@@ -10382,19 +11486,21 @@ public sealed partial class SettingsWindow : Window
         var p = CurrentPalette;
         var tint = CurrentTint;
         var serif = new FontFamily(YYFontFamily.Serif.WindowsFamily());
+        var mono = new FontFamily(YYFontFamily.Mono.WindowsFamily());
+        bool preferCn = ModelDownload.PrefersChinaMirror();
 
         var bookplate = new Grid { ColumnSpacing = 36, Margin = new Thickness(6, 18, 0, 8), MinHeight = 470 };
-        bookplate.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(204) });
+        bookplate.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(212) });
         bookplate.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        // 左页：书扉（68x68 YuyueMark「阅」+ 靛蓝胶囊短横 + 语阅 + 铅笔手写签名 + by nowtin · GPL-3.0）
+        // 左页：藏书票书扉（framed ex-libris bookplate folio + 64x64 YuyueMark + 语阅 + 版本 + 铅笔手写签名 + GPL-3.0 徽章）
         var leftGrid = new Grid();
         leftGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         leftGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         var leftTop = new StackPanel { Spacing = 0 };
         var markInner = new StackPanel { Spacing = 4, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        markInner.Children.Add(new TextBlock
+        markInner.Children.Add(L10n.Skip(new TextBlock
         {
             Text = "阅",
             FontFamily = serif,
@@ -10403,7 +11509,7 @@ public sealed partial class SettingsWindow : Window
             Foreground = ThemeHelper.Brush(Color.FromArgb(255, 28, 29, 32)),
             HorizontalAlignment = HorizontalAlignment.Center,
             Margin = new Thickness(0, -2, 0, 0),
-        });
+        }));
         markInner.Children.Add(new Border
         {
             Width = 22,
@@ -10432,18 +11538,26 @@ public sealed partial class SettingsWindow : Window
             Text = "语阅",
             FontFamily = serif,
             FontSize = 28,
-            CharacterSpacing = 140,
+            CharacterSpacing = L10n.IsEnglish ? 25 : 140,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Foreground = ThemeHelper.Brush(p.T1),
             Margin = new Thickness(0, 16, 0, 4),
         });
         leftTop.Children.Add(new TextBlock
         {
-            Text = "Yuyue for Windows",
+            Text = L10n.IsEnglish ? "语阅 · for Windows" : "Yuyue for Windows",
             FontFamily = new FontFamily(YYFontFamily.LatinSerif.WindowsFamily()),
             FontStyle = Windows.UI.Text.FontStyle.Italic,
             FontSize = 13,
             Foreground = ThemeHelper.Brush(p.T3),
+        });
+        leftTop.Children.Add(new TextBlock
+        {
+            Text = $"v{UpdateAndFeedbackService.CurrentVersion} ({UpdateAndFeedbackService.CurrentBuild})",
+            FontFamily = mono,
+            FontSize = 11,
+            Foreground = ThemeHelper.Brush(p.T3),
+            Margin = new Thickness(0, 4, 0, 0),
         });
         leftTop.Children.Add(new Border
         {
@@ -10451,7 +11565,7 @@ public sealed partial class SettingsWindow : Window
             Height = 1.5,
             Background = ThemeHelper.Brush(p.Line),
             HorizontalAlignment = HorizontalAlignment.Left,
-            Margin = new Thickness(0, 18, 0, 16),
+            Margin = new Thickness(0, 16, 0, 14),
         });
         leftTop.Children.Add(new TextBlock
         {
@@ -10466,26 +11580,54 @@ public sealed partial class SettingsWindow : Window
 
         // 底部 PencilSignature（点击签名区或底部版权行一笔笔写出 CTT 铅笔签名，1:1 PhoneSignature.swift & MacUpdate.swift:214-239）
         var (sigView, triggerSigWrite) = YYChrome.MakePencilSignature(58, IsDark);
-        var sigWrap = new StackPanel { Spacing = 4, Margin = new Thickness(0, 20, 0, 4), Background = new SolidColorBrush(Colors.Transparent) };
+        var sigWrap = new StackPanel { Spacing = 5, Margin = new Thickness(0, 20, 0, 0), Background = new SolidColorBrush(Colors.Transparent) };
         sigWrap.PointerPressed += (_, _) => triggerSigWrite();
         sigWrap.Children.Add(sigView);
-        var leftFoot = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Background = new SolidColorBrush(Colors.Transparent) };
+        var leftFoot = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, Background = new SolidColorBrush(Colors.Transparent) };
         leftFoot.Children.Add(new TextBlock { Text = "by", FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center });
         var authorText = new TextBlock { Text = "nowtin", FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) };
         var authorBtn = new Button { Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0), Padding = new Thickness(2, 0, 2, 0), MinWidth = 0, MinHeight = 0, Content = authorText, UseSystemFocusVisuals = false };
+        AutomationProperties.SetName(authorBtn, "nowtin");
         authorBtn.PointerEntered += (_, _) => authorText.TextDecorations = Windows.UI.Text.TextDecorations.Underline;
         authorBtn.PointerExited += (_, _) => authorText.TextDecorations = Windows.UI.Text.TextDecorations.None;
-        authorBtn.Click += (_, _) => _ = Launcher.LaunchUriAsync(new Uri("https://github.com/nowtin"));
+        string authorUrl = preferCn ? "https://cnb.cool/inokoru" : "https://github.com/nowtin";
+        authorBtn.Click += (_, _) => _ = Launcher.LaunchUriAsync(new Uri(authorUrl));
         leftFoot.Children.Add(authorBtn);
-        leftFoot.Children.Add(new TextBlock { Text = "· GPL-3.0", FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center });
+        leftFoot.Children.Add(new Border
+        {
+            CornerRadius = new CornerRadius(5),
+            Padding = new Thickness(5, 1, 5, 1),
+            Background = ThemeHelper.Brush(p.Inset),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(0.5),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = new TextBlock { Text = "GPL-3.0", FontSize = 10, Foreground = ThemeHelper.Brush(p.T3) },
+        });
         leftFoot.PointerPressed += (_, e) => { triggerSigWrite(); e.Handled = true; };
         sigWrap.Children.Add(leftFoot);
         Grid.SetRow(sigWrap, 1);
         leftGrid.Children.Add(sigWrap);
-        bookplate.Children.Add(leftGrid);
 
-        // 右页：牌记与操作卡片
-        var rightStack = new StackPanel { Spacing = 12, Margin = new Thickness(0, 2, 0, 0) };
+        var leftBookplateCard = new Border
+        {
+            CornerRadius = new CornerRadius(14),
+            Background = ThemeHelper.Brush(p.Card),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(0.75),
+            Padding = new Thickness(18, 20, 18, 16),
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Child = leftGrid,
+        };
+        bookplate.Children.Add(leftBookplateCard);
+
+        // 右页：牌记与操作卡片（MaxWidth = 480 对齐 MacUpdate.swift rightFolio 468px）
+        var rightStack = new StackPanel
+        {
+            Spacing = 12,
+            Margin = new Thickness(0, 2, 0, 0),
+            MaxWidth = 480,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
         bool showActiveOfferCard = _library.Updates.LatestOffer is not null && !_library.Updates.IsOfferSuppressed;
 
         // Inline active update offer card (MacUpdate.swift:252-254, 418-496)
@@ -10542,10 +11684,11 @@ public sealed partial class SettingsWindow : Window
             offerActions.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             offerActions.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
+            string installLabel = !string.IsNullOrWhiteSpace(_library.Updates.LatestWinInstallerUrl) ? "下载并安装" : "前往下载安装";
             var installNowBtn = new Button
             {
                 Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"],
-                Content = "下载并安装",
+                Content = installLabel,
                 Height = 28,
                 MinHeight = 28,
             };
@@ -10554,11 +11697,12 @@ public sealed partial class SettingsWindow : Window
                 installNowBtn.IsEnabled = false;
                 try
                 {
-                    await _library.Updates.ShowUpdateCheckDialogAsync(RootGrid.XamlRoot);
-                    RenderDynamicPage("about");
+                    await _library.Updates.InstallOfferAsync(RootGrid.XamlRoot, activeOffer);
+                    if (_closed) return;
+                    if (_activePage == "about") RenderDynamicPage("about");
                     MountIcons();
                 }
-                finally { installNowBtn.IsEnabled = true; }
+                finally { if (!_closed) installNowBtn.IsEnabled = true; }
             };
             offerActions.Children.Add(installNowBtn);
 
@@ -10574,8 +11718,7 @@ public sealed partial class SettingsWindow : Window
                 _library.Prefs.UpdateRemindVersion = activeOffer.Version;
                 _library.Prefs.UpdateRemindUntilMs = DateTimeOffset.UtcNow.AddDays(3).ToUnixTimeMilliseconds();
                 _library.SavePrefs();
-                RenderDynamicPage("about");
-                MountIcons();
+                _library.Updates.NotifyStateChanged();
             };
             Grid.SetColumn(remindBtn, 1);
             offerActions.Children.Add(remindBtn);
@@ -10592,8 +11735,7 @@ public sealed partial class SettingsWindow : Window
             {
                 _library.Prefs.UpdateSkippedVersion = activeOffer.Version;
                 _library.SavePrefs();
-                RenderDynamicPage("about");
-                MountIcons();
+                _library.Updates.NotifyStateChanged();
             };
             Grid.SetColumn(skipVerBtn, 3);
             offerActions.Children.Add(skipVerBtn);
@@ -10611,63 +11753,142 @@ public sealed partial class SettingsWindow : Window
 
         string FormatLastChecked()
         {
-            if (_library.Prefs.UpdateLastCheckedMs is not long ms || ms <= 0) return "尚未检查更新";
+            if (_library.Prefs.UpdateLastCheckedMs is not long ms || ms <= 0) return L10n.T("尚未检查更新");
+            long ageMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - ms;
+            if (ageMs >= 0 && ageMs < 90_000) return L10n.T("刚刚检查过");
             var dt = DateTimeOffset.FromUnixTimeMilliseconds(ms).LocalDateTime;
             string when = dt.Date == DateTime.Today ? $"今天 {dt:HH:mm}" : $"{dt:M 月 d 日 HH:mm}";
-            return $"{when} 检查过";
+            return L10n.T($"{when} 检查过");
         }
 
         bool checkedCurrentBuild = _library.Prefs.UpdateCheckedBuild == UpdateAndFeedbackService.CurrentBuild &&
             _library.Prefs.UpdateLastCheckedMs is > 0;
-        string initialStatus = _library.Updates.LatestOffer is { } off
-            ? $"发现新版本 v{off.Version}"
-            : (checkedCurrentBuild ? $"已是最新 · {FormatLastChecked()}" : "尚未检查更新");
+
+        string initialStatus;
+        Color initialStatusColor;
+        if (_aboutCheckingInline)
+        {
+            initialStatus = L10n.T("正在检查更新…");
+            initialStatusColor = p.T2;
+        }
+        else if (!string.IsNullOrWhiteSpace(_aboutLastInlineCheckError))
+        {
+            initialStatus = _aboutLastInlineCheckError!;
+            initialStatusColor = p.Danger;
+        }
+        else if (_library.Updates.LatestOffer is { } off)
+        {
+            initialStatus = L10n.T($"发现新版本 v{off.Version}");
+            initialStatusColor = tint.Accent;
+        }
+        else if (checkedCurrentBuild || _aboutJustCheckedUpToDate)
+        {
+            initialStatus = $"{L10n.T("已是最新")} · {FormatLastChecked()}";
+            initialStatusColor = p.Ok;
+        }
+        else
+        {
+            initialStatus = L10n.T("尚未检查更新");
+            initialStatusColor = p.T3;
+        }
 
         var statusLine = new TextBlock
         {
             Text = initialStatus,
             FontSize = 12,
-            Foreground = ThemeHelper.Brush(_library.Updates.LatestOffer is not null ? tint.Accent : (checkedCurrentBuild ? p.Ok : p.T3)),
+            Foreground = ThemeHelper.Brush(initialStatusColor),
+            TextWrapping = TextWrapping.Wrap,
         };
-        var checkBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "检查更新" };
+        string checkBtnLabel = _aboutCheckingInline
+            ? "正在检查…"
+            : (!string.IsNullOrWhiteSpace(_aboutLastInlineCheckError) ? "重试" : "检查更新");
+        var checkBtn = new Button
+        {
+            Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+            Content = checkBtnLabel,
+            IsEnabled = !_aboutCheckingInline,
+        };
         checkBtn.Click += async (_, _) =>
         {
+            if (_aboutCheckingInline) return;
+            _aboutCheckingInline = true;
+            _aboutLastInlineCheckError = null;
             checkBtn.IsEnabled = false;
+            checkBtn.Content = L10n.T("正在检查…");
             statusLine.Text = L10n.T("正在检查更新…");
+            statusLine.Foreground = ThemeHelper.Brush(p.T2);
             try
             {
-                await _library.Updates.ShowUpdateCheckDialogAsync(RootGrid.XamlRoot);
-                RenderDynamicPage("about");
-                MountIcons();
+                var (hasUpdate, info, _) = await _library.Updates.CheckForUpdatesAsync(manual: true);
+                if (_closed) return;
+                if (!hasUpdate && info is null)
+                {
+                    _aboutLastInlineCheckError = L10n.T("无法检查更新，请检查网络连接后重试。");
+                    _aboutJustCheckedUpToDate = false;
+                }
+                else if (!hasUpdate)
+                {
+                    _aboutLastInlineCheckError = null;
+                    _aboutJustCheckedUpToDate = true;
+                }
+                else
+                {
+                    _aboutLastInlineCheckError = null;
+                    _aboutJustCheckedUpToDate = false;
+                    // Manual check explicitly unsuppresses skipped/deferred banner so the user sees the offer
+                    _library.Prefs.UpdateSkippedVersion = "";
+                    _library.Prefs.UpdateRemindVersion = "";
+                    _library.Prefs.UpdateRemindUntilMs = 0;
+                    _library.SavePrefs();
+                }
             }
-            finally { checkBtn.IsEnabled = true; }
+            catch
+            {
+                if (_closed) return;
+                _aboutLastInlineCheckError = L10n.T("无法检查更新，请检查网络连接后重试。");
+                _aboutJustCheckedUpToDate = false;
+            }
+            finally
+            {
+                _aboutCheckingInline = false;
+                if (!_closed)
+                {
+                    MountIcons();
+                    if (_activePage == "about") RenderDynamicPage("about");
+                }
+            }
         };
 
         Release[] releases = _library.Updates.LoadBundledChangelog();
         int? currentEdition = UpdateAndFeedbackService.ResolveEdition(UpdateAndFeedbackService.CurrentVersion, releases);
-        var verRow = new Grid { Padding = new Thickness(16, 14, 16, 14) };
+        var verRow = new Grid { Padding = new Thickness(16, 14, 16, 14), ColumnSpacing = 10 };
+        verRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        verRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
         var verLeft = new StackPanel { Spacing = 3 };
         var verHead = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         if (currentEdition is int ed)
         {
             verHead.Children.Add(new TextBlock { Text = $"第 {ed} 版", FontFamily = serif, FontSize = 17, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
-            verHead.Children.Add(new TextBlock { Text = $"v{UpdateAndFeedbackService.CurrentVersion} ({UpdateAndFeedbackService.CurrentBuild})", FontFamily = new FontFamily(YYFontFamily.Mono.WindowsFamily()), FontSize = 12, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 2) });
+            verHead.Children.Add(new TextBlock { Text = $"v{UpdateAndFeedbackService.CurrentVersion} ({UpdateAndFeedbackService.CurrentBuild})", FontFamily = mono, FontSize = 12, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 2) });
         }
         else
         {
             verHead.Children.Add(new TextBlock { Text = $"v{UpdateAndFeedbackService.CurrentVersion} ({UpdateAndFeedbackService.CurrentBuild})", FontFamily = serif, FontSize = 17, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
         }
         verLeft.Children.Add(verHead);
-        verLeft.Children.Add(statusLine);
+        if (!showActiveOfferCard)
+            verLeft.Children.Add(statusLine);
         verRow.Children.Add(verLeft);
         if (!showActiveOfferCard)
         {
             checkBtn.HorizontalAlignment = HorizontalAlignment.Right;
             checkBtn.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(checkBtn, 1);
             verRow.Children.Add(checkBtn);
         }
 
-        // Skipped / Remind-Later quiet update banner with 1-click reopen
+        // Skipped / Remind-Later quiet update banner with 1-click inline reopen (no modal dialog)
         if (_library.Updates.LatestOffer is { } suppressed && _library.Updates.IsOfferSuppressed)
         {
             bool skipped = suppressed.Version == _library.Prefs.UpdateSkippedVersion;
@@ -10690,15 +11911,13 @@ public sealed partial class SettingsWindow : Window
                 MinHeight = 25,
                 FontSize = 11,
             };
-            reopenBtn.Click += async (_, _) =>
+            reopenBtn.Click += (_, _) =>
             {
                 _library.Prefs.UpdateSkippedVersion = "";
                 _library.Prefs.UpdateRemindVersion = "";
                 _library.Prefs.UpdateRemindUntilMs = 0;
                 _library.SavePrefs();
-                await _library.Updates.ShowUpdateCheckDialogAsync(RootGrid.XamlRoot);
-                RenderDynamicPage("about");
-                MountIcons();
+                _library.Updates.NotifyStateChanged();
             };
             Grid.SetColumn(reopenBtn, 1);
             bannerGrid.Children.Add(reopenBtn);
@@ -10731,6 +11950,7 @@ public sealed partial class SettingsWindow : Window
                 UseSystemFocusVisuals = false,
                 Content = g,
             };
+            AutomationProperties.SetName(b, L10n.T(title));
             b.Click += (_, _) => onClick();
             return b;
         }
@@ -10742,7 +11962,7 @@ public sealed partial class SettingsWindow : Window
         var chMenu = new MenuFlyout();
         foreach (var (ck, cl) in new[] { ("stable", "正式版"), ("beta", "测试版") })
         {
-            var mi = new MenuFlyoutItem { Text = _library.Prefs.UpdateChannel == ck ? $"✓ {cl}" : cl };
+            var mi = new MenuFlyoutItem { Text = L10n.T(_library.Prefs.UpdateChannel == ck ? $"✓ {cl}" : cl) };
             string key = ck;
             string lbl = cl;
             mi.Click += (_, _) =>
@@ -10793,16 +12013,21 @@ public sealed partial class SettingsWindow : Window
             })),
             MakeRow("更新渠道", "测试版先拿到新功能；换回正式版后随下个正式版恢复", chBtn)));
 
+        string repoUrl = _library.Updates.GetPreferredRepoUrl();
+        string issuesUrl = preferCn ? $"{repoUrl}/-/issues" : $"{repoUrl}/issues";
+        string issuesBtnLabel = preferCn ? "CNB ↗" : "GitHub ↗";
+        string srcDisplay = preferCn ? "cnb.cool/inokoru/yuyue ↗" : "github.com/inokoru/yuyue ↗";
+
         var feedbackRight = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var ghIssuesBtn = new Button { Style = (Style)Application.Current.Resources["YYIconButtonStyle"], Content = "GitHub ↗", FontSize = 12, Foreground = ThemeHelper.Brush(p.T2) };
-        ghIssuesBtn.Click += (_, _) => _ = Launcher.LaunchUriAsync(new Uri("https://github.com/inokoru/yuyue/issues"));
+        var ghIssuesBtn = new Button { Style = (Style)Application.Current.Resources["YYIconButtonStyle"], Content = issuesBtnLabel, FontSize = 12, Foreground = ThemeHelper.Brush(p.T2) };
+        ghIssuesBtn.Click += (_, _) => _ = Launcher.LaunchUriAsync(new Uri(issuesUrl));
         var writeFbBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "写反馈…", Height = 26, MinHeight = 26 };
         writeFbBtn.Click += async (_, _) => await _library.Updates.ShowFeedbackComposerAsync(this, RootGrid.XamlRoot);
         feedbackRight.Children.Add(ghIssuesBtn);
         feedbackRight.Children.Add(writeFbBtn);
 
-        var srcBtn = new Button { Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"], Content = "github.com/inokoru/yuyue ↗", FontSize = 12.5, Foreground = ThemeHelper.Brush(p.T1) };
-        srcBtn.Click += (_, _) => _ = Launcher.LaunchUriAsync(new Uri("https://github.com/inokoru/yuyue"));
+        var srcBtn = new Button { Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"], Content = srcDisplay, FontSize = 12.5, Foreground = ThemeHelper.Brush(p.T1) };
+        srcBtn.Click += (_, _) => _ = Launcher.LaunchUriAsync(new Uri(repoUrl));
 
         rightStack.Children.Add(MakeCard(
             MakeRow("问题与建议", "可附截图或文件，无需注册账号", feedbackRight),

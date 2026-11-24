@@ -295,6 +295,7 @@
                                     <Border Grid.Column="1" Width="8" Height="11" CornerRadius="2" Background="{ThemeResource YYText3Brush}" Opacity="0.62" VerticalAlignment="Center" />
                                     <Slider
                                         x:Name="CoverSizeSlider"
+                                        AutomationProperties.Name="书架封面大小"
                                         Grid.Column="2"
                                         Minimum="80"
                                         Maximum="130"
@@ -311,7 +312,7 @@
                                         <TextBlock Text="封面下显示进度" FontSize="12.5" FontWeight="Medium" Foreground="{ThemeResource YYText1Brush}" />
                                         <TextBlock Text="关闭后仅显示书名" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" />
                                     </StackPanel>
-                                    <ToggleSwitch x:Name="ShowProgressToggle" HorizontalAlignment="Right" Toggled="ShowProgressToggle_Toggled" />
+                                    <ToggleSwitch x:Name="ShowProgressToggle" AutomationProperties.Name="封面下显示进度" HorizontalAlignment="Right" Toggled="ShowProgressToggle_Toggled" />
                                 </Grid>
                             </StackPanel>
                         </Border>
@@ -331,6 +332,7 @@
                 <Grid>
                     <Button
                         x:Name="CornerHistoryBtn"
+                        AutomationProperties.Name="最近修改的设置"
                         Style="{StaticResource YYIconButtonStyle}"
                         Width="28"
                         Height="28"
@@ -373,6 +375,7 @@
                     <Grid HorizontalAlignment="Right">
                         <Button
                             x:Name="InspectorHistoryBtn"
+                            AutomationProperties.Name="最近修改的设置"
                             Style="{StaticResource YYIconButtonStyle}"
                             Width="26"
                             Height="26"

@@ -100,6 +100,7 @@ public sealed class AudioPlayer : IDisposable
     // Sleep timer with 20s linear volume fade & wall-clock deadline (#28)
     private int _sleepMode; // 0=off, 1=timed, 2=endOfChapter, 3=afterSentence
     private double _sleepRemainingSec;
+    private int _lastSleepDisplayedMin = -1;
     private DateTime? _sleepDeadlineUtc;
     private DateTime _sleepLastTickUtc = DateTime.UtcNow;
     private bool _isSleepFading;
@@ -170,7 +171,19 @@ public sealed class AudioPlayer : IDisposable
     public string? PairedAudioBookId => _pairedAudioBookId;
     public double CurrentRecordingSeconds => _pairedGlobalPosSec;
 
-    public static IReadOnlyList<VoiceInformation> AvailableVoices => SpeechSynthesizer.AllVoices.ToArray();
+    private static readonly Lazy<IReadOnlyList<VoiceInformation>> CachedAvailableVoices = new(() =>
+    {
+        try { return SpeechSynthesizer.AllVoices.ToArray(); }
+        catch { return []; }
+    });
+
+    public static IReadOnlyList<VoiceInformation> AvailableVoices => CachedAvailableVoices.Value;
+
+    public static void PrewarmVoicesAsync()
+    {
+        if (!CachedAvailableVoices.IsValueCreated)
+            _ = Task.Run(() => _ = CachedAvailableVoices.Value);
+    }
 
     public static IReadOnlyList<VoiceInformation> GetSystemVoicesForLanguage(string? language)
     {
@@ -457,6 +470,7 @@ public sealed class AudioPlayer : IDisposable
         double secs = Math.Max(1, minutes) * 60.0;
         _sleepMode = 1;
         _sleepRemainingSec = secs;
+        _lastSleepDisplayedMin = (int)Math.Ceiling(secs / 60.0);
         _sleepDeadlineUtc = DateTime.UtcNow.AddSeconds(secs);
         _sleepLastTickUtc = DateTime.UtcNow;
         _isSleepFading = false;
@@ -472,6 +486,7 @@ public sealed class AudioPlayer : IDisposable
     {
         _sleepMode = 2;
         _sleepRemainingSec = 0;
+        _lastSleepDisplayedMin = -1;
         _sleepDeadlineUtc = null;
         _isSleepFading = false;
         _stopAfterSentence = false;
@@ -485,6 +500,7 @@ public sealed class AudioPlayer : IDisposable
     {
         _sleepMode = 3;
         _sleepRemainingSec = 0;
+        _lastSleepDisplayedMin = -1;
         _sleepDeadlineUtc = null;
         _isSleepFading = false;
         _stopAfterSentence = true;
@@ -510,6 +526,7 @@ public sealed class AudioPlayer : IDisposable
         double nextSec = baseRem + addMinutes * 60.0;
         _sleepMode = 1;
         _sleepRemainingSec = nextSec;
+        _lastSleepDisplayedMin = (int)Math.Ceiling(nextSec / 60.0);
         _sleepDeadlineUtc = DateTime.UtcNow.AddSeconds(nextSec);
         _sleepLastTickUtc = DateTime.UtcNow;
         _isSleepFading = false;
@@ -525,6 +542,7 @@ public sealed class AudioPlayer : IDisposable
     {
         _sleepMode = 0;
         _sleepRemainingSec = 0;
+        _lastSleepDisplayedMin = -1;
         _sleepDeadlineUtc = null;
         _isSleepFading = false;
         _stopAfterSentence = false;
@@ -540,6 +558,7 @@ public sealed class AudioPlayer : IDisposable
         {
             _sleepMode = 0;
             _sleepRemainingSec = 0;
+            _lastSleepDisplayedMin = -1;
             _sleepDeadlineUtc = null;
             _isSleepFading = false;
             _stopAfterSentence = false;
@@ -803,11 +822,18 @@ public sealed class AudioPlayer : IDisposable
                     _sleepMode = 0;
                     _sleepDeadlineUtc = null;
                     _sleepRemainingSec = 0;
+                    _lastSleepDisplayedMin = -1;
                     _stopAfterSentence = false;
                     _sleepTriggeredStop = false;
                     RestoreVolume();
                     SleepStateChanged?.Invoke();
                     return;
+                }
+                int pausedMin = (int)Math.Ceiling(_sleepRemainingSec / 60.0);
+                if (pausedMin != _lastSleepDisplayedMin)
+                {
+                    _lastSleepDisplayedMin = pausedMin;
+                    SleepStateChanged?.Invoke();
                 }
             }
             else if (_sleepRemainingSec <= 0)
@@ -815,6 +841,7 @@ public sealed class AudioPlayer : IDisposable
                 _sleepMode = 0;
                 _sleepDeadlineUtc = null;
                 _sleepRemainingSec = 0;
+                _lastSleepDisplayedMin = -1;
                 _isSleepFading = false;
                 if (IsUsingPairedRecording)
                 {
@@ -850,12 +877,21 @@ public sealed class AudioPlayer : IDisposable
                 }
                 return;
             }
-            else if (_sleepRemainingSec <= SleepFadeSeconds)
+            else
             {
-                _isSleepFading = true;
-                double frac = Math.Clamp(_sleepRemainingSec / SleepFadeSeconds, 0.05, 1.0);
-                double baseVol = IsUsingPairedRecording ? _pairedBaseVolume : 1.0;
-                try { _player.Volume = baseVol * frac; } catch { }
+                int curMin = (int)Math.Ceiling(_sleepRemainingSec / 60.0);
+                if (curMin != _lastSleepDisplayedMin)
+                {
+                    _lastSleepDisplayedMin = curMin;
+                    SleepStateChanged?.Invoke();
+                }
+                if (_sleepRemainingSec <= SleepFadeSeconds)
+                {
+                    _isSleepFading = true;
+                    double frac = Math.Clamp(_sleepRemainingSec / SleepFadeSeconds, 0.05, 1.0);
+                    double baseVol = IsUsingPairedRecording ? _pairedBaseVolume : 1.0;
+                    try { _player.Volume = baseVol * frac; } catch { }
+                }
             }
         }
 
@@ -1012,6 +1048,7 @@ public sealed class AudioPlayer : IDisposable
         StopPairedFillTts();
         _pairedSpeakingUnread = true;
         var tts = new AudioPlayer(_library);
+        try { App.CurrentApp?.BindAudioClaimOwner(tts, this); } catch { }
         _pairedFillTtsPlayer = tts;
         try
         {
@@ -1160,6 +1197,21 @@ public sealed class AudioPlayer : IDisposable
         }
         if (_selectedKokoroId is null && _selectedCardId is null && _selectedCloudId is null)
             _voiceDisplayName = chosen?.DisplayName ?? "系统语音";
+
+        if (_playing && !IsUsingPairedRecording)
+        {
+            _ = SpeakCurrentAsync();
+        }
+        else if (!_playing && !IsUsingPairedRecording && _sentences.Count > 0)
+        {
+            _currentRawDurationMs = 0;
+            try
+            {
+                _player.Pause();
+                _player.Source = null;
+            }
+            catch { }
+        }
     }
 
     public void FallbackToSystemVoice()

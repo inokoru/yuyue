@@ -271,10 +271,14 @@ public static class AudiobookImporter
                 : Path.GetFileNameWithoutExtension(ordered[0]);
         }
 
-        AudioMark[] marks = BuildCombinedChapterMarks(library, audioFiles);
+        var (marks, matchedEbook) = await Task.Run(() =>
+        {
+            var m = BuildCombinedChapterMarks(library, audioFiles);
+            var eb = FindMatchingShelfEbook(library, title);
+            return (m, eb);
+        });
 
         string[] authors = string.IsNullOrWhiteSpace(author) ? [] : [author];
-        var matchedEbook = FindMatchingShelfEbook(library, title);
 
         return new PendingAudiobookImport(audioFiles, names, title, authors, marks, cover, matchedEbook);
     }
@@ -439,6 +443,7 @@ public static class AudiobookImporter
             Padding = new Thickness(0, 1, 0, 1),
             MinHeight = 22,
         };
+        YYChrome.StripTextBoxChrome(titleBox);
         var authorBox = new TextBox
         {
             Text = string.Join("、", pending.Authors),
@@ -450,6 +455,7 @@ public static class AudiobookImporter
             Padding = new Thickness(0, 1, 0, 1),
             MinHeight = 20,
         };
+        YYChrome.StripTextBoxChrome(authorBox);
         double totalSec = pending.Files.Sum(f => f.Seconds);
         var lenTb = new TextBlock
         {

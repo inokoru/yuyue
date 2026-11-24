@@ -20,7 +20,7 @@
                 <!-- 3 槽预加载 WebView2 容器（prev / current / next，TECH.md §3 & ReaderPager.swift） -->
                 <Grid x:Name="WebViewSlotHost" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
                 <!-- 启动瞬时上次书页截图缓存（TECH.md §3：首帧 ready 后无缝退场） -->
-                <Image x:Name="LaunchSnapshotImage" Visibility="Collapsed" Stretch="UniformToFill" IsHitTestVisible="False" />
+                <Image x:Name="LaunchSnapshotImage" Visibility="Collapsed" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False" />
 
                 <!-- 上下滚动边界切章提示胶囊 (0c733b0: active paper colors, Margin="0,68,0,92", 松手进入 armed copy) -->
                 <Border
@@ -48,7 +48,7 @@
                 <Grid x:Name="ListenOnlyCover" Visibility="Collapsed">
                     <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="360">
                         <ContentPresenter x:Name="ListenOnlyIconHost" HorizontalAlignment="Center" Margin="0,0,0,4" />
-                        <TextBlock x:Name="ListenOnlyTitleText" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ListenOnlyTitleText" FontFamily="Georgia, SimSun, Songti SC" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
                         <TextBlock x:Name="ListenOnlySubText" Text="纯听模式 · 已隐藏正文" FontSize="12" HorizontalAlignment="Center" Opacity="0.72" />
                         <Button
                             Style="{StaticResource YYPillButtonStyle}"
@@ -58,6 +58,17 @@
                             Click="ExitListenOnly_Click" />
                     </StackPanel>
                 </Grid>
+
+                <!-- 沉浸模式底边悬停呼出听书胶囊/返回条感应区（仅全屏时启用命中测试，且置于浮卡与底部浮层下层以免拦截按钮点击） -->
+                <Border
+                    x:Name="ImmersiveBottomPeekZone"
+                    Height="42"
+                    VerticalAlignment="Bottom"
+                    Background="Transparent"
+                    IsHitTestVisible="False"
+                    PointerEntered="ImmersiveBottomPeek_Entered"
+                    PointerMoved="ImmersiveBottomPeek_Entered"
+                    PointerExited="ImmersiveBottomPeek_Exited" />
 
                 <!-- 选中浮卡菱形指针 (ReaderCards.swift diamond pointer) -->
                 <Border
@@ -108,7 +119,7 @@
                         <!-- Row 1: 4 颜色圆点 (带 YYInsetBrush 1..4 键帽胶囊) + 实线/点线下划线 + 删除 -->
                         <Grid>
                             <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                <Button Tag="yellow" Padding="2" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="黄色划线 (1)" Click="MarkColor_Click">
+                                <Button x:Name="SwatchYellowBtn" Tag="yellow" Padding="2" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="黄色划线 (1)" Click="MarkColor_Click">
                                     <StackPanel Spacing="3" HorizontalAlignment="Center">
                                         <Border x:Name="SwatchYellowRing" Width="22" Height="22" CornerRadius="11" Padding="1.5" BorderThickness="1.5" BorderBrush="Transparent">
                                             <Border CornerRadius="9" Background="#FBE7A0" BorderBrush="#22000000" BorderThickness="0.5" />
@@ -118,7 +129,7 @@
                                         </Border>
                                     </StackPanel>
                                 </Button>
-                                <Button Tag="blue" Padding="2" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="蓝色划线 (2)" Click="MarkColor_Click">
+                                <Button x:Name="SwatchBlueBtn" Tag="blue" Padding="2" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="蓝色划线 (2)" Click="MarkColor_Click">
                                     <StackPanel Spacing="3" HorizontalAlignment="Center">
                                         <Border x:Name="SwatchBlueRing" Width="22" Height="22" CornerRadius="11" Padding="1.5" BorderThickness="1.5" BorderBrush="Transparent">
                                             <Border CornerRadius="9" Background="#CFE6F4" BorderBrush="#22000000" BorderThickness="0.5" />
@@ -128,7 +139,7 @@
                                         </Border>
                                     </StackPanel>
                                 </Button>
-                                <Button Tag="pink" Padding="2" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="粉色划线 (3)" Click="MarkColor_Click">
+                                <Button x:Name="SwatchPinkBtn" Tag="pink" Padding="2" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="粉色划线 (3)" Click="MarkColor_Click">
                                     <StackPanel Spacing="3" HorizontalAlignment="Center">
                                         <Border x:Name="SwatchPinkRing" Width="22" Height="22" CornerRadius="11" Padding="1.5" BorderThickness="1.5" BorderBrush="Transparent">
                                             <Border CornerRadius="9" Background="#F6C7C0" BorderBrush="#22000000" BorderThickness="0.5" />
@@ -138,7 +149,7 @@
                                         </Border>
                                     </StackPanel>
                                 </Button>
-                                <Button Tag="wave" Padding="2" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="波浪线 (4)" Click="MarkColor_Click">
+                                <Button x:Name="SwatchWaveBtn" Tag="wave" Padding="2" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="波浪线 (4)" Click="MarkColor_Click">
                                     <StackPanel Spacing="3" HorizontalAlignment="Center">
                                         <Border x:Name="SwatchWaveRing" Width="22" Height="22" CornerRadius="11" Padding="1.5" BorderThickness="1.5" BorderBrush="Transparent">
                                             <Border x:Name="SwatchWaveFill" CornerRadius="9" Background="{ThemeResource YYInsetBrush}" BorderThickness="0">
@@ -281,16 +292,6 @@
                     </StackPanel>
                 </Border>
 
-                <!-- 沉浸模式底边悬停呼出听书胶囊/返回条感应区（置于底部浮层下层以免拦截按钮点击） -->
-                <Border
-                    x:Name="ImmersiveBottomPeekZone"
-                    Height="42"
-                    VerticalAlignment="Bottom"
-                    Background="Transparent"
-                    PointerEntered="ImmersiveBottomPeek_Entered"
-                    PointerMoved="ImmersiveBottomPeek_Entered"
-                    PointerExited="ImmersiveBottomPeek_Exited" />
-
                 <!-- 顶部紧凑状态提示横幅（文字版 TextVersionBanner / 书籍重整 MarksStale / 仅按章对齐有声书） -->
                 <StackPanel
                     x:Name="TopInfoBannersStack"
@@ -421,7 +422,7 @@
                                     <TextBlock x:Name="FootnoteTitleText" Text="注释" FontSize="12.5" FontWeight="SemiBold" Foreground="{ThemeResource YYAccentBrush}" VerticalAlignment="Center" />
                                     <TextBlock x:Name="FootnoteBeforeText" Text="" FontSize="11.5" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" MaxWidth="250" MaxLines="1" TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
-                                <Button HorizontalAlignment="Right" Width="22" Height="22" Padding="0" CornerRadius="11" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" Click="CloseFootnote_Click">
+                                <Button x:Name="FootnoteCloseBtn" HorizontalAlignment="Right" Width="22" Height="22" Padding="0" CornerRadius="11" Background="Transparent" BorderThickness="0" UseSystemFocusVisuals="False" Click="CloseFootnote_Click">
                                     <TextBlock Text="×" FontSize="13" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Button>
                             </Grid>
@@ -662,7 +663,7 @@
                                     <TextBlock Text="书伴" FontSize="14" FontWeight="Bold" Foreground="{ThemeResource YYText1Brush}" />
                                     <TextBlock x:Name="CompanionBookTitleText" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Bottom" MaxLines="1" TextTrimming="CharacterEllipsis" Margin="0,0,0,1" />
                                 </StackPanel>
-                                <Button Grid.Column="2" Width="26" Height="26" Padding="0" CornerRadius="13" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" UseSystemFocusVisuals="False">
+                                <Button x:Name="CompanionMoreBtn" Grid.Column="2" Width="26" Height="26" Padding="0" CornerRadius="13" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" UseSystemFocusVisuals="False">
                                     <ContentPresenter x:Name="CompanionMoreIcon" />
                                     <Button.Flyout>
                                         <MenuFlyout Placement="BottomEdgeAlignedRight">
@@ -707,7 +708,7 @@
                                     </Grid.ColumnDefinitions>
                                     <Border Background="{ThemeResource YYAccentBrush}" CornerRadius="1" />
                                     <TextBlock x:Name="CompanionQuoteText" Grid.Column="1" FontFamily="SimSun" FontSize="11.5" Foreground="{ThemeResource YYText2Brush}" MaxLines="2" TextTrimming="CharacterEllipsis" />
-                                    <Button Grid.Column="2" Background="Transparent" BorderThickness="0" Padding="2" MinWidth="18" MinHeight="18" UseSystemFocusVisuals="False" Click="ClearCompanionQuote_Click">
+                                    <Button x:Name="ClearCompanionQuoteBtn" Grid.Column="2" Background="Transparent" BorderThickness="0" Padding="2" MinWidth="18" MinHeight="18" UseSystemFocusVisuals="False" Click="ClearCompanionQuote_Click">
                                         <TextBlock Text="×" FontSize="11" />
                                     </Button>
                                 </Grid>
@@ -781,42 +782,50 @@
                 <TextBlock x:Name="SubtitleText" FontSize="11" HorizontalAlignment="Center" MaxWidth="420" TextTrimming="CharacterEllipsis" />
             </StackPanel>
 
-            <!-- 中间空白拖动区（严格限制在 Column 1） -->
+            <!-- 中间空白拖动区（严格限制在 Column 1；搜索展开时切换为不覆盖搜索胶囊的左侧拖动区） -->
             <Border x:Name="TitleDragRegion" Grid.Column="1" Background="Transparent" Margin="8,0" />
 
-            <!-- 中：内联书内搜索胶囊（居中替换标题栏，MacReaderView.swift:318-322） -->
-            <Border
-                x:Name="InlineSearchCapsule"
-                Grid.Column="1"
-                Visibility="Collapsed"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                Height="32"
-                CornerRadius="16"
-                BorderThickness="1"
-                Padding="11,0,5,0">
-                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <ContentPresenter x:Name="InlineSearchIcon" VerticalAlignment="Center" />
-                    <TextBox
-                        x:Name="BookSearchBox"
-                        Width="168"
-                        BorderThickness="0"
-                        Background="Transparent"
-                        PlaceholderText="书内搜索"
-                        FontSize="12.5"
-                        Padding="2,3"
-                        VerticalAlignment="Center"
-                        TextChanged="BookSearchBox_TextChanged"
-                        KeyDown="BookSearchBox_KeyDown" />
-                    <TextBlock x:Name="SearchHitCountText" FontSize="11.5" FontWeight="SemiBold" Opacity="0.78" VerticalAlignment="Center" />
-                    <Border Width="1" Height="14" Opacity="0.24" Background="Gray" Margin="2,0" />
-                    <Button x:Name="SearchPrevBtn" Style="{StaticResource YYIconButtonStyle}" MinWidth="20" MinHeight="22" Padding="2" ToolTipService.ToolTip="上一处 (Shift+Ctrl+G)" Click="PrevHit_Click" />
-                    <Button x:Name="SearchNextBtn" Style="{StaticResource YYIconButtonStyle}" MinWidth="20" MinHeight="22" Padding="2" ToolTipService.ToolTip="下一处 (Ctrl+G)" Click="NextHit_Click" />
-                    <Button x:Name="SearchCloseCircleBtn" Width="22" Height="22" Padding="0" CornerRadius="11" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="收起 (Esc)" Click="CloseSearch_Click">
-                        <ContentPresenter x:Name="SearchCloseXIcon" />
-                    </Button>
-                </StackPanel>
-            </Border>
+            <!-- 中：内联书内搜索胶囊（居中替换标题栏，左侧保留独立非重叠拖动区，MacReaderView.swift:318-322） -->
+            <Grid x:Name="InlineSearchHostGrid" Grid.Column="1" Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border x:Name="SearchSideDragRegion" Grid.Column="0" Background="Transparent" Margin="8,0" />
+                <Border
+                    x:Name="InlineSearchCapsule"
+                    Grid.Column="1"
+                    Visibility="Collapsed"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Height="32"
+                    CornerRadius="16"
+                    BorderThickness="1"
+                    Padding="11,0,5,0">
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <ContentPresenter x:Name="InlineSearchIcon" VerticalAlignment="Center" />
+                        <TextBox
+                            x:Name="BookSearchBox"
+                            Width="168"
+                            BorderThickness="0"
+                            Background="Transparent"
+                            PlaceholderText="书内搜索"
+                            FontSize="12.5"
+                            Padding="2,3"
+                            VerticalAlignment="Center"
+                            TextChanged="BookSearchBox_TextChanged"
+                            KeyDown="BookSearchBox_KeyDown" />
+                        <TextBlock x:Name="SearchHitCountText" FontSize="11.5" FontWeight="SemiBold" Opacity="0.78" VerticalAlignment="Center" />
+                        <Border Width="1" Height="14" Opacity="0.24" Background="Gray" Margin="2,0" />
+                        <Button x:Name="SearchPrevBtn" Style="{StaticResource YYIconButtonStyle}" MinWidth="20" MinHeight="22" Padding="2" ToolTipService.ToolTip="上一处 (Shift+Ctrl+G)" Click="PrevHit_Click" />
+                        <Button x:Name="SearchNextBtn" Style="{StaticResource YYIconButtonStyle}" MinWidth="20" MinHeight="22" Padding="2" ToolTipService.ToolTip="下一处 (Ctrl+G)" Click="NextHit_Click" />
+                        <Button x:Name="SearchCloseCircleBtn" Width="22" Height="22" Padding="0" CornerRadius="11" BorderThickness="0" UseSystemFocusVisuals="False" ToolTipService.ToolTip="收起 (Esc)" Click="CloseSearch_Click">
+                            <ContentPresenter x:Name="SearchCloseXIcon" />
+                        </Button>
+                    </StackPanel>
+                </Border>
+            </Grid>
 
             <!-- 左：‹ 书架 / ‹ 播客 胶囊 -->
             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Left" VerticalAlignment="Center">
@@ -1047,15 +1056,15 @@
                                             </StackPanel>
                                         </StackPanel>
 
-                                        <!-- 内联「调纸」子页 (1:1 CustomPapers.swift:470-620：< 排版 | 调纸 | 完成) -->
+                                        <!-- 内联「调纸」子页 (1:1 CustomPapers.swift:470-620：< 排版 / 全部纸张 | 调纸 | 完成) -->
                                         <StackPanel x:Name="TypesetPaperEditorPanel" Visibility="Collapsed" Spacing="10" Padding="2">
                                             <Grid Height="28">
                                                 <Button HorizontalAlignment="Left" Background="Transparent" BorderThickness="0" Padding="0,2" UseSystemFocusVisuals="False" Click="TypesetPaperEditorCancel_Click">
-                                                    <TextBlock Text="‹ 排版" FontSize="12.5" FontWeight="Medium" Foreground="{ThemeResource YYText2Brush}" />
+                                                    <TextBlock x:Name="TypesetEditorBackText" Text="‹ 排版" FontSize="12.5" FontWeight="Medium" Foreground="{ThemeResource YYText2Brush}" />
                                                 </Button>
-                                                <TextBlock x:Name="TypesetEditorTitleText" Text="" FontSize="13" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                                <Button x:Name="TypesetPaperEditorSaveBtn" HorizontalAlignment="Right" Background="Transparent" BorderThickness="0" Padding="4,2" UseSystemFocusVisuals="False" Click="TypesetPaperEditorSave_Click">
-                                                    <TextBlock x:Name="TypesetEditorDoneText" Text="完成" FontSize="12.5" FontWeight="SemiBold" Foreground="{ThemeResource YYAccentBrush}" />
+                                                <TextBlock x:Name="TypesetEditorTitleText" Text="" FontSize="13" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="148" MaxLines="1" TextTrimming="CharacterEllipsis" />
+                                                <Button x:Name="TypesetPaperEditorSaveBtn" HorizontalAlignment="Right" Height="26" MinHeight="26" Padding="14,0" CornerRadius="13" Background="{ThemeResource YYInsetBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.5" UseSystemFocusVisuals="False" Click="TypesetPaperEditorSave_Click">
+                                                    <TextBlock x:Name="TypesetEditorDoneText" Text="完成" FontSize="11.5" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" />
                                                 </Button>
                                             </Grid>
                                             <ScrollViewer MaxHeight="450" VerticalScrollBarVisibility="Auto">
@@ -1063,26 +1072,26 @@
                                             </ScrollViewer>
                                         </StackPanel>
 
-                                        <!-- 内联「全部纸张」子页 (1:1 CustomPapers.swift:622-713：< 排版 | 全部纸张 | ＋) -->
+                                        <!-- 内联「全部纸张」子页 (1:1 MacReaderCards.swift:497-534：< 排版 | 全部纸张 | ＋) -->
                                         <StackPanel x:Name="TypesetAllPapersPanel" Visibility="Collapsed" Spacing="10" Padding="2">
                                             <Grid Height="28">
                                                 <Button HorizontalAlignment="Left" Background="Transparent" BorderThickness="0" Padding="0,2" UseSystemFocusVisuals="False" Click="TypesetBack_Click">
-                                                    <TextBlock Text="‹ 排版" FontSize="12.5" FontWeight="Medium" Foreground="{ThemeResource YYText2Brush}" />
+                                                    <TextBlock Text="‹ 排版" FontSize="12.5" FontWeight="SemiBold" Foreground="{ThemeResource YYAccentBrush}" />
                                                 </Button>
-                                                <TextBlock x:Name="TypesetAllPapersTitleText" Text="" FontSize="13" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                                <Button HorizontalAlignment="Right" Background="Transparent" BorderThickness="0" Padding="4,2" UseSystemFocusVisuals="False" Click="TypesetAllPapersNew_Click">
+                                                <TextBlock x:Name="TypesetAllPapersTitleText" Text="" FontSize="12.5" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                <Button x:Name="TypesetAllPapersNewBtn" HorizontalAlignment="Right" Background="Transparent" BorderThickness="0" Padding="4,2" UseSystemFocusVisuals="False" Click="TypesetAllPapersNew_Click">
                                                     <TextBlock Text="＋" FontSize="14" FontWeight="SemiBold" Foreground="{ThemeResource YYAccentBrush}" />
                                                 </Button>
                                             </Grid>
                                             <ScrollViewer MaxHeight="430" VerticalScrollBarVisibility="Auto">
-                                                <StackPanel x:Name="TypesetAllPapersListHost" Spacing="6" />
+                                                <StackPanel x:Name="TypesetAllPapersListHost" Spacing="8" />
                                             </ScrollViewer>
                                         </StackPanel>
 
                                         <!-- 更多子页 (1:1 MacReaderCards.swift:177-245) -->
                                         <StackPanel x:Name="TypesetMorePanel" Visibility="Collapsed" Spacing="11" Padding="2">
                                             <Button HorizontalAlignment="Left" Background="Transparent" BorderThickness="0" Padding="0,2" UseSystemFocusVisuals="False" Click="TypesetBack_Click">
-                                                <TextBlock Text="‹ 排版" FontSize="13" FontWeight="SemiBold" Foreground="{ThemeResource YYText2Brush}" />
+                                                <TextBlock Text="‹ 排版" FontSize="13" FontWeight="SemiBold" Foreground="{ThemeResource YYAccentBrush}" />
                                             </Button>
 
                                             <Grid>
@@ -1147,12 +1156,10 @@
                                                 </Border>
                                             </Grid>
 
-                                            <Border CornerRadius="10" Background="{ThemeResource YYInsetBrush}" Padding="10,2">
-                                                <Grid Height="32">
-                                                    <TextBlock Text="中文标点挤压" FontSize="12" VerticalAlignment="Center" Foreground="{ThemeResource YYText1Brush}" />
-                                                    <ToggleSwitch x:Name="CompressToggle" MinWidth="0" OnContent="" OffContent="" HorizontalAlignment="Right" Toggled="CompressToggle_Toggled" />
-                                                </Grid>
-                                            </Border>
+                                            <Grid Height="32">
+                                                <TextBlock Text="中文标点挤压" FontSize="12" VerticalAlignment="Center" Foreground="{ThemeResource YYText1Brush}" />
+                                                <ToggleSwitch x:Name="CompressToggle" MinWidth="0" OnContent="" OffContent="" HorizontalAlignment="Right" Toggled="CompressToggle_Toggled" />
+                                            </Grid>
 
                                             <Grid x:Name="ScriptRow">
                                                 <TextBlock Text="简繁" FontSize="12" VerticalAlignment="Center" Foreground="{ThemeResource YYText1Brush}" />

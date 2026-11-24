@@ -28,6 +28,97 @@ public static class Aligner
     public const int ContextSamples = 2 * SampleRate;
     public const int VadFrameSamples = 480; // 30 ms @ 16 kHz
 
+    private static readonly object SessionGate = new();
+    private static InferenceSession? _sharedSession;
+    private static string? _sharedSessionModelPath;
+    private static int _activeSessionUsers;
+    private static bool _unloadPending;
+
+    public static void Unload()
+    {
+        InferenceSession? toDispose = null;
+        lock (SessionGate)
+        {
+            if (_activeSessionUsers > 0)
+            {
+                _unloadPending = true;
+            }
+            else
+            {
+                toDispose = _sharedSession;
+                _sharedSession = null;
+                _sharedSessionModelPath = null;
+                _unloadPending = false;
+            }
+        }
+        try { toDispose?.Dispose(); } catch { }
+    }
+
+    private static InferenceSession AcquireSession(string modelPath)
+    {
+        InferenceSession? stale = null;
+        lock (SessionGate)
+        {
+            _unloadPending = false;
+            if (_sharedSession is not null && string.Equals(_sharedSessionModelPath, modelPath, StringComparison.OrdinalIgnoreCase))
+            {
+                _activeSessionUsers++;
+                return _sharedSession;
+            }
+            stale = _sharedSession;
+            _sharedSession = null;
+            _sharedSessionModelPath = null;
+        }
+        try { stale?.Dispose(); } catch { }
+
+        using var opts = new SessionOptions();
+        opts.IntraOpNumThreads = Math.Max(1, Environment.ProcessorCount - 1);
+        opts.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL;
+        var created = new InferenceSession(modelPath, opts);
+
+        InferenceSession? raceWinner = null;
+        lock (SessionGate)
+        {
+            if (_sharedSession is not null && string.Equals(_sharedSessionModelPath, modelPath, StringComparison.OrdinalIgnoreCase))
+            {
+                _activeSessionUsers++;
+                raceWinner = _sharedSession;
+            }
+            else
+            {
+                _sharedSession = created;
+                _sharedSessionModelPath = modelPath;
+                _activeSessionUsers++;
+            }
+        }
+        if (raceWinner is not null)
+        {
+            try { created.Dispose(); } catch { }
+            return raceWinner;
+        }
+        return created;
+    }
+
+    private static void ReleaseSession(InferenceSession session)
+    {
+        InferenceSession? toDispose = null;
+        lock (SessionGate)
+        {
+            if (ReferenceEquals(_sharedSession, session))
+            {
+                _activeSessionUsers = Math.Max(0, _activeSessionUsers - 1);
+                if (_activeSessionUsers == 0 && _unloadPending)
+                {
+                    toDispose = _sharedSession;
+                    _sharedSession = null;
+                    _sharedSessionModelPath = null;
+                    _unloadPending = false;
+                }
+            }
+        }
+        try { toDispose?.Dispose(); } catch { }
+    }
+
     public static string ModelsDir(string dataDir) => Path.Combine(dataDir, "models");
     public static string ModelPath(string dataDir) => Path.Combine(ModelsDir(dataDir), FileName);
     public static bool IsInstalled(string dataDir) => File.Exists(ModelPath(dataDir));
@@ -82,6 +173,7 @@ public static class Aligner
 
     public static void DeleteModel(string dataDir)
     {
+        Unload();
         string path = ModelPath(dataDir);
         if (File.Exists(path)) File.Delete(path);
         string part = Path.Combine(ModelsDir(dataDir), $".{FileName}.part");
@@ -221,97 +313,100 @@ public static class Aligner
         string partPath = outEmissionsPath + ".part";
         if (File.Exists(partPath)) File.Delete(partPath);
 
-        using var opts = new SessionOptions();
-        opts.IntraOpNumThreads = Math.Max(1, Environment.ProcessorCount - 1);
-        opts.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL;
-
-        using var session = new InferenceSession(modelPath, opts);
-        string inputName = session.InputMetadata.Keys.FirstOrDefault() ?? "wav";
-
-        int totalFrames = 0;
-        long totalSamples = info.SampleCount;
-
-        using (var wavStream = new FileStream(pcmWavPath, FileMode.Open, FileAccess.Read, FileShare.Read))
-        using (var outStream = new FileStream(partPath, FileMode.Create, FileAccess.Write, FileShare.None, 65536))
+        var session = AcquireSession(modelPath);
+        try
         {
-            byte[] pcmBytes = new byte[(HopSamples + 2 * ContextSamples) * 2];
+            string inputName = session.InputMetadata.Keys.FirstOrDefault() ?? "wav";
 
-            for (long start = 0; start < totalSamples; start += HopSamples)
+            int totalFrames = 0;
+            long totalSamples = info.SampleCount;
+
+            using (var wavStream = new FileStream(pcmWavPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (var outStream = new FileStream(partPath, FileMode.Create, FileAccess.Write, FileShare.None, 65536))
             {
-                ct.ThrowIfCancellationRequested();
-                long a = Math.Max(0, start - ContextSamples);
-                long b = Math.Min(totalSamples, start + HopSamples + ContextSamples);
-                int count = (int)(b - a);
-                if (count < 400) break;
+                byte[] pcmBytes = new byte[(HopSamples + 2 * ContextSamples) * 2];
 
-                wavStream.Seek(info.DataOffset + a * 2L, SeekOrigin.Begin);
-                int gotBytes = ReadExactOrAvailable(wavStream, pcmBytes, count * 2);
-                int gotSamples = gotBytes / 2;
-                if (gotSamples < 400) break;
-
-                var shorts = MemoryMarshal.Cast<byte, short>(pcmBytes.AsSpan(0, gotSamples * 2));
-                var x = new float[gotSamples];
-                double mean = 0;
-                for (int i = 0; i < gotSamples; i++)
+                for (long start = 0; start < totalSamples; start += HopSamples)
                 {
-                    float v = shorts[i] / 32768f;
-                    x[i] = v;
-                    mean += v;
-                }
-                mean /= gotSamples;
+                    ct.ThrowIfCancellationRequested();
+                    long a = Math.Max(0, start - ContextSamples);
+                    long b = Math.Min(totalSamples, start + HopSamples + ContextSamples);
+                    int count = (int)(b - a);
+                    if (count < 400) break;
 
-                double variance = 0;
-                for (int i = 0; i < gotSamples; i++)
-                {
-                    double d = x[i] - mean;
-                    variance += d * d;
-                }
-                variance /= gotSamples;
-                float scale = (float)(1.0 / Math.Sqrt(variance + 1e-5));
-                for (int i = 0; i < gotSamples; i++)
-                {
-                    x[i] = (float)((x[i] - mean) * scale);
-                }
+                    wavStream.Seek(info.DataOffset + a * 2L, SeekOrigin.Begin);
+                    int gotBytes = ReadExactOrAvailable(wavStream, pcmBytes, count * 2);
+                    int gotSamples = gotBytes / 2;
+                    if (gotSamples < 400) break;
 
-                var inputTensor = new DenseTensor<float>(x, new[] { 1, gotSamples });
-                using var results = session.Run(new[] { NamedOnnxValue.CreateFromTensor(inputName, inputTensor) });
-                var outTensor = results[0].AsTensor<float>();
-                int frames = outTensor.Dimensions[1];
-                int stride = outTensor.Dimensions.Length >= 3 ? outTensor.Dimensions[2] : Letters;
-
-                double windowSec = gotSamples / (double)SampleRate;
-                double fps = frames / windowSec;
-                int lo = (int)Math.Round((start - a) / (double)SampleRate * fps);
-                int hi = Math.Min(frames, lo + (int)Math.Round(Math.Min(HopSamples, totalSamples - start) / (double)SampleRate * fps));
-                lo = Math.Clamp(lo, 0, frames);
-                hi = Math.Clamp(hi, lo, frames);
-
-                int keepFrames = hi - lo;
-                if (keepFrames > 0)
-                {
-                    float[] slice = new float[keepFrames * Letters];
-                    if (outTensor is DenseTensor<float> dense && stride == Letters)
+                    var shorts = MemoryMarshal.Cast<byte, short>(pcmBytes.AsSpan(0, gotSamples * 2));
+                    var x = new float[gotSamples];
+                    double mean = 0;
+                    for (int i = 0; i < gotSamples; i++)
                     {
-                        dense.Buffer.Span.Slice(lo * Letters, keepFrames * Letters).CopyTo(slice);
+                        float v = shorts[i] / 32768f;
+                        x[i] = v;
+                        mean += v;
                     }
-                    else
-                    {
-                        for (int f = 0; f < keepFrames; f++)
-                            for (int c = 0; c < Letters; c++)
-                                slice[f * Letters + c] = outTensor[0, lo + f, c];
-                    }
-                    outStream.Write(MemoryMarshal.AsBytes(slice.AsSpan()));
-                    totalFrames += keepFrames;
-                }
+                    mean /= gotSamples;
 
-                onSecondsDone?.Invoke(Math.Min(start + HopSamples, totalSamples) / (double)SampleRate);
+                    double variance = 0;
+                    for (int i = 0; i < gotSamples; i++)
+                    {
+                        double d = x[i] - mean;
+                        variance += d * d;
+                    }
+                    variance /= gotSamples;
+                    float scale = (float)(1.0 / Math.Sqrt(variance + 1e-5));
+                    for (int i = 0; i < gotSamples; i++)
+                    {
+                        x[i] = (float)((x[i] - mean) * scale);
+                    }
+
+                    var inputTensor = new DenseTensor<float>(x, new[] { 1, gotSamples });
+                    using var results = session.Run(new[] { NamedOnnxValue.CreateFromTensor(inputName, inputTensor) });
+                    var outTensor = results[0].AsTensor<float>();
+                    int frames = outTensor.Dimensions[1];
+                    int stride = outTensor.Dimensions.Length >= 3 ? outTensor.Dimensions[2] : Letters;
+
+                    double windowSec = gotSamples / (double)SampleRate;
+                    double fps = frames / windowSec;
+                    int lo = (int)Math.Round((start - a) / (double)SampleRate * fps);
+                    int hi = Math.Min(frames, lo + (int)Math.Round(Math.Min(HopSamples, totalSamples - start) / (double)SampleRate * fps));
+                    lo = Math.Clamp(lo, 0, frames);
+                    hi = Math.Clamp(hi, lo, frames);
+
+                    int keepFrames = hi - lo;
+                    if (keepFrames > 0)
+                    {
+                        float[] slice = new float[keepFrames * Letters];
+                        if (outTensor is DenseTensor<float> dense && stride == Letters)
+                        {
+                            dense.Buffer.Span.Slice(lo * Letters, keepFrames * Letters).CopyTo(slice);
+                        }
+                        else
+                        {
+                            for (int f = 0; f < keepFrames; f++)
+                                for (int c = 0; c < Letters; c++)
+                                    slice[f * Letters + c] = outTensor[0, lo + f, c];
+                        }
+                        outStream.Write(MemoryMarshal.AsBytes(slice.AsSpan()));
+                        totalFrames += keepFrames;
+                    }
+
+                    onSecondsDone?.Invoke(Math.Min(start + HopSamples, totalSamples) / (double)SampleRate);
+                }
             }
+
+            if (File.Exists(outEmissionsPath)) File.Delete(outEmissionsPath);
+            File.Move(partPath, outEmissionsPath);
+
+            return (totalFrames, totalSamples / (double)SampleRate);
         }
-
-        if (File.Exists(outEmissionsPath)) File.Delete(outEmissionsPath);
-        File.Move(partPath, outEmissionsPath);
-
-        return (totalFrames, totalSamples / (double)SampleRate);
+        finally
+        {
+            ReleaseSession(session);
+        }
     }
 
     internal readonly record struct WavInfo(

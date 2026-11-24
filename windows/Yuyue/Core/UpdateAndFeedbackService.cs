@@ -15,6 +15,7 @@ using Windows.UI.Core;
 using Microsoft.UI;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -71,6 +72,22 @@ public sealed class UpdateAndFeedbackService
     public string? LatestWinInstallerUrl { get; private set; }
     public string? LatestWinInstallerSha256 { get; private set; }
     public Release[] OfferNotes { get; private set; } = [];
+    public event Action? StateChanged;
+
+    public void NotifyStateChanged() => StateChanged?.Invoke();
+
+    public static string ResolvePreferredRepoUrl() =>
+        Yuyue.Speech.ModelDownload.PrefersChinaMirror()
+            ? $"https://cnb.cool/{RepoSlug}"
+            : $"https://github.com/{RepoSlug}";
+
+    public string GetPreferredRepoUrl() => ResolvePreferredRepoUrl();
+
+    public string GetPreferredReleasesUrl(bool latest = false) =>
+        Yuyue.Speech.ModelDownload.PrefersChinaMirror()
+            ? $"https://cnb.cool/{RepoSlug}/-/releases"
+            : (latest ? $"https://github.com/{RepoSlug}/releases/latest" : $"https://github.com/{RepoSlug}/releases");
+
     public bool IsOfferSuppressed =>
         LatestOffer is not null && !HasUnreadBadge;
     public bool HasUnreadBadge =>
@@ -258,6 +275,7 @@ public sealed class UpdateAndFeedbackService
                 LatestWinInstallerUrl = null;
                 LatestWinInstallerSha256 = null;
                 OfferNotes = [];
+                StateChanged?.Invoke();
                 return (false, info, $"当前已是最新版本（v{CurrentVersion}）");
             }
 
@@ -283,6 +301,7 @@ public sealed class UpdateAndFeedbackService
             }
             if (OfferNotes.Length == 0) OfferNotes = [YuyueCoreMethods.UpdateRelease(info)];
 
+            StateChanged?.Invoke();
             return (true, info, $"发现新版本 v{info.Version}");
         }
         catch (Exception ex)
@@ -436,8 +455,9 @@ public sealed class UpdateAndFeedbackService
         {
             ContentDialog? upToDateDlg = null;
             bool openReleases = false;
+            string releasesBtnText = Yuyue.Speech.ModelDownload.PrefersChinaMirror() ? "查看发布页 (CNB) ↗" : "查看 GitHub Releases ↗";
             var footRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 4, 0, 0) };
-            footRow.Children.Add(YYChrome.MakeSheetPillButton("查看 GitHub Releases ↗", () => { openReleases = true; upToDateDlg?.Hide(); }, dark, _library.Prefs.Tint, "secondary", height: 34, horizontalPadding: 14));
+            footRow.Children.Add(YYChrome.MakeSheetPillButton(releasesBtnText, () => { openReleases = true; upToDateDlg?.Hide(); }, dark, _library.Prefs.Tint, "secondary", height: 34, horizontalPadding: 14));
             footRow.Children.Add(YYChrome.MakeSheetPillButton("好", () => upToDateDlg?.Hide(), dark, _library.Prefs.Tint, "dark", height: 34, horizontalPadding: 18));
 
             var body = new StackPanel
@@ -456,7 +476,7 @@ public sealed class UpdateAndFeedbackService
             upToDateDlg = YYChrome.CreateMacSheet(xamlRoot, dark, 368, body, tint: _library.Prefs.Tint);
             await upToDateDlg.ShowSafeAsync(_library.Prefs.Tint);
             if (openReleases)
-                _ = Launcher.LaunchUriAsync(new Uri($"https://github.com/{RepoSlug}/releases"));
+                _ = Launcher.LaunchUriAsync(new Uri(GetPreferredReleasesUrl()));
             return;
         }
 
@@ -504,6 +524,7 @@ public sealed class UpdateAndFeedbackService
         {
             _library.Prefs.UpdateSkippedVersion = info.Version;
             _library.SavePrefs();
+            StateChanged?.Invoke();
             offerDlg?.Hide();
         }, dark);
         skipBtn.HorizontalAlignment = HorizontalAlignment.Left;
@@ -525,21 +546,29 @@ public sealed class UpdateAndFeedbackService
 
         if (action == 1)
         {
-            if (!string.IsNullOrWhiteSpace(LatestWinInstallerUrl))
-            {
-                await DownloadAndInstallUpdateAsync(xamlRoot, info, LatestWinInstallerUrl!, LatestWinInstallerSha256);
-            }
-            else
-            {
-                string url = !string.IsNullOrWhiteSpace(info.Page) ? info.Page : $"https://github.com/{RepoSlug}/releases/latest";
-                _ = Launcher.LaunchUriAsync(new Uri(url));
-            }
+            await InstallOfferAsync(xamlRoot, info);
         }
         else if (action == 2)
         {
             _library.Prefs.UpdateRemindVersion = info.Version;
             _library.Prefs.UpdateRemindUntilMs = DateTimeOffset.UtcNow.AddDays(3).ToUnixTimeMilliseconds();
             _library.SavePrefs();
+            StateChanged?.Invoke();
+        }
+    }
+
+    public async Task InstallOfferAsync(XamlRoot xamlRoot, UpdateInfo? offerOverride = null)
+    {
+        var info = offerOverride ?? LatestOffer;
+        if (info is null) return;
+        if (!string.IsNullOrWhiteSpace(LatestWinInstallerUrl))
+        {
+            await DownloadAndInstallUpdateAsync(xamlRoot, info, LatestWinInstallerUrl!, LatestWinInstallerSha256);
+        }
+        else
+        {
+            string url = !string.IsNullOrWhiteSpace(info.Page) ? info.Page : GetPreferredReleasesUrl(latest: true);
+            _ = Launcher.LaunchUriAsync(new Uri(url));
         }
     }
 
@@ -594,22 +623,29 @@ public sealed class UpdateAndFeedbackService
             {
                 byte[] buf = new byte[65536];
                 long got = 0;
+                long lastUiTick = 0;
                 int read;
                 while ((read = await remote.ReadAsync(buf, cts.Token)) > 0)
                 {
                     await local.WriteAsync(buf.AsMemory(0, read), cts.Token);
                     sha.AppendData(buf, 0, read);
                     got += read;
-                    if (total is > 0)
+                    long nowTick = Environment.TickCount64;
+                    bool reachedFinal = total is > 0 && got >= total.Value;
+                    if (reachedFinal || nowTick - lastUiTick >= 100)
                     {
-                        double pct = Math.Clamp(got * 100.0 / total.Value, 0, 100);
-                        progressBar.IsIndeterminate = false;
-                        progressBar.Value = pct;
-                        statusText.Text = $"正在下载 v{info.Version} · {got / 1048576.0:0.1} / {total.Value / 1048576.0:0.1} MB ({pct:0}%)";
-                    }
-                    else
-                    {
-                        statusText.Text = $"正在下载 v{info.Version} · {got / 1048576.0:0.1} MB";
+                        lastUiTick = nowTick;
+                        if (total is > 0)
+                        {
+                            double pct = reachedFinal ? 100.0 : Math.Clamp(got * 100.0 / total.Value, 0, 100);
+                            progressBar.IsIndeterminate = false;
+                            progressBar.Value = pct;
+                            statusText.Text = L10n.T($"正在下载 v{info.Version} · {got / 1048576.0:0.1} / {total.Value / 1048576.0:0.1} MB ({pct:0}%)");
+                        }
+                        else
+                        {
+                            statusText.Text = L10n.T($"正在下载 v{info.Version} · {got / 1048576.0:0.1} MB");
+                        }
                     }
                 }
             }
@@ -666,7 +702,7 @@ public sealed class UpdateAndFeedbackService
                 tint: _library.Prefs.Tint);
             if (openPage)
             {
-                string url = !string.IsNullOrWhiteSpace(info.Page) ? info.Page : $"https://github.com/{RepoSlug}/releases/latest";
+                string url = !string.IsNullOrWhiteSpace(info.Page) ? info.Page : GetPreferredReleasesUrl(latest: true);
                 _ = Launcher.LaunchUriAsync(new Uri(url));
             }
         }
@@ -740,7 +776,8 @@ public sealed class UpdateAndFeedbackService
         }
 
         var foot = new Grid { Margin = new Thickness(0, 2, 0, 0) };
-        var ghBtn = YYChrome.MakeSettingsActionButton("GitHub Releases ↗", () => _ = Launcher.LaunchUriAsync(new Uri($"https://github.com/{RepoSlug}/releases")), dark);
+        string relLabel = Yuyue.Speech.ModelDownload.PrefersChinaMirror() ? "CNB Releases ↗" : "GitHub Releases ↗";
+        var ghBtn = YYChrome.MakeSettingsActionButton(relLabel, () => _ = Launcher.LaunchUriAsync(new Uri(GetPreferredReleasesUrl())), dark);
         ghBtn.HorizontalAlignment = HorizontalAlignment.Left;
         foot.Children.Add(ghBtn);
         var okBtn = YYChrome.MakeSheetPillButton("好", () => dlgRef?.Hide(), dark, _library.Prefs.Tint, "dark", height: 34, horizontalPadding: 20);
@@ -912,7 +949,9 @@ public sealed class UpdateAndFeedbackService
         scrollContent.Children.Add(modelDeps);
 
         var foot = new Grid { Margin = new Thickness(0, 2, 0, 0) };
-        var srcBtn = YYChrome.MakeSettingsActionButton("查看源代码 (GitHub) ↗", () => _ = Launcher.LaunchUriAsync(new Uri($"https://github.com/{RepoSlug}")), dark);
+        string repoUrl = ResolvePreferredRepoUrl();
+        string repoHost = repoUrl.Contains("cnb.cool", StringComparison.OrdinalIgnoreCase) ? "CNB" : "GitHub";
+        var srcBtn = YYChrome.MakeSettingsActionButton($"查看源代码 ({repoHost}) ↗", () => _ = Launcher.LaunchUriAsync(new Uri(repoUrl)), dark);
         srcBtn.HorizontalAlignment = HorizontalAlignment.Left;
         foot.Children.Add(srcBtn);
         var okBtn = YYChrome.MakeSheetPillButton("好", () => dlgRef?.Hide(), dark, tint, "dark", height: 34, horizontalPadding: 20);
@@ -1088,6 +1127,8 @@ public sealed class UpdateAndFeedbackService
             Padding = new Thickness(0, 6, 0, 6),
             VerticalAlignment = VerticalAlignment.Center,
         };
+        YYChrome.StripTextBoxChrome(titleBox);
+        AutomationProperties.SetName(titleBox, L10n.T("反馈标题"));
         titleBoxHolder = titleBox;
         var titleCounterText = new TextBlock
         {
@@ -1111,6 +1152,8 @@ public sealed class UpdateAndFeedbackService
             FontSize = 13.5,
             Padding = new Thickness(0, 4, 0, 4),
         };
+        YYChrome.StripTextBoxChrome(bodyBox);
+        AutomationProperties.SetName(bodyBox, L10n.T("反馈正文"));
         bodyBoxHolder = bodyBox;
         var counterText = new TextBlock
         {
@@ -1176,6 +1219,7 @@ public sealed class UpdateAndFeedbackService
                 dark,
                 fontSize: 12.5,
                 height: 32);
+            L10n.ApplyTree(segHost);
         }
         SyncCatVisuals();
 
@@ -1191,7 +1235,7 @@ public sealed class UpdateAndFeedbackService
             }
             else
             {
-                attachErrorText.Text = err;
+                attachErrorText.Text = L10n.T(err);
                 attachErrorText.Visibility = Visibility.Visible;
             }
         }
@@ -1206,7 +1250,7 @@ public sealed class UpdateAndFeedbackService
                 var att = attachments[i];
                 var chip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
                 chip.Children.Add(YYIcons.Make(att.IsImage ? "photo" : "note-card", 11, ThemeHelper.Brush(tint.Accent)));
-                chip.Children.Add(new TextBlock
+                chip.Children.Add(L10n.Skip(new TextBlock
                 {
                     Text = $"{att.Name} · {Math.Max(1, att.Data.Length / 1024)} KB",
                     FontSize = 11,
@@ -1215,7 +1259,7 @@ public sealed class UpdateAndFeedbackService
                     MaxWidth = 136,
                     MaxLines = 1,
                     TextTrimming = TextTrimming.CharacterEllipsis,
-                });
+                }));
                 var rm = new Button
                 {
                     Content = "×",
@@ -1228,6 +1272,7 @@ public sealed class UpdateAndFeedbackService
                     BorderThickness = new Thickness(0),
                     UseSystemFocusVisuals = false,
                 };
+                AutomationProperties.SetName(rm, L10n.T("移除附件"));
                 rm.Click += (_, _) =>
                 {
                     DeleteOwnedDraftTempIfAny(attachments[idx].SourcePath);
@@ -1247,6 +1292,7 @@ public sealed class UpdateAndFeedbackService
                     Child = chip,
                 });
             }
+            L10n.ApplyTree(attachList);
         }
 
         async Task TryAttachFileAsync(StorageFile f)
@@ -1377,6 +1423,7 @@ public sealed class UpdateAndFeedbackService
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        AutomationProperties.SetName(deviceToggle, L10n.T("附带设备信息"));
         var logsCheck = new CheckBox
         {
             Content = FindLocalLogFile() is not null ? L10n.T("附带最近运行日志（末尾 64 KB，随反馈公开）") : L10n.T("附带最近运行日志（如有，随反馈公开）"),
@@ -1472,7 +1519,8 @@ public sealed class UpdateAndFeedbackService
             MinWidth = 0,
         });
         infoMetaRow.Children.Add(new TextBlock { Text = "·", FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center });
-        var openGhDirectBtn = YYChrome.MakeSettingsActionButton("在 GitHub 打开 Issue ↗", () =>
+        bool preferCn = Yuyue.Speech.ModelDownload.PrefersChinaMirror();
+        var openGhDirectBtn = YYChrome.MakeSettingsActionButton(preferCn ? "在 CNB 打开 Issue ↗" : "在 GitHub 打开 Issue ↗", () =>
         {
             string t0 = titleBox.Text.Trim();
             string b0 = bodyBox.Text.Trim();
@@ -1521,11 +1569,12 @@ public sealed class UpdateAndFeedbackService
             {
                 ResetComposerToEmpty();
                 outerSwitchHost.Content = composerRoot;
+                L10n.ApplyTree(outerSwitchHost);
                 titleBox.Focus(FocusState.Programmatic);
             }, dark, _library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 18));
             thanksBtns.Children.Add(YYChrome.MakeSheetPillButton("完成", () => activeDlg?.Hide(), dark, _library.Prefs.Tint, "dark", height: 36, horizontalPadding: 22));
 
-            return new StackPanel
+            var thanksStack = new StackPanel
             {
                 Spacing = 12,
                 Padding = new Thickness(28, 28, 28, 24),
@@ -1562,6 +1611,8 @@ public sealed class UpdateAndFeedbackService
                     thanksBtns,
                 },
             };
+            L10n.ApplyTree(thanksStack);
+            return thanksStack;
         }
 
         var uploadFailRow = new StackPanel
@@ -1570,7 +1621,7 @@ public sealed class UpdateAndFeedbackService
             Spacing = 8,
             Visibility = Visibility.Collapsed,
         };
-        var fallbackGhBtn = YYChrome.MakeSheetPillButton("改为在 GitHub 打开 Issue ↗", () =>
+        var fallbackGhBtn = YYChrome.MakeSheetPillButton(preferCn ? "改为在 CNB 打开 Issue ↗" : "改为在 GitHub 打开 Issue ↗", () =>
         {
             string t0 = titleBox.Text.Trim();
             string b0 = bodyBox.Text.Trim();
@@ -1741,6 +1792,7 @@ public sealed class UpdateAndFeedbackService
 
         RebuildAttachments();
         outerSwitchHost.Content = composerRoot;
+        L10n.ApplyTree(outerSwitchHost);
 
         while (true)
         {
@@ -1943,7 +1995,9 @@ public sealed class UpdateAndFeedbackService
         string body = withInfo
             ? $"{text}\n\n---\n- 平台：Windows ({OsDisplayVersion()})\n- 版本：语阅 {CurrentVersion} ({CurrentBuild})"
             : text;
-        string url = $"https://github.com/{RepoSlug}/issues/new?title={Uri.EscapeDataString(tag + cleanTitle)}&body={Uri.EscapeDataString(body)}";
+        string url = Yuyue.Speech.ModelDownload.PrefersChinaMirror()
+            ? $"https://cnb.cool/{RepoSlug}/-/issues"
+            : $"https://github.com/{RepoSlug}/issues/new?title={Uri.EscapeDataString(tag + cleanTitle)}&body={Uri.EscapeDataString(body)}";
         _ = Launcher.LaunchUriAsync(new Uri(url));
     }
 

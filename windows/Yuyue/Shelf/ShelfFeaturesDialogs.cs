@@ -35,7 +35,7 @@ public static class ShelfFeaturesDialogs
         using var service = new WifiTransferService(library);
         string url = service.Start();
 
-        var urlBox = new TextBlock
+        var urlBox = L10n.Skip(new TextBlock
         {
             Text = url,
             FontFamily = mono,
@@ -44,7 +44,7 @@ public static class ShelfFeaturesDialogs
             Foreground = ThemeHelper.Brush(tint.Accent),
             IsTextSelectionEnabled = true,
             HorizontalAlignment = HorizontalAlignment.Center,
-        };
+        });
 
         Button? copyBtn = null;
         copyBtn = YYChrome.MakeSheetPillButton("复制传书地址", () =>
@@ -119,7 +119,7 @@ public static class ShelfFeaturesDialogs
                 VerticalAlignment = VerticalAlignment.Center,
                 Content = YYIcons.Make("book", 12.5, ThemeHelper.Brush(tint.Accent)),
             };
-            var nameTb = new TextBlock
+            var nameTb = L10n.Skip(new TextBlock
             {
                 Text = displayName,
                 FontSize = 12.5,
@@ -127,7 +127,7 @@ public static class ShelfFeaturesDialogs
                 Foreground = ThemeHelper.Brush(p.T1),
                 MaxLines = 1,
                 TextTrimming = TextTrimming.CharacterEllipsis,
-            };
+            });
             var statusTb = new TextBlock
             {
                 Text = L10n.T("准备接收…"),
@@ -185,10 +185,13 @@ public static class ShelfFeaturesDialogs
             },
         };
 
-        service.LogEvent += msg =>
+        bool dialogClosed = false;
+        Action<string> onLogEvent = msg =>
         {
+            if (dialogClosed) return;
             root.DispatcherQueue.TryEnqueue(() =>
             {
+                if (dialogClosed) return;
                 if (msg.StartsWith("准备接收：", StringComparison.Ordinal))
                 {
                     string name = msg["准备接收：".Length..].Trim();
@@ -207,7 +210,7 @@ public static class ShelfFeaturesDialogs
                     string detail = dotIdx > 0 ? body[(dotIdx + 3)..].Trim() : body;
                     var row = GetOrAddRow(name, name);
                     row.Finished = false;
-                    row.StatusText.Text = detail;
+                    row.StatusText.Text = L10n.T(detail);
                     row.StatusText.Foreground = ThemeHelper.Brush(p.T2);
                     row.Bar.Visibility = Visibility.Visible;
                     int pctEnd = detail.IndexOf('%');
@@ -232,30 +235,47 @@ public static class ShelfFeaturesDialogs
                 {
                     int openP = msg.IndexOf('(');
                     int closeP = msg.IndexOf(")：", StringComparison.Ordinal);
-                    string name = openP >= 0 && closeP > openP ? msg[(openP + 1)..closeP] : "文件";
+                    string name = openP >= 0 && closeP > openP ? msg[(openP + 1)..closeP] : L10n.T("文件");
                     string err = closeP > 0 ? msg[(closeP + 2)..].Trim() : msg;
                     var row = GetOrAddRow(name, name);
                     row.Finished = true;
-                    row.StatusText.Text = err;
+                    row.StatusText.Text = L10n.T(err);
                     row.StatusText.Foreground = ThemeHelper.Brush(p.Danger);
                     row.Bar.Visibility = Visibility.Collapsed;
                     row.Badge.Content = YYIcons.Make("xmark-circle", 14, ThemeHelper.Brush(p.Danger));
                 }
                 else
                 {
-                    var row = GetOrAddRow(msg, msg);
+                    var row = GetOrAddRow(msg, L10n.T(msg));
                     row.StatusText.Text = "";
                     row.Bar.Visibility = Visibility.Collapsed;
                 }
             });
         };
-        service.BookImported += () =>
+        Action onImportedHandler = () =>
         {
-            root.DispatcherQueue.TryEnqueue(() => onBookImported());
+            if (dialogClosed) return;
+            root.DispatcherQueue.TryEnqueue(() =>
+            {
+                if (dialogClosed) return;
+                onBookImported();
+            });
         };
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 440, root, tint: library.Prefs.Tint);
-        await dlgRef.ShowSafeAsync(library.Prefs.Tint);
-        service.Stop();
+        service.LogEvent += onLogEvent;
+        service.BookImported += onImportedHandler;
+
+        try
+        {
+            dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 440, root, tint: library.Prefs.Tint);
+            await dlgRef.ShowSafeAsync(library.Prefs.Tint);
+        }
+        finally
+        {
+            dialogClosed = true;
+            service.LogEvent -= onLogEvent;
+            service.BookImported -= onImportedHandler;
+            service.Stop();
+        }
     }
 }

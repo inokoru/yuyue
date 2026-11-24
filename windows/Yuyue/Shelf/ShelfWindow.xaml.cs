@@ -1,8 +1,12 @@
 using System.Diagnostics;
+using System.Numerics;
 using Microsoft.UI;
 using Microsoft.UI.Input;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -51,15 +55,31 @@ public sealed partial class ShelfWindow : Window
         ".epub", ".pdf", ".txt", ".mobi", ".azw3", ".azw", ".prc", ".fb2",
     };
 
+    private bool _closed;
+    private string? _hoveredSidebarGroup;
     private bool _notesByBook;
     private string _notesChip = "all"; // all | thoughts | yellow | blue | pink | wave
     private string _notesQuery = "";
     private string? _notesChosenBookId;
+    private readonly Dictionary<string, IReadOnlyList<Mark>> _notesMarksCache = new(StringComparer.Ordinal);
+    private NoteConflict[]? _cachedNoteConflicts;
+    private ReviewDeck? _cachedReviewDeck;
     private bool _wordsByBook;
     private bool _wordsShowKnown;
+    private string _wordsQuery = "";
+    private string? _speakingVocabWord;
+    private int _vocabSpeakSeq;
+    private TextBox? _activeNotesFilterBox;
+    private TextBox? _activeWordsFilterBox;
+    private TextBox? _activeCollectionsFilterBox;
     private Action? _toastUndoAction;
     private DispatcherTimer? _toastTimer;
     private bool _toastHoverPaused;
+    private DispatcherTimer? _importCardDismissTimer;
+    private bool _importCardHoverPaused;
+    private DispatcherTimer? _dropLeaveTimer;
+    private int _dragStorageCount;
+    private bool _probingDragItems;
     private readonly List<(Button Btn, Action Activate, FrameworkElement? OpenHint)> _quickSearchItems = [];
     private int _quickSearchSelectedIdx = -1;
     private BookSummary? _quickSearchBestCompanionBook;
@@ -77,13 +97,16 @@ public sealed partial class ShelfWindow : Window
         _recordBuilder = new BookRecordPageBuilder(this, library);
         _podcastBuilder = new PodcastWorkspaceBuilder(this, library);
         _sidebarVisible = _library.Prefs.ShelfSidebarShown;
+        _sortKey = _library.Prefs.BooksSort is "added" or "title" or "author" ? _library.Prefs.BooksSort : "recent";
         _collectionSort = _library.Prefs.CollectionSort is "name" or "count" or "own" ? _library.Prefs.CollectionSort : "recent";
         InitializeComponent();
 
-        ThemeHelper.ResizeWindow(this, 1040, 720);
+        YYChrome.StripTextBoxChrome(QuickSearchBox);
+        ThemeHelper.ResizeWindow(this, _library.Prefs.ShelfWindowWidth, _library.Prefs.ShelfWindowHeight, minWidthDip: 720, minHeightDip: 500);
         SetTitleBar(TopDragBar);
         ThemeHelper.ApplyElevation(PaperSheet, DeskShadowReceiver, 20f);
         ThemeHelper.ApplyElevation(ToastBanner, PaperInnerGrid, 14f);
+        ThemeHelper.ApplyElevation(ImportQueueCard, DeskShadowReceiver, 20f);
         ThemeHelper.ApplyElevation(QuickSearchCard, DeskShadowReceiver, 32f);
 
         if (!_sidebarVisible)
@@ -98,8 +121,21 @@ public sealed partial class ShelfWindow : Window
             if (panel is not null) panel.Visibility = Visibility.Collapsed;
         }
 
+        _library.SystemIntegration.PlaybackStateChanged += OnPlaybackStateChanged;
+
         Closed += (_, _) =>
         {
+            _closed = true;
+            _toastTimer?.Stop();
+            _importCardDismissTimer?.Stop();
+            _dropLeaveTimer?.Stop();
+            _library.SystemIntegration.PlaybackStateChanged -= OnPlaybackStateChanged;
+            if (ThemeHelper.TryGetRestoredDipSize(this, out int sw, out int sh))
+            {
+                _library.Prefs.ShelfWindowWidth = sw;
+                _library.Prefs.ShelfWindowHeight = sh;
+                _library.SavePrefs();
+            }
             _podcastBuilder.Dispose();
             try { _reviewClipPlayer?.Pause(); _reviewClipPlayer?.Dispose(); _reviewClipPlayer = null; } catch { }
             try { _quickSearchCts?.Cancel(); _quickSearchCts?.Dispose(); } catch { }
@@ -163,6 +199,7 @@ public sealed partial class ShelfWindow : Window
             await Task.Delay(3500);
             DispatcherQueue.TryEnqueue(() =>
             {
+                if (_closed) return;
                 if (_highlightedBookId == bookId)
                 {
                     _highlightedBookId = null;
@@ -193,6 +230,7 @@ public sealed partial class ShelfWindow : Window
             CornerRadius = new CornerRadius(10),
             Padding = new Thickness(12, 9, 12, 9),
         };
+        YYChrome.StripTextBoxChrome(titleBox);
 
         void DoAdd()
         {
@@ -294,6 +332,58 @@ public sealed partial class ShelfWindow : Window
             _ => p.T3,
         };
         SyncDot.Fill = ThemeHelper.Brush(dotColor);
+
+        int peerCount = 0;
+        if (_library.Sync.IsEnabled)
+        {
+            try { peerCount = _library.GetDevices().Count; } catch { }
+        }
+        if (_library.Sync.IsEnabled && peerCount > 1)
+        {
+            SyncDevicesText.Text = L10n.T($"{peerCount} 台设备");
+            SyncDevicesText.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            SyncDevicesText.Text = "";
+            SyncDevicesText.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void UpdateSidebarGroupChevrons()
+    {
+        bool dark = ThemeHelper.IsDark(RootGrid.ActualTheme);
+        var t3 = ThemeHelper.Brush(ThemeHelper.Palette(dark).T3);
+        foreach (var (key, panel, presenter) in new[]
+        {
+            ("library", GroupLibrary, GroupChevronLibrary),
+            ("notes", GroupNotes, GroupChevronNotes),
+            ("collections", GroupCollections, GroupChevronCollections),
+        })
+        {
+            bool collapsed = panel.Visibility == Visibility.Collapsed;
+            bool hovered = _hoveredSidebarGroup == key;
+            presenter.Content = YYIcons.Make(collapsed ? "chevron-right" : "chevron-down", 10, t3);
+            presenter.Opacity = collapsed || hovered ? 1.0 : 0.0;
+        }
+    }
+
+    private void GroupHeader_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string key)
+        {
+            _hoveredSidebarGroup = key;
+            UpdateSidebarGroupChevrons();
+        }
+    }
+
+    private void GroupHeader_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string key && _hoveredSidebarGroup == key)
+        {
+            _hoveredSidebarGroup = null;
+            UpdateSidebarGroupChevrons();
+        }
     }
 
     private void MountStaticIcons()
@@ -311,7 +401,7 @@ public sealed partial class ShelfWindow : Window
         SortChevronIcon.Content = YYIcons.Make("updown", 11, t2);
         SettingsFootBtn.Content = YYIcons.Make("gear", 14, t2);
         FeedbackFootBtn.Content = YYIcons.Make("feedback", 14, t2);
-        EmptyIconHost.Content = YYIcons.Make("books.vertical", 42, t3);
+        EmptyIconHost.Content = YYIcons.Make("books.vertical", 28, t3);
         ToastCheckIcon.Content = YYIcons.Make("checkmark", 9.5, new SolidColorBrush(Colors.White));
         ToastCloseButton.Content = YYIcons.Make("xmark", 9.5, t3);
         DropArrowIcon.Content = YYIcons.Make("arrow-down", 24, ThemeHelper.Brush(ThemeHelper.TintColors(_library.Prefs.Tint, dark).Accent));
@@ -323,6 +413,16 @@ public sealed partial class ShelfWindow : Window
         IconNotes.Content = YYIcons.Make("square.and.pencil", 14, _activeFilter == "notes" ? t1 : t2);
         IconWords.Content = YYIcons.Make("a-wen", 14, _activeFilter == "words" ? t1 : t2);
         IconCollections.Content = YYIcons.Make("stack", 14, _activeFilter == "collections" ? t1 : t2);
+        UpdateSidebarGroupChevrons();
+
+        AutomationProperties.SetName(QuickSearchTrigger, L10n.T("搜索 · 问"));
+        AutomationProperties.SetName(SyncFooterBtn, L10n.T("同步"));
+        AutomationProperties.SetName(SettingsFootBtn, L10n.T("设置"));
+        AutomationProperties.SetName(FeedbackFootBtn, L10n.T("反馈"));
+        AutomationProperties.SetName(SidebarToggleBtn, L10n.T("显示或隐藏侧栏"));
+        AutomationProperties.SetName(ToastCloseButton, L10n.T("关闭"));
+        AutomationProperties.SetName(ImportBtn, L10n.T("导入"));
+        AutomationProperties.SetName(SortButton, L10n.T("排序"));
     }
 
     public void ApplyAppearance()
@@ -336,6 +436,7 @@ public sealed partial class ShelfWindow : Window
         DropOverlay.Background = ThemeHelper.Brush(Color.FromArgb(dark ? (byte)230 : (byte)220, pal.Bg.R, pal.Bg.G, pal.Bg.B));
         DropOverlayInner.Background = ThemeHelper.Brush(Color.FromArgb(dark ? (byte)28 : (byte)14, tnt.Accent.R, tnt.Accent.G, tnt.Accent.B));
         MountStaticIcons();
+        SyncSortMenuVisuals();
         UpdateSyncFooter();
 
         double coverW = Math.Clamp(_library.Prefs.CoverWidth, 76, 148);
@@ -347,13 +448,15 @@ public sealed partial class ShelfWindow : Window
 
     public void RefreshBooks()
     {
-        _shelfBooks = _library.GetShelfBooks();
-        _keptBooks = _library.GetKeptBooks();
+        var (shelf, kept) = _library.GetShelfAndKeptBooks();
+        _shelfBooks = shelf;
+        _keptBooks = kept;
         _collections = _library.GetCollections();
         _markCounts = _library.GetMarkCounts();
         _words = _library.GetWords();
         try { _listeningPairs = _library.Core.ListeningPairs(); } catch { _listeningPairs = []; }
         _pairedBookIds = _listeningPairs.Select(lp => lp.Book).ToHashSet(StringComparer.Ordinal);
+        InvalidateNotesCache();
 
         UpdateSidebarCounts();
         RebuildCollectionsSidebar();
@@ -366,7 +469,7 @@ public sealed partial class ShelfWindow : Window
         CountAll.Text = CountText(_shelfBooks.Count);
         CountProgress.Text = CountText(_keptBooks.Count(b => b.Status == ReadingStatus.Reading));
         int podcastCount = 0;
-        try { podcastCount = _library.Podcasts.GetIssues().Count; } catch { }
+        try { podcastCount = _library.Podcasts.GetIssues().Count(i => i.Placement == PodcastPlacement.Desk); } catch { }
         CountPodcasts.Text = CountText(podcastCount);
         CountAudio.Text = CountText(_shelfBooks.Count(b => b.Format == BookFormat.Audio || _pairedBookIds.Contains(b.Id)));
 
@@ -403,7 +506,7 @@ public sealed partial class ShelfWindow : Window
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var icon = YYIcons.Make(YYIcons.CollectionIconName(colItem.Name, colItem.Icon), 13, t2);
-            var name = new TextBlock { Text = colItem.Name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+            var name = L10n.Skip(new TextBlock { Text = colItem.Name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
             Grid.SetColumn(name, 1);
             var cnt = new TextBlock
             {
@@ -419,17 +522,17 @@ public sealed partial class ShelfWindow : Window
             grid.Children.Add(cnt);
 
             var ctx = new MenuFlyout();
-            var pinItem = new MenuFlyoutItem { Text = "取消固定" };
+            var pinItem = new MenuFlyoutItem { Text = L10n.T("取消固定") };
             pinItem.Click += (_, _) =>
             {
                 _library.Prefs.PinnedCollectionIds.Remove(colItem.Id);
                 _library.SavePrefs();
                 RefreshBooks();
             };
-            var renameItem = new MenuFlyoutItem { Text = "重命名…" };
+            var renameItem = new MenuFlyoutItem { Text = L10n.T("重命名…") };
             renameItem.Click += async (_, _) => await RenameCollectionAsync(colItem);
             var iconSub = BuildCollectionIconSubMenu(colItem);
-            var delItem = new MenuFlyoutItem { Text = "删除合集…", Foreground = ThemeHelper.Brush(p.Danger) };
+            var delItem = new MenuFlyoutItem { Text = L10n.T("删除合集…"), Foreground = ThemeHelper.Brush(p.Danger) };
             delItem.Click += async (_, _) => await ConfirmDeleteCollectionAsync(colItem);
             ctx.Items.Add(pinItem);
             ctx.Items.Add(new MenuFlyoutSeparator());
@@ -449,52 +552,130 @@ public sealed partial class ShelfWindow : Window
             };
             string pinCid = colItem.Id;
             string pinCname = colItem.Name;
+            AutomationProperties.SetName(btn, pinCname);
             btn.DragStarting += (_, de) =>
             {
+                de.Data.Properties["yuyue-pincol"] = pinCid;
                 de.Data.SetText("yuyue-pincol:" + pinCid);
-                de.Data.RequestedOperation = DataPackageOperation.Move;
+                de.Data.RequestedOperation = DataPackageOperation.Move | DataPackageOperation.Copy;
             };
             btn.DragOver += (_, de) =>
             {
-                if (de.DataView.Contains(StandardDataFormats.Text) || de.DataView.Contains(StandardDataFormats.StorageItems))
+                if (de.DataView.Properties.ContainsKey("yuyue-pincol"))
+                {
+                    de.AcceptedOperation = DataPackageOperation.Move;
+                    de.Handled = true;
+                    HideDropOverlay();
+                }
+                else if (de.DataView.Properties.ContainsKey("yuyue-book-id")
+                    || de.DataView.Contains(StandardDataFormats.Text)
+                    || de.DataView.Contains(StandardDataFormats.StorageItems))
+                {
                     de.AcceptedOperation = DataPackageOperation.Copy;
+                    de.Handled = true;
+                    HideDropOverlay();
+                }
             };
             btn.Drop += async (_, de) =>
             {
-                if (de.DataView.Contains(StandardDataFormats.StorageItems))
+                de.Handled = true;
+                HideDropOverlay();
+                var deferral = de.GetDeferral();
+                try
                 {
-                    var items = await de.DataView.GetStorageItemsAsync();
-                    var paths = items.Select(it => it.Path).Where(fp => !string.IsNullOrEmpty(fp)).ToArray();
-                    if (paths.Length > 0) await ImportPathsAsync(paths, openFirst: false, targetCollectionId: pinCid);
-                    return;
-                }
-                if (!de.DataView.Contains(StandardDataFormats.Text)) return;
-                string txt = await de.DataView.GetTextAsync();
-                if (txt.StartsWith("yuyue-book:", StringComparison.Ordinal))
-                {
-                    string bid = txt["yuyue-book:".Length..];
-                    _library.SetInCollection(pinCid, bid, true);
-                    RefreshBooks();
-                    ShowToast($"已放进合集“{pinCname}”", canUndo: false);
-                }
-                else if (txt.StartsWith("yuyue-pincol:", StringComparison.Ordinal))
-                {
-                    string dragCid = txt["yuyue-pincol:".Length..];
-                    var pins = _library.Prefs.PinnedCollectionIds;
-                    int fromIdx = pins.IndexOf(dragCid);
-                    int toIdx = pins.IndexOf(pinCid);
-                    if (fromIdx >= 0 && toIdx >= 0 && fromIdx != toIdx)
+                    if (de.DataView.Contains(StandardDataFormats.StorageItems))
                     {
-                        pins.RemoveAt(fromIdx);
-                        pins.Insert(toIdx, dragCid);
-                        _library.SavePrefs();
-                        RebuildCollectionsSidebar();
-                        UpdateNavSelectionVisuals();
+                        var items = await de.DataView.GetStorageItemsAsync();
+                        var paths = items.Select(it => it.Path).Where(fp => !string.IsNullOrEmpty(fp)).ToArray();
+                        if (paths.Length > 0) await ImportPathsAsync(paths, openFirst: false, targetCollectionId: pinCid);
+                        return;
                     }
+                    string? dragBookId = de.DataView.Properties.TryGetValue("yuyue-book-id", out var bv) ? bv as string : null;
+                    string? dragPinId = de.DataView.Properties.TryGetValue("yuyue-pincol", out var pv) ? pv as string : null;
+                    if (dragBookId is null && dragPinId is null && de.DataView.Contains(StandardDataFormats.Text))
+                    {
+                        string txt = await de.DataView.GetTextAsync();
+                        if (txt.StartsWith("yuyue-book:", StringComparison.Ordinal)) dragBookId = txt["yuyue-book:".Length..];
+                        else if (txt.StartsWith("yuyue-pincol:", StringComparison.Ordinal)) dragPinId = txt["yuyue-pincol:".Length..];
+                    }
+                    if (!string.IsNullOrEmpty(dragBookId))
+                    {
+                        _library.SetInCollection(pinCid, dragBookId, true);
+                        RefreshBooks();
+                        ShowToast($"已放进合集“{pinCname}”", canUndo: false);
+                    }
+                    else if (!string.IsNullOrEmpty(dragPinId))
+                    {
+                        var pins = _library.Prefs.PinnedCollectionIds;
+                        int fromIdx = pins.IndexOf(dragPinId);
+                        int toIdx = pins.IndexOf(pinCid);
+                        if (fromIdx >= 0 && toIdx >= 0 && fromIdx != toIdx)
+                        {
+                            pins.RemoveAt(fromIdx);
+                            pins.Insert(toIdx, dragPinId);
+                            _library.SavePrefs();
+                            RebuildCollectionsSidebar();
+                            UpdateNavSelectionVisuals();
+                        }
+                    }
+                }
+                finally
+                {
+                    deferral.Complete();
                 }
             };
             btn.Click += NavItem_Click;
             CollectionsStack.Children.Add(btn);
+        }
+    }
+
+    private void NavCollections_DragOver(object sender, DragEventArgs e)
+    {
+        if (e.DataView.Properties.ContainsKey("yuyue-pincol")) return;
+        if (e.DataView.Properties.ContainsKey("yuyue-book-id") || e.DataView.Contains(StandardDataFormats.Text))
+        {
+            e.AcceptedOperation = DataPackageOperation.Copy;
+            e.Handled = true;
+            HideDropOverlay();
+            bool dark = ThemeHelper.IsDark(RootGrid.ActualTheme);
+            var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+            NavCollections.Background = ThemeHelper.Brush(tint.Soft);
+        }
+    }
+
+    private void NavCollections_DragLeave(object sender, DragEventArgs e) => UpdateNavSelectionVisuals();
+
+    private async void NavCollections_Drop(object sender, DragEventArgs e)
+    {
+        UpdateNavSelectionVisuals();
+        if (e.DataView.Properties.ContainsKey("yuyue-pincol")) return;
+        string? bid = e.DataView.Properties.TryGetValue("yuyue-book-id", out var bv) ? bv as string : null;
+        if (bid is null && e.DataView.Contains(StandardDataFormats.Text))
+        {
+            e.Handled = true;
+            var def = e.GetDeferral();
+            try
+            {
+                string txt = await e.DataView.GetTextAsync();
+                if (txt.StartsWith("yuyue-book:", StringComparison.Ordinal))
+                    bid = txt["yuyue-book:".Length..];
+            }
+            finally
+            {
+                def.Complete();
+            }
+        }
+        else if (bid is not null)
+        {
+            e.Handled = true;
+        }
+
+        if (!string.IsNullOrEmpty(bid))
+        {
+            var book = _keptBooks.FirstOrDefault(b => b.Id == bid)
+                ?? _shelfBooks.FirstOrDefault(b => b.Id == bid);
+            if (book is not null)
+                await ShowPickCollectionDialogAsync(book);
         }
     }
 
@@ -603,17 +784,163 @@ public sealed partial class ShelfWindow : Window
 
     public void SetBottomDock(Border? dock)
     {
+        bool isPodcasts = _activeFilter == "podcasts";
         if (dock is null)
         {
             SubPageBottomDockHost.Content = null;
             SubPageBottomDockHost.Visibility = Visibility.Collapsed;
-            SubPageScroll.Padding = new Thickness(22, 4, 28, 40);
+            SubPageScroll.Padding = new Thickness(22, 4, 28, isPodcasts ? 0 : 40);
+            ShelfContentStack.Padding = new Thickness(0, 0, 0, 48);
             return;
         }
         ThemeHelper.ApplyElevation(dock, PaperInnerGrid, 14f);
         SubPageBottomDockHost.Content = dock;
         SubPageBottomDockHost.Visibility = Visibility.Visible;
-        SubPageScroll.Padding = new Thickness(22, 4, 28, 86);
+        SubPageScroll.Padding = new Thickness(22, 4, 28, isPodcasts ? 0 : 86);
+        ShelfContentStack.Padding = new Thickness(0, 0, 0, isPodcasts ? 48 : 86);
+    }
+
+    private Border BuildGlobalNowPlayingBar(string activeTitle)
+    {
+        bool dark = ThemeHelper.IsDark(RootGrid.ActualTheme);
+        var palette = ThemeHelper.Palette(dark);
+        var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+
+        var outer = new Grid();
+        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        outer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var leftGrid = new Grid { ColumnSpacing = 10 };
+        leftGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        leftGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        leftGrid.Children.Add(new Border
+        {
+            Width = 26,
+            Height = 26,
+            CornerRadius = new CornerRadius(13),
+            Background = ThemeHelper.Brush(tint.Soft),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = YYIcons.Make("headphones", 12.5, ThemeHelper.Brush(tint.Accent)),
+        });
+
+        var textStack = new StackPanel { Spacing = 0.5, VerticalAlignment = VerticalAlignment.Center };
+        textStack.Children.Add(L10n.Skip(new TextBlock
+        {
+            Text = activeTitle,
+            FontSize = 12,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush(palette.T1),
+            MaxLines = 1,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        }));
+        textStack.Children.Add(new TextBlock
+        {
+            Text = L10n.T("正在收听 · 点击回到播放页"),
+            FontSize = 10,
+            Foreground = ThemeHelper.Brush(palette.T3),
+            MaxLines = 1,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+        Grid.SetColumn(textStack, 1);
+        leftGrid.Children.Add(textStack);
+
+        var surfaceBtn = new Button
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Padding = new Thickness(12, 0, 8, 0),
+            CornerRadius = new CornerRadius(22, 0, 0, 22),
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            UseSystemFocusVisuals = false,
+            Content = leftGrid,
+        };
+        AutomationProperties.SetName(surfaceBtn, $"{activeTitle} · {L10n.T("正在收听 · 点击回到播放页")}");
+        surfaceBtn.Click += (_, _) => App.CurrentApp.ActivateActiveAudioSurface();
+        outer.Children.Add(surfaceBtn);
+
+        var toggleBtn = new Button
+        {
+            Width = 30,
+            Height = 30,
+            MinWidth = 30,
+            MinHeight = 30,
+            Padding = new Thickness(0),
+            Margin = new Thickness(0, 0, 7, 0),
+            CornerRadius = new CornerRadius(15),
+            Background = ThemeHelper.Brush(tint.Soft),
+            BorderBrush = ThemeHelper.Brush(tint.Edge),
+            BorderThickness = new Thickness(0.5),
+            VerticalAlignment = VerticalAlignment.Center,
+            UseSystemFocusVisuals = false,
+            Content = YYIcons.Make("pause", 11.5, ThemeHelper.Brush(tint.Accent), filled: true),
+        };
+        ToolTipService.SetToolTip(toggleBtn, L10n.T("暂停"));
+        AutomationProperties.SetName(toggleBtn, L10n.T("暂停"));
+        toggleBtn.Click += (_, _) =>
+        {
+            if (_library.SystemIntegration.TogglePlaybackCallback is Action cb)
+                cb();
+            else
+                App.CurrentApp.ActivateActiveAudioSurface();
+        };
+        Grid.SetColumn(toggleBtn, 1);
+        outer.Children.Add(toggleBtn);
+
+        return new Border
+        {
+            Height = 44,
+            MinWidth = 300,
+            MaxWidth = 520,
+            CornerRadius = new CornerRadius(22),
+            Background = ThemeHelper.Brush(palette.Card),
+            BorderBrush = ThemeHelper.Brush(palette.Line),
+            BorderThickness = new Thickness(1),
+            Child = outer,
+        };
+    }
+
+    private void UpdateGlobalNowPlayingDock()
+    {
+        if (_activeFilter == "podcasts") return;
+        if (_library.SystemIntegration.IsAudioPlaying
+            && !string.IsNullOrWhiteSpace(_library.SystemIntegration.ActivePlaybackTitle))
+        {
+            SetBottomDock(BuildGlobalNowPlayingBar(_library.SystemIntegration.ActivePlaybackTitle));
+        }
+        else
+        {
+            SetBottomDock(null);
+        }
+    }
+
+    private void OnPlaybackStateChanged()
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_closed) return;
+            if (_activeFilter != "podcasts")
+            {
+                UpdateGlobalNowPlayingDock();
+            }
+            if (_activeFilter is "all" or "audio" || _activeFilter.StartsWith("col:", StringComparison.Ordinal))
+            {
+                RenderShelfMain();
+            }
+        });
+    }
+
+    private bool IsBookCurrentlyPlaying(BookSummary book)
+    {
+        string? activeBookId = App.CurrentApp.GetActiveAudioBookId();
+        if (!string.IsNullOrEmpty(activeBookId))
+        {
+            if (activeBookId == book.Id) return true;
+            if (_listeningPairs.Any(lp => (lp.Book == book.Id && lp.Recording == activeBookId) || (lp.Recording == book.Id && lp.Book == activeBookId)))
+                return true;
+        }
+        return _library.SystemIntegration.IsPlayingTitle(book.Title);
     }
 
     private void RenderCurrentView()
@@ -653,7 +980,15 @@ public sealed partial class ShelfWindow : Window
                 RenderShelfMain();
                 break;
         }
+        if (_activeFilter != "podcasts")
+        {
+            UpdateGlobalNowPlayingDock();
+        }
         L10n.ApplyTree(RootGrid);
+        if (_activeFilter.StartsWith("col:", StringComparison.Ordinal))
+        {
+            ViewTitleText.Text = _collections.FirstOrDefault(c => $"col:{c.Id}" == _activeFilter)?.Name ?? L10n.T("合集");
+        }
     }
 
     private void ConfigureHeaderForCurrentView()
@@ -664,6 +999,9 @@ public sealed partial class ShelfWindow : Window
 
         HeaderLeftCustomHost.Children.Clear();
         HeaderRightHost.Children.Clear();
+        _activeNotesFilterBox = null;
+        _activeWordsFilterBox = null;
+        _activeCollectionsFilterBox = null;
         ViewTitleText.Visibility = Visibility.Visible;
         ViewSubtitleText.Text = "";
 
@@ -737,6 +1075,7 @@ public sealed partial class ShelfWindow : Window
                         UseSystemFocusVisuals = false,
                         Content = backSp,
                     };
+                    AutomationProperties.SetName(backBtn, L10n.T("进度"));
                     backBtn.Click += (_, _) =>
                     {
                         _recordBuilder.OpenBookId = null;
@@ -795,6 +1134,8 @@ public sealed partial class ShelfWindow : Window
                         MinHeight = 24,
                         VerticalAlignment = VerticalAlignment.Center,
                     };
+                    YYChrome.StripTextBoxChrome(notesFilterBox);
+                    _activeNotesFilterBox = notesFilterBox;
                     notesFilterBox.TextChanged += (_, _) =>
                     {
                         _notesQuery = notesFilterBox.Text ?? "";
@@ -817,6 +1158,7 @@ public sealed partial class ShelfWindow : Window
                             Background = new SolidColorBrush(Colors.Transparent),
                             Content = YYIcons.Make("xmark", 9, ThemeHelper.Brush(p.T3)),
                         };
+                        AutomationProperties.SetName(clearNotesBtn, L10n.T("清除搜索"));
                         clearNotesBtn.Click += (_, _) =>
                         {
                             _notesQuery = "";
@@ -833,22 +1175,38 @@ public sealed partial class ShelfWindow : Window
                 HeaderRightHost.Children.Add(BuildHeaderSegments(_notesByBook, "按时间", "按书", byBook =>
                 {
                     _notesByBook = byBook;
-                    _notesChip = "all";
                     ConfigureHeaderForCurrentView();
                     RenderNotesPage();
                 }));
 
                 var expSp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, VerticalAlignment = VerticalAlignment.Center };
                 expSp.Children.Add(YYIcons.Make("share-up", 11, t1));
-                expSp.Children.Add(new TextBlock { Text = "导出", FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
+                var expBtnLabel = new TextBlock { Text = "导出", FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+                expSp.Children.Add(expBtnLabel);
                 var noteMenu = new MenuFlyout();
+                var exportNotesBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+                    Content = expSp,
+                    Flyout = noteMenu,
+                    IsEnabled = totalMarks > 0,
+                };
+                AutomationProperties.SetName(exportNotesBtn, L10n.T("导出"));
+
+                void SetNotesExportBusy(bool busy)
+                {
+                    if (_closed) return;
+                    exportNotesBtn.IsEnabled = !busy && totalMarks > 0;
+                    expBtnLabel.Text = L10n.T(busy ? "导出中…" : "导出");
+                }
+
                 // Fix first-visit 按书 scope: fall back to most recently marked book if _notesChosenBookId isn't set yet
                 BookSummary? chosenBook = null;
                 if (_notesByBook)
                 {
                     chosenBook = _keptBooks.FirstOrDefault(b => b.Id == _notesChosenBookId)
                         ?? _keptBooks
-                            .Select(b => (Book: b, Marks: _library.GetMarks(b.Id)))
+                            .Select(b => (Book: b, Marks: GetCachedMarks(b.Id)))
                             .Where(x => x.Marks.Count > 0)
                             .OrderByDescending(x => x.Marks.Max(m => m.At))
                             .FirstOrDefault().Book;
@@ -863,9 +1221,18 @@ public sealed partial class ShelfWindow : Window
                     InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
                     var f = await picker.PickSaveFileAsync();
                     if (f is null) return;
-                    string md = BuildFilteredNotesMarkdown(chosenBook);
-                    await File.WriteAllTextAsync(f.Path, md);
-                    ShowToast($"已导出笔记到 {f.Name}", canUndo: false);
+                    string chipSnap = _notesChip;
+                    string querySnap = _notesQuery;
+                    var keptSnap = _keptBooks.ToArray();
+                    SetNotesExportBusy(true);
+                    try
+                    {
+                        string md = await Task.Run(() => BuildFilteredNotesMarkdownCore(chosenBook, keptSnap, chipSnap, querySnap));
+                        await File.WriteAllTextAsync(f.Path, md);
+                        if (!_closed) ShowToast($"已导出笔记到 {f.Name}", canUndo: false);
+                    }
+                    catch (Exception ex) { if (!_closed) ShowToast(ex.Message, canUndo: false, isDelete: true); }
+                    finally { SetNotesExportBusy(false); }
                 };
                 noteMenu.Items.Add(mdItem);
                 noteMenu.Items.Add(new MenuFlyoutSeparator());
@@ -877,12 +1244,14 @@ public sealed partial class ShelfWindow : Window
                     var obsItem = new MenuFlyoutItem { Text = "发到 Obsidian 库" };
                     obsItem.Click += async (_, _) =>
                     {
+                        SetNotesExportBusy(true);
                         try
                         {
                             var (booksN, marksN) = await _library.NoteExports.ExportToObsidianAsync(chosenBook);
-                            ShowToast($"已发送 {marksN} 条笔记到 Obsidian（{booksN} 本书）", canUndo: false);
+                            if (!_closed) ShowToast($"已发送 {marksN} 条笔记到 Obsidian（{booksN} 本书）", canUndo: false);
                         }
-                        catch (Exception ex) { ShowToast(ex.Message, canUndo: false, isDelete: true); }
+                        catch (Exception ex) { if (!_closed) ShowToast(ex.Message, canUndo: false, isDelete: true); }
+                        finally { SetNotesExportBusy(false); }
                     };
                     noteMenu.Items.Add(obsItem);
                 }
@@ -893,12 +1262,14 @@ public sealed partial class ShelfWindow : Window
                     var notItem = new MenuFlyoutItem { Text = "发到 Notion" };
                     notItem.Click += async (_, _) =>
                     {
+                        SetNotesExportBusy(true);
                         try
                         {
                             var (_, marksN) = await _library.NoteExports.ExportToNotionAsync(chosenBook);
-                            ShowToast(marksN > 0 ? $"已增量同步 {marksN} 条新笔记到 Notion" : "Notion 已是最新，没有新笔记需要发送", canUndo: false);
+                            if (!_closed) ShowToast(marksN > 0 ? $"已增量同步 {marksN} 条新笔记到 Notion" : "Notion 已是最新，没有新笔记需要发送", canUndo: false);
                         }
-                        catch (Exception ex) { ShowToast(ex.Message, canUndo: false, isDelete: true); }
+                        catch (Exception ex) { if (!_closed) ShowToast(ex.Message, canUndo: false, isDelete: true); }
+                        finally { SetNotesExportBusy(false); }
                     };
                     noteMenu.Items.Add(notItem);
                 }
@@ -909,12 +1280,14 @@ public sealed partial class ShelfWindow : Window
                     var floItem = new MenuFlyoutItem { Text = "发到 flomo" };
                     floItem.Click += async (_, _) =>
                     {
+                        SetNotesExportBusy(true);
                         try
                         {
                             var (_, marksN) = await _library.NoteExports.ExportToFlomoAsync(chosenBook);
-                            ShowToast(marksN > 0 ? $"已发送 {marksN} 条卡片到 flomo" : "flomo 已是最新，没有未发过的划线", canUndo: false);
+                            if (!_closed) ShowToast(marksN > 0 ? $"已发送 {marksN} 条卡片到 flomo" : "flomo 已是最新，没有未发过的划线", canUndo: false);
                         }
-                        catch (Exception ex) { ShowToast(ex.Message, canUndo: false, isDelete: true); }
+                        catch (Exception ex) { if (!_closed) ShowToast(ex.Message, canUndo: false, isDelete: true); }
+                        finally { SetNotesExportBusy(false); }
                     };
                     noteMenu.Items.Add(floItem);
                 }
@@ -925,12 +1298,14 @@ public sealed partial class ShelfWindow : Window
                     var xzItem = new MenuFlyoutItem { Text = "发到 新枝" };
                     xzItem.Click += async (_, _) =>
                     {
+                        SetNotesExportBusy(true);
                         try
                         {
                             var (_, marksN) = await _library.NoteExports.ExportToXinzhiAsync(chosenBook);
-                            ShowToast(marksN > 0 ? $"已发送 {marksN} 条笔记到新枝" : "新枝已是最新，没有未发过的划线", canUndo: false);
+                            if (!_closed) ShowToast(marksN > 0 ? $"已发送 {marksN} 条笔记到新枝" : "新枝已是最新，没有未发过的划线", canUndo: false);
                         }
-                        catch (Exception ex) { ShowToast(ex.Message, canUndo: false, isDelete: true); }
+                        catch (Exception ex) { if (!_closed) ShowToast(ex.Message, canUndo: false, isDelete: true); }
+                        finally { SetNotesExportBusy(false); }
                     };
                     noteMenu.Items.Add(xzItem);
                 }
@@ -953,23 +1328,19 @@ public sealed partial class ShelfWindow : Window
                         InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
                         var f = await picker.PickSaveFileAsync();
                         if (f is null) return;
+                        SetNotesExportBusy(true);
                         try
                         {
                             await _library.NoteExports.ExportAnnotatedEpubAsync(chosenBook.Id, f.Path);
-                            ShowToast($"已导出 {f.Name}", canUndo: false);
+                            if (!_closed) ShowToast($"已导出 {f.Name}", canUndo: false);
                         }
-                        catch (Exception ex) { ShowToast($"导出失败：{ex.Message}", canUndo: false, isDelete: true); }
+                        catch (Exception ex) { if (!_closed) ShowToast($"导出失败：{ex.Message}", canUndo: false, isDelete: true); }
+                        finally { SetNotesExportBusy(false); }
                     };
                     noteMenu.Items.Add(epubItem);
                 }
 
-                HeaderRightHost.Children.Add(new Button
-                {
-                    Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
-                    Content = expSp,
-                    Flyout = noteMenu,
-                    IsEnabled = totalMarks > 0,
-                });
+                HeaderRightHost.Children.Add(exportNotesBtn);
                 break;
             }
 
@@ -978,6 +1349,73 @@ public sealed partial class ShelfWindow : Window
                 int learning = _words.Count(w => !w.Known);
                 int known = _words.Count(w => w.Known);
                 if (_words.Count > 0) ViewSubtitleText.Text = $"在学 {learning} · 已掌握 {known}";
+
+                if (_words.Count > 0 || !string.IsNullOrEmpty(_wordsQuery))
+                {
+                    var wordsFilterWrap = new Border
+                    {
+                        Height = 28,
+                        Width = 164,
+                        CornerRadius = new CornerRadius(14),
+                        Background = ThemeHelper.Brush(p.Inset),
+                        BorderBrush = ThemeHelper.Brush(p.Line),
+                        BorderThickness = new Thickness(0.5),
+                        Padding = new Thickness(9, 0, 6, 0),
+                    };
+                    var wfg = new Grid { ColumnSpacing = 5 };
+                    wfg.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    wfg.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    wfg.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    wfg.Children.Add(YYIcons.Make("search", 11, ThemeHelper.Brush(p.T3)));
+
+                    var wordsFilterBox = new TextBox
+                    {
+                        Text = _wordsQuery,
+                        PlaceholderText = "找生词",
+                        FontSize = 11.5,
+                        BorderThickness = new Thickness(0),
+                        Background = new SolidColorBrush(Colors.Transparent),
+                        Padding = new Thickness(0, 4, 0, 0),
+                        MinHeight = 24,
+                        VerticalAlignment = VerticalAlignment.Center,
+                    };
+                    YYChrome.StripTextBoxChrome(wordsFilterBox);
+                    _activeWordsFilterBox = wordsFilterBox;
+                    wordsFilterBox.TextChanged += (_, _) =>
+                    {
+                        _wordsQuery = wordsFilterBox.Text ?? "";
+                        RenderWordsPage();
+                    };
+                    Grid.SetColumn(wordsFilterBox, 1);
+                    wfg.Children.Add(wordsFilterBox);
+
+                    if (!string.IsNullOrEmpty(_wordsQuery))
+                    {
+                        var clearWordsBtn = new Button
+                        {
+                            Width = 18,
+                            Height = 18,
+                            MinWidth = 18,
+                            MinHeight = 18,
+                            Padding = new Thickness(0),
+                            CornerRadius = new CornerRadius(9),
+                            BorderThickness = new Thickness(0),
+                            Background = new SolidColorBrush(Colors.Transparent),
+                            Content = YYIcons.Make("xmark", 9, ThemeHelper.Brush(p.T3)),
+                        };
+                        AutomationProperties.SetName(clearWordsBtn, L10n.T("清除搜索"));
+                        clearWordsBtn.Click += (_, _) =>
+                        {
+                            _wordsQuery = "";
+                            ConfigureHeaderForCurrentView();
+                            RenderWordsPage();
+                        };
+                        Grid.SetColumn(clearWordsBtn, 2);
+                        wfg.Children.Add(clearWordsBtn);
+                    }
+                    wordsFilterWrap.Child = wfg;
+                    HeaderRightHost.Children.Add(wordsFilterWrap);
+                }
 
                 HeaderRightHost.Children.Add(BuildHeaderSegments(_wordsByBook, "按时间", "按书", byBook =>
                 {
@@ -999,7 +1437,7 @@ public sealed partial class ShelfWindow : Window
                     var f = await picker.PickSaveFileAsync();
                     if (f is null) return;
                     var sb = new System.Text.StringBuilder("#separator:tab\n#html:true\n#tags column:3\n");
-                    foreach (var w in _words.Where(w => w.Known == _wordsShowKnown))
+                    foreach (var w in GetFilteredWords())
                     {
                         string front = $"<b>{System.Net.WebUtility.HtmlEncode(w.Word)}</b>" + (string.IsNullOrEmpty(w.Phonetic) ? "" : $" <span style=\"color:#666\">/{System.Net.WebUtility.HtmlEncode(w.Phonetic.Trim('/'))}/</span>");
                         string ctxHtml = "";
@@ -1033,8 +1471,15 @@ public sealed partial class ShelfWindow : Window
                         string v = (s ?? "").Replace("\r\n", " ").Replace('\n', ' ').Replace("\"", "\"\"");
                         return $"\"{v}\"";
                     }
-                    var csvSb = new System.Text.StringBuilder("单词,音标,释义,原句,出处,加入时间,掌握了\n");
-                    var scope = _words.Where(w => w.Known == _wordsShowKnown);
+                    string csvHeader = L10n.T("单词,音标,释义,原句,出处,加入时间,掌握了");
+                    if (csvHeader == "单词,音标,释义,原句,出处,加入时间,掌握了" && L10n.T("是") != "是")
+                    {
+                        csvHeader = string.Join(",",
+                            L10n.T("单词"), L10n.T("音标"), L10n.T("释义"), L10n.T("原句"),
+                            L10n.T("出处"), L10n.T("加入时间"), L10n.T("已掌握"));
+                    }
+                    var csvSb = new System.Text.StringBuilder(csvHeader + "\n");
+                    var scope = GetFilteredWords();
                     foreach (var w in scope)
                     {
                         string added = DateTimeOffset.FromUnixTimeMilliseconds(w.At).LocalDateTime.ToString("yyyy-MM-dd HH:mm");
@@ -1046,7 +1491,7 @@ public sealed partial class ShelfWindow : Window
                             CsvCell(w.Context),
                             CsvCell(bookTitle),
                             CsvCell(added),
-                            CsvCell(w.Known ? "是" : "否")));
+                            CsvCell(L10n.T(w.Known ? "是" : "否"))));
                     }
                     await File.WriteAllTextAsync(f.Path, csvSb.ToString(), new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
                     ShowToast($"已导出 CSV 到 {f.Name}", canUndo: false);
@@ -1060,6 +1505,7 @@ public sealed partial class ShelfWindow : Window
                     Flyout = expMenu,
                     IsEnabled = _words.Count > 0,
                 };
+                AutomationProperties.SetName(expWordBtn, L10n.T("导出"));
                 HeaderRightHost.Children.Add(expWordBtn);
                 break;
             }
@@ -1073,7 +1519,7 @@ public sealed partial class ShelfWindow : Window
                         ? $"{_collections.Count} 个 · 收纳 {totalInCols} 本"
                         : $"{_collections.Count} 个";
                 }
-                if (_collections.Count >= 5 || !string.IsNullOrEmpty(_collectionQuery))
+                if (_collections.Count > 0 || !string.IsNullOrEmpty(_collectionQuery))
                 {
                     var filterWrap = new Border
                     {
@@ -1102,6 +1548,8 @@ public sealed partial class ShelfWindow : Window
                         MinHeight = 24,
                         VerticalAlignment = VerticalAlignment.Center,
                     };
+                    YYChrome.StripTextBoxChrome(filterBox);
+                    _activeCollectionsFilterBox = filterBox;
                     filterBox.TextChanged += (_, _) =>
                     {
                         _collectionQuery = filterBox.Text ?? "";
@@ -1122,6 +1570,7 @@ public sealed partial class ShelfWindow : Window
                             Content = new TextBlock { Text = "×", FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3) },
                             UseSystemFocusVisuals = false,
                         };
+                        AutomationProperties.SetName(clearBtn, L10n.T("清除搜索"));
                         clearBtn.Click += (_, _) =>
                         {
                             _collectionQuery = "";
@@ -1162,6 +1611,7 @@ public sealed partial class ShelfWindow : Window
                             Content = backSp,
                         };
                         ToolTipService.SetToolTip(backBtn, "返回全部合集 (Ctrl+[)");
+                        AutomationProperties.SetName(backBtn, L10n.T("返回全部合集 (Ctrl+[)"));
                         backBtn.Click += (_, _) =>
                         {
                             _cameFromCollectionsWall = false;
@@ -1175,7 +1625,7 @@ public sealed partial class ShelfWindow : Window
                     if (activeCol is not null)
                     {
                         var colMenu = new MenuFlyout();
-                        var pinItem = new MenuFlyoutItem { Text = isPinned ? "取消固定到侧栏" : "固定到侧栏" };
+                        var pinItem = new MenuFlyoutItem { Text = L10n.T(isPinned ? "取消固定到侧栏" : "固定到侧栏") };
                         pinItem.Click += (_, _) =>
                         {
                             if (isPinned) _library.Prefs.PinnedCollectionIds.Remove(activeCol.Id);
@@ -1183,9 +1633,9 @@ public sealed partial class ShelfWindow : Window
                             _library.SavePrefs();
                             RefreshBooks();
                         };
-                        var renItem = new MenuFlyoutItem { Text = "重命名…" };
+                        var renItem = new MenuFlyoutItem { Text = L10n.T("重命名…") };
                         renItem.Click += async (_, _) => await RenameCollectionAsync(activeCol);
-                        var delItem = new MenuFlyoutItem { Text = "删除合集…", Foreground = ThemeHelper.Brush(p.Danger) };
+                        var delItem = new MenuFlyoutItem { Text = L10n.T("删除合集…"), Foreground = ThemeHelper.Brush(p.Danger) };
                         delItem.Click += async (_, _) => await ConfirmDeleteCollectionAsync(activeCol);
                         colMenu.Items.Add(pinItem);
                         colMenu.Items.Add(new MenuFlyoutSeparator());
@@ -1201,6 +1651,7 @@ public sealed partial class ShelfWindow : Window
                             Flyout = colMenu,
                         };
                         ToolTipService.SetToolTip(manageBtn, "管理合集");
+                        AutomationProperties.SetName(manageBtn, L10n.T("管理合集"));
                         HeaderRightHost.Children.Add(manageBtn);
                     }
                 }
@@ -1329,7 +1780,7 @@ public sealed partial class ShelfWindow : Window
             }
             else
             {
-                EmptyIconHost.Content = YYIcons.Make("books.vertical", 42, ThemeHelper.Brush(pal.T3));
+                EmptyIconHost.Content = YYIcons.Make(_activeFilter.StartsWith("col:", StringComparison.Ordinal) ? "stack" : "books.vertical", 28, ThemeHelper.Brush(pal.T3));
                 EmptyTitleText.Text = _activeFilter.StartsWith("col:", StringComparison.Ordinal)
                     ? "还没有书。把文件拖进来，或在书的右键菜单里加入这个合集"
                     : "书架是空的，把 EPUB、PDF、MOBI、TXT 拖进窗口就能开始读";
@@ -1426,7 +1877,7 @@ public sealed partial class ShelfWindow : Window
         }
 
         var pct = (int)Math.Round(book.Progress * 100);
-        bool isPlayingThis = _library.SystemIntegration.IsPlayingTitle(book.Title);
+        bool isPlayingThis = IsBookCurrentlyPlaying(book);
         bool hasPairedOrAudio = book.Format == BookFormat.Audio || _pairedBookIds.Contains(book.Id);
         var metaLine = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(0, 1, 0, 0) };
         if (isPlayingThis)
@@ -1458,6 +1909,7 @@ public sealed partial class ShelfWindow : Window
                 isPlayingThis ? ThemeHelper.Brush(tint.Accent) : iconBrush),
         };
         ToolTipService.SetToolTip(listenBtn, isPlayingThis ? "正在听" : "听");
+        AutomationProperties.SetName(listenBtn, L10n.T(isPlayingThis ? "正在听" : "听"));
         listenBtn.Click += (_, _) => TryOpenBook(book, autoListen: true);
 
         var moreBtn = new Button
@@ -1468,6 +1920,7 @@ public sealed partial class ShelfWindow : Window
             Flyout = BuildBookMenuFlyout(book),
         };
         ToolTipService.SetToolTip(moreBtn, "更多");
+        AutomationProperties.SetName(moreBtn, L10n.T("更多"));
 
         actions.Children.Add(listenBtn);
         actions.Children.Add(moreBtn);
@@ -1483,6 +1936,7 @@ public sealed partial class ShelfWindow : Window
             UseSystemFocusVisuals = false,
             ContextFlyout = BuildBookMenuFlyout(book),
         };
+        AutomationProperties.SetName(hitBtn, $"{book.Title}{(book.Authors.Length > 0 ? $"，{book.Authors[0]}" : "")}，{(pct > 0 ? $"{pct}%" : L10n.T("刚开始"))}");
         hitBtn.Click += (_, _) => TryOpenBook(book);
 
         outer.Children.Add(hitBtn);
@@ -1532,7 +1986,11 @@ public sealed partial class ShelfWindow : Window
     private async Task TintLeadCardAsync(Border card, string coverPath, bool dark)
     {
         var color = await CoverColorHelper.LoadLeadCardColorAsync(coverPath, dark);
-        DispatcherQueue.TryEnqueue(() => card.Background = ThemeHelper.Brush(color));
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_closed) return;
+            card.Background = ThemeHelper.Brush(color);
+        });
     }
 
     private UIElement CreateBookCell(BookSummary book)
@@ -1559,6 +2017,13 @@ public sealed partial class ShelfWindow : Window
             Content = cover,
             ContextFlyout = BuildBookMenuFlyout(book),
         };
+        AutomationProperties.SetName(coverBtn, $"{book.Title}{(book.Authors.Length > 0 ? $"，{book.Authors[0]}" : "")}，{L10n.T(FormatShelfNote(book))}");
+        if (!_library.Prefs.GlobalEinkMode)
+        {
+            coverBtn.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(140) };
+            coverBtn.PointerEntered += (_, _) => coverBtn.Translation = new Vector3(0, -2f, 0);
+            coverBtn.PointerExited += (_, _) => coverBtn.Translation = Vector3.Zero;
+        }
         if (isHighlighted)
         {
             coverBtn.Loaded += (_, _) => { try { coverBtn.StartBringIntoView(); } catch { } };
@@ -1566,6 +2031,7 @@ public sealed partial class ShelfWindow : Window
         string dragBookId = book.Id;
         coverBtn.DragStarting += (_, e) =>
         {
+            e.Data.Properties["yuyue-book-id"] = dragBookId;
             e.Data.SetText("yuyue-book:" + dragBookId);
             e.Data.RequestedOperation = DataPackageOperation.Copy;
         };
@@ -1585,14 +2051,38 @@ public sealed partial class ShelfWindow : Window
 
         if (_library.Prefs.ShowProgress)
         {
-            root.Children.Add(new TextBlock
+            if (IsBookCurrentlyPlaying(book))
             {
-                Text = FormatShelfNote(book),
-                FontSize = 10.5,
-                Foreground = ThemeHelper.Brush(palette.T3),
-                MaxLines = 1,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-            });
+                int pct = (int)Math.Round(book.Progress * 100);
+                var listenRow = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 4,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                listenRow.Children.Add(YYIcons.Make("headphones", 10, ThemeHelper.Brush(tint.Accent)));
+                listenRow.Children.Add(L10n.Skip(new TextBlock
+                {
+                    Text = $"{L10n.T("正在听")} · {pct}%",
+                    FontSize = 10.5,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+                    Foreground = ThemeHelper.Brush(tint.Accent),
+                    MaxLines = 1,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                }));
+                root.Children.Add(listenRow);
+            }
+            else
+            {
+                root.Children.Add(new TextBlock
+                {
+                    Text = FormatShelfNote(book),
+                    FontSize = 10.5,
+                    Foreground = ThemeHelper.Brush(palette.T3),
+                    MaxLines = 1,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                });
+            }
         }
 
         return root;
@@ -1689,7 +2179,9 @@ public sealed partial class ShelfWindow : Window
 
         if (!string.IsNullOrEmpty(book.CoverPath) && File.Exists(book.CoverPath))
         {
-            layer.Children.Add(new Image { Source = new BitmapImage(new Uri(book.CoverPath)), Stretch = Stretch.UniformToFill });
+            var bmp = new BitmapImage { DecodePixelWidth = Math.Max(48, (int)Math.Ceiling(width * 2)) };
+            bmp.UriSource = new Uri(book.CoverPath);
+            layer.Children.Add(new Image { Source = bmp, Stretch = Stretch.UniformToFill });
         }
         else if (isAudio)
         {
@@ -1729,7 +2221,8 @@ public sealed partial class ShelfWindow : Window
             face.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             face.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            face.Children.Add(new TextBlock
+            var topStack = new StackPanel { Spacing = Math.Max(2, 4.5 * unit), VerticalAlignment = VerticalAlignment.Top };
+            topStack.Children.Add(new TextBlock
             {
                 Text = book.Title,
                 FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
@@ -1739,12 +2232,11 @@ public sealed partial class ShelfWindow : Window
                 TextWrapping = TextWrapping.Wrap,
                 MaxLines = width < 48 ? 2 : 4,
                 TextTrimming = TextTrimming.CharacterEllipsis,
-                VerticalAlignment = VerticalAlignment.Top,
             });
 
             if (book.Authors.Length > 0 && width >= 40)
             {
-                var authTb = new TextBlock
+                topStack.Children.Add(new TextBlock
                 {
                     Text = book.Authors[0],
                     FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
@@ -1752,22 +2244,29 @@ public sealed partial class ShelfWindow : Window
                     Foreground = ThemeHelper.Brush(palette.T2),
                     MaxLines = 1,
                     TextTrimming = TextTrimming.CharacterEllipsis,
-                    VerticalAlignment = VerticalAlignment.Bottom,
-                };
-                Grid.SetRow(authTb, 1);
-                face.Children.Add(authTb);
+                });
             }
-            else if (book.Format == BookFormat.Pdf)
+            face.Children.Add(topStack);
+
+            if (book.Format == BookFormat.Pdf)
             {
-                var pdfTb = new TextBlock
+                var pdfPill = new Border
                 {
-                    Text = "PDF",
-                    FontSize = Math.Max(7, 8.5 * unit),
-                    Foreground = ThemeHelper.Brush(palette.T2),
+                    CornerRadius = new CornerRadius(Math.Max(2, 3 * unit)),
+                    Background = ThemeHelper.Brush(Color.FromArgb(dark ? (byte)28 : (byte)16, palette.T1.R, palette.T1.G, palette.T1.B)),
+                    Padding = new Thickness(Math.Max(3, 4.5 * unit), Math.Max(0.8, 1.4 * unit), Math.Max(3, 4.5 * unit), Math.Max(0.8, 1.4 * unit)),
+                    HorizontalAlignment = HorizontalAlignment.Left,
                     VerticalAlignment = VerticalAlignment.Bottom,
+                    Child = new TextBlock
+                    {
+                        Text = "PDF",
+                        FontSize = Math.Max(6.5, 8 * unit),
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        Foreground = ThemeHelper.Brush(palette.T2),
+                    },
                 };
-                Grid.SetRow(pdfTb, 1);
-                face.Children.Add(pdfTb);
+                Grid.SetRow(pdfPill, 1);
+                face.Children.Add(pdfPill);
             }
             layer.Children.Add(face);
         }
@@ -1840,7 +2339,7 @@ public sealed partial class ShelfWindow : Window
         var titleRow = new Grid { ColumnSpacing = 6 };
         titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        titleRow.Children.Add(new TextBlock
+        titleRow.Children.Add(L10n.Skip(new TextBlock
         {
             Text = book.Title,
             FontSize = 13,
@@ -1849,10 +2348,10 @@ public sealed partial class ShelfWindow : Window
             MaxLines = 1,
             TextTrimming = TextTrimming.CharacterEllipsis,
             MaxWidth = book.Authors.Length > 0 ? 138 : 186,
-        });
+        }));
         if (book.Authors.Length > 0)
         {
-            var authTb = new TextBlock
+            var authTb = L10n.Skip(new TextBlock
             {
                 Text = book.Authors[0],
                 FontSize = 10.5,
@@ -1860,7 +2359,7 @@ public sealed partial class ShelfWindow : Window
                 MaxLines = 1,
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 VerticalAlignment = VerticalAlignment.Bottom,
-            };
+            });
             Grid.SetColumn(authTb, 1);
             titleRow.Children.Add(authTb);
         }
@@ -1999,7 +2498,7 @@ public sealed partial class ShelfWindow : Window
             root.Children.Add(Hairline());
             var openSec = new StackPanel { Spacing = 1 };
             bool isAudio = book.Format == BookFormat.Audio;
-            bool playingNow = _library.SystemIntegration.IsPlayingTitle(book.Title);
+            bool playingNow = IsBookCurrentlyPlaying(book);
             bool hasPairedAudiobook = _listeningPairs.Any(lp => lp.Book == book.Id);
             string openLbl = playingNow
                 ? "正在听 · 切换过去"
@@ -2023,6 +2522,7 @@ public sealed partial class ShelfWindow : Window
         mgmtSec.Children.Add(MenuRow("删除", "trash", () => _ = HandleDeleteBookAsync(book), danger: true));
         root.Children.Add(mgmtSec);
 
+        L10n.ApplyTree(root);
         flyout.Content = root;
         return flyout;
     }
@@ -2287,6 +2787,8 @@ public sealed partial class ShelfWindow : Window
         {
             pickedCoverBytes = await File.ReadAllBytesAsync(path);
             coverPreviewHost.Children.Clear();
+            var bmp = new BitmapImage { DecodePixelWidth = 152 };
+            bmp.UriSource = new Uri(path);
             var b = new Border
             {
                 Width = 76,
@@ -2294,7 +2796,7 @@ public sealed partial class ShelfWindow : Window
                 CornerRadius = new CornerRadius(5),
                 BorderBrush = ThemeHelper.Brush(p.Line),
                 BorderThickness = new Thickness(0.5),
-                Child = new Image { Source = new BitmapImage(new Uri(path)), Stretch = Stretch.UniformToFill },
+                Child = new Image { Source = bmp, Stretch = Stretch.UniformToFill },
             };
             coverPreviewHost.Children.Add(b);
             pickCoverBtn.Content = L10n.T("已换新封面");
@@ -2342,6 +2844,7 @@ public sealed partial class ShelfWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(0, 6, 0, 6),
         };
+        YYChrome.StripTextBoxChrome(titleBox);
         var authorBox = new TextBox
         {
             PlaceholderText = "几位作者用顿号隔开",
@@ -2352,6 +2855,7 @@ public sealed partial class ShelfWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(0, 6, 0, 6),
         };
+        YYChrome.StripTextBoxChrome(authorBox);
 
         Grid MakeFieldRow(string label, TextBox box)
         {
@@ -2389,15 +2893,36 @@ public sealed partial class ShelfWindow : Window
             Margin = new Thickness(4, 0, 4, 0),
         };
 
-        void SaveAndClose()
+        bool saving = false;
+        Button? okBtnRef = null;
+        async void SaveAndClose()
         {
+            if (saving) return;
+            saving = true;
+            if (okBtnRef is not null) okBtnRef.IsEnabled = false;
             var newTitle = titleBox.Text.Trim();
             var newAuthors = authorBox.Text
                 .Split(['、', ',', '，', ';', '；', '/'], StringSplitOptions.RemoveEmptyEntries)
                 .Select(s => s.Trim()).Where(s => s.Length > 0).ToArray();
-            _library.EditBookInfo(book.Id, newTitle, newAuthors);
-            if (pickedCoverBytes is not null)
-                _library.SetCover(book.Id, pickedCoverBytes);
+            var coverBytes = pickedCoverBytes;
+            string editBookId = book.Id;
+            try
+            {
+                await Task.Run(() =>
+                {
+                    _library.EditBookInfo(editBookId, newTitle, newAuthors);
+                    if (coverBytes is not null)
+                        _library.SetCover(editBookId, coverBytes);
+                });
+            }
+            catch (Exception ex)
+            {
+                saving = false;
+                if (okBtnRef is not null) okBtnRef.IsEnabled = true;
+                if (!_closed) ShowToast(ex.Message, canUndo: false, isDelete: true);
+                return;
+            }
+            if (_closed) return;
             dlgRef?.Hide();
             RefreshBooks();
             ShowToast("书籍信息已更新", canUndo: false);
@@ -2407,6 +2932,7 @@ public sealed partial class ShelfWindow : Window
         authorBox.KeyDown += (_, ke) => { if (ke.Key == VirtualKey.Enter) { ke.Handled = true; SaveAndClose(); } };
 
         var okBtn = YYChrome.MakeSheetPillButton("好", SaveAndClose, dark, _library.Prefs.Tint, "dark", height: 42, stretch: true);
+        okBtnRef = okBtn;
         okBtn.Margin = new Thickness(0, 4, 0, 0);
 
         var body = new StackPanel
@@ -2439,6 +2965,8 @@ public sealed partial class ShelfWindow : Window
             _ = QuoteShareDialog.ShowAsync(this, RootGrid.XamlRoot, "赌书消得泼茶香，当时只道是寻常。", "所有的伏笔都在不经意的闲笔里悄然种下。", _shelfBooks[0].Title, _shelfBooks[0].Authors.FirstOrDefault(), _shelfBooks[0].CoverPath, "第一回", _library);
         else if (kind == "feedback")
             _ = _library.Updates.ShowFeedbackComposerAsync(this, RootGrid.XamlRoot);
+        else if (kind == "review")
+            _ = ShowReviewSheetAsync(null);
     }
 #endif
 
@@ -2512,7 +3040,7 @@ public sealed partial class ShelfWindow : Window
                     Child = YYIcons.Make(YYIcons.CollectionIconName(col.Name, col.Icon), 13, ThemeHelper.Brush(inside ? tint.Accent : p.T1)),
                 });
                 var m = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
-                m.Children.Add(new TextBlock { Text = col.Name, FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) });
+                m.Children.Add(L10n.Skip(new TextBlock { Text = col.Name, FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) }));
                 m.Children.Add(new TextBlock { Text = $"{col.Count} 本", FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3) });
                 Grid.SetColumn(m, 1);
                 g.Children.Add(m);
@@ -2649,6 +3177,7 @@ public sealed partial class ShelfWindow : Window
             }
 
             if (rowActions.Count > 0) { selIdx = 0; UpdatePickHighlight(); }
+            L10n.ApplyTree(rowsHost);
         }
 
         searchBox.TextChanged += (_, _) => RebuildRows(searchBox.Text);
@@ -2709,6 +3238,7 @@ public sealed partial class ShelfWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Content = YYIcons.Make("search", 13.5, ThemeHelper.Brush(p.T1)),
         };
+        AutomationProperties.SetName(searchCircleBtn, L10n.T("搜索"));
         searchCircleBtn.Click += (_, _) =>
         {
             bool nextVis = searchBox.Visibility != Visibility.Visible;
@@ -2767,7 +3297,7 @@ public sealed partial class ShelfWindow : Window
 
         var popMeta = new StackPanel { Spacing = 0, VerticalAlignment = VerticalAlignment.Center };
         popMeta.Children.Add(new TextBlock { Text = L10n.T("加入合集"), FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = ThemeHelper.Brush(p.T1) });
-        popMeta.Children.Add(new TextBlock { Text = book.Title, FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
+        popMeta.Children.Add(L10n.Skip(new TextBlock { Text = book.Title, FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis }));
         Grid.SetColumn(popMeta, 1);
         popHeader.Children.Add(popMeta);
 
@@ -2892,7 +3422,7 @@ public sealed partial class ShelfWindow : Window
                 }
                 wavePath.Data = geo;
             };
-            container.Children.Add(tb);
+            container.Children.Add(L10n.Skip(tb));
             container.Children.Add(wavePath);
             return container;
         }
@@ -2935,7 +3465,7 @@ public sealed partial class ShelfWindow : Window
                 }
                 linePath.Data = geo;
             };
-            container.Children.Add(tb);
+            container.Children.Add(L10n.Skip(tb));
             container.Children.Add(linePath);
             return container;
         }
@@ -2954,7 +3484,7 @@ public sealed partial class ShelfWindow : Window
             CornerRadius = new CornerRadius(3),
             Padding = new Thickness(4, 1.5, 4, 1.5),
             HorizontalAlignment = HorizontalAlignment.Left,
-            Child = new TextBlock
+            Child = L10n.Skip(new TextBlock
             {
                 Text = mark.Text,
                 FontFamily = serif,
@@ -2962,7 +3492,7 @@ public sealed partial class ShelfWindow : Window
                 LineHeight = lineHeight,
                 Foreground = ThemeHelper.Brush(palette.T1),
                 TextWrapping = TextWrapping.Wrap,
-            },
+            }),
         };
     }
 
@@ -2976,7 +3506,25 @@ public sealed partial class ShelfWindow : Window
         return WeekdayNames[(int)day.DayOfWeek];
     }
 
-    private bool MatchesNotesChip(Mark m) => _notesChip switch
+    private IReadOnlyList<Mark> GetCachedMarks(string bookId)
+    {
+        if (!_notesMarksCache.TryGetValue(bookId, out var marks))
+        {
+            try { marks = _library.GetMarks(bookId); }
+            catch { marks = []; }
+            _notesMarksCache[bookId] = marks;
+        }
+        return marks;
+    }
+
+    private void InvalidateNotesCache()
+    {
+        _notesMarksCache.Clear();
+        _cachedNoteConflicts = null;
+        _cachedReviewDeck = null;
+    }
+
+    private static bool MatchesNotesChipStatic(Mark m, string chip) => chip switch
     {
         "thoughts" => !string.IsNullOrWhiteSpace(m.Note),
         "yellow" => m.Style == MarkStyle.Yellow,
@@ -2986,10 +3534,10 @@ public sealed partial class ShelfWindow : Window
         _ => true,
     };
 
-    private bool MatchesNotesFilter(Mark m, BookSummary? book = null)
+    private static bool MatchesNotesFilterStatic(Mark m, string chip, string rawQuery, BookSummary? book = null)
     {
-        if (!MatchesNotesChip(m)) return false;
-        string q = _notesQuery.Trim();
+        if (!MatchesNotesChipStatic(m, chip)) return false;
+        string q = rawQuery.Trim();
         if (string.IsNullOrEmpty(q)) return true;
         if (m.Text.Contains(q, StringComparison.OrdinalIgnoreCase)) return true;
         if (!string.IsNullOrEmpty(m.Note) && m.Note.Contains(q, StringComparison.OrdinalIgnoreCase)) return true;
@@ -2997,9 +3545,16 @@ public sealed partial class ShelfWindow : Window
         return false;
     }
 
-    private string BuildFilteredNotesMarkdown(BookSummary? chosenBook)
+    private bool MatchesNotesFilter(Mark m, BookSummary? book = null) =>
+        MatchesNotesFilterStatic(m, _notesChip, _notesQuery, book);
+
+    private string BuildFilteredNotesMarkdownCore(
+        BookSummary? chosenBook,
+        IReadOnlyList<BookSummary> keptSnapshot,
+        string chip,
+        string query)
     {
-        bool hasActiveFilter = _notesChip != "all" || !string.IsNullOrWhiteSpace(_notesQuery);
+        bool hasActiveFilter = chip != "all" || !string.IsNullOrWhiteSpace(query);
         if (!hasActiveFilter)
         {
             return chosenBook is not null
@@ -3041,7 +3596,7 @@ public sealed partial class ShelfWindow : Window
         if (chosenBook is not null)
         {
             var filtered = _library.GetMarks(chosenBook.Id)
-                .Where(m => MatchesNotesFilter(m, chosenBook))
+                .Where(m => MatchesNotesFilterStatic(m, chip, query, chosenBook))
                 .OrderBy(m => m.Section).ThenBy(m => m.Start.Sentence).ThenBy(m => m.Start.Offset)
                 .ToArray();
             return FormatSingleBookFiltered(chosenBook, filtered);
@@ -3050,10 +3605,10 @@ public sealed partial class ShelfWindow : Window
         var allSb = new System.Text.StringBuilder();
         allSb.AppendLine($"# 语阅笔记筛选导出\n\n> 导出时间：{DateTime.Now:yyyy-MM-dd HH:mm}\n");
         int booksExported = 0;
-        foreach (var book in _keptBooks)
+        foreach (var book in keptSnapshot)
         {
             var filtered = _library.GetMarks(book.Id)
-                .Where(m => MatchesNotesFilter(m, book))
+                .Where(m => MatchesNotesFilterStatic(m, chip, query, book))
                 .OrderBy(m => m.Section).ThenBy(m => m.Start.Sentence).ThenBy(m => m.Start.Offset)
                 .ToArray();
             if (filtered.Length == 0) continue;
@@ -3066,6 +3621,23 @@ public sealed partial class ShelfWindow : Window
         return allSb.ToString();
     }
 
+    private async Task LoadReviewDeckIntoSlotAsync(ContentControl slot, bool dark)
+    {
+        try
+        {
+            long dayStartMs = new DateTimeOffset(DateTime.Today).ToUnixTimeMilliseconds();
+            var deck = await Task.Run(() => _library.Core.ReviewToday(null, dayStartMs, 5));
+            if (_closed) return;
+            _cachedReviewDeck = deck;
+            if ((deck.Items.Length > 0 || deck.DoneToday > 0) && slot.XamlRoot is not null)
+            {
+                slot.Content = BuildReviewDeckCard(deck, dark);
+                L10n.ApplyTree(slot);
+            }
+        }
+        catch { }
+    }
+
     private void RenderNotesPage()
     {
         SubPageStack.Children.Clear();
@@ -3074,7 +3646,7 @@ public sealed partial class ShelfWindow : Window
         var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
 
         var bookNotes = _keptBooks
-            .Select(b => (Book: b, Marks: _library.GetMarks(b.Id)))
+            .Select(b => (Book: b, Marks: GetCachedMarks(b.Id)))
             .Where(x => x.Marks.Count > 0)
             .OrderByDescending(x => x.Marks.Max(m => m.At))
             .ToArray();
@@ -3086,6 +3658,7 @@ public sealed partial class ShelfWindow : Window
             emptyStack.Children.Add(new TextBlock { Text = "还没有笔记", FontSize = 13.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(palette.T1), HorizontalAlignment = HorizontalAlignment.Center });
             emptyStack.Children.Add(new TextBlock { Text = "读书时选中文字即可划线；所有书的划线和想法都会在这里", FontSize = 12, Foreground = ThemeHelper.Brush(palette.T2), HorizontalAlignment = HorizontalAlignment.Center });
             SubPageStack.Children.Add(emptyStack);
+            L10n.ApplyTree(SubPageStack);
             return;
         }
 
@@ -3095,7 +3668,8 @@ public sealed partial class ShelfWindow : Window
         // 1:1 ConflictSheet.swift: 存在多设备想法冲突时在笔记页顶部展示解决入口横幅
         try
         {
-            var conflicts = _library.Core.NoteConflicts();
+            _cachedNoteConflicts ??= _library.Core.NoteConflicts();
+            var conflicts = _cachedNoteConflicts;
             if (conflicts.Length > 0)
             {
                 var cfGrid = new Grid { Padding = new Thickness(14, 10, 14, 10) };
@@ -3133,6 +3707,20 @@ public sealed partial class ShelfWindow : Window
 
         bool MatchesChip(Mark m, BookSummary? bk = null) => MatchesNotesFilter(m, bk);
 
+        UIElement MakeNoMatchingNotesEmptyState()
+        {
+            var emptyFilter = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 64, 0, 0) };
+            emptyFilter.Children.Add(YYIcons.Make("search", 24, ThemeHelper.Brush(palette.T3)));
+            emptyFilter.Children.Add(new TextBlock
+            {
+                Text = L10n.T("没有匹配的笔记"),
+                FontSize = 12.5,
+                Foreground = ThemeHelper.Brush(palette.T3),
+                HorizontalAlignment = HorizontalAlignment.Center,
+            });
+            return emptyFilter;
+        }
+
         StackPanel BuildFilterChips(IReadOnlyList<Mark> scopeMarks)
         {
             var chips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(0, 0, 0, 6) };
@@ -3169,7 +3757,7 @@ public sealed partial class ShelfWindow : Window
             }
 
             AddChip("all", "全部", scopeMarks.Count);
-            if (!_notesByBook) AddChip("thoughts", "有想法", scopeMarks.Count(m => !string.IsNullOrWhiteSpace(m.Note)));
+            AddChip("thoughts", "有想法", scopeMarks.Count(m => !string.IsNullOrWhiteSpace(m.Note)));
             chips.Children.Add(new Border { Width = 1, Height = 15, Background = ThemeHelper.Brush(palette.Line), Margin = new Thickness(4, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center });
             foreach (var (key, st, col, isWave) in new[]
             {
@@ -3208,7 +3796,7 @@ public sealed partial class ShelfWindow : Window
         UIElement BuildNoteEntry(BookSummary book, Mark mark, bool showBookFooter)
         {
             var entry = new StackPanel { Spacing = 7, Padding = new Thickness(0, 12, 0, 10) };
-            entry.Children.Add(BuildHighlightedQuote(mark, palette, dark, 14));
+            entry.Children.Add(L10n.Skip(BuildHighlightedQuote(mark, palette, dark, 14)));
 
             if (!string.IsNullOrWhiteSpace(mark.Note))
             {
@@ -3216,14 +3804,14 @@ public sealed partial class ShelfWindow : Window
                 thoughtRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.5) });
                 thoughtRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 thoughtRow.Children.Add(new Border { Background = ThemeHelper.Brush(tint.Accent), CornerRadius = new CornerRadius(0.75) });
-                var tb = new TextBlock
+                var tb = L10n.Skip(new TextBlock
                 {
                     Text = mark.Note,
                     FontFamily = new FontFamily(YYFontFamily.Kaiti.WindowsFamily()),
                     FontSize = 12.5,
                     Foreground = ThemeHelper.Brush(tint.Accent),
                     TextWrapping = TextWrapping.Wrap,
-                };
+                });
                 Grid.SetColumn(tb, 1);
                 thoughtRow.Children.Add(tb);
                 entry.Children.Add(thoughtRow);
@@ -3235,16 +3823,16 @@ public sealed partial class ShelfWindow : Window
             {
                 var left = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
                 left.Children.Add(CreateCoverView(book, 14, 20, elevated: false));
-                left.Children.Add(new TextBlock
+                left.Children.Add(L10n.Skip(new TextBlock
                 {
-                    Text = $"{book.Title} · {GetChapterTitle(book, mark.Section)}",
+                    Text = $"{book.Title} · {L10n.T(GetChapterTitle(book, mark.Section))}",
                     FontSize = 11,
                     FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                     Foreground = ThemeHelper.Brush(palette.T2),
                     VerticalAlignment = VerticalAlignment.Center,
                     MaxLines = 1,
                     TextTrimming = TextTrimming.CharacterEllipsis,
-                });
+                }));
                 footer.Children.Add(left);
             }
             var rightMeta = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
@@ -3261,10 +3849,10 @@ public sealed partial class ShelfWindow : Window
             entry.Children.Add(footer);
 
             var ctx = new MenuFlyout();
-            var jumpItem = new MenuFlyoutItem { Text = "回到书里这一页" };
+            var jumpItem = new MenuFlyoutItem { Text = L10n.T("回到书里这一页") };
             jumpItem.Click += (_, _) => TryOpenBook(book, section: mark.Section, sentence: (int)mark.Start.Sentence);
 
-            var editNoteItem = new MenuFlyoutItem { Text = string.IsNullOrWhiteSpace(mark.Note) ? "写想法…" : "改想法…" };
+            var editNoteItem = new MenuFlyoutItem { Text = L10n.T(string.IsNullOrWhiteSpace(mark.Note) ? "写想法…" : "改想法…") };
             editNoteItem.Click += async (_, _) =>
             {
                 var updated = await BookRecordPageBuilder.ShowThoughtEditorSheetAsync(
@@ -3276,17 +3864,19 @@ public sealed partial class ShelfWindow : Window
                 }
             };
 
-            var styleSubItem = new MenuFlyoutSubItem { Text = "换个样子" };
+            var styleSubItem = new MenuFlyoutSubItem { Text = L10n.T("换个样子") };
             foreach (var (st, stLabel) in new[]
             {
                 (MarkStyle.Yellow, "荧光黄"),
                 (MarkStyle.Blue, "浅蓝"),
                 (MarkStyle.Pink, "樱粉"),
                 (MarkStyle.Wave, "波浪线"),
+                (MarkStyle.Underline, "实线下划线"),
+                (MarkStyle.Dotted, "点线下划线"),
             })
             {
                 var targetStyle = st;
-                var smi = new ToggleMenuFlyoutItem { Text = stLabel, IsChecked = mark.Style == targetStyle };
+                var smi = new ToggleMenuFlyoutItem { Text = L10n.T(stLabel), IsChecked = mark.Style == targetStyle };
                 smi.Click += (_, _) =>
                 {
                     _library.SetMarkStyle(book.Id, mark.Id, targetStyle);
@@ -3295,7 +3885,7 @@ public sealed partial class ShelfWindow : Window
                 styleSubItem.Items.Add(smi);
             }
 
-            var copyItem = new MenuFlyoutItem { Text = "复制" };
+            var copyItem = new MenuFlyoutItem { Text = L10n.T("复制") };
             copyItem.Click += (_, _) =>
             {
                 var dp = new DataPackage();
@@ -3305,11 +3895,11 @@ public sealed partial class ShelfWindow : Window
             };
 
             string noteChapter = GetChapterTitle(book, mark.Section);
-            var shareItem = new MenuFlyoutItem { Text = "分享书摘…" };
+            var shareItem = new MenuFlyoutItem { Text = L10n.T("分享书摘…") };
             shareItem.Click += async (_, _) => await QuoteShareDialog.ShowAsync(
                 this, RootGrid.XamlRoot, mark.Text, mark.Note, book.Title, book.Authors.FirstOrDefault(), book.CoverPath, chapter: noteChapter, library: _library);
 
-            var delItem = new MenuFlyoutItem { Text = "删除划线", Foreground = ThemeHelper.Brush(palette.Danger) };
+            var delItem = new MenuFlyoutItem { Text = L10n.T("删除划线"), Foreground = ThemeHelper.Brush(palette.Danger) };
             delItem.Click += (_, _) =>
             {
                 string bid = book.Id;
@@ -3370,43 +3960,73 @@ public sealed partial class ShelfWindow : Window
             var allMarks = bookNotes.SelectMany(bn => bn.Marks).ToArray();
             SubPageStack.Children.Add(BuildFilterChips(allMarks));
 
-            // 1:1 ReviewDeckCard（今天回顾三层叠卡，MacReviewView.swift:70-156）
-            try
+            // 1:1 ReviewDeckCard（今天回顾三层叠卡，MacReviewView.swift:70-156），异步加载不阻塞主线程
+            var reviewDeckSlot = new ContentControl();
+            SubPageStack.Children.Add(reviewDeckSlot);
+            if (_cachedReviewDeck is ReviewDeck cachedDeck)
             {
-                long dayStartMs = new DateTimeOffset(DateTime.Today).ToUnixTimeMilliseconds();
-                var deck = _library.Core.ReviewToday(null, dayStartMs, 5);
-                if (deck.Items.Length > 0 || deck.DoneToday > 0)
-                {
-                    SubPageStack.Children.Add(BuildReviewDeckCard(deck, dark));
-                }
+                if (cachedDeck.Items.Length > 0 || cachedDeck.DoneToday > 0)
+                    reviewDeckSlot.Content = BuildReviewDeckCard(cachedDeck, dark);
             }
-            catch { }
+            else
+            {
+                _ = LoadReviewDeckIntoSlotAsync(reviewDeckSlot, dark);
+            }
 
             var byDay = bookNotes
                 .SelectMany(bn => bn.Marks.Where(m => MatchesChip(m, bn.Book)).Select(m => (bn.Book, Mark: m, Day: DateTimeOffset.FromUnixTimeMilliseconds(m.At).LocalDateTime.Date)))
                 .OrderByDescending(x => x.Mark.At)
-                .GroupBy(x => x.Day);
+                .GroupBy(x => x.Day)
+                .ToArray();
 
-            foreach (var grp in byDay)
+            if (byDay.Length == 0)
             {
-                var row = new Grid { ColumnSpacing = 16, Margin = new Thickness(0, 4, 0, 8) };
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(92) });
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                SubPageStack.Children.Add(MakeNoMatchingNotesEmptyState());
+            }
+            else
+            {
+                foreach (var grp in byDay)
+                {
+                    var row = new Grid { ColumnSpacing = 16, Margin = new Thickness(0, 4, 0, 8) };
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(92) });
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-                var side = new StackPanel { Spacing = 2, Margin = new Thickness(0, 14, 0, 0) };
-                side.Children.Add(new TextBlock { Text = FormatDayName(grp.Key), FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = ThemeHelper.Brush(palette.T1) });
-                side.Children.Add(new TextBlock { Text = $"{grp.Key.Month} 月 {grp.Key.Day} 日", FontSize = 10.5, Foreground = ThemeHelper.Brush(palette.T3) });
-                side.Children.Add(new TextBlock { Text = $"{grp.Count()} 条", FontSize = 10.5, Foreground = ThemeHelper.Brush(palette.T3) });
-                row.Children.Add(side);
+                    var side = new StackPanel { Spacing = 2, Margin = new Thickness(0, 14, 0, 0) };
+                    side.Children.Add(new TextBlock { Text = FormatDayName(grp.Key), FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = ThemeHelper.Brush(palette.T1) });
+                    side.Children.Add(new TextBlock { Text = $"{grp.Key.Month} 月 {grp.Key.Day} 日", FontSize = 10.5, Foreground = ThemeHelper.Brush(palette.T3) });
+                    side.Children.Add(new TextBlock { Text = $"{grp.Count()} 条", FontSize = 10.5, Foreground = ThemeHelper.Brush(palette.T3) });
+                    row.Children.Add(side);
 
-                var card = WrapNoteCard(grp.Select(x => BuildNoteEntry(x.Book, x.Mark, showBookFooter: true)).ToArray());
-                Grid.SetColumn(card, 1);
-                row.Children.Add(card);
-                SubPageStack.Children.Add(row);
+                    var card = WrapNoteCard(grp.Select(x => BuildNoteEntry(x.Book, x.Mark, showBookFooter: true)).ToArray());
+                    Grid.SetColumn(card, 1);
+                    row.Children.Add(card);
+                    SubPageStack.Children.Add(row);
+                }
             }
         }
         else
         {
+            bool hasFilter = !string.IsNullOrWhiteSpace(_notesQuery) || _notesChip != "all";
+            var filteredBookNotes = hasFilter
+                ? bookNotes
+                    .Select(bn => (bn.Book, AllMarks: bn.Marks, MatchedMarks: (IReadOnlyList<Mark>)bn.Marks.Where(m => MatchesChip(m, bn.Book)).ToArray()))
+                    .Where(x => x.MatchedMarks.Count > 0)
+                    .ToArray()
+                : bookNotes
+                    .Select(bn => (bn.Book, AllMarks: bn.Marks, MatchedMarks: bn.Marks))
+                    .ToArray();
+
+            if (filteredBookNotes.Length == 0)
+            {
+                SubPageStack.Children.Add(BuildFilterChips(bookNotes.SelectMany(bn => bn.Marks).ToArray()));
+                SubPageStack.Children.Add(MakeNoMatchingNotesEmptyState());
+                L10n.ApplyTree(SubPageStack);
+                return;
+            }
+
+            if (_notesChosenBookId is null || !filteredBookNotes.Any(b => b.Book.Id == _notesChosenBookId))
+                _notesChosenBookId = filteredBookNotes[0].Book.Id;
+
             bool coversOnly = _library.Prefs.NotesCoversOnly;
             var split = new Grid { ColumnSpacing = 22 };
             split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(coversOnly ? 52 : 250) });
@@ -3432,6 +4052,7 @@ public sealed partial class ShelfWindow : Window
                         Content = YYIcons.Make(icon, 10.5, ThemeHelper.Brush(active ? palette.T1 : palette.T3)),
                     };
                     ToolTipService.SetToolTip(cb, tip);
+                    AutomationProperties.SetName(cb, L10n.T(tip));
                     bool targetVal = val;
                     cb.Click += (_, _) =>
                     {
@@ -3459,7 +4080,7 @@ public sealed partial class ShelfWindow : Window
                 leftColWrap.Children.Add(swTop);
 
                 var railStack = new StackPanel { Spacing = 8, Padding = new Thickness(0, 6, 0, 6), HorizontalAlignment = HorizontalAlignment.Center };
-                foreach (var bn in bookNotes)
+                foreach (var bn in filteredBookNotes)
                 {
                     bool on = bn.Book.Id == _notesChosenBookId;
                     var covWrap = new Border
@@ -3479,9 +4100,10 @@ public sealed partial class ShelfWindow : Window
                         UseSystemFocusVisuals = false,
                         Content = covWrap,
                     };
-                    ToolTipService.SetToolTip(cBtn, bn.Book.Title);
+                    ToolTipService.SetToolTip(cBtn, hasFilter ? $"{bn.Book.Title} ({bn.MatchedMarks.Count})" : bn.Book.Title);
+                    AutomationProperties.SetName(cBtn, bn.Book.Title);
                     string bid = bn.Book.Id;
-                    cBtn.Click += (_, _) => { _notesChosenBookId = bid; _notesChip = "all"; ConfigureHeaderForCurrentView(); RenderNotesPage(); };
+                    cBtn.Click += (_, _) => { _notesChosenBookId = bid; ConfigureHeaderForCurrentView(); RenderNotesPage(); };
                     railStack.Children.Add(cBtn);
                 }
                 leftColWrap.Children.Add(new Border
@@ -3499,7 +4121,7 @@ public sealed partial class ShelfWindow : Window
                 var headBar = new Grid { Margin = new Thickness(6, 0, 2, 0) };
                 headBar.Children.Add(new TextBlock
                 {
-                    Text = $"{bookNotes.Length} 本书",
+                    Text = $"{filteredBookNotes.Length} 本书",
                     FontSize = 11.5,
                     FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                     Foreground = ThemeHelper.Brush(palette.T3),
@@ -3509,11 +4131,11 @@ public sealed partial class ShelfWindow : Window
                 leftColWrap.Children.Add(headBar);
 
                 var leftStack = new StackPanel { Spacing = 2 };
-                foreach (var bn in bookNotes)
+                foreach (var bn in filteredBookNotes)
                 {
                     bool on = bn.Book.Id == _notesChosenBookId;
-                    int thoughtCnt = bn.Marks.Count(m => !string.IsNullOrWhiteSpace(m.Note));
-                    long latestAt = bn.Marks.Max(m => m.At);
+                    int thoughtCnt = bn.AllMarks.Count(m => !string.IsNullOrWhiteSpace(m.Note));
+                    long latestAt = bn.AllMarks.Max(m => m.At);
                     var r = new Grid { ColumnSpacing = 10 };
                     r.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(26) });
                     r.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -3522,16 +4144,19 @@ public sealed partial class ShelfWindow : Window
                     var topRow = new Grid { ColumnSpacing = 6 };
                     topRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                     topRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                    topRow.Children.Add(new TextBlock { Text = bn.Book.Title, FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(on ? tint.Accent : palette.T1), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
+                    topRow.Children.Add(L10n.Skip(new TextBlock { Text = bn.Book.Title, FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(on ? tint.Accent : palette.T1), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis }));
                     var agoTb = new TextBlock { Text = ShortAgo(latestAt), FontSize = 10, Foreground = ThemeHelper.Brush(palette.T3), VerticalAlignment = VerticalAlignment.Center };
                     Grid.SetColumn(agoTb, 1);
                     topRow.Children.Add(agoTb);
                     info.Children.Add(topRow);
+                    string countLine = hasFilter
+                        ? $"{bn.MatchedMarks.Count} 条"
+                        : (thoughtCnt > 0 ? $"划线 {bn.AllMarks.Count} · 想法 {thoughtCnt}" : $"划线 {bn.AllMarks.Count}");
                     info.Children.Add(new TextBlock
                     {
-                        Text = thoughtCnt > 0 ? $"划线 {bn.Marks.Count} · 想法 {thoughtCnt}" : $"划线 {bn.Marks.Count}",
+                        Text = countLine,
                         FontSize = 10.5,
-                        Foreground = ThemeHelper.Brush(palette.T3),
+                        Foreground = ThemeHelper.Brush(hasFilter ? tint.Accent : palette.T3),
                     });
                     Grid.SetColumn(info, 1);
                     r.Children.Add(info);
@@ -3548,7 +4173,7 @@ public sealed partial class ShelfWindow : Window
                         Content = r,
                     };
                     string bid = bn.Book.Id;
-                    btn.Click += (_, _) => { _notesChosenBookId = bid; _notesChip = "all"; ConfigureHeaderForCurrentView(); RenderNotesPage(); };
+                    btn.Click += (_, _) => { _notesChosenBookId = bid; ConfigureHeaderForCurrentView(); RenderNotesPage(); };
                     leftStack.Children.Add(btn);
                 }
 
@@ -3564,8 +4189,8 @@ public sealed partial class ShelfWindow : Window
             }
             split.Children.Add(leftColWrap);
 
-            var chosen = bookNotes.First(b => b.Book.Id == _notesChosenBookId);
-            int chosenThoughts = chosen.Marks.Count(m => !string.IsNullOrWhiteSpace(m.Note));
+            var chosen = filteredBookNotes.First(b => b.Book.Id == _notesChosenBookId);
+            int chosenThoughts = chosen.AllMarks.Count(m => !string.IsNullOrWhiteSpace(m.Note));
             var rightStack = new StackPanel { Spacing = 14 };
             var head = new Grid { ColumnSpacing = 14 };
             head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(46) });
@@ -3573,21 +4198,21 @@ public sealed partial class ShelfWindow : Window
             head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             head.Children.Add(CreateCoverView(chosen.Book, 46, 66, elevated: false));
             var hMeta = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-            hMeta.Children.Add(new TextBlock { Text = chosen.Book.Title, FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = ThemeHelper.Brush(palette.T1) });
+            hMeta.Children.Add(L10n.Skip(new TextBlock { Text = chosen.Book.Title, FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = ThemeHelper.Brush(palette.T1) }));
             int chosenPct = (int)Math.Round(chosen.Book.Progress * 100);
             string progPart = chosen.Book.Record
-                ? $"纸书 · {BookRecordPageBuilder.StatusDisplayName(chosen.Book.Status)}"
-                : (chosen.Book.Status == ReadingStatus.Finished ? "已读完" : $"读到 {chosenPct}%");
+                ? $"{L10n.T("纸书")} · {L10n.T(BookRecordPageBuilder.StatusDisplayName(chosen.Book.Status))}"
+                : (chosen.Book.Status == ReadingStatus.Finished ? L10n.T("已读完") : L10n.T($"读到 {chosenPct}%"));
             string line1 = string.Join(" · ", new[] { chosen.Book.Authors.FirstOrDefault(), progPart }.Where(s => !string.IsNullOrWhiteSpace(s)));
-            hMeta.Children.Add(new TextBlock
+            hMeta.Children.Add(L10n.Skip(new TextBlock
             {
                 Text = line1,
                 FontSize = 11.5,
                 Foreground = ThemeHelper.Brush(palette.T2),
-            });
+            }));
             hMeta.Children.Add(new TextBlock
             {
-                Text = $"划线 {chosen.Marks.Count}{(chosenThoughts > 0 ? $" · 想法 {chosenThoughts}" : "")} · 按书里的顺序",
+                Text = $"划线 {chosen.AllMarks.Count}{(chosenThoughts > 0 ? $" · 想法 {chosenThoughts}" : "")} · 按书里的顺序",
                 FontSize = 11,
                 Foreground = ThemeHelper.Brush(palette.T3),
             });
@@ -3611,37 +4236,45 @@ public sealed partial class ShelfWindow : Window
             head.Children.Add(rightBtns);
 
             rightStack.Children.Add(head);
-            rightStack.Children.Add(BuildFilterChips(chosen.Marks));
+            rightStack.Children.Add(BuildFilterChips(chosen.AllMarks));
 
-            var filteredMarks = chosen.Marks.Where(m => MatchesChip(m, chosen.Book))
+            var filteredMarks = chosen.MatchedMarks
                 .OrderBy(m => m.Section).ThenBy(m => m.Start.Sentence).ThenBy(m => m.Start.Offset)
                 .ToArray();
 
-            foreach (var secGrp in filteredMarks.GroupBy(m => m.Section))
+            if (filteredMarks.Length == 0)
             {
-                var chHead = new Grid { Margin = new Thickness(4, 4, 4, -6) };
-                chHead.Children.Add(new TextBlock
+                rightStack.Children.Add(MakeNoMatchingNotesEmptyState());
+            }
+            else
+            {
+                foreach (var secGrp in filteredMarks.GroupBy(m => m.Section))
                 {
-                    Text = GetChapterTitle(chosen.Book, secGrp.Key),
-                    FontSize = 12,
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                    Foreground = ThemeHelper.Brush(palette.T2),
-                });
-                chHead.Children.Add(new TextBlock
-                {
-                    Text = $"{secGrp.Count()} 条",
-                    FontSize = 11,
-                    Foreground = ThemeHelper.Brush(palette.T3),
-                    HorizontalAlignment = HorizontalAlignment.Right,
-                });
-                rightStack.Children.Add(chHead);
-                rightStack.Children.Add(WrapNoteCard(secGrp.Select(m => BuildNoteEntry(chosen.Book, m, showBookFooter: false)).ToArray()));
+                    var chHead = new Grid { Margin = new Thickness(4, 4, 4, -6) };
+                    chHead.Children.Add(new TextBlock
+                    {
+                        Text = GetChapterTitle(chosen.Book, secGrp.Key),
+                        FontSize = 12,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        Foreground = ThemeHelper.Brush(palette.T2),
+                    });
+                    chHead.Children.Add(new TextBlock
+                    {
+                        Text = $"{secGrp.Count()} 条",
+                        FontSize = 11,
+                        Foreground = ThemeHelper.Brush(palette.T3),
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                    });
+                    rightStack.Children.Add(chHead);
+                    rightStack.Children.Add(WrapNoteCard(secGrp.Select(m => BuildNoteEntry(chosen.Book, m, showBookFooter: false)).ToArray()));
+                }
             }
 
             Grid.SetColumn(rightStack, 1);
             split.Children.Add(rightStack);
             SubPageStack.Children.Add(split);
         }
+        L10n.ApplyTree(SubPageStack);
     }
 
     private UIElement BuildReviewDeckCard(ReviewDeck deck, bool dark)
@@ -3694,7 +4327,7 @@ public sealed partial class ShelfWindow : Window
         {
             var first = deck.Items[0];
             var firstBook = _keptBooks.FirstOrDefault(b => b.Id == first.Book);
-            mid.Children.Add(new TextBlock
+            mid.Children.Add(L10n.Skip(new TextBlock
             {
                 Text = $"“{first.Mark.Text}”",
                 FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
@@ -3702,13 +4335,13 @@ public sealed partial class ShelfWindow : Window
                 Foreground = ThemeHelper.Brush(p.T1),
                 MaxLines = 1,
                 TextTrimming = TextTrimming.CharacterEllipsis,
-            });
-            mid.Children.Add(new TextBlock
+            }));
+            mid.Children.Add(L10n.Skip(new TextBlock
             {
-                Text = firstBook?.Title ?? "书摘",
+                Text = firstBook?.Title ?? L10n.T("书摘"),
                 FontSize = 10.5,
                 Foreground = ThemeHelper.Brush(p.T3),
-            });
+            }));
         }
         else
         {
@@ -3778,12 +4411,19 @@ public sealed partial class ShelfWindow : Window
             ? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             : new DateTimeOffset(DateTime.Today).ToUnixTimeMilliseconds();
         ReviewItem[] items;
+        PodcastClip[] allPodClips = [];
         try
         {
-            var deck = _library.Core.ReviewToday(onlyBookId, dayStartMs, 5u);
-            items = deck.Items;
+            (items, allPodClips) = await Task.Run(() =>
+            {
+                var deck = _library.Core.ReviewToday(onlyBookId, dayStartMs, 5u);
+                PodcastClip[] clips = [];
+                try { clips = _library.Core.PodcastClips(null); } catch { }
+                return (deck.Items, clips);
+            });
         }
         catch { return; }
+        if (_closed) return;
 
         if (items.Length == 0)
         {
@@ -3800,8 +4440,18 @@ public sealed partial class ShelfWindow : Window
         string? nextOnlyBookId = null;
         var host = new StackPanel { Spacing = 14, Padding = new Thickness(22, 18, 22, 20) };
         ContentDialog? dlgRef = null;
-        PodcastClip[] allPodClips = [];
-        try { allPodClips = _library.Core.PodcastClips(null); } catch { }
+        Button? activePrimaryBtn = null;
+
+        void FocusActiveButton()
+        {
+            var target = activePrimaryBtn;
+            if (target is null) return;
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_closed) return;
+                target.Focus(FocusState.Programmatic);
+            });
+        }
 
         void RenderCard()
         {
@@ -3845,7 +4495,7 @@ public sealed partial class ShelfWindow : Window
                         cv.Opacity = isKept ? 1.0 : 0.45;
                         rg.Children.Add(cv);
                     }
-                    var rText = new TextBlock
+                    var rText = L10n.Skip(new TextBlock
                     {
                         Text = rit.Mark.Text,
                         FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
@@ -3854,7 +4504,7 @@ public sealed partial class ShelfWindow : Window
                         VerticalAlignment = VerticalAlignment.Center,
                         MaxLines = 1,
                         TextTrimming = TextTrimming.CharacterEllipsis,
-                    };
+                    });
                     Grid.SetColumn(rText, 1);
                     rg.Children.Add(rText);
 
@@ -3949,6 +4599,10 @@ public sealed partial class ShelfWindow : Window
 
                 var doneBtn = YYChrome.MakeSheetPillButton("完成", () => dlgRef?.Hide(), dark, _library.Prefs.Tint, "dark", height: 38, stretch: true);
                 host.Children.Add(doneBtn);
+                activePrimaryBtn = doneBtn;
+                L10n.ApplyTree(host);
+                doneBtn.Loaded += (_, _) => doneBtn.Focus(FocusState.Programmatic);
+                FocusActiveButton();
                 return;
             }
 
@@ -3976,17 +4630,19 @@ public sealed partial class ShelfWindow : Window
                 BorderBrush = ThemeHelper.Brush(p.Line),
                 BorderThickness = new Thickness(0.5),
                 HorizontalAlignment = HorizontalAlignment.Left,
+                IsTabStop = false,
                 UseSystemFocusVisuals = false,
                 Content = YYIcons.Make("xmark", 11.5, ThemeHelper.Brush(p.T1)),
             };
+            AutomationProperties.SetName(closeRevBtn, L10n.T("关闭"));
             closeRevBtn.Click += (_, _) => dlgRef?.Hide();
             topBar.Children.Add(closeRevBtn);
 
             var onlyBook = onlyBookId is not null ? _keptBooks.FirstOrDefault(b => b.Id == onlyBookId) : null;
             string revHeadTitle = onlyBookId is null
                 ? L10n.T("今天回顾")
-                : (onlyBook is not null ? $"回顾《{onlyBook.Title}》" : L10n.T("回顾这本书"));
-            topBar.Children.Add(new TextBlock
+                : (onlyBook is not null ? L10n.T($"回顾《{onlyBook.Title}》") : L10n.T("回顾这本书"));
+            topBar.Children.Add(L10n.Skip(new TextBlock
             {
                 Text = $"{revHeadTitle} · {idx + 1} / {items.Length}",
                 FontSize = 14,
@@ -3997,7 +4653,7 @@ public sealed partial class ShelfWindow : Window
                 MaxWidth = 310,
                 MaxLines = 1,
                 TextTrimming = TextTrimming.CharacterEllipsis,
-            });
+            }));
 
             var shareTopBtn = new Button
             {
@@ -4011,13 +4667,16 @@ public sealed partial class ShelfWindow : Window
                 BorderBrush = ThemeHelper.Brush(p.Line),
                 BorderThickness = new Thickness(0.5),
                 HorizontalAlignment = HorizontalAlignment.Right,
+                IsTabStop = false,
                 UseSystemFocusVisuals = false,
                 Content = YYIcons.Make("share", 13, ThemeHelper.Brush(p.T1)),
             };
+            AutomationProperties.SetName(shareTopBtn, L10n.T("分享书摘"));
             shareTopBtn.Click += async (_, _) =>
             {
+                if (RootGrid.XamlRoot is not { } xr) return;
                 await Yuyue.Reader.QuoteShareDialog.ShowAsync(
-                    this, RootGrid.XamlRoot, cur.Mark.Text, cur.Mark.Note,
+                    this, xr, cur.Mark.Text, cur.Mark.Note,
                     book?.Title ?? "书摘", book?.Authors.FirstOrDefault(), book?.CoverPath,
                     chapter: revChap, library: _library);
             };
@@ -4044,8 +4703,8 @@ public sealed partial class ShelfWindow : Window
             cardGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var quoteTop = new StackPanel { Spacing = 12, VerticalAlignment = VerticalAlignment.Top };
-            quoteTop.Children.Add(new TextBlock { Text = "“", FontFamily = new FontFamily("Georgia"), FontSize = 36, Foreground = ThemeHelper.Brush(tint.Accent), Margin = new Thickness(0, -6, 0, -14) });
-            quoteTop.Children.Add(new TextBlock
+            quoteTop.Children.Add(L10n.Skip(new TextBlock { Text = "“", FontFamily = new FontFamily("Georgia"), FontSize = 36, Foreground = ThemeHelper.Brush(tint.Accent), Margin = new Thickness(0, -6, 0, -14) }));
+            quoteTop.Children.Add(L10n.Skip(new TextBlock
             {
                 Text = cur.Mark.Text,
                 FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
@@ -4054,7 +4713,7 @@ public sealed partial class ShelfWindow : Window
                 LineHeight = 30,
                 Foreground = ThemeHelper.Brush(p.T1),
                 TextWrapping = TextWrapping.Wrap,
-            });
+            }));
 
             if (!string.IsNullOrWhiteSpace(cur.Mark.Note))
             {
@@ -4062,7 +4721,7 @@ public sealed partial class ShelfWindow : Window
                 th.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2) });
                 th.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 th.Children.Add(new Border { Background = ThemeHelper.Brush(tint.Accent), CornerRadius = new CornerRadius(1) });
-                var nt = new TextBlock { Text = cur.Mark.Note, FontFamily = new FontFamily(YYFontFamily.Kaiti.WindowsFamily()), FontSize = 13.5, Foreground = ThemeHelper.Brush(tint.Accent), TextWrapping = TextWrapping.Wrap };
+                var nt = L10n.Skip(new TextBlock { Text = cur.Mark.Note, FontFamily = new FontFamily(YYFontFamily.Kaiti.WindowsFamily()), FontSize = 13.5, Foreground = ThemeHelper.Brush(tint.Accent), TextWrapping = TextWrapping.Wrap });
                 Grid.SetColumn(nt, 1);
                 th.Children.Add(nt);
                 quoteTop.Children.Add(th);
@@ -4077,7 +4736,7 @@ public sealed partial class ShelfWindow : Window
             foot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             if (book is not null) foot.Children.Add(CreateCoverView(book, 28, 40, elevated: false));
             var bm = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
-            bm.Children.Add(new TextBlock { Text = book?.Title ?? "书摘", FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
+            bm.Children.Add(L10n.Skip(new TextBlock { Text = book?.Title ?? L10n.T("书摘"), FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis }));
             int daysOld = Math.Max(0, (int)(DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeMilliseconds(cur.Mark.At)).TotalDays);
             string ageText = daysOld == 0
                 ? "今天"
@@ -4088,8 +4747,8 @@ public sealed partial class ShelfWindow : Window
                         : daysOld < 365
                             ? $"{Math.Max(1, daysOld / 30)} 个月前"
                             : $"{Math.Max(1, daysOld / 365)} 年前";
-            string subFoot = string.Join(" · ", new[] { book?.Authors.FirstOrDefault(), revChap, ageText }.Where(s => !string.IsNullOrWhiteSpace(s)));
-            bm.Children.Add(new TextBlock { Text = subFoot, FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
+            string subFoot = string.Join(" · ", new[] { book?.Authors.FirstOrDefault(), revChap, L10n.T(ageText) }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            bm.Children.Add(L10n.Skip(new TextBlock { Text = subFoot, FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis }));
             Grid.SetColumn(bm, 1);
             foot.Children.Add(bm);
 
@@ -4130,7 +4789,7 @@ public sealed partial class ShelfWindow : Window
                         {
                             _reviewClipPlayer?.Pause();
                             clipPlayingNow = false;
-                            replayBtn.Content = "▶ 重听原声";
+                            replayBtn.Content = L10n.T("▶ 重听原声");
                             return;
                         }
                         _reviewClipPlayer?.Pause();
@@ -4138,12 +4797,13 @@ public sealed partial class ShelfWindow : Window
                         _reviewClipPlayer = new Windows.Media.Playback.MediaPlayer { AutoPlay = true };
                         _reviewClipPlayer.MediaEnded += (_, _) => DispatcherQueue.TryEnqueue(() =>
                         {
+                            if (_closed) return;
                             clipPlayingNow = false;
-                            replayBtn.Content = "▶ 重听原声";
+                            replayBtn.Content = L10n.T("▶ 重听原声");
                         });
                         _reviewClipPlayer.Source = Windows.Media.Core.MediaSource.CreateFromUri(new Uri(clipPath));
                         clipPlayingNow = true;
-                        replayBtn.Content = "⏹ 停止原声";
+                        replayBtn.Content = L10n.T("⏹ 停止原声");
                     }
                     catch { }
                 };
@@ -4215,60 +4875,93 @@ public sealed partial class ShelfWindow : Window
             actGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             actGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            void DoDrop()
-            {
-                keptMap[cur.Mark.Id] = false;
-                try { _library.Core.SetMarkReview(cur.Book, cur.Mark.Id, false); } catch { }
-                idx++;
-                RenderCard();
-            }
-            void DoKeep()
-            {
-                keptMap[cur.Mark.Id] = true;
-                try { _library.Core.SetMarkReview(cur.Book, cur.Mark.Id, true); } catch { }
-                idx++;
-                RenderCard();
-            }
-
             var dropBtn = YYChrome.MakeSheetPillButton("✕  不要了", DoDrop, dark, _library.Prefs.Tint, "secondary", height: 42, stretch: true);
             var keepBtn = YYChrome.MakeSheetPillButton("✓  留下", DoKeep, dark, _library.Prefs.Tint, "warm", height: 42, stretch: true);
             Grid.SetColumn(keepBtn, 1);
             actGrid.Children.Add(dropBtn);
             actGrid.Children.Add(keepBtn);
             host.Children.Add(actGrid);
+
+            activePrimaryBtn = keepBtn;
+            L10n.ApplyTree(host);
+            keepBtn.Loaded += (_, _) => keepBtn.Focus(FocusState.Programmatic);
+            FocusActiveButton();
         }
 
-        host.IsTabStop = true;
-        host.KeyDown += (_, ke) =>
+        void DoDrop()
         {
             if (idx >= items.Length) return;
             var cur = items[idx];
-            if (ke.Key == VirtualKey.Enter)
-            {
-                ke.Handled = true;
-                keptMap[cur.Mark.Id] = true;
-                try { _library.Core.SetMarkReview(cur.Book, cur.Mark.Id, true); } catch { }
-                idx++;
-                RenderCard();
-            }
-            else if (ke.Key is VirtualKey.Delete or VirtualKey.Back)
-            {
-                ke.Handled = true;
-                keptMap[cur.Mark.Id] = false;
-                try { _library.Core.SetMarkReview(cur.Book, cur.Mark.Id, false); } catch { }
-                idx++;
-                RenderCard();
-            }
-        };
+            keptMap[cur.Mark.Id] = false;
+            try { _library.Core.SetMarkReview(cur.Book, cur.Mark.Id, false); } catch { }
+            idx++;
+            RenderCard();
+        }
+
+        void DoKeep()
+        {
+            if (idx >= items.Length) return;
+            var cur = items[idx];
+            keptMap[cur.Mark.Id] = true;
+            try { _library.Core.SetMarkReview(cur.Book, cur.Mark.Id, true); } catch { }
+            idx++;
+            RenderCard();
+        }
 
         RenderCard();
         if (RootGrid.XamlRoot is null) return;
         dlgRef = YYChrome.CreateMacSheet(RootGrid.XamlRoot, dark, 444, host, tint: _library.Prefs.Tint);
+        dlgRef.Opened += (_, _) => FocusActiveButton();
+        dlgRef.PreviewKeyDown += (_, ke) =>
+        {
+            if (RootGrid.XamlRoot is not null)
+            {
+                var popups = VisualTreeHelper.GetOpenPopupsForXamlRoot(RootGrid.XamlRoot);
+                if (popups.Any(pp => pp.Child is MenuFlyoutPresenter or FlyoutPresenter)) return;
+            }
+
+            if (idx >= items.Length)
+            {
+                if (ke.Key is VirtualKey.Enter or VirtualKey.Space)
+                {
+                    ke.Handled = true;
+                    dlgRef?.Hide();
+                }
+                return;
+            }
+
+            if (ke.Key is VirtualKey.Right or VirtualKey.Enter or VirtualKey.Space)
+            {
+                ke.Handled = true;
+                DoKeep();
+            }
+            else if (ke.Key is VirtualKey.Left or VirtualKey.Delete or VirtualKey.Back)
+            {
+                ke.Handled = true;
+                DoDrop();
+            }
+        };
         await dlgRef.ShowSafeAsync(_library.Prefs.Tint);
         try { _reviewClipPlayer?.Pause(); _reviewClipPlayer?.Dispose(); _reviewClipPlayer = null; } catch { }
+        if (_closed) return;
+        _cachedReviewDeck = null;
         RenderNotesPage();
         if (nextOnlyBookId is not null)
             await ShowReviewSheetAsync(nextOnlyBookId);
+    }
+
+    private VocabWord[] GetFilteredWords()
+    {
+        string q = _wordsQuery.Trim();
+        return _words
+            .Where(w => w.Known == _wordsShowKnown)
+            .Where(w => string.IsNullOrEmpty(q)
+                || w.Word.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || (!string.IsNullOrEmpty(w.Meaning) && w.Meaning.Contains(q, StringComparison.OrdinalIgnoreCase))
+                || (!string.IsNullOrEmpty(w.Context) && w.Context.Contains(q, StringComparison.OrdinalIgnoreCase))
+                || NameMatcher.Matches(ResolveVocabSourceTitle(w.Book), q))
+            .OrderByDescending(w => w.At)
+            .ToArray();
     }
 
     private void RenderWordsPage()
@@ -4285,6 +4978,7 @@ public sealed partial class ShelfWindow : Window
             emptyStack.Children.Add(new TextBlock { Text = "还没有生词", FontSize = 13.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(palette.T1), HorizontalAlignment = HorizontalAlignment.Center });
             emptyStack.Children.Add(new TextBlock { Text = "读外文书时点一个词，在释义卡片里点「加入生词本」，就记在这里，带着原句", FontSize = 12, Foreground = ThemeHelper.Brush(palette.T2), HorizontalAlignment = HorizontalAlignment.Center });
             SubPageStack.Children.Add(emptyStack);
+            L10n.ApplyTree(SubPageStack);
             return;
         }
 
@@ -4317,18 +5011,65 @@ public sealed partial class ShelfWindow : Window
         }
         SubPageStack.Children.Add(chips);
 
-        var shown = _words.Where(w => w.Known == _wordsShowKnown).OrderByDescending(w => w.At).ToArray();
+        var shown = GetFilteredWords();
         if (shown.Length == 0)
         {
             SubPageStack.Children.Add(new TextBlock
             {
-                Text = _wordsShowKnown ? "暂无已掌握的词。将在学的词标为「已掌握」后移至此处" : "已全部掌握。新查的词加入生词本后会显示在这里",
+                Text = !string.IsNullOrWhiteSpace(_wordsQuery)
+                    ? L10n.T("没有匹配的生词")
+                    : (_wordsShowKnown ? "暂无已掌握的词。将在学的词标为「已掌握」后移至此处" : "已全部掌握。新查的词加入生词本后会显示在这里"),
                 FontSize = 12,
                 Foreground = ThemeHelper.Brush(palette.T3),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Margin = new Thickness(0, 56, 0, 0),
             });
+            L10n.ApplyTree(SubPageStack);
             return;
+        }
+
+        var speakerButtons = new List<(string Word, Button Btn)>();
+        void SyncSpeakerButtons()
+        {
+            foreach (var (word, btn) in speakerButtons)
+            {
+                bool active = string.Equals(_speakingVocabWord, word, StringComparison.Ordinal);
+                btn.Background = ThemeHelper.Brush(active ? tint.Soft : palette.Inset);
+                btn.BorderBrush = active ? ThemeHelper.Brush(tint.Edge) : null;
+                btn.BorderThickness = new Thickness(active ? 0.5 : 0);
+                btn.Content = YYIcons.Make(active ? "waveform" : "speaker", 12, ThemeHelper.Brush(active ? tint.Accent : palette.T1));
+                string tip = L10n.T(active ? "停止朗读" : "读一遍");
+                ToolTipService.SetToolTip(btn, tip);
+                AutomationProperties.SetName(btn, tip);
+            }
+        }
+
+        async Task ToggleSpeakWordAsync(string word, string? lang)
+        {
+            if (string.Equals(_speakingVocabWord, word, StringComparison.Ordinal))
+            {
+                _vocabSpeakSeq++;
+                _speakingVocabWord = null;
+                Yuyue.Speech.AudioPlayer.StopActivePreview();
+                SyncSpeakerButtons();
+                return;
+            }
+
+            int seq = ++_vocabSpeakSeq;
+            _speakingVocabWord = word;
+            Yuyue.Speech.AudioPlayer.StopActivePreview();
+            SyncSpeakerButtons();
+            try
+            {
+                await Yuyue.Speech.AudioPlayer.SpeakForeignWordAsync(_library, word, lang);
+            }
+            catch { }
+
+            if (!_closed && seq == _vocabSpeakSeq && string.Equals(_speakingVocabWord, word, StringComparison.Ordinal))
+            {
+                _speakingVocabWord = null;
+                SyncSpeakerButtons();
+            }
         }
 
         // 全库词频统计（1:1 Vocab.swift:63-68）
@@ -4395,40 +5136,46 @@ public sealed partial class ShelfWindow : Window
 
                 var head = new Grid();
                 var wordLine = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
-                wordLine.Children.Add(new TextBlock
+                wordLine.Children.Add(L10n.Skip(new TextBlock
                 {
                     Text = w.Word,
                     FontFamily = new FontFamily(YYFontFamily.LatinSerif.WindowsFamily()),
                     FontSize = 18,
                     FontWeight = Microsoft.UI.Text.FontWeights.Bold,
                     Foreground = ThemeHelper.Brush(palette.T1),
-                });
+                }));
                 if (!string.IsNullOrWhiteSpace(w.Phonetic))
-                    wordLine.Children.Add(new TextBlock { Text = $"/{w.Phonetic.Trim('/', '[', ']')}/", FontSize = 12, Foreground = ThemeHelper.Brush(palette.T2), VerticalAlignment = VerticalAlignment.Center });
+                    wordLine.Children.Add(L10n.Skip(new TextBlock { Text = $"/{w.Phonetic.Trim('/', '[', ']')}/", FontSize = 12, Foreground = ThemeHelper.Brush(palette.T2), VerticalAlignment = VerticalAlignment.Center }));
                 head.Children.Add(wordLine);
 
+                bool isSpeakingThis = string.Equals(_speakingVocabWord, w.Word, StringComparison.Ordinal);
                 var spkBtn = new Button
                 {
                     Width = 28,
                     Height = 28,
                     Padding = new Thickness(0),
                     CornerRadius = new CornerRadius(14),
-                    Background = ThemeHelper.Brush(palette.Inset),
-                    BorderThickness = new Thickness(0),
+                    Background = ThemeHelper.Brush(isSpeakingThis ? tint.Soft : palette.Inset),
+                    BorderBrush = isSpeakingThis ? ThemeHelper.Brush(tint.Edge) : null,
+                    BorderThickness = new Thickness(isSpeakingThis ? 0.5 : 0),
                     HorizontalAlignment = HorizontalAlignment.Right,
                     UseSystemFocusVisuals = false,
-                    Content = YYIcons.Make("speaker", 12, ThemeHelper.Brush(palette.T1)),
+                    Content = YYIcons.Make(isSpeakingThis ? "waveform" : "speaker", 12, ThemeHelper.Brush(isSpeakingThis ? tint.Accent : palette.T1)),
                 };
+                string spkTip = L10n.T(isSpeakingThis ? "停止朗读" : "读一遍");
+                ToolTipService.SetToolTip(spkBtn, spkTip);
+                AutomationProperties.SetName(spkBtn, spkTip);
                 string speakText = w.Word;
                 string? wordLang = ResolveVocabLanguage(w.Book);
-                spkBtn.Click += (_, _) => _ = Yuyue.Speech.AudioPlayer.SpeakForeignWordAsync(_library, speakText, wordLang);
+                speakerButtons.Add((speakText, spkBtn));
+                spkBtn.Click += (_, _) => _ = ToggleSpeakWordAsync(speakText, wordLang);
                 head.Children.Add(spkBtn);
                 item.Children.Add(head);
 
                 // POS 斜体词性拆分（1:1 MacWordsView.swift:239-243）
                 if (!string.IsNullOrEmpty(w.Meaning))
                 {
-                    var meanTb = new TextBlock { FontSize = 13, Foreground = ThemeHelper.Brush(palette.T1), TextWrapping = TextWrapping.Wrap };
+                    var meanTb = L10n.Skip(new TextBlock { FontSize = 13, Foreground = ThemeHelper.Brush(palette.T1), TextWrapping = TextWrapping.Wrap });
                     int dotIdx = w.Meaning.IndexOf(". ", StringComparison.Ordinal);
                     if (dotIdx is > 0 and <= 6)
                     {
@@ -4508,7 +5255,7 @@ public sealed partial class ShelfWindow : Window
                     {
                         ctxTb.Text = ctxText;
                     }
-                    item.Children.Add(ctxTb);
+                    item.Children.Add(L10n.Skip(ctxTb));
                 }
 
                 var foot = new Grid { Margin = new Thickness(0, 4, 0, 0) };
@@ -4519,7 +5266,7 @@ public sealed partial class ShelfWindow : Window
                     ? (chapTitle != bookTitle ? chapTitle : "")
                     : (!string.IsNullOrWhiteSpace(chapTitle) && chapTitle != bookTitle ? $"{bookTitle} · {chapTitle}" : bookTitle);
                 if (!string.IsNullOrWhiteSpace(srcLine))
-                    srcLeft.Children.Add(new TextBlock { Text = srcLine, FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(palette.T2), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
+                    srcLeft.Children.Add(L10n.Skip(new TextBlock { Text = srcLine, FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(palette.T2), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis }));
 
                 int wordTokenCount = w.Word.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
                 if (wordTokenCount is > 0 and <= 1 && freqMap.TryGetValue(w.Word, out var wc) && wc.Times > 0)
@@ -4562,11 +5309,11 @@ public sealed partial class ShelfWindow : Window
                         : () => TryOpenBook(w.Book, section: w.Section, sentence: (int)w.Sentence));
 
                 var wCtx = new MenuFlyout();
-                var wJump = new MenuFlyoutItem { Text = podIssue is not null ? "回到播客这一句" : "回到书里这一句" };
+                var wJump = new MenuFlyoutItem { Text = L10n.T(podIssue is not null ? "回到播客这一句" : "回到书里这一句") };
                 wJump.Click += (_, _) => jumpAction();
-                var wSpeak = new MenuFlyoutItem { Text = "读一遍" };
-                wSpeak.Click += (_, _) => _ = Yuyue.Speech.AudioPlayer.SpeakForeignWordAsync(_library, speakText, wordLang);
-                var wCopy = new MenuFlyoutItem { Text = "拷贝" };
+                var wSpeak = new MenuFlyoutItem { Text = L10n.T("读一遍") };
+                wSpeak.Click += (_, _) => _ = ToggleSpeakWordAsync(speakText, wordLang);
+                var wCopy = new MenuFlyoutItem { Text = L10n.T("拷贝") };
                 wCopy.Click += (_, _) =>
                 {
                     var dp = new DataPackage();
@@ -4574,7 +5321,7 @@ public sealed partial class ShelfWindow : Window
                     Clipboard.SetContent(dp);
                     ShowToast("已拷贝生词", canUndo: false);
                 };
-                var wDel = new MenuFlyoutItem { Text = "删除", Foreground = ThemeHelper.Brush(palette.Danger) };
+                var wDel = new MenuFlyoutItem { Text = L10n.T("删除"), Foreground = ThemeHelper.Brush(palette.Danger) };
                 VocabWord savedWord = w;
                 wDel.Click += (_, _) =>
                 {
@@ -4614,6 +5361,7 @@ public sealed partial class ShelfWindow : Window
             row.Children.Add(card);
             SubPageStack.Children.Add(row);
         }
+        L10n.ApplyTree(SubPageStack);
     }
 
     internal readonly record struct CollectionClothTone(
@@ -4732,7 +5480,7 @@ public sealed partial class ShelfWindow : Window
         }
         else
         {
-            center.Children.Add(new TextBlock
+            center.Children.Add(L10n.Skip(new TextBlock
             {
                 Text = emb.Value,
                 FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
@@ -4740,7 +5488,7 @@ public sealed partial class ShelfWindow : Window
                 FontWeight = Microsoft.UI.Text.FontWeights.Medium,
                 Foreground = inkBrush,
                 HorizontalAlignment = HorizontalAlignment.Center,
-            });
+            }));
         }
         var rules = new StackPanel { Spacing = 2.5, HorizontalAlignment = HorizontalAlignment.Center };
         rules.Children.Add(new Border { Width = 18, Height = 1, CornerRadius = new CornerRadius(0.5), Background = ThemeHelper.Brush(Color.FromArgb(56, tone.Ink.R, tone.Ink.G, tone.Ink.B)) });
@@ -4869,6 +5617,7 @@ public sealed partial class ShelfWindow : Window
                 BorderThickness = new Thickness(1),
                 Child = cardBody,
             });
+            L10n.ApplyTree(SubPageStack);
             return;
         }
 
@@ -4914,7 +5663,7 @@ public sealed partial class ShelfWindow : Window
         var sortFlyout = new MenuFlyout();
         foreach (var (k, lbl) in new[] { ("recent", "最近用过"), ("name", "名字"), ("count", "书的多少"), ("own", "自己排的") })
         {
-            var mi = new MenuFlyoutItem { Text = (_collectionSort == k ? "✓ " : "") + lbl };
+            var mi = new MenuFlyoutItem { Text = (_collectionSort == k ? "✓ " : "") + L10n.T(lbl) };
             string key = k;
             mi.Click += (_, _) =>
             {
@@ -4939,6 +5688,7 @@ public sealed partial class ShelfWindow : Window
             Content = sortSp,
             Flyout = sortFlyout,
         };
+        AutomationProperties.SetName(sortBtn, L10n.T(sortName));
         topRow.Children.Add(sortBtn);
         SubPageStack.Children.Add(topRow);
 
@@ -4983,6 +5733,7 @@ public sealed partial class ShelfWindow : Window
                 noneSp.Children.Add(quickNewBtn);
             }
             SubPageStack.Children.Add(noneSp);
+            L10n.ApplyTree(SubPageStack);
             return;
         }
 
@@ -5019,7 +5770,7 @@ public sealed partial class ShelfWindow : Window
             var tone = ResolveCollectionClothTone(col.Id, resolvedIcon, dark, eink);
 
             var ctx = new MenuFlyout();
-            var pinMi = new MenuFlyoutItem { Text = isPinned ? "取消固定" : "固定到侧栏" };
+            var pinMi = new MenuFlyoutItem { Text = L10n.T(isPinned ? "取消固定" : "固定到侧栏") };
             pinMi.Click += (_, _) =>
             {
                 if (isPinned) _library.Prefs.PinnedCollectionIds.Remove(col.Id);
@@ -5027,10 +5778,10 @@ public sealed partial class ShelfWindow : Window
                 _library.SavePrefs();
                 RefreshBooks();
             };
-            var renMi = new MenuFlyoutItem { Text = "重命名…" };
+            var renMi = new MenuFlyoutItem { Text = L10n.T("重命名…") };
             renMi.Click += async (_, _) => await RenameCollectionAsync(col);
             var iconSub = BuildCollectionIconSubMenu(col);
-            var delMi = new MenuFlyoutItem { Text = "删除合集…", Foreground = ThemeHelper.Brush(palette.Danger) };
+            var delMi = new MenuFlyoutItem { Text = L10n.T("删除合集…"), Foreground = ThemeHelper.Brush(palette.Danger) };
             delMi.Click += async (_, _) => await ConfirmDeleteCollectionAsync(col);
             ctx.Items.Add(pinMi);
             ctx.Items.Add(new MenuFlyoutSeparator());
@@ -5039,7 +5790,7 @@ public sealed partial class ShelfWindow : Window
             if (_collectionSort == "own")
             {
                 int curIdx = i;
-                var moveUp = new MenuFlyoutItem { Text = "往前挪", IsEnabled = curIdx > 0 };
+                var moveUp = new MenuFlyoutItem { Text = L10n.T("往前挪"), IsEnabled = curIdx > 0 };
                 moveUp.Click += (_, _) =>
                 {
                     var ids = _collections.Select(x => x.Id).ToList();
@@ -5051,7 +5802,7 @@ public sealed partial class ShelfWindow : Window
                         RefreshBooks();
                     }
                 };
-                var moveDown = new MenuFlyoutItem { Text = "往后挪", IsEnabled = curIdx + 1 < ordered.Length };
+                var moveDown = new MenuFlyoutItem { Text = L10n.T("往后挪"), IsEnabled = curIdx + 1 < ordered.Length };
                 moveDown.Click += (_, _) =>
                 {
                     var ids = _collections.Select(x => x.Id).ToList();
@@ -5135,6 +5886,7 @@ public sealed partial class ShelfWindow : Window
                 Content = YYIcons.Make("pin", 10, ThemeHelper.Brush(curPinned ? tint.Accent : palette.T3), filled: curPinned),
             };
             ToolTipService.SetToolTip(pinPill, curPinned ? "取消固定" : "固定到侧栏");
+            AutomationProperties.SetName(pinPill, L10n.T(curPinned ? "取消固定" : "固定到侧栏"));
             pinPill.Click += (_, _) =>
             {
                 if (curPinned) _library.Prefs.PinnedCollectionIds.Remove(pinTargetId);
@@ -5153,10 +5905,11 @@ public sealed partial class ShelfWindow : Window
                 BorderThickness = new Thickness(0.5),
                 UseSystemFocusVisuals = false,
                 Opacity = 0,
-                Content = new TextBlock { Text = "···", FontSize = 10, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = ThemeHelper.Brush(palette.T2) },
+                Content = L10n.Skip(new TextBlock { Text = "···", FontSize = 10, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = ThemeHelper.Brush(palette.T2) }),
                 Flyout = ctx,
             };
             ToolTipService.SetToolTip(morePill, $"管理合集“{col.Name}”");
+            AutomationProperties.SetName(morePill, L10n.T($"管理合集“{col.Name}”"));
             rightPills.Children.Add(pinPill);
             rightPills.Children.Add(morePill);
             topControls.Children.Add(rightPills);
@@ -5183,7 +5936,7 @@ public sealed partial class ShelfWindow : Window
             footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var fMeta = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-            fMeta.Children.Add(new TextBlock
+            fMeta.Children.Add(L10n.Skip(new TextBlock
             {
                 Text = col.Name,
                 FontSize = 14,
@@ -5191,7 +5944,7 @@ public sealed partial class ShelfWindow : Window
                 Foreground = ThemeHelper.Brush(palette.T1),
                 MaxLines = 1,
                 TextTrimming = TextTrimming.CharacterEllipsis,
-            });
+            }));
             string subStr = col.Count == 0
                 ? "还没有书"
                 : (col.UsedAt > 0
@@ -5227,6 +5980,7 @@ public sealed partial class ShelfWindow : Window
                 UseSystemFocusVisuals = false,
                 ContextFlyout = ctx,
             };
+            AutomationProperties.SetName(openHit, col.Name);
             string cid = col.Id;
             string cname = col.Name;
             openHit.Click += (_, _) =>
@@ -5269,9 +6023,13 @@ public sealed partial class ShelfWindow : Window
 
             cardBorder.DragOver += (_, de) =>
             {
-                if (de.DataView.Contains(StandardDataFormats.Text) || de.DataView.Contains(StandardDataFormats.StorageItems))
+                if (de.DataView.Properties.ContainsKey("yuyue-book-id")
+                    || de.DataView.Contains(StandardDataFormats.Text)
+                    || de.DataView.Contains(StandardDataFormats.StorageItems))
                 {
                     de.AcceptedOperation = DataPackageOperation.Copy;
+                    de.Handled = true;
+                    HideDropOverlay();
                     cardBorder.BorderBrush = ThemeHelper.Brush(tint.Accent);
                     cardBorder.BorderThickness = new Thickness(1.2);
                 }
@@ -5283,23 +6041,41 @@ public sealed partial class ShelfWindow : Window
             };
             cardBorder.Drop += async (_, de) =>
             {
-                cardBorder.BorderBrush = ThemeHelper.Brush(dark ? Color.FromArgb(18, 255, 255, 255) : palette.Line);
-                cardBorder.BorderThickness = new Thickness(0.5);
-                if (de.DataView.Contains(StandardDataFormats.StorageItems))
+                de.Handled = true;
+                HideDropOverlay();
+                var deferral = de.GetDeferral();
+                try
                 {
-                    var items = await de.DataView.GetStorageItemsAsync();
-                    var paths = items.Select(it => it.Path).Where(fp => !string.IsNullOrEmpty(fp)).ToArray();
-                    if (paths.Length > 0) await ImportPathsAsync(paths, openFirst: false, targetCollectionId: cid);
-                    return;
+                    cardBorder.BorderBrush = ThemeHelper.Brush(dark ? Color.FromArgb(18, 255, 255, 255) : palette.Line);
+                    cardBorder.BorderThickness = new Thickness(0.5);
+                    if (de.DataView.Contains(StandardDataFormats.StorageItems))
+                    {
+                        var items = await de.DataView.GetStorageItemsAsync();
+                        var paths = items.Select(it => it.Path).Where(fp => !string.IsNullOrEmpty(fp)).ToArray();
+                        if (paths.Length > 0) await ImportPathsAsync(paths, openFirst: false, targetCollectionId: cid);
+                        return;
+                    }
+                    string? bid = null;
+                    if (de.DataView.Properties.TryGetValue("yuyue-book-id", out var rawBid) && rawBid is string propBid && !string.IsNullOrEmpty(propBid))
+                    {
+                        bid = propBid;
+                    }
+                    else if (de.DataView.Contains(StandardDataFormats.Text))
+                    {
+                        string txt = await de.DataView.GetTextAsync();
+                        if (txt.StartsWith("yuyue-book:", StringComparison.Ordinal))
+                            bid = txt["yuyue-book:".Length..];
+                    }
+                    if (!string.IsNullOrEmpty(bid))
+                    {
+                        _library.SetInCollection(cid, bid, true);
+                        RefreshBooks();
+                        ShowToast($"已放进合集“{cname}”", canUndo: false);
+                    }
                 }
-                if (!de.DataView.Contains(StandardDataFormats.Text)) return;
-                string txt = await de.DataView.GetTextAsync();
-                if (txt.StartsWith("yuyue-book:", StringComparison.Ordinal))
+                finally
                 {
-                    string bid = txt["yuyue-book:".Length..];
-                    _library.SetInCollection(cid, bid, true);
-                    RefreshBooks();
-                    ShowToast($"已放进合集“{cname}”", canUndo: false);
+                    deferral.Complete();
                 }
             };
 
@@ -5309,6 +6085,7 @@ public sealed partial class ShelfWindow : Window
         }
 
         SubPageStack.Children.Add(grid);
+        L10n.ApplyTree(SubPageStack);
     }
 
     // ---------- Events ----------
@@ -5329,6 +6106,7 @@ public sealed partial class ShelfWindow : Window
             _library.Prefs.ClosedSidebarGroups.Remove(key);
         }
         _library.SavePrefs();
+        UpdateSidebarGroupChevrons();
     }
 
     public void SwitchTab(string filter)
@@ -5369,6 +6147,8 @@ public sealed partial class ShelfWindow : Window
             return;
         }
 #endif
+        if (filter == "books") filter = "all";
+        if (filter == "notes") InvalidateNotesCache();
         _cameFromCollectionsWall = false;
         _activeFilter = filter;
         UpdateNavSelectionVisuals();
@@ -5379,6 +6159,7 @@ public sealed partial class ShelfWindow : Window
     {
         if (sender is Button btn && btn.Tag is string tag)
         {
+            if (tag == "notes") InvalidateNotesCache();
             _cameFromCollectionsWall = false;
             _activeFilter = tag;
             UpdateNavSelectionVisuals();
@@ -5388,11 +6169,12 @@ public sealed partial class ShelfWindow : Window
 
     private MenuFlyoutSubItem BuildCollectionIconSubMenu(BookCollection col)
     {
-        var iconSub = new MenuFlyoutSubItem { Text = "更换图标" };
+        var iconSub = new MenuFlyoutSubItem { Text = L10n.T("更换图标") };
         string colId = col.Id;
         foreach (var (symbol, label) in YYIcons.CollectionIconChoices)
         {
-            var icItem = new MenuFlyoutItem { Text = col.Icon == symbol ? $"✓ {label}" : label };
+            string locLabel = L10n.T(label);
+            var icItem = new MenuFlyoutItem { Text = col.Icon == symbol ? $"✓ {locLabel}" : locLabel };
             string nextIc = symbol;
             icItem.Click += (_, _) =>
             {
@@ -5402,7 +6184,8 @@ public sealed partial class ShelfWindow : Window
             iconSub.Items.Add(icItem);
         }
         iconSub.Items.Add(new MenuFlyoutSeparator());
-        var autoItem = new MenuFlyoutItem { Text = string.IsNullOrEmpty(col.Icon) ? "✓ 按名字自动选" : "按名字自动选" };
+        string autoLabel = L10n.T("按名字自动选");
+        var autoItem = new MenuFlyoutItem { Text = string.IsNullOrEmpty(col.Icon) ? $"✓ {autoLabel}" : autoLabel };
         autoItem.Click += (_, _) =>
         {
             try { _library.Core.SetCollectionIcon(colId, null); } catch { }
@@ -5434,18 +6217,75 @@ public sealed partial class ShelfWindow : Window
         ApplySidebarVisibility(_sidebarVisible);
     }
 
+    private void SyncSortMenuVisuals()
+    {
+        SortItemRecent.IsChecked = _sortKey == "recent";
+        SortItemAdded.IsChecked = _sortKey == "added";
+        SortItemTitle.IsChecked = _sortKey == "title";
+        SortItemAuthor.IsChecked = _sortKey == "author";
+        string raw = _sortKey switch
+        {
+            "added" => "加入时间",
+            "title" => "书名",
+            "author" => "作者",
+            _ => "最近读过",
+        };
+        SortLabelText.Text = L10n.T(raw);
+    }
+
+    internal void SyncShelfSortFromPrefs()
+    {
+        string pref = _library.Prefs.BooksSort;
+        if (pref is "recent" or "added" or "title" or "author")
+        {
+            _sortKey = pref;
+            SyncSortMenuVisuals();
+        }
+    }
+
     private void SortItem_Click(object sender, RoutedEventArgs e)
     {
         if (sender is MenuFlyoutItem item && item.Tag is string key)
         {
             _sortKey = key;
-            SortLabelText.Text = item.Text;
+            _library.Prefs.BooksSort = key;
+            if (key is "recent" or "added" or "title")
+                _recordBuilder.SortKey = key;
+            _library.SavePrefs();
+            SyncSortMenuVisuals();
             RenderCurrentView();
         }
     }
 
-    // 1:1 MacShelfView.swift:447-450：点击底部同步状态始终打开「设置 · 同步」
-    private void SyncStatus_Click(object sender, RoutedEventArgs e) => App.CurrentApp.OpenSettings("sync");
+    private void SyncStatus_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_library.Sync.IsEnabled)
+        {
+            App.CurrentApp.OpenSettings("sync");
+            return;
+        }
+
+        var flyout = new MenuFlyout();
+        var syncNowItem = new MenuFlyoutItem { Text = L10n.T("立即同步") };
+        syncNowItem.Click += async (_, _) =>
+        {
+            UpdateSyncFooter();
+            try
+            {
+                await _library.Sync.SyncNowAsync();
+            }
+            catch { }
+            if (_closed) return;
+            RefreshBooks();
+            UpdateSyncFooter();
+        };
+        var settingsItem = new MenuFlyoutItem { Text = L10n.T("同步设置…") };
+        settingsItem.Click += (_, _) => App.CurrentApp.OpenSettings("sync");
+        flyout.Items.Add(syncNowItem);
+        flyout.Items.Add(new MenuFlyoutSeparator());
+        flyout.Items.Add(settingsItem);
+        flyout.ShowAt(SyncFooterBtn);
+    }
 
     private void OpenSettings_Click(object sender, RoutedEventArgs e) => App.CurrentApp.OpenSettings("general");
     private async void Feedback_Click(object sender, RoutedEventArgs e) => await _library.Updates.ShowFeedbackComposerAsync(this, RootGrid.XamlRoot);
@@ -5608,7 +6448,7 @@ public sealed partial class ShelfWindow : Window
             if (ct.IsCancellationRequested) return;
 
             var tocMatches = new List<(BookSummary Book, uint SectionIndex, string Title)>();
-            foreach (var b in shelfSnapshot.Where(b => !b.Record && b.Available && b.Format != BookFormat.Audio && b.Format != BookFormat.Pdf))
+            foreach (var b in shelfSnapshot.Where(b => !b.Record && b.Available && b.Format != BookFormat.Audio))
             {
                 if (ct.IsCancellationRequested) return;
                 try
@@ -5691,7 +6531,7 @@ public sealed partial class ShelfWindow : Window
             if (ct.IsCancellationRequested) return;
             DispatcherQueue.TryEnqueue(() =>
             {
-                if (ct.IsCancellationRequested || QuickSearchOverlay.Visibility != Visibility.Visible) return;
+                if (_closed || ct.IsCancellationRequested || QuickSearchOverlay.Visibility != Visibility.Visible) return;
                 RenderQuickSearchRows(q, tocMatches, fullTextHits, hitBookCount, totalLineCount, noteMatches, searching: false, lineCapped: lineCapped);
             });
         }, ct);
@@ -5718,18 +6558,38 @@ public sealed partial class ShelfWindow : Window
         int totalNotes = 0;
         foreach (var b in _keptBooks)
             if (_markCounts.TryGetValue(b.Id, out var c)) totalNotes += (int)c;
-        QuickSearchScopeText.Text = searching
+        QuickSearchScopeText.Text = L10n.T(searching
             ? "正在书库和笔记里检索…"
-            : $"在 {_keptBooks.Count} 本书和 {totalNotes} 条笔记里搜";
+            : $"在 {_keptBooks.Count} 本书和 {totalNotes} 条笔记里搜");
 
-        TextBlock GroupHeader(string title, string? right = null) => new()
+        UIElement GroupHeader(string title, string? right = null)
         {
-            Text = right is null ? title : $"{title} · {right}",
-            FontSize = 11,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = ThemeHelper.Brush(palette.T3),
-            Margin = new Thickness(10, 8, 10, 3),
-        };
+            var g = new Grid { Margin = new Thickness(10, 8, 10, 3) };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.Children.Add(new TextBlock
+            {
+                Text = L10n.T(title),
+                FontSize = 11,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = ThemeHelper.Brush(palette.T3),
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            if (!string.IsNullOrEmpty(right))
+            {
+                var rtb = new TextBlock
+                {
+                    Text = L10n.T(right),
+                    FontSize = 10.5,
+                    Foreground = ThemeHelper.Brush(palette.T3),
+                    Opacity = 0.85,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                Grid.SetColumn(rtb, 1);
+                g.Children.Add(rtb);
+            }
+            return g;
+        }
 
         Border MakeOpenHintBadge() => new()
         {
@@ -5837,14 +6697,14 @@ public sealed partial class ShelfWindow : Window
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
                 row.Children.Add(CreateCoverView(book, 20, 28, elevated: false));
-                var tb = QuickSearchDialog.BuildHighlightedBlock(book.Title, q, 13, Microsoft.UI.Text.FontWeights.Normal, palette.T1, tint.Accent);
+                var tb = L10n.Skip(QuickSearchDialog.BuildHighlightedBlock(book.Title, q, 13, Microsoft.UI.Text.FontWeights.Normal, palette.T1, tint.Accent));
                 tb.MaxLines = 1;
                 tb.VerticalAlignment = VerticalAlignment.Center;
                 Grid.SetColumn(tb, 1);
                 row.Children.Add(tb);
 
-                string subLabel = $"{book.Authors.FirstOrDefault() ?? ""} · {FormatShelfNote(book)}".Trim(' ', '·');
-                var sub = QuickSearchDialog.BuildHighlightedBlock(subLabel, q, 11, Microsoft.UI.Text.FontWeights.Normal, palette.T3, tint.Accent);
+                string subLabel = $"{book.Authors.FirstOrDefault() ?? ""} · {L10n.T(FormatShelfNote(book))}".Trim(' ', '·');
+                var sub = L10n.Skip(QuickSearchDialog.BuildHighlightedBlock(subLabel, q, 11, Microsoft.UI.Text.FontWeights.Normal, palette.T3, tint.Accent));
                 sub.MaxLines = 1;
                 sub.VerticalAlignment = VerticalAlignment.Center;
                 var openBadge = MakeOpenHintBadge();
@@ -5877,13 +6737,13 @@ public sealed partial class ShelfWindow : Window
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
                 row.Children.Add(CreateCoverView(book, 20, 28, elevated: false));
-                var tb = QuickSearchDialog.BuildHighlightedBlock(secTitle, q, 12.5, Microsoft.UI.Text.FontWeights.Normal, palette.T1, tint.Accent);
+                var tb = L10n.Skip(QuickSearchDialog.BuildHighlightedBlock(secTitle, q, 12.5, Microsoft.UI.Text.FontWeights.Normal, palette.T1, tint.Accent));
                 tb.MaxLines = 1;
                 tb.VerticalAlignment = VerticalAlignment.Center;
                 Grid.SetColumn(tb, 1);
                 row.Children.Add(tb);
 
-                var sub = new TextBlock { Text = $"章节 · {book.Title}", FontSize = 11, Foreground = ThemeHelper.Brush(palette.T3), VerticalAlignment = VerticalAlignment.Center, MaxWidth = 160, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis };
+                var sub = L10n.Skip(new TextBlock { Text = $"{L10n.T("章节")} · {book.Title}", FontSize = 11, Foreground = ThemeHelper.Brush(palette.T3), VerticalAlignment = VerticalAlignment.Center, MaxWidth = 160, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
                 var openBadge = MakeOpenHintBadge();
                 var rightSlot = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
                 rightSlot.Children.Add(sub);
@@ -5910,6 +6770,7 @@ public sealed partial class ShelfWindow : Window
 
         if (string.IsNullOrEmpty(q))
         {
+            L10n.ApplyTree(QuickSearchResults);
             if (_quickSearchItems.Count > 1) SetQuickSearchSelection(1);
             else if (_quickSearchItems.Count > 0) SetQuickSearchSelection(0);
             return;
@@ -5926,7 +6787,7 @@ public sealed partial class ShelfWindow : Window
                 r.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 r.Children.Add(CreateCoverView(b, 20, 28, elevated: false));
 
-                var sentTb = new TextBlock
+                var sentTb = L10n.Skip(new TextBlock
                 {
                     FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
                     FontSize = 12.5,
@@ -5934,7 +6795,7 @@ public sealed partial class ShelfWindow : Window
                     MaxLines = 1,
                     TextTrimming = TextTrimming.CharacterEllipsis,
                     VerticalAlignment = VerticalAlignment.Center,
-                };
+                });
                 if (!string.IsNullOrEmpty(hit.Before)) sentTb.Inlines.Add(new Run { Text = hit.Before });
                 var ul = new Underline();
                 ul.Inlines.Add(new Run { Text = hit.Matched, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = ThemeHelper.Brush(tint.Accent) });
@@ -5944,7 +6805,7 @@ public sealed partial class ShelfWindow : Window
                 r.Children.Add(sentTb);
 
                 string srcLabel = string.IsNullOrWhiteSpace(chap) ? b.Title : $"{b.Title} · {chap}";
-                var src = new TextBlock { Text = srcLabel, FontSize = 11, Foreground = ThemeHelper.Brush(palette.T3), VerticalAlignment = VerticalAlignment.Center, MaxWidth = 160, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis };
+                var src = L10n.Skip(new TextBlock { Text = srcLabel, FontSize = 11, Foreground = ThemeHelper.Brush(palette.T3), VerticalAlignment = VerticalAlignment.Center, MaxWidth = 160, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
                 var openBadge = MakeOpenHintBadge();
                 var rightSlot = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
                 rightSlot.Children.Add(src);
@@ -5983,13 +6844,13 @@ public sealed partial class ShelfWindow : Window
                 r.Children.Add(CreateCoverView(b, 20, 28, elevated: false));
 
                 var sp = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-                var mkTb = QuickSearchDialog.BuildHighlightedBlock(mk.Text, q, 12.5, Microsoft.UI.Text.FontWeights.Normal, palette.T1, tint.Accent);
+                var mkTb = L10n.Skip(QuickSearchDialog.BuildHighlightedBlock(mk.Text, q, 12.5, Microsoft.UI.Text.FontWeights.Normal, palette.T1, tint.Accent));
                 mkTb.FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily());
                 mkTb.MaxLines = 1;
                 sp.Children.Add(mkTb);
                 if (!string.IsNullOrWhiteSpace(mk.Note))
                 {
-                    var ntTb = QuickSearchDialog.BuildHighlightedBlock(mk.Note, q, 11.5, Microsoft.UI.Text.FontWeights.Normal, tint.Accent, tint.Accent);
+                    var ntTb = L10n.Skip(QuickSearchDialog.BuildHighlightedBlock(mk.Note, q, 11.5, Microsoft.UI.Text.FontWeights.Normal, tint.Accent, tint.Accent));
                     ntTb.FontFamily = new FontFamily(YYFontFamily.Kaiti.WindowsFamily());
                     ntTb.MaxLines = 1;
                     sp.Children.Add(ntTb);
@@ -5997,7 +6858,7 @@ public sealed partial class ShelfWindow : Window
                 Grid.SetColumn(sp, 1);
                 r.Children.Add(sp);
 
-                var src = new TextBlock { Text = b.Title, FontSize = 11, Foreground = ThemeHelper.Brush(palette.T3), VerticalAlignment = VerticalAlignment.Center, MaxWidth = 140, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis };
+                var src = L10n.Skip(new TextBlock { Text = b.Title, FontSize = 11, Foreground = ThemeHelper.Brush(palette.T3), VerticalAlignment = VerticalAlignment.Center, MaxWidth = 140, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
                 var openBadge = MakeOpenHintBadge();
                 var rightSlot = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
                 rightSlot.Children.Add(src);
@@ -6035,19 +6896,87 @@ public sealed partial class ShelfWindow : Window
             });
         }
 
+        L10n.ApplyTree(QuickSearchResults);
         if (_quickSearchItems.Count > 1) SetQuickSearchSelection(1);
         else if (_quickSearchItems.Count > 0) SetQuickSearchSelection(0);
     }
 
-    private void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
+    private void ToggleFullScreen()
     {
+        try
+        {
+            var appWin = this.AppWindow;
+            if (appWin is null) return;
+            appWin.SetPresenter(appWin.Presenter.Kind == AppWindowPresenterKind.FullScreen
+                ? AppWindowPresenterKind.Overlapped
+                : AppWindowPresenterKind.FullScreen);
+        }
+        catch { }
+    }
+
+    private void RootGrid_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (_activeFilter != "podcasts" || QuickSearchOverlay.Visibility == Visibility.Visible) return;
+        if (YYChrome.HasBlockingModalOrFlyoutOpen(RootGrid.XamlRoot)) return;
+
         bool ctrl = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(CoreVirtualKeyStates.Down);
         bool alt = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu).HasFlag(CoreVirtualKeyStates.Down);
+        if (ctrl || alt) return;
 
-        if (ctrl && e.Key == VirtualKey.K)
+        var focused = FocusManager.GetFocusedElement(RootGrid.XamlRoot);
+        if (focused is TextBox or RichEditBox or PasswordBox or AutoSuggestBox) return;
+
+        if (e.Key is VirtualKey.Space or VirtualKey.H or VirtualKey.I
+            or VirtualKey.Number1 or VirtualKey.Number2 or VirtualKey.Number3)
+        {
+            if (_podcastBuilder.HandleKeyDown(e.Key))
+                e.Handled = true;
+        }
+    }
+
+    private void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (YYChrome.HasBlockingModalOrFlyoutOpen(RootGrid.XamlRoot)) return;
+
+        bool ctrl = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(CoreVirtualKeyStates.Down);
+        bool alt = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu).HasFlag(CoreVirtualKeyStates.Down);
+        var focused = FocusManager.GetFocusedElement(RootGrid.XamlRoot);
+        bool inTextInput = focused is TextBox or RichEditBox or PasswordBox or AutoSuggestBox;
+
+        if (ctrl && !alt && e.Key == VirtualKey.W)
+        {
+            Close();
+            e.Handled = true;
+        }
+        else if (ctrl && !alt && e.Key == VirtualKey.K)
         {
             if (QuickSearchOverlay.Visibility == Visibility.Visible) CloseQuickSearch();
             else OpenQuickSearch();
+            e.Handled = true;
+        }
+        else if (ctrl && !alt && e.Key == VirtualKey.F)
+        {
+            TextBox? activeFilterBox = _activeFilter switch
+            {
+                "notes" => _activeNotesFilterBox,
+                "words" => _activeWordsFilterBox,
+                "collections" => _activeCollectionsFilterBox,
+                _ => null,
+            };
+            if (activeFilterBox is not null && activeFilterBox.IsLoaded && activeFilterBox.Visibility == Visibility.Visible)
+            {
+                activeFilterBox.Focus(FocusState.Programmatic);
+                activeFilterBox.SelectAll();
+            }
+            else
+            {
+                OpenQuickSearch();
+            }
+            e.Handled = true;
+        }
+        else if (!ctrl && !alt && e.Key == VirtualKey.F11)
+        {
+            ToggleFullScreen();
             e.Handled = true;
         }
         else if (ctrl && alt && (e.Key == VirtualKey.S || e.Key == VirtualKey.N))
@@ -6055,13 +6984,38 @@ public sealed partial class ShelfWindow : Window
             ToggleSidebar_Click(sender, e);
             e.Handled = true;
         }
-        else if (ctrl && e.Key == VirtualKey.Z && ToastBanner.Visibility == Visibility.Visible && _toastUndoAction is not null)
+        else if (ctrl && !alt && !inTextInput && e.Key == VirtualKey.Z && ToastBanner.Visibility == Visibility.Visible && _toastUndoAction is not null)
         {
             ToastUndo_Click(sender, e);
             e.Handled = true;
         }
-        else if (ctrl && e.Key == VirtualKey.O) { ImportButton_Click(sender, e); e.Handled = true; }
-        else if (ctrl && e.Key == (VirtualKey)188) { App.CurrentApp.OpenSettings("general"); e.Handled = true; }
+        else if (ctrl && !alt && (e.Key == VirtualKey.O || e.Key == VirtualKey.I))
+        {
+            ImportButton_Click(sender, e);
+            e.Handled = true;
+        }
+        else if (ctrl && !alt && e.Key == (VirtualKey)188)
+        {
+            App.CurrentApp.OpenSettings("general");
+            e.Handled = true;
+        }
+        else if (ctrl && !alt && !inTextInput && e.Key is >= VirtualKey.Number1 and <= VirtualKey.Number7)
+        {
+            string targetTab = e.Key switch
+            {
+                VirtualKey.Number1 => "all",
+                VirtualKey.Number2 => "progress",
+                VirtualKey.Number3 => "podcasts",
+                VirtualKey.Number4 => "audio",
+                VirtualKey.Number5 => "notes",
+                VirtualKey.Number6 => "words",
+                VirtualKey.Number7 => "collections",
+                _ => "all",
+            };
+            CloseQuickSearch();
+            SwitchTab(targetTab);
+            e.Handled = true;
+        }
         else if (ctrl && e.Key == (VirtualKey)219 || alt && e.Key == VirtualKey.Left)
         {
             if (_activeFilter == "progress" && _recordBuilder.OpenBookId is not null)
@@ -6085,16 +7039,50 @@ public sealed partial class ShelfWindow : Window
                 e.Handled = true;
             }
         }
-        else if (e.Key == VirtualKey.Escape && QuickSearchOverlay.Visibility == Visibility.Visible) { CloseQuickSearch(); e.Handled = true; }
-        else if (!ctrl && !alt && _activeFilter == "podcasts" && QuickSearchOverlay.Visibility != Visibility.Visible)
+        else if (e.Key == VirtualKey.Escape)
         {
-            var focused = FocusManager.GetFocusedElement(RootGrid.XamlRoot);
-            if (focused is not TextBox and not RichEditBox and not PasswordBox and not AutoSuggestBox
-                && VisualTreeHelper.GetOpenPopupsForXamlRoot(RootGrid.XamlRoot).Count == 0)
+            if (QuickSearchOverlay.Visibility == Visibility.Visible)
             {
-                if (_podcastBuilder.HandleKeyDown(e.Key))
-                    e.Handled = true;
+                CloseQuickSearch();
+                e.Handled = true;
             }
+            else if (!inTextInput && _activeFilter == "progress" && _recordBuilder.OpenBookId is not null)
+            {
+                _recordBuilder.OpenBookId = null;
+                RefreshCurrentSubPage();
+                e.Handled = true;
+            }
+            else if (!inTextInput && _activeFilter == "podcasts")
+            {
+                if (_podcastBuilder.HandleKeyDown(VirtualKey.Escape))
+                {
+                    e.Handled = true;
+                }
+                else if (_podcastBuilder.OpenIssueId is not null)
+                {
+                    _podcastBuilder.OpenIssueId = null;
+                    RefreshCurrentSubPage();
+                    e.Handled = true;
+                }
+            }
+            else if (!inTextInput && _activeFilter.StartsWith("col:", StringComparison.Ordinal))
+            {
+                _cameFromCollectionsWall = false;
+                _activeFilter = "collections";
+                UpdateNavSelectionVisuals();
+                RenderCurrentView();
+                e.Handled = true;
+            }
+            else if (this.AppWindow?.Presenter.Kind == AppWindowPresenterKind.FullScreen)
+            {
+                try { this.AppWindow.SetPresenter(AppWindowPresenterKind.Overlapped); } catch { }
+                e.Handled = true;
+            }
+        }
+        else if (!ctrl && !alt && !inTextInput && _activeFilter == "podcasts" && QuickSearchOverlay.Visibility != Visibility.Visible)
+        {
+            if (_podcastBuilder.HandleKeyDown(e.Key))
+                e.Handled = true;
         }
     }
 
@@ -6159,6 +7147,29 @@ public sealed partial class ShelfWindow : Window
         return found;
     }
 
+    private void ImportQueueCard_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        _importCardHoverPaused = true;
+        _importCardDismissTimer?.Stop();
+    }
+
+    private void ImportQueueCard_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_importCardHoverPaused) return;
+        _importCardHoverPaused = false;
+        if (ImportQueueCard.Visibility == Visibility.Visible)
+            _importCardDismissTimer?.Start();
+    }
+
+    private void HideImportQueueCard()
+    {
+        _importCardDismissTimer?.Stop();
+        _importCardDismissTimer = null;
+        _importCardHoverPaused = false;
+        ImportQueueCard.Visibility = Visibility.Collapsed;
+        ImportQueueCard.Child = null;
+    }
+
     public async Task ImportPathsAsync(IReadOnlyList<string> paths, bool openFirst, string? targetCollectionId = null)
     {
         string? effectiveColId = targetCollectionId
@@ -6171,7 +7182,7 @@ public sealed partial class ShelfWindow : Window
             .ToHashSet(StringComparer.Ordinal);
         var imported = new List<BookSummary>();
         var duplicates = new List<BookSummary>();
-        var results = new List<(string Name, string Status, bool IsError, BookSummary? Book)>();
+        int errorCount = 0;
 
         var snapshotPaths = paths.Where(p => string.Equals(Path.GetExtension(p), ".yuyue", StringComparison.OrdinalIgnoreCase)).ToArray();
         foreach (var sp in snapshotPaths)
@@ -6184,187 +7195,441 @@ public sealed partial class ShelfWindow : Window
         }
         if (snapshotPaths.Length == paths.Count) return;
 
-        var ebookFiles = new List<string>();
-        var audioBatches = new List<string[]>();
-        var looseAudioTracks = new List<string>();
-
-        foreach (var raw in paths)
+        var rawCopy = paths.ToArray();
+        var (ebookFiles, audioBatches) = await Task.Run(() =>
         {
-            if (string.IsNullOrWhiteSpace(raw)) continue;
-            if (string.Equals(Path.GetExtension(raw), ".yuyue", StringComparison.OrdinalIgnoreCase)) continue;
+            var ebooks = new List<string>();
+            var batches = new List<string[]>();
+            var looseAudio = new List<string>();
 
-            if (Directory.Exists(raw))
+            foreach (var raw in rawCopy)
             {
-                var booksInside = EnumerateBooksInsideFolder(raw);
-                if (booksInside.Count > 0)
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                if (string.Equals(Path.GetExtension(raw), ".yuyue", StringComparison.OrdinalIgnoreCase)) continue;
+
+                if (Directory.Exists(raw))
                 {
-                    ebookFiles.AddRange(booksInside);
+                    var booksInside = EnumerateBooksInsideFolder(raw);
+                    if (booksInside.Count > 0)
+                    {
+                        ebooks.AddRange(booksInside);
+                    }
+                    else if (AudiobookImporter.IsAudiobookOrArchivePath(raw))
+                    {
+                        batches.Add([raw]);
+                    }
+                    continue;
                 }
-                else if (AudiobookImporter.IsAudiobookOrArchivePath(raw))
+
+                if (!File.Exists(raw)) continue;
+                string ext = Path.GetExtension(raw).ToLowerInvariant();
+                if (EbookImportExtensions.Contains(ext))
                 {
-                    audioBatches.Add([raw]);
+                    ebooks.Add(raw);
                 }
-                continue;
+                else if (ext is ".m4b" or ".zip" || AudiobookImporter.DrmExtensions.Contains(ext))
+                {
+                    // Each .m4b or .zip archive is its own standalone audiobook
+                    batches.Add([raw]);
+                }
+                else if (AudiobookImporter.Extensions.Contains(ext))
+                {
+                    looseAudio.Add(raw);
+                }
             }
 
-            if (!File.Exists(raw)) continue;
-            string ext = Path.GetExtension(raw).ToLowerInvariant();
-            if (EbookImportExtensions.Contains(ext))
-            {
-                ebookFiles.Add(raw);
-            }
-            else if (ext is ".m4b" or ".zip" || AudiobookImporter.DrmExtensions.Contains(ext))
-            {
-                // Each .m4b or .zip archive is its own standalone audiobook
-                audioBatches.Add([raw]);
-            }
-            else if (AudiobookImporter.Extensions.Contains(ext))
-            {
-                looseAudioTracks.Add(raw);
-            }
+            if (looseAudio.Count > 0)
+                batches.Add(looseAudio.ToArray());
+
+            return (ebooks, batches);
+        });
+        if (_closed) return;
+
+        bool useInteractiveAudioSheet = audioBatches.Count == 1 && ebookFiles.Count == 0 && RootGrid.XamlRoot is not null && !openFirst;
+        int totalQueue = ebookFiles.Count + (useInteractiveAudioSheet ? 0 : audioBatches.Count);
+
+        bool dark = ThemeHelper.IsDark(RootGrid.ActualTheme);
+        var p = ThemeHelper.Palette(dark);
+        var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+
+        TextBlock? headerTitleText = null;
+        Border? progressFill = null;
+        const double progressTrackWidth = 296.0;
+        var rowViews = new List<(TextBlock TitleTb, TextBlock SubTb, ContentControl StatusHost)>(totalQueue);
+        int doneCount = 0;
+
+        void UpdateProgressVisuals()
+        {
+            if (headerTitleText is not null)
+                headerTitleText.Text = L10n.T($"正在导入 {doneCount} / {totalQueue}…");
+            if (progressFill is not null)
+                progressFill.Width = totalQueue > 0 ? Math.Clamp(progressTrackWidth * doneCount / totalQueue, 0, progressTrackWidth) : 0;
         }
 
-        if (looseAudioTracks.Count > 0)
+        UIElement MakeStatusWaiting() => new TextBlock
         {
-            audioBatches.Add(looseAudioTracks.ToArray());
+            Text = L10n.T("等待中"),
+            FontSize = 11,
+            Foreground = ThemeHelper.Brush(p.T3),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        UIElement MakeStatusImporting() => new ProgressRing
+        {
+            IsActive = true,
+            Width = 14,
+            Height = 14,
+            Foreground = ThemeHelper.Brush(tint.Accent),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        UIElement MakeStatusSuccess() => YYIcons.Make("checkmark", 11, ThemeHelper.Brush(p.Ok));
+
+        UIElement MakeStatusDuplicate(string bookId)
+        {
+            var btn = new Button
+            {
+                Height = 22,
+                MinHeight = 22,
+                Padding = new Thickness(7, 0, 7, 0),
+                CornerRadius = new CornerRadius(11),
+                Background = ThemeHelper.Brush(p.Inset),
+                BorderThickness = new Thickness(0),
+                UseSystemFocusVisuals = false,
+                Content = new TextBlock
+                {
+                    Text = L10n.T("已在书架"),
+                    FontSize = 10.5,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+                    Foreground = ThemeHelper.Brush(p.T2),
+                },
+            };
+            btn.Click += (_, _) => RevealAndHighlightBook(bookId);
+            return btn;
         }
+
+        UIElement MakeStatusError() => new Border
+        {
+            Width = 16,
+            Height = 16,
+            CornerRadius = new CornerRadius(8),
+            Background = ThemeHelper.Brush(p.Danger),
+            Child = L10n.Skip(new TextBlock
+            {
+                Text = "!",
+                FontSize = 10,
+                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                Foreground = new SolidColorBrush(Colors.White),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            }),
+        };
+
+        if (totalQueue >= 1)
+        {
+            _importCardDismissTimer?.Stop();
+            _importCardDismissTimer = null;
+            _importCardHoverPaused = false;
+
+            var cardStack = new StackPanel();
+            var headGrid = new Grid { Padding = new Thickness(14, 10, 8, 8), ColumnSpacing = 8 };
+            headGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            headerTitleText = new TextBlock
+            {
+                Text = L10n.T($"正在导入 0 / {totalQueue}…"),
+                FontSize = 12.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = ThemeHelper.Brush(p.T1),
+                VerticalAlignment = VerticalAlignment.Center,
+                MaxLines = 1,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            };
+            headGrid.Children.Add(headerTitleText);
+
+            var closeBtn = new Button
+            {
+                Width = 24,
+                Height = 24,
+                MinWidth = 24,
+                MinHeight = 24,
+                Padding = new Thickness(0),
+                CornerRadius = new CornerRadius(12),
+                Background = new SolidColorBrush(Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                UseSystemFocusVisuals = false,
+                Content = YYIcons.Make("xmark", 10, ThemeHelper.Brush(p.T3)),
+            };
+            AutomationProperties.SetName(closeBtn, L10n.T("关闭"));
+            closeBtn.Click += (_, _) => HideImportQueueCard();
+            Grid.SetColumn(closeBtn, 1);
+            headGrid.Children.Add(closeBtn);
+            cardStack.Children.Add(headGrid);
+
+            progressFill = new Border
+            {
+                Height = 2,
+                Width = 0,
+                CornerRadius = new CornerRadius(1),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Background = ThemeHelper.Brush(tint.Accent),
+            };
+            cardStack.Children.Add(new Border
+            {
+                Height = 2,
+                Width = progressTrackWidth,
+                Margin = new Thickness(12, 0, 12, 4),
+                CornerRadius = new CornerRadius(1),
+                Background = ThemeHelper.Brush(p.Inset),
+                Child = progressFill,
+            });
+
+            var rowsStack = new StackPanel();
+            var initialLabels = new List<string>(totalQueue);
+            foreach (var path in ebookFiles)
+                initialLabels.Add(Path.GetFileNameWithoutExtension(path));
+            if (!useInteractiveAudioSheet)
+            {
+                foreach (var batch in audioBatches)
+                    initialLabels.Add(batch.Length == 1 ? Path.GetFileNameWithoutExtension(batch[0]) : L10n.T("有声书"));
+            }
+
+            for (int i = 0; i < initialLabels.Count; i++)
+            {
+                if (i > 0)
+                    rowsStack.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(14, 0, 14, 0) });
+
+                var rg = new Grid { Padding = new Thickness(14, 7, 12, 7), ColumnSpacing = 8 };
+                rg.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                rg.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var metaSp = new StackPanel { Spacing = 1.5, VerticalAlignment = VerticalAlignment.Center };
+                var titleTb = L10n.Skip(new TextBlock
+                {
+                    Text = initialLabels[i],
+                    FontSize = 12,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+                    Foreground = ThemeHelper.Brush(p.T1),
+                    MaxLines = 1,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                });
+                var subTb = new TextBlock
+                {
+                    Visibility = Visibility.Collapsed,
+                    FontSize = 10.5,
+                    Foreground = ThemeHelper.Brush(p.Danger),
+                    TextWrapping = TextWrapping.Wrap,
+                };
+                metaSp.Children.Add(titleTb);
+                metaSp.Children.Add(subTb);
+                rg.Children.Add(metaSp);
+
+                var statusHost = new ContentControl
+                {
+                    VerticalAlignment = VerticalAlignment.Center,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Content = MakeStatusWaiting(),
+                };
+                Grid.SetColumn(statusHost, 1);
+                rg.Children.Add(statusHost);
+
+                rowViews.Add((titleTb, subTb, statusHost));
+                rowsStack.Children.Add(rg);
+            }
+
+            cardStack.Children.Add(new ScrollViewer
+            {
+                MaxHeight = 216,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Padding = new Thickness(0, 0, 0, 6),
+                Content = rowsStack,
+            });
+
+            ImportQueueCard.Child = cardStack;
+            ImportQueueCard.Visibility = Visibility.Visible;
+            YYChrome.AnimateEntrance(ImportQueueCard, fromY: 10f, durationMs: 165);
+        }
+
+        int rowIdx = 0;
 
         // Import ebooks first so simultaneous ebook + audiobook drops auto-pair cleanly
         foreach (var path in ebookFiles)
         {
-            string fname = Path.GetFileName(path);
+            if (_closed) return;
+            var curRow = rowIdx < rowViews.Count ? rowViews[rowIdx] : default;
+            if (curRow.StatusHost is not null)
+                curRow.StatusHost.Content = MakeStatusImporting();
+            UpdateProgressVisuals();
+
             try
             {
                 var book = await _library.ImportBookWithExtrasAsync(path);
+                if (_closed) return;
                 if (!string.IsNullOrEmpty(effectiveColId))
                     _library.SetInCollection(effectiveColId, book.Id, true);
+                if (curRow.TitleTb is not null)
+                    curRow.TitleTb.Text = book.Title;
+
                 if (existingIds.Contains(book.Id))
                 {
                     duplicates.Add(book);
-                    results.Add((book.Title, "已在书架里", false, book));
+                    if (curRow.StatusHost is not null)
+                        curRow.StatusHost.Content = MakeStatusDuplicate(book.Id);
                 }
                 else
                 {
                     existingIds.Add(book.Id);
                     imported.Add(book);
-                    results.Add((book.Title, "✓ 已导入", false, book));
+                    if (curRow.StatusHost is not null)
+                        curRow.StatusHost.Content = MakeStatusSuccess();
                 }
             }
-            catch (CoreException.Protected) { results.Add((fname, "这本书有版权保护（DRM），打不开", true, null)); }
-            catch (Exception ex) { results.Add((fname, ex.Message, true, null)); }
+            catch (CoreException.Protected)
+            {
+                errorCount++;
+                if (curRow.SubTb is not null)
+                {
+                    curRow.SubTb.Text = L10n.T("这本书有版权保护（DRM），打不开");
+                    curRow.SubTb.Visibility = Visibility.Visible;
+                }
+                if (curRow.StatusHost is not null)
+                    curRow.StatusHost.Content = MakeStatusError();
+            }
+            catch (Exception ex)
+            {
+                errorCount++;
+                if (curRow.SubTb is not null)
+                {
+                    curRow.SubTb.Text = L10n.T(ex.Message);
+                    curRow.SubTb.Visibility = Visibility.Visible;
+                }
+                if (curRow.StatusHost is not null)
+                    curRow.StatusHost.Content = MakeStatusError();
+            }
+
+            rowIdx++;
+            doneCount++;
+            UpdateProgressVisuals();
         }
 
-        bool useInteractiveAudioSheet = audioBatches.Count == 1 && ebookFiles.Count == 0 && RootGrid.XamlRoot is not null && !openFirst;
         foreach (var batch in audioBatches)
         {
-            string label = batch.Length == 1 ? Path.GetFileName(batch[0]) : "有声书";
+            if (_closed) return;
+            var curRow = !useInteractiveAudioSheet && rowIdx < rowViews.Count ? rowViews[rowIdx] : default;
+            if (curRow.StatusHost is not null)
+                curRow.StatusHost.Content = MakeStatusImporting();
+            if (!useInteractiveAudioSheet)
+                UpdateProgressVisuals();
+
             try
             {
                 BookSummary? audioBook = useInteractiveAudioSheet
                     ? await AudiobookImporter.ShowImportSheetAsync(this, RootGrid.XamlRoot!, _library, batch)
                     : await AudiobookImporter.ImportFilesAsync(_library, batch);
+                if (_closed) return;
                 if (audioBook is not null)
                 {
                     if (!string.IsNullOrEmpty(effectiveColId))
                         _library.SetInCollection(effectiveColId, audioBook.Id, true);
+                    if (curRow.TitleTb is not null)
+                        curRow.TitleTb.Text = audioBook.Title;
+
                     if (existingIds.Contains(audioBook.Id))
                     {
                         duplicates.Add(audioBook);
-                        results.Add((audioBook.Title, "已在书架里", false, audioBook));
+                        if (curRow.StatusHost is not null)
+                            curRow.StatusHost.Content = MakeStatusDuplicate(audioBook.Id);
                     }
                     else
                     {
                         existingIds.Add(audioBook.Id);
                         imported.Add(audioBook);
-                        results.Add((audioBook.Title, "✓ 已导入有声书", false, audioBook));
+                        if (curRow.StatusHost is not null)
+                            curRow.StatusHost.Content = MakeStatusSuccess();
                     }
                 }
             }
-            catch (Exception ex) { results.Add((label, ex.Message, true, null)); }
+            catch (Exception ex)
+            {
+                errorCount++;
+                if (curRow.SubTb is not null)
+                {
+                    curRow.SubTb.Text = L10n.T(ex.Message);
+                    curRow.SubTb.Visibility = Visibility.Visible;
+                }
+                if (curRow.StatusHost is not null)
+                    curRow.StatusHost.Content = MakeStatusError();
+                else
+                    ShowToast($"导入失败：{ex.Message}", canUndo: false, isDelete: true);
+            }
+
+            if (!useInteractiveAudioSheet)
+            {
+                rowIdx++;
+                doneCount++;
+                UpdateProgressVisuals();
+            }
         }
 
+        if (_closed) return;
         RefreshBooks();
 
-        // Duplicate single-book toast with "在书架里显示" scroll-and-highlight ring (1:1 MacImportCard)
-        if (imported.Count == 0 && duplicates.Count == 1 && results.All(r => !r.IsError))
+        if (totalQueue >= 1 && headerTitleText is not null)
+        {
+            if (progressFill is not null)
+                progressFill.Width = progressTrackWidth;
+
+            if (errorCount == 0 && duplicates.Count == 0 && imported.Count > 0)
+            {
+                headerTitleText.Text = L10n.T(imported.Count == 1
+                    ? $"已导入《{imported[0].Title}》"
+                    : $"已导入 {imported.Count} 本书");
+                _importCardDismissTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.4) };
+                _importCardDismissTimer.Tick += (_, _) =>
+                {
+                    if (_importCardHoverPaused) return;
+                    HideImportQueueCard();
+                };
+                if (!_importCardHoverPaused)
+                    _importCardDismissTimer.Start();
+            }
+            else if (errorCount == 0 && imported.Count == 0 && duplicates.Count > 0)
+            {
+                headerTitleText.Text = L10n.T(duplicates.Count == 1
+                    ? $"《{duplicates[0].Title}》已在书架里"
+                    : $"{duplicates.Count} 本书已在书架里");
+            }
+            else if (errorCount > 0)
+            {
+                headerTitleText.Text = imported.Count > 0
+                    ? L10n.T($"已导入 {imported.Count} 本 · {errorCount} 项失败")
+                    : L10n.T($"导入失败 · 共 {errorCount} 项");
+            }
+            else
+            {
+                headerTitleText.Text = L10n.T($"已导入 {imported.Count} 本 · {duplicates.Count} 本已在书架");
+            }
+
+            if (openFirst)
+            {
+                var toOpen = imported.FirstOrDefault() ?? duplicates.FirstOrDefault();
+                if (toOpen is not null) TryOpenBook(toOpen);
+            }
+            return;
+        }
+
+        if (imported.Count == 0 && duplicates.Count == 1 && errorCount == 0)
         {
             var dup = duplicates[0];
             ShowToast($"《{dup.Title}》已在书架里", canUndo: true, isDelete: false, undo: () => RevealAndHighlightBook(dup.Id), actionLabel: "在书架里显示");
             if (openFirst) TryOpenBook(dup);
-            return;
         }
-
-        // Per-file MacImportCard summary when importing multiple files or encountering errors alongside successes
-        if (results.Count >= 2 && (results.Any(r => r.IsError) || duplicates.Count > 0))
-        {
-            await ShowImportQueueCardAsync(results);
-            if (openFirst && imported.Count > 0) TryOpenBook(imported[0]);
-            return;
-        }
-
-        if (imported.Count > 0)
+        else if (imported.Count > 0)
         {
             ShowToast(imported.Count == 1 ? $"已导入《{imported[0].Title}》" : $"已导入 {imported.Count} 本书", canUndo: false);
             if (openFirst) TryOpenBook(imported[0]);
         }
-        else if (results.FirstOrDefault(r => r.IsError) is { Name.Length: > 0 } firstErr)
-        {
-            ShowToast($"导入失败（{firstErr.Name}）：{firstErr.Status}", canUndo: false, isDelete: true);
-        }
-    }
-
-    private async Task ShowImportQueueCardAsync(List<(string Name, string Status, bool IsError, BookSummary? Book)> rows)
-    {
-        if (RootGrid.XamlRoot is null) return;
-        bool dark = ThemeHelper.IsDark(RootGrid.ActualTheme);
-        var p = ThemeHelper.Palette(dark);
-        ContentDialog? dlgRef = null;
-
-        var list = new StackPanel { Spacing = 0 };
-        for (int i = 0; i < rows.Count; i++)
-        {
-            if (i > 0) list.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(12, 0, 12, 0) });
-            var (name, status, isErr, book) = rows[i];
-            var g = new Grid { ColumnSpacing = 10, Padding = new Thickness(12, 9, 12, 9) };
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var meta = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-            meta.Children.Add(new TextBlock { Text = name, FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
-            meta.Children.Add(new TextBlock { Text = status, FontSize = 11, Foreground = ThemeHelper.Brush(isErr ? p.Danger : p.T3), TextWrapping = TextWrapping.Wrap });
-            g.Children.Add(meta);
-            if (book is not null)
-            {
-                string bid = book.Id;
-                var showBtn = YYChrome.MakeSheetPillButton("在书架里显示", () => { dlgRef?.Hide(); RevealAndHighlightBook(bid); }, dark, _library.Prefs.Tint, "secondary", height: 26, horizontalPadding: 10);
-                Grid.SetColumn(showBtn, 1);
-                g.Children.Add(showBtn);
-            }
-            list.Children.Add(g);
-        }
-
-        var groupCard = new Border
-        {
-            CornerRadius = new CornerRadius(14),
-            Background = ThemeHelper.Brush(p.Card),
-            BorderBrush = ThemeHelper.Brush(p.Line),
-            BorderThickness = new Thickness(0.5),
-            Child = list,
-        };
-
-        var sheetBody = new StackPanel
-        {
-            Spacing = 14,
-            Padding = new Thickness(22, 18, 22, 18),
-            Children =
-            {
-                YYChrome.MakeSheetHeader($"导入结果 · 共 {rows.Count} 项", null, () => dlgRef?.Hide(), dark),
-                new ScrollViewer { MaxHeight = 320, Content = groupCard },
-                YYChrome.MakeSheetPillButton("完成", () => dlgRef?.Hide(), dark, _library.Prefs.Tint, "dark", height: 36, stretch: true),
-            },
-        };
-
-        dlgRef = YYChrome.CreateMacSheet(RootGrid.XamlRoot, dark, 440, sheetBody, tint: _library.Prefs.Tint);
-        await dlgRef.ShowSafeAsync(_library.Prefs.Tint);
     }
 
     private async void NewCollection_Click(object sender, RoutedEventArgs e)
@@ -6391,24 +7656,106 @@ public sealed partial class ShelfWindow : Window
         }
     }
 
-    private void RootGrid_DragOver(object sender, DragEventArgs e)
+    private void OnDropLeaveTimerTick(object? sender, object e) => HideDropOverlay();
+
+    private void HideDropOverlay()
     {
-        if (e.DataView.Contains(StandardDataFormats.StorageItems))
+        _dropLeaveTimer?.Stop();
+        _dragStorageCount = 0;
+        _probingDragItems = false;
+        DropOverlay.Visibility = Visibility.Collapsed;
+    }
+
+    private void UpdateDropOverlayCopy()
+    {
+        string? colName = _activeFilter.StartsWith("col:", StringComparison.Ordinal)
+            ? _collections.FirstOrDefault(c => c.Id == _activeFilter[4..])?.Name
+            : null;
+
+        if (!string.IsNullOrEmpty(colName))
         {
-            e.AcceptedOperation = DataPackageOperation.Copy;
-            DropOverlay.Visibility = Visibility.Visible;
+            DropOverlayTitleText.Text = L10n.T($"放进「{colName}」");
+            DropOverlaySubtitleText.Text = _dragStorageCount > 1
+                ? L10n.T($"松开即可导入这 {_dragStorageCount} 个文件")
+                : L10n.T("书名、作者和封面从文件里读出来，之后都能改");
+        }
+        else
+        {
+            DropOverlayTitleText.Text = _dragStorageCount > 1
+                ? L10n.T($"松开即可导入这 {_dragStorageCount} 个文件")
+                : L10n.T("松开即可导入书库");
+            DropOverlaySubtitleText.Text = L10n.T("书名、作者和封面从文件里读出来，之后都能改");
         }
     }
 
-    private void RootGrid_DragLeave(object sender, DragEventArgs e) => DropOverlay.Visibility = Visibility.Collapsed;
+    private async Task ProbeDragStorageCountAsync(DataPackageView dataView)
+    {
+        try
+        {
+            var items = await dataView.GetStorageItemsAsync();
+            if (_closed) return;
+            _dragStorageCount = items.Count;
+            if (DropOverlay.Visibility == Visibility.Visible)
+                UpdateDropOverlayCopy();
+        }
+        catch { }
+        finally
+        {
+            _probingDragItems = false;
+        }
+    }
+
+    private void RootGrid_DragOver(object sender, DragEventArgs e)
+    {
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems)) return;
+        _dropLeaveTimer?.Stop();
+        e.AcceptedOperation = DataPackageOperation.Copy;
+        if (!_probingDragItems && _dragStorageCount == 0)
+        {
+            _probingDragItems = true;
+            _ = ProbeDragStorageCountAsync(e.DataView);
+        }
+        if (DropOverlay.Visibility != Visibility.Visible)
+        {
+            DropOverlay.Visibility = Visibility.Visible;
+            L10n.ApplyTree(DropOverlay);
+        }
+        UpdateDropOverlayCopy();
+    }
+
+    private void RootGrid_DragLeave(object sender, DragEventArgs e)
+    {
+        if (DropOverlay.Visibility != Visibility.Visible) return;
+        var pt = e.GetPosition(RootGrid);
+        const double edge = 8;
+        if (pt.X <= edge || pt.Y <= edge || pt.X >= RootGrid.ActualWidth - edge || pt.Y >= RootGrid.ActualHeight - edge)
+        {
+            HideDropOverlay();
+            return;
+        }
+        _dropLeaveTimer?.Stop();
+        _dropLeaveTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(90) };
+        _dropLeaveTimer.Tick -= OnDropLeaveTimerTick;
+        _dropLeaveTimer.Tick += OnDropLeaveTimerTick;
+        _dropLeaveTimer.Start();
+    }
 
     private async void RootGrid_Drop(object sender, DragEventArgs e)
     {
-        DropOverlay.Visibility = Visibility.Collapsed;
+        HideDropOverlay();
         if (!e.DataView.Contains(StandardDataFormats.StorageItems)) return;
-        var items = await e.DataView.GetStorageItemsAsync();
-        var paths = items.Select(it => it.Path).Where(p => !string.IsNullOrEmpty(p)).ToArray();
-        if (paths.Length > 0) await ImportPathsAsync(paths, openFirst: false);
+        var deferral = e.GetDeferral();
+        try
+        {
+            var items = await e.DataView.GetStorageItemsAsync();
+            var paths = items.Select(it => it.Path).Where(p => !string.IsNullOrEmpty(p)).ToArray();
+            string? targetColId = _activeFilter.StartsWith("col:", StringComparison.Ordinal) ? _activeFilter[4..] : null;
+            if (paths.Length > 0) await ImportPathsAsync(paths, openFirst: false, targetCollectionId: targetColId);
+        }
+        finally
+        {
+            deferral.Complete();
+        }
     }
 
     private void ToastClose_Click(object sender, RoutedEventArgs e)

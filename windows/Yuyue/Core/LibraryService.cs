@@ -92,8 +92,16 @@ public sealed class DevicePrefs
     public double ReaderPanelWidth { get; set; } = 320.0;
     public int ReaderWindowWidth { get; set; } = 1080;
     public int ReaderWindowHeight { get; set; } = 740;
+    public int ShelfWindowWidth { get; set; } = 1040;
+    public int ShelfWindowHeight { get; set; } = 720;
+    public int SettingsWindowWidth { get; set; } = 1020;
+    public int SettingsWindowHeight { get; set; } = 640;
+    public int AudiobookWindowWidth { get; set; } = 960;
+    public int AudiobookWindowHeight { get; set; } = 640;
     public string ReaderLastPanel { get; set; } = "";
+    public string BooksSort { get; set; } = "recent";
     public string CollectionSort { get; set; } = "custom";
+    public double AudiobookRate { get; set; } = 1.0;
     public string QuoteShareLook { get; set; } = "paper";
     public string QuoteShareShape { get; set; } = "card";
     public bool QuoteShareIncludeThought { get; set; } = true;
@@ -352,6 +360,14 @@ public sealed class LibraryService : IDisposable
 
     public IReadOnlyList<BookSummary> GetKeptBooks() =>
         Core.Books().Where(b => b.Format != BookFormat.Podcast).ToArray();
+
+    public (IReadOnlyList<BookSummary> ShelfBooks, IReadOnlyList<BookSummary> KeptBooks) GetShelfAndKeptBooks()
+    {
+        var all = Core.Books();
+        var kept = all.Where(b => b.Format != BookFormat.Podcast).ToArray();
+        var shelf = kept.Where(b => !b.Record).ToArray();
+        return (shelf, kept);
+    }
 
     public IReadOnlyList<BookCollection> GetCollections() => Core.Collections();
     public Dictionary<string, uint> GetMarkCounts() => Core.MarkCounts();

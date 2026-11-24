@@ -1011,6 +1011,7 @@ public static class BookToolsDialogs
             VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(0, 4, 0, 4),
         };
+        YYChrome.StripTextBoxChrome(ruleBox);
         var encSegGrid = new Grid { ColumnSpacing = 3 };
         for (int c = 0; c < 4; c++) encSegGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         var encHost = new Border

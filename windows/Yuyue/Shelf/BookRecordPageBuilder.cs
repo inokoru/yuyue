@@ -1,5 +1,6 @@
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
@@ -34,6 +35,7 @@ public sealed class BookRecordPageBuilder
     {
         _shelf = shelf;
         _library = library;
+        SortKey = library.Prefs.BooksSort is "added" or "title" or "rating" ? library.Prefs.BooksSort : "recent";
     }
 
     public void RenderInto(StackPanel host, IReadOnlyList<BookSummary> keptBooks, bool dark)
@@ -45,12 +47,14 @@ public sealed class BookRecordPageBuilder
             if (book is not null)
             {
                 RenderInlineBookRecordPage(host, book, dark);
+                L10n.ApplyTree(host);
                 return;
             }
             OpenBookId = null;
         }
 
         RenderStatusList(host, keptBooks, dark);
+        L10n.ApplyTree(host);
     }
 
     // ---------- 1. 进度列表（MacBooksView.swift + BookRecordCard） ----------
@@ -129,11 +133,18 @@ public sealed class BookRecordPageBuilder
         foreach (var (k, lbl) in new[] { ("recent", "最近读过"), ("added", "加入时间"), ("title", "书名"), ("rating", "评分") })
         {
             string key = k;
-            var item = new MenuFlyoutItem { Text = (SortKey == key ? "✓ " : "") + lbl };
-            item.Click += (_, _) => { SortKey = key; _shelf.RefreshCurrentSubPage(); };
+            var item = new ToggleMenuFlyoutItem { Text = L10n.T(lbl), IsChecked = SortKey == key };
+            item.Click += (_, _) =>
+            {
+                SortKey = key;
+                _library.Prefs.BooksSort = key;
+                _library.SavePrefs();
+                _shelf.SyncShelfSortFromPrefs();
+                _shelf.RefreshCurrentSubPage();
+            };
             sortMenu.Items.Add(item);
         }
-        topBar.Children.Add(new Button
+        var sortBtn = new Button
         {
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
@@ -143,7 +154,9 @@ public sealed class BookRecordPageBuilder
             UseSystemFocusVisuals = false,
             Content = sortSp,
             Flyout = sortMenu,
-        });
+        };
+        AutomationProperties.SetName(sortBtn, L10n.T(sortTitle));
+        topBar.Children.Add(sortBtn);
         host.Children.Add(topBar);
 
         var filtered = SortProgressBooks(keptBooks.Where(b => b.Status == ActiveStatus)).ToArray();
@@ -205,12 +218,21 @@ public sealed class BookRecordPageBuilder
         host.Children.Add(grid);
     }
 
+    private static long LastTouchedAt(BookSummary b)
+    {
+        long t = b.AddedAt;
+        if (b.OpenedAt is long oa && oa > t) t = oa;
+        if (b.Manual?.At is long ma && ma > t) t = ma;
+        if (b.FinishedAt is long fa && fa > t) t = fa;
+        return t;
+    }
+
     private IEnumerable<BookSummary> SortProgressBooks(IEnumerable<BookSummary> src) => SortKey switch
     {
         "added" => src.OrderByDescending(b => b.AddedAt),
         "title" => src.OrderBy(b => b.Title, StringComparer.CurrentCultureIgnoreCase),
-        "rating" => src.OrderByDescending(b => b.Rating ?? 0).ThenByDescending(b => b.FinishedAt ?? b.AddedAt),
-        _ => src.OrderByDescending(b => Math.Max(b.OpenedAt ?? 0, b.AddedAt)),
+        "rating" => src.OrderByDescending(b => b.Rating ?? 0).ThenByDescending(LastTouchedAt),
+        _ => src.OrderByDescending(LastTouchedAt),
     };
 
     internal static Border MakePaperBookTag(bool dark)
@@ -271,7 +293,7 @@ public sealed class BookRecordPageBuilder
 
         // 中栏：14px 宋体粗体书名 + 作者/纸书标签 + 状态进度/分章条/星级 (1:1 BookRecord.swift e42fcb6)
         var mid = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
-        mid.Children.Add(new TextBlock
+        mid.Children.Add(L10n.Skip(new TextBlock
         {
             Text = book.Title,
             FontFamily = serif,
@@ -280,16 +302,34 @@ public sealed class BookRecordPageBuilder
             Foreground = ThemeHelper.Brush(p.T1),
             MaxLines = 1,
             TextTrimming = TextTrimming.CharacterEllipsis,
-        });
+        }));
 
         string author = book.Authors.FirstOrDefault() ?? "";
         string relTime = !book.Record && book.OpenedAt is long oa && oa > 0 && book.Status is ReadingStatus.Reading or ReadingStatus.Paused
-            ? RelativeAgo(oa)
+            ? L10n.T(RelativeAgo(oa))
             : "";
         string byline = string.Join(" · ", new[] { author, relTime }.Where(s => !string.IsNullOrWhiteSpace(s)));
-        if (!string.IsNullOrEmpty(byline))
+        if (book.Record)
         {
-            mid.Children.Add(new TextBlock
+            var bylineRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+            bylineRow.Children.Add(MakePaperBookTag(dark));
+            if (!string.IsNullOrEmpty(byline))
+            {
+                bylineRow.Children.Add(L10n.Skip(new TextBlock
+                {
+                    Text = byline,
+                    FontSize = 11.5,
+                    Foreground = ThemeHelper.Brush(p.T2),
+                    MaxLines = 1,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    VerticalAlignment = VerticalAlignment.Center,
+                }));
+            }
+            mid.Children.Add(bylineRow);
+        }
+        else if (!string.IsNullOrEmpty(byline))
+        {
+            mid.Children.Add(L10n.Skip(new TextBlock
             {
                 Text = byline,
                 FontSize = 11.5,
@@ -297,7 +337,7 @@ public sealed class BookRecordPageBuilder
                 MaxLines = 1,
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 VerticalAlignment = VerticalAlignment.Center,
-            });
+            }));
         }
 
         // 状态专属底部行（对齐 BookRecord.swift e42fcb6：纸质书仅追踪阅读状态与短评，不记手动页码）
@@ -311,7 +351,7 @@ public sealed class BookRecordPageBuilder
                     : $"{RelativeAgo(book.AddedAt)}加的";
                 mid.Children.Add(new TextBlock { Text = paperTime, FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 2, 0, 0) });
                 if (!string.IsNullOrWhiteSpace(book.Comment))
-                    mid.Children.Add(new TextBlock { Text = book.Comment, FontFamily = serif, FontSize = 11, Foreground = ThemeHelper.Brush(p.T2), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
+                    mid.Children.Add(L10n.Skip(new TextBlock { Text = book.Comment, FontFamily = serif, FontSize = 11, Foreground = ThemeHelper.Brush(p.T2), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis }));
             }
             else
             {
@@ -334,7 +374,7 @@ public sealed class BookRecordPageBuilder
         {
             var finRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, Margin = new Thickness(0, 2, 0, 0) };
             if (book.Rating is byte r && r > 0)
-                finRow.Children.Add(new TextBlock { Text = new string('★', r) + new string('☆', Math.Max(0, 5 - r)), FontSize = 10.5, Foreground = ThemeHelper.Brush(tint.Accent) });
+                finRow.Children.Add(L10n.Skip(new TextBlock { Text = new string('★', r) + new string('☆', Math.Max(0, 5 - r)), FontSize = 10.5, Foreground = ThemeHelper.Brush(tint.Accent) }));
             if (book.FinishedAt is long fa && fa > 0)
             {
                 var dt = DateTimeOffset.FromUnixTimeMilliseconds(fa).LocalDateTime;
@@ -346,7 +386,7 @@ public sealed class BookRecordPageBuilder
             }
             mid.Children.Add(finRow);
             if (!string.IsNullOrWhiteSpace(book.Comment))
-                mid.Children.Add(new TextBlock { Text = book.Comment, FontFamily = serif, FontSize = 11, Foreground = ThemeHelper.Brush(p.T2), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
+                mid.Children.Add(L10n.Skip(new TextBlock { Text = book.Comment, FontFamily = serif, FontSize = 11, Foreground = ThemeHelper.Brush(p.T2), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis }));
         }
         else // Want
         {
@@ -397,6 +437,7 @@ public sealed class BookRecordPageBuilder
             Content = statusSp,
             Flyout = BuildStatusMenuFlyout(book, dark, p, tint),
         };
+        AutomationProperties.SetName(statusBtn, L10n.T(StatusShortName(book.Status)));
         if (!book.Record)
             rightCol.Children.Add(statusBtn);
 
@@ -432,6 +473,7 @@ public sealed class BookRecordPageBuilder
                     Flyout = BuildChapterJumpFlyout(book, p, tint),
                 };
                 ToolTipService.SetToolTip(tocBtn, "跳到某一章");
+                AutomationProperties.SetName(tocBtn, L10n.T("跳到某一章"));
                 quickRow.Children.Add(tocBtn);
             }
             var openBtn = MakeCompactCardButton(book.Status == ReadingStatus.Want ? "开始读" : "接着读", main: true, p, tint);
@@ -463,6 +505,7 @@ public sealed class BookRecordPageBuilder
             UseSystemFocusVisuals = false,
             ContextFlyout = _shelf.BuildBookMenuFlyout(book),
         };
+        AutomationProperties.SetName(hitBtn, book.Title);
         hitBtn.Click += (_, _) =>
         {
             OpenBookId = book.Id;
@@ -550,7 +593,7 @@ public sealed class BookRecordPageBuilder
 
             var items = det.Toc.Length > 0
                 ? det.Toc.Select(t => (t.Title, t.Section)).ToArray()
-                : det.Sections.Select((s, idx) => (Title: string.IsNullOrWhiteSpace(s.Title) ? $"第 {idx + 1} 节" : s.Title!, Section: (uint)idx)).ToArray();
+                : det.Sections.Select((s, idx) => (Title: string.IsNullOrWhiteSpace(s.Title) ? L10n.T($"第 {idx + 1} 节") : s.Title!, Section: (uint)idx)).ToArray();
 
             var prog = _library.GetProgress(book.Id);
             uint curSec = prog?.Position.Section ?? 0;
@@ -560,7 +603,7 @@ public sealed class BookRecordPageBuilder
             int curItemIdx = Array.FindIndex(items, it => it.Section >= curSec);
             if (curItemIdx >= 0) curChunk = curItemIdx / chunkSize;
 
-            var search = new TextBox { PlaceholderText = $"搜章节（共 {items.Length} 章，支持拼音首字母）…", FontSize = 12, CornerRadius = new CornerRadius(8) };
+            var search = new TextBox { PlaceholderText = L10n.T($"搜章节（共 {items.Length} 章，支持拼音首字母）…"), FontSize = 12, CornerRadius = new CornerRadius(8) };
             var rangeRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
             var rangeScroll = new ScrollViewer
             {
@@ -617,10 +660,10 @@ public sealed class BookRecordPageBuilder
                     var r = new Grid { ColumnSpacing = 8 };
                     r.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                     r.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                    r.Children.Add(new TextBlock { Text = title, FontSize = 12.5, FontWeight = here ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal, Foreground = ThemeHelper.Brush(here ? tint.Accent : p.T1), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
+                    r.Children.Add(L10n.Skip(new TextBlock { Text = title, FontSize = 12.5, FontWeight = here ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal, Foreground = ThemeHelper.Brush(here ? tint.Accent : p.T1), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis }));
                     if (here)
                     {
-                        var hereTb = new TextBlock { Text = "读到这", FontSize = 10.5, Foreground = ThemeHelper.Brush(tint.Accent), VerticalAlignment = VerticalAlignment.Center };
+                        var hereTb = new TextBlock { Text = L10n.T("读到这"), FontSize = 10.5, Foreground = ThemeHelper.Brush(tint.Accent), VerticalAlignment = VerticalAlignment.Center };
                         Grid.SetColumn(hereTb, 1);
                         r.Children.Add(hereTb);
                     }
@@ -639,6 +682,7 @@ public sealed class BookRecordPageBuilder
                     b.Click += (_, _) => { flyout.Hide(); _shelf.TryOpenBook(book, section: target, sentence: 0); };
                     listStack.Children.Add(b);
                 }
+                L10n.ApplyTree(listStack);
             }
 
             search.TextChanged += (_, _) => Populate(search.Text.Trim());
@@ -646,12 +690,20 @@ public sealed class BookRecordPageBuilder
             host.Children.Add(rangeScroll);
             host.Children.Add(scroller);
             Populate("");
+            L10n.ApplyTree(host);
         };
         flyout.Content = host;
         return flyout;
     }
 
     // ---------- 2. 内联单书档案页（BookRecordPage.swift 1:1） ----------
+
+    private static string FormatBookFormatBadge(BookFormat fmt) => fmt switch
+    {
+        BookFormat.Mobi => "Kindle",
+        BookFormat.Audio => L10n.T("有声书"),
+        _ => fmt.ToString().ToUpperInvariant(),
+    };
 
     private void RenderInlineBookRecordPage(StackPanel outerHost, BookSummary book, bool dark)
     {
@@ -679,7 +731,7 @@ public sealed class BookRecordPageBuilder
         hero.Children.Add(_shelf.CreateCoverView(book, 120, 172, elevated: true));
 
         var rightHero = new StackPanel { Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
-        rightHero.Children.Add(new TextBlock
+        rightHero.Children.Add(L10n.Skip(new TextBlock
         {
             Text = book.Title,
             FontFamily = serif,
@@ -688,20 +740,26 @@ public sealed class BookRecordPageBuilder
             Foreground = ThemeHelper.Brush(p.T1),
             MaxLines = 3,
             TextWrapping = TextWrapping.Wrap,
-        });
+        }));
 
-        string authorLine = book.Authors.Length > 0 ? string.Join(" · ", book.Authors) : (book.Record ? "纸质书 / 阅读档案" : "佚名");
-        rightHero.Children.Add(new TextBlock { Text = authorLine, FontSize = 13, Foreground = ThemeHelper.Brush(p.T2) });
+        if (book.Authors.Length > 0)
+        {
+            rightHero.Children.Add(L10n.Skip(new TextBlock { Text = string.Join(" · ", book.Authors), FontSize = 13, Foreground = ThemeHelper.Brush(p.T2) }));
+        }
+        else if (book.Record)
+        {
+            rightHero.Children.Add(new TextBlock { Text = "纸质书 / 阅读档案", FontSize = 13, Foreground = ThemeHelper.Brush(p.T2) });
+        }
 
-        string fmtLabel = book.Record ? "纸书" : book.Format.ToString().ToUpperInvariant();
+        string fmtLabel = book.Record ? L10n.T("纸书") : FormatBookFormatBadge(book.Format);
         uint estMins = book.Format == BookFormat.Audio ? book.ListenMinutes : book.ReadMinutes;
         string specLine = string.Join(" · ", new[]
         {
             fmtLabel,
-            !book.Record && chapterCount > 1 ? $"{chapterCount} 章" : null,
-            estMins >= 60 ? $"约 {Math.Max(1, estMins / 60)} 小时" : (estMins > 0 ? $"约 {estMins} 分钟" : null),
+            !book.Record && chapterCount > 1 ? L10n.T($"{chapterCount} 章") : null,
+            estMins >= 60 ? L10n.T($"约 {Math.Max(1, estMins / 60)} 小时") : (estMins > 0 ? L10n.T($"约 {estMins} 分钟") : null),
         }.Where(s => !string.IsNullOrEmpty(s)));
-        rightHero.Children.Add(new TextBlock { Text = specLine, FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3) });
+        rightHero.Children.Add(L10n.Skip(new TextBlock { Text = specLine, FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3) }));
 
         // 你的评分（可交互五星）
         var ratingRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 2, 0, 2) };
@@ -787,7 +845,7 @@ public sealed class BookRecordPageBuilder
         if (book.StartedAt is long sa && sa > 0)
         {
             var sdt = DateTimeOffset.FromUnixTimeMilliseconds(sa).LocalDateTime;
-            standingParts.Add($"{sdt.Month}月{sdt.Day}日开始");
+            standingParts.Add(L10n.T($"{sdt.Month}月{sdt.Day}日开始"));
         }
         if (detail is not null)
         {
@@ -796,13 +854,25 @@ public sealed class BookRecordPageBuilder
                 var secTimes = _library.Core.SectionTimes(book.Id);
                 uint rSec = (uint)secTimes.Sum(t => t.ReadSeconds);
                 uint lSec = (uint)secTimes.Sum(t => t.ListenSeconds);
-                if (rSec >= 60) standingParts.Add(rSec >= 3600 ? $"读了 {rSec / 3600} 小时 {(rSec % 3600) / 60} 分" : $"读了 {rSec / 60} 分钟");
-                if (lSec >= 60) standingParts.Add($"听了 {lSec / 60} 分钟");
+                if (rSec >= 60)
+                {
+                    uint rMin = rSec / 60;
+                    standingParts.Add(rMin >= 60
+                        ? (rMin % 60 == 0 ? L10n.T($"读了 {rMin / 60} 小时") : L10n.T($"读了 {rMin / 60} 小时 {rMin % 60} 分"))
+                        : L10n.T($"读了 {rMin} 分钟"));
+                }
+                if (lSec >= 60)
+                {
+                    uint lMin = lSec / 60;
+                    standingParts.Add(lMin >= 60
+                        ? (lMin % 60 == 0 ? L10n.T($"听了 {lMin / 60} 小时") : L10n.T($"听了 {lMin / 60} 小时 {lMin % 60} 分"))
+                        : L10n.T($"听了 {lMin} 分钟"));
+                }
             }
             catch { }
         }
         if (standingParts.Count > 0)
-            rightHero.Children.Add(new TextBlock { Text = string.Join(" · ", standingParts), FontSize = 11, Foreground = ThemeHelper.Brush(p.T3) });
+            rightHero.Children.Add(L10n.Skip(new TextBlock { Text = string.Join(" · ", standingParts), FontSize = 11, Foreground = ThemeHelper.Brush(p.T3) }));
 
         Grid.SetColumn(rightHero, 1);
         hero.Children.Add(rightHero);
@@ -921,6 +991,7 @@ public sealed class BookRecordPageBuilder
                 Content = YYIcons.Make(icon, 12, ThemeHelper.Brush(active ? p.T1 : p.T3)),
             };
             ToolTipService.SetToolTip(b, tip);
+            AutomationProperties.SetName(b, L10n.T(tip));
             bool gVal = gridOn;
             b.Click += (_, _) => { _tocGridMode = gVal; _shelf.RefreshCurrentSubPage(); };
             modeRow.Children.Add(b);
@@ -993,7 +1064,7 @@ public sealed class BookRecordPageBuilder
             Grid.SetColumn(idxTb, 1);
             row.Children.Add(idxTb);
 
-            var titleTb = new TextBlock
+            var titleTb = L10n.Skip(new TextBlock
             {
                 Text = it.Title,
                 FontFamily = serif,
@@ -1004,11 +1075,11 @@ public sealed class BookRecordPageBuilder
                 MaxLines = 1,
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 VerticalAlignment = VerticalAlignment.Center,
-            };
+            });
             Grid.SetColumn(titleTb, 2);
             row.Children.Add(titleTb);
 
-            var dots = new TextBlock
+            var dots = L10n.Skip(new TextBlock
             {
                 Text = "· · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · ·",
                 FontSize = 10,
@@ -1017,7 +1088,7 @@ public sealed class BookRecordPageBuilder
                 TextTrimming = TextTrimming.Clip,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(4, 0, 4, 0),
-            };
+            });
             Grid.SetColumn(dots, 3);
             row.Children.Add(dots);
 
@@ -1068,23 +1139,26 @@ public sealed class BookRecordPageBuilder
         string? desc = null;
         try { desc = _library.Core.BookDescription(book.Id); } catch { }
 
-        stack.Children.Add(new TextBlock
+        bool hasDesc = !string.IsNullOrWhiteSpace(desc);
+        var descTb = new TextBlock
         {
-            Text = string.IsNullOrWhiteSpace(desc) ? "这本书的文件里没有附带内容简介。" : desc.Trim(),
+            Text = hasDesc ? desc!.Trim() : "这本书的文件里没有附带内容简介。",
             FontFamily = serif,
             FontSize = 13.5,
             LineHeight = 23,
-            Foreground = ThemeHelper.Brush(string.IsNullOrWhiteSpace(desc) ? p.T3 : p.T1),
+            Foreground = ThemeHelper.Brush(hasDesc ? p.T1 : p.T3),
             TextWrapping = TextWrapping.Wrap,
-        });
+        };
+        if (hasDesc) L10n.Skip(descTb);
+        stack.Children.Add(descTb);
 
         var addedDt = DateTimeOffset.FromUnixTimeMilliseconds(book.AddedAt).LocalDateTime;
-        stack.Children.Add(new TextBlock
+        stack.Children.Add(L10n.Skip(new TextBlock
         {
-            Text = $"加入于 {addedDt:yyyy年M月d日} · {(book.Record ? "仅保留阅读记录" : book.Format.ToString().ToUpperInvariant())}",
+            Text = $"{L10n.T($"加入于 {addedDt:yyyy年M月d日}")} · {(book.Record ? L10n.T("仅保留阅读记录") : FormatBookFormatBadge(book.Format))}",
             FontSize = 11.5,
             Foreground = ThemeHelper.Brush(p.T3),
-        });
+        }));
 
         stack.Children.Add(BuildTagsRow(book, p, tint));
         return stack;
@@ -1161,7 +1235,7 @@ public sealed class BookRecordPageBuilder
                     tRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2) });
                     tRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                     tRow.Children.Add(new Border { Background = ThemeHelper.Brush(tint.Accent), CornerRadius = new CornerRadius(1) });
-                    var ntb = new TextBlock { Text = mk.Note, FontFamily = new FontFamily(YYFontFamily.Kaiti.WindowsFamily()), FontSize = 12.5, Foreground = ThemeHelper.Brush(tint.Accent), TextWrapping = TextWrapping.Wrap };
+                    var ntb = L10n.Skip(new TextBlock { Text = mk.Note, FontFamily = new FontFamily(YYFontFamily.Kaiti.WindowsFamily()), FontSize = 12.5, Foreground = ThemeHelper.Brush(tint.Accent), TextWrapping = TextWrapping.Wrap });
                     Grid.SetColumn(ntb, 1);
                     tRow.Children.Add(ntb);
                     item.Children.Add(tRow);
@@ -1170,12 +1244,12 @@ public sealed class BookRecordPageBuilder
                 var ctx = new MenuFlyout();
                 if (!book.Record)
                 {
-                    var openMi = new MenuFlyoutItem { Text = "回到书里这一页" };
+                    var openMi = new MenuFlyoutItem { Text = L10n.T("回到书里这一页") };
                     openMi.Click += (_, _) => _shelf.TryOpenBook(book, section: mk.Section, sentence: (int)mk.Start.Sentence);
                     ctx.Items.Add(openMi);
                 }
 
-                var editNoteMi = new MenuFlyoutItem { Text = string.IsNullOrWhiteSpace(mk.Note) ? "写想法…" : "改想法…" };
+                var editNoteMi = new MenuFlyoutItem { Text = L10n.T(string.IsNullOrWhiteSpace(mk.Note) ? "写想法…" : "改想法…") };
                 editNoteMi.Click += async (_, _) =>
                 {
                     var updated = await ShowThoughtEditorSheetAsync(
@@ -1188,17 +1262,19 @@ public sealed class BookRecordPageBuilder
                 };
                 ctx.Items.Add(editNoteMi);
 
-                var styleSub = new MenuFlyoutSubItem { Text = "换个样子" };
+                var styleSub = new MenuFlyoutSubItem { Text = L10n.T("换个样子") };
                 foreach (var (st, stName) in new[]
                 {
                     (MarkStyle.Yellow, "荧光黄"),
                     (MarkStyle.Blue, "浅蓝"),
                     (MarkStyle.Pink, "樱粉"),
                     (MarkStyle.Wave, "波浪线"),
+                    (MarkStyle.Underline, "实线下划线"),
+                    (MarkStyle.Dotted, "点线下划线"),
                 })
                 {
                     var targetStyle = st;
-                    var smi = new ToggleMenuFlyoutItem { Text = stName, IsChecked = mk.Style == targetStyle };
+                    var smi = new ToggleMenuFlyoutItem { Text = L10n.T(stName), IsChecked = mk.Style == targetStyle };
                     smi.Click += (_, _) =>
                     {
                         _library.SetMarkStyle(book.Id, mk.Id, targetStyle);
@@ -1208,7 +1284,7 @@ public sealed class BookRecordPageBuilder
                 }
                 ctx.Items.Add(styleSub);
 
-                var copyMi = new MenuFlyoutItem { Text = "复制" };
+                var copyMi = new MenuFlyoutItem { Text = L10n.T("复制") };
                 copyMi.Click += (_, _) =>
                 {
                     var dp = new DataPackage();
@@ -1220,10 +1296,10 @@ public sealed class BookRecordPageBuilder
 
                 string markChap = ResolveMarkChapter(mk);
                 string? chapArg = string.IsNullOrWhiteSpace(markChap) ? null : markChap;
-                var shareMi = new MenuFlyoutItem { Text = "分享书摘…" };
+                var shareMi = new MenuFlyoutItem { Text = L10n.T("分享书摘…") };
                 shareMi.Click += async (_, _) => await Yuyue.Reader.QuoteShareDialog.ShowAsync(
                     _shelf, _shelf.WindowXamlRoot, mk.Text, mk.Note, book.Title, book.Authors.FirstOrDefault(), book.CoverPath, chapter: chapArg, library: _library);
-                var delMi = new MenuFlyoutItem { Text = "删除划线", Foreground = ThemeHelper.Brush(p.Danger) };
+                var delMi = new MenuFlyoutItem { Text = L10n.T("删除划线"), Foreground = ThemeHelper.Brush(p.Danger) };
                 delMi.Click += (_, _) =>
                 {
                     string delId = mk.Id;
@@ -1313,7 +1389,7 @@ public sealed class BookRecordPageBuilder
 
     private FrameworkElement BuildMentionRow(BookPodcastMention mt, YYPalette p, YYTintColors tint, FontFamily serif)
     {
-        string showName = string.IsNullOrWhiteSpace(mt.ShowTitle) ? "书房电台" : mt.ShowTitle;
+        string showName = string.IsNullOrWhiteSpace(mt.ShowTitle) ? L10n.T("书房电台") : mt.ShowTitle;
         var r = new Grid { ColumnSpacing = 10, Padding = new Thickness(4, 8, 4, 8) };
         r.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
         r.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1330,7 +1406,7 @@ public sealed class BookRecordPageBuilder
         });
 
         var m = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-        m.Children.Add(new TextBlock
+        m.Children.Add(L10n.Skip(new TextBlock
         {
             Text = mt.IssueTitle,
             FontFamily = serif,
@@ -1339,16 +1415,16 @@ public sealed class BookRecordPageBuilder
             Foreground = ThemeHelper.Brush(p.T1),
             MaxLines = 1,
             TextTrimming = TextTrimming.CharacterEllipsis,
-        });
+        }));
         string subText = string.IsNullOrWhiteSpace(mt.Snippet) ? showName : $"{showName} · {mt.Snippet}";
-        m.Children.Add(new TextBlock
+        m.Children.Add(L10n.Skip(new TextBlock
         {
             Text = subText,
             FontSize = 11.5,
             Foreground = ThemeHelper.Brush(p.T2),
             MaxLines = 2,
             TextTrimming = TextTrimming.CharacterEllipsis,
-        });
+        }));
         Grid.SetColumn(m, 1);
         r.Children.Add(m);
 
@@ -1411,8 +1487,8 @@ public sealed class BookRecordPageBuilder
                 r.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 r.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 var m = new StackPanel { Spacing = 2 };
-                m.Children.Add(new TextBlock { Text = iss.Title, FontFamily = serif, FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
-                m.Children.Add(new TextBlock { Text = iss.Summary, FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T2), MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis });
+                m.Children.Add(L10n.Skip(new TextBlock { Text = iss.Title, FontFamily = serif, FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) }));
+                m.Children.Add(L10n.Skip(new TextBlock { Text = iss.Summary, FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T2), MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis }));
                 r.Children.Add(m);
                 string iid = iss.Id;
                 var openBtn = MakeCompactCardButton("展开书页", main: true, p, tint);
@@ -1542,6 +1618,7 @@ public sealed class BookRecordPageBuilder
         root.Children.Add(MakeRow("放进合集…", "stack", p.T1, false, () => _shelf.OpenPickCollectionForBook(book)));
         root.Children.Add(MakeRow("删除…", "trash", p.Danger, false, () => _shelf.OpenDeleteForBook(book)));
 
+        L10n.ApplyTree(root);
         flyout.Content = root;
         return flyout;
     }
@@ -1566,7 +1643,7 @@ public sealed class BookRecordPageBuilder
             () => dlgRef?.Hide(),
             dark));
 
-        root.Children.Add(new TextBlock
+        root.Children.Add(L10n.Skip(new TextBlock
         {
             Text = $"“{quoteText}”",
             FontFamily = serif,
@@ -1576,7 +1653,7 @@ public sealed class BookRecordPageBuilder
             MaxLines = 3,
             TextTrimming = TextTrimming.CharacterEllipsis,
             TextWrapping = TextWrapping.Wrap,
-        });
+        }));
 
         var box = new TextBox
         {
@@ -1623,7 +1700,7 @@ public sealed class BookRecordPageBuilder
         foreach (var tag in book.Tags ?? [])
         {
             string t = tag;
-            var chip = new Button
+            var chip = L10n.Skip(new Button
             {
                 Content = $"#{t} ×",
                 Height = 24,
@@ -1635,7 +1712,7 @@ public sealed class BookRecordPageBuilder
                 Background = ThemeHelper.Brush(tint.Soft),
                 BorderThickness = new Thickness(0),
                 UseSystemFocusVisuals = false,
-            };
+            });
             chip.Click += (_, _) => { try { _library.Core.SetTag(book.Id, t, false); _shelf.RefreshBooks(); } catch { } };
             row.Children.Add(chip);
         }

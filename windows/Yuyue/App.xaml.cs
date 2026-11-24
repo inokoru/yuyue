@@ -12,6 +12,11 @@ using Yuyue.Shelf;
 
 namespace Yuyue;
 
+public interface IDebugScreenshotCapable
+{
+    Task<bool> SaveCompositeScreenshotAsync(string path);
+}
+
 public partial class App : Application
 {
     public static App CurrentApp => (App)Current;
@@ -69,6 +74,36 @@ public partial class App : Application
             _pauseActiveAudio = pauseCallback;
         }
         _activeAudioClaimant = normClaimant;
+    }
+
+    public string? GetActiveAudioBookId()
+    {
+        if (Library?.SystemIntegration.IsAudioPlaying != true || _activeAudioClaimant is null) return null;
+        foreach (var kv in _readerWindows) if (ReferenceEquals(kv.Value, _activeAudioClaimant)) return kv.Key;
+        foreach (var kv in _audioWindows) if (ReferenceEquals(kv.Value, _activeAudioClaimant)) return kv.Key;
+        foreach (var kv in _pdfWindows) if (ReferenceEquals(kv.Value, _activeAudioClaimant)) return kv.Key;
+        return null;
+    }
+
+    public bool IsPodcastActiveAudioOwner() =>
+        Library?.SystemIntegration.IsAudioPlaying == true
+        && _shelfWindow is not null
+        && ReferenceEquals(_activeAudioClaimant, _shelfWindow);
+
+    public void ActivateActiveAudioSurface()
+    {
+        if (_activeAudioClaimant is Window win)
+        {
+            if (ReferenceEquals(win, _shelfWindow))
+            {
+                ShowShelf();
+                _shelfWindow?.SwitchTab("podcasts");
+                return;
+            }
+            try { win.Activate(); BringWindowToFront(win); } catch { }
+            return;
+        }
+        ShowShelf();
     }
 
     /// <summary>
@@ -143,8 +178,10 @@ public partial class App : Application
         }
         catch { }
 
-        // Prewarm shared WebView2 environment in the background (TECH.md §3)
+        // Prewarm shared WebView2 environment, offline ECDICT, and system TTS voice list in the background (TECH.md §3)
         ReaderWebViewHost.PrewarmAsync(Library.DataDir);
+        Library.Ecdict.PrewarmAsync();
+        Speech.AudioPlayer.PrewarmVoicesAsync();
 
         if (startBackground)
             Library.SystemIntegration.EnsureTrayVisible(forceVisible: true);
@@ -261,7 +298,10 @@ public partial class App : Application
 #if DEBUG
     private async Task DumpActiveWindowForDebugAsync(string path)
     {
-        await Task.Delay(1200);
+        int baseWait = _readerWindows.Count > 0 ? 5600 : 1200;
+        if (int.TryParse(Environment.GetEnvironmentVariable("YUYUE_DUMP_DELAY_MS"), out int customDelay) && customDelay >= 200)
+            baseWait = customDelay;
+        await Task.Delay(baseWait);
         if (Environment.GetEnvironmentVariable("YUYUE_DEBUG_DIALOG") is { Length: > 0 } dlgKind)
         {
             if (_settingsWindow is not null) _settingsWindow.OpenDebugSheet(dlgKind);
@@ -272,11 +312,13 @@ public partial class App : Application
         {
             await Task.Delay(600);
         }
-        UIElement? target = _settingsWindow?.Content
-            ?? _audioWindows.Values.LastOrDefault()?.Content
-            ?? _pdfWindows.Values.LastOrDefault()?.Content
-            ?? _readerWindows.Values.LastOrDefault()?.Content
-            ?? _shelfWindow?.Content;
+        Window? activeWin = (Window?)_settingsWindow
+            ?? (Window?)_audioWindows.Values.LastOrDefault()
+            ?? (Window?)_pdfWindows.Values.LastOrDefault()
+            ?? (Window?)_readerWindows.Values.LastOrDefault()
+            ?? _shelfWindow;
+        UIElement? target = activeWin?.Content;
+        bool targetIsModal = false;
         if (target?.XamlRoot is { } xr)
         {
             foreach (var pop in Microsoft.UI.Xaml.Media.VisualTreeHelper.GetOpenPopupsForXamlRoot(xr))
@@ -284,9 +326,18 @@ public partial class App : Application
                 if (pop.Child is Microsoft.UI.Xaml.Controls.ContentDialog cd && cd.Content is UIElement bodyEl)
                 {
                     target = bodyEl;
+                    targetIsModal = true;
                     break;
                 }
             }
+        }
+        if (!targetIsModal && activeWin is IDebugScreenshotCapable cap)
+        {
+            try
+            {
+                if (await cap.SaveCompositeScreenshotAsync(path)) return;
+            }
+            catch { }
         }
         if (target is not null)
         {

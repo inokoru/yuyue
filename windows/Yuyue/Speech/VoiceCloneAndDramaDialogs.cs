@@ -85,7 +85,7 @@ public static class VoiceCloneAndDramaDialogs
     // ---------- 1. Voice Cloning Sheet (1:1 CloneVoiceView.swift: 348px progressive steps) ----------
 
     public static async Task<VoiceCard?> ShowCloneVoiceDialogAsync(
-        Window ownerWindow, XamlRoot xamlRoot, LibraryService library, string? forBookId = null, string? forRoleName = null)
+        Window ownerWindow, XamlRoot xamlRoot, LibraryService library, string? forBookId = null, string? forRoleName = null, string? existingCardId = null)
     {
         bool dark = ThemeHelper.IsDark(xamlRoot.Content is FrameworkElement fe ? fe.ActualTheme : ElementTheme.Light);
         var p = ThemeHelper.Palette(dark);
@@ -94,21 +94,27 @@ public static class VoiceCloneAndDramaDialogs
         var kami = dark ? YYPapers.Kaminight : YYPapers.Kami;
         var serifFont = new FontFamily(YYFontFamily.Serif.WindowsFamily());
 
+        VoiceCard? existingCard = !string.IsNullOrWhiteSpace(existingCardId)
+            ? library.LiveVoice.GetClonedCards().FirstOrDefault(c => c.Id == existingCardId)
+            : null;
+
         string? bookTitle = null;
-        string bookLang = "zh";
+        string bookLang = "zh-Hans";
         if (!string.IsNullOrEmpty(forBookId))
         {
             try
             {
                 var det = library.GetBookDetail(forBookId);
                 bookTitle = det.Summary.Title;
-                if (!string.IsNullOrWhiteSpace(det.Summary.Language) && det.Summary.Language.StartsWith("en", StringComparison.OrdinalIgnoreCase))
-                    bookLang = "en";
+                if (!string.IsNullOrWhiteSpace(det.Summary.Language))
+                    bookLang = det.Summary.Language;
             }
             catch { }
         }
 
-        string lang = bookLang;
+        string lang = existingCard is not null
+            ? (existingCard.Lang.StartsWith("en", StringComparison.OrdinalIgnoreCase) ? "en" : "zh")
+            : (bookLang.StartsWith("en", StringComparison.OrdinalIgnoreCase) ? "en" : "zh");
         string LoadScript(string l)
         {
             try { return library.Core.CardScript(l, CardStyle.Neutral); }
@@ -145,26 +151,29 @@ public static class VoiceCloneAndDramaDialogs
 
         string promptScript = LoadScript(lang);
         string transcriptText = promptScript;
-        bool consented = false;
+        bool consented = existingCard is not null;
         bool importedFile = false;
         string step = "record"; // record | checking | fault | ready | use
         float[]? capturedSamples24k = null;
         CardCheck? latestCheck = null;
         VoiceCard? savedCard = null;
-        string cardName = !string.IsNullOrWhiteSpace(forRoleName) ? forRoleName! : (lang == "en" ? "My Voice" : "我的声音");
-        bool syncElevenLabs = false;
+        string cardName = existingCard is not null
+            ? existingCard.Name
+            : (!string.IsNullOrWhiteSpace(forRoleName) ? forRoleName! : (lang == "en" ? "My Voice" : "我的声音"));
+        bool syncElevenLabs = existingCard is not null && library.Prefs.ClonedUseElevenLabs.Contains(existingCard.Id);
         bool previewSynthesizing = false;
         bool previewSounding = false;
         bool savingCard = false;
+        string? inlineError = null;
 
         MediaCapture? capture = null;
         InMemoryRandomAccessStream? recStream = null;
         bool isRecording = false;
         bool stoppingRecording = false;
+        bool samplingMeter = false;
         DateTime recStartUtc = DateTime.UtcNow;
         double speechActiveSeconds = 0;
         double silenceSeconds = 0;
-        ulong lastMeterOffset = 44;
 
         const int BarCount = 28;
         var barLevels = new double[BarCount];
@@ -241,9 +250,21 @@ public static class VoiceCloneAndDramaDialogs
 
         recTimer.Tick += async (_, _) =>
         {
+            if (!isRecording || recStream is null || samplingMeter) return;
+            samplingMeter = true;
+            double level;
+            double dbFs;
+            try
+            {
+                (level, dbFs) = await SampleLatestRmsLevelAsync(recStream);
+            }
+            finally
+            {
+                samplingMeter = false;
+            }
             if (!isRecording || recStream is null) return;
+
             double elapsed = (DateTime.UtcNow - recStartUtc).TotalSeconds;
-            double level = SampleLatestRmsLevel(recStream, ref lastMeterOffset, out double dbFs);
 
             Array.Copy(barLevels, 1, barLevels, 0, BarCount - 1);
             barLevels[BarCount - 1] = level;
@@ -295,7 +316,7 @@ public static class VoiceCloneAndDramaDialogs
                 string sampleLine = LoadNextBookSentence(lang);
                 string refText = string.IsNullOrWhiteSpace(transcriptText) ? promptScript : transcriptText.Trim();
                 byte[]? wav = null;
-                if (library.LiveVoice.IsModelInstalled && CardVoiceEngine.SpeaksLanguage(lang))
+                if (library.LiveVoice.IsReady && CardVoiceEngine.SpeaksLanguage(lang))
                 {
                     wav = await CardVoiceEngine.Instance.PreviewReferenceWavAsync(
                         library.Core, library.LiveVoice, capturedSamples24k, 24_000, refText, sampleLine, lang);
@@ -408,6 +429,7 @@ public static class VoiceCloneAndDramaDialogs
             capturedSamples24k = null;
             latestCheck = null;
             importedFile = false;
+            inlineError = null;
             transcriptText = promptScript;
             Array.Clear(barLevels);
             step = "record";
@@ -418,40 +440,49 @@ public static class VoiceCloneAndDramaDialogs
         {
             if (savingCard || capturedSamples24k is null || capturedSamples24k.Length < 12_000) return;
             string cleanName = cardName.Trim();
+            if (string.IsNullOrEmpty(cleanName)) return;
             string cleanTranscript = string.IsNullOrWhiteSpace(transcriptText) ? promptScript : transcriptText.Trim();
-            if (string.IsNullOrEmpty(cleanName)) cleanName = lang == "en" ? "My Voice" : "我的声音";
 
+            inlineError = null;
             savingCard = true;
             StopClonePreview();
             RebuildSheet();
 
-            string newCardId = $"cloned.{Guid.NewGuid():D}";
-            string stageDir = System.IO.Path.Combine(library.DataDir, "clones", newCardId);
+            var latestExisting = !string.IsNullOrWhiteSpace(existingCardId)
+                ? library.LiveVoice.GetClonedCards().FirstOrDefault(c => c.Id == existingCardId) ?? existingCard
+                : null;
+            string targetCardId = latestExisting?.Id ?? $"cloned.{Guid.NewGuid():D}";
+            string stageDir = System.IO.Path.Combine(library.DataDir, "clones", targetCardId);
             Directory.CreateDirectory(stageDir);
             string wavFile = System.IO.Path.Combine(stageDir, "neutral.wav");
 
             try
             {
                 float secs = library.Core.CardWriteWav(wavFile, capturedSamples24k, 24_000);
-                CharacterGender gender = CharacterGender.Unknown;
+                CharacterGender gender = latestExisting?.Gender ?? CharacterGender.Unknown;
                 try { gender = library.Core.SpeakerVoiceGender(capturedSamples24k, 24_000); } catch { }
                 float avgRate = Math.Max(2.5f, cleanTranscript.Length / Math.Max(1.0f, secs));
 
+                var neutralClip = new CardClip(CardStyle.Neutral, "neutral.wav", cleanTranscript, secs);
+                CardClip[] mergedClips = latestExisting is not null
+                    ? new[] { neutralClip }.Concat(latestExisting.Clips.Where(c => c.Style != CardStyle.Neutral)).ToArray()
+                    : [neutralClip];
+
                 var draft = new VoiceCard(
-                    Id: newCardId,
+                    Id: targetCardId,
                     Name: cleanName,
                     Gender: gender,
-                    Age: CharacterAge.Young,
-                    Tags: ["克隆"],
+                    Age: latestExisting?.Age ?? CharacterAge.Young,
+                    Tags: latestExisting?.Tags is { Length: > 0 } ? latestExisting.Tags : ["克隆"],
                     Lang: lang,
                     Origin: new CardOrigin.Cloned(),
-                    Clips: [new CardClip(CardStyle.Neutral, "neutral.wav", cleanTranscript, secs)],
-                    Description: "本机克隆声音",
-                    Version: 1,
-                    Narrator: true,
+                    Clips: mergedClips,
+                    Description: latestExisting?.Description ?? "本机克隆声音",
+                    Version: (latestExisting?.Version ?? 0u) + 1u,
+                    Narrator: latestExisting?.Narrator ?? true,
                     Rate: avgRate,
                     Embedding: [],
-                    Sync: false);
+                    Sync: latestExisting?.Sync ?? false);
 
                 savedCard = await Task.Run(() => library.Core.CardSave(null, draft, stageDir));
 
@@ -469,14 +500,19 @@ public static class VoiceCloneAndDramaDialogs
                 DramaSynthService.InvalidateAllCasts();
                 App.CurrentApp.BroadcastVoiceChanged();
                 savingCard = false;
+                if (latestExisting is not null)
+                {
+                    dlgRef?.Hide();
+                    return;
+                }
                 step = "use";
                 RebuildSheet();
             }
             catch (Exception ex)
             {
                 savingCard = false;
-                dlgRef?.Hide();
-                await YYChrome.ShowNoticeAsync(xamlRoot, dark, "没存下", ex.Message, tint: useTint);
+                inlineError = $"{L10n.T("没存下")}：{ex.Message}";
+                RebuildSheet();
             }
         }
 
@@ -553,7 +589,7 @@ public static class VoiceCloneAndDramaDialogs
             {
                 "ready" => "听听像不像",
                 "use" => "存好了",
-                _ => "克隆一个声音",
+                _ => existingCard is not null ? "重新录一段" : "克隆一个声音",
             };
             hdr.Children.Add(new TextBlock
             {
@@ -745,6 +781,7 @@ public static class VoiceCloneAndDramaDialogs
                     {
                         try
                         {
+                            inlineError = null;
                             AudioPlayer.StopActivePreview();
                             StopClonePreview();
                             App.CurrentApp?.ClaimAudioPlayback(ClonePreviewClaimant, () => _ = StopRecordingAndCheckAsync());
@@ -761,7 +798,6 @@ public static class VoiceCloneAndDramaDialogs
                             Array.Clear(barLevels);
                             speechActiveSeconds = 0;
                             silenceSeconds = 0;
-                            lastMeterOffset = 44;
                             isRecording = true;
                             recStartUtc = DateTime.UtcNow;
                             RebuildSheet();
@@ -774,8 +810,8 @@ public static class VoiceCloneAndDramaDialogs
                             try { capture?.Dispose(); } catch { }
                             capture = null;
                             isRecording = false;
-                            dlgRef?.Hide();
-                            await YYChrome.ShowNoticeAsync(xamlRoot, dark, "无法打开麦克风", ex.Message, tint: useTint);
+                            inlineError = $"{L10n.T("无法打开麦克风")}：{ex.Message}";
+                            RebuildSheet();
                         }
                     }
                 };
@@ -968,11 +1004,14 @@ public static class VoiceCloneAndDramaDialogs
             else if (step == "ready")
             {
                 // Book-sentence audition card (1:1 CloneVoiceView.passReviewSection)
+                bool hasLocalModel = library.LiveVoice.IsReady && CardVoiceEngine.SpeaksLanguage(lang);
                 var prevContent = new StackPanel { Spacing = 6 };
                 var prevTop = new Grid();
-                string tryCaption = !string.IsNullOrWhiteSpace(bookTitle)
-                    ? $"正在用你的声音念《{bookTitle}》下一句"
-                    : "正在用你的声音念下一句";
+                string tryCaption = hasLocalModel
+                    ? (!string.IsNullOrWhiteSpace(bookTitle)
+                        ? $"正在用你的声音念《{bookTitle}》下一句"
+                        : "正在用你的声音念下一句")
+                    : L10n.T("回放刚才的参考录音");
                 prevTop.Children.Add(L10n.Skip(new TextBlock
                 {
                     Text = tryCaption,
@@ -1006,9 +1045,12 @@ public static class VoiceCloneAndDramaDialogs
                 }
                 prevContent.Children.Add(prevTop);
 
+                string previewBodyText = hasLocalModel
+                    ? LoadNextBookSentence(lang)
+                    : (string.IsNullOrWhiteSpace(transcriptText) ? promptScript : transcriptText.Trim());
                 prevContent.Children.Add(L10n.Skip(new TextBlock
                 {
-                    Text = $"“{LoadNextBookSentence(lang)}”",
+                    Text = $"“{previewBodyText}”",
                     FontFamily = serifFont,
                     FontSize = 14,
                     LineHeight = 22,
@@ -1035,7 +1077,25 @@ public static class VoiceCloneAndDramaDialogs
                 auditionCardBtn.Click += async (_, _) => await PlayAuditionPreviewAsync();
                 outerRoot.Children.Add(auditionCardBtn);
 
+                if (!library.LiveVoice.IsReady)
+                {
+                    outerRoot.Children.Add(new Border
+                    {
+                        CornerRadius = new CornerRadius(10),
+                        Background = ThemeHelper.Brush(p.Inset),
+                        Padding = new Thickness(11, 8, 11, 8),
+                        Child = new TextBlock
+                        {
+                            Text = L10n.T("需要下载本地语音克隆模型（约 160 MB）后，才能合成任意书页正文；当前试听为参考原声。"),
+                            FontSize = 11,
+                            Foreground = ThemeHelper.Brush(p.T2),
+                            TextWrapping = TextWrapping.Wrap,
+                        },
+                    });
+                }
+
                 // Name input row
+                Button? saveBtn = null;
                 var nameRow = new Grid { ColumnSpacing = 8 };
                 nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1056,9 +1116,17 @@ public static class VoiceCloneAndDramaDialogs
                     FontWeight = FontWeights.Medium,
                     Padding = new Thickness(2, 4, 2, 4),
                 });
-                nameInput.Resources["TextControlBorderThemeThickness"] = new Thickness(0);
-                nameInput.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
-                nameInput.TextChanged += (_, _) => cardName = nameInput.Text;
+                YYChrome.StripTextBoxChrome(nameInput);
+                nameInput.TextChanged += (_, _) =>
+                {
+                    cardName = nameInput.Text;
+                    if (saveBtn is not null)
+                    {
+                        bool canSave = !savingCard && !string.IsNullOrWhiteSpace(cardName);
+                        saveBtn.IsEnabled = canSave;
+                        saveBtn.Opacity = canSave ? 1.0 : 0.45;
+                    }
+                };
                 Grid.SetColumn(nameInput, 1);
                 nameRow.Children.Add(nameInput);
 
@@ -1090,8 +1158,13 @@ public static class VoiceCloneAndDramaDialogs
 
                 var footer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
                 footer.Children.Add(YYChrome.MakeSheetPillButton("再录一次", ResetToRecord, dark, useTint, kind: "secondary", height: 32, horizontalPadding: 14));
-                var saveBtn = YYChrome.MakeSheetPillButton(savingCard ? "保存中…" : "保存这个声音", () => _ = SaveVoiceCardNowAsync(), dark, useTint, kind: "warm", height: 32, horizontalPadding: 16);
-                saveBtn.IsEnabled = !savingCard;
+                saveBtn = YYChrome.MakeSheetPillButton(
+                    savingCard ? "保存中…" : (existingCard is not null ? "保存新录音" : "保存这个声音"),
+                    () => _ = SaveVoiceCardNowAsync(),
+                    dark, useTint, kind: "warm", height: 32, horizontalPadding: 16);
+                bool canSaveInitial = !savingCard && !string.IsNullOrWhiteSpace(cardName);
+                saveBtn.IsEnabled = canSaveInitial;
+                saveBtn.Opacity = canSaveInitial ? 1.0 : 0.45;
                 footer.Children.Add(saveBtn);
                 outerRoot.Children.Add(footer);
             }
@@ -1123,7 +1196,13 @@ public static class VoiceCloneAndDramaDialogs
 
                 cardsCol.Children.Add(MakeChoiceCard("headphones", "全书（旁白）", "设为当前语种默认朗读旁白声音", highlight: string.IsNullOrEmpty(forRoleName), () =>
                 {
-                    library.Prefs.SetVoiceForLanguage(lang, savedCard.Id);
+                    string targetLang = !string.IsNullOrEmpty(forBookId) &&
+                                        bookLang.StartsWith(lang == "en" ? "en" : "zh", StringComparison.OrdinalIgnoreCase)
+                        ? bookLang
+                        : (lang == "en" ? "en" : "zh-Hans");
+                    library.Prefs.SetVoiceForLanguage(targetLang, savedCard.Id);
+                    if (lang == "en") library.Prefs.VoiceIdEn = savedCard.Id;
+                    else library.Prefs.VoiceId = savedCard.Id;
                     library.SavePrefs();
                     App.CurrentApp.BroadcastVoiceChanged();
                     dlgRef?.Hide();
@@ -1152,6 +1231,25 @@ public static class VoiceCloneAndDramaDialogs
                 outerRoot.Children.Add(cardsCol);
             }
 
+            if (!string.IsNullOrWhiteSpace(inlineError))
+            {
+                outerRoot.Children.Add(new Border
+                {
+                    CornerRadius = new CornerRadius(10),
+                    Background = ThemeHelper.Brush(Color.FromArgb(20, p.Danger.R, p.Danger.G, p.Danger.B)),
+                    BorderBrush = ThemeHelper.Brush(Color.FromArgb(64, p.Danger.R, p.Danger.G, p.Danger.B)),
+                    BorderThickness = new Thickness(0.75),
+                    Padding = new Thickness(12, 9, 12, 9),
+                    Child = L10n.Skip(new TextBlock
+                    {
+                        Text = inlineError,
+                        FontSize = 11.5,
+                        Foreground = ThemeHelper.Brush(p.Danger),
+                        TextWrapping = TextWrapping.Wrap,
+                    }),
+                });
+            }
+
             L10n.ApplyTree(outerRoot);
             YYChrome.AnimateEntrance(outerRoot, fromY: 5f, durationMs: 140);
         }
@@ -1163,6 +1261,7 @@ public static class VoiceCloneAndDramaDialogs
         recTimer.Stop();
         speakingAnimTimer.Stop();
         StopClonePreview();
+        AudioPlayer.StopActivePreview();
         if (isRecording && capture is not null)
         {
             try { await capture.StopRecordAsync(); } catch { }
@@ -1206,26 +1305,24 @@ public static class VoiceCloneAndDramaDialogs
         return lines;
     }
 
-    private static double SampleLatestRmsLevel(InMemoryRandomAccessStream stream, ref ulong lastOffset, out double dbFs)
+    private static async Task<(double Level, double DbFs)> SampleLatestRmsLevelAsync(InMemoryRandomAccessStream stream)
     {
-        dbFs = -60.0;
         try
         {
             ulong size = stream.Size;
-            if (size <= 48) return 0;
+            if (size <= 48) return (0, -60.0);
             ulong windowBytes = 3840; // 1920 samples = 80ms @ 24kHz PCM16
             ulong start = size > 44 + windowBytes ? size - windowBytes : 44;
             if ((start & 1UL) != 0) start++;
             uint len = (uint)Math.Min(windowBytes, size - start);
-            if (len < 4) return 0;
+            if (len < 4) return (0, -60.0);
 
             using var input = stream.GetInputStreamAt(start);
             using var reader = new DataReader(input);
-            uint loaded = reader.LoadAsync(len).AsTask().GetAwaiter().GetResult();
-            if (loaded < 4) return 0;
+            uint loaded = await reader.LoadAsync(len);
+            if (loaded < 4) return (0, -60.0);
             byte[] buf = new byte[loaded];
             reader.ReadBytes(buf);
-            lastOffset = size;
 
             int samples = buf.Length / 2;
             double sumSq = 0;
@@ -1236,18 +1333,18 @@ public static class VoiceCloneAndDramaDialogs
                 sumSq += norm * norm;
             }
             double rms = Math.Sqrt(sumSq / Math.Max(1, samples));
-            dbFs = rms > 1e-5 ? 20.0 * Math.Log10(rms) : -60.0;
-            return Math.Clamp((dbFs + 48.0) / 36.0, 0.0, 1.0);
+            double dbFs = rms > 1e-5 ? 20.0 * Math.Log10(rms) : -60.0;
+            return (Math.Clamp((dbFs + 48.0) / 36.0, 0.0, 1.0), dbFs);
         }
         catch
         {
-            return 0;
+            return (0, -60.0);
         }
     }
 
     /// <summary>
     /// 1:1 <c>ClonedCardDetailView</c> + <c>StyleClipRecordSheet</c> (<c>CloneVoiceView.swift:762-1206</c>):
-    /// rename, sync toggle, ElevenLabs opt-in toggle, 6 emotional style clips (record/import/preview), and confirmed delete.
+    /// rename, re-record base voice, sync toggle, ElevenLabs opt-in toggle, 6 emotional style clips, and confirmed delete.
     /// </summary>
     public static async Task ShowClonedCardDetailDialogAsync(
         Window ownerWindow, XamlRoot xamlRoot, LibraryService library, string cardId, Action? onChanged = null)
@@ -1262,6 +1359,7 @@ public static class VoiceCloneAndDramaDialogs
         bool deleted = false;
         CardStyle? pendingRecordStyle = null;
         bool pendingRename = false;
+        bool pendingRerecordBase = false;
         bool pendingDeleteConfirm = false;
 
         void Rebuild()
@@ -1424,15 +1522,24 @@ public static class VoiceCloneAndDramaDialogs
                 Child = optsStack,
             });
 
-            // 3. Footer: Rename + Confirmed Delete (1:1 CloneVoiceView.swift:830-850)
+            // 3. Footer: Rename + Re-record + Confirmed Delete (1:1 CloneVoiceView.swift:830-850)
             outer.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) });
             var footRow = new Grid();
+            var leftFoot = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             var renameBtn = YYChrome.MakeSheetPillButton("重命名", () =>
             {
                 pendingRename = true;
                 dlgRef?.Hide();
             }, dark, useTint, kind: "secondary", height: 30, horizontalPadding: 14);
-            footRow.Children.Add(renameBtn);
+            leftFoot.Children.Add(renameBtn);
+
+            var rerecordBtn = YYChrome.MakeSheetPillButton("重新录一段", () =>
+            {
+                pendingRerecordBase = true;
+                dlgRef?.Hide();
+            }, dark, useTint, kind: "secondary", height: 30, horizontalPadding: 14);
+            leftFoot.Children.Add(rerecordBtn);
+            footRow.Children.Add(leftFoot);
 
             Color dangerBg = dark ? Color.FromArgb(36, 229, 128, 111) : Color.FromArgb(22, 194, 71, 58);
             var delBtn = new Button
@@ -1463,6 +1570,7 @@ public static class VoiceCloneAndDramaDialogs
         {
             pendingRecordStyle = null;
             pendingRename = false;
+            pendingRerecordBase = false;
             pendingDeleteConfirm = false;
             Rebuild();
 
@@ -1470,9 +1578,17 @@ public static class VoiceCloneAndDramaDialogs
             dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 380, scroll, maxHeight: 620, tint: useTint);
             await dlgRef.ShowSafeAsync(useTint);
             StopClonePreview();
+            AudioPlayer.StopActivePreview();
 
             var latestCard = library.LiveVoice.GetClonedCards().FirstOrDefault(c => c.Id == cardId);
             if (latestCard is null) break;
+
+            if (pendingRerecordBase)
+            {
+                var updated = await ShowCloneVoiceDialogAsync(ownerWindow, xamlRoot, library, existingCardId: latestCard.Id);
+                if (updated is not null) onChanged?.Invoke();
+                continue;
+            }
 
             if (pendingRename)
             {
@@ -1555,9 +1671,10 @@ public static class VoiceCloneAndDramaDialogs
         InMemoryRandomAccessStream? stream = null;
         bool recording = false;
         bool stopping = false;
+        bool samplingStyleMeter = false;
+        string? styleMicError = null;
         DateTime recStartUtc = DateTime.UtcNow;
         double speechSec = 0, silenceSec = 0;
-        ulong meterOffset = 44;
 
         const int BarCount = 28;
         var barLevels = new double[BarCount];
@@ -1620,9 +1737,20 @@ public static class VoiceCloneAndDramaDialogs
 
         recTimer.Tick += async (_, _) =>
         {
+            if (!recording || stream is null || samplingStyleMeter) return;
+            samplingStyleMeter = true;
+            double lvl;
+            double dbFs;
+            try
+            {
+                (lvl, dbFs) = await SampleLatestRmsLevelAsync(stream);
+            }
+            finally
+            {
+                samplingStyleMeter = false;
+            }
             if (!recording || stream is null) return;
             double elapsed = (DateTime.UtcNow - recStartUtc).TotalSeconds;
-            double lvl = SampleLatestRmsLevel(stream, ref meterOffset, out double dbFs);
             Array.Copy(barLevels, 1, barLevels, 0, BarCount - 1);
             barLevels[BarCount - 1] = lvl;
             for (int i = 0; i < BarCount; i++)
@@ -1717,6 +1845,7 @@ public static class VoiceCloneAndDramaDialogs
                 {
                     try
                     {
+                        styleMicError = null;
                         AudioPlayer.StopActivePreview();
                         StopClonePreview();
                         App.CurrentApp?.ClaimAudioPlayback(ClonePreviewClaimant, () => _ = StopStyleRecAsync());
@@ -1727,13 +1856,22 @@ public static class VoiceCloneAndDramaDialogs
                         prof.Audio.SampleRate = 24_000; prof.Audio.ChannelCount = 1; prof.Audio.BitsPerSample = 16;
                         await capture.StartRecordToStreamAsync(prof, stream);
                         Array.Clear(barLevels);
-                        speechSec = 0; silenceSec = 0; meterOffset = 44;
+                        speechSec = 0; silenceSec = 0;
                         recording = true;
                         recStartUtc = DateTime.UtcNow;
                         Rebuild();
                         recTimer.Start();
                     }
-                    catch { recording = false; }
+                    catch (Exception ex)
+                    {
+                        try { stream?.Dispose(); } catch { }
+                        stream = null;
+                        try { capture?.Dispose(); } catch { }
+                        capture = null;
+                        recording = false;
+                        styleMicError = $"{L10n.T("无法打开麦克风")}：{ex.Message}";
+                        Rebuild();
+                    }
                 }
             };
             recCenter.Children.Add(micBtn);
@@ -1764,7 +1902,23 @@ public static class VoiceCloneAndDramaDialogs
             recCenter.Children.Add(recHint);
             outer.Children.Add(recCenter);
 
-            if (chk is not null)
+            if (!string.IsNullOrWhiteSpace(styleMicError))
+            {
+                outer.Children.Add(new Border
+                {
+                    CornerRadius = new CornerRadius(10),
+                    Background = ThemeHelper.Brush(Color.FromArgb(20, p.Danger.R, p.Danger.G, p.Danger.B)),
+                    Padding = new Thickness(12, 8, 12, 8),
+                    Child = L10n.Skip(new TextBlock
+                    {
+                        Text = styleMicError,
+                        FontSize = 11.5,
+                        Foreground = ThemeHelper.Brush(p.Danger),
+                        TextWrapping = TextWrapping.Wrap,
+                    }),
+                });
+            }
+            else if (chk is not null)
             {
                 outer.Children.Add(new Border
                 {
@@ -2324,9 +2478,11 @@ public static class VoiceCloneAndDramaDialogs
         var useTint = library.Prefs.Tint;
         var tint = ThemeHelper.TintColors(useTint, dark);
 
-        CastPick[] everyone;
-        try { everyone = library.Core.DramaEveryone(bookId, currentSection); }
-        catch { everyone = []; }
+        CastPick[] everyone = await Task.Run(() =>
+        {
+            try { return library.Core.DramaEveryone(bookId, currentSection); }
+            catch { return Array.Empty<CastPick>(); }
+        });
 
         UserChoice? picked = null;
         ContentDialog? dlgRef = null;
@@ -2350,8 +2506,7 @@ public static class VoiceCloneAndDramaDialogs
             Padding = new Thickness(2, 4, 4, 4),
             VerticalAlignment = VerticalAlignment.Center,
         };
-        searchBox.Resources["TextControlBorderThemeThickness"] = new Thickness(0);
-        searchBox.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
+        YYChrome.StripTextBoxChrome(searchBox);
         Grid.SetColumn(searchBox, 1);
         searchRow.Children.Add(searchBox);
 
@@ -2498,32 +2653,61 @@ public static class VoiceCloneAndDramaDialogs
         var tint = ThemeHelper.TintColors(useTint, dark);
         var serifFont = new FontFamily(YYFontFamily.Serif.WindowsFamily());
 
-        CastPick[] everyone;
-        try { everyone = library.Core.DramaEveryone(bookId, currentSection); }
-        catch { everyone = []; }
+        var (everyone, initialRaw) = await Task.Run(() =>
+        {
+            CastPick[] ev;
+            try { ev = library.Core.DramaEveryone(bookId, currentSection); } catch { ev = []; }
+            UnsureLine[] rw;
+            try { rw = library.Core.DramaReview(bookId, currentSection); } catch { rw = []; }
+            return (ev, rw);
+        });
         var lookMap = everyone.GroupBy(x => x.Name).ToDictionary(g => g.Key, g => g.First());
+        UnsureLine[] cachedRaw = initialRaw;
 
         int skipOffset = 0;
         int resolvedCount = 0;
         int settledTotal = 0;
         (uint Sec, uint Sent, uint Start, string Name, uint Freed)? lastDecision = null;
         UnsureLine? activeLine = null;
+        int rebuildGen = 0;
 
         var outer = new StackPanel { Spacing = 10, Padding = new Thickness(18, 16, 18, 16) };
         ContentDialog? dlgRef = null;
         bool openPickerNext = false;
 
+        async Task RefreshReviewAndRebuildAsync()
+        {
+            int gen = ++rebuildGen;
+            var latest = await Task.Run(() =>
+            {
+                try { return library.Core.DramaReview(bookId, currentSection); }
+                catch { return Array.Empty<UnsureLine>(); }
+            });
+            if (gen != rebuildGen) return;
+            cachedRaw = latest;
+            RebuildCard();
+        }
+
         void CommitChoice(UnsureLine cur, UserChoice choice, string displayLabel)
         {
             uint freed = cur.Frees;
-            try { library.Core.DramaSetSpeaker(bookId, cur.Section, cur.Sentence, cur.Start, choice); }
-            catch { }
-            lastDecision = (cur.Section, cur.Sentence, cur.Start, displayLabel, freed);
-            resolvedCount++;
-            settledTotal += (int)Math.Max(1u, freed);
-            DramaSynthService.InvalidateCast(bookId);
-            onChanged();
-            RebuildCard();
+            activeLine = null;
+            _ = Task.Run(() =>
+            {
+                try { library.Core.DramaSetSpeaker(bookId, cur.Section, cur.Sentence, cur.Start, choice); }
+                catch { }
+            }).ContinueWith(_ =>
+            {
+                outer.DispatcherQueue?.TryEnqueue(() =>
+                {
+                    lastDecision = (cur.Section, cur.Sentence, cur.Start, displayLabel, freed);
+                    resolvedCount++;
+                    settledTotal += (int)Math.Max(1u, freed);
+                    DramaSynthService.InvalidateCast(bookId);
+                    onChanged();
+                    _ = RefreshReviewAndRebuildAsync();
+                });
+            }, TaskScheduler.Default);
         }
 
         void RebuildCard()
@@ -2533,11 +2717,7 @@ public static class VoiceCloneAndDramaDialogs
 
             outer.Children.Add(YYChrome.MakeSheetHeader("待确认的台词", null, () => dlgRef?.Hide(), dark));
 
-            UnsureLine[] raw;
-            try { raw = library.Core.DramaReview(bookId, currentSection); }
-            catch { raw = []; }
-
-            var ordered = raw
+            var ordered = cachedRaw
                 .OrderByDescending(u => u.Section == currentSection)
                 .ThenByDescending(u => u.Frees)
                 .ToArray();
@@ -2570,13 +2750,21 @@ public static class VoiceCloneAndDramaDialogs
 
                 var undoBtn = YYChrome.MakeSheetPillButton("撤销", () =>
                 {
-                    try { library.Core.DramaClearSpeaker(bookId, lSec, lSent, lStart); } catch { }
                     lastDecision = null;
                     resolvedCount = Math.Max(0, resolvedCount - 1);
                     settledTotal = Math.Max(0, settledTotal - (int)Math.Max(1u, lFreed));
-                    DramaSynthService.InvalidateCast(bookId);
-                    onChanged();
-                    RebuildCard();
+                    _ = Task.Run(() =>
+                    {
+                        try { library.Core.DramaClearSpeaker(bookId, lSec, lSent, lStart); } catch { }
+                    }).ContinueWith(_ =>
+                    {
+                        outer.DispatcherQueue?.TryEnqueue(() =>
+                        {
+                            DramaSynthService.InvalidateCast(bookId);
+                            onChanged();
+                            _ = RefreshReviewAndRebuildAsync();
+                        });
+                    }, TaskScheduler.Default);
                 }, dark, useTint, kind: "secondary", height: 24, horizontalPadding: 10);
                 Grid.SetColumn(undoBtn, 1);
                 undoRow.Children.Add(undoBtn);
@@ -2827,6 +3015,9 @@ public static class VoiceCloneAndDramaDialogs
             dlgRef.PreviewKeyDown += (_, e) =>
             {
                 if (activeLine is null) return;
+                bool ctrl = (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control) & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
+                bool alt = (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu) & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
+                if (ctrl || alt) return;
                 string[] names = (activeLine.Names is { Length: > 0 } ? activeLine.Names : activeLine.Present) ?? [];
                 int idx = e.Key switch
                 {
@@ -2845,6 +3036,7 @@ public static class VoiceCloneAndDramaDialogs
 
             if (openPickerNext && activeLine is not null)
             {
+                var targetLine = activeLine;
                 var chosen = await ShowPeoplePickerDialogAsync(xamlRoot, library, bookId, currentSection, "是谁说的");
                 if (chosen is not null)
                 {
@@ -2854,7 +3046,18 @@ public static class VoiceCloneAndDramaDialogs
                         UserChoice.Group gr => gr.Name,
                         _ => "不是台词",
                     };
-                    CommitChoice(activeLine, chosen, lbl);
+                    try { await Task.Run(() => library.Core.DramaSetSpeaker(bookId, targetLine.Section, targetLine.Sentence, targetLine.Start, chosen)); }
+                    catch { }
+                    lastDecision = (targetLine.Section, targetLine.Sentence, targetLine.Start, lbl, targetLine.Frees);
+                    resolvedCount++;
+                    settledTotal += (int)Math.Max(1u, targetLine.Frees);
+                    DramaSynthService.InvalidateCast(bookId);
+                    onChanged();
+                    cachedRaw = await Task.Run(() =>
+                    {
+                        try { return library.Core.DramaReview(bookId, currentSection); }
+                        catch { return Array.Empty<UnsureLine>(); }
+                    });
                 }
                 continue;
             }
@@ -2949,37 +3152,48 @@ public static class VoiceCloneAndDramaDialogs
             await AudioPlayer.PreviewVoiceAsync(library, sampleVoice, library.Prefs.SpeechRate * curRate, sampleQuote);
         }
 
-        void RebuildRole()
-        {
-            outer.Children.Clear();
-            string[] aliases;
-            CharacterGender gender;
-            RoleVoice? curRoleVoice = null;
-            CastMember? castMember = null;
-            bool dramaOn = false;
+        int roleLoadGen = 0;
 
-            try
+        async Task RebuildRoleAsync()
+        {
+            int gen = ++roleLoadGen;
+            string roleSnap = currentRole;
+            var loaded = await Task.Run(() =>
             {
-                uint curSec = library.GetProgress(bookId)?.Position.Section ?? 0;
-                aliases = library.Core.DramaNames(bookId, currentRole);
-                gender = library.Core.DramaGender(bookId, currentRole);
-                curRoleVoice = library.Core.BookRoles(bookId).FirstOrDefault(r => r.Name == currentRole)?.Voice;
-                castMember = library.Core.BookCast(bookId, curSec).FirstOrDefault(m => m.Name == currentRole);
-                dramaOn = library.Core.DramaEnabled(bookId);
-            }
-            catch
-            {
-                aliases = [currentRole];
-                gender = CharacterGender.Unknown;
-            }
-            if (aliases.Length == 0) aliases = [currentRole];
+                string[] al;
+                CharacterGender gd;
+                RoleVoice? rv = null;
+                CastMember? cm = null;
+                bool dr = false;
+                try
+                {
+                    uint curSec = library.GetProgress(bookId)?.Position.Section ?? 0;
+                    al = library.Core.DramaNames(bookId, roleSnap);
+                    gd = library.Core.DramaGender(bookId, roleSnap);
+                    rv = library.Core.BookRoles(bookId).FirstOrDefault(r => r.Name == roleSnap)?.Voice;
+                    cm = library.Core.BookCast(bookId, curSec).FirstOrDefault(m => m.Name == roleSnap);
+                    dr = library.Core.DramaEnabled(bookId);
+                }
+                catch
+                {
+                    al = [roleSnap];
+                    gd = CharacterGender.Unknown;
+                }
+                if (al.Length == 0) al = [roleSnap];
+                string quote = FindCharacterSampleLine(library, bookId, roleSnap, bookLang);
+                var voices = AudioPlayer.GetAllVoiceOptions(library, bookId);
+                return (al, gd, rv, cm, dr, quote, voices);
+            });
+            if (gen != roleLoadGen) return;
+
+            outer.Children.Clear();
+            var (aliases, gender, curRoleVoice, castMember, dramaOn, sampleQuote, allV) = loaded;
 
             curRate = curRoleVoice?.Rate ?? 1.0;
             curPitch = curRoleVoice?.Pitch ?? 0.0;
             curRight = curRoleVoice?.Right ?? false;
             curVid = DramaSynthService.NormalizeVoiceId(curRoleVoice?.Voice);
 
-            string sampleQuote = FindCharacterSampleLine(library, bookId, currentRole, bookLang);
             Color avColor = ParseHexColor(castMember?.Color, tint.Accent);
             string avGlyph = castMember?.Avatar ?? (currentRole.Length > 0 ? currentRole[^1].ToString() : "?");
             string? lineCountSub = castMember is not null ? $"{castMember.LinesSoFar} 句" : null;
@@ -3020,7 +3234,7 @@ public static class VoiceCloneAndDramaDialogs
                             currentRole = al;
                             DramaSynthService.InvalidateCast(bookId);
                             onChanged();
-                            RebuildRole();
+                            _ = RebuildRoleAsync();
                         }
                         catch { }
                     }
@@ -3048,7 +3262,7 @@ public static class VoiceCloneAndDramaDialogs
                             library.Core.DramaEditCast(bookId, new CastEdit.Split(al));
                             DramaSynthService.InvalidateCast(bookId);
                             onChanged();
-                            RebuildRole();
+                            _ = RebuildRoleAsync();
                         }
                         catch { }
                     };
@@ -3103,7 +3317,7 @@ public static class VoiceCloneAndDramaDialogs
                     try { library.Core.DramaEditCast(bookId, new CastEdit.SetGender(currentRole, nextG)); } catch { }
                     DramaSynthService.InvalidateCast(bookId);
                     onChanged();
-                    RebuildRole();
+                    _ = RebuildRoleAsync();
                 },
                 dark,
                 fontSize: 11.5,
@@ -3126,7 +3340,6 @@ public static class VoiceCloneAndDramaDialogs
             string voiceDisplay = L10n.T(dramaOn ? "自动选角" : "跟旁白");
             if (!string.IsNullOrEmpty(curVid))
             {
-                var allV = AudioPlayer.GetAllVoiceOptions(library, bookId);
                 voiceDisplay = allV.FirstOrDefault(v => v.Id == curVid)?.Label.Split('（')[0].Trim('✦', '☁', ' ') ?? curVid;
             }
 
@@ -3165,7 +3378,7 @@ public static class VoiceCloneAndDramaDialogs
                         onChanged();
                     }
                     catch { }
-                    RebuildRole();
+                    _ = RebuildRoleAsync();
                 },
                 dark,
                 fontSize: 11.5,
@@ -3212,10 +3425,10 @@ public static class VoiceCloneAndDramaDialogs
             pitchHeaderRow.Children.Add(new TextBlock { Text = L10n.T("声音高一点或低一点"), FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom });
             slidersCard.Children.Add(pitchHeaderRow);
 
-            var pitchSlider = new Slider { Minimum = -6.0, Maximum = 6.0, StepFrequency = 0.5, Value = Math.Clamp(curPitch, -6.0, 6.0) };
+            var pitchSlider = new Slider { Minimum = -6.0, Maximum = 6.0, StepFrequency = 1.0, Value = Math.Clamp(curPitch, -6.0, 6.0) };
             pitchSlider.ValueChanged += (_, e) =>
             {
-                double next = Math.Round(e.NewValue, 1);
+                double next = Math.Round(e.NewValue);
                 if (Math.Abs(next - curPitch) < 0.05) return;
                 curPitch = next;
                 pitchValLabel.Text = $"{L10n.T("高低")} {FormatPitch(curPitch)}";
@@ -3294,7 +3507,7 @@ public static class VoiceCloneAndDramaDialogs
                         library.Core.SetBookRole(bookId, currentRole, new RoleVoice(null, 1.0, 0.0, false));
                         DramaSynthService.InvalidateCast(bookId);
                         onChanged();
-                        RebuildRole();
+                        _ = RebuildRoleAsync();
                     }
                     catch { }
                 }, dark, useTint, kind: "secondary", height: 28, horizontalPadding: 14);
@@ -3307,7 +3520,7 @@ public static class VoiceCloneAndDramaDialogs
         while (true)
         {
             pendingAction = null;
-            RebuildRole();
+            await RebuildRoleAsync();
             var scroll = new ScrollViewer { MaxHeight = 560, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = outer };
             roleDlg = YYChrome.CreateMacSheet(xamlRoot, dark, 380, scroll, maxHeight: 620, tint: useTint);
             await roleDlg.ShowSafeAsync(useTint);
@@ -3315,6 +3528,7 @@ public static class VoiceCloneAndDramaDialogs
             saveDebounce.Stop();
             FlushRoleSave();
             StopClonePreview();
+            AudioPlayer.StopActivePreview();
 
             if (pendingAction == "add-alias")
             {

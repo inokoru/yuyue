@@ -138,7 +138,7 @@ public static class QuoteShareDialog
             double baseQuoteSize = shape == "wide" ? 14.5 : 15.5;
             if (trimmedQuote.Length > 260) baseQuoteSize -= 2.5;
             else if (trimmedQuote.Length > 140) baseQuoteSize -= 1.5;
-            bodyStack.Children.Add(new TextBlock
+            bodyStack.Children.Add(L10n.Skip(new TextBlock
             {
                 Text = trimmedQuote,
                 FontFamily = new FontFamily(YYFontFamily.Serif.WindowsFamily()),
@@ -146,7 +146,7 @@ public static class QuoteShareDialog
                 LineHeight = Math.Round(baseQuoteSize * 1.65),
                 Foreground = ThemeHelper.Brush(ink),
                 TextWrapping = TextWrapping.Wrap,
-            });
+            }));
 
             if (includeThought && !string.IsNullOrWhiteSpace(thought))
             {
@@ -154,7 +154,7 @@ public static class QuoteShareDialog
                 thGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2) });
                 thGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 thGrid.Children.Add(new Border { Background = ThemeHelper.Brush(accent), CornerRadius = new CornerRadius(1) });
-                var thTb = new TextBlock
+                var thTb = L10n.Skip(new TextBlock
                 {
                     Text = thought.Trim(),
                     FontFamily = new FontFamily(YYFontFamily.Kaiti.WindowsFamily()),
@@ -162,7 +162,7 @@ public static class QuoteShareDialog
                     LineHeight = 19,
                     Foreground = ThemeHelper.Brush(ink2),
                     TextWrapping = TextWrapping.Wrap,
-                };
+                });
                 Grid.SetColumn(thTb, 1);
                 thGrid.Children.Add(thTb);
                 bodyStack.Children.Add(thGrid);
@@ -177,6 +177,11 @@ public static class QuoteShareDialog
 
             if (!string.IsNullOrEmpty(coverPath) && File.Exists(coverPath))
             {
+                var bmp = new BitmapImage
+                {
+                    DecodePixelWidth = Math.Max(48, (int)Math.Ceiling(20 * ExportScale)),
+                    UriSource = new Uri(coverPath),
+                };
                 footRow.Children.Add(new Border
                 {
                     Width = 20,
@@ -184,12 +189,12 @@ public static class QuoteShareDialog
                     CornerRadius = new CornerRadius(2.5),
                     BorderBrush = ThemeHelper.Brush(rule),
                     BorderThickness = new Thickness(0.5),
-                    Child = new Image { Source = new BitmapImage(new Uri(coverPath)), Stretch = Stretch.UniformToFill },
+                    Child = new Image { Source = bmp, Stretch = Stretch.UniformToFill },
                 });
             }
 
             var citeStack = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
-            citeStack.Children.Add(new TextBlock
+            citeStack.Children.Add(L10n.Skip(new TextBlock
             {
                 Text = bookTitle,
                 FontSize = 11.5,
@@ -197,18 +202,18 @@ public static class QuoteShareDialog
                 Foreground = ThemeHelper.Brush(ink),
                 MaxLines = 1,
                 TextTrimming = TextTrimming.CharacterEllipsis,
-            });
+            }));
             string subCite = string.Join(" · ", new[] { author, chapter }.Where(s => !string.IsNullOrWhiteSpace(s)));
             if (!string.IsNullOrWhiteSpace(subCite))
             {
-                citeStack.Children.Add(new TextBlock
+                citeStack.Children.Add(L10n.Skip(new TextBlock
                 {
                     Text = subCite,
                     FontSize = 10,
                     Foreground = ThemeHelper.Brush(ink2),
                     MaxLines = 1,
                     TextTrimming = TextTrimming.CharacterEllipsis,
-                });
+                }));
             }
             Grid.SetColumn(citeStack, 1);
             footRow.Children.Add(citeStack);
@@ -466,7 +471,7 @@ public static class QuoteShareDialog
             var dp = new DataPackage();
             dp.SetText(BuildPlainShareText());
             Clipboard.SetContent(dp);
-            statusText.Text = "✓ 已复制纯文字书摘";
+            statusText.Text = L10n.T("✓ 已复制纯文字书摘");
             statusText.Visibility = Visibility.Visible;
         }, darkUi, tint, "secondary", height: 40, stretch: true);
 
@@ -474,8 +479,8 @@ public static class QuoteShareDialog
         {
             try
             {
-                var picker = new FileSavePicker { SuggestedFileName = $"{SanitizeFileName(bookTitle)}-书摘" };
-                picker.FileTypeChoices.Add("PNG 图片", [".png"]);
+                var picker = new FileSavePicker { SuggestedFileName = $"{SanitizeFileName(bookTitle)}-{L10n.T("书摘")}" };
+                picker.FileTypeChoices.Add(L10n.T("PNG 图片"), [".png"]);
                 InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(ownerWindow));
                 var file = await picker.PickSaveFileAsync();
                 if (file is null) return;
@@ -485,10 +490,10 @@ public static class QuoteShareDialog
                 byte[] bytes = new byte[pngStream.Size];
                 await pngStream.ReadAsync(bytes.AsBuffer(), (uint)bytes.Length, InputStreamOptions.None);
                 await File.WriteAllBytesAsync(file.Path, bytes);
-                statusText.Text = $"✓ 已保存到 {file.Name}";
+                statusText.Text = L10n.T($"✓ 已保存到 {file.Name}");
                 statusText.Visibility = Visibility.Visible;
             }
-            catch (Exception ex) { statusText.Text = $"保存失败：{ex.Message}"; statusText.Visibility = Visibility.Visible; }
+            catch (Exception ex) { statusText.Text = L10n.T($"保存失败：{ex.Message}"); statusText.Visibility = Visibility.Visible; }
         }, darkUi, tint, "secondary", height: 40, stretch: true);
 
         var shareBtn = YYChrome.MakeSheetPillButton(MakeActionLabel("share-up", "分享", tc.Accent), async () =>
@@ -501,7 +506,7 @@ public static class QuoteShareDialog
                 await stream.ReadAsync(pngBytes.AsBuffer(), (uint)pngBytes.Length, InputStreamOptions.None);
                 stream.Seek(0);
 
-                string shareTitle = $"《{bookTitle}》书摘";
+                string shareTitle = L10n.T($"《{bookTitle}》书摘");
                 string shareText = BuildPlainShareText();
                 bool shownNative = await TryShowNativeShareSheetAsync(ownerWindow, shareTitle, shareText, bookTitle, pngBytes);
                 if (!shownNative)
@@ -509,7 +514,7 @@ public static class QuoteShareDialog
                     var dp = new DataPackage();
                     dp.SetBitmap(RandomAccessStreamReference.CreateFromStream(stream));
                     Clipboard.SetContent(dp);
-                    statusText.Text = "✓ 已复制书摘卡片图片，可直接粘贴分享";
+                    statusText.Text = L10n.T("✓ 已复制书摘卡片图片，可直接粘贴分享");
                     statusText.Visibility = Visibility.Visible;
                 }
                 else
@@ -518,11 +523,11 @@ public static class QuoteShareDialog
                     var dp = new DataPackage();
                     dp.SetBitmap(RandomAccessStreamReference.CreateFromStream(stream));
                     try { Clipboard.SetContent(dp); } catch { }
-                    statusText.Text = "✓ 已唤起系统分享面板（同时已复制到剪贴板）";
+                    statusText.Text = L10n.T("✓ 已唤起系统分享面板（同时已复制到剪贴板）");
                     statusText.Visibility = Visibility.Visible;
                 }
             }
-            catch (Exception ex) { statusText.Text = $"分享失败：{ex.Message}"; statusText.Visibility = Visibility.Visible; }
+            catch (Exception ex) { statusText.Text = L10n.T($"分享失败：{ex.Message}"); statusText.Visibility = Visibility.Visible; }
         }, darkUi, tint, "warm", height: 40, stretch: true);
 
         var actionGrid = new Grid { ColumnSpacing = 10, Margin = new Thickness(0, 2, 0, 0) };

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -224,8 +225,237 @@ public static partial class L10n
         m = RxDiscoveredBook().Match(s);
         if (m.Success) return $"Found ebook \"{m.Groups[1].Value}\"";
 
+        m = RxFullDateYmd().Match(s);
+        if (m.Success)
+        {
+            if (int.TryParse(m.Groups[1].Value, out int yr) &&
+                int.TryParse(m.Groups[2].Value, out int mo) &&
+                int.TryParse(m.Groups[3].Value, out int dy) &&
+                mo is >= 1 and <= 12 && dy is >= 1 and <= 31)
+            {
+                try { return new DateTime(yr, mo, dy).ToString("MMM d, yyyy", CultureInfo.InvariantCulture); }
+                catch { }
+            }
+            return $"{m.Groups[1].Value}-{m.Groups[2].Value}-{m.Groups[3].Value}";
+        }
+
+        m = RxYearMonth().Match(s);
+        if (m.Success)
+        {
+            if (int.TryParse(m.Groups[1].Value, out int yr) &&
+                int.TryParse(m.Groups[2].Value, out int mo) &&
+                mo is >= 1 and <= 12)
+            {
+                try { return new DateTime(yr, mo, 1).ToString("MMM yyyy", CultureInfo.InvariantCulture); }
+                catch { }
+            }
+            return $"{m.Groups[1].Value}-{m.Groups[2].Value}";
+        }
+
         m = RxMonthDay().Match(s);
-        if (m.Success) return $"{m.Groups[1].Value}/{m.Groups[2].Value}";
+        if (m.Success)
+        {
+            if (int.TryParse(m.Groups[1].Value, out int mo) &&
+                int.TryParse(m.Groups[2].Value, out int dy) &&
+                mo is >= 1 and <= 12 && dy is >= 1 and <= 31)
+            {
+                try { return new DateTime(2026, mo, dy).ToString("MMM d", CultureInfo.InvariantCulture); }
+                catch { }
+            }
+            return $"{m.Groups[1].Value}/{m.Groups[2].Value}";
+        }
+
+        m = RxNotesSummary().Match(s);
+        if (m.Success)
+        {
+            string n = m.Groups[1].Value;
+            string b = m.Groups[2].Value;
+            return $"{n} {(n == "1" ? "note" : "notes")} · from {b} {(b == "1" ? "book" : "books")}";
+        }
+
+        m = RxItemsCount().Match(s);
+        if (m.Success) return m.Groups[1].Value == "1" ? "1 note" : $"{m.Groups[1].Value} notes";
+
+        m = RxFromBooksCount().Match(s);
+        if (m.Success) return m.Groups[1].Value == "1" ? "from 1 book" : $"from {m.Groups[1].Value} books";
+
+        m = RxReadUpToChapter().Match(s);
+        if (m.Success) return $"At Ch. {m.Groups[1].Value}";
+
+        m = RxChapterPct().Match(s);
+        if (m.Success) return $"Ch. {m.Groups[1].Value}%";
+
+        m = RxStatusChipCount().Match(s);
+        if (m.Success) return $"{T(m.Groups[1].Value)} {m.Groups[2].Value}";
+
+        m = RxWeekday().Match(s);
+        if (m.Success)
+        {
+            return m.Groups[1].Value switch
+            {
+                "一" => "Monday",
+                "二" => "Tuesday",
+                "三" => "Wednesday",
+                "四" => "Thursday",
+                "五" => "Friday",
+                _ => "Sunday",
+            };
+        }
+        if (s == "星期六" || s == "周六") return "Saturday";
+
+        // Sync & relative time
+        m = RxSyncMinutesAgo().Match(s);
+        if (m.Success) return $"Synced {m.Groups[1].Value} min ago";
+
+        m = RxSyncTodayAt().Match(s);
+        if (m.Success) return $"Synced today at {m.Groups[1].Value}";
+
+        m = RxSyncDateAt().Match(s);
+        if (m.Success) return $"Synced {m.Groups[1].Value}";
+
+        m = RxPlacePendingSync().Match(s);
+        if (m.Success) return $"{T(m.Groups[1].Value)} · Pending sync";
+
+        m = RxPlaceJustSynced().Match(s);
+        if (m.Success) return $"{T(m.Groups[1].Value)} · Just synced";
+
+        m = RxMinutesAgo().Match(s);
+        if (m.Success) return $"{m.Groups[1].Value} min ago";
+
+        m = RxHoursAgo().Match(s);
+        if (m.Success) return $"{m.Groups[1].Value}h ago";
+
+        m = RxDaysAgo().Match(s);
+        if (m.Success) return $"{m.Groups[1].Value}d ago";
+
+        m = RxDevicesCount().Match(s);
+        if (m.Success) return m.Groups[1].Value == "1" ? "1 device" : $"{m.Groups[1].Value} devices";
+
+        // Shelf & Review
+        m = RxKeptItems().Match(s);
+        if (m.Success) return $"Kept {m.Groups[1].Value}";
+
+        m = RxAddedToCollection().Match(s);
+        if (m.Success) return $"Added to \"{m.Groups[1].Value}\"";
+
+        m = RxPutIntoCollection().Match(s);
+        if (m.Success) return $"Add to \"{m.Groups[1].Value}\"";
+
+        m = RxImportedBooks().Match(s);
+        if (m.Success) return m.Groups[1].Value == "1" ? "Imported 1 book" : $"Imported {m.Groups[1].Value} books";
+
+        m = RxTotalBooks().Match(s);
+        if (m.Success) return m.Groups[1].Value == "1" ? "1 book total" : $"{m.Groups[1].Value} books total";
+
+        m = RxImportingProgress().Match(s);
+        if (m.Success) return $"Importing {m.Groups[1].Value} / {m.Groups[2].Value}…";
+
+        m = RxDropToImportFiles().Match(s);
+        if (m.Success) return m.Groups[1].Value == "1" ? "Drop to import 1 file" : $"Drop to import {m.Groups[1].Value} files";
+
+        // Progress & Reading
+        m = RxReadDays().Match(s);
+        if (m.Success) return m.Groups[1].Value == "1" ? "Read 1 day" : $"Read {m.Groups[1].Value} days";
+
+        m = RxListenedHoursMin().Match(s);
+        if (m.Success) return $"Listened {m.Groups[1].Value}h {m.Groups[2].Value}m";
+
+        m = RxListenedHours().Match(s);
+        if (m.Success) return $"Listened {m.Groups[1].Value}h";
+
+        m = RxListenedMinutes().Match(s);
+        if (m.Success) return $"Listened {m.Groups[1].Value} min";
+
+        m = RxChapterOf().Match(s);
+        if (m.Success) return $"Chapter {m.Groups[1].Value} / {m.Groups[2].Value}";
+
+        m = RxChapterSingle().Match(s);
+        if (m.Success) return $"Chapter {m.Groups[1].Value}";
+
+        m = RxEpisodeSingle().Match(s);
+        if (m.Success) return $"Episode {m.Groups[1].Value}";
+
+        m = RxApproxHoursMin().Match(s);
+        if (m.Success) return $"~{m.Groups[1].Value}h {m.Groups[2].Value}m";
+
+        m = RxApproxMinutes().Match(s);
+        if (m.Success) return $"~{m.Groups[1].Value} min";
+
+        m = RxDurationHoursMin().Match(s);
+        if (m.Success) return $"{m.Groups[1].Value}h {m.Groups[2].Value}m";
+
+        m = RxDurationMinutes().Match(s);
+        if (m.Success) return $"{m.Groups[1].Value} min";
+
+        m = RxBookRemainingHoursMin().Match(s);
+        if (m.Success) return $"{m.Groups[1].Value}h {m.Groups[2].Value}m left in book";
+
+        m = RxBookRemainingMin().Match(s);
+        if (m.Success) return $"{m.Groups[1].Value} min left in book";
+
+        m = RxRemainingClock().Match(s);
+        if (m.Success) return $"{m.Groups[1].Value} left";
+
+        m = RxSleepCountdown().Match(s);
+        if (m.Success) return $"Sleep in {m.Groups[1].Value}";
+
+        m = RxSleepFading().Match(s);
+        if (m.Success) return $"Fading out in {m.Groups[1].Value}s (Space +10m)";
+
+        m = RxCharCount().Match(s);
+        if (m.Success) return m.Groups[1].Value == "1" ? "1 char" : $"{m.Groups[1].Value} chars";
+
+        // Settings, Downloads, Streaming & Audio
+        m = RxDownloadAndUseMb().Match(s);
+        if (m.Success) return $"Download & Use · {m.Groups[1].Value}";
+
+        m = RxResumeDownloadPct().Match(s);
+        if (m.Success) return $"Resume ({m.Groups[1].Value}%)";
+
+        m = RxCancelDownloadPct().Match(s);
+        if (m.Success) return $"Cancel ({m.Groups[1].Value}%)";
+
+        m = RxOneClickDownloadMb().Match(s);
+        if (m.Success) return $"Download ({m.Groups[1].Value})";
+
+        m = RxIncludesBookFilesSize().Match(s);
+        if (m.Success) return $"Includes book files · ~{m.Groups[1].Value}";
+
+        m = RxDownloadedEpisodes().Match(s);
+        if (m.Success) return $"Downloaded {m.Groups[1].Value} / {m.Groups[2].Value}";
+
+        m = RxEpisodeDownloadingWait().Match(s);
+        if (m.Success) return $"Downloading Ep. {m.Groups[1].Value} — playback will resume automatically";
+
+        m = RxTrackSwitchedSeamless().Match(s);
+        if (m.Success) return $"Switched track seamlessly: {T(m.Groups[1].Value)}";
+
+        m = RxSkippedIntroSec().Match(s);
+        if (m.Success) return $"Skipped intro ({m.Groups[1].Value}s)";
+
+        m = RxUnreadSentencesCount().Match(s);
+        if (m.Success) return $"Narrator skipped {m.Groups[1].Value} sentences";
+
+        m = RxSavedPauseTime().Match(s);
+        if (m.Success) return $"Saved {T(m.Groups[1].Value)} on this book";
+
+        m = RxRecordingSkippedSentences().Match(s);
+        if (m.Success) return $"Recording skipped {m.Groups[1].Value} sentences";
+
+        m = RxAllChaptersReady().Match(s);
+        if (m.Success) return $"All {m.Groups[1].Value} chapters ready";
+
+        m = RxListenReadyChapters().Match(s);
+        if (m.Success) return $"Listen to {m.Groups[1].Value} ready chapters";
+
+        m = RxChaptersAlreadyReady().Match(s);
+        if (m.Success) return $"{m.Groups[1].Value} chapters ready";
+
+        m = RxChaptersCount().Match(s);
+        if (m.Success) return m.Groups[1].Value == "1" ? "1 chapter" : $"{m.Groups[1].Value} chapters";
+
+        m = RxHerePct().Match(s);
+        if (m.Success) return $"Here {m.Groups[1].Value}%";
 
         return null;
     }
@@ -373,6 +603,13 @@ public static partial class L10n
                 string next = T(orig);
                 if (tip != next) ToolTipService.SetToolTip(fe, next);
             }
+            string autoName = Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(fe);
+            if (!string.IsNullOrEmpty(autoName))
+            {
+                string origAuto = GetOrStoreOriginal(fe, "AutomationName", autoName);
+                string nextAuto = T(origAuto);
+                if (autoName != nextAuto) Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(fe, nextAuto);
+            }
             if (fe.ContextFlyout is FlyoutBase ctx) ApplyFlyout(ctx);
         }
 
@@ -409,6 +646,65 @@ public static partial class L10n
         else if (node is ScrollViewer sv && sv.Content is DependencyObject svChild)
         {
             ApplyNode(svChild);
+        }
+
+        // Ensure every Button/ToggleButton whose Content is a Panel/Border/Icon exposes a non-empty UIA name
+        // (WinUI 3 ButtonAutomationPeer returns "" when Content is a Grid/StackPanel rather than a string).
+        if (node is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase btnBase &&
+            string.IsNullOrEmpty(Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(btnBase)))
+        {
+            var parts = new List<string>(3);
+            CollectReadableText(btnBase.Content, parts);
+            string derived = parts.Count > 0
+                ? string.Join(" ", parts)
+                : (ToolTipService.GetToolTip(btnBase) as string ?? "");
+            if (!string.IsNullOrWhiteSpace(derived))
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(btnBase, derived.Trim());
+        }
+    }
+
+    private static void CollectReadableText(object? current, List<string> parts)
+    {
+        if (current is null || parts.Count >= 4) return;
+        if (current is string s)
+        {
+            if (!string.IsNullOrWhiteSpace(s)) parts.Add(s.Trim());
+            return;
+        }
+        if (current is TextBlock tb)
+        {
+            if (!string.IsNullOrWhiteSpace(tb.Text))
+            {
+                parts.Add(tb.Text.Trim());
+            }
+            else if (tb.Inlines.Count > 0)
+            {
+                var sb = new System.Text.StringBuilder();
+                foreach (var inl in tb.Inlines)
+                {
+                    if (inl is Run r && !string.IsNullOrEmpty(r.Text)) sb.Append(r.Text);
+                }
+                if (sb.Length > 0) parts.Add(sb.ToString().Trim());
+            }
+            return;
+        }
+        if (current is Panel panel)
+        {
+            foreach (var child in panel.Children)
+            {
+                CollectReadableText(child, parts);
+                if (parts.Count >= 4) break;
+            }
+            return;
+        }
+        if (current is Border b)
+        {
+            CollectReadableText(b.Child, parts);
+            return;
+        }
+        if (current is ContentPresenter cp)
+        {
+            CollectReadableText(cp.Content, parts);
         }
     }
 
@@ -498,6 +794,30 @@ public static partial class L10n
             }
             catch { }
         }
+
+        // Overlay windows-en.json directly so runtime never misses Windows-specific keys even if en.json wasn't rebuilt
+        string[] winOverrideCandidates =
+        [
+            Path.Combine(AppContext.BaseDirectory, "Assets", "L10n", "windows-en.json"),
+            Path.Combine(Directory.GetCurrentDirectory(), "windows", "Yuyue", "Assets", "L10n", "windows-en.json"),
+            Path.Combine(Directory.GetCurrentDirectory(), "Assets", "L10n", "windows-en.json"),
+        ];
+
+        foreach (string path in winOverrideCandidates)
+        {
+            if (!File.Exists(path)) continue;
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path));
+                if (parsed is not null)
+                {
+                    foreach (var kv in parsed) map[kv.Key] = kv.Value;
+                    break;
+                }
+            }
+            catch { }
+        }
+
         return map;
     }
 
@@ -597,6 +917,183 @@ public static partial class L10n
     [GeneratedRegex(@"^发现《(.+?)》电子书$")]
     private static partial Regex RxDiscoveredBook();
 
-    [GeneratedRegex(@"^(\d{1,2})月(\d{1,2})日$")]
+    [GeneratedRegex(@"^(\d{4})年(\d{1,2})月(\d{1,2})日$")]
+    private static partial Regex RxFullDateYmd();
+
+    [GeneratedRegex(@"^(\d{4})年(\d{1,2})月$")]
+    private static partial Regex RxYearMonth();
+
+    [GeneratedRegex(@"^(\d{1,2})\s*月\s*(\d{1,2})\s*日$")]
     private static partial Regex RxMonthDay();
+
+    [GeneratedRegex(@"^(\d+)\s*条\s*·\s*来自\s*(\d+)\s*本书$")]
+    private static partial Regex RxNotesSummary();
+
+    [GeneratedRegex(@"^(\d+)\s*条$")]
+    private static partial Regex RxItemsCount();
+
+    [GeneratedRegex(@"^来自\s*(\d+)\s*本书$")]
+    private static partial Regex RxFromBooksCount();
+
+    [GeneratedRegex(@"^读到\s*第\s*(\d+)\s*章$")]
+    private static partial Regex RxReadUpToChapter();
+
+    [GeneratedRegex(@"^本章\s*(\d+)%$")]
+    private static partial Regex RxChapterPct();
+
+    [GeneratedRegex(@"^(在读|想读|读过|搁置|弃读)\s+(\d+)$")]
+    private static partial Regex RxStatusChipCount();
+
+    [GeneratedRegex(@"^(?:星期|周)([一二三四五日天])$")]
+    private static partial Regex RxWeekday();
+
+    [GeneratedRegex(@"^(\d+)\s*分钟前同步$")]
+    private static partial Regex RxSyncMinutesAgo();
+
+    [GeneratedRegex(@"^今天\s*(\d{1,2}:\d{2})\s*同步$")]
+    private static partial Regex RxSyncTodayAt();
+
+    [GeneratedRegex(@"^(\d{1,2}/\d{1,2}\s+\d{1,2}:\d{2})\s*同步$")]
+    private static partial Regex RxSyncDateAt();
+
+    [GeneratedRegex(@"^(.+?)\s*·\s*待同步$")]
+    private static partial Regex RxPlacePendingSync();
+
+    [GeneratedRegex(@"^(.+?)\s*·\s*刚刚同步$")]
+    private static partial Regex RxPlaceJustSynced();
+
+    [GeneratedRegex(@"^(\d+)\s*分钟前$")]
+    private static partial Regex RxMinutesAgo();
+
+    [GeneratedRegex(@"^(\d+)\s*小时前$")]
+    private static partial Regex RxHoursAgo();
+
+    [GeneratedRegex(@"^(\d+)\s*天前$")]
+    private static partial Regex RxDaysAgo();
+
+    [GeneratedRegex(@"^(\d+)\s*台设备$")]
+    private static partial Regex RxDevicesCount();
+
+    [GeneratedRegex(@"^留下\s*(\d+)\s*条$")]
+    private static partial Regex RxKeptItems();
+
+    [GeneratedRegex(@"^已放进合集[“""「](.+?)[”""」]$")]
+    private static partial Regex RxAddedToCollection();
+
+    [GeneratedRegex(@"^放进[「“""](.+?)[」”""]$")]
+    private static partial Regex RxPutIntoCollection();
+
+    [GeneratedRegex(@"^已导入\s*(\d+)\s*本$")]
+    private static partial Regex RxImportedBooks();
+
+    [GeneratedRegex(@"^共\s*(\d+)\s*本$")]
+    private static partial Regex RxTotalBooks();
+
+    [GeneratedRegex(@"^正在导入\s*(\d+)\s*/\s*(\d+)[…\.]{0,3}$")]
+    private static partial Regex RxImportingProgress();
+
+    [GeneratedRegex(@"^松开即可导入这\s*(\d+)\s*个文件$")]
+    private static partial Regex RxDropToImportFiles();
+
+    [GeneratedRegex(@"^读了\s*(\d+)\s*天$")]
+    private static partial Regex RxReadDays();
+
+    [GeneratedRegex(@"^听了\s*(\d+)\s*小时\s*(\d+)\s*分钟?$")]
+    private static partial Regex RxListenedHoursMin();
+
+    [GeneratedRegex(@"^听了\s*(\d+)\s*小时$")]
+    private static partial Regex RxListenedHours();
+
+    [GeneratedRegex(@"^听了\s*(\d+)\s*分钟?$")]
+    private static partial Regex RxListenedMinutes();
+
+    [GeneratedRegex(@"^第\s*(\d+)\s*/\s*(\d+)\s*章$")]
+    private static partial Regex RxChapterOf();
+
+    [GeneratedRegex(@"^第\s*(\d+)\s*章$")]
+    private static partial Regex RxChapterSingle();
+
+    [GeneratedRegex(@"^第\s*(\d+)\s*集$")]
+    private static partial Regex RxEpisodeSingle();
+
+    [GeneratedRegex(@"^约\s*(\d+)\s*小时\s*(\d+)\s*分钟?$")]
+    private static partial Regex RxApproxHoursMin();
+
+    [GeneratedRegex(@"^约\s*(\d+)\s*分钟?$")]
+    private static partial Regex RxApproxMinutes();
+
+    [GeneratedRegex(@"^(\d+)\s*小时\s*(\d+)\s*分钟?$")]
+    private static partial Regex RxDurationHoursMin();
+
+    [GeneratedRegex(@"^(\d+)\s*分钟?$")]
+    private static partial Regex RxDurationMinutes();
+
+    [GeneratedRegex(@"^全书还剩\s*(\d+)\s*小时\s*(\d+)\s*分钟?$")]
+    private static partial Regex RxBookRemainingHoursMin();
+
+    [GeneratedRegex(@"^全书还剩\s*(\d+)\s*分钟?$")]
+    private static partial Regex RxBookRemainingMin();
+
+    [GeneratedRegex(@"^还剩\s*(\d{1,2}:\d{2}(?::\d{2})?)$")]
+    private static partial Regex RxRemainingClock();
+
+    [GeneratedRegex(@"^定时还剩\s*(\d+:\d{2})$")]
+    private static partial Regex RxSleepCountdown();
+
+    [GeneratedRegex(@"^即将渐弱暂停\s*(\d+)s（按空格延\s*10\s*分）$")]
+    private static partial Regex RxSleepFading();
+
+    [GeneratedRegex(@"^(\d+)\s*字$")]
+    private static partial Regex RxCharCount();
+
+    [GeneratedRegex(@"^下载并选用\s*·\s*(.+)$")]
+    private static partial Regex RxDownloadAndUseMb();
+
+    [GeneratedRegex(@"^继续下载\s*\((\d+)%\)$")]
+    private static partial Regex RxResumeDownloadPct();
+
+    [GeneratedRegex(@"^取消下载\s*\((\d+)%\)$")]
+    private static partial Regex RxCancelDownloadPct();
+
+    [GeneratedRegex(@"^一键下载\s*\((.+?)\)$")]
+    private static partial Regex RxOneClickDownloadMb();
+
+    [GeneratedRegex(@"^含书文件\s*·\s*约\s*(.+)$")]
+    private static partial Regex RxIncludesBookFilesSize();
+
+    [GeneratedRegex(@"^已下\s*(\d+)\s*/\s*(\d+)\s*集$")]
+    private static partial Regex RxDownloadedEpisodes();
+
+    [GeneratedRegex(@"^第\s*(\d+)\s*集还在下，下好就接着放$")]
+    private static partial Regex RxEpisodeDownloadingWait();
+
+    [GeneratedRegex(@"^同句无缝切换：(.+)$")]
+    private static partial Regex RxTrackSwitchedSeamless();
+
+    [GeneratedRegex(@"^跳过了片头（(\d+)\s*秒）$")]
+    private static partial Regex RxSkippedIntroSec();
+
+    [GeneratedRegex(@"^这本有\s*(\d+)\s*句没念$")]
+    private static partial Regex RxUnreadSentencesCount();
+
+    [GeneratedRegex(@"^这本已经省了\s*(.+)$")]
+    private static partial Regex RxSavedPauseTime();
+
+    [GeneratedRegex(@"^录音里跳过了\s*(\d+)\s*句$")]
+    private static partial Regex RxRecordingSkippedSentences();
+
+    [GeneratedRegex(@"^(\d+)\s*章都准备好了$")]
+    private static partial Regex RxAllChaptersReady();
+
+    [GeneratedRegex(@"^先听对好的\s*(\d+)\s*章$")]
+    private static partial Regex RxListenReadyChapters();
+
+    [GeneratedRegex(@"^(\d+)\s*章已经能听$")]
+    private static partial Regex RxChaptersAlreadyReady();
+
+    [GeneratedRegex(@"^(\d+)\s*章$")]
+    private static partial Regex RxChaptersCount();
+
+    [GeneratedRegex(@"^这台在\s*(\d+)%$")]
+    private static partial Regex RxHerePct();
 }

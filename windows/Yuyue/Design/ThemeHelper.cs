@@ -178,18 +178,148 @@ public static class ThemeHelper
     [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(IntPtr hwnd);
 
-    public static void ResizeWindow(Window window, int widthDip, int heightDip)
+    [DllImport("comctl32.dll", SetLastError = true)]
+    private static extern bool SetWindowSubclass(IntPtr hWnd, SubclassProc pfnSubclass, nuint uIdSubclass, nuint dwRefData);
+
+    [DllImport("comctl32.dll", SetLastError = true)]
+    private static extern bool RemoveWindowSubclass(IntPtr hWnd, SubclassProc pfnSubclass, nuint uIdSubclass);
+
+    [DllImport("comctl32.dll")]
+    private static extern IntPtr DefSubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
+
+    private delegate IntPtr SubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam, nuint uIdSubclass, nuint dwRefData);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT_WIN32
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MINMAXINFO
+    {
+        public POINT_WIN32 ptReserved;
+        public POINT_WIN32 ptMaxSize;
+        public POINT_WIN32 ptMaxPosition;
+        public POINT_WIN32 ptMinTrackSize;
+        public POINT_WIN32 ptMaxTrackSize;
+    }
+
+    private const uint WM_GETMINMAXINFO = 0x0024;
+    private const uint WM_NCDESTROY = 0x0082;
+    private const nuint MinSizeSubclassId = 0x5959_4D49;
+    private static readonly SubclassProc s_minSizeSubclassDelegate = MinSizeSubclassWndProc;
+    private static readonly Dictionary<IntPtr, (int MinWidthDip, int MinHeightDip)> s_windowMinBounds = new();
+
+    private static IntPtr MinSizeSubclassWndProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam, nuint uIdSubclass, nuint dwRefData)
+    {
+        if (uMsg == WM_GETMINMAXINFO && lParam != IntPtr.Zero)
+        {
+            (int minWDip, int minHDip) bounds;
+            bool found;
+            lock (s_windowMinBounds) found = s_windowMinBounds.TryGetValue(hWnd, out bounds);
+            if (found)
+            {
+                uint dpi = GetDpiForWindow(hWnd);
+                double scale = dpi >= 96 ? dpi / 96.0 : 1.0;
+                var mmi = Marshal.PtrToStructure<MINMAXINFO>(lParam);
+                mmi.ptMinTrackSize.X = Math.Max(mmi.ptMinTrackSize.X, (int)Math.Round(bounds.minWDip * scale));
+                mmi.ptMinTrackSize.Y = Math.Max(mmi.ptMinTrackSize.Y, (int)Math.Round(bounds.minHDip * scale));
+                Marshal.StructureToPtr(mmi, lParam, fDeleteOld: false);
+                return IntPtr.Zero;
+            }
+        }
+        else if (uMsg == WM_NCDESTROY)
+        {
+            lock (s_windowMinBounds) s_windowMinBounds.Remove(hWnd);
+            RemoveWindowSubclass(hWnd, s_minSizeSubclassDelegate, uIdSubclass);
+        }
+        return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+
+    public static void SetWindowMinimumSize(Window window, int minWidthDip, int minHeightDip)
+    {
+        if (minWidthDip <= 0 || minHeightDip <= 0) return;
+        try
+        {
+            IntPtr hwnd = WindowNative.GetWindowHandle(window);
+            if (hwnd == IntPtr.Zero) return;
+            bool isNew;
+            lock (s_windowMinBounds)
+            {
+                isNew = !s_windowMinBounds.ContainsKey(hwnd);
+                s_windowMinBounds[hwnd] = (minWidthDip, minHeightDip);
+            }
+            if (isNew)
+            {
+                SetWindowSubclass(hwnd, s_minSizeSubclassDelegate, MinSizeSubclassId, 0);
+            }
+        }
+        catch { }
+    }
+
+    public static double GetWindowScale(Window window)
+    {
+        try
+        {
+            uint dpi = GetDpiForWindow(WindowNative.GetWindowHandle(window));
+            if (dpi >= 96) return dpi / 96.0;
+        }
+        catch { }
+        return 1.0;
+    }
+
+    internal static (int WidthDip, int HeightDip) PhysicalSizeToDip(int physicalWidth, int physicalHeight, uint dpi)
+    {
+        double scale = dpi >= 96 ? dpi / 96.0 : 1.0;
+        return (
+            Math.Max(320, (int)Math.Round(physicalWidth / scale)),
+            Math.Max(240, (int)Math.Round(physicalHeight / scale)));
+    }
+
+    public static bool TryGetRestoredDipSize(Window window, out int widthDip, out int heightDip)
+    {
+        widthDip = 0;
+        heightDip = 0;
+        var appWindow = window.AppWindow;
+        if (appWindow is null) return false;
+
+        if (appWindow.Presenter is OverlappedPresenter op && op.State != OverlappedPresenterState.Restored)
+            return false;
+        if (appWindow.Presenter?.Kind == AppWindowPresenterKind.FullScreen)
+            return false;
+
+        uint dpi = 96;
+        try
+        {
+            uint raw = GetDpiForWindow(WindowNative.GetWindowHandle(window));
+            if (raw >= 96) dpi = raw;
+        }
+        catch { }
+
+        var sz = appWindow.Size;
+        if (sz.Width <= 200 || sz.Height <= 200) return false;
+        (widthDip, heightDip) = PhysicalSizeToDip(sz.Width, sz.Height, dpi);
+        return true;
+    }
+
+    public static void ResizeWindow(Window window, int widthDip, int heightDip, int minWidthDip = 0, int minHeightDip = 0)
     {
         var appWindow = window.AppWindow;
         if (appWindow is null) return;
 
-        double scale = 1.0;
-        try
+        double scale = GetWindowScale(window);
+
+        if (minWidthDip > 0 && minHeightDip > 0)
         {
-            uint dpi = GetDpiForWindow(WindowNative.GetWindowHandle(window));
-            if (dpi >= 96) scale = dpi / 96.0;
+            widthDip = Math.Max(widthDip, minWidthDip);
+            heightDip = Math.Max(heightDip, minHeightDip);
+            SetWindowMinimumSize(window, minWidthDip, minHeightDip);
         }
-        catch { }
+
+        if (appWindow.Presenter is OverlappedPresenter curOp && curOp.State == OverlappedPresenterState.Maximized)
+            return;
 
         int pw = (int)Math.Round(widthDip * scale);
         int ph = (int)Math.Round(heightDip * scale);

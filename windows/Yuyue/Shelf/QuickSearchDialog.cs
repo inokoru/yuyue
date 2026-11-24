@@ -52,6 +52,7 @@ public static class QuickSearchDialog
 
         ContentDialog? dlg = null;
         CancellationTokenSource? searchCts = null;
+        bool sheetClosed = false;
         var items = new List<(Button Btn, Action Activate, FrameworkElement? OpenHint)>();
         int selectedIdx = -1;
         BookSummary? bestCompanionBook = null;
@@ -71,10 +72,11 @@ public static class QuickSearchDialog
             VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(4, 6, 4, 6),
         };
+        YYChrome.StripTextBoxChrome(searchBox);
         var resultsPanel = new StackPanel { Spacing = 3 };
         var scopeText = new TextBlock
         {
-            Text = $"在 {allKeptInitial.Count} 本书和 {totalNotesCount} 条笔记里搜",
+            Text = L10n.T($"在 {allKeptInitial.Count} 本书和 {totalNotesCount} 条笔记里搜"),
             FontSize = 11,
             Foreground = ThemeHelper.Brush(p.T3),
             HorizontalAlignment = HorizontalAlignment.Right,
@@ -127,6 +129,11 @@ public static class QuickSearchDialog
         {
             if (!string.IsNullOrEmpty(b.CoverPath) && System.IO.File.Exists(b.CoverPath))
             {
+                var bmp = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage
+                {
+                    DecodePixelWidth = 48,
+                    UriSource = new Uri(b.CoverPath),
+                };
                 return new Border
                 {
                     Width = 20,
@@ -137,7 +144,7 @@ public static class QuickSearchDialog
                     Opacity = b.Available || b.Record ? 1.0 : 0.55,
                     Child = new Image
                     {
-                        Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(b.CoverPath)),
+                        Source = bmp,
                         Stretch = Stretch.UniformToFill,
                     },
                 };
@@ -157,14 +164,31 @@ public static class QuickSearchDialog
 
         void AddSectionHeader(string title, string? right = null)
         {
-            resultsPanel.Children.Add(new TextBlock
+            var g = new Grid { Margin = new Thickness(10, 8, 10, 3) };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.Children.Add(new TextBlock
             {
-                Text = right is null ? L10n.T(title) : $"{L10n.T(title)} · {right}",
+                Text = L10n.T(title),
                 FontSize = 11,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = ThemeHelper.Brush(p.T3),
-                Margin = new Thickness(10, 8, 10, 3),
+                VerticalAlignment = VerticalAlignment.Center,
             });
+            if (!string.IsNullOrEmpty(right))
+            {
+                var rtb = new TextBlock
+                {
+                    Text = L10n.T(right),
+                    FontSize = 10.5,
+                    Foreground = ThemeHelper.Brush(p.T3),
+                    Opacity = 0.85,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                Grid.SetColumn(rtb, 1);
+                g.Children.Add(rtb);
+            }
+            resultsPanel.Children.Add(g);
         }
 
         void RegisterRow(Button btn, Action activate, FrameworkElement? openHint = null, bool closeOnActivate = true)
@@ -222,9 +246,9 @@ public static class QuickSearchDialog
             selectedIdx = -1;
 
             scopeText.Foreground = ThemeHelper.Brush(p.T3);
-            scopeText.Text = searching
-                ? L10n.T("正在书库和笔记里检索…")
-                : $"在 {allKeptInitial.Count} 本书和 {totalNotesCount} 条笔记里搜";
+            scopeText.Text = L10n.T(searching
+                ? "正在书库和笔记里检索…"
+                : $"在 {allKeptInitial.Count} 本书和 {totalNotesCount} 条笔记里搜");
 
             var passageBook = passageHits.Select(x => x.Book).FirstOrDefault(IsCompanionEligible);
             bestCompanionBook = ResolveCompanionTargetBook(
@@ -248,7 +272,7 @@ public static class QuickSearchDialog
             var askMeta = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
             askMeta.Children.Add(new TextBlock
             {
-                Text = string.IsNullOrEmpty(q) ? L10n.T("问书伴") : $"问书伴：“{q}”",
+                Text = string.IsNullOrEmpty(q) ? "问书伴" : $"问书伴：“{q}”",
                 FontSize = 13,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = ThemeHelper.Brush(tint.Accent),
@@ -301,17 +325,17 @@ public static class QuickSearchDialog
                     row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                     row.Children.Add(MakeMiniBookBadge(b));
 
-                    var tb = BuildHighlightedBlock(b.Title, q, 13, FontWeights.Normal, p.T1, tint.Accent);
+                    var tb = L10n.Skip(BuildHighlightedBlock(b.Title, q, 13, FontWeights.Normal, p.T1, tint.Accent));
                     tb.MaxLines = 1;
                     tb.VerticalAlignment = VerticalAlignment.Center;
                     Grid.SetColumn(tb, 1);
                     row.Children.Add(tb);
 
                     string statusNote = !b.Available && !b.Record
-                        ? "在别的设备上"
-                        : (b.Record ? $"纸书 · {BookRecordPageBuilder.StatusDisplayName(b.Status)}" : $"已读 {(int)Math.Round(b.Progress * 100)}%");
+                        ? L10n.T("在别的设备上")
+                        : (b.Record ? L10n.T($"纸书 · {BookRecordPageBuilder.StatusDisplayName(b.Status)}") : L10n.T($"已读 {(int)Math.Round(b.Progress * 100)}%"));
                     string subLabel = string.Join(" · ", new[] { b.Authors.FirstOrDefault(), statusNote }.Where(s => !string.IsNullOrWhiteSpace(s)));
-                    var sub = BuildHighlightedBlock(subLabel, q, 11, FontWeights.Normal, p.T3, tint.Accent);
+                    var sub = L10n.Skip(BuildHighlightedBlock(subLabel, q, 11, FontWeights.Normal, p.T3, tint.Accent));
                     sub.MaxLines = 1;
                     sub.VerticalAlignment = VerticalAlignment.Center;
                     var openBadge = MakeOpenBadge();
@@ -345,22 +369,22 @@ public static class QuickSearchDialog
                     row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                     row.Children.Add(MakeMiniBookBadge(b));
 
-                    var tb = BuildHighlightedBlock(secTitle, q, 12.5, FontWeights.Normal, p.T1, tint.Accent);
+                    var tb = L10n.Skip(BuildHighlightedBlock(secTitle, q, 12.5, FontWeights.Normal, p.T1, tint.Accent));
                     tb.MaxLines = 1;
                     tb.VerticalAlignment = VerticalAlignment.Center;
                     Grid.SetColumn(tb, 1);
                     row.Children.Add(tb);
 
-                    var sub = new TextBlock
+                    var sub = L10n.Skip(new TextBlock
                     {
-                        Text = $"章节 · {b.Title}",
+                        Text = $"{L10n.T("章节")} · {b.Title}",
                         FontSize = 11,
                         Foreground = ThemeHelper.Brush(p.T3),
                         VerticalAlignment = VerticalAlignment.Center,
                         MaxWidth = 150,
                         MaxLines = 1,
                         TextTrimming = TextTrimming.CharacterEllipsis,
-                    };
+                    });
                     var openBadge = MakeOpenBadge();
                     var rightSlot = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
                     rightSlot.Children.Add(sub);
@@ -385,6 +409,7 @@ public static class QuickSearchDialog
 
             if (string.IsNullOrEmpty(q))
             {
+                L10n.ApplyTree(resultsPanel);
                 if (items.Count > 1) selectedIdx = 1;
                 else if (items.Count > 0) selectedIdx = 0;
                 HighlightSelection();
@@ -406,7 +431,7 @@ public static class QuickSearchDialog
                     row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                     row.Children.Add(MakeMiniBookBadge(b));
 
-                    var sentTb = new TextBlock
+                    var sentTb = L10n.Skip(new TextBlock
                     {
                         FontFamily = serif,
                         FontSize = 12.5,
@@ -414,7 +439,7 @@ public static class QuickSearchDialog
                         MaxLines = 1,
                         TextTrimming = TextTrimming.CharacterEllipsis,
                         VerticalAlignment = VerticalAlignment.Center,
-                    };
+                    });
                     if (!string.IsNullOrEmpty(h.Before)) sentTb.Inlines.Add(new Run { Text = h.Before });
                     var ul = new Underline();
                     ul.Inlines.Add(new Run { Text = h.Matched, FontWeight = FontWeights.Bold, Foreground = ThemeHelper.Brush(tint.Accent) });
@@ -424,7 +449,7 @@ public static class QuickSearchDialog
                     row.Children.Add(sentTb);
 
                     string srcLabel = string.IsNullOrWhiteSpace(chap) ? b.Title : $"{b.Title} · {chap}";
-                    var src = new TextBlock
+                    var src = L10n.Skip(new TextBlock
                     {
                         Text = srcLabel,
                         FontSize = 11,
@@ -433,7 +458,7 @@ public static class QuickSearchDialog
                         MaxWidth = 150,
                         MaxLines = 1,
                         TextTrimming = TextTrimming.CharacterEllipsis,
-                    };
+                    });
                     var openBadge = MakeOpenBadge();
                     var rightSlot = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
                     rightSlot.Children.Add(src);
@@ -471,13 +496,13 @@ public static class QuickSearchDialog
                     row.Children.Add(MakeMiniBookBadge(b));
 
                     var sp = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-                    var mkTb = BuildHighlightedBlock(m.Text, q, 12.5, FontWeights.Normal, p.T1, tint.Accent);
+                    var mkTb = L10n.Skip(BuildHighlightedBlock(m.Text, q, 12.5, FontWeights.Normal, p.T1, tint.Accent));
                     mkTb.FontFamily = serif;
                     mkTb.MaxLines = 1;
                     sp.Children.Add(mkTb);
                     if (!string.IsNullOrWhiteSpace(m.Note))
                     {
-                        var ntTb = BuildHighlightedBlock(m.Note, q, 11.5, FontWeights.Normal, tint.Accent, tint.Accent);
+                        var ntTb = L10n.Skip(BuildHighlightedBlock(m.Note, q, 11.5, FontWeights.Normal, tint.Accent, tint.Accent));
                         ntTb.FontFamily = kaiti;
                         ntTb.MaxLines = 1;
                         sp.Children.Add(ntTb);
@@ -485,7 +510,7 @@ public static class QuickSearchDialog
                     Grid.SetColumn(sp, 1);
                     row.Children.Add(sp);
 
-                    var src = new TextBlock
+                    var src = L10n.Skip(new TextBlock
                     {
                         Text = b.Title,
                         FontSize = 11,
@@ -494,7 +519,7 @@ public static class QuickSearchDialog
                         MaxWidth = 140,
                         MaxLines = 1,
                         TextTrimming = TextTrimming.CharacterEllipsis,
-                    };
+                    });
                     var openBadge = MakeOpenBadge();
                     var rightSlot = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
                     rightSlot.Children.Add(src);
@@ -529,6 +554,7 @@ public static class QuickSearchDialog
                 });
             }
 
+            L10n.ApplyTree(resultsPanel);
             if (items.Count > 1) selectedIdx = 1;
             else if (items.Count > 0) selectedIdx = 0;
             HighlightSelection();
@@ -558,95 +584,106 @@ public static class QuickSearchDialog
             RenderRows(q, bookHits, [], [], 0, 0, false, [], searching: true);
 
             var snapshotBooks = allBooks.ToArray();
-            var computed = await Task.Run(async () =>
+            (List<(BookSummary Book, uint SectionIndex, string Title)> tocMatches,
+             List<(BookSummary Book, SearchHit Hit, string Chapter)> rrHits,
+             int hitBooks, int totalLines, bool capped,
+             List<(BookSummary Book, Mark Mark)> markHits) computed;
+            try
             {
-                await Task.Delay(90, ct);
-                var tocMatches = new List<(BookSummary Book, uint SectionIndex, string Title)>();
-                foreach (var b in snapshotBooks.Where(b => !b.Record && b.Available && b.Format != BookFormat.Audio && b.Format != BookFormat.Pdf))
+                computed = await Task.Run(async () =>
                 {
-                    if (ct.IsCancellationRequested) break;
-                    try
+                    await Task.Delay(90, ct);
+                    var tocMatches = new List<(BookSummary Book, uint SectionIndex, string Title)>();
+                    foreach (var b in snapshotBooks.Where(b => !b.Record && b.Available && b.Format != BookFormat.Audio))
                     {
-                        var det = library.GetBookDetail(b.Id);
-                        for (uint sIdx = 0; sIdx < det.Sections.Length; sIdx++)
+                        if (ct.IsCancellationRequested) break;
+                        try
                         {
-                            string? sTitle = det.Sections[sIdx].Title;
-                            if (!string.IsNullOrWhiteSpace(sTitle) && NameMatcher.Matches(sTitle, q))
+                            var det = library.GetBookDetail(b.Id);
+                            for (uint sIdx = 0; sIdx < det.Sections.Length; sIdx++)
                             {
-                                tocMatches.Add((b, sIdx, sTitle));
-                                if (tocMatches.Count >= 6) break;
+                                string? sTitle = det.Sections[sIdx].Title;
+                                if (!string.IsNullOrWhiteSpace(sTitle) && NameMatcher.Matches(sTitle, q))
+                                {
+                                    tocMatches.Add((b, sIdx, sTitle));
+                                    if (tocMatches.Count >= 6) break;
+                                }
+                            }
+                            if (tocMatches.Count >= 6) break;
+                        }
+                        catch { }
+                    }
+
+                    var buckets = new List<(BookSummary Book, IReadOnlyList<SearchHit> Hits, BookDetail? Detail)>();
+                    int hitBooks = 0;
+                    int totalLines = 0;
+                    bool capped = false;
+                    foreach (var b in snapshotBooks.Where(b => !b.Record && b.Available && b.Format != BookFormat.Audio))
+                    {
+                        if (ct.IsCancellationRequested) break;
+                        try
+                        {
+                            var found = library.SearchBook(b.Id, q);
+                            if (found.Count > 0)
+                            {
+                                hitBooks++;
+                                totalLines += found.Count;
+                                if (found.Count >= 500) capped = true;
+                                BookDetail? det = null;
+                                try { det = library.GetBookDetail(b.Id); } catch { }
+                                buckets.Add((b, found, det));
                             }
                         }
-                        if (tocMatches.Count >= 6) break;
+                        catch { }
                     }
-                    catch { }
-                }
 
-                var buckets = new List<(BookSummary Book, IReadOnlyList<SearchHit> Hits, BookDetail? Detail)>();
-                int hitBooks = 0;
-                int totalLines = 0;
-                bool capped = false;
-                foreach (var b in snapshotBooks.Where(b => !b.Record && b.Available && b.Format != BookFormat.Audio))
-                {
-                    if (ct.IsCancellationRequested) break;
-                    try
+                    var rrHits = new List<(BookSummary Book, SearchHit Hit, string Chapter)>();
+                    for (int round = 0; rrHits.Count < 10; round++)
                     {
-                        var found = library.SearchBook(b.Id, q);
-                        if (found.Count > 0)
+                        bool anyInRound = false;
+                        foreach (var (b, found, det) in buckets)
                         {
-                            hitBooks++;
-                            totalLines += found.Count;
-                            if (found.Count >= 500) capped = true;
-                            BookDetail? det = null;
-                            try { det = library.GetBookDetail(b.Id); } catch { }
-                            buckets.Add((b, found, det));
-                        }
-                    }
-                    catch { }
-                }
-
-                var rrHits = new List<(BookSummary Book, SearchHit Hit, string Chapter)>();
-                for (int round = 0; rrHits.Count < 10; round++)
-                {
-                    bool anyInRound = false;
-                    foreach (var (b, found, det) in buckets)
-                    {
-                        if (round < found.Count)
-                        {
-                            anyInRound = true;
-                            var h = found[round];
-                            string chap = det is not null && h.Section < det.Sections.Length
-                                ? (det.Sections[h.Section].Title ?? "")
-                                : "";
-                            rrHits.Add((b, h, chap));
-                            if (rrHits.Count >= 10) break;
-                        }
-                    }
-                    if (!anyInRound) break;
-                }
-
-                var markHits = new List<(BookSummary Book, Mark Mark)>();
-                foreach (var b in snapshotBooks)
-                {
-                    if (ct.IsCancellationRequested) break;
-                    try
-                    {
-                        foreach (var m in library.GetMarks(b.Id))
-                        {
-                            if (m.Text.Contains(q, StringComparison.OrdinalIgnoreCase)
-                                || (!string.IsNullOrEmpty(m.Note) && m.Note.Contains(q, StringComparison.OrdinalIgnoreCase)))
+                            if (round < found.Count)
                             {
-                                markHits.Add((b, m));
+                                anyInRound = true;
+                                var h = found[round];
+                                string chap = det is not null && h.Section < det.Sections.Length
+                                    ? (det.Sections[h.Section].Title ?? "")
+                                    : "";
+                                rrHits.Add((b, h, chap));
+                                if (rrHits.Count >= 10) break;
                             }
                         }
+                        if (!anyInRound) break;
                     }
-                    catch { }
-                }
 
-                return (tocMatches, rrHits, hitBooks, totalLines, capped, markHits);
-            }, ct);
+                    var markHits = new List<(BookSummary Book, Mark Mark)>();
+                    foreach (var b in snapshotBooks)
+                    {
+                        if (ct.IsCancellationRequested) break;
+                        try
+                        {
+                            foreach (var m in library.GetMarks(b.Id))
+                            {
+                                if (m.Text.Contains(q, StringComparison.OrdinalIgnoreCase)
+                                    || (!string.IsNullOrEmpty(m.Note) && m.Note.Contains(q, StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    markHits.Add((b, m));
+                                }
+                            }
+                        }
+                        catch { }
+                    }
 
-            if (ct.IsCancellationRequested) return;
+                    return (tocMatches, rrHits, hitBooks, totalLines, capped, markHits);
+                }, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            if (sheetClosed || ct.IsCancellationRequested) return;
             RenderRows(q, bookHits, computed.tocMatches, computed.rrHits, computed.hitBooks, computed.totalLines, computed.capped, computed.markHits, searching: false);
         }
 
@@ -738,15 +775,22 @@ public static class QuickSearchDialog
             Child = spotlightGrid,
         };
 
-        dlg = YYChrome.CreateMacSheet(xamlRoot, dark, 540, cardSurface, maxHeight: 540, tint: library.Prefs.Tint);
+        dlg = YYChrome.CreateMacSheet(xamlRoot, dark, 640, cardSurface, maxHeight: 540, tint: library.Prefs.Tint);
         dlg.Opened += (_, _) =>
         {
             searchBox.Focus(FocusState.Programmatic);
             _ = RefreshAsync("");
         };
 
-        await dlg.ShowSafeAsync(library.Prefs.Tint);
-        try { searchCts?.Cancel(); searchCts?.Dispose(); } catch { }
+        try
+        {
+            await dlg.ShowSafeAsync(library.Prefs.Tint);
+        }
+        finally
+        {
+            sheetClosed = true;
+            try { searchCts?.Cancel(); searchCts?.Dispose(); } catch { }
+        }
     }
 
     public static TextBlock BuildHighlightedBlock(

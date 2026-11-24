@@ -36,7 +36,7 @@ public static class AlignCheckAndPolishService
     public static void OpenAlignCheckWindow(LibraryService library, string audioBookId, int initialRowIndex = 0, Action? onSaved = null)
     {
         var win = new Window { Title = "对齐检查" };
-        ThemeHelper.ResizeWindow(win, 1080, 700);
+        ThemeHelper.ResizeWindow(win, 1080, 700, minWidthDip: 820, minHeightDip: 540);
 
         bool dark = ThemeHelper.IsDark(library.Prefs.ToElementTheme());
         var p = ThemeHelper.Palette(dark);
@@ -59,8 +59,13 @@ public static class AlignCheckAndPolishService
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(54) });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-        var dragBar = new Border { Background = new SolidColorBrush(Colors.Transparent) };
-        root.Children.Add(dragBar);
+        var topBar = new Grid { Padding = new Thickness(0, 0, 148, 0) };
+        topBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        topBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var dragBar = new Grid { Background = new SolidColorBrush(Colors.Transparent), Padding = new Thickness(20, 0, 12, 0) };
+        topBar.Children.Add(dragBar);
+        root.Children.Add(topBar);
         win.Content = root;
         win.SetTitleBar(dragBar);
         ThemeHelper.ConfigureTitleBar(win, dark);
@@ -144,6 +149,8 @@ public static class AlignCheckAndPolishService
         int? activeStop = stops.FindIndex(s => s.StartIdx <= at && at <= s.EndIdx) is >= 0 and int si ? si : null;
         var pinnedIndices = new HashSet<int>();
 
+        bool closed = false;
+        int waveSampleGen = 0;
         var previewPlayer = new MediaPlayer { AutoPlay = false };
         var stopPreviewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(80) };
         var windowCts = new CancellationTokenSource();
@@ -152,6 +159,7 @@ public static class AlignCheckAndPolishService
         double previewEndInTrackSec = double.MaxValue;
         stopPreviewTimer.Tick += (_, _) =>
         {
+            if (closed) return;
             try
             {
                 if (previewPlayer.PlaybackSession.Position.TotalSeconds >= previewEndInTrackSec)
@@ -164,9 +172,22 @@ public static class AlignCheckAndPolishService
         };
         win.Closed += (_, _) =>
         {
-            try { windowCts.Cancel(); windowCts.Dispose(); } catch { }
+            closed = true;
+            try
+            {
+                windowCts.Cancel();
+                if (decodingTracks.IsEmpty)
+                    windowCts.Dispose();
+            }
+            catch { }
             stopPreviewTimer.Stop();
-            try { previewPlayer.Pause(); previewPlayer.Dispose(); } catch { }
+            try
+            {
+                previewPlayer.Pause();
+                previewPlayer.Source = null;
+                previewPlayer.Dispose();
+            }
+            catch { }
         };
 
         string ResolveTrackPath(string rawPath) =>
@@ -174,6 +195,7 @@ public static class AlignCheckAndPolishService
 
         void PlayAroundRow(SyncRow row)
         {
+            if (closed) return;
             double globalStart = Math.Max(0, row.T0Ms / 1000.0 - 0.25);
             double globalEnd = Math.Max(globalStart + 1.2, row.T1Ms / 1000.0 + 0.35);
 
@@ -190,6 +212,7 @@ public static class AlignCheckAndPolishService
                     previewEndInTrackSec = Math.Min(f.Seconds, globalEnd - accum);
                     App.CurrentApp.ClaimAudioPlayback(win, () => win.DispatcherQueue.TryEnqueue(() =>
                     {
+                        if (closed) return;
                         try { previewPlayer.Pause(); stopPreviewTimer.Stop(); } catch { }
                     }));
                     previewPlayer.Source = MediaSource.CreateFromUri(new Uri(trackPath));
@@ -202,23 +225,21 @@ public static class AlignCheckAndPolishService
             }
         }
 
-        // Top Toolbar
-        var topBar = new Grid { Padding = new Thickness(20, 0, 148, 0) };
-        topBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        topBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
+        // Top Toolbar (populate dragBar in Col 0 and rightTools in Col 1)
         var titleStack = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
-        var mainTitleTb = new TextBlock { Text = $"{bookTitle} · 对齐检查", FontSize = 13.5, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = ThemeHelper.Brush(p.T1) };
+        var mainTitleTb = new TextBlock { Text = $"{bookTitle} · {L10n.T("对齐检查")}", FontSize = 13.5, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = ThemeHelper.Brush(p.T1) };
         var subTitleTb = new TextBlock { FontSize = 11, Foreground = ThemeHelper.Brush(p.T3) };
         titleStack.Children.Add(mainTitleTb);
         titleStack.Children.Add(subTitleTb);
-        topBar.Children.Add(titleStack);
+        dragBar.Children.Add(titleStack);
 
         var rightTools = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
         var stopCounterTb = new TextBlock { FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) };
         var prevStopBtn = new Button { Style = (Style)Application.Current.Resources["YYIconButtonStyle"], Content = YYIcons.Make("chevron-left", 11.5, ThemeHelper.Brush(p.T1)) };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(prevStopBtn, L10n.T("上一处待确认"));
         var nextStopBtn = new Button { Style = (Style)Application.Current.Resources["YYIconButtonStyle"], Content = YYIcons.Make("chevron-right", 11.5, ThemeHelper.Brush(p.T1)) };
-        var doneBtn = new Button { Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"], Height = 28, MinHeight = 28, Padding = new Thickness(14, 0, 14, 0), Content = "完成" };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(nextStopBtn, L10n.T("下一处待确认"));
+        var doneBtn = new Button { Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"], Height = 28, MinHeight = 28, Padding = new Thickness(14, 0, 14, 0), Content = L10n.T("完成") };
         doneBtn.Click += (_, _) => { onSaved?.Invoke(); win.Close(); };
 
         rightTools.Children.Add(stopCounterTb);
@@ -227,7 +248,6 @@ public static class AlignCheckAndPolishService
         rightTools.Children.Add(doneBtn);
         Grid.SetColumn(rightTools, 1);
         topBar.Children.Add(rightTools);
-        root.Children.Add(topBar);
 
         // Body: Left Prose + Bottom Timeline | Right 288px Inspector
         var body = new Grid { Padding = new Thickness(0, 0, 14, 14) };
@@ -282,7 +302,7 @@ public static class AlignCheckAndPolishService
 
         void RenderAll()
         {
-            if (map is null || map.Rows.Length == 0) return;
+            if (closed || map is null || map.Rows.Length == 0) return;
             at = Math.Clamp(at, 0, map.Rows.Length - 1);
             var cur = map.Rows[at];
             activeStop = stops.FindIndex(s => s.StartIdx <= at && at <= s.EndIdx) is >= 0 and int idx ? idx : null;
@@ -420,85 +440,114 @@ public static class AlignCheckAndPolishService
             }
             tlStack.Children.Add(blocksRow);
 
-            // Real PCM amplitude peak waveform bars around [winLo, winHi]
+            // Real PCM amplitude peak waveform bars around [winLo, winHi] (offloaded off UI thread!)
             const int barCount = 84;
-            var peaks = new float[barCount];
-            bool hasRealPeaks = false;
-            double trackAccum = 0;
-            for (int fi = 0; fi < recording.Files.Length; fi++)
-            {
-                var f = recording.Files[fi];
-                double dur = Math.Max(0.05, f.Seconds);
-                double trackLo = trackAccum;
-                double trackHi = trackAccum + dur;
-                trackAccum = trackHi;
-
-                if (trackHi <= winLo || trackLo >= winHi)
-                    continue;
-
-                double ovLo = Math.Max(winLo, trackLo);
-                double ovHi = Math.Min(winHi, trackHi);
-                string srcPath = ResolveTrackPath(f.Path);
-                string cachedWav1 = Path.Combine(pcmScratchDir, $"pcm16k-{fi}.wav");
-                string cachedWav2 = Path.Combine(library.DataDir, "audiobook-work", audioBookId, $"pcm16k-{fi}.wav");
-
-                string? readableWav = null;
-                if (File.Exists(cachedWav1)) readableWav = cachedWav1;
-                else if (File.Exists(cachedWav2)) readableWav = cachedWav2;
-                else if (srcPath.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) && File.Exists(srcPath)) readableWav = srcPath;
-
-                if (readableWav is not null &&
-                    TrySampleWavSpanPeaks(readableWav, ovLo - trackLo, ovHi - trackLo, trackLo, winLo, winHi, peaks))
-                {
-                    hasRealPeaks = true;
-                }
-                else if (File.Exists(srcPath) && decodingTracks.TryAdd(fi, 1))
-                {
-                    int idxCap = fi;
-                    string srcCap = srcPath;
-                    var ct = windowCts.Token;
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            await Aligner.EnsurePcm16kWavAsync(srcCap, pcmScratchDir, idxCap, ct);
-                            if (!ct.IsCancellationRequested)
-                                win.DispatcherQueue.TryEnqueue(RenderAll);
-                        }
-                        catch { }
-                        finally
-                        {
-                            decodingTracks.TryRemove(idxCap, out _);
-                        }
-                    }, ct);
-                }
-            }
-
-            float maxPeak = 0f;
-            for (int b = 0; b < barCount; b++)
-                if (peaks[b] > maxPeak) maxPeak = peaks[b];
-            float normPeak = Math.Max(0.08f, maxPeak);
-
+            var barBorders = new Border[barCount];
             var wavePanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Height = 26, VerticalAlignment = VerticalAlignment.Center };
+            double curT0Sec = cur.T0Ms / 1000.0;
+            double curT1Sec = cur.T1Ms / 1000.0;
             for (int b = 0; b < barCount; b++)
             {
                 double t = winLo + (winHi - winLo) * (b + 0.5) / barCount;
-                bool insideCur = t >= cur.T0Ms / 1000.0 && t <= cur.T1Ms / 1000.0;
-                double barH = hasRealPeaks
-                    ? Math.Clamp(3.0 + Math.Pow(Math.Clamp(peaks[b] / normPeak, 0f, 1f), 0.72) * 21.0, 3.0, 24.0)
-                    : (insideCur ? 6.0 : 3.5);
-                wavePanel.Children.Add(new Border
+                bool insideCur = t >= curT0Sec && t <= curT1Sec;
+                var barEl = new Border
                 {
                     Width = 3,
-                    Height = barH,
+                    Height = insideCur ? 6.0 : 3.5,
                     CornerRadius = new CornerRadius(1.5),
                     VerticalAlignment = VerticalAlignment.Center,
                     Background = ThemeHelper.Brush(insideCur ? tint.Accent : p.T3),
                     Opacity = insideCur ? 0.9 : 0.45,
-                });
+                };
+                barBorders[b] = barEl;
+                wavePanel.Children.Add(barEl);
             }
             tlStack.Children.Add(wavePanel);
             timelineHost.Child = tlStack;
+
+            int myWaveGen = ++waveSampleGen;
+            var filesSnap = recording.Files;
+            _ = Task.Run(() =>
+            {
+                if (closed) return;
+                var peaks = new float[barCount];
+                bool hasRealPeaks = false;
+                double trackAccum = 0;
+                for (int fi = 0; fi < filesSnap.Length; fi++)
+                {
+                    if (closed) return;
+                    var f = filesSnap[fi];
+                    double dur = Math.Max(0.05, f.Seconds);
+                    double trackLo = trackAccum;
+                    double trackHi = trackAccum + dur;
+                    trackAccum = trackHi;
+
+                    if (trackHi <= winLo || trackLo >= winHi)
+                        continue;
+
+                    double ovLo = Math.Max(winLo, trackLo);
+                    double ovHi = Math.Min(winHi, trackHi);
+                    string srcPath = ResolveTrackPath(f.Path);
+                    string cachedWav1 = Path.Combine(pcmScratchDir, $"pcm16k-{fi}.wav");
+                    string cachedWav2 = Path.Combine(library.DataDir, "audiobook-work", audioBookId, $"pcm16k-{fi}.wav");
+
+                    string? readableWav = null;
+                    if (File.Exists(cachedWav1)) readableWav = cachedWav1;
+                    else if (File.Exists(cachedWav2)) readableWav = cachedWav2;
+                    else if (srcPath.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) && File.Exists(srcPath)) readableWav = srcPath;
+
+                    if (readableWav is not null &&
+                        TrySampleWavSpanPeaks(readableWav, ovLo - trackLo, ovHi - trackLo, trackLo, winLo, winHi, peaks))
+                    {
+                        hasRealPeaks = true;
+                    }
+                    else if (!closed && File.Exists(srcPath) && decodingTracks.TryAdd(fi, 1))
+                    {
+                        int idxCap = fi;
+                        string srcCap = srcPath;
+                        CancellationToken ct;
+                        try { ct = windowCts.Token; } catch { decodingTracks.TryRemove(idxCap, out _); continue; }
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await Aligner.EnsurePcm16kWavAsync(srcCap, pcmScratchDir, idxCap, ct);
+                                if (!closed && !ct.IsCancellationRequested)
+                                {
+                                    win.DispatcherQueue.TryEnqueue(() =>
+                                    {
+                                        if (!closed) RenderAll();
+                                    });
+                                }
+                            }
+                            catch { }
+                            finally
+                            {
+                                decodingTracks.TryRemove(idxCap, out _);
+                                if (closed && decodingTracks.IsEmpty)
+                                {
+                                    try { windowCts.Dispose(); } catch { }
+                                }
+                            }
+                        });
+                    }
+                }
+
+                if (!hasRealPeaks || closed || myWaveGen != waveSampleGen) return;
+                float maxPeak = 0f;
+                for (int b = 0; b < barCount; b++)
+                    if (peaks[b] > maxPeak) maxPeak = peaks[b];
+                float normPeak = Math.Max(0.08f, maxPeak);
+
+                win.DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (closed || myWaveGen != waveSampleGen) return;
+                    for (int b = 0; b < barCount; b++)
+                    {
+                        barBorders[b].Height = Math.Clamp(3.0 + Math.Pow(Math.Clamp(peaks[b] / normPeak, 0f, 1f), 0.72) * 21.0, 3.0, 24.0);
+                    }
+                });
+            });
 
             // 3. Render Right Inspector
             inspectorStack.Children.Clear();
@@ -617,8 +666,28 @@ public static class AlignCheckAndPolishService
             if (target >= 0 && target < stops.Count) { at = stops[target].StartIdx; RenderAll(); }
         };
 
-        root.KeyDown += (_, e) =>
+        root.PreviewKeyDown += (_, e) =>
         {
+            if (closed || YYChrome.HasBlockingModalOrFlyoutOpen(root.XamlRoot)) return;
+            bool ctrl = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control)
+                .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+            bool alt = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu)
+                .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+            if (ctrl && !alt)
+            {
+                if (e.Key == VirtualKey.W)
+                {
+                    e.Handled = true;
+                    win.Close();
+                    return;
+                }
+                if (e.Key == (VirtualKey)188)
+                {
+                    e.Handled = true;
+                    App.CurrentApp.OpenSettings();
+                    return;
+                }
+            }
             if (map is null || map.Rows.Length == 0) return;
             var cur = map.Rows[Math.Clamp(at, 0, map.Rows.Length - 1)];
             switch (e.Key)
@@ -868,11 +937,16 @@ public static class AlignCheckAndPolishService
             }
         }
 
+        bool polishSheetClosed = false;
         var dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         Action<string> onChanged = id =>
         {
-            if (id != bookId) return;
-            dispatcher?.TryEnqueue(RefreshUi);
+            if (polishSheetClosed || id != bookId) return;
+            dispatcher?.TryEnqueue(() =>
+            {
+                if (!polishSheetClosed)
+                    RefreshUi();
+            });
         };
         PolishStateChanged += onChanged;
 
@@ -972,6 +1046,7 @@ public static class AlignCheckAndPolishService
         }
         finally
         {
+            polishSheetClosed = true;
             PolishStateChanged -= onChanged;
         }
     }

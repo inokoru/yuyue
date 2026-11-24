@@ -153,6 +153,7 @@ public sealed class SystemIntegrationService : IDisposable
 
     public string? ActivePlaybackTitle { get; private set; }
     public bool IsAudioPlaying { get; private set; }
+    public event Action? PlaybackStateChanged;
     public bool IsPlayingTitle(string? title) =>
         IsAudioPlaying && !string.IsNullOrWhiteSpace(title)
         && string.Equals(ActivePlaybackTitle, title, StringComparison.OrdinalIgnoreCase);
@@ -210,6 +211,7 @@ public sealed class SystemIntegrationService : IDisposable
 
         ApplyPowerStayAwake();
         UpdateTrayState();
+        NotifyPlaybackStateChanged();
     }
 
     public void ClearAudioSource(string source) => ClearAudioSource((object?)source);
@@ -294,6 +296,17 @@ public sealed class SystemIntegrationService : IDisposable
 
         ApplyPowerStayAwake();
         UpdateTrayState();
+        NotifyPlaybackStateChanged();
+    }
+
+    private void NotifyPlaybackStateChanged()
+    {
+        var handler = PlaybackStateChanged;
+        if (handler is null) return;
+        if (_uiQueue is not null)
+            _uiQueue.TryEnqueue(() => { try { handler(); } catch { } });
+        else
+            try { handler(); } catch { }
     }
 
     public void ApplyPowerStayAwake()

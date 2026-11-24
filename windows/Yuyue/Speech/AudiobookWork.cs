@@ -101,6 +101,8 @@ public sealed class AudiobookWork : IDisposable
             {
                 if (_running.TryRemove(recordingId, out var doneCts))
                     doneCts.Dispose();
+                if (_running.IsEmpty)
+                    Aligner.Unload();
             }
         });
     }
@@ -112,12 +114,15 @@ public sealed class AudiobookWork : IDisposable
             try { cts.Cancel(); } catch { }
             cts.Dispose();
         }
+        if (_running.IsEmpty)
+            Aligner.Unload();
     }
 
     public void Dispose()
     {
         foreach (var kv in _running.ToArray())
             Stop(kv.Key);
+        Aligner.Unload();
     }
 
     private void Publish(AudiobookWorkStatus status)

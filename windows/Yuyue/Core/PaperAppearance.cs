@@ -116,20 +116,25 @@ public static class PaperAppearance
     /// Picks a preset paper. Returns true if <paramref name="settings"/> should be saved to core
     /// (updating <paramref name="updated"/>), or false if only local night-slot prefs changed.
     /// </summary>
-    public static bool PickPreset(LibraryService library, Paper preset, ReaderSettings settings, out ReaderSettings updated, bool? appDarkOverride = null)
-        => Pick(library, new Resolved(preset, null), settings, out updated, appDarkOverride);
+    public static bool PickPreset(LibraryService library, Paper preset, ReaderSettings settings, out ReaderSettings updated, bool? appDarkOverride = null, bool perBookOverride = false)
+        => Pick(library, new Resolved(preset, null), settings, out updated, appDarkOverride, perBookOverride);
 
     /// <summary>
     /// Picks a custom paper (我的纸).
     /// </summary>
-    public static bool PickCustom(LibraryService library, CustomPaper custom, ReaderSettings settings, out ReaderSettings updated, bool? appDarkOverride = null)
+    public static bool PickCustom(LibraryService library, CustomPaper custom, ReaderSettings settings, out ReaderSettings updated, bool? appDarkOverride = null, bool perBookOverride = false)
     {
         var preset = YuyueCoreMethods.PaperColors(custom).Preset;
-        return Pick(library, new Resolved(preset, custom), settings, out updated, appDarkOverride);
+        return Pick(library, new Resolved(preset, custom), settings, out updated, appDarkOverride, perBookOverride);
     }
 
-    private static bool Pick(LibraryService library, Resolved chosen, ReaderSettings settings, out ReaderSettings updated, bool? appDarkOverride = null)
+    private static bool Pick(LibraryService library, Resolved chosen, ReaderSettings settings, out ReaderSettings updated, bool? appDarkOverride = null, bool perBookOverride = false)
     {
+        if (perBookOverride)
+        {
+            updated = settings with { Paper = chosen.Preset, CustomPaper = chosen.Custom?.Id };
+            return true;
+        }
         updated = settings;
         var basePaper = Raw(library, settings);
         bool dark = appDarkOverride ?? IsAppDark(library);

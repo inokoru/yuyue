@@ -6,7 +6,7 @@
     Title="有声书">
 
     <!-- 1:1 对齐 AudiobookScreen.swift：左侧无白框直接铺在暖白纸底（240 方封面 + 当前章名在上 / 书名作者在下 + 单章进度 + 5 枚播控 + 底部键位条），右侧 300px 章节书签卡与配对卡 -->
-    <Grid x:Name="RootGrid" Background="{ThemeResource YYBgBrush}" KeyDown="RootGrid_KeyDown">
+    <Grid x:Name="RootGrid" Background="{ThemeResource YYBgBrush}" PreviewKeyDown="RootGrid_PreviewKeyDown">
         <Grid x:Name="ShadowReceiver" Background="Transparent" />
 
         <Grid>
@@ -77,8 +77,9 @@
                                 Minimum="0"
                                 Maximum="100"
                                 Value="0"
+                                AutomationProperties.Name="章节进度"
                                 ValueChanged="ChapterSlider_ValueChanged" />
-                            <Canvas x:Name="BookmarkTicksCanvas" Height="10" VerticalAlignment="Center" IsHitTestVisible="False" />
+                            <Canvas x:Name="BookmarkTicksCanvas" Height="22" VerticalAlignment="Center" IsHitTestVisible="True" />
                         </Grid>
                         <Grid>
                             <TextBlock x:Name="ChapterElapsedText" Text="00:00" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" />
@@ -109,6 +110,7 @@
                             FontSize="12.5"
                             FontWeight="SemiBold"
                             Content="1×"
+                            AutomationProperties.Name="播放速度"
                             ToolTipService.ToolTip="播放速度"
                             Click="Rate_Click" />
 
@@ -121,24 +123,42 @@
                             CornerRadius="20"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Center"
+                            AutomationProperties.Name="后退 15 秒"
                             ToolTipService.ToolTip="后退 15 秒 (←)"
                             Click="Rewind15_Click" />
 
-                        <Button
-                            x:Name="PlayPauseBtn"
+                        <Grid
                             Grid.Column="2"
-                            Width="60"
-                            Height="60"
-                            Padding="0"
-                            CornerRadius="30"
-                            BorderThickness="0"
-                            Background="{ThemeResource YYText1Brush}"
+                            Width="68"
+                            Height="68"
+                            Margin="6,0"
                             HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Margin="10,0"
-                            UseSystemFocusVisuals="False"
-                            ToolTipService.ToolTip="播放 / 暂停 (空格)"
-                            Click="PlayPause_Click" />
+                            VerticalAlignment="Center">
+                            <ProgressRing
+                                x:Name="PlayBufferingRing"
+                                Width="68"
+                                Height="68"
+                                IsActive="False"
+                                Visibility="Collapsed"
+                                IsHitTestVisible="False"
+                                Foreground="{ThemeResource YYAccentBrush}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                            <Button
+                                x:Name="PlayPauseBtn"
+                                Width="60"
+                                Height="60"
+                                Padding="0"
+                                CornerRadius="30"
+                                BorderThickness="0"
+                                Background="{ThemeResource YYText1Brush}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                UseSystemFocusVisuals="False"
+                                AutomationProperties.Name="播放或暂停"
+                                ToolTipService.ToolTip="播放 / 暂停 (空格)"
+                                Click="PlayPause_Click" />
+                        </Grid>
 
                         <Button
                             x:Name="Forward30Btn"
@@ -149,6 +169,7 @@
                             CornerRadius="20"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Center"
+                            AutomationProperties.Name="前进 30 秒"
                             ToolTipService.ToolTip="前进 30 秒 (→)"
                             Click="Forward30_Click" />
 
@@ -161,9 +182,18 @@
                             CornerRadius="20"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Center"
+                            AutomationProperties.Name="睡眠定时"
                             ToolTipService.ToolTip="睡眠定时"
                             Click="SleepTimer_Click" />
                     </Grid>
+
+                    <TextBlock
+                        x:Name="WaitingStreamText"
+                        Visibility="Collapsed"
+                        FontSize="11"
+                        Foreground="{ThemeResource YYText2Brush}"
+                        HorizontalAlignment="Center"
+                        Margin="0,8,0,0" />
 
                     <TextBlock
                         x:Name="SleepCountdownText"
@@ -309,6 +339,7 @@
                 BorderThickness="0.75"
                 VerticalAlignment="Center"
                 UseSystemFocusVisuals="False"
+                AutomationProperties.Name="返回书架"
                 Click="BackToShelf_Click">
                 <StackPanel Orientation="Horizontal" Spacing="5">
                     <ContentPresenter x:Name="IconBack" VerticalAlignment="Center" />

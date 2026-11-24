@@ -93,16 +93,21 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
     private bool _hasNewClipDot;
     private string? _focusClipIdOnOpen;
     private string? _playingClipId;
+    private (int AudioFiles, long AudioBytes, int ClipFiles, long ClipBytes)? _cachedStorageStats;
+    private bool _loadingStorageStats;
 
-    // Inline PodcastReaderView & Playback state
+    // Inline PodcastReaderView & Playback state (separated playing vs open reader!)
+    private bool _disposed;
     private PodcastTrack _track = PodcastTrack.Original;
     private bool _blindListen;
-    private int _activeTurnIdx;
+    private int _playingTurnIdx;
+    private MagazineSentence[] _playingSentences = [];
+    private int _readerTurnIdx;
+    private MagazineSentence[] _readerSentences = [];
     private bool _playing;
     private bool _usingExternalMedia;
     private double _rate = 1.0;
     private string? _playingIssueId;
-    private MagazineSentence[] _activeSentences = [];
     private string? _transcribingIssueId;
     private string _transcribeStatus = "";
     private TextBox? _stationCmdBox;
@@ -118,11 +123,13 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
     private bool _readerDarkTheme;
     private PodcastIssue? _renderedReaderIssue;
     private ContentPresenter? _slimPlayIconHost;
+    private Grid? _slimCenterGrid;
     private TextBlock? _slimClockTb;
     private TextBlock? _slimChapterBtnLabel;
     private Action<double>? _redrawSlimScrubber;
     private TextBlock? _slimRateLabelTb;
     private StackPanel? _slimClipBtnContent;
+    private StackPanel? _topClipBtnContent;
     private Button? _slimInterruptBtn;
     private bool _clipFlashActive;
 
@@ -169,10 +176,12 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
         _mediaPlayer.MediaEnded += (_, _) => _shelf.DispatcherQueue.TryEnqueue(() =>
         {
+            if (_disposed) return;
             string? endedId = _playingIssueId;
             _playing = false;
             _usingExternalMedia = false;
             _mediaPosTimer?.Stop();
+            SyncEqTimer();
             _library.SystemIntegration.SetAudioPlaying(_shelf, false);
             UpdateSmtcState(null, playing: false);
             if (endedId is not null && OpenIssueId == endedId)
@@ -188,6 +197,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         _clipPreviewPlayer = new MediaPlayer { AudioCategory = MediaPlayerAudioCategory.Speech, AutoPlay = false };
         _clipPreviewPlayer.MediaEnded += (_, _) => _shelf.DispatcherQueue.TryEnqueue(() =>
         {
+            if (_disposed) return;
             _playingClipId = null;
             if (_drawerOpen && _drawerTab == "clips")
                 _shelf.RefreshCurrentSubPage();
@@ -199,7 +209,11 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         _eqPulseTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(480) };
         _eqPulseTimer.Tick += (_, _) =>
         {
-            if (!_playing || _liveEqBarSets.Count == 0) return;
+            if (_disposed || !_playing || _liveEqBarSets.Count == 0)
+            {
+                _eqPulseTimer.Stop();
+                return;
+            }
             _eqPulseToggle = !_eqPulseToggle;
             foreach (var bars in _liveEqBarSets)
             {
@@ -209,7 +223,18 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 bars[2].Height = _eqPulseToggle ? 8 : 3.5;
             }
         };
-        _eqPulseTimer.Start();
+    }
+
+    private void SyncEqTimer()
+    {
+        if (!_disposed && _playing && _liveEqBarSets.Count > 0)
+        {
+            if (!_eqPulseTimer.IsEnabled) _eqPulseTimer.Start();
+        }
+        else
+        {
+            _eqPulseTimer.Stop();
+        }
     }
 
     public void OpenIssueAt(string issueId, double? seekSec = null, bool autoPlay = false)
@@ -219,27 +244,43 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         var issue = _library.Podcasts.GetIssues().FirstOrDefault(x => x.Id == issueId);
         if (issue is not null)
         {
-            var sents = LoadOrSynthesizeTranscript(issue);
+            var sents = _playingIssueId == issueId && _playingSentences.Length > 0
+                ? _playingSentences
+                : LoadOrSynthesizeTranscript(issue);
+            _readerSentences = sents;
+
             if (seekSec is double sec && sec >= 0)
             {
                 int idx = sents.Length > 0 ? Array.FindLastIndex(sents, s => sec >= s.T0) : 0;
-                _activeTurnIdx = Math.Max(0, idx);
+                _readerTurnIdx = Math.Max(0, idx);
+                if (_playingIssueId == issueId)
+                {
+                    _playingTurnIdx = _readerTurnIdx;
+                    if (_usingExternalMedia)
+                    {
+                        try { _mediaPlayer.PlaybackSession.Position = TimeSpan.FromSeconds(sec); } catch { }
+                    }
+                }
                 try { _library.Core.PodcastSavePlayback(issueId, sec, null); } catch { }
+            }
+            else if (_playingIssueId == issueId)
+            {
+                _readerTurnIdx = sents.Length > 0 ? Math.Clamp(_playingTurnIdx, 0, sents.Length - 1) : 0;
             }
             else if (sents.Length > 0 && issue.PositionSec > 0)
             {
                 int idx = Array.FindLastIndex(sents, s => issue.PositionSec >= s.T0);
-                _activeTurnIdx = Math.Max(0, idx);
+                _readerTurnIdx = Math.Max(0, idx);
             }
             else
             {
-                _activeTurnIdx = 0;
+                _readerTurnIdx = 0;
             }
 
             _track = SupportsTrackSwitch(issue, sents) ? issue.Track : PodcastTrack.Original;
             if (autoPlay)
             {
-                PlayIssueAtTurn(issue, sents, sents.Length > 0 ? Math.Clamp(_activeTurnIdx, 0, sents.Length - 1) : 0);
+                PlayIssueAtTurn(issue, sents, sents.Length > 0 ? Math.Clamp(_readerTurnIdx, 0, sents.Length - 1) : 0, exactSeekSec: seekSec);
             }
         }
     }
@@ -248,7 +289,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
     {
         _shelf.DispatcherQueue.TryEnqueue(() =>
         {
-            if (_playingIssueId is null) return;
+            if (_disposed || _playingIssueId is null) return;
             var issue = _library.Podcasts.GetIssues().FirstOrDefault(x => x.Id == _playingIssueId);
             if (issue is null) return;
             switch (args.Button)
@@ -256,7 +297,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 case SystemMediaTransportControlsButton.Play:
                     if (!_playing)
                     {
-                        PlayIssueAtTurn(issue, _activeSentences, _activeTurnIdx);
+                        PlayIssueAtTurn(issue, _playingSentences, _playingTurnIdx);
                         if (OpenIssueId == issue.Id) RefreshPlayButtonsInPlace();
                         else _shelf.RefreshCurrentSubPage();
                     }
@@ -270,10 +311,10 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                     }
                     break;
                 case SystemMediaTransportControlsButton.Next:
-                    StepPlayback(issue, _activeSentences, forward: true);
+                    StepPlayback(issue, _playingSentences, forward: true);
                     break;
                 case SystemMediaTransportControlsButton.Previous:
-                    StepPlayback(issue, _activeSentences, forward: false);
+                    StepPlayback(issue, _playingSentences, forward: false);
                     break;
             }
         });
@@ -299,20 +340,42 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         _mediaPosTimer.Stop();
         _eqPulseTimer.Stop();
+        AudioPlayer.StopActivePreview();
         try { _interruptMicCts?.Cancel(); _interruptMicCts?.Dispose(); } catch { }
         _ttsPlayer.SentenceFinished -= OnStudioTurnFinished;
         _ttsPlayer.Dispose();
         _library.SystemIntegration.SetAudioPlaying(_shelf, false);
         try { _mediaPlayer.SystemMediaTransportControls.ButtonPressed -= OnSmtcButtonPressed; } catch { }
-        try { _mediaPlayer.Pause(); _mediaPlayer.Dispose(); } catch { }
-        try { _clipPreviewPlayer.Pause(); _clipPreviewPlayer.Dispose(); } catch { }
+        try { _mediaPlayer.Pause(); _mediaPlayer.Source = null; _mediaPlayer.Dispose(); } catch { }
+        try { _clipPreviewPlayer.Pause(); _clipPreviewPlayer.Source = null; _clipPreviewPlayer.Dispose(); } catch { }
+    }
+
+    private void StopDrawerAudioPreviews()
+    {
+        _playingClipId = null;
+        try
+        {
+            _clipPreviewPlayer.Pause();
+            _clipPreviewPlayer.Source = null;
+        }
+        catch { }
+        AudioPlayer.StopActivePreview();
+    }
+
+    private void CloseDrawer()
+    {
+        _drawerOpen = false;
+        StopDrawerAudioPreviews();
     }
 
     public bool SupportsTrackSwitch(PodcastIssue? issue, MagazineSentence[]? preloaded = null)
     {
         if (issue is null) return false;
+        if (issue.StudioKind == StudioKind.VocabRadio || issue.Fidelity == PodcastFidelity.L3CrossLingual)
+            return true;
         var sents = preloaded is { Length: > 0 } ? preloaded : LoadOrSynthesizeTranscript(issue);
         return sents.Any(s => !string.IsNullOrWhiteSpace(s.TextTrans) || !string.IsNullOrWhiteSpace(s.CoachNote));
     }
@@ -343,15 +406,15 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 return false;
             }
 
-            var sents = _activeSentences.Length > 0 && (_playingIssueId == issueId || _renderedReaderIssue?.Id == issueId)
-                ? _activeSentences
-                : LoadOrSynthesizeTranscript(issue);
+            var sents = _readerSentences.Length > 0 && _renderedReaderIssue?.Id == issueId
+                ? _readerSentences
+                : (_playingIssueId == issueId && _playingSentences.Length > 0 ? _playingSentences : LoadOrSynthesizeTranscript(issue));
 
             switch (key)
             {
                 case VirtualKey.Space:
                     if (_playing && _playingIssueId == issue.Id) StopPlayback();
-                    else PlayIssueAtTurn(issue, sents, _activeTurnIdx);
+                    else PlayIssueAtTurn(issue, sents, _readerTurnIdx);
                     RefreshPlayButtonsInPlace();
                     return true;
                 case VirtualKey.H:
@@ -378,7 +441,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                     }
                     if (_drawerOpen)
                     {
-                        _drawerOpen = false;
+                        CloseDrawer();
                         _shelf.RefreshCurrentSubPage();
                         return true;
                     }
@@ -415,7 +478,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             }
             if (_drawerOpen)
             {
-                _drawerOpen = false;
+                CloseDrawer();
                 _shelf.RefreshCurrentSubPage();
                 return true;
             }
@@ -493,6 +556,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
     public void PopulateTopHeader(Panel leftAfterToggleHost, Panel rightHost, bool dark)
     {
+        _topClipBtnContent = null;
         var p = ThemeHelper.Palette(dark);
         var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
 
@@ -524,15 +588,22 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             };
             leftAfterToggleHost.Children.Add(backBtn);
 
-            // Right: Track segmented control (only when episode supports translation / coach notes) + 盲听 + 稍后听 + 原声划线 + 书摘抽屉
-            bool canSwitchTrack = SupportsTrackSwitch(curIssue, _playingIssueId == issueId && _activeSentences.Length > 0 ? _activeSentences : null);
+            // Right: Track segmented control (only when episode supports translation / coach notes) + 盲听 + 稍后听 + 原声划线
+            var cachedSents = _readerSentences.Length > 0 && _renderedReaderIssue?.Id == issueId
+                ? _readerSentences
+                : (_playingIssueId == issueId && _playingSentences.Length > 0 ? _playingSentences : null);
+            bool canSwitchTrack = SupportsTrackSwitch(curIssue, cachedSents);
             if (!canSwitchTrack && _track != PodcastTrack.Original)
             {
                 _track = PodcastTrack.Original;
             }
             if (canSwitchTrack)
             {
-                rightHost.Children.Add(BuildTrackSegmentedControl(_track, compact: false, p, tint, nextTr => SwitchTrack(issueId, curIssue, nextTr)));
+                bool isEnglishEp = curIssue is null
+                    || !(curIssue.Language ?? "").StartsWith("zh", StringComparison.OrdinalIgnoreCase)
+                    || curIssue.StudioKind == StudioKind.VocabRadio
+                    || curIssue.Fidelity == PodcastFidelity.L3CrossLingual;
+                rightHost.Children.Add(BuildTrackSegmentedControl(_track, compact: false, p, tint, nextTr => SwitchTrack(issueId, curIssue, nextTr), isEnglishEp));
             }
 
             var blindBtn = MakePaperPill(L10n.T("盲听"), accent: _blindListen, p, tint);
@@ -561,8 +632,8 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             }
 
             var clipSp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-            clipSp.Children.Add(YYIcons.Make("bookmark", 11, ThemeHelper.Brush(tint.Accent), filled: true));
-            clipSp.Children.Add(new TextBlock { Text = L10n.T("原声划线"), FontSize = 11.5, FontWeight = FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) });
+            PopulateTopClipButtonContent(clipSp, _clipFlashActive, p, tint);
+            _topClipBtnContent = clipSp;
             var clipBtn = new Button
             {
                 Height = 28,
@@ -577,10 +648,6 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             };
             clipBtn.Click += async (_, _) => await ClipCurrentTurnAsync(issueId);
             rightHost.Children.Add(clipBtn);
-
-            var drawerBtn = MakeCircleIconButton("bookmark", L10n.T("原声书摘 · 稍后听"), p, _hasNewClipDot, tint);
-            drawerBtn.Click += (_, _) => ToggleDrawer("clips");
-            rightHost.Children.Add(drawerBtn);
             return;
         }
 
@@ -709,10 +776,11 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
     {
         if (_drawerOpen && _drawerTab == tab)
         {
-            _drawerOpen = false;
+            CloseDrawer();
         }
         else
         {
+            StopDrawerAudioPreviews();
             _drawerTab = tab;
             _drawerOpen = true;
             if (tab is "clips" or "later") _hasNewClipDot = false;
@@ -722,6 +790,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
     private void OpenDrawer(string tab, string? focusClipId = null)
     {
+        StopDrawerAudioPreviews();
         _drawerTab = tab;
         _drawerOpen = true;
         _focusClipIdOnOpen = focusClipId;
@@ -733,6 +802,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
     {
         host.Children.Clear();
         _liveEqBarSets.Clear();
+        SyncEqTimer();
         ClearLiveReaderRefs();
         ClearLiveDeskRefs();
 
@@ -791,6 +861,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         _turnVisualByIndex.Clear();
         _renderedReaderIssue = null;
         _slimPlayIconHost = null;
+        _slimCenterGrid = null;
         _slimClockTb = null;
         _slimChapterBtnLabel = null;
         _redrawSlimScrubber = null;
@@ -869,7 +940,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         scrim.PointerPressed += (_, e) =>
         {
             e.Handled = true;
-            _drawerOpen = false;
+            CloseDrawer();
             _shelf.RefreshCurrentSubPage();
         };
         overlayRoot.Children.Add(scrim);
@@ -1149,6 +1220,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(0, 6, 0, 4),
         };
+        YYChrome.StripTextBoxChrome(cmdBox);
         _stationCmdBox = cmdBox;
 
         var leadIconHost = new ContentPresenter
@@ -1612,6 +1684,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 var charts = await _library.Podcasts.FetchItunesTopChartsAsync();
                 _shelf.DispatcherQueue.TryEnqueue(() =>
                 {
+                    if (_disposed) return;
                     _discoveredShows = charts;
                     _loadingDiscovery = false;
                     if (OpenIssueId is null) _shelf.RefreshCurrentSubPage();
@@ -1619,7 +1692,11 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             }
             catch
             {
-                _shelf.DispatcherQueue.TryEnqueue(() => _loadingDiscovery = false);
+                _shelf.DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (_disposed) return;
+                    _loadingDiscovery = false;
+                });
             }
         });
     }
@@ -1679,7 +1756,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 UseSystemFocusVisuals = false,
             };
             string nextTab = k;
-            tb.Click += (_, _) => { _drawerTab = nextTab; _shelf.RefreshCurrentSubPage(); };
+            tb.Click += (_, _) => { StopDrawerAudioPreviews(); _drawerTab = nextTab; _shelf.RefreshCurrentSubPage(); };
             pairRow.Children.Add(tb);
         }
 
@@ -1700,6 +1777,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         switchPairBtn.CornerRadius = new CornerRadius(14);
         switchPairBtn.Click += (_, _) =>
         {
+            StopDrawerAudioPreviews();
             _drawerTab = isClipLaterPair ? "voices" : "clips";
             if (_drawerTab == "clips") _hasNewClipDot = false;
             _shelf.RefreshCurrentSubPage();
@@ -1721,7 +1799,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             Content = YYIcons.Make("xmark", 12, ThemeHelper.Brush(p.T3)),
         };
         ToolTipService.SetToolTip(closeBtn, L10n.T("关闭"));
-        closeBtn.Click += (_, _) => { _drawerOpen = false; _shelf.RefreshCurrentSubPage(); };
+        closeBtn.Click += (_, _) => { CloseDrawer(); _shelf.RefreshCurrentSubPage(); };
         Grid.SetColumn(closeBtn, 3);
         topHeader.Children.Add(closeBtn);
         outer.Children.Add(topHeader);
@@ -1802,8 +1880,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                     {
                         if (_playingClipId == item.Id)
                         {
-                            try { _clipPreviewPlayer.Pause(); } catch { }
-                            _playingClipId = null;
+                            StopDrawerAudioPreviews();
                             _shelf.RefreshCurrentSubPage();
                             return;
                         }
@@ -1811,6 +1888,15 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                         {
                             try
                             {
+                                if (_playing) StopPlayback();
+                                AudioPlayer.StopActivePreview();
+                                App.CurrentApp.ClaimAudioPlayback(_clipPreviewPlayer, () => _shelf.DispatcherQueue.TryEnqueue(() =>
+                                {
+                                    if (_disposed) return;
+                                    StopDrawerAudioPreviews();
+                                    if (_drawerOpen && _drawerTab == "clips")
+                                        _shelf.RefreshCurrentSubPage();
+                                }));
                                 _clipPreviewPlayer.Pause();
                                 _clipPreviewPlayer.Source = MediaSource.CreateFromUri(new Uri(clipPath));
                                 _clipPreviewPlayer.Play();
@@ -1821,7 +1907,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                         }
                         else
                         {
-                            _drawerOpen = false;
+                            CloseDrawer();
                             OpenIssueAt(item.IssueId, item.T0, autoPlay: true);
                             _shelf.RefreshCurrentSubPage();
                         }
@@ -1845,7 +1931,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                     ToolTipService.SetToolTip(jumpBtn, L10n.T("回到原句"));
                     jumpBtn.Click += (_, _) =>
                     {
-                        _drawerOpen = false;
+                        CloseDrawer();
                         OpenIssueAt(item.IssueId, item.T0);
                         _shelf.RefreshCurrentSubPage();
                     };
@@ -1880,6 +1966,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                         BorderThickness = new Thickness(0),
                         Padding = new Thickness(0, 2, 0, 2),
                     };
+                    YYChrome.StripTextBoxChrome(noteBox);
                     noteBox.LostFocus += (_, _) => _library.Podcasts.SetClipThought(cid, noteBox.Text);
                     noteBox.KeyDown += (_, ke) =>
                     {
@@ -1900,7 +1987,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                     var jumpMi = new MenuFlyoutItem { Text = L10n.T("跳到原句") };
                     jumpMi.Click += (_, _) =>
                     {
-                        _drawerOpen = false;
+                        CloseDrawer();
                         OpenIssueAt(item.IssueId, item.T0);
                         _shelf.RefreshCurrentSubPage();
                     };
@@ -1971,7 +2058,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                         };
                         openBtn.Click += (_, _) =>
                         {
-                            _drawerOpen = false;
+                            CloseDrawer();
                             OpenIssueAt(target.Id);
                             _shelf.RefreshCurrentSubPage();
                         };
@@ -1993,7 +2080,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                         playNowBtn.Click += (_, _) =>
                         {
                             try { _library.Core.PodcastSetPlacement(target.Id, PodcastPlacement.Desk); } catch { }
-                            _drawerOpen = false;
+                            CloseDrawer();
                             ToggleDeskIssuePlayback(target, forcePlay: true);
                         };
                         acts.Children.Add(playNowBtn);
@@ -2145,9 +2232,9 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 int chCnt = _library.Podcasts.GetChannels().Count;
                 int issCnt = _library.Podcasts.GetIssues().Count;
                 int clipCnt = clips.Length;
-                var stats = _library.Podcasts.GetStorageStats();
-                string audioMb = $"{stats.AudioBytes / (1024.0 * 1024.0):F1} MB";
-                string clipMb = $"{stats.ClipBytes / (1024.0 * 1024.0):F1} MB";
+                var stats = _cachedStorageStats ?? (0, 0L, 0, 0L);
+                string FormatStorageSummary((int AudioFiles, long AudioBytes, int ClipFiles, long ClipBytes) st) =>
+                    $"单集缓存：{st.AudioFiles} 个文件 · {st.AudioBytes / (1024.0 * 1024.0):F1} MB\n原声书摘片段：{st.ClipFiles} 段 WAV · {st.ClipBytes / (1024.0 * 1024.0):F1} MB";
 
                 var transcribable = (OpenIssueId is not null
                     ? _library.Podcasts.GetIssues().FirstOrDefault(x => x.Id == OpenIssueId)
@@ -2187,23 +2274,44 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
                 var cacheSp = new StackPanel { Spacing = 6 };
                 cacheSp.Children.Add(new TextBlock { Text = L10n.T("缓存与离线音频空间"), FontSize = 12.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
-                cacheSp.Children.Add(new TextBlock
+                var cacheSummaryTb = new TextBlock
                 {
-                    Text = $"单集缓存：{stats.AudioFiles} 个文件 · {audioMb}\n原声书摘片段：{stats.ClipFiles} 段 WAV · {clipMb}",
+                    Text = _cachedStorageStats is not null ? FormatStorageSummary(stats) : L10n.T("正在统计缓存空间…"),
                     FontSize = 11,
                     Foreground = ThemeHelper.Brush(p.T3),
                     LineHeight = 17,
-                });
-                if (stats.AudioBytes > 0)
+                };
+                cacheSp.Children.Add(cacheSummaryTb);
+
+                var clearBtn = MakePaperPill(L10n.T("清理单集音频缓存"), accent: false, p, tint);
+                clearBtn.Visibility = stats.AudioBytes > 0 ? Visibility.Visible : Visibility.Collapsed;
+                clearBtn.Click += async (_, _) =>
                 {
-                    var clearBtn = MakePaperPill(L10n.T("清理单集音频缓存"), accent: false, p, tint);
-                    clearBtn.Click += (_, _) =>
+                    clearBtn.IsEnabled = false;
+                    clearBtn.Content = L10n.T("清理中…");
+                    long freed = await Task.Run(() => _library.Podcasts.ClearAudioCache());
+                    var nextStats = await Task.Run(() => _library.Podcasts.GetStorageStats());
+                    if (_disposed) return;
+                    _cachedStorageStats = nextStats;
+                    _shelf.ShowToast($"已清理 {freed / (1024.0 * 1024.0):F1} MB 缓存（原声书摘保留不受影响）", canUndo: false);
+                    _shelf.RefreshCurrentSubPage();
+                };
+                cacheSp.Children.Add(clearBtn);
+
+                if (!_loadingStorageStats)
+                {
+                    _loadingStorageStats = true;
+                    _ = Task.Run(() => _library.Podcasts.GetStorageStats()).ContinueWith(t =>
                     {
-                        long freed = _library.Podcasts.ClearAudioCache();
-                        _shelf.ShowToast($"已清理 {freed / (1024.0 * 1024.0):F1} MB 缓存（原声书摘保留不受影响）", canUndo: false);
-                        _shelf.RefreshCurrentSubPage();
-                    };
-                    cacheSp.Children.Add(clearBtn);
+                        _shelf.DispatcherQueue.TryEnqueue(() =>
+                        {
+                            _loadingStorageStats = false;
+                            if (_disposed || !t.IsCompletedSuccessfully) return;
+                            _cachedStorageStats = t.Result;
+                            cacheSummaryTb.Text = FormatStorageSummary(t.Result);
+                            clearBtn.Visibility = t.Result.AudioBytes > 0 ? Visibility.Visible : Visibility.Collapsed;
+                        });
+                    }, TaskScheduler.Default);
                 }
                 bodyStack.Children.Add(new Border
                 {
@@ -2271,10 +2379,12 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 _transcribeStatus = msg;
                 _shelf.DispatcherQueue.TryEnqueue(() =>
                 {
+                    if (_disposed) return;
                     if (OpenIssueId == issueId || _drawerOpen)
                         _shelf.RefreshCurrentSubPage();
                 });
             });
+            if (_disposed) return;
             _transcribingIssueId = null;
             _transcribeStatus = "";
             OpenIssueId = issueId;
@@ -2736,6 +2846,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             sp.Children.Add(bars[i]);
         }
         _liveEqBarSets.Add(bars);
+        SyncEqTimer();
         return sp;
     }
 
@@ -2850,7 +2961,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         bool isStudio = active is null || active.StudioKind is not null;
         bool isPlayingActive = active is not null && _playing && _playingIssueId == active.Id;
         var sentsForActive = active is not null
-            ? (_playingIssueId == active.Id && _activeSentences.Length > 0 ? _activeSentences : LoadOrSynthesizeTranscript(active))
+            ? (_playingIssueId == active.Id && _playingSentences.Length > 0 ? _playingSentences : LoadOrSynthesizeTranscript(active))
             : [];
         bool canSwitchTrack = active is not null && SupportsTrackSwitch(active, sentsForActive);
 
@@ -2874,7 +2985,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         double curPos = active is not null
             ? (isPlayingActive && _usingExternalMedia
                 ? _mediaPlayer.PlaybackSession.Position.TotalSeconds
-                : (isPlayingActive && _activeTurnIdx < sentsForActive.Length ? sentsForActive[_activeTurnIdx].T0 : active.PositionSec))
+                : (isPlayingActive && _playingTurnIdx < sentsForActive.Length ? sentsForActive[_playingTurnIdx].T0 : active.PositionSec))
             : 0.0;
 
         string statusSub;
@@ -2950,7 +3061,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
         string rightBadgeLabel = active is null || active.StudioKind is not null
             ? L10n.T("本地声卡 · 不剧透锁")
-            : TrackLabel(active.Track);
+            : TrackLabel(active.Track, active);
 
         string excerpt;
         if (active is not null)
@@ -3171,7 +3282,6 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             midSlot.Child = BuildTrackSegmentedControl(active.Track, compact: true, p, tint, nextTr =>
             {
                 SwitchTrack(active.Id, active, nextTr);
-                _shelf.ShowToast($"已切至{TrackLabel(nextTr)}", canUndo: false);
             });
         }
         else
@@ -3261,12 +3371,16 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         var serif = new FontFamily(YYFontFamily.Serif.WindowsFamily());
         var geoSerif = new FontFamily(YYFontFamily.LatinSerif.WindowsFamily());
 
-        var sentences = LoadOrSynthesizeTranscript(issue);
-        _activeSentences = sentences;
-        if (sentences.Length > 0)
-            _activeTurnIdx = Math.Clamp(_activeTurnIdx, 0, sentences.Length - 1);
+        var sentences = _playingIssueId == issue.Id && _playingSentences.Length > 0
+            ? _playingSentences
+            : LoadOrSynthesizeTranscript(issue);
+        _readerSentences = sentences;
+        if (_playingIssueId == issue.Id)
+            _readerTurnIdx = sentences.Length > 0 ? Math.Clamp(_playingTurnIdx, 0, sentences.Length - 1) : 0;
+        else if (sentences.Length > 0)
+            _readerTurnIdx = Math.Clamp(_readerTurnIdx, 0, sentences.Length - 1);
         else
-            _activeTurnIdx = 0;
+            _readerTurnIdx = 0;
 
         HashSet<string> highlightedIds;
         try { highlightedIds = _library.Core.PodcastHighlightSentenceIds(issue.Id).ToHashSet(StringComparer.Ordinal); }
@@ -3285,6 +3399,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             HorizontalAlignment = HorizontalAlignment.Center,
             Margin = new Thickness(0, 14, 0, 136),
             IsTabStop = true,
+            UseSystemFocusVisuals = false,
         };
 
         // 1. Kicker: ShowMark + ShowTitle · Duration
@@ -3315,7 +3430,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         // 3. Meta bar + 0.5pt hairline (PodcastReaderView.swift:597-619)
         bool canDub = SupportsTrackSwitch(issue, sentences);
         string metaLeft = canDub
-            ? $"当前声轨：{TrackLabel(_track)}"
+            ? $"当前声轨：{TrackLabel(_track, issue)}"
             : (issue.StudioKind is StudioKind sk ? $"{StudioKindTitle(sk)} · 防剧透物理锁" : L10n.T("原声收听"));
         string metaRight = canDub
             ? L10n.T("点任意句子即刻跳播，点高亮词查词收进生词本")
@@ -3405,7 +3520,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                     continue;
                 }
 
-                bool active = idx == _activeTurnIdx;
+                bool active = idx == _readerTurnIdx;
                 bool isClipped = highlightedIds.Contains(s.Id);
                 bool peeked = _peekedTurnIndices.Contains(idx);
 
@@ -3469,7 +3584,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                             if (_turnVisualByIndex.TryGetValue(idx, out var vm))
                             {
                                 if (vm.PeekButton is not null) vm.PeekButton.Content = nowPeeked ? L10n.T("收起") : L10n.T("偷看");
-                                vm.BodyPanel.Opacity = (_blindListen && idx != _activeTurnIdx && !nowPeeked) ? 0.14 : 1.0;
+                                vm.BodyPanel.Opacity = (_blindListen && idx != _readerTurnIdx && !nowPeeked) ? 0.14 : 1.0;
                             }
                         };
                         spLine.Children.Add(peekPill);
@@ -3602,8 +3717,8 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                     // Do not hijack taps that originated inside child Buttons/Hyperlinks
                     if (te.OriginalSource is DependencyObject src && IsInsideInteractiveChild(src, turnCard))
                         return;
-                    int prevIdx = _activeTurnIdx;
-                    _activeTurnIdx = idx;
+                    int prevIdx = _readerTurnIdx;
+                    _readerTurnIdx = idx;
                     PlayIssueAtTurn(issue, sentences, idx);
                     UpdateActiveTurnVisualsInPlace(prevIdx, idx, bringIntoView: false);
                     RefreshPlayButtonsInPlace();
@@ -3635,10 +3750,14 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         };
         transcriptScroll.Loaded += (_, _) =>
         {
-            if (_turnVisualByIndex.TryGetValue(_activeTurnIdx, out var activeVm) && _activeTurnIdx > 0)
+            if (_turnVisualByIndex.TryGetValue(_readerTurnIdx, out var activeVm) && _readerTurnIdx > 0)
             {
                 try { activeVm.Card.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false, VerticalAlignmentRatio = 0.35 }); }
                 catch { try { activeVm.Card.StartBringIntoView(); } catch { } }
+            }
+            if (!_interruptOpen && !_drawerOpen)
+            {
+                try { sheet.Focus(FocusState.Programmatic); } catch { }
             }
         };
 
@@ -3886,7 +4005,9 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         double totalDur = Math.Max(1.0, Math.Max(issue.DurationSec, sentences.Length > 0 ? sentences[^1].T1 : 1.0));
         double curSec = isPlayingNow && _usingExternalMedia
             ? _mediaPlayer.PlaybackSession.Position.TotalSeconds
-            : (sentences.Length > _activeTurnIdx ? sentences[_activeTurnIdx].T0 : issue.PositionSec);
+            : (isPlayingNow && _playingTurnIdx < _playingSentences.Length
+                ? _playingSentences[_playingTurnIdx].T0
+                : (_readerTurnIdx < sentences.Length ? sentences[_readerTurnIdx].T0 : issue.PositionSec));
 
         var segments = BuildPlayerSegments(issue, sentences, totalDur);
         int topicCount = segments.Count(s => !s.IsAd);
@@ -3925,7 +4046,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         mainPlayBtn.Click += (_, _) =>
         {
             if (_playing && _playingIssueId == issue.Id) StopPlayback();
-            else PlayIssueAtTurn(issue, sentences, _activeTurnIdx);
+            else PlayIssueAtTurn(issue, sentences, _readerTurnIdx);
             RefreshPlayButtonsInPlace();
         };
         leftTrans.Children.Add(mainPlayBtn);
@@ -3936,7 +4057,13 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         row.Children.Add(leftTrans);
 
         // 2. Center stretch: Chapter menu + Dynamic-width Segmented Scrubber + Clock
-        var centerGrid = new Grid { ColumnSpacing = 7, VerticalAlignment = VerticalAlignment.Center };
+        var centerGrid = new Grid
+        {
+            ColumnSpacing = 7,
+            VerticalAlignment = VerticalAlignment.Center,
+            Opacity = _interruptOpen ? 0.45 : 1.0,
+            IsHitTestVisible = !_interruptOpen,
+        };
         centerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         centerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         centerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -4223,6 +4350,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         row.Children.Add(rightTools);
 
         _slimPlayIconHost = playIconHost;
+        _slimCenterGrid = centerGrid;
         _slimClockTb = clockTb;
         _slimChapterBtnLabel = chapterLbl;
         _redrawSlimScrubber = RenderSegmentedScrubber;
@@ -4243,13 +4371,28 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         };
     }
 
+    private static void PopulateTopClipButtonContent(StackPanel sp, bool flashed, YYPalette p, YYTintColors tint)
+    {
+        sp.Children.Clear();
+        if (flashed)
+        {
+            sp.Children.Add(YYIcons.Make("checkmark", 10, ThemeHelper.Brush(tint.Accent)));
+            sp.Children.Add(new TextBlock { Text = L10n.T("已记原声"), FontSize = 11.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(tint.Accent), VerticalAlignment = VerticalAlignment.Center });
+        }
+        else
+        {
+            sp.Children.Add(YYIcons.Make("bookmark", 11, ThemeHelper.Brush(tint.Accent), filled: true));
+            sp.Children.Add(new TextBlock { Text = L10n.T("原声划线"), FontSize = 11.5, FontWeight = FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center });
+        }
+    }
+
     private static void PopulateSlimClipButtonContent(StackPanel sp, bool flashed, bool dark, YYPalette p, YYTintColors tint)
     {
         sp.Children.Clear();
         if (flashed)
         {
             sp.Children.Add(YYIcons.Make("checkmark", 9.5, ThemeHelper.Brush(tint.Accent)));
-            sp.Children.Add(new TextBlock { Text = L10n.T("已记"), FontSize = 11, FontWeight = FontWeights.Medium, Foreground = ThemeHelper.Brush(tint.Accent), VerticalAlignment = VerticalAlignment.Center });
+            sp.Children.Add(new TextBlock { Text = L10n.T("已记原声"), FontSize = 11, FontWeight = FontWeights.Medium, Foreground = ThemeHelper.Brush(tint.Accent), VerticalAlignment = VerticalAlignment.Center });
         }
         else
         {
@@ -4507,7 +4650,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         return false;
     }
 
-    private void ShowVocabPopover(
+    private async void ShowVocabPopover(
         FrameworkElement anchor,
         string word,
         string? coachHint,
@@ -4517,9 +4660,15 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         YYPalette p,
         YYTintColors tint)
     {
-        var hit = _library.LookUpWordRich(word);
+        var (hit, savedWords) = await Task.Run(() =>
+        {
+            try { return (_library.LookUpWordRich(word), _library.GetWords()); }
+            catch { return ((WordLookupResult?)null, (IReadOnlyList<VocabWord>)Array.Empty<VocabWord>()); }
+        });
+        if (_disposed || !anchor.IsLoaded) return;
+
         string headword = hit?.Headword ?? word.ToLowerInvariant();
-        bool alreadySaved = _library.GetWords().Any(x => x.Word.Equals(headword, StringComparison.OrdinalIgnoreCase) && !x.Known);
+        bool alreadySaved = savedWords.Any(x => x.Word.Equals(headword, StringComparison.OrdinalIgnoreCase) && !x.Known);
 
         string? combinedMeaning = hit?.Summary;
         if (!string.IsNullOrWhiteSpace(coachHint))
@@ -4613,8 +4762,10 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
     private void SetActiveTurnInPlace(int newIdx, bool bringIntoView)
     {
-        int oldIdx = _activeTurnIdx;
-        _activeTurnIdx = newIdx;
+        int oldIdx = _readerTurnIdx;
+        _readerTurnIdx = newIdx;
+        if (_playingIssueId == OpenIssueId)
+            _playingTurnIdx = newIdx;
         UpdateActiveTurnVisualsInPlace(oldIdx, newIdx, bringIntoView);
     }
 
@@ -4693,10 +4844,10 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         if (OpenIssueId is null && _renderedDeskIssueId is not null && _playingIssueId == _renderedDeskIssueId)
         {
             _redrawDeskScrubber?.Invoke(posSec);
-            if (_activeSentences.Length > 0)
+            if (_playingSentences.Length > 0)
             {
-                int idx = Math.Max(0, Array.FindLastIndex(_activeSentences, s => posSec >= s.T0));
-                var s = _activeSentences[Math.Clamp(idx, 0, _activeSentences.Length - 1)];
+                int idx = Math.Max(0, Array.FindLastIndex(_playingSentences, s => posSec >= s.T0));
+                var s = _playingSentences[Math.Clamp(idx, 0, _playingSentences.Length - 1)];
                 if (_deskSpeakerTb is not null && !string.IsNullOrWhiteSpace(s.Speaker))
                     _deskSpeakerTb.Text = s.Speaker;
                 if (_deskExcerptTb is not null)
@@ -4709,12 +4860,44 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
     private void SwitchTrack(string issueId, PodcastIssue? issue, PodcastTrack nextTr)
     {
+        if (_track == nextTr) return;
+        PodcastTrack prevTr = _track;
+
+        double? preserveSec = null;
+        if (_playingIssueId == issueId && issue is not null)
+        {
+            if (_usingExternalMedia)
+            {
+                try { preserveSec = _mediaPlayer.PlaybackSession.Position.TotalSeconds; } catch { }
+            }
+            else if (_playingTurnIdx >= 0 && _playingTurnIdx < _playingSentences.Length)
+            {
+                preserveSec = _playingSentences[_playingTurnIdx].T0;
+            }
+        }
+
         _track = nextTr;
         try { _library.Core.PodcastSetViewMode(issueId, PodcastEdition.Full, nextTr); } catch { }
+
         if (_playing && _playingIssueId == issueId && issue is not null)
         {
-            PlayIssueAtTurn(issue, _activeSentences.Length > 0 ? _activeSentences : LoadOrSynthesizeTranscript(issue), _activeTurnIdx);
+            var sents = _playingSentences.Length > 0 ? _playingSentences : LoadOrSynthesizeTranscript(issue);
+            bool hasAudioStream = (!string.IsNullOrEmpty(issue.LocalAudioPath) && File.Exists(issue.LocalAudioPath))
+                || !string.IsNullOrEmpty(issue.AudioUrl);
+            bool prevUsedStream = prevTr != PodcastTrack.Dub && hasAudioStream;
+            bool nextUsesStream = nextTr != PodcastTrack.Dub && hasAudioStream;
+
+            if (prevUsedStream && nextUsesStream && _usingExternalMedia)
+            {
+                // Keep real human audio stream playing seamlessly without recreating MediaSource!
+            }
+            else
+            {
+                PlayIssueAtTurn(issue, sents, _playingTurnIdx, exactSeekSec: preserveSec);
+            }
         }
+
+        _shelf.ShowToast(L10n.T($"同句无缝切换：{TrackLabel(nextTr, issue)}"), canUndo: false);
         _shelf.RefreshCurrentSubPage();
     }
 
@@ -4734,11 +4917,18 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         double clamped = Math.Clamp(targetSec, 0, totalDur);
         try { _library.Core.PodcastSavePlayback(issue.Id, clamped, null); } catch { }
 
-        int prevIdx = _activeTurnIdx;
-        if (sentences.Length > 0)
+        int prevReaderIdx = _readerTurnIdx;
+        int newIdx = sentences.Length > 0 ? Math.Max(0, Array.FindLastIndex(sentences, s => clamped >= s.T0)) : 0;
+
+        if (OpenIssueId == issue.Id)
         {
-            int idx = Array.FindLastIndex(sentences, s => clamped >= s.T0);
-            _activeTurnIdx = Math.Max(0, idx);
+            _readerSentences = sentences;
+            _readerTurnIdx = newIdx;
+        }
+        if (_playingIssueId == issue.Id)
+        {
+            _playingSentences = sentences;
+            _playingTurnIdx = newIdx;
         }
 
         if (_usingExternalMedia && _playing && _playingIssueId == issue.Id)
@@ -4747,12 +4937,12 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         }
         else if (_playing && _playingIssueId == issue.Id && sentences.Length > 0)
         {
-            PlayIssueAtTurn(issue, sentences, _activeTurnIdx);
+            PlayIssueAtTurn(issue, sentences, newIdx, exactSeekSec: clamped);
         }
 
         if (OpenIssueId == issue.Id)
         {
-            UpdateActiveTurnVisualsInPlace(prevIdx, _activeTurnIdx, bringIntoView: true);
+            UpdateActiveTurnVisualsInPlace(prevReaderIdx, _readerTurnIdx, bringIntoView: true);
             UpdateLiveProgressInPlace(clamped);
             RefreshPlayButtonsInPlace();
         }
@@ -4778,16 +4968,17 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             return;
         }
 
-        int prevIdx = _activeTurnIdx;
+        int baseIdx = _playingIssueId == issue.Id ? _playingTurnIdx : (OpenIssueId == issue.Id ? _readerTurnIdx : 0);
+        int prevReaderIdx = _readerTurnIdx;
         int step = forward ? 1 : -1;
-        int next = Math.Clamp(_activeTurnIdx + step, 0, Math.Max(0, sentences.Length - 1));
-        _activeTurnIdx = next;
-        PlayIssueAtTurn(issue, sentences, _activeTurnIdx);
+        int next = Math.Clamp(baseIdx + step, 0, Math.Max(0, sentences.Length - 1));
+        if (OpenIssueId == issue.Id) _readerTurnIdx = next;
+        PlayIssueAtTurn(issue, sentences, next);
 
         if (OpenIssueId == issue.Id)
         {
-            UpdateActiveTurnVisualsInPlace(prevIdx, _activeTurnIdx, bringIntoView: true);
-            UpdateLiveProgressInPlace(sentences[_activeTurnIdx].T0);
+            UpdateActiveTurnVisualsInPlace(prevReaderIdx, _readerTurnIdx, bringIntoView: true);
+            UpdateLiveProgressInPlace(sentences[next].T0);
             RefreshPlayButtonsInPlace();
         }
         else
@@ -4798,10 +4989,10 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
     private Action CreateShelfPauseCallback() => () =>
     {
-        if (_isPreviewingInterruptAnswer) return;
+        if (_disposed || _isPreviewingInterruptAnswer) return;
         _shelf.DispatcherQueue.TryEnqueue(() =>
         {
-            if (_isPreviewingInterruptAnswer) return;
+            if (_disposed || _isPreviewingInterruptAnswer) return;
             StopPlayback();
             if (OpenIssueId is not null) RefreshPlayButtonsInPlace();
             else _shelf.RefreshCurrentSubPage();
@@ -4917,20 +5108,28 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         return _library.Prefs.GetVoiceForLanguage(useEn ? "en-US" : "zh-Hans");
     }
 
-    private void PlayIssueAtTurn(PodcastIssue issue, MagazineSentence[] sentences, int idx)
+    private void PlayIssueAtTurn(PodcastIssue issue, MagazineSentence[] sentences, int idx, double? exactSeekSec = null)
     {
+        StopDrawerAudioPreviews();
         App.CurrentApp.ClaimAudioPlayback(_shelf, CreateShelfPauseCallback());
 
         _playing = true;
         _playingIssueId = issue.Id;
-        _activeSentences = sentences;
-        _activeTurnIdx = sentences.Length > 0 ? Math.Clamp(idx, 0, sentences.Length - 1) : 0;
+        _playingSentences = sentences;
+        _playingTurnIdx = sentences.Length > 0 ? Math.Clamp(idx, 0, sentences.Length - 1) : 0;
+        if (OpenIssueId == issue.Id)
+        {
+            _readerSentences = sentences;
+            _readerTurnIdx = _playingTurnIdx;
+        }
+        SyncEqTimer();
 
         _library.SystemIntegration.SetAudioPlaying(_shelf, true, issue.Title, () =>
             _shelf.DispatcherQueue.TryEnqueue(() =>
             {
+                if (_disposed) return;
                 if (_playing) StopPlayback();
-                else PlayIssueAtTurn(issue, _activeSentences, _activeTurnIdx);
+                else PlayIssueAtTurn(issue, _playingSentences, _playingTurnIdx);
                 if (OpenIssueId == issue.Id) RefreshPlayButtonsInPlace();
                 else _shelf.RefreshCurrentSubPage();
             }));
@@ -4938,10 +5137,11 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
         bool hasAudioStream = (!string.IsNullOrEmpty(issue.LocalAudioPath) && File.Exists(issue.LocalAudioPath))
             || !string.IsNullOrEmpty(issue.AudioUrl);
+        // 1:1 PodcastHub.swift:203-206: Coach ("双语助教") keeps playing the real human podcast audio stream!
+        // Only PodcastTrack.Dub ("原声线中文") switches to synthesized translated narration.
         bool wantsTranslatedDub = _track == PodcastTrack.Dub && sentences.Any(s => !string.IsNullOrWhiteSpace(s.TextTrans));
-        bool wantsCoachNarration = _track == PodcastTrack.Coach && sentences.Any(s => !string.IsNullOrWhiteSpace(s.CoachNote));
 
-        if (hasAudioStream && !wantsTranslatedDub && !wantsCoachNarration)
+        if (hasAudioStream && !wantsTranslatedDub)
         {
             try
             {
@@ -4952,7 +5152,9 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 _mediaPlayer.Source = MediaSource.CreateFromUri(new Uri(src));
                 _mediaPlayer.Volume = _interruptOpen ? 0.063 : 1.0;
                 _mediaPlayer.PlaybackSession.PlaybackRate = _rate;
-                double seekSec = _activeTurnIdx < sentences.Length ? Math.Max(0, sentences[_activeTurnIdx].T0) : Math.Max(0, issue.PositionSec);
+                double seekSec = exactSeekSec is double es && es >= 0
+                    ? es
+                    : (_playingTurnIdx < sentences.Length ? Math.Max(0, sentences[_playingTurnIdx].T0) : Math.Max(0, issue.PositionSec));
                 _mediaPlayer.PlaybackSession.Position = TimeSpan.FromSeconds(seekSec);
                 _mediaPlayer.Play();
                 _usingExternalMedia = true;
@@ -4966,12 +5168,12 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         _mediaPosTimer.Stop();
         try { _mediaPlayer.Pause(); } catch { }
 
-        if (_activeTurnIdx >= 0 && _activeTurnIdx < sentences.Length)
+        if (_playingTurnIdx >= 0 && _playingTurnIdx < sentences.Length)
         {
-            var s = sentences[_activeTurnIdx];
+            var s = sentences[_playingTurnIdx];
             string spk = s.Speaker ?? "";
             bool secondHost = spk.Contains("苏") || spk.Contains("沈") || spk.Contains("Clara", StringComparison.OrdinalIgnoreCase)
-                || (_activeTurnIdx % 2 == 1 && string.IsNullOrEmpty(spk));
+                || (_playingTurnIdx % 2 == 1 && string.IsNullOrEmpty(spk));
             bool isEn = (issue.Language ?? "").StartsWith("en", StringComparison.OrdinalIgnoreCase) && _track != PodcastTrack.Dub;
             string targetLang = isEn ? "en-US" : "zh-Hans";
 
@@ -4980,13 +5182,9 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             _ttsPlayer.SetVoice(hostVid);
             _ttsPlayer.SetRate(_rate);
 
-            string text = _track switch
-            {
-                PodcastTrack.Dub when !string.IsNullOrWhiteSpace(s.TextTrans) => s.TextTrans!,
-                PodcastTrack.Coach when !string.IsNullOrWhiteSpace(s.CoachNote) =>
-                    $"{s.TextOrig}。助教提示：{s.CoachNote}",
-                _ => s.TextOrig,
-            };
+            string text = _track == PodcastTrack.Dub && !string.IsNullOrWhiteSpace(s.TextTrans)
+                ? s.TextTrans!
+                : s.TextOrig;
             try { _library.Core.PodcastSavePlayback(issue.Id, s.T0, issue.DurationSec); } catch { }
             UpdateLiveProgressInPlace(s.T0);
             _ = _ttsPlayer.SpeakSentenceAsync(text, issue.Title, issue.ShowTitle, issue.Id, targetLang);
@@ -5000,27 +5198,28 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
     {
         _shelf.DispatcherQueue.TryEnqueue(() =>
         {
-            if (!_playing || _usingExternalMedia || _playingIssueId is null) return;
+            if (_disposed || !_playing || _usingExternalMedia || _playingIssueId is null) return;
             var issue = _library.Podcasts.GetIssues().FirstOrDefault(x => x.Id == _playingIssueId);
             if (issue is null) { StopPlayback(); return; }
 
-            int prevIdx = _activeTurnIdx;
-            int next = _activeTurnIdx + 1;
-            while (next < _activeSentences.Length && !string.IsNullOrEmpty(_activeSentences[next].SkipReason))
+            int prevIdx = _playingTurnIdx;
+            int next = _playingTurnIdx + 1;
+            while (next < _playingSentences.Length && !string.IsNullOrEmpty(_playingSentences[next].SkipReason))
                 next++;
 
-            if (next < _activeSentences.Length)
+            if (next < _playingSentences.Length)
             {
-                _activeTurnIdx = next;
-                PlayIssueAtTurn(issue, _activeSentences, next);
+                _playingTurnIdx = next;
+                PlayIssueAtTurn(issue, _playingSentences, next);
                 if (OpenIssueId == issue.Id)
                 {
+                    _readerTurnIdx = next;
                     UpdateActiveTurnVisualsInPlace(prevIdx, next, bringIntoView: true);
-                    UpdateLiveProgressInPlace(_activeSentences[next].T0);
+                    UpdateLiveProgressInPlace(_playingSentences[next].T0);
                 }
                 else
                 {
-                    UpdateLiveProgressInPlace(_activeSentences[next].T0);
+                    UpdateLiveProgressInPlace(_playingSentences[next].T0);
                 }
             }
             else
@@ -5046,21 +5245,22 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
     /// </summary>
     private void OnMediaPosTick(object? sender, object e)
     {
-        if (!_playing || !_usingExternalMedia || _playingIssueId is null) return;
+        if (_disposed || !_playing || !_usingExternalMedia || _playingIssueId is null) return;
         double pos = _mediaPlayer.PlaybackSession.Position.TotalSeconds;
         try { _library.Core.PodcastSavePlayback(_playingIssueId, pos, null); } catch { }
 
         UpdateLiveProgressInPlace(pos);
 
-        if (_activeSentences.Length > 0)
+        if (_playingSentences.Length > 0)
         {
-            int idx = Array.FindLastIndex(_activeSentences, s => pos >= s.T0);
-            if (idx >= 0 && idx != _activeTurnIdx)
+            int idx = Array.FindLastIndex(_playingSentences, s => pos >= s.T0);
+            if (idx >= 0 && idx != _playingTurnIdx)
             {
-                int prevIdx = _activeTurnIdx;
-                _activeTurnIdx = idx;
+                int prevIdx = _playingTurnIdx;
+                _playingTurnIdx = idx;
                 if (OpenIssueId == _playingIssueId)
                 {
+                    _readerTurnIdx = idx;
                     UpdateActiveTurnVisualsInPlace(prevIdx, idx, bringIntoView: true);
                 }
             }
@@ -5072,6 +5272,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         _playing = false;
         _usingExternalMedia = false;
         _mediaPosTimer.Stop();
+        SyncEqTimer();
         _ttsPlayer.Stop();
         try { _mediaPlayer.Pause(); } catch { }
         _library.SystemIntegration.SetAudioPlaying(_shelf, false);
@@ -5084,44 +5285,57 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
     {
         var issue = _library.Podcasts.GetIssues().FirstOrDefault(i => i.Id == issueId);
         if (issue is null) return;
-        var sents = _activeSentences.Length > 0 && (_playingIssueId == issueId || _renderedReaderIssue?.Id == issueId)
-            ? _activeSentences
-            : LoadOrSynthesizeTranscript(issue);
-        double curSec = _usingExternalMedia && _playingIssueId == issueId
+
+        bool isPlayingTarget = _playingIssueId == issueId;
+        bool isReaderTarget = OpenIssueId == issueId && _renderedReaderIssue?.Id == issueId;
+        var sents = isPlayingTarget && _playingSentences.Length > 0
+            ? _playingSentences
+            : (isReaderTarget && _readerSentences.Length > 0 ? _readerSentences : LoadOrSynthesizeTranscript(issue));
+        int targetTurnIdx = isPlayingTarget ? _playingTurnIdx : (isReaderTarget ? _readerTurnIdx : 0);
+
+        double curSec = isPlayingTarget && _usingExternalMedia
             ? _mediaPlayer.PlaybackSession.Position.TotalSeconds
-            : (sents.ElementAtOrDefault(_activeTurnIdx)?.T0 ?? issue.PositionSec);
+            : (sents.ElementAtOrDefault(targetTurnIdx)?.T0 ?? issue.PositionSec);
 
         var win = YuyueCoreMethods.ResolveClipWindow(sents, curSec, Math.Max(10.0, issue.DurationSec));
         string quote = !string.IsNullOrWhiteSpace(win.QuoteText)
             ? win.QuoteText
-            : (sents.ElementAtOrDefault(_activeTurnIdx)?.TextOrig ?? $"原声片段 {FormatClock(win.T0)} – {FormatClock(win.T1)}");
+            : (sents.ElementAtOrDefault(targetTurnIdx)?.TextOrig ?? $"原声片段 {FormatClock(win.T0)} – {FormatClock(win.T1)}");
 
-        string spkForClip = win.Speaker ?? sents.ElementAtOrDefault(_activeTurnIdx)?.Speaker ?? "";
+        string spkForClip = win.Speaker ?? sents.ElementAtOrDefault(targetTurnIdx)?.Speaker ?? "";
         bool clipSecondHost = spkForClip.Contains("苏") || spkForClip.Contains("沈") || spkForClip.Contains("Clara", StringComparison.OrdinalIgnoreCase);
         bool clipIsEn = (issue.Language ?? "").StartsWith("en", StringComparison.OrdinalIgnoreCase);
         string? clipVoiceId = PickHostVoiceId(clipSecondHost, clipIsEn);
 
         string? audioRelPath = await _library.Podcasts.SliceLocalAudioClipAsync(issue, win.T0, win.T1, default, quote, clipVoiceId);
+        if (_disposed) return;
         try
         {
             var saved = _library.Core.PodcastAddClip(issueId, win.T0, win.T1, win.Speaker, quote, null, audioRelPath);
             if (!_drawerOpen) _hasNewClipDot = true;
 
-            // Update turn badge & slim button flash in-place without resetting scroll!
-            if (OpenIssueId == issueId && _turnVisualByIndex.TryGetValue(_activeTurnIdx, out var vm))
+            int clippedIdx = sents.Length > 0
+                ? Math.Max(0, Array.FindLastIndex(sents, s => win.T0 >= s.T0 - 0.1))
+                : targetTurnIdx;
+
+            // Update turn badge & BOTH top and bottom clip button flash in-place without resetting scroll!
+            if (OpenIssueId == issueId && _turnVisualByIndex.TryGetValue(clippedIdx, out var vm))
             {
                 vm.IsClipped = true;
                 if (vm.ClippedBadge is not null) vm.ClippedBadge.Visibility = Visibility.Visible;
                 var tint = ThemeHelper.TintColors(_library.Prefs.Tint, _readerDarkTheme);
-                vm.Card.Background = ComputeTurnBackground(_activeTurnIdx == vm.TurnIndex, true, _readerDarkTheme, tint);
+                vm.Card.Background = ComputeTurnBackground(_readerTurnIdx == vm.TurnIndex, true, _readerDarkTheme, tint);
             }
 
-            if (_slimClipBtnContent is not null)
+            if (_slimClipBtnContent is not null || _topClipBtnContent is not null)
             {
                 _clipFlashActive = true;
                 var p = ThemeHelper.Palette(_readerDarkTheme);
                 var tint = ThemeHelper.TintColors(_library.Prefs.Tint, _readerDarkTheme);
-                PopulateSlimClipButtonContent(_slimClipBtnContent, true, _readerDarkTheme, p, tint);
+                if (_slimClipBtnContent is not null)
+                    PopulateSlimClipButtonContent(_slimClipBtnContent, true, _readerDarkTheme, p, tint);
+                if (_topClipBtnContent is not null)
+                    PopulateTopClipButtonContent(_topClipBtnContent, true, p, tint);
                 _ = ResetClipFlashLaterAsync();
             }
 
@@ -5143,13 +5357,14 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         await Task.Delay(1500);
         _shelf.DispatcherQueue.TryEnqueue(() =>
         {
+            if (_disposed) return;
             _clipFlashActive = false;
+            var p = ThemeHelper.Palette(_readerDarkTheme);
+            var tint = ThemeHelper.TintColors(_library.Prefs.Tint, _readerDarkTheme);
             if (_slimClipBtnContent is not null)
-            {
-                var p = ThemeHelper.Palette(_readerDarkTheme);
-                var tint = ThemeHelper.TintColors(_library.Prefs.Tint, _readerDarkTheme);
                 PopulateSlimClipButtonContent(_slimClipBtnContent, false, _readerDarkTheme, p, tint);
-            }
+            if (_topClipBtnContent is not null)
+                PopulateTopClipButtonContent(_topClipBtnContent, false, p, tint);
         });
     }
 
@@ -5173,6 +5388,12 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             _ttsPlayer.Pause();
         }
 
+        if (_slimCenterGrid is not null)
+        {
+            _slimCenterGrid.Opacity = 0.45;
+            _slimCenterGrid.IsHitTestVisible = false;
+        }
+
         if (_slimInterruptBtn is not null)
         {
             var p = ThemeHelper.Palette(_readerDarkTheme);
@@ -5190,6 +5411,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
     private void CloseInterrupt(bool resumeAudio)
     {
+        AudioPlayer.StopActivePreview();
         try { _interruptMicCts?.Cancel(); _interruptMicCts?.Dispose(); } catch { }
         _interruptMicCts = null;
         _interruptListening = false;
@@ -5207,23 +5429,61 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 try
                 {
                     double cur = _mediaPlayer.PlaybackSession.Position.TotalSeconds;
-                    _mediaPlayer.PlaybackSession.Position = TimeSpan.FromSeconds(Math.Max(0, cur - 3.0));
+                    double rewound = Math.Max(0, cur - 3.0);
+                    _mediaPlayer.PlaybackSession.Position = TimeSpan.FromSeconds(rewound);
                     _mediaPlayer.Volume = 1.0;
+                    if (_playingIssueId is not null)
+                    {
+                        try { _library.Core.PodcastSavePlayback(_playingIssueId, rewound, null); } catch { }
+                        UpdateLiveProgressInPlace(rewound);
+                    }
                 }
                 catch { }
             }
             else if (_interruptWasPlayingTts)
             {
                 _ttsPlayer.Resume();
+                if (!_ttsPlayer.IsPlaying && _playingIssueId is string pid)
+                {
+                    var curIss = _library.Podcasts.GetIssues().FirstOrDefault(x => x.Id == pid);
+                    if (curIss is not null)
+                        PlayIssueAtTurn(curIss, _playingSentences, _playingTurnIdx);
+                }
+            }
+            else if (_renderedReaderIssue is PodcastIssue pausedIss)
+            {
+                // Rewind 3s even when paused before 插话 (PodcastHub.swift:799-800)
+                try
+                {
+                    double baseSec = (_playingIssueId == pausedIss.Id && _mediaPlayer.Source is not null)
+                        ? _mediaPlayer.PlaybackSession.Position.TotalSeconds
+                        : (_readerTurnIdx < _readerSentences.Length ? _readerSentences[_readerTurnIdx].T0 : pausedIss.PositionSec);
+                    double rewound = Math.Max(0, baseSec - 3.0);
+                    SeekIssueToSeconds(pausedIss, _readerSentences, rewound);
+                }
+                catch { }
             }
         }
-        else if (_interruptWasPlayingExternal)
+        else
         {
-            try { _mediaPlayer.Volume = 1.0; } catch { }
+            if (_interruptWasPlayingExternal)
+            {
+                try { _mediaPlayer.Volume = 1.0; } catch { }
+            }
+            else if (_interruptWasPlayingTts)
+            {
+                StopPlayback();
+            }
         }
 
         _interruptWasPlayingExternal = false;
         _interruptWasPlayingTts = false;
+
+        if (_slimCenterGrid is not null)
+        {
+            _slimCenterGrid.Opacity = 1.0;
+            _slimCenterGrid.IsHitTestVisible = true;
+        }
 
         if (_interruptCardHost is not null)
         {
@@ -5236,6 +5496,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             var tint = ThemeHelper.TintColors(_library.Prefs.Tint, _readerDarkTheme);
             StyleSlimInterruptButton(_slimInterruptBtn, false, p, tint);
         }
+        RefreshPlayButtonsInPlace();
     }
 
     private void RebuildFloatingInterruptCard(PodcastIssue issue)
@@ -5247,7 +5508,9 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         var serif = new FontFamily(YYFontFamily.Serif.WindowsFamily());
         Color leafSurface = dark ? Color.FromArgb(255, 31, 30, 28) : Color.FromArgb(255, 248, 245, 239);
 
-        var sents = _activeSentences.Length > 0 ? _activeSentences : LoadOrSynthesizeTranscript(issue);
+        var sents = _readerSentences.Length > 0 && OpenIssueId == issue.Id
+            ? _readerSentences
+            : (_playingIssueId == issue.Id && _playingSentences.Length > 0 ? _playingSentences : LoadOrSynthesizeTranscript(issue));
         string? linkedBookTitle = sents.FirstOrDefault(s => !string.IsNullOrWhiteSpace(s.BookTitle))?.BookTitle;
         bool showingReply = _latestInterruptReply is not null && !_interruptListening && string.IsNullOrWhiteSpace(_interruptQuestion) && !_interruptSending;
 
@@ -5284,6 +5547,8 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 {
                     _isPreviewingInterruptAnswer = false;
                     speakBtn.Content = L10n.T("▶ 听回答");
+                    if (_playing)
+                        App.CurrentApp.ClaimAudioPlayback(_shelf, CreateShelfPauseCallback());
                 }
             };
             Grid.SetColumn(speakBtn, 1);
@@ -5369,6 +5634,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 VerticalAlignment = VerticalAlignment.Center,
                 Padding = new Thickness(0, 6, 0, 4),
             };
+            YYChrome.StripTextBoxChrome(qBox);
             _interruptInputBox = qBox;
             Grid.SetColumn(qBox, 1);
             composerGrid.Children.Add(qBox);
@@ -5525,11 +5791,15 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         string q = _interruptQuestion.Trim();
         if (string.IsNullOrEmpty(q) || _interruptSending) return;
 
-        var sents = _activeSentences.Length > 0 ? _activeSentences : LoadOrSynthesizeTranscript(issue);
-        double atSec = _usingExternalMedia && _playingIssueId == issue.Id
+        bool isPlayingTarget = _playingIssueId == issue.Id;
+        var sents = isPlayingTarget && _playingSentences.Length > 0
+            ? _playingSentences
+            : (OpenIssueId == issue.Id && _readerSentences.Length > 0 ? _readerSentences : LoadOrSynthesizeTranscript(issue));
+        int askTurnIdx = isPlayingTarget ? _playingTurnIdx : _readerTurnIdx;
+        double atSec = isPlayingTarget && _usingExternalMedia
             ? _mediaPlayer.PlaybackSession.Position.TotalSeconds
-            : (sents.ElementAtOrDefault(_activeTurnIdx)?.T0 ?? issue.PositionSec);
-        string? contextLine = sents.ElementAtOrDefault(_activeTurnIdx)?.TextOrig;
+            : (sents.ElementAtOrDefault(askTurnIdx)?.T0 ?? issue.PositionSec);
+        string? contextLine = sents.ElementAtOrDefault(askTurnIdx)?.TextOrig;
 
         _interruptSending = true;
         _interruptVoiceHint = L10n.T("书伴正在结合上下文思考…");
@@ -5544,13 +5814,14 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                     source: UsageSource.Podcast)
                 : L10n.T("请先在「设置 · 书伴」中连接大模型 API Key 或本地 Ollama 后即可实时插话问答。");
 
+            if (_disposed) return;
             string cleanReply = reply.Trim();
             PodcastInterrupt savedObj;
             if (_library.Companion.IsConfigured)
             {
                 savedObj = _library.Core.PodcastAddInterrupt(issue.Id, atSec, q, cleanReply);
-                // Append inline right inside the active turn without resetting scroll!
-                if (_turnVisualByIndex.TryGetValue(_activeTurnIdx, out var vm))
+                // Append inline right inside the asked turn (captured before await!) without resetting scroll!
+                if (OpenIssueId == issue.Id && _turnVisualByIndex.TryGetValue(askTurnIdx, out var vm))
                 {
                     var p = ThemeHelper.Palette(_readerDarkTheme);
                     var tint = ThemeHelper.TintColors(_library.Prefs.Tint, _readerDarkTheme);
@@ -5637,6 +5908,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(0, 4, 0, 4),
         };
+        YYChrome.StripTextBoxChrome(searchBox);
         var searchPill = new Grid
         {
             Height = 28,
@@ -5665,6 +5937,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(0, 6, 0, 6),
         };
+        YYChrome.StripTextBoxChrome(topicBox);
 
         // Gapped Segmented Duration Scrubber (`5–10–15–30–45–60`, extending to `3` / `90` when custom) + Click-to-edit Pill!
         var durScrubHost = new Grid { Height = 38, Background = new SolidColorBrush(Colors.Transparent), VerticalAlignment = VerticalAlignment.Center };
@@ -5841,6 +6114,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                     Padding = new Thickness(4, 2, 2, 2),
                     VerticalAlignment = VerticalAlignment.Center,
                 };
+                YYChrome.StripTextBoxChrome(editBox);
                 void CommitCustomDur()
                 {
                     string digits = new string(editBox.Text.Where(char.IsDigit).ToArray());
@@ -6272,7 +6546,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                             CornerRadius = new CornerRadius(3),
                             BorderBrush = ThemeHelper.Brush(p.Line),
                             BorderThickness = new Thickness(0.5),
-                            Child = new Image { Source = new BitmapImage(new Uri(bk.CoverPath)), Stretch = Stretch.UniformToFill },
+                            Child = new Image { Source = new BitmapImage(new Uri(bk.CoverPath)) { DecodePixelWidth = 48 }, Stretch = Stretch.UniformToFill },
                         };
                     }
                     else
@@ -6613,6 +6887,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(0, 6, 0, 4),
         };
+        YYChrome.StripTextBoxChrome(queryBox);
 
         if (string.IsNullOrWhiteSpace(initialQuery))
         {
@@ -6766,6 +7041,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 var charts = await _library.Podcasts.FetchItunesTopChartsAsync();
                 _shelf.DispatcherQueue.TryEnqueue(() =>
                 {
+                    if (_disposed) return;
                     if (!string.IsNullOrWhiteSpace(queryBox.Text) && !LooksLikePodcastUrl(queryBox.Text)) return;
                     if (resultsStack.Children.Count <= 1 && charts.Count > 0)
                     {
@@ -7044,26 +7320,34 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         _ => L10n.T("书房电台"),
     };
 
-    private static string TrackLabel(PodcastTrack track) => track switch
+    private static string TrackLabel(PodcastTrack track, PodcastIssue? issue = null)
     {
-        PodcastTrack.Dub => L10n.T("原声线中文"),
-        PodcastTrack.Coach => L10n.T("双语"),
-        _ => L10n.T("原声"),
-    };
+        bool isEnglish = issue is null
+            || !(issue.Language ?? "").StartsWith("zh", StringComparison.OrdinalIgnoreCase)
+            || issue.StudioKind == StudioKind.VocabRadio
+            || issue.Fidelity == PodcastFidelity.L3CrossLingual;
+        return track switch
+        {
+            PodcastTrack.Dub => L10n.T("原声线中文"),
+            PodcastTrack.Coach => L10n.T("双语助教"),
+            _ => isEnglish ? L10n.T("英文原声") : L10n.T("原声"),
+        };
+    }
 
     private static Border BuildTrackSegmentedControl(
         PodcastTrack current,
         bool compact,
         YYPalette p,
         YYTintColors tint,
-        Action<PodcastTrack> onSelect)
+        Action<PodcastTrack> onSelect,
+        bool isEnglish = true)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
         (PodcastTrack Tr, string Label)[] opts =
         [
-            (PodcastTrack.Original, L10n.T("原声")),
+            (PodcastTrack.Original, compact ? L10n.T("原声") : (isEnglish ? L10n.T("英文原声") : L10n.T("原声"))),
             (PodcastTrack.Dub, compact ? L10n.T("中文") : L10n.T("原声线中文")),
-            (PodcastTrack.Coach, L10n.T("双语")),
+            (PodcastTrack.Coach, compact ? L10n.T("双语") : L10n.T("双语助教")),
         ];
         foreach (var (tr, lbl) in opts)
         {
@@ -7126,7 +7410,11 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 Background = ThemeHelper.Brush(p.Inset),
                 BorderBrush = ThemeHelper.Brush(p.Line),
                 BorderThickness = new Thickness(0.5),
-                Child = new Image { Source = new BitmapImage(artUri), Stretch = Stretch.UniformToFill },
+                Child = new Image
+                {
+                    Source = new BitmapImage(artUri) { DecodePixelWidth = Math.Max(36, (int)Math.Ceiling(size * 2)) },
+                    Stretch = Stretch.UniformToFill,
+                },
             };
         }
 

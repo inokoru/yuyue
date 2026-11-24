@@ -1,7 +1,9 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
@@ -767,19 +769,72 @@ public static class YYChrome
 
     // ---------- Frameless macOS Sheet, Safe Dialog Host & Motion Helpers ----------
 
-    private static readonly Dictionary<XamlRoot, SemaphoreSlim> _dialogLocks = new();
+    private static readonly ConditionalWeakTable<XamlRoot, SemaphoreSlim> _dialogLocks = new();
 
-    private static SemaphoreSlim GetDialogLock(XamlRoot xamlRoot)
+    private static SemaphoreSlim GetDialogLock(XamlRoot xamlRoot) =>
+        _dialogLocks.GetValue(xamlRoot, static _ => new SemaphoreSlim(1, 1));
+
+    /// <summary>
+    /// Returns true if a real modal dialog or flyout/menu is open on <paramref name="xamlRoot"/>,
+    /// ignoring ephemeral <see cref="ToolTip"/> popups so hover tooltips never block keyboard shortcuts.
+    /// </summary>
+    public static bool HasBlockingModalOrFlyoutOpen(XamlRoot? xamlRoot)
     {
-        lock (_dialogLocks)
+        if (xamlRoot is null) return false;
+        try
         {
-            if (!_dialogLocks.TryGetValue(xamlRoot, out var sem))
+            foreach (var pop in VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot))
             {
-                sem = new SemaphoreSlim(1, 1);
-                _dialogLocks[xamlRoot] = sem;
+                if (pop.Child is ContentDialog or FlyoutPresenter or MenuFlyoutPresenter)
+                    return true;
             }
-            return sem;
         }
+        catch { }
+        return false;
+    }
+
+    /// <summary>
+    /// Strips WinUI 3's inner focus border and opaque focus/hover fill from a <see cref="TextBox"/>
+    /// placed inside a custom rounded capsule or card <see cref="Border"/>.
+    /// </summary>
+    public static void StripTextBoxChrome(TextBox box)
+    {
+        var transparent = new SolidColorBrush(Colors.Transparent);
+        box.BorderThickness = new Thickness(0);
+        box.Background = transparent;
+        box.UseSystemFocusVisuals = false;
+        box.Resources["TextControlBorderThemeThickness"] = new Thickness(0);
+        box.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
+        box.Resources["TextControlBackground"] = transparent;
+        box.Resources["TextControlBackgroundPointerOver"] = transparent;
+        box.Resources["TextControlBackgroundFocused"] = transparent;
+        box.Resources["TextControlBackgroundDisabled"] = transparent;
+        box.Resources["TextControlBorderBrush"] = transparent;
+        box.Resources["TextControlBorderBrushPointerOver"] = transparent;
+        box.Resources["TextControlBorderBrushFocused"] = transparent;
+        box.Resources["TextControlBorderBrushDisabled"] = transparent;
+    }
+
+    /// <summary>
+    /// Strips WinUI 3's inner focus border and opaque focus/hover fill from a <see cref="PasswordBox"/>
+    /// placed inside a custom rounded capsule or card <see cref="Border"/>.
+    /// </summary>
+    public static void StripPasswordBoxChrome(PasswordBox box)
+    {
+        var transparent = new SolidColorBrush(Colors.Transparent);
+        box.BorderThickness = new Thickness(0);
+        box.Background = transparent;
+        box.UseSystemFocusVisuals = false;
+        box.Resources["TextControlBorderThemeThickness"] = new Thickness(0);
+        box.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
+        box.Resources["TextControlBackground"] = transparent;
+        box.Resources["TextControlBackgroundPointerOver"] = transparent;
+        box.Resources["TextControlBackgroundFocused"] = transparent;
+        box.Resources["TextControlBackgroundDisabled"] = transparent;
+        box.Resources["TextControlBorderBrush"] = transparent;
+        box.Resources["TextControlBorderBrushPointerOver"] = transparent;
+        box.Resources["TextControlBorderBrushFocused"] = transparent;
+        box.Resources["TextControlBorderBrushDisabled"] = transparent;
     }
 
     /// <summary>
@@ -893,6 +948,7 @@ public static class YYChrome
             Child = body,
         };
         body.HorizontalAlignment = HorizontalAlignment.Stretch;
+        L10n.ApplyTree(surface);
 
         var dlg = new ContentDialog
         {
@@ -1189,6 +1245,7 @@ public static class YYChrome
             VerticalAlignment = VerticalAlignment.Center,
             Content = YYIcons.Make("xmark", Math.Round(size * 0.39), ThemeHelper.Brush(p.T2)),
         };
+        AutomationProperties.SetName(btn, L10n.T("关闭"));
         btn.Click += (_, _) => onClose();
         return btn;
     }
