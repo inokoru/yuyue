@@ -810,7 +810,7 @@ public sealed class UpdateAndFeedbackService
 
         (string Title, string Body)[] items =
         [
-            ("没有账号，也没有服务器", "语阅没有注册登录，不埋点、不接入任何第三方统计或崩溃分析 SDK。你的书库、阅读进度、划线想法与生词全部保存在本机目录中。"),
+            ("没有账号，也没有广告", "语阅没有注册登录、广告或跨应用追踪。你的书库、阅读进度、划线想法与生词全部保存在本机目录中。为了解功能使用情况，应用默认开启匿名使用统计，仅记录功能使用形态，不关联个人身份，绝不收集书名、笔记、划线或搜索词，可随时在「关于」页关闭。"),
             ("连接外部服务时直连服务商", "使用免费在线语音时，当前要读的句子会直接发给在线语音服务；当你主动配置 WebDAV 云盘、AI 书伴（DeepSeek / OpenAI / Claude / Ollama 等）、云端语音或 Notion / flomo / 新枝笔记导出时，客户端直接向你指定的服务地址发起请求，API Key 使用 Windows DPAPI 加密存储在本机，从不经过语阅中转，也从不写入跨端同步包。"),
             ("检查更新与模型下载", "检查更新与按需下载开源字体、离线语音模型、声音包时，仅向 GitHub Releases、魔搭（ModelScope）或 Hugging Face 发起普通 HTTPS GET 请求（字体预览按需访问 Google Fonts），不携带任何书库或设备标识。"),
             ("问题反馈", "只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；正文与附件均会公开展示，不收集邮箱。"),
@@ -861,7 +861,7 @@ public sealed class UpdateAndFeedbackService
             Padding = new Thickness(24, 20, 24, 18),
             Children =
             {
-                YYChrome.MakeSheetHeader("隐私说明", "没有服务器，不收集任何数据", () => dlgRef?.Hide(), dark, titleSize: 18, serifTitle: true),
+                YYChrome.MakeSheetHeader("隐私说明", "书库仅存本机，不含身份与广告", () => dlgRef?.Hide(), dark, titleSize: 18, serifTitle: true),
                 new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) },
                 new ScrollViewer { MaxHeight = 430, Content = groupCard },
                 foot,
@@ -1010,6 +1010,7 @@ public sealed class UpdateAndFeedbackService
 
     public async Task ShowFeedbackComposerAsync(Window ownerWindow, XamlRoot xamlRoot)
     {
+        _library.Analytics.TrackScreen("Feedback");
         await FlushOfflineFeedbackQueueAsync();
 
         bool dark = ThemeHelper.IsDark(xamlRoot.Content is FrameworkElement fe ? fe.ActualTheme : ElementTheme.Light);
@@ -1654,6 +1655,7 @@ public sealed class UpdateAndFeedbackService
                 var relayStatus = await TrySubmitViaRelayAsync(category, title, text, withDeviceInfo, finalAttachments);
                 if (relayStatus == RelaySubmitOutcome.Sent)
                 {
+                    _library.Analytics.TrackFeedbackSubmitted(finalAttachments.Count(a => a.IsImage), withDeviceInfo);
                     ClearPersistedDraft();
                     outerSwitchHost.Content = BuildThanksView(queuedOffline: false);
                 }

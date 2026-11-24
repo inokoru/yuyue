@@ -71,6 +71,12 @@ public sealed partial class PodcastReaderWindow : Window
         Closed += OnWindowClosed;
 
         ApplyAppearance();
+        _library.Analytics.TrackScreen("Podcasts");
+        Activated += (_, args) =>
+        {
+            if (args.WindowActivationState != WindowActivationState.Deactivated)
+                _library.Analytics.TrackScreen("Podcasts");
+        };
         _ = RenderIssueAsync();
         _ = RenderClipsAsync();
     }
@@ -461,6 +467,7 @@ public sealed partial class PodcastReaderWindow : Window
                 _streamPlayer.PlaybackSession.Position = System.TimeSpan.FromSeconds(_issue.PositionSec);
             _streamPlayer.Play();
             _playingStream = true;
+            _library.Analytics.TrackAudioFeatureUsed("podcast_play");
             _library.SystemIntegration.SetAudioPlaying(this, true, _issue.Title, PauseFromAudioClaim);
             UpdatePlayButton();
             return;
@@ -479,6 +486,8 @@ public sealed partial class PodcastReaderWindow : Window
                 _ttsPlayer.SetRate(_rate);
                 _ttsPlayer.Start(lines, 0);
                 _playingTts = true;
+                _library.Analytics.TrackAudioFeatureUsed("podcast_play");
+                _library.Analytics.TrackTtsStarted(_ttsPlayer.ActiveTtsEngineKey, "podcast");
                 _library.SystemIntegration.SetAudioPlaying(this, true, _issue.Title, PauseFromAudioClaim);
                 UpdatePlayButton();
             }

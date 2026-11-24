@@ -169,6 +169,12 @@ public sealed partial class AudiobookWindow : Window
         Closed += OnWindowClosed;
 
         ApplyAppearance();
+        _library.Analytics.TrackScreen("Reader");
+        Activated += (_, args) =>
+        {
+            if (args.WindowActivationState != WindowActivationState.Deactivated)
+                _library.Analytics.TrackScreen("Reader");
+        };
         _ = LoadRecordingAsync(autoPlay);
         TryAutoResumeAlignment();
     }
@@ -371,7 +377,7 @@ public sealed partial class AudiobookWindow : Window
         {
             var prog = _library.Core.AudiobookProgress(_bookId);
             if (!string.IsNullOrEmpty(prog.PairedWith) && !prog.Done && Aligner.IsInstalled(_library.DataDir))
-                _library.AudiobookWork.Start(_bookId, prog.PairedWith, _globalPosSec, autoDownloadModel: false);
+                _library.AudiobookWork.Start(_bookId, prog.PairedWith, _globalPosSec, autoDownloadModel: false, trackAnalytics: false);
         }
         catch { }
     }
@@ -820,9 +826,12 @@ public sealed partial class AudiobookWindow : Window
 
         if (startPlaying)
         {
+            bool wasPlaying = _playing;
             App.CurrentApp.ClaimAudioPlayback(this, () => DispatcherQueue.TryEnqueue(() => { if (!_closed) PausePlayback(); }));
             _player.Play();
             _playing = true;
+            if (!wasPlaying)
+                _library.Analytics.TrackAudioFeatureUsed("audiobook_play");
             _listenSinceUtc ??= DateTime.UtcNow;
             _sleepLastTickUtc = DateTime.UtcNow;
         }
@@ -3554,6 +3563,7 @@ public sealed partial class AudiobookWindow : Window
             _player.Volume = _baseVolume;
             _player.Play();
             _playing = true;
+            _library.Analytics.TrackAudioFeatureUsed("audiobook_play");
             _listenSinceUtc = DateTime.UtcNow;
             _sleepLastTickUtc = DateTime.UtcNow;
             UpdateTransportUi();

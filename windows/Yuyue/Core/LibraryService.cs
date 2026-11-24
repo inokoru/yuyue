@@ -197,6 +197,11 @@ public sealed class DevicePrefs
     public string AmbientSoundId { get; set; } = ""; // "" | rain | fire | stream | night | cafe | wind
     public double AmbientSoundVolume { get; set; } = 0.25;
 
+    // 匿名使用统计偏好（默认开启，可随时在「关于」关闭）
+    public bool AnalyticsEnabled { get; set; } = true;
+    public string AnalyticsDistinctId { get; set; } = "";
+    public string AnalyticsLastVersion { get; set; } = "";
+
     public ElementTheme ToElementTheme() => ThemeMode switch
     {
         "light" => ElementTheme.Light,
@@ -234,6 +239,7 @@ public sealed class LibraryService : IDisposable
     public RemoteLibraryService RemoteLibraries { get; }
     public RecordingShareServer RecordingShare { get; }
     public SettingsHistoryStore SettingsHistory { get; }
+    public AirTrafficClient Analytics { get; }
 
     private readonly string _prefsPath;
 
@@ -267,6 +273,7 @@ public sealed class LibraryService : IDisposable
             catch { }
             SavePrefs();
         }
+        Analytics = new AirTrafficClient(Prefs, SavePrefs);
         Usage = new CompanionUsageLedger(DataDir, () => Prefs.AiDailyLlmTokenCap, () => Prefs.AiDailyTtsCharCap);
         Ecdict = new BuiltInEcdict();
         Kokoro = new KokoroVoiceModel(Core, DataDir, (langKey, vid) =>
@@ -275,7 +282,7 @@ public sealed class LibraryService : IDisposable
             SavePrefs();
         });
         LiveVoice = new LiveVoiceModel(Core, DataDir);
-        AudiobookWork = new AudiobookWork(Core, DataDir);
+        AudiobookWork = new AudiobookWork(Core, DataDir, () => Analytics.TrackAudioFeatureUsed("audiobook_align"));
         CloudVoices = new CloudVoiceService(this);
         Fonts = new FontShelfService(Core.FontsDir());
         Sync = new SyncService(this);
@@ -532,7 +539,10 @@ public sealed class LibraryService : IDisposable
                 if (prop is null || !prop.CanWrite) return false;
                 object? val = JsonSerializer.Deserialize(raw, prop.PropertyType);
                 prop.SetValue(Prefs, val);
-                SavePrefs();
+                if (propName == nameof(DevicePrefs.AnalyticsEnabled))
+                    Analytics.SetEnabled(Prefs.AnalyticsEnabled);
+                else
+                    SavePrefs();
                 return true;
             }
         }
@@ -542,6 +552,7 @@ public sealed class LibraryService : IDisposable
 
     public void Dispose()
     {
+        try { Analytics.Dispose(); } catch { }
         Kokoro.CancelDownload();
         KokoroEngine.Instance.CloseSession();
         AudiobookWork.Dispose();

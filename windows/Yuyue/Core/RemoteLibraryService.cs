@@ -421,6 +421,7 @@ public sealed class RemoteLibraryService
                         fallbackCover: coverBytes);
                 }
 
+                _library.Analytics.TrackBookImported(imported.Format.ToString(), src.Kind, dest);
                 _library.Prefs.RemoteAcquiredBooks[item.Url] = imported.Id;
                 _library.SavePrefs();
                 return imported;
@@ -517,6 +518,7 @@ public sealed class RemoteLibraryService
         _wantedTrack.TryAdd(bookId, 1);
         StartBackgroundStreamLoop(bookId);
 
+        _library.Analytics.TrackBookImported("audio", src.Kind, null);
         _library.Prefs.RemoteAcquiredBooks[audioTracks[0].Url] = summary.Id;
         _library.SavePrefs();
         return summary;

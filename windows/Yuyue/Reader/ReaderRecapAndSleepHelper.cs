@@ -578,6 +578,7 @@ public static class ReaderRecapAndSleepHelper
             var imported = Yuyue.Audiobook.AudiobookImporter.IsAudiobookOrArchivePath(picked.Path)
                 ? await Yuyue.Audiobook.AudiobookImporter.ImportFilesAsync(library, [picked.Path])
                 : await library.ImportBookWithExtrasAsync(picked.Path);
+            library.Analytics.TrackBookImported(imported.Format.ToString(), "file_picker", picked.Path);
             if (onReimported is not null) await onReimported(imported.Id);
         }
         catch (Exception ex)

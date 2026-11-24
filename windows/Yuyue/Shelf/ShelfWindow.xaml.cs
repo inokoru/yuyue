@@ -168,6 +168,24 @@ public sealed partial class ShelfWindow : Window
         ApplyAppearance();
         RefreshBooks();
         UpdateSyncFooter();
+        TrackActiveShelfScreen();
+        Activated += (_, args) =>
+        {
+            if (args.WindowActivationState != WindowActivationState.Deactivated)
+                TrackActiveShelfScreen();
+        };
+    }
+
+    private void TrackActiveShelfScreen()
+    {
+        string screen = _activeFilter switch
+        {
+            "notes" or "words" => "Notes",
+            "podcasts" => "Podcasts",
+            "progress" => "Me",
+            _ => "Shelf",
+        };
+        _library.Analytics.TrackScreen(screen);
     }
 
     public void RefreshCurrentSubPage()
@@ -183,6 +201,7 @@ public sealed partial class ShelfWindow : Window
         UpdateNavSelectionVisuals();
         ConfigureHeaderForCurrentView();
         RenderCurrentView();
+        TrackActiveShelfScreen();
     }
 
     public Task OpenStudioSheetForBookAsync(string bookId, StudioKind kind = StudioKind.BookGuide) =>
@@ -194,6 +213,7 @@ public sealed partial class ShelfWindow : Window
         _activeFilter = "all";
         UpdateNavSelectionVisuals();
         RenderCurrentView();
+        TrackActiveShelfScreen();
         _ = Task.Run(async () =>
         {
             await Task.Delay(3500);
@@ -587,7 +607,7 @@ public sealed partial class ShelfWindow : Window
                     {
                         var items = await de.DataView.GetStorageItemsAsync();
                         var paths = items.Select(it => it.Path).Where(fp => !string.IsNullOrEmpty(fp)).ToArray();
-                        if (paths.Length > 0) await ImportPathsAsync(paths, openFirst: false, targetCollectionId: pinCid);
+                        if (paths.Length > 0) await ImportPathsAsync(paths, openFirst: false, targetCollectionId: pinCid, source: "share_in");
                         return;
                     }
                     string? dragBookId = de.DataView.Properties.TryGetValue("yuyue-book-id", out var bv) ? bv as string : null;
@@ -2674,6 +2694,7 @@ public sealed partial class ShelfWindow : Window
                     var imported = await AudiobookImporter.ShowImportSheetAsync(this, RootGrid.XamlRoot, _library, files.Select(f => f.Path).ToArray());
                     if (imported is not null)
                     {
+                        _library.Analytics.TrackBookImported(imported.Format.ToString(), "file_picker", files.FirstOrDefault()?.Path);
                         try { _library.Core.AudiobookPair(imported.Id, book.Id); } catch { }
                         RefreshBooks();
                         ShowToast($"已导入并配对《{imported.Title}》", canUndo: false);
@@ -6052,7 +6073,7 @@ public sealed partial class ShelfWindow : Window
                     {
                         var items = await de.DataView.GetStorageItemsAsync();
                         var paths = items.Select(it => it.Path).Where(fp => !string.IsNullOrEmpty(fp)).ToArray();
-                        if (paths.Length > 0) await ImportPathsAsync(paths, openFirst: false, targetCollectionId: cid);
+                        if (paths.Length > 0) await ImportPathsAsync(paths, openFirst: false, targetCollectionId: cid, source: "share_in");
                         return;
                     }
                     string? bid = null;
@@ -6124,6 +6145,7 @@ public sealed partial class ShelfWindow : Window
             _activeFilter = "progress";
             UpdateNavSelectionVisuals();
             RenderCurrentView();
+            TrackActiveShelfScreen();
             return;
         }
         if (filter.Equals("podcast-inline", StringComparison.OrdinalIgnoreCase))
@@ -6133,6 +6155,7 @@ public sealed partial class ShelfWindow : Window
             _activeFilter = "podcasts";
             UpdateNavSelectionVisuals();
             RenderCurrentView();
+            TrackActiveShelfScreen();
             return;
         }
         if (filter.StartsWith("quick:", StringComparison.OrdinalIgnoreCase))
@@ -6141,6 +6164,7 @@ public sealed partial class ShelfWindow : Window
             _activeFilter = "all";
             UpdateNavSelectionVisuals();
             RenderCurrentView();
+            TrackActiveShelfScreen();
             QuickSearchOverlay.Visibility = Visibility.Visible;
             QuickSearchBox.Text = q;
             UpdateQuickSearchResults(q);
@@ -6153,6 +6177,7 @@ public sealed partial class ShelfWindow : Window
         _activeFilter = filter;
         UpdateNavSelectionVisuals();
         RenderCurrentView();
+        TrackActiveShelfScreen();
     }
 
     private void NavItem_Click(object sender, RoutedEventArgs e)
@@ -6164,6 +6189,7 @@ public sealed partial class ShelfWindow : Window
             _activeFilter = tag;
             UpdateNavSelectionVisuals();
             RenderCurrentView();
+            TrackActiveShelfScreen();
         }
     }
 
@@ -7170,7 +7196,7 @@ public sealed partial class ShelfWindow : Window
         ImportQueueCard.Child = null;
     }
 
-    public async Task ImportPathsAsync(IReadOnlyList<string> paths, bool openFirst, string? targetCollectionId = null)
+    public async Task ImportPathsAsync(IReadOnlyList<string> paths, bool openFirst, string? targetCollectionId = null, string source = "file_picker")
     {
         string? effectiveColId = targetCollectionId
             ?? (_activeFilter.StartsWith("col:", StringComparison.Ordinal) ? _activeFilter[4..] : null);
@@ -7483,6 +7509,7 @@ public sealed partial class ShelfWindow : Window
                     imported.Add(book);
                     if (curRow.StatusHost is not null)
                         curRow.StatusHost.Content = MakeStatusSuccess();
+                    _library.Analytics.TrackBookImported(book.Format.ToString(), source, path);
                 }
             }
             catch (CoreException.Protected)
@@ -7547,6 +7574,7 @@ public sealed partial class ShelfWindow : Window
                         imported.Add(audioBook);
                         if (curRow.StatusHost is not null)
                             curRow.StatusHost.Content = MakeStatusSuccess();
+                        _library.Analytics.TrackBookImported(audioBook.Format.ToString(), source, batch.FirstOrDefault());
                     }
                 }
             }
@@ -7750,7 +7778,7 @@ public sealed partial class ShelfWindow : Window
             var items = await e.DataView.GetStorageItemsAsync();
             var paths = items.Select(it => it.Path).Where(p => !string.IsNullOrEmpty(p)).ToArray();
             string? targetColId = _activeFilter.StartsWith("col:", StringComparison.Ordinal) ? _activeFilter[4..] : null;
-            if (paths.Length > 0) await ImportPathsAsync(paths, openFirst: false, targetCollectionId: targetColId);
+            if (paths.Length > 0) await ImportPathsAsync(paths, openFirst: false, targetCollectionId: targetColId, source: "share_in");
         }
         finally
         {

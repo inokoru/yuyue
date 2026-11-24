@@ -215,7 +215,7 @@
   "请输入以 https://flomoapp.com/iwh/ 开头的专属 API 地址": "Enter your webhook URL starting with https://flomoapp.com/iwh/",
   "读书时选中文字即可划线；所有书的划线和想法都会在这里": "Select text while reading to highlight; all highlights and notes appear here.",
   "读外文书时点一个词，在释义卡片里点「加入生词本」，就记在这里，带着原句": "Click a word while reading and add it to Vocabulary; saved words appear here with context.",
-  "读着听，听着读，进度接得上。\n没有服务器，不收集数据，\n书与笔记都留在你手里。": "Read and listen in one seamless place.\nNo servers, no tracking—\nyour books and notes stay yours.",
+  "读着听，听着读，进度接得上。\n没有账号与广告，\n书与笔记都留在你手里。": "Read and listen in one seamless place.\nNo accounts, no ads—\nyour books and notes stay yours.",
   "调整颜色…": "Adjust Colors…",
   "通过个人云盘在多台设备间同步": "Sync across devices via your own cloud drive",
   "选择下方任一方式，跨设备同步进度、笔记与设置": "Choose a method below to sync progress, notes, and settings across devices",
@@ -631,5 +631,11 @@
   "接着读": "Continue",
   "加书": "Add Book",
   "正在梳理出场人物…": "Analyzing characters…",
-  "正在读取本章人物与台词…": "Loading chapter cast & dialogue…"
+  "正在读取本章人物与台词…": "Loading chapter cast & dialogue…",
+  "匿名使用统计": "Anonymous Usage Analytics",
+  "仅记录功能使用形态，不关联身份，绝不收集书名、笔记或搜索词": "Records feature usage shapes only without identity; never collects titles, notes, or searches",
+  "书库仅存本机 · 可关匿名统计": "Library on device · Opt-out analytics",
+  "书库仅存本机，不含身份与广告": "Library stays on device · No accounts or ads",
+  "没有账号，也没有广告": "No accounts, no ads",
+  "语阅没有注册登录、广告或跨应用追踪。你的书库、阅读进度、划线想法与生词全部保存在本机目录中。为了解功能使用情况，应用默认开启匿名使用统计，仅记录功能使用形态，不关联个人身份，绝不收集书名、笔记、划线或搜索词，可随时在「关于」页关闭。": "Yuyue has no accounts, ads, or cross-app tracking. Your library, reading progress, highlights, notes, and vocabulary stay strictly on this device. Anonymous usage analytics is enabled by default to understand feature usage—recording only feature shapes without personal identity and never collecting book titles, notes, highlights, or search queries—and can be turned off anytime on the About page."
 }
