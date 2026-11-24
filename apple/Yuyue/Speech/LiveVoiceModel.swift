@@ -219,6 +219,9 @@ final class LiveVoiceDownload {
     private(set) var phase: Phase = LiveVoiceModel.deviceUnsupported ? .unsupported : .idle
     private(set) var isExpensive = false
     @ObservationIgnored private var pathKnown = false
+    @ObservationIgnored private var pathSatisfied = false
+    @ObservationIgnored private var pendingWifiAutoStart = false
+    @ObservationIgnored private var runID: UInt64 = 0
     @ObservationIgnored private let monitor = NWPathMonitor()
     @ObservationIgnored private var task: Task<Void, Never>?
 
@@ -228,11 +231,20 @@ final class LiveVoiceDownload {
             return
         }
         monitor.pathUpdateHandler = { [weak self] path in
+            let satisfied = path.status == .satisfied
             let expensive = path.isExpensive || path.usesInterfaceType(.cellular)
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                self.pathSatisfied = satisfied
                 self.isExpensive = expensive
                 self.pathKnown = true
+                if self.pendingWifiAutoStart {
+                    self.pendingWifiAutoStart = false
+                    if KokoroDownload.canAutoStartOnWifi(pathKnown: true, isSatisfied: satisfied, isExpensive: expensive),
+                       self.phase == .idle, self.task == nil {
+                        self.start()
+                    }
+                }
             }
         }
         monitor.start(queue: .global(qos: .utility))
@@ -274,19 +286,19 @@ final class LiveVoiceDownload {
         if phase == .ready || task != nil { return }
         // 若上次失败，不自动无限重试，留给面板上的“再试”按钮。
         if phase == .failed { return }
-        Task { [weak self] in
-            guard let self else { return }
-            if !self.pathKnown {
-                try? await Task.sleep(for: .milliseconds(150))
-            }
-            guard !self.isExpensive, self.phase == .idle, self.task == nil else { return }
-            self.start()
+        guard pathKnown else {
+            pendingWifiAutoStart = true
+            return
         }
+        guard KokoroDownload.canAutoStartOnWifi(pathKnown: pathKnown, isSatisfied: pathSatisfied, isExpensive: isExpensive),
+              phase == .idle else { return }
+        start()
     }
 
     /// 用户手动点“下载”或“再试”（或 Wi‑Fi 自动触发）。
     func start() {
         guard !LiveVoiceModel.deviceUnsupported, task == nil, let ctx = LiveVoiceModel.context else { return }
+        pendingWifiAutoStart = false
         if LiveVoiceModel.installed(ctx.dataDir) {
             phase = .ready
             let core = ctx.core
@@ -294,15 +306,21 @@ final class LiveVoiceDownload {
             Task { await LiveVoiceModel.registerAsync(core, dataDir) }
             return
         }
+        runID &+= 1
+        let currentRun = runID
         phase = .downloading(0)
         let core = ctx.core
         let dataDir = ctx.dataDir
         let relay = ModelDownload.ProgressRelay { [weak self] frac in
-            guard let self, case .downloading = self.phase else { return }
+            guard let self, self.runID == currentRun, case .downloading = self.phase else { return }
             self.phase = .downloading(frac)
         }
         task = Task { [weak self] in
-            defer { self?.task = nil }
+            defer {
+                if let self, self.runID == currentRun {
+                    self.task = nil
+                }
+            }
             let needModel = !LiveVoiceModel.modelInstalled(dataDir)
             let needPack = !LiveVoiceModel.packInstalled(dataDir)
             let modelWeight = needModel && needPack ? 0.90 : (needModel ? 1.0 : 0.0)
@@ -334,14 +352,14 @@ final class LiveVoiceDownload {
                     }
                 }
                 await LiveVoiceModel.registerAsync(core, dataDir)
-                guard let self else { return }
+                guard let self, self.runID == currentRun else { return }
                 self.phase = .ready
                 DramaWork.tellCore(core)
                 NotificationCenter.default.post(name: LiveVoiceModel.ready, object: nil)
             } catch is CancellationError {
-                if let self, self.phase != .ready { self.phase = .idle }
+                if let self, self.runID == currentRun, self.phase != .ready { self.phase = .idle }
             } catch {
-                if let self { self.phase = .failed }
+                if let self, self.runID == currentRun { self.phase = .failed }
             }
         }
     }

@@ -279,4 +279,33 @@ struct WalkthroughRegressionTests {
         #expect(RemoteSources.hasEntry(entryID: "entry-gatsby", entryTitle: "The Great Gatsby", sourceID: "src1", got: got, books: [summary(id: "book-123", title: "The Great Gatsby", available: false)]) == false)
     }
 
+    @Test func `kokoro installation checks English lexicon, gates unknown network path, and aligns default narrators`() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "yuyue-kokoro-test-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let dir = KokoroModel.folder(root)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        for name in ["model.int8.onnx", "voices.bin", "tokens.txt", "lexicon-zh.txt"] {
+            try Data([1]).write(to: dir.appending(path: name))
+        }
+        #expect(KokoroModel.installed(root) == false)
+
+        try Data([1]).write(to: dir.appending(path: "lexicon-us-en.txt"))
+        if !KokoroModel.deviceUnsupported {
+            #expect(KokoroModel.installed(root) == true)
+        }
+
+        // Unknown network path or cellular path must never auto-start large model downloads (#46).
+        #expect(KokoroDownload.canAutoStartOnWifi(pathKnown: false, isSatisfied: false, isExpensive: false) == false)
+        #expect(KokoroDownload.canAutoStartOnWifi(pathKnown: false, isSatisfied: true, isExpensive: false) == false)
+        #expect(KokoroDownload.canAutoStartOnWifi(pathKnown: true, isSatisfied: false, isExpensive: false) == false)
+        #expect(KokoroDownload.canAutoStartOnWifi(pathKnown: true, isSatisfied: true, isExpensive: true) == false)
+        #expect(KokoroDownload.canAutoStartOnWifi(pathKnown: true, isSatisfied: true, isExpensive: false) == true)
+
+        let zhDefault = try #require(KokoroModel.fallbackSpeakers.first(where: { $0.id == "kokoro.zf_001" }))
+        let enDefault = try #require(KokoroModel.fallbackSpeakers.first(where: { $0.id == "kokoro.af_maple" }))
+        #expect(KokoroVoice(speaker: zhDefault).isDefaultNarrator == true)
+        #expect(KokoroVoice(speaker: enDefault).isDefaultNarrator == true)
+    }
 }

@@ -469,7 +469,7 @@ fun VoiceGroupsContent(
 
     // 1. 推荐
     if (showRecommended) {
-        val defaultKokoroId = if (language.lowercase().startsWith("en")) "kokoro.af_heart" else "kokoro.zf_001"
+        val defaultKokoroId = if (language.lowercase().startsWith("en")) "kokoro.af_maple" else "kokoro.zf_001"
         val primaryNarratorId = if (kokoroVoices.isNotEmpty()) defaultKokoroId else if (language.lowercase().startsWith("en")) "card.b.33" else "card.b.01"
         YYLabel(
             t("推荐"),

@@ -90,10 +90,7 @@ public sealed class KokoroVoiceModel
     public string ModelDir => Path.Combine(_dataDir, "models", ModelName);
 
     public bool IsInstalled =>
-        File.Exists(Path.Combine(ModelDir, "model.int8.onnx")) &&
-        File.Exists(Path.Combine(ModelDir, "voices.bin")) &&
-        File.Exists(Path.Combine(ModelDir, "tokens.txt")) &&
-        File.Exists(Path.Combine(ModelDir, "lexicon-zh.txt"));
+        RawFiles.All(f => File.Exists(Path.Combine(ModelDir, f.Name)));
 
     public void RegisterIfInstalled()
     {

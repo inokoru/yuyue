@@ -217,4 +217,21 @@ class VoiceExperienceTest {
             dir.deleteRecursively()
         }
     }
+
+    @Test
+    fun kokoroInstalledRequiresEnglishLexiconFile() {
+        val dir = Files.createTempDirectory("yuyue-kokoro-check").toFile()
+        try {
+            val modelDir = KokoroModel.folder(dir).apply { mkdirs() }
+            for (name in listOf("model.int8.onnx", "voices.bin", "tokens.txt", "lexicon-zh.txt")) {
+                modelDir.resolve(name).writeBytes(byteArrayOf(1))
+            }
+            assertFalse(KokoroModel.installed(dir))
+
+            modelDir.resolve("lexicon-us-en.txt").writeBytes(byteArrayOf(1))
+            assertTrue(KokoroModel.installed(dir))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }

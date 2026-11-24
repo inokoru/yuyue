@@ -53,10 +53,9 @@ nonisolated enum KokoroModel {
         guard !deviceUnsupported else { return false }
         let dir = folder(dataDir)
         let fm = FileManager.default
-        return fm.fileExists(atPath: dir.appending(path: "model.int8.onnx").path(percentEncoded: false))
-            && fm.fileExists(atPath: dir.appending(path: "voices.bin").path(percentEncoded: false))
-            && fm.fileExists(atPath: dir.appending(path: "tokens.txt").path(percentEncoded: false))
-            && fm.fileExists(atPath: dir.appending(path: "lexicon-zh.txt").path(percentEncoded: false))
+        return rawFiles.allSatisfy {
+            fm.fileExists(atPath: dir.appending(path: $0.name).path(percentEncoded: false))
+        }
     }
 
     static var isInstalled: Bool {
@@ -221,16 +220,26 @@ final class KokoroDownload {
         }
     }
 
+    private static let pendingVoiceKey = "kokoro.pendingVoice"
+
     private(set) var phase: Phase = KokoroModel.deviceUnsupported ? .unsupported : .idle
     private(set) var isExpensive = false
     /// 用户在离线包尚未下好时点选的音色（key 为 `VoiceBook.key`，如 `player.voice.zh`），下好后自动启用。
     private(set) var pendingVoice: [String: String] = [:]
     @ObservationIgnored private var pathKnown = false
+    @ObservationIgnored private var pathSatisfied = false
+    @ObservationIgnored private var pendingWifiAutoStart = false
+    @ObservationIgnored private var runID: UInt64 = 0
     @ObservationIgnored private let monitor = NWPathMonitor()
     @ObservationIgnored private var task: Task<Void, Never>?
 
+    nonisolated static func canAutoStartOnWifi(pathKnown: Bool, isSatisfied: Bool, isExpensive: Bool) -> Bool {
+        pathKnown && isSatisfied && !isExpensive
+    }
+
     func queueSelection(_ voiceID: String, for bookKey: String) {
         pendingVoice[bookKey] = voiceID
+        UserDefaults.standard.set(pendingVoice, forKey: Self.pendingVoiceKey)
         if phase == .idle || phase == .failed {
             start()
         }
@@ -242,16 +251,28 @@ final class KokoroDownload {
     }
 
     private init() {
+        if let saved = UserDefaults.standard.dictionary(forKey: Self.pendingVoiceKey) as? [String: String] {
+            pendingVoice = saved
+        }
         guard !KokoroModel.deviceUnsupported else {
             phase = .unsupported
             return
         }
         monitor.pathUpdateHandler = { [weak self] path in
+            let satisfied = path.status == .satisfied
             let expensive = path.isExpensive || path.usesInterfaceType(.cellular)
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                self.pathSatisfied = satisfied
                 self.isExpensive = expensive
                 self.pathKnown = true
+                if self.pendingWifiAutoStart {
+                    self.pendingWifiAutoStart = false
+                    if Self.canAutoStartOnWifi(pathKnown: true, isSatisfied: satisfied, isExpensive: expensive),
+                       self.phase == .idle, self.task == nil {
+                        self.start()
+                    }
+                }
             }
         }
         monitor.start(queue: .global(qos: .utility))
@@ -265,6 +286,7 @@ final class KokoroDownload {
         }
         guard let ctx = LiveVoiceModel.context else { return }
         if KokoroModel.installed(ctx.dataDir) {
+            applyPendingVoices()
             phase = .ready
             let core = ctx.core
             let dataDir = ctx.dataDir
@@ -274,61 +296,74 @@ final class KokoroDownload {
         }
     }
 
+    private func applyPendingVoices() {
+        guard !pendingVoice.isEmpty else { return }
+        for (bookKey, voiceID) in pendingVoice {
+            UserDefaults.standard.set(voiceID, forKey: bookKey)
+        }
+        pendingVoice.removeAll()
+        UserDefaults.standard.removeObject(forKey: Self.pendingVoiceKey)
+    }
+
     func startIfWifi(for language: String) {
         guard CardVoice.supportsLanguage(language), !KokoroModel.deviceUnsupported else { return }
         refresh()
         if phase == .ready || task != nil || phase == .failed { return }
-        Task { [weak self] in
-            guard let self else { return }
-            if !self.pathKnown {
-                try? await Task.sleep(for: .milliseconds(150))
-            }
-            guard !self.isExpensive, self.phase == .idle, self.task == nil else { return }
-            self.start()
+        guard pathKnown else {
+            pendingWifiAutoStart = true
+            return
         }
+        guard Self.canAutoStartOnWifi(pathKnown: pathKnown, isSatisfied: pathSatisfied, isExpensive: isExpensive),
+              phase == .idle else { return }
+        start()
     }
 
     func start() {
         guard !KokoroModel.deviceUnsupported, task == nil, let ctx = LiveVoiceModel.context else { return }
+        pendingWifiAutoStart = false
         if KokoroModel.installed(ctx.dataDir) {
+            applyPendingVoices()
             phase = .ready
             let core = ctx.core
             let dataDir = ctx.dataDir
             Task { await KokoroModel.registerAsync(core, dataDir) }
             return
         }
+        runID &+= 1
+        let currentRun = runID
         phase = .downloading(0)
         let core = ctx.core
         let dataDir = ctx.dataDir
         let relay = ModelDownload.ProgressRelay { [weak self] frac in
-            guard let self, case .downloading = self.phase else { return }
+            guard let self, self.runID == currentRun, case .downloading = self.phase else { return }
             self.phase = .downloading(frac)
         }
         task = Task { [weak self] in
-            defer { self?.task = nil }
+            defer {
+                if let self, self.runID == currentRun {
+                    self.task = nil
+                }
+            }
             do {
                 try await KokoroModel.ensureInstalled(into: dataDir) { frac in
                     relay.send(frac)
                 }
                 await KokoroModel.registerAsync(core, dataDir)
-                guard let self else { return }
-                if !self.pendingVoice.isEmpty {
-                    for (bookKey, voiceID) in self.pendingVoice {
-                        UserDefaults.standard.set(voiceID, forKey: bookKey)
-                    }
-                    self.pendingVoice.removeAll()
-                }
+                guard let self, self.runID == currentRun else { return }
+                self.applyPendingVoices()
                 self.phase = .ready
                 NotificationCenter.default.post(name: KokoroModel.ready, object: nil)
             } catch is CancellationError {
-                if let self, self.phase != .ready { self.phase = .idle }
+                if let self, self.runID == currentRun, self.phase != .ready { self.phase = .idle }
             } catch {
-                if let self { self.phase = .failed }
+                if let self, self.runID == currentRun { self.phase = .failed }
             }
         }
     }
 
     func cancel() {
+        runID &+= 1
+        pendingWifiAutoStart = false
         task?.cancel()
         task = nil
         if phase != .ready { phase = .idle }
@@ -355,7 +390,7 @@ nonisolated struct KokoroVoice: Voice {
     var qualityName: String? { String(localized: "Kokoro 离线") }
     var isOffline: Bool { true }
     var summaryLine: String { speaker.summary }
-    var isDefaultNarrator: Bool { speaker.id == "kokoro.zf_001" || speaker.id == "kokoro.af_heart" }
+    var isDefaultNarrator: Bool { speaker.id == "kokoro.zf_001" || speaker.id == "kokoro.af_maple" }
 
     func speaks(_ language: String) -> Bool {
         guard CardVoice.supportsLanguage(language) else { return false }
@@ -370,9 +405,7 @@ nonisolated struct KokoroVoice: Voice {
         let lang = CardVoice.inferLanguage(from: text, fallback: language.isEmpty ? speaker.lang : language)
         guard let ctx = LiveVoiceModel.context, KokoroModel.installed(ctx.dataDir) else {
             Task { @MainActor in
-                if KokoroDownload.shared.phase == .idle || KokoroDownload.shared.phase == .failed {
-                    KokoroDownload.shared.start()
-                }
+                KokoroDownload.shared.startIfWifi(for: lang)
             }
             throw KokoroError.notInstalled
         }

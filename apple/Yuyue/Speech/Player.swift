@@ -1067,15 +1067,9 @@ final class Player {
         let canon = CardVoice.canonicalLanguage(language)
         let savedID = UserDefaults.standard.string(forKey: Self.voiceKey(language))
             ?? UserDefaults.standard.string(forKey: Self.voiceKey(canon))
-        if let savedID {
-            if let chosen = Voices.find(savedID, bookID: detail.summary.id) {
-                voices[language] = chosen
-                return chosen
-            }
-            if savedID.hasPrefix("kokoro."),
-               let sp = KokoroModel.allSpeakers().first(where: { $0.id == savedID }) {
-                return KokoroVoice(speaker: sp)
-            }
+        if let savedID, let chosen = Voices.find(savedID, bookID: detail.summary.id) {
+            voices[language] = chosen
+            return chosen
         }
         if KokoroModel.isInstalled, let def = KokoroModel.defaultNarrator(for: language) {
             voices[language] = def

@@ -88,10 +88,7 @@ object KokoroModel {
 
     fun installed(dataDir: File): Boolean {
         val dir = folder(dataDir)
-        return File(dir, "model.int8.onnx").isFile &&
-            File(dir, "voices.bin").isFile &&
-            File(dir, "tokens.txt").isFile &&
-            File(dir, "lexicon-zh.txt").isFile
+        return directFiles.all { File(dir, it.localName).isFile }
     }
 
     fun canRun(dataDir: File): Boolean = !deviceUnsupported && installed(dataDir)
@@ -154,7 +151,7 @@ object KokoroModel {
         val core = app.library.core
         val list = voices(core, dataDir, tag)
         if (list.isEmpty()) return null
-        val primary = if (tag.lowercase().startsWith("en")) "kokoro.af_heart" else "kokoro.zf_001"
+        val primary = if (tag.lowercase().startsWith("en")) "kokoro.af_maple" else "kokoro.zf_001"
         return list.firstOrNull { it.id == primary } ?: list.firstOrNull { it.speaker.narrator } ?: list.first()
     }
 
