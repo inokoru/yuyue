@@ -81,8 +81,9 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 
 # —— Mac：Sparkle 用的 zip、签名、更新日志页、appcast.xml（Apple 芯片）与 appcast-x86_64.xml（Intel） ——
-ZIP="Yuyue-$VERSION-mac-arm64.zip"
-ZIP_X64="Yuyue-$VERSION-mac-x86_64.zip"
+# 发布附件统一用不带版本号的固定文件名，使 /releases/latest/download/Yuyue-* 永久指向最新版。
+ZIP="Yuyue-mac-arm64.zip"
+ZIP_X64="Yuyue-mac-x86_64.zip"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT/$ZIP"
 ditto -c -k --sequesterRsrc --keepParent "$APP_X64" "$OUT/$ZIP_X64"
 SIGN_UPDATE="$(find "$ROOT/apple/build/release-mac/SourcePackages/artifacts" "$ROOT/apple/build/release-mac-x86_64/SourcePackages/artifacts" -path '*Sparkle*/bin/sign_update' -type f 2>/dev/null | head -1)"
@@ -141,7 +142,7 @@ write_appcast "$OUT/appcast.xml" "$ZIP" "$SIG"
 write_appcast "$OUT/appcast-x86_64.xml" "$ZIP_X64" "$SIG_X64"
 
 # —— Android、iPhone：update.json ——
-APK_NAME="Yuyue-$VERSION-android.apk"
+APK_NAME="Yuyue-android.apk"
 cp "$APK" "$OUT/$APK_NAME"
 SIZE="$(stat -f %z "$OUT/$APK_NAME")"
 SHA="$(shasum -a 256 "$OUT/$APK_NAME" | cut -d' ' -f1)"
@@ -158,7 +159,10 @@ json.dump(u, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 PY
 fi
 
-cp "$DMG" "$DMG_X64" "$IPA" "$ROOT/CHANGELOG.md" "$OUT/"
+cp "$DMG" "$OUT/Yuyue-mac-arm64.dmg"
+cp "$DMG_X64" "$OUT/Yuyue-mac-x86_64.dmg"
+cp "$IPA" "$OUT/Yuyue-ios-unsigned.ipa"
+cp "$ROOT/CHANGELOG.md" "$OUT/"
 yuyue release-notes "$ROOT/CHANGELOG.md" "$VERSION" md > "$DIST/release-$VERSION-notes.md"
 
 if [ "$LOCAL" = 1 ]; then

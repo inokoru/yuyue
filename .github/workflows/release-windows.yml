@@ -166,6 +166,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "${{ needs.resolve-matrix.outputs.tag }}"
+          Get-ChildItem "windows/dist" -Filter "Yuyue-*-windows-*-Setup.exe" -File | ForEach-Object {
+            $stableName = $_.Name -replace '^Yuyue-[^-]+-windows-', 'Yuyue-windows-'
+            if ($stableName -ne $_.Name) {
+              Copy-Item $_.FullName (Join-Path $_.DirectoryName $stableName) -Force
+            }
+          }
           $files = Get-ChildItem "windows/dist" -File | Where-Object {
             $_.Name -like "*.zip" -or $_.Name -like "*-Setup.exe" -or $_.Name -like "SHA256SUMS-windows-*.txt" -or $_.Name -like "windows-update-*.json"
           } | Select-Object -ExpandProperty FullName

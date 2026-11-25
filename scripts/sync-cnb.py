@@ -120,8 +120,11 @@ def api_json(
         sys.exit(f"CNB API 请求失败：{method} {url} -> HTTP {e.code}\n{body}")
 
 
-def prepare_cnb_stage(release_dir: Path, stage_dir: Path, cnb_repo: str, tag: str) -> list[Path]:
-    """复制 release_dir 产物到临时目录，并将元数据中的 GitHub 下载地址替换为 CNB 同版本直链。"""
+def prepare_cnb_stage(release_dir: Path, stage_dir: Path, cnb_repo: str, tag: str, version: str = "") -> list[Path]:
+    """复制 release_dir 产物到临时目录，并将元数据中的 GitHub 下载地址替换为 CNB 同版本直链。
+    若产物目录仍是带版本号的旧文件名（如 Yuyue-0.1.3-android.apk），自动补充无版本号固定名（Yuyue-android.apk），
+    使 /-/releases/latest/download/Yuyue-* 永久免改链接直达最新版。
+    """
     gh_dl = f"https://github.com/{GITHUB_REPO}/releases/download/{tag}"
     cnb_dl = f"{WEB_BASE}/{cnb_repo}/-/releases/download/{tag}"
     gh_page = f"https://github.com/{GITHUB_REPO}/releases/tag/{tag}"
@@ -147,6 +150,22 @@ def prepare_cnb_stage(release_dir: Path, stage_dir: Path, cnb_repo: str, tag: st
         else:
             shutil.copy2(src, dst)
         staged_files.append(dst)
+
+    if version:
+        stable_suffixes = [
+            "android.apk",
+            "mac-arm64.dmg",
+            "mac-x86_64.dmg",
+            "ios-unsigned.ipa",
+            "windows-x64-Setup.exe",
+            "windows-arm64-Setup.exe",
+        ]
+        for suffix in stable_suffixes:
+            versioned_src = release_dir / f"Yuyue-{version}-{suffix}"
+            stable_dst = stage_dir / f"Yuyue-{suffix}"
+            if versioned_src.is_file() and not stable_dst.exists():
+                shutil.copy2(versioned_src, stable_dst)
+                staged_files.append(stable_dst)
 
     return staged_files
 
@@ -259,14 +278,26 @@ def verify_public_urls(cnb_repo: str, tag: str, filenames: list[str], check_late
         ).stdout.strip()
         print(f"  [{code}] {url}")
 
-    if check_latest and "update.json" in filenames:
-        latest_url = f"{WEB_BASE}/{cnb_repo}/-/releases/latest/download/update.json"
-        code = subprocess.run(
-            ["curl", "-sIL", "-o", "/dev/null", "-w", "%{http_code}", latest_url],
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        print(f"  [{code}] {latest_url}")
+    if check_latest:
+        latest_names = [
+            n
+            for n in filenames
+            if n in {
+                "update.json",
+                "Yuyue-android.apk",
+                "Yuyue-mac-arm64.dmg",
+                "Yuyue-mac-x86_64.dmg",
+                "Yuyue-ios-unsigned.ipa",
+            }
+        ]
+        for name in latest_names:
+            latest_url = f"{WEB_BASE}/{cnb_repo}/-/releases/latest/download/{name}"
+            code = subprocess.run(
+                ["curl", "-sIL", "-o", "/dev/null", "-w", "%{http_code}", latest_url],
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            print(f"  [{code}] {latest_url}")
 
 
 def main() -> None:
@@ -277,6 +308,7 @@ def main() -> None:
     parser.add_argument("--token-file", default=str(Path.home() / ".config" / "yuyue" / "cnb.token"), help="CNB 令牌文件路径")
     parser.add_argument("--draft", action="store_true", help="创建为草稿（默认直接正式发布）")
     parser.add_argument("--skip-git", action="store_true", help="跳过 git push，仅上传 Release 附件")
+    parser.add_argument("--only", nargs="+", help="仅上传指定文件名的附件（用于增量补传）")
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parent.parent
@@ -299,7 +331,10 @@ def main() -> None:
         git_push_cnb(root, args.repo, tag, token)
 
     with tempfile.TemporaryDirectory(prefix=f"yuyue-cnb-{version}-") as tmp:
-        staged = prepare_cnb_stage(release_dir, Path(tmp), args.repo, tag)
+        staged = prepare_cnb_stage(release_dir, Path(tmp), args.repo, tag, version)
+        if args.only:
+            only_set = set(args.only)
+            staged = [f for f in staged if f.name in only_set]
         if not staged:
             sys.exit(f"{release_dir} 中没有可上传的文件")
 
