@@ -457,8 +457,8 @@ public sealed class UpdateAndFeedbackService
             bool openReleases = false;
             string releasesBtnText = Yuyue.Speech.ModelDownload.PrefersChinaMirror() ? "查看发布页 (CNB) ↗" : "查看 GitHub Releases ↗";
             var footRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 4, 0, 0) };
-            footRow.Children.Add(YYChrome.MakeSheetPillButton(releasesBtnText, () => { openReleases = true; upToDateDlg?.Hide(); }, dark, _library.Prefs.Tint, "secondary", height: 34, horizontalPadding: 14));
-            footRow.Children.Add(YYChrome.MakeSheetPillButton("好", () => upToDateDlg?.Hide(), dark, _library.Prefs.Tint, "dark", height: 34, horizontalPadding: 18));
+            footRow.Children.Add(YYChrome.MakeDialogButton(releasesBtnText, () => { openReleases = true; upToDateDlg?.Hide(); }, dark, _library.Prefs.Tint, "secondary", height: 34, horizontalPadding: 14));
+            footRow.Children.Add(YYChrome.MakeDialogButton("好", () => upToDateDlg?.Hide(), dark, _library.Prefs.Tint, "dark", height: 34, horizontalPadding: 18));
 
             var body = new StackPanel
             {
@@ -466,14 +466,14 @@ public sealed class UpdateAndFeedbackService
                 Padding = new Thickness(22, 20, 22, 18),
                 Children =
                 {
-                    YYChrome.MakeSheetHeader(info is not null ? "已是最新版本" : "检查更新", null, () => upToDateDlg?.Hide(), dark, titleSize: 16),
+                    YYChrome.MakeDialogHeader(info is not null ? "已是最新版本" : "检查更新", null, () => upToDateDlg?.Hide(), dark, titleSize: 16),
                     new TextBlock { Text = msg, FontSize = 13, LineHeight = 20, Foreground = ThemeHelper.Brush(p.T1), TextWrapping = TextWrapping.Wrap },
                     new TextBlock { Text = $"更新渠道：{(_library.Prefs.UpdateChannel == "beta" ? "测试版 (Beta)" : "正式版")}", FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3) },
                     footRow,
                 },
             };
 
-            upToDateDlg = YYChrome.CreateMacSheet(xamlRoot, dark, 368, body, tint: _library.Prefs.Tint);
+            upToDateDlg = YYChrome.CreateFluentDialog(xamlRoot, dark, 368, body, tint: _library.Prefs.Tint);
             await upToDateDlg.ShowSafeAsync(_library.Prefs.Tint);
             if (openReleases)
                 _ = Launcher.LaunchUriAsync(new Uri(GetPreferredReleasesUrl()));
@@ -501,7 +501,7 @@ public sealed class UpdateAndFeedbackService
         kickerStack.Children.Add(new TextBlock { Text = $"语阅 v{info.Version}", FontFamily = serif, FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = ThemeHelper.Brush(p.T1) });
         kickerStack.Children.Add(new TextBlock { Text = $"当前版本 v{CurrentVersion}", FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3) });
         topHead.Children.Add(kickerStack);
-        var closeBtn = YYChrome.MakeSheetCloseButton(() => offerDlg?.Hide(), dark);
+        var closeBtn = YYChrome.MakeDialogCloseButton(() => offerDlg?.Hide(), dark);
         closeBtn.HorizontalAlignment = HorizontalAlignment.Right;
         closeBtn.VerticalAlignment = VerticalAlignment.Top;
         topHead.Children.Add(closeBtn);
@@ -517,7 +517,7 @@ public sealed class UpdateAndFeedbackService
         };
 
         string primaryLabel = !string.IsNullOrWhiteSpace(LatestWinInstallerUrl) ? "下载并安装" : "前往下载安装";
-        var installBtn = YYChrome.MakeSheetPillButton(primaryLabel, () => { action = 1; offerDlg?.Hide(); }, dark, _library.Prefs.Tint, "dark", height: 40, stretch: true);
+        var installBtn = YYChrome.MakeDialogButton(primaryLabel, () => { action = 1; offerDlg?.Hide(); }, dark, _library.Prefs.Tint, "dark", height: 40, stretch: true);
 
         var subRow = new Grid { Margin = new Thickness(0, 2, 0, 0) };
         var skipBtn = YYChrome.MakeSettingsActionButton("跳过此版本", () =>
@@ -541,7 +541,7 @@ public sealed class UpdateAndFeedbackService
             Children = { topHead, notesCard, installBtn, subRow },
         };
 
-        offerDlg = YYChrome.CreateMacSheet(xamlRoot, dark, 440, offerBody, tint: _library.Prefs.Tint);
+        offerDlg = YYChrome.CreateFluentDialog(xamlRoot, dark, 440, offerBody, tint: _library.Prefs.Tint);
         await offerDlg.ShowSafeAsync(_library.Prefs.Tint);
 
         if (action == 1)
@@ -581,7 +581,7 @@ public sealed class UpdateAndFeedbackService
 
         var progressBar = new ProgressBar { Minimum = 0, Maximum = 100, Value = 0, IsIndeterminate = true, HorizontalAlignment = HorizontalAlignment.Stretch };
         var statusText = new TextBlock { Text = $"正在下载语阅 v{info.Version} 安装包…", FontSize = 12.5, Foreground = ThemeHelper.Brush(p.T2), TextWrapping = TextWrapping.Wrap };
-        var cancelBtn = YYChrome.MakeSheetPillButton("取消", () => { cts.Cancel(); progDlg?.Hide(); }, dark, _library.Prefs.Tint, "secondary", height: 32, horizontalPadding: 16);
+        var cancelBtn = YYChrome.MakeDialogButton("取消", () => { cts.Cancel(); progDlg?.Hide(); }, dark, _library.Prefs.Tint, "secondary", height: 32, horizontalPadding: 16);
         cancelBtn.HorizontalAlignment = HorizontalAlignment.Right;
 
         var progBody = new StackPanel
@@ -597,7 +597,7 @@ public sealed class UpdateAndFeedbackService
             },
         };
 
-        progDlg = YYChrome.CreateMacSheet(xamlRoot, dark, 380, progBody, tint: _library.Prefs.Tint);
+        progDlg = YYChrome.CreateFluentDialog(xamlRoot, dark, 380, progBody, tint: _library.Prefs.Tint);
         progDlg.Closed += (_, _) => { try { cts.Cancel(); } catch { } };
 
         string? downloadedPath = null;
@@ -780,7 +780,7 @@ public sealed class UpdateAndFeedbackService
         var ghBtn = YYChrome.MakeSettingsActionButton(relLabel, () => _ = Launcher.LaunchUriAsync(new Uri(GetPreferredReleasesUrl())), dark);
         ghBtn.HorizontalAlignment = HorizontalAlignment.Left;
         foot.Children.Add(ghBtn);
-        var okBtn = YYChrome.MakeSheetPillButton("好", () => dlgRef?.Hide(), dark, _library.Prefs.Tint, "dark", height: 34, horizontalPadding: 20);
+        var okBtn = YYChrome.MakeDialogButton("好", () => dlgRef?.Hide(), dark, _library.Prefs.Tint, "dark", height: 34, horizontalPadding: 20);
         okBtn.HorizontalAlignment = HorizontalAlignment.Right;
         foot.Children.Add(okBtn);
 
@@ -790,14 +790,14 @@ public sealed class UpdateAndFeedbackService
             Padding = new Thickness(24, 20, 24, 18),
             Children =
             {
-                YYChrome.MakeSheetHeader("更新日志", "每一版改了什么", () => dlgRef?.Hide(), dark, titleSize: 18, serifTitle: true),
+                YYChrome.MakeDialogHeader("更新日志", "每一版改了什么", () => dlgRef?.Hide(), dark, titleSize: 18, serifTitle: true),
                 new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) },
                 new ScrollViewer { MaxHeight = 440, Content = stack },
                 foot,
             },
         };
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 540, sheetBody, tint: _library.Prefs.Tint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 540, sheetBody, tint: _library.Prefs.Tint);
         await dlgRef.ShowSafeAsync(_library.Prefs.Tint);
     }
 
@@ -837,7 +837,7 @@ public sealed class UpdateAndFeedbackService
         };
 
         Button? copyDiagBtn = null;
-        copyDiagBtn = YYChrome.MakeSheetPillButton("复制诊断摘要", () =>
+        copyDiagBtn = YYChrome.MakeDialogButton("复制诊断摘要", () =>
         {
             string summary = $"语阅 {CurrentVersion} ({CurrentBuild})\n系统：{OsDisplayVersion()}\n架构：{System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}";
             var dp = new DataPackage();
@@ -848,7 +848,7 @@ public sealed class UpdateAndFeedbackService
         }, dark, tint, "secondary", height: 34, horizontalPadding: 14);
         copyDiagBtn.HorizontalAlignment = HorizontalAlignment.Left;
 
-        var okBtn = YYChrome.MakeSheetPillButton("好", () => dlgRef?.Hide(), dark, tint, "dark", height: 34, horizontalPadding: 20);
+        var okBtn = YYChrome.MakeDialogButton("好", () => dlgRef?.Hide(), dark, tint, "dark", height: 34, horizontalPadding: 20);
         okBtn.HorizontalAlignment = HorizontalAlignment.Right;
 
         var foot = new Grid { Margin = new Thickness(0, 2, 0, 0) };
@@ -861,14 +861,14 @@ public sealed class UpdateAndFeedbackService
             Padding = new Thickness(24, 20, 24, 18),
             Children =
             {
-                YYChrome.MakeSheetHeader("隐私说明", "书库仅存本机，不含身份与广告", () => dlgRef?.Hide(), dark, titleSize: 18, serifTitle: true),
+                YYChrome.MakeDialogHeader("隐私说明", "书库仅存本机，不含身份与广告", () => dlgRef?.Hide(), dark, titleSize: 18, serifTitle: true),
                 new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) },
                 new ScrollViewer { MaxHeight = 430, Content = groupCard },
                 foot,
             },
         };
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 540, sheetBody, tint: tint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 540, sheetBody, tint: tint);
         await dlgRef.ShowSafeAsync(tint);
     }
 
@@ -954,7 +954,7 @@ public sealed class UpdateAndFeedbackService
         var srcBtn = YYChrome.MakeSettingsActionButton($"查看源代码 ({repoHost}) ↗", () => _ = Launcher.LaunchUriAsync(new Uri(repoUrl)), dark);
         srcBtn.HorizontalAlignment = HorizontalAlignment.Left;
         foot.Children.Add(srcBtn);
-        var okBtn = YYChrome.MakeSheetPillButton("好", () => dlgRef?.Hide(), dark, tint, "dark", height: 34, horizontalPadding: 20);
+        var okBtn = YYChrome.MakeDialogButton("好", () => dlgRef?.Hide(), dark, tint, "dark", height: 34, horizontalPadding: 20);
         okBtn.HorizontalAlignment = HorizontalAlignment.Right;
         foot.Children.Add(okBtn);
 
@@ -964,14 +964,14 @@ public sealed class UpdateAndFeedbackService
             Padding = new Thickness(24, 20, 24, 18),
             Children =
             {
-                YYChrome.MakeSheetHeader("开源许可与致谢", "GPL-3.0 · NOTICE", () => dlgRef?.Hide(), dark, titleSize: 18, serifTitle: true),
+                YYChrome.MakeDialogHeader("开源许可与致谢", "GPL-3.0 · NOTICE", () => dlgRef?.Hide(), dark, titleSize: 18, serifTitle: true),
                 new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) },
                 new ScrollViewer { MaxHeight = 440, Content = scrollContent },
                 foot,
             },
         };
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 560, sheetBody, tint: tint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 560, sheetBody, tint: tint);
         await dlgRef.ShowSafeAsync(tint);
     }
 
@@ -1348,7 +1348,7 @@ public sealed class UpdateAndFeedbackService
             return sp;
         }
 
-        addImageBtn = YYChrome.MakeSheetPillButton(MakeAttachIconLabel("photo", "图片"), async () =>
+        addImageBtn = YYChrome.MakeDialogButton(MakeAttachIconLabel("photo", "图片"), async () =>
         {
             if (isSending) return;
             if (attachments.Count >= AirFeedbackClient.MaxImages)
@@ -1373,7 +1373,7 @@ public sealed class UpdateAndFeedbackService
             }
         }, dark, _library.Prefs.Tint, "secondary", height: 26, horizontalPadding: 10);
 
-        snapWindowBtn = YYChrome.MakeSheetPillButton(MakeAttachIconLabel("camera", "截图"), () =>
+        snapWindowBtn = YYChrome.MakeDialogButton(MakeAttachIconLabel("camera", "截图"), () =>
         {
             if (isSending) return;
             if (attachments.Count >= AirFeedbackClient.MaxImages)
@@ -1610,14 +1610,14 @@ public sealed class UpdateAndFeedbackService
             };
 
             var thanksBtns = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 8, 0, 0) };
-            thanksBtns.Children.Add(YYChrome.MakeSheetPillButton("再写一条", () =>
+            thanksBtns.Children.Add(YYChrome.MakeDialogButton("再写一条", () =>
             {
                 ResetComposerToEmpty();
                 outerSwitchHost.Content = composerRoot;
                 L10n.ApplyTree(outerSwitchHost);
                 bodyBox.Focus(FocusState.Programmatic);
             }, dark, _library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 18));
-            thanksBtns.Children.Add(YYChrome.MakeSheetPillButton("完成", () => activeDlg?.Hide(), dark, _library.Prefs.Tint, "dark", height: 36, horizontalPadding: 22));
+            thanksBtns.Children.Add(YYChrome.MakeDialogButton("完成", () => activeDlg?.Hide(), dark, _library.Prefs.Tint, "dark", height: 36, horizontalPadding: 22));
 
             var thanksStack = new StackPanel
             {
@@ -1712,8 +1712,8 @@ public sealed class UpdateAndFeedbackService
             }
         }
 
-        sendBtn = YYChrome.MakeSheetPillButton("发送给开发者", () => _ = SubmitFeedbackNowAsync(), dark, _library.Prefs.Tint, "dark", height: 36, horizontalPadding: 20);
-        cancelBtn = YYChrome.MakeSheetPillButton("取消", () => { if (!isSending) { SaveDraftState(); activeDlg?.Hide(); } }, dark, _library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 16);
+        sendBtn = YYChrome.MakeDialogButton("发送给开发者", () => _ = SubmitFeedbackNowAsync(), dark, _library.Prefs.Tint, "dark", height: 36, horizontalPadding: 20);
+        cancelBtn = YYChrome.MakeDialogButton("取消", () => { if (!isSending) { SaveDraftState(); activeDlg?.Hide(); } }, dark, _library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 16);
 
         var footerGrid = new Grid { Margin = new Thickness(0, 2, 0, 0) };
         footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -1733,7 +1733,7 @@ public sealed class UpdateAndFeedbackService
             AllowDrop = true,
             Children =
             {
-                YYChrome.MakeSheetHeader("反馈", L10n.T("语阅还在早期，哪里不对、想要什么，直接写。"), () => { if (!isSending) { SaveDraftState(); activeDlg?.Hide(); } }, dark, titleSize: 17),
+                YYChrome.MakeDialogHeader("反馈", L10n.T("语阅还在早期，哪里不对、想要什么，直接写。"), () => { if (!isSending) { SaveDraftState(); activeDlg?.Hide(); } }, dark, titleSize: 17),
                 bodyGroupCard,
                 errorBanner,
                 deviceCard,
@@ -1842,7 +1842,7 @@ public sealed class UpdateAndFeedbackService
 
         while (true)
         {
-            activeDlg = YYChrome.CreateMacSheet(xamlRoot, dark, 500, outerSwitchHost, maxHeight: 780, tint: _library.Prefs.Tint);
+            activeDlg = YYChrome.CreateFluentDialog(xamlRoot, dark, 500, outerSwitchHost, maxHeight: 780, tint: _library.Prefs.Tint);
             activeDlg.Closing += (_, closeArgs) =>
             {
                 if (isSending) closeArgs.Cancel = true;

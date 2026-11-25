@@ -344,9 +344,15 @@ public sealed class SystemIntegrationService : IDisposable
         catch { }
     }
 
+    public Func<bool>? IsMainWindowHiddenInTray { get; set; }
+
     public void EnsureTrayVisible(bool forceVisible = false)
     {
-        bool shouldShow = forceVisible || IsAudioPlaying || !string.IsNullOrEmpty(ActivePlaybackTitle) || _library.Prefs.AutoLaunchOnLogin;
+        bool shouldShow = forceVisible
+            || (IsMainWindowHiddenInTray?.Invoke() == true)
+            || IsAudioPlaying
+            || !string.IsNullOrEmpty(ActivePlaybackTitle)
+            || _library.Prefs.AutoLaunchOnLogin;
         RunOnTrayThread(() =>
         {
             if (shouldShow) ShowOrUpdateTrayLocked();

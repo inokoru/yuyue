@@ -1,6 +1,6 @@
 using Xunit;
 using Yuyue.Core;
-using Yuyue.Shelf;
+using Yuyue.Design;
 using Yuyue.Speech;
 
 namespace Yuyue.Tests;
@@ -105,27 +105,27 @@ public sealed class UpstreamParityTests : IDisposable
     [Fact]
     public void BookcaseWallAndPaperBookClothTones_AreDeterministicAndHandleEink()
     {
-        var c1 = ShelfWindow.PaperClothColor("红楼梦", dark: false);
-        var c2 = ShelfWindow.PaperClothColor("红楼梦", dark: false);
+        var c1 = BookVisuals.PaperClothColor("红楼梦", dark: false);
+        var c2 = BookVisuals.PaperClothColor("红楼梦", dark: false);
         Assert.Equal(c1, c2);
 
-        var tLight = ShelfWindow.ResolveCollectionClothTone("col-1", "globe", dark: false, eink: false);
-        var tEink = ShelfWindow.ResolveCollectionClothTone("col-1", "globe", dark: false, eink: true);
+        var tLight = BookVisuals.ResolveCollectionClothTone("col-1", "globe", dark: false, eink: false);
+        var tEink = BookVisuals.ResolveCollectionClothTone("col-1", "globe", dark: false, eink: true);
         Assert.NotEqual(tLight.WellTop, tEink.WellTop);
 
-        var zhEmb = ShelfWindow.ResolveExLibrisEmblem("文学经典", null);
+        var zhEmb = BookVisuals.ResolveExLibrisEmblem("文学经典", null);
         Assert.False(zhEmb.IsSymbol);
         Assert.Equal("文", zhEmb.Value);
 
-        var enEmb = ShelfWindow.ResolveExLibrisEmblem("Sci-Fi", null);
+        var enEmb = BookVisuals.ResolveExLibrisEmblem("Sci-Fi", null);
         Assert.False(enEmb.IsSymbol);
         Assert.Equal("S", enEmb.Value);
 
-        var yrEmb = ShelfWindow.ResolveExLibrisEmblem("2026", null);
+        var yrEmb = BookVisuals.ResolveExLibrisEmblem("2026", null);
         Assert.False(yrEmb.IsSymbol);
         Assert.Equal("2026", yrEmb.Value);
 
-        var symEmb = ShelfWindow.ResolveExLibrisEmblem("任意名称", "moon");
+        var symEmb = BookVisuals.ResolveExLibrisEmblem("任意名称", "moon");
         Assert.True(symEmb.IsSymbol);
         Assert.Equal("moon", symEmb.Value);
     }

@@ -535,8 +535,8 @@ public static class ReaderRecapAndSleepHelper
         var foot = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 6, 0, 0) };
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var stayBtn = YYChrome.MakeSheetPillButton(L10n.T("先放着"), () => dlgRef?.Hide(), dark, library.Prefs.Tint, "secondary", height: 36, stretch: true);
-        var reimportBtn = YYChrome.MakeSheetPillButton(L10n.T("重新导入…"), () => { wantReimport = true; dlgRef?.Hide(); }, dark, library.Prefs.Tint, "warm", height: 36, stretch: true);
+        var stayBtn = YYChrome.MakeDialogButton(L10n.T("先放着"), () => dlgRef?.Hide(), dark, library.Prefs.Tint, "secondary", height: 36, stretch: true);
+        var reimportBtn = YYChrome.MakeDialogButton(L10n.T("重新导入…"), () => { wantReimport = true; dlgRef?.Hide(); }, dark, library.Prefs.Tint, "warm", height: 36, stretch: true);
         Grid.SetColumn(stayBtn, 0);
         Grid.SetColumn(reimportBtn, 1);
         foot.Children.Add(stayBtn);
@@ -548,7 +548,7 @@ public static class ReaderRecapAndSleepHelper
             Padding = new Thickness(22, 18, 22, 18),
             Children =
             {
-                YYChrome.MakeSheetHeader(failTitle, $"《{bookTitle}》", () => dlgRef?.Hide(), dark, titleSize: 17),
+                YYChrome.MakeDialogHeader(failTitle, $"《{bookTitle}》", () => dlgRef?.Hide(), dark, titleSize: 17),
                 new TextBlock
                 {
                     Text = failDetail,
@@ -561,7 +561,7 @@ public static class ReaderRecapAndSleepHelper
             },
         };
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 400, body, tint: library.Prefs.Tint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 400, body, tint: library.Prefs.Tint);
         await dlgRef.ShowSafeAsync(library.Prefs.Tint);
         if (!wantReimport) return;
 
@@ -869,8 +869,8 @@ public static class ReaderRecapAndSleepHelper
         var foot = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 4, 0, 0) };
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var notYetBtn = YYChrome.MakeSheetPillButton(L10n.T("还没读完"), () => dlgRef?.Hide(), dark, library.Prefs.Tint, "secondary", height: 38, stretch: true);
-        var confirmBtn = YYChrome.MakeSheetPillButton(L10n.T("记为读过"), () => { markFinished = true; dlgRef?.Hide(); }, dark, library.Prefs.Tint, "dark", height: 38, stretch: true);
+        var notYetBtn = YYChrome.MakeDialogButton(L10n.T("还没读完"), () => dlgRef?.Hide(), dark, library.Prefs.Tint, "secondary", height: 38, stretch: true);
+        var confirmBtn = YYChrome.MakeDialogButton(L10n.T("记为读过"), () => { markFinished = true; dlgRef?.Hide(); }, dark, library.Prefs.Tint, "dark", height: 38, stretch: true);
         Grid.SetColumn(notYetBtn, 0);
         Grid.SetColumn(confirmBtn, 1);
         foot.Children.Add(notYetBtn);
@@ -910,7 +910,7 @@ public static class ReaderRecapAndSleepHelper
         body.Children.Add(commentBox);
         body.Children.Add(foot);
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 420, body, tint: library.Prefs.Tint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 420, body, tint: library.Prefs.Tint);
         await dlgRef.ShowSafeAsync(library.Prefs.Tint);
 
         if (markFinished)

@@ -1,0 +1,33 @@
+afterEach:
+  - yuyue.close: {}
+
+cases:
+  - name: 深色模式打开红楼梦并验证翻页与版面不撑破
+    steps:
+      - yuyue.launch:
+          theme: dark
+          fixtures:
+            - hongloumeng.epub
+      - aiWaitFor:
+          prompt: 语阅窗口已以深色模式打开《红楼梦》并显示正文内容
+          options:
+            timeoutMs: 25000
+      - aiAssert:
+          prompt: 界面为深色背景，正文文字对比度清晰可读，左右边界与顶部工具栏没有互相遮挡或撑破
+      - aiKeyboardPress: Right
+      - sleep:
+          ms: 800
+      - aiAssert:
+          prompt: 阅读器仍然处于正常显示状态，没有白屏、卡死或错位
+
+  - name: 打开 PDF 夹具校验页面渲染
+    steps:
+      - yuyue.launch:
+          fixtures:
+            - sample.pdf
+      - aiWaitFor:
+          prompt: 语阅窗口已打开 PDF 阅读视图并渲染出文档页面内容
+          options:
+            timeoutMs: 25000
+      - aiAssert:
+          prompt: PDF 页面内容正常可见，没有空白画布或崩溃提示

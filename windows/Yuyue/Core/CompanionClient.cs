@@ -718,9 +718,9 @@ public sealed class CompanionClient
         var preset = FindPreset(p.AiProvider);
         var baseUrl = (p.AiBaseUrl?.Trim().TrimEnd('/') is { Length: > 0 } u ? u : preset?.BaseUrl?.TrimEnd('/')) ?? "";
         var primaryModel = (p.AiModel?.Trim() is { Length: > 0 } m ? m : preset?.DefaultModel) ?? "";
-        var rawKey = _library.Secrets.Get("ai.apiKey");
+        var rawKey = _library.Secrets.Get($"ai.key.{p.AiProvider}");
         if (string.IsNullOrWhiteSpace(rawKey))
-            rawKey = _library.Secrets.Get($"ai.key.{p.AiProvider}");
+            rawKey = _library.Secrets.Get("ai.apiKey");
         if (string.IsNullOrWhiteSpace(rawKey) && preset is { DefaultKey.Length: > 0 })
             rawKey = preset.DefaultKey;
 

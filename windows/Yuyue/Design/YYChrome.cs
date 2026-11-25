@@ -1,16 +1,12 @@
-using System.Numerics;
 using System.Runtime.CompilerServices;
 using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Imaging;
-using Microsoft.UI.Xaml.Shapes;
-using Windows.Foundation;
+using Microsoft.UI.Xaml.Media.Animation;
 using Windows.System;
 using Windows.UI;
 using Windows.UI.Text;
@@ -19,217 +15,18 @@ using Yuyue.Core;
 namespace Yuyue.Design;
 
 /// <summary>
-/// Shared macOS-aligned visual chrome builders: brand/service icon tiles, segmented bars,
-/// borderless SettingsActionStyle buttons, keycaps, and the floating white BookMenuCard.
+/// Shared Windows 11 Fluent Design 2 dialog, button, segmented track, keycap, and safe ContentDialog helpers.
+/// Uses 6px control radii, 10px overlay/dialog radii, crisp 1px hairlines, and Yuyue warm paper palettes.
 /// </summary>
 public static class YYChrome
 {
-    private static string? ResolveBrandAssetFile(string key, bool dark) => key.Trim().ToLowerInvariant() switch
-    {
-        "obsidian" => "obsidian.png",
-        "notion" => dark ? "notion-dark.png" : "notion.png",
-        "flomo" => "flomo.png",
-        "xinzhi" => "xinzhi.png",
-        "azure" => "azure.png",
-        "claude" or "anthropic" => "claude.png",
-        "openai" => dark ? "openai-dark.png" : "openai.png",
-        "deepseek" => "deepseek.png",
-        "gemini" or "google" => "gemini.png",
-        "openrouter" => dark ? "openrouter-dark.png" : "openrouter.png",
-        "qwen" or "dashscope" or "aliyun" => "dashscope.png",
-        "kimi" or "moonshot" => dark ? "moonshot-dark.png" : "moonshot.png",
-        "glm" or "zhipu" => "zhipu.png",
-        "doubao" or "volc" or "volcengine" => "volcengine.png",
-        "siliconflow" => "siliconflow.png",
-        "minimax" => "minimax.png",
-        "grok" or "xai" => dark ? "xai-dark.png" : "xai.png",
-        "mistral" => "mistral.png",
-        "groq" => dark ? "groq-dark.png" : "groq.png",
-        "ollama" => dark ? "ollama-dark.png" : "ollama.png",
-        "lmstudio" => dark ? "lmstudio-dark.png" : "lmstudio.png",
-        "magpie" => dark ? "magpie-dark.png" : "magpie.png",
-        _ => null,
-    };
+    private static readonly ConditionalWeakTable<XamlRoot, SemaphoreSlim> _dialogLocks = new();
 
-    private static Image? TryCreateBrandImage(string fileName, double displaySize)
-    {
-        try
-        {
-            string full = System.IO.Path.Combine(System.AppContext.BaseDirectory, "Assets", "Brands", fileName);
-            if (!System.IO.File.Exists(full)) return null;
-            var bmp = new BitmapImage
-            {
-                DecodePixelWidth = Math.Max(48, (int)Math.Round(displaySize * 3.0)),
-                UriSource = new System.Uri(full, System.UriKind.Absolute),
-            };
-            return new Image
-            {
-                Width = displaySize,
-                Height = displaySize,
-                Stretch = Stretch.Uniform,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                Source = bmp,
-            };
-        }
-        catch
-        {
-            return null;
-        }
-    }
+    private static SemaphoreSlim GetDialogLock(XamlRoot xamlRoot) =>
+        _dialogLocks.GetValue(xamlRoot, static _ => new SemaphoreSlim(1, 1));
 
     /// <summary>
-    /// Borderless bare brand/provider logo mark (used in 3-column picker sheets like <c>settings-companion-add/1.png</c>).
-    /// </summary>
-    public static FrameworkElement MakeBareServiceIcon(string key, bool dark, double size = 20)
-    {
-        if (ResolveBrandAssetFile(key, dark) is { } assetFile && TryCreateBrandImage(assetFile, size) is { } img)
-            return img;
-
-        var palette = ThemeHelper.Palette(dark);
-        return key.Trim().ToLowerInvariant() switch
-        {
-            "mimo" or "xiaomi" => new Border
-            {
-                Width = size,
-                Height = size,
-                CornerRadius = new CornerRadius(Math.Round(size * 0.28)),
-                Background = ThemeHelper.Brush(Color.FromArgb(255, 255, 105, 0)),
-                Child = MakeGlyphMark("mi", Colors.Transparent, Colors.White, size * 0.92),
-            },
-            "fish" or "fishaudio" => YYIcons.Make("wave", size * 0.86, ThemeHelper.Brush(Color.FromArgb(255, 58, 134, 220))),
-            "elevenlabs" => MakeGlyphMark("II", Colors.Transparent, dark ? Colors.White : Color.FromArgb(255, 28, 30, 34), size * 1.1),
-            "local" or "voicestudio" or "indextts" or "gpt-sovits" or "cosyvoice" => YYIcons.Make("laptop", size * 0.86, ThemeHelper.Brush(palette.T1)),
-            _ => YYIcons.Make("sparkle", size * 0.86, ThemeHelper.Brush(palette.T2)),
-        };
-    }
-
-    /// <summary>
-    /// Crisp macOS rounded-square service/brand icon tile (32×32 default, CornerRadius ~27%).
-    /// Matches <c>MacListeningSettings.swift</c>, <c>MacCompanionSettings.swift</c>, and <c>MacNoteExportSettings.swift</c>.
-    /// </summary>
-    public static Border MakeServiceTile(string key, bool dark, double size = 32)
-    {
-        var palette = ThemeHelper.Palette(dark);
-        double radius = Math.Round(size * 0.27);
-        double iconSize = Math.Round(size * 0.50);
-        double brandImgSize = Math.Round(size * 0.62);
-
-        Border MakeTile(Color bg, Color border, UIElement child, double borderThickness = 0.75) => new()
-        {
-            Width = size,
-            Height = size,
-            CornerRadius = new CornerRadius(radius),
-            Background = ThemeHelper.Brush(bg),
-            BorderBrush = ThemeHelper.Brush(border),
-            BorderThickness = new Thickness(borderThickness),
-            Child = child,
-        };
-
-        Color neutralBg = dark ? Color.FromArgb(255, 36, 37, 40) : Color.FromArgb(255, 250, 249, 246);
-        Color neutralLine = dark ? Color.FromArgb(24, 255, 255, 255) : Color.FromArgb(20, 42, 43, 46);
-        Color whiteTile = dark ? Color.FromArgb(255, 34, 35, 38) : Colors.White;
-
-        string k = key.Trim().ToLowerInvariant();
-        if (k == "xinzhi" && TryCreateBrandImage("xinzhi.png", size) is { } xinzhiImg)
-        {
-            // xinzhi.svg already includes its full-bleed warm gradient rounded square
-            return MakeTile(Colors.Transparent, neutralLine, xinzhiImg, 0.5);
-        }
-
-        if (ResolveBrandAssetFile(k, dark) is { } brandAsset && TryCreateBrandImage(brandAsset, brandImgSize) is { } brandImg)
-        {
-            return MakeTile(whiteTile, neutralLine, brandImg);
-        }
-
-        switch (k)
-        {
-            case "kokoro":
-                return MakeTile(neutralBg, neutralLine,
-                    YYIcons.Make("wave", iconSize, ThemeHelper.Brush(dark ? Color.FromArgb(255, 214, 186, 152) : Color.FromArgb(255, 118, 92, 62))));
-
-            case "edge":
-            {
-                var badge = new Border
-                {
-                    Width = Math.Round(size * 0.62),
-                    Height = Math.Round(size * 0.62),
-                    CornerRadius = new CornerRadius(Math.Round(size * 0.19)),
-                    Background = ThemeHelper.Brush(Color.FromArgb(255, 35, 140, 156)),
-                    Child = new TextBlock
-                    {
-                        Text = "e",
-                        FontSize = Math.Round(size * 0.40),
-                        FontWeight = FontWeights.Bold,
-                        Foreground = ThemeHelper.Brush(Colors.White),
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        Margin = new Thickness(0, -1, 0, 0),
-                    },
-                };
-                return MakeTile(whiteTile, neutralLine, badge);
-            }
-
-            case "online" or "neural":
-            {
-                var badge = new Border
-                {
-                    Width = Math.Round(size * 0.64),
-                    Height = Math.Round(size * 0.64),
-                    CornerRadius = new CornerRadius(Math.Round(size * 0.32)),
-                    Background = ThemeHelper.Brush(Color.FromArgb(255, 58, 146, 102)),
-                    Child = YYIcons.Make("globe", Math.Round(size * 0.42), ThemeHelper.Brush(Colors.White)),
-                };
-                return MakeTile(whiteTile, neutralLine, badge);
-            }
-
-            case "system" or "pc" or "thispc":
-                return MakeTile(whiteTile, neutralLine,
-                    YYIcons.Make("laptop", iconSize, ThemeHelper.Brush(palette.T1)));
-
-            case "add":
-                return MakeTile(neutralBg, neutralLine,
-                    YYIcons.Make("plus", Math.Round(size * 0.42), ThemeHelper.Brush(palette.T2)));
-
-            case "mimo" or "xiaomi":
-            {
-                var badge = new Border
-                {
-                    Width = Math.Round(size * 0.62),
-                    Height = Math.Round(size * 0.62),
-                    CornerRadius = new CornerRadius(Math.Round(size * 0.19)),
-                    Background = ThemeHelper.Brush(Color.FromArgb(255, 255, 105, 0)),
-                    Child = MakeGlyphMark("mi", Colors.Transparent, Colors.White, size * 0.78),
-                };
-                return MakeTile(whiteTile, neutralLine, badge);
-            }
-
-            case "fish" or "fishaudio":
-                return MakeTile(whiteTile, neutralLine,
-                    YYIcons.Make("wave", iconSize, ThemeHelper.Brush(Color.FromArgb(255, 58, 134, 220))));
-
-            case "elevenlabs":
-                return MakeTile(whiteTile, neutralLine,
-                    MakeGlyphMark("II", Colors.Transparent, dark ? Colors.White : Color.FromArgb(255, 34, 36, 40), size));
-
-            default:
-                return MakeTile(whiteTile, neutralLine,
-                    YYIcons.Make("sparkle", iconSize, ThemeHelper.Brush(palette.T2)));
-        }
-    }
-
-    private static TextBlock MakeGlyphMark(string glyph, Color _, Color fg, double tileSize) => new()
-    {
-        Text = glyph,
-        FontSize = Math.Round(tileSize * 0.42),
-        FontWeight = FontWeights.Bold,
-        Foreground = ThemeHelper.Brush(fg),
-        HorizontalAlignment = HorizontalAlignment.Center,
-        VerticalAlignment = VerticalAlignment.Center,
-    };
-
-    /// <summary>
-    /// Borderless <c>SettingsActionStyle</c> text button (MacSettings.swift:314-331).
+    /// Borderless Fluent subtle text action button.
     /// </summary>
     public static Button MakeSettingsActionButton(string text, Action onClick, bool dark, bool destructive = false, bool enabled = true)
     {
@@ -250,7 +47,7 @@ public static class YYChrome
     }
 
     /// <summary>
-    /// Exact macOS segmented bar (<c>YYInsetBrush</c> pill track + white active capsule).
+    /// Native Windows 11 Fluent 2 segmented bar (6px outer track + 4px crisp elevated active thumb).
     /// </summary>
     public static Border MakeSegmentedBar(
         IReadOnlyList<(string Id, string Label)> items,
@@ -258,523 +55,102 @@ public static class YYChrome
         Action<string> onSelect,
         bool dark,
         double fontSize = 12,
-        double height = 30)
+        double height = 32)
     {
         var palette = ThemeHelper.Palette(dark);
+        double innerH = Math.Max(22, height - 6);
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
+        Color activeBorderColor = dark ? Color.FromArgb(26, 255, 255, 255) : Color.FromArgb(20, 42, 43, 46);
+        Color inactiveHoverColor = dark ? Color.FromArgb(18, 255, 255, 255) : Color.FromArgb(12, 42, 43, 46);
+        var entries = new List<(string Id, Action<bool> SetActive)>(items.Count);
+
         foreach (var (id, label) in items)
         {
             bool active = id == activeId;
+            var bgBrush = new SolidColorBrush(active ? palette.Card : Colors.Transparent);
+            var hoverBgBrush = new SolidColorBrush(active ? palette.Card : inactiveHoverColor);
+            var fgBrush = new SolidColorBrush(active ? palette.T1 : palette.T2);
+            var hoverFgBrush = new SolidColorBrush(palette.T1);
+
             var btn = new Button
             {
-                Content = label,
-                Height = height - 4,
-                MinHeight = height - 4,
-                Padding = new Thickness(11, 0, 11, 0),
-                CornerRadius = new CornerRadius(7),
-                BorderThickness = new Thickness(active ? 0.5 : 0),
-                BorderBrush = active ? ThemeHelper.Brush(dark ? Color.FromArgb(24, 255, 255, 255) : Color.FromArgb(18, 42, 43, 46)) : null,
-                Background = active ? ThemeHelper.Brush(palette.Card) : ThemeHelper.Brush(Colors.Transparent),
-                Foreground = ThemeHelper.Brush(active ? palette.T1 : palette.T2),
+                Content = L10n.T(label),
+                Height = innerH,
+                MinHeight = innerH,
+                Padding = new Thickness(12, 0, 12, 0),
+                CornerRadius = new CornerRadius(4),
+                BorderThickness = new Thickness(active ? 1 : 0),
+                BorderBrush = active ? ThemeHelper.Brush(activeBorderColor) : null,
+                Background = bgBrush,
+                Foreground = fgBrush,
                 FontSize = fontSize,
                 FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal,
                 UseSystemFocusVisuals = false,
             };
+            btn.Resources["ButtonBackground"] = bgBrush;
+            btn.Resources["ButtonBackgroundPointerOver"] = hoverBgBrush;
+            btn.Resources["ButtonBackgroundPressed"] = hoverBgBrush;
+            btn.Resources["ButtonForeground"] = fgBrush;
+            btn.Resources["ButtonForegroundPointerOver"] = hoverFgBrush;
+            btn.Resources["ButtonForegroundPressed"] = hoverFgBrush;
+
+            void SetActive(bool on)
+            {
+                bgBrush.Color = on ? palette.Card : Colors.Transparent;
+                hoverBgBrush.Color = on ? palette.Card : inactiveHoverColor;
+                fgBrush.Color = on ? palette.T1 : palette.T2;
+                btn.BorderThickness = new Thickness(on ? 1 : 0);
+                btn.BorderBrush = on ? ThemeHelper.Brush(activeBorderColor) : null;
+                btn.FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal;
+            }
+
+            entries.Add((id, SetActive));
             string captured = id;
-            btn.Click += (_, _) => onSelect(captured);
+            btn.Click += (_, _) =>
+            {
+                foreach (var (entryId, setActive) in entries)
+                    setActive(entryId == captured);
+                onSelect(captured);
+            };
             row.Children.Add(btn);
         }
 
         return new Border
         {
-            CornerRadius = new CornerRadius(9),
+            Height = height,
+            CornerRadius = new CornerRadius(6),
             Background = ThemeHelper.Brush(palette.Inset),
-            Padding = new Thickness(2.5),
+            BorderBrush = ThemeHelper.Brush(palette.Line),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(2),
+            VerticalAlignment = VerticalAlignment.Center,
             Child = row,
         };
     }
 
     /// <summary>
-    /// Crisp macOS keyboard hint keycap (used in QuickSearch, Podcast Desk, History).
+    /// Crisp Windows 11 keyboard shortcut keycap badge.
     /// </summary>
     public static Border MakeKeycap(string text, bool dark)
     {
         var palette = ThemeHelper.Palette(dark);
         return new Border
         {
-            CornerRadius = new CornerRadius(5),
-            Background = ThemeHelper.Brush(dark ? Color.FromArgb(255, 42, 43, 46) : Color.FromArgb(255, 244, 242, 238)),
+            CornerRadius = new CornerRadius(4),
+            Background = ThemeHelper.Brush(dark ? Color.FromArgb(255, 42, 40, 38) : Color.FromArgb(255, 245, 242, 238)),
             BorderBrush = ThemeHelper.Brush(palette.Line),
-            BorderThickness = new Thickness(0.75),
+            BorderThickness = new Thickness(1),
             Padding = new Thickness(5, 1.5, 5, 1.5),
             VerticalAlignment = VerticalAlignment.Center,
             Child = new TextBlock
             {
                 Text = text,
-                FontSize = 10,
+                FontSize = 10.5,
                 FontWeight = FontWeights.Medium,
                 Foreground = ThemeHelper.Brush(palette.T2),
             },
         };
     }
-
-    /// <summary>
-    /// Exact macOS <c>BookMenuCard</c> (BookMenu.swift:56-234, shelf-menu/1.png):
-    /// pure white floating 214px card with title + remaining header, 5 status rows, and grouped action rows with right-aligned icons.
-    /// </summary>
-    public static Flyout MakeBookMenuFlyout(
-        BookSummary book,
-        bool dark,
-        YYTint tint,
-        bool hasAudiobook,
-        Action<ReadingStatus> onSetStatus,
-        Action onOpen,
-        Action onListenFromStart,
-        Action onAudiobook,
-        Action onEditInfo,
-        Action onAddToCollection,
-        Action onRevealInExplorer,
-        Action onDelete)
-    {
-        var palette = ThemeHelper.Palette(dark);
-        var tc = ThemeHelper.TintColors(tint, dark);
-        var flyout = new Flyout
-        {
-            FlyoutPresenterStyle = (Style)Application.Current.Resources["YYFloatFlyoutPresenterStyle"],
-            ShouldConstrainToRootBounds = true,
-        };
-
-        var root = new StackPanel { Width = 214, Spacing = 0 };
-
-        // Header: title + author + progress/remaining
-        var header = new StackPanel
-        {
-            Spacing = 6,
-            Padding = new Thickness(14, 11, 14, 10),
-        };
-        var titleRow = new Grid { ColumnSpacing = 6 };
-        titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        titleRow.Children.Add(new TextBlock
-        {
-            Text = book.Title,
-            FontSize = 13,
-            FontWeight = FontWeights.Bold,
-            Foreground = ThemeHelper.Brush(palette.T1),
-            MaxLines = 1,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            MaxWidth = 140,
-        });
-        string? author = book.Authors.FirstOrDefault();
-        if (!string.IsNullOrWhiteSpace(author))
-        {
-            var auth = new TextBlock
-            {
-                Text = author,
-                FontSize = 10.5,
-                Foreground = ThemeHelper.Brush(palette.T3),
-                MaxLines = 1,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                VerticalAlignment = VerticalAlignment.Bottom,
-            };
-            Grid.SetColumn(auth, 1);
-            titleRow.Children.Add(auth);
-        }
-        header.Children.Add(titleRow);
-
-        if (book.Record)
-        {
-            var tagRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-            tagRow.Children.Add(new Border
-            {
-                CornerRadius = new CornerRadius(4),
-                Background = ThemeHelper.Brush(tc.Soft),
-                Padding = new Thickness(5, 1, 5, 1),
-                Child = new TextBlock { Text = "纸书", FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(tc.Accent) },
-            });
-            tagRow.Children.Add(new TextBlock { Text = StatusDisplayName(book.Status), FontSize = 10.5, Foreground = ThemeHelper.Brush(palette.T2), VerticalAlignment = VerticalAlignment.Center });
-            header.Children.Add(tagRow);
-        }
-        else if (book.Progress > 0.001)
-        {
-            var progGrid = new Grid { ColumnSpacing = 8 };
-            progGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            progGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var track = new Border
-            {
-                Height = 2.5,
-                CornerRadius = new CornerRadius(1.25),
-                Background = ThemeHelper.Brush(palette.Line),
-                VerticalAlignment = VerticalAlignment.Center,
-                Child = new Border
-                {
-                    HorizontalAlignment = HorizontalAlignment.Left,
-                    Width = Math.Clamp(book.Progress, 0.04, 1.0) * 116,
-                    CornerRadius = new CornerRadius(1.25),
-                    Background = ThemeHelper.Brush(tc.Fill),
-                },
-            };
-            progGrid.Children.Add(track);
-            var rem = new TextBlock
-            {
-                Text = FormatRemaining(book),
-                FontSize = 10.5,
-                Foreground = ThemeHelper.Brush(palette.T2),
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            Grid.SetColumn(rem, 1);
-            progGrid.Children.Add(rem);
-            header.Children.Add(progGrid);
-        }
-        else
-        {
-            header.Children.Add(new TextBlock
-            {
-                Text = "还没读",
-                FontSize = 10.5,
-                Foreground = ThemeHelper.Brush(palette.T2),
-            });
-        }
-        root.Children.Add(header);
-
-        void AddDivider() => root.Children.Add(new Border
-        {
-            Height = 0.5,
-            Margin = new Thickness(14, 0, 14, 0),
-            Background = ThemeHelper.Brush(palette.Line),
-        });
-
-        Button MakeRow(string label, string icon, Color fg, bool bold, Action action)
-        {
-            var g = new Grid();
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.Children.Add(new TextBlock
-            {
-                Text = label,
-                FontSize = 12.5,
-                FontWeight = bold ? FontWeights.SemiBold : FontWeights.Normal,
-                Foreground = ThemeHelper.Brush(fg),
-                VerticalAlignment = VerticalAlignment.Center,
-            });
-            var ic = YYIcons.Make(icon, 13, ThemeHelper.Brush(fg));
-            ic.VerticalAlignment = VerticalAlignment.Center;
-            Grid.SetColumn(ic, 1);
-            g.Children.Add(ic);
-
-            var btn = new Button
-            {
-                Content = g,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                Height = 28,
-                MinHeight = 28,
-                Padding = new Thickness(9, 0, 9, 0),
-                Margin = new Thickness(5, 0, 5, 0),
-                CornerRadius = new CornerRadius(7),
-                BorderThickness = new Thickness(0),
-                Background = ThemeHelper.Brush(Colors.Transparent),
-                UseSystemFocusVisuals = false,
-            };
-            btn.PointerEntered += (_, _) => btn.Background = ThemeHelper.Brush(palette.Inset);
-            btn.PointerExited += (_, _) => btn.Background = ThemeHelper.Brush(Colors.Transparent);
-            btn.Click += (_, _) =>
-            {
-                flyout.Hide();
-                action();
-            };
-            return btn;
-        }
-
-        // Group 0: 5 Reading statuses (在读 / 想读 / 读过 / 搁置 / 弃读)
-        AddDivider();
-        var statusBox = new StackPanel { Spacing = 0, Padding = new Thickness(0, 4, 0, 4) };
-        (ReadingStatus St, string Name, string Sym)[] statuses =
-        [
-            (ReadingStatus.Reading, "在读", "book-open"),
-            (ReadingStatus.Want, "想读", "bookmark"),
-            (ReadingStatus.Finished, "读过", "check-circle"),
-            (ReadingStatus.Paused, "搁置", "pause-circle"),
-            (ReadingStatus.Dropped, "弃读", "xmark-circle"),
-        ];
-        foreach (var (st, name, sym) in statuses)
-        {
-            bool cur = book.Status == st;
-            ReadingStatus captured = st;
-            statusBox.Children.Add(MakeRow(name, cur ? "checkmark" : sym, cur ? tc.Accent : palette.T1, cur, () => onSetStatus(captured)));
-        }
-        root.Children.Add(statusBox);
-
-        // Group 1: Open / Listen / Audiobook (only for file-backed books)
-        if (!book.Record)
-        {
-            AddDivider();
-            var playBox = new StackPanel { Spacing = 0, Padding = new Thickness(0, 4, 0, 4) };
-            bool isAudio = book.Format == BookFormat.Audio;
-            string openLabel = isAudio
-                ? (book.Progress > 0 ? "接着听" : "开始听")
-                : (book.Progress > 0 ? "接着读" : "开始读");
-            playBox.Children.Add(MakeRow(openLabel, isAudio ? "headphones" : "book-open", tc.Accent, true, onOpen));
-            playBox.Children.Add(MakeRow("从头听", "headphones", palette.T1, false, onListenFromStart));
-            if (hasAudiobook)
-                playBox.Children.Add(MakeRow("有声书…", "wave", palette.T1, false, onAudiobook));
-            root.Children.Add(playBox);
-        }
-
-        // Group 2: Edit / Collection / Reveal / Delete
-        AddDivider();
-        var manageBox = new StackPanel { Spacing = 0, Padding = new Thickness(0, 4, 0, 4) };
-        manageBox.Children.Add(MakeRow("编辑信息…", "pencil", palette.T1, false, onEditInfo));
-        manageBox.Children.Add(MakeRow("加入合集…", "stack", palette.T1, false, onAddToCollection));
-        if (!book.Record)
-            manageBox.Children.Add(MakeRow("在资源管理器中显示", "folder", palette.T1, false, onRevealInExplorer));
-        manageBox.Children.Add(MakeRow("删除", "trash", palette.Danger, false, onDelete));
-        root.Children.Add(manageBox);
-
-        flyout.Content = root;
-        return flyout;
-    }
-
-    private static string FormatRemaining(BookSummary book)
-    {
-        if (book.Format == BookFormat.Pdf && book.Page > 0) return $"第 {book.Page} 页";
-        if (book.Progress >= 0.995) return "已读完";
-        uint totalMin = book.Format == BookFormat.Audio ? book.ListenMinutes : book.ReadMinutes;
-        if (totalMin == 0) return $"{(int)Math.Round(book.Progress * 100)}%";
-        int rem = Math.Max(1, (int)Math.Round(totalMin * (1.0 - Math.Clamp(book.Progress, 0, 1))));
-        return rem >= 60
-            ? (rem % 60 == 0 ? $"还剩 {rem / 60} 小时" : $"还剩 {rem / 60} 小时 {rem % 60} 分")
-            : $"还剩 {rem} 分";
-    }
-
-    private static string StatusDisplayName(ReadingStatus status) => status switch
-    {
-        ReadingStatus.Reading => "在读",
-        ReadingStatus.Want => "想读",
-        ReadingStatus.Finished => "读过",
-        ReadingStatus.Paused => "搁置",
-        ReadingStatus.Dropped => "弃读",
-        _ => "想读",
-    };
-
-    /// <summary>
-    /// 1:1 port of <c>PhoneSignature.swift</c> (<c>PencilSignature</c>) used in <c>MacUpdate.swift</c>:
-    /// invisible when the About page opens; clicking the signature area or the <c>by nowtin · GPL-3.0</c>
-    /// line beneath it writes out all three graphite strokes ("CTT") one after another.
-    /// </summary>
-    public static (FrameworkElement View, Action TriggerWrite) MakePencilSignature(double size, bool dark)
-    {
-        double k = size / 60.0;
-        double w = size;
-        double h = size * 56.0 / 60.0;
-        Color lead = dark ? Color.FromArgb(255, 217, 213, 205) : Color.FromArgb(255, 47, 46, 45);
-
-        Point Pt(double x, double y) => new((x - 8.0) * k, (y - 6.0) * k);
-
-        // Pre-sampled arc-length tables for exact smooth trim(0..t) at 60fps
-        var s0 = SampleMultiBezier([
-            (Pt(24, 9),    Pt(19, 15),    Pt(13.5, 25),  Pt(11.5, 33)),
-            (Pt(11.5, 33), Pt(10, 39),    Pt(13, 41.5),  Pt(20, 41.5)),
-            (Pt(20, 41.5), Pt(28, 41.5),  Pt(36, 40.5),  Pt(44, 39.5)),
-            (Pt(44, 39.5), Pt(51, 38.5),  Pt(58, 37.5),  Pt(64, 37)),
-        ]);
-        var s1 = SampleMultiBezier([
-            (Pt(21.5, 17), Pt(27, 18.5),  Pt(31.5, 18.8), Pt(35, 18.2)),
-            (Pt(35, 18.2), Pt(31, 21),    Pt(27.5, 26),   Pt(26.3, 33)),
-            (Pt(26.3, 33), Pt(25.3, 40),  Pt(24.6, 47),   Pt(25.2, 53)),
-        ]);
-        var s2 = SampleMultiBezier([
-            (Pt(43, 17.5), Pt(48, 18.8),  Pt(52.5, 17.8), Pt(56.5, 15.5)),
-            (Pt(56.5, 15.5), Pt(51, 19),  Pt(45.5, 24),   Pt(43.3, 31)),
-            (Pt(43.3, 31), Pt(41.5, 39),  Pt(40.3, 49),   Pt(41, 59.5)),
-        ]);
-        var pressed = SampleMultiBezier([
-            (Pt(40, 40.2), Pt(48, 39), Pt(56, 37.8), Pt(63.5, 37.2)),
-        ]);
-
-        Polyline MakeLine(double thickness, double opacity, double dx = 0, double dy = 0, bool grainDash = false)
-        {
-            var pl = new Polyline
-            {
-                Stroke = ThemeHelper.Brush(lead),
-                StrokeThickness = thickness,
-                Opacity = opacity,
-                StrokeStartLineCap = PenLineCap.Round,
-                StrokeEndLineCap = PenLineCap.Round,
-                StrokeLineJoin = PenLineJoin.Round,
-                IsHitTestVisible = false,
-            };
-            if (grainDash)
-            {
-                pl.StrokeDashArray = [2.4, 0.65];
-                pl.StrokeDashCap = PenLineCap.Round;
-            }
-            if (dx != 0 || dy != 0)
-            {
-                Canvas.SetLeft(pl, dx);
-                Canvas.SetTop(pl, dy);
-            }
-            return pl;
-        }
-
-        var canvas = new Canvas
-        {
-            Width = w,
-            Height = h,
-            Background = new SolidColorBrush(Colors.Transparent),
-            Opacity = 0.86,
-            HorizontalAlignment = HorizontalAlignment.Left,
-        };
-
-        var mainLines = new[]
-        {
-            MakeLine(1.9 * k, 0.82),
-            MakeLine(1.9 * k, 0.82),
-            MakeLine(1.9 * k, 0.82),
-        };
-        var grainLines = new[]
-        {
-            MakeLine(1.0 * k, 0.54, 0.28 * k, 0.22 * k, grainDash: true),
-            MakeLine(1.0 * k, 0.54, 0.28 * k, 0.22 * k, grainDash: true),
-            MakeLine(1.0 * k, 0.54, 0.28 * k, 0.22 * k, grainDash: true),
-        };
-        var pressedLine = MakeLine(2.6 * k, 0.46);
-
-        for (int i = 0; i < 3; i++)
-        {
-            canvas.Children.Add(mainLines[i]);
-            canvas.Children.Add(grainLines[i]);
-            if (i == 0) canvas.Children.Add(pressedLine);
-        }
-
-        canvas.PointerEntered += (_, _) => canvas.Opacity = 1.0;
-        canvas.PointerExited += (_, _) => canvas.Opacity = 0.86;
-
-        var samples = new[] { s0, s1, s2 };
-        double[] durations = [0.62, 0.50, 0.56];
-        double[] starts = [0.10, 0.10 + 0.62 * 0.82, 0.10 + 0.62 * 0.82 + 0.50 * 0.82];
-        double totalEnd = starts[2] + durations[2] + 0.04;
-
-        DispatcherTimer? timer = null;
-        var sw = new System.Diagnostics.Stopwatch();
-
-        void ApplyTrim(Polyline target, (Point Pt, double CumLen)[] table, double t)
-        {
-            target.Points.Clear();
-            if (t <= 0.001 || table.Length < 2) return;
-            double total = table[^1].CumLen;
-            double targetLen = Math.Clamp(t, 0.0, 1.0) * total;
-            target.Points.Add(table[0].Pt);
-            for (int idx = 1; idx < table.Length; idx++)
-            {
-                if (table[idx].CumLen <= targetLen)
-                {
-                    target.Points.Add(table[idx].Pt);
-                }
-                else
-                {
-                    double prevLen = table[idx - 1].CumLen;
-                    double seg = Math.Max(1e-6, table[idx].CumLen - prevLen);
-                    double frac = (targetLen - prevLen) / seg;
-                    var a = table[idx - 1].Pt;
-                    var b = table[idx].Pt;
-                    target.Points.Add(new Point(a.X + (b.X - a.X) * frac, a.Y + (b.Y - a.Y) * frac));
-                    break;
-                }
-            }
-        }
-
-        void Write()
-        {
-            timer?.Stop();
-            for (int i = 0; i < 3; i++)
-            {
-                mainLines[i].Points.Clear();
-                grainLines[i].Points.Clear();
-            }
-            pressedLine.Points.Clear();
-
-            sw.Restart();
-            timer = new DispatcherTimer { Interval = System.TimeSpan.FromMilliseconds(16) };
-            timer.Tick += (_, _) =>
-            {
-                double elapsed = sw.Elapsed.TotalSeconds;
-                for (int i = 0; i < 3; i++)
-                {
-                    double raw = (elapsed - starts[i]) / durations[i];
-                    double eased = raw <= 0 ? 0 : (raw >= 1 ? 1 : CubicBezierEase(raw, 0.45, 0.05, 0.30, 1.0));
-                    ApplyTrim(mainLines[i], samples[i], eased);
-                    ApplyTrim(grainLines[i], samples[i], eased);
-                    if (i == 0)
-                    {
-                        double pTrim = Math.Max(0.0, eased * 2.1 - 1.1);
-                        ApplyTrim(pressedLine, pressed, pTrim);
-                    }
-                }
-                if (elapsed >= totalEnd)
-                {
-                    timer.Stop();
-                }
-            };
-            timer.Start();
-        }
-
-        canvas.PointerPressed += (_, e) =>
-        {
-            Write();
-            e.Handled = true;
-        };
-        canvas.Unloaded += (_, _) => timer?.Stop();
-
-        return (canvas, Write);
-    }
-
-    private static (Point Pt, double CumLen)[] SampleMultiBezier((Point P0, Point C1, Point C2, Point P3)[] segs)
-    {
-        const int stepsPerSeg = 36;
-        var list = new List<(Point Pt, double CumLen)>(segs.Length * stepsPerSeg + 1);
-        double cum = 0;
-        Point prev = segs[0].P0;
-        list.Add((prev, 0));
-        foreach (var (p0, c1, c2, p3) in segs)
-        {
-            for (int s = 1; s <= stepsPerSeg; s++)
-            {
-                double t = (double)s / stepsPerSeg;
-                double u = 1.0 - t;
-                double x = u * u * u * p0.X + 3 * u * u * t * c1.X + 3 * u * t * t * c2.X + t * t * t * p3.X;
-                double y = u * u * u * p0.Y + 3 * u * u * t * c1.Y + 3 * u * t * t * c2.Y + t * t * t * p3.Y;
-                var cur = new Point(x, y);
-                double dx = cur.X - prev.X;
-                double dy = cur.Y - prev.Y;
-                cum += Math.Sqrt(dx * dx + dy * dy);
-                list.Add((cur, cum));
-                prev = cur;
-            }
-        }
-        return list.ToArray();
-    }
-
-    private static double CubicBezierEase(double x, double x1, double y1, double x2, double y2)
-    {
-        double lo = 0.0, hi = 1.0, t = x;
-        for (int i = 0; i < 12; i++)
-        {
-            t = 0.5 * (lo + hi);
-            double u = 1.0 - t;
-            double bx = 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t;
-            if (bx < x) lo = t; else hi = t;
-        }
-        double uFinal = 1.0 - t;
-        return 3 * uFinal * uFinal * t * y1 + 3 * uFinal * t * t * y2 + t * t * t;
-    }
-
-    // ---------- Frameless macOS Sheet, Safe Dialog Host & Motion Helpers ----------
-
-    private static readonly ConditionalWeakTable<XamlRoot, SemaphoreSlim> _dialogLocks = new();
-
-    private static SemaphoreSlim GetDialogLock(XamlRoot xamlRoot) =>
-        _dialogLocks.GetValue(xamlRoot, static _ => new SemaphoreSlim(1, 1));
 
     /// <summary>
     /// Returns true if a real modal dialog or flyout/menu is open on <paramref name="xamlRoot"/>,
@@ -797,31 +173,9 @@ public static class YYChrome
 
     /// <summary>
     /// Strips WinUI 3's inner focus border and opaque focus/hover fill from a <see cref="TextBox"/>
-    /// placed inside a custom rounded capsule or card <see cref="Border"/>.
+    /// placed inside a custom rounded container <see cref="Border"/>.
     /// </summary>
     public static void StripTextBoxChrome(TextBox box)
-    {
-        var transparent = new SolidColorBrush(Colors.Transparent);
-        box.BorderThickness = new Thickness(0);
-        box.Background = transparent;
-        box.UseSystemFocusVisuals = false;
-        box.Resources["TextControlBorderThemeThickness"] = new Thickness(0);
-        box.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
-        box.Resources["TextControlBackground"] = transparent;
-        box.Resources["TextControlBackgroundPointerOver"] = transparent;
-        box.Resources["TextControlBackgroundFocused"] = transparent;
-        box.Resources["TextControlBackgroundDisabled"] = transparent;
-        box.Resources["TextControlBorderBrush"] = transparent;
-        box.Resources["TextControlBorderBrushPointerOver"] = transparent;
-        box.Resources["TextControlBorderBrushFocused"] = transparent;
-        box.Resources["TextControlBorderBrushDisabled"] = transparent;
-    }
-
-    /// <summary>
-    /// Strips WinUI 3's inner focus border and opaque focus/hover fill from a <see cref="PasswordBox"/>
-    /// placed inside a custom rounded capsule or card <see cref="Border"/>.
-    /// </summary>
-    public static void StripPasswordBoxChrome(PasswordBox box)
     {
         var transparent = new SolidColorBrush(Colors.Transparent);
         box.BorderThickness = new Thickness(0);
@@ -890,7 +244,7 @@ public static class YYChrome
     /// <summary>
     /// Crash-safe wrapper around <see cref="ContentDialog.ShowAsync()"/> that awaits closure of any prior open dialog
     /// on the same <see cref="XamlRoot"/>, syncs <see cref="FrameworkElement.RequestedTheme"/> from the host window,
-    /// and applies warm control theme resources.
+    /// and applies warm Fluent control theme resources.
     /// </summary>
     public static async Task<ContentDialogResult> ShowSafeAsync(this ContentDialog dlg, YYTint? tint = null)
     {
@@ -901,7 +255,7 @@ public static class YYChrome
             dlg.RequestedTheme = rootFe.ActualTheme != ElementTheme.Default ? rootFe.ActualTheme : rootFe.RequestedTheme;
 
         bool dark = ThemeHelper.IsDark(dlg.RequestedTheme);
-        ThemeHelper.ApplyControlThemeResources(dlg.Resources, dark, tint ?? YYTints.Default);
+        ThemeHelper.ApplyControlThemeResources(dlg.Resources, dark, tint ?? App.CurrentApp?.Library?.Prefs.Tint ?? YYTints.Default);
 
         var sem = GetDialogLock(dlg.XamlRoot);
         await sem.WaitAsync();
@@ -927,11 +281,10 @@ public static class YYChrome
     }
 
     /// <summary>
-    /// Creates a frameless macOS-style sheet <see cref="ContentDialog"/> with warm paper surface,
-    /// <c>18px</c> corner radius, zero built-in WinUI command bar, custom exact width, Esc-to-close,
-    /// and smooth Composition entrance animation.
+    /// Creates a Windows 11 Fluent 2 <see cref="ContentDialog"/> with warm paper surface,
+    /// <c>10px</c> overlay radius, crisp <c>1px</c> elevation border, Esc-to-close, and subtle fade/slide motion.
     /// </summary>
-    public static ContentDialog CreateMacSheet(
+    public static ContentDialog CreateFluentDialog(
         XamlRoot xamlRoot,
         bool dark,
         double width,
@@ -940,13 +293,14 @@ public static class YYChrome
         YYTint? tint = null)
     {
         var p = ThemeHelper.Palette(dark);
-        Color edgeColor = dark ? Color.FromArgb(32, 255, 255, 255) : p.Line;
+        Color surfaceBg = dark ? Color.FromArgb(255, 32, 30, 28) : Color.FromArgb(255, 250, 248, 244);
+        Color edgeColor = dark ? Color.FromArgb(36, 255, 255, 255) : Color.FromArgb(28, 42, 43, 46);
 
         var surface = new Border
         {
             Width = width,
-            Background = ThemeHelper.Brush(p.Bg),
-            CornerRadius = new CornerRadius(18),
+            Background = ThemeHelper.Brush(surfaceBg),
+            CornerRadius = new CornerRadius(10),
             Child = body,
         };
         body.HorizontalAlignment = HorizontalAlignment.Stretch;
@@ -956,18 +310,18 @@ public static class YYChrome
         {
             XamlRoot = xamlRoot,
             RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light,
-            Background = ThemeHelper.Brush(p.Bg),
+            Background = ThemeHelper.Brush(surfaceBg),
             Foreground = ThemeHelper.Brush(p.T1),
             BorderBrush = ThemeHelper.Brush(edgeColor),
-            BorderThickness = new Thickness(0.75),
-            CornerRadius = new CornerRadius(18),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
             Content = surface,
         };
-        ThemeHelper.ApplyControlThemeResources(dlg.Resources, dark, tint ?? YYTints.Default);
-        dlg.Resources["ContentDialogBackground"] = ThemeHelper.Brush(p.Bg);
+        ThemeHelper.ApplyControlThemeResources(dlg.Resources, dark, tint ?? App.CurrentApp?.Library?.Prefs.Tint ?? YYTints.Default);
+        dlg.Resources["ContentDialogBackground"] = ThemeHelper.Brush(surfaceBg);
         dlg.Resources["ContentDialogForeground"] = ThemeHelper.Brush(p.T1);
         dlg.Resources["ContentDialogBorderBrush"] = ThemeHelper.Brush(edgeColor);
-        dlg.Resources["ContentDialogBorderWidth"] = new Thickness(0.75);
+        dlg.Resources["ContentDialogBorderWidth"] = new Thickness(1);
         dlg.Resources["ContentDialogPadding"] = new Thickness(0);
         dlg.Resources["ContentDialogTitleMargin"] = new Thickness(0);
         dlg.Resources["ContentDialogMinWidth"] = width;
@@ -977,7 +331,7 @@ public static class YYChrome
         dlg.Resources["ContentDialogTopOverlay"] = new SolidColorBrush(Colors.Transparent);
         dlg.Resources["ContentDialogSeparatorThickness"] = new Thickness(0);
         dlg.Resources["ContentDialogSeparatorBorderBrush"] = new SolidColorBrush(Colors.Transparent);
-        dlg.Resources["OverlayCornerRadius"] = new CornerRadius(18);
+        dlg.Resources["OverlayCornerRadius"] = new CornerRadius(10);
 
         dlg.PreviewKeyDown += (_, e) =>
         {
@@ -990,7 +344,7 @@ public static class YYChrome
         dlg.Opened += (_, _) =>
         {
             UnclampDialogTemplateBounds(dlg, width, maxHeight);
-            AnimateEntrance(surface, fromY: 8f, durationMs: 170);
+            AnimateEntrance(surface, fromY: 6f, durationMs: 140);
         };
         return dlg;
     }
@@ -1012,7 +366,7 @@ public static class YYChrome
     }
 
     /// <summary>
-    /// Frameless macOS <c>YYDialogCard</c> confirmation sheet (<c>Parts.swift:1278-1400</c>).
+    /// Native Windows 11 Fluent 2 confirmation dialog with recessed bottom command band.
     /// </summary>
     public static async Task<bool> ShowConfirmAsync(
         XamlRoot? xamlRoot,
@@ -1026,75 +380,94 @@ public static class YYChrome
     {
         if (xamlRoot is null) return false;
         var p = ThemeHelper.Palette(dark);
-        var useTint = tint ?? YYTints.Default;
+        var useTint = tint ?? App.CurrentApp?.Library?.Prefs.Tint ?? YYTints.Default;
         bool confirmed = false;
         ContentDialog? dlgRef = null;
 
-        var stack = new StackPanel { Spacing = 14, Padding = new Thickness(22, 20, 22, 18) };
-        stack.Children.Add(new TextBlock
+        var root = new StackPanel { Spacing = 0 };
+        var body = new StackPanel { Spacing = 10, Padding = new Thickness(24, 22, 24, 20) };
+        body.Children.Add(new TextBlock
         {
             Text = L10n.T(title),
-            FontSize = 16,
+            FontSize = 17,
             FontWeight = FontWeights.SemiBold,
             Foreground = ThemeHelper.Brush(p.T1),
             TextWrapping = TextWrapping.Wrap,
         });
         if (!string.IsNullOrWhiteSpace(message))
         {
-            stack.Children.Add(new TextBlock
+            body.Children.Add(new TextBlock
             {
                 Text = L10n.T(message),
-                FontSize = 13,
+                FontSize = 13.5,
                 Foreground = ThemeHelper.Brush(p.T2),
                 TextWrapping = TextWrapping.Wrap,
                 LineHeight = 20,
             });
         }
+        root.Children.Add(body);
 
-        var btnRow = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 4, 0, 0) };
-        btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        var cancelBtn = MakeSheetPillButton(cancelText, () => dlgRef?.Hide(), dark, useTint, kind: "secondary", height: 34, horizontalPadding: 16);
-        Grid.SetColumn(cancelBtn, 1);
+        var footerBand = new Border
+        {
+            Background = ThemeHelper.Brush(dark ? Color.FromArgb(255, 25, 24, 22) : Color.FromArgb(255, 242, 239, 234)),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(0, 1, 0, 0),
+            CornerRadius = new CornerRadius(0, 0, 10, 10),
+            Padding = new Thickness(24, 14, 24, 14),
+        };
+        var btnRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Right,
+        };
 
         Button okBtn;
         if (destructive)
         {
-            Color dangerBg = dark ? Color.FromArgb(42, 232, 93, 78) : Color.FromArgb(26, 208, 66, 52);
-            Color dangerFg = p.Danger;
+            Color dangerBg = p.Danger;
+            Color dangerHover = Color.FromArgb(255, (byte)Math.Clamp(dangerBg.R - 14, 0, 255), (byte)Math.Clamp(dangerBg.G - 10, 0, 255), (byte)Math.Clamp(dangerBg.B - 10, 0, 255));
             okBtn = new Button
             {
-                Height = 34,
-                MinHeight = 34,
+                MinWidth = 88,
+                Height = 32,
+                MinHeight = 32,
                 Padding = new Thickness(16, 0, 16, 0),
-                CornerRadius = new CornerRadius(17),
+                CornerRadius = new CornerRadius(6),
                 Background = ThemeHelper.Brush(dangerBg),
-                Foreground = ThemeHelper.Brush(dangerFg),
-                BorderBrush = ThemeHelper.Brush(Color.FromArgb(64, dangerFg.R, dangerFg.G, dangerFg.B)),
-                BorderThickness = new Thickness(0.75),
+                Foreground = ThemeHelper.Brush(Colors.White),
+                BorderThickness = new Thickness(0),
                 FontWeight = FontWeights.SemiBold,
                 UseSystemFocusVisuals = false,
-                Content = new TextBlock { Text = L10n.T(confirmText), FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(dangerFg) },
+                Content = new TextBlock { Text = L10n.T(confirmText), FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(Colors.White) },
             };
+            okBtn.Resources["ButtonBackground"] = ThemeHelper.Brush(dangerBg);
+            okBtn.Resources["ButtonBackgroundPointerOver"] = ThemeHelper.Brush(dangerHover);
+            okBtn.Resources["ButtonBackgroundPressed"] = ThemeHelper.Brush(dangerHover);
+            okBtn.Resources["ButtonForeground"] = ThemeHelper.Brush(Colors.White);
+            okBtn.Resources["ButtonForegroundPointerOver"] = ThemeHelper.Brush(Colors.White);
             okBtn.Click += (_, _) => { confirmed = true; dlgRef?.Hide(); };
         }
         else
         {
-            okBtn = MakeSheetPillButton(confirmText, () => { confirmed = true; dlgRef?.Hide(); }, dark, useTint, kind: "dark", height: 34, horizontalPadding: 18);
+            okBtn = MakeDialogButton(confirmText, () => { confirmed = true; dlgRef?.Hide(); }, dark, useTint, kind: "primary", height: 32, horizontalPadding: 18);
+            okBtn.MinWidth = 88;
         }
-        Grid.SetColumn(okBtn, 2);
+        var cancelBtn = MakeDialogButton(cancelText, () => dlgRef?.Hide(), dark, useTint, kind: "secondary", height: 32, horizontalPadding: 16);
+        cancelBtn.MinWidth = 84;
 
-        btnRow.Children.Add(cancelBtn);
         btnRow.Children.Add(okBtn);
-        stack.Children.Add(btnRow);
+        btnRow.Children.Add(cancelBtn);
+        footerBand.Child = btnRow;
+        root.Children.Add(footerBand);
 
-        dlgRef = CreateMacSheet(xamlRoot, dark, 348, stack, tint: useTint);
+        dlgRef = CreateFluentDialog(xamlRoot, dark, 388, root, tint: useTint);
         dlgRef.PreviewKeyDown += (_, e) =>
         {
             if (e.Key == VirtualKey.Enter)
             {
+                if (ReferenceEquals(FocusManager.GetFocusedElement(xamlRoot), cancelBtn))
+                    return;
                 confirmed = true;
                 dlgRef.Hide();
                 e.Handled = true;
@@ -1105,7 +478,7 @@ public static class YYChrome
     }
 
     /// <summary>
-    /// Frameless macOS <c>yyNotice</c> single-button sheet (<c>Parts.swift:1278-1370</c>).
+    /// Native Windows 11 Fluent 2 notice dialog.
     /// </summary>
     public static async Task ShowNoticeAsync(
         XamlRoot? xamlRoot,
@@ -1117,35 +490,47 @@ public static class YYChrome
     {
         if (xamlRoot is null) return;
         var p = ThemeHelper.Palette(dark);
-        var useTint = tint ?? YYTints.Default;
+        var useTint = tint ?? App.CurrentApp?.Library?.Prefs.Tint ?? YYTints.Default;
         ContentDialog? dlgRef = null;
 
-        var stack = new StackPanel { Spacing = 14, Padding = new Thickness(22, 20, 22, 18) };
-        stack.Children.Add(new TextBlock
+        var root = new StackPanel { Spacing = 0 };
+        var body = new StackPanel { Spacing = 10, Padding = new Thickness(24, 22, 24, 20) };
+        body.Children.Add(new TextBlock
         {
             Text = L10n.T(title),
-            FontSize = 16,
+            FontSize = 17,
             FontWeight = FontWeights.SemiBold,
             Foreground = ThemeHelper.Brush(p.T1),
             TextWrapping = TextWrapping.Wrap,
         });
         if (!string.IsNullOrWhiteSpace(message))
         {
-            stack.Children.Add(new TextBlock
+            body.Children.Add(new TextBlock
             {
                 Text = L10n.T(message),
-                FontSize = 13,
+                FontSize = 13.5,
                 Foreground = ThemeHelper.Brush(p.T2),
                 TextWrapping = TextWrapping.Wrap,
                 LineHeight = 20,
             });
         }
+        root.Children.Add(body);
 
-        var okBtn = MakeSheetPillButton(okText, () => dlgRef?.Hide(), dark, useTint, kind: "dark", height: 34, horizontalPadding: 20);
+        var okBtn = MakeDialogButton(okText, () => dlgRef?.Hide(), dark, useTint, kind: "primary", height: 32, horizontalPadding: 20);
+        okBtn.MinWidth = 88;
         okBtn.HorizontalAlignment = HorizontalAlignment.Right;
-        stack.Children.Add(okBtn);
 
-        dlgRef = CreateMacSheet(xamlRoot, dark, 340, stack, tint: useTint);
+        root.Children.Add(new Border
+        {
+            Background = ThemeHelper.Brush(dark ? Color.FromArgb(255, 25, 24, 22) : Color.FromArgb(255, 242, 239, 234)),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(0, 1, 0, 0),
+            CornerRadius = new CornerRadius(0, 0, 10, 10),
+            Padding = new Thickness(24, 14, 24, 14),
+            Child = okBtn,
+        });
+
+        dlgRef = CreateFluentDialog(xamlRoot, dark, 376, root, tint: useTint);
         dlgRef.PreviewKeyDown += (_, e) =>
         {
             if (e.Key == VirtualKey.Enter)
@@ -1158,7 +543,7 @@ public static class YYChrome
     }
 
     /// <summary>
-    /// Frameless macOS <c>yyPrompt</c> single-line text input sheet (<c>Parts.swift:1405-1455</c>).
+    /// Native Windows 11 Fluent 2 single-line input prompt dialog.
     /// </summary>
     public static async Task<string?> ShowPromptAsync(
         XamlRoot? xamlRoot,
@@ -1166,46 +551,50 @@ public static class YYChrome
         string title,
         string placeholder = "",
         string initialText = "",
-        string confirmText = "好",
+        string confirmText = "确定",
         string cancelText = "取消",
         string? subtitle = null,
         YYTint? tint = null)
     {
         if (xamlRoot is null) return null;
         var p = ThemeHelper.Palette(dark);
-        var useTint = tint ?? YYTints.Default;
+        var useTint = tint ?? App.CurrentApp?.Library?.Prefs.Tint ?? YYTints.Default;
         string? submitted = null;
         ContentDialog? dlgRef = null;
 
-        var stack = new StackPanel { Spacing = 12, Padding = new Thickness(22, 20, 22, 18) };
-        stack.Children.Add(new TextBlock
+        var root = new StackPanel { Spacing = 0 };
+        var body = new StackPanel { Spacing = 10, Padding = new Thickness(24, 22, 24, 20) };
+        body.Children.Add(new TextBlock
         {
             Text = L10n.T(title),
-            FontSize = 16,
+            FontSize = 17,
             FontWeight = FontWeights.SemiBold,
             Foreground = ThemeHelper.Brush(p.T1),
         });
         if (!string.IsNullOrWhiteSpace(subtitle))
         {
-            stack.Children.Add(new TextBlock
+            body.Children.Add(new TextBlock
             {
                 Text = L10n.T(subtitle),
                 FontSize = 12.5,
                 Foreground = ThemeHelper.Brush(p.T3),
                 TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, -6, 0, 0),
+                Margin = new Thickness(0, -4, 0, 0),
             });
         }
 
         var box = new TextBox
         {
+            Style = (Style)Application.Current.Resources["YYSingleLineTextBoxStyle"],
             PlaceholderText = L10n.T(placeholder),
             Text = initialText,
-            CornerRadius = new CornerRadius(10),
             FontSize = 13.5,
+            Height = 34,
+            MinHeight = 34,
             Background = ThemeHelper.Brush(p.Card),
         };
-        stack.Children.Add(box);
+        body.Children.Add(box);
+        root.Children.Add(body);
 
         void Submit()
         {
@@ -1215,18 +604,28 @@ public static class YYChrome
             dlgRef?.Hide();
         }
 
-        var btnRow = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 4, 0, 0) };
-        btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        var cancelBtn = MakeSheetPillButton(cancelText, () => dlgRef?.Hide(), dark, useTint, kind: "secondary", height: 34, horizontalPadding: 16);
-        var okBtn = MakeSheetPillButton(confirmText, Submit, dark, useTint, kind: "dark", height: 34, horizontalPadding: 18);
-        Grid.SetColumn(cancelBtn, 1);
-        Grid.SetColumn(okBtn, 2);
-        btnRow.Children.Add(cancelBtn);
+        var btnRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Right,
+        };
+        var okBtn = MakeDialogButton(confirmText, Submit, dark, useTint, kind: "primary", height: 32, horizontalPadding: 18);
+        okBtn.MinWidth = 88;
+        var cancelBtn = MakeDialogButton(cancelText, () => dlgRef?.Hide(), dark, useTint, kind: "secondary", height: 32, horizontalPadding: 16);
+        cancelBtn.MinWidth = 84;
         btnRow.Children.Add(okBtn);
-        stack.Children.Add(btnRow);
+        btnRow.Children.Add(cancelBtn);
+
+        root.Children.Add(new Border
+        {
+            Background = ThemeHelper.Brush(dark ? Color.FromArgb(255, 25, 24, 22) : Color.FromArgb(255, 242, 239, 234)),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(0, 1, 0, 0),
+            CornerRadius = new CornerRadius(0, 0, 10, 10),
+            Padding = new Thickness(24, 14, 24, 14),
+            Child = btnRow,
+        });
 
         box.KeyDown += (_, e) =>
         {
@@ -1237,7 +636,7 @@ public static class YYChrome
             }
         };
 
-        dlgRef = CreateMacSheet(xamlRoot, dark, 356, stack, tint: useTint);
+        dlgRef = CreateFluentDialog(xamlRoot, dark, 396, root, tint: useTint);
         dlgRef.Opened += (_, _) =>
         {
             box.Focus(FocusState.Programmatic);
@@ -1248,11 +647,13 @@ public static class YYChrome
     }
 
     /// <summary>
-    /// Circular <c>28×28</c> recessed macOS sheet close button (<c>×</c>).
+    /// Native Windows 11 Fluent subtle 6px-rounded dialog close button (<c>×</c>).
     /// </summary>
-    public static Button MakeSheetCloseButton(Action onClose, bool dark, double size = 28)
+    public static Button MakeDialogCloseButton(Action onClose, bool dark, double size = 30)
     {
         var p = ThemeHelper.Palette(dark);
+        Color hoverBg = dark ? Color.FromArgb(22, 255, 255, 255) : Color.FromArgb(14, 42, 43, 46);
+        Color pressBg = dark ? Color.FromArgb(34, 255, 255, 255) : Color.FromArgb(24, 42, 43, 46);
         var btn = new Button
         {
             Width = size,
@@ -1260,22 +661,25 @@ public static class YYChrome
             MinWidth = size,
             MinHeight = size,
             Padding = new Thickness(0),
-            CornerRadius = new CornerRadius(size / 2.0),
-            Background = ThemeHelper.Brush(dark ? Color.FromArgb(255, 44, 45, 49) : Color.FromArgb(255, 236, 233, 227)),
+            CornerRadius = new CornerRadius(6),
+            Background = ThemeHelper.Brush(Colors.Transparent),
             BorderThickness = new Thickness(0),
             UseSystemFocusVisuals = false,
             VerticalAlignment = VerticalAlignment.Center,
-            Content = YYIcons.Make("xmark", Math.Round(size * 0.39), ThemeHelper.Brush(p.T2)),
+            Content = YYIcons.Make("xmark", Math.Round(size * 0.40), ThemeHelper.Brush(p.T2)),
         };
+        btn.Resources["ButtonBackground"] = ThemeHelper.Brush(Colors.Transparent);
+        btn.Resources["ButtonBackgroundPointerOver"] = ThemeHelper.Brush(hoverBg);
+        btn.Resources["ButtonBackgroundPressed"] = ThemeHelper.Brush(pressBg);
         AutomationProperties.SetName(btn, L10n.T("关闭面板"));
         btn.Click += (_, _) => onClose();
         return btn;
     }
 
     /// <summary>
-    /// Standard macOS sheet header row: optional leading tile + bold title + muted inline subtitle + trailing circular <c>×</c>.
+    /// Standard Fluent 2 dialog header row: optional leading visual + semibold title + subtle subtitle + trailing Fluent <c>×</c>.
     /// </summary>
-    public static Grid MakeSheetHeader(
+    public static Grid MakeDialogHeader(
         string title,
         string? subtitle,
         Action onClose,
@@ -1322,27 +726,29 @@ public static class YYChrome
         }
         row.Children.Add(left);
 
-        var closeBtn = MakeSheetCloseButton(onClose, dark);
+        var closeBtn = MakeDialogCloseButton(onClose, dark);
         Grid.SetColumn(closeBtn, 1);
         row.Children.Add(closeBtn);
         return row;
     }
 
     /// <summary>
-    /// Pill button used in macOS sheet footers (<c>"secondary"</c> white pill, <c>"warm"</c> soft tint wash, <c>"dark"</c> solid charcoal).
+    /// Native Windows 11 Fluent 2 6px-rounded dialog button
+    /// (<c>"primary"</c>/<c>"dark"</c> warm brand accent, <c>"warm"</c> soft tint wash, <c>"secondary"</c> crisp surface card).
     /// </summary>
-    public static Button MakeSheetPillButton(
+    public static Button MakeDialogButton(
         object content,
         Action onClick,
         bool dark,
         YYTint tint,
         string kind = "secondary",
-        double height = 36,
-        double horizontalPadding = 18,
+        double height = 32,
+        double horizontalPadding = 16,
         bool stretch = false)
     {
         var p = ThemeHelper.Palette(dark);
         var tc = ThemeHelper.TintColors(tint, dark);
+        double clampedH = Math.Min(height, 34);
         Color bg, bgHover, bgPress, bgDisabled, fg, fgDisabled, edge;
         double borderW;
         FontWeight fw;
@@ -1356,19 +762,18 @@ public static class YYChrome
                 fg = tc.Accent;
                 fgDisabled = Color.FromArgb(130, fg.R, fg.G, fg.B);
                 edge = tc.Edge;
-                borderW = 0.75;
+                borderW = 1;
                 fw = FontWeights.SemiBold;
                 break;
+            case "primary":
             case "dark":
-                bg = p.T1;
-                bgHover = Color.FromArgb(255, (byte)Math.Clamp(bg.R + (dark ? -18 : 22), 0, 255), (byte)Math.Clamp(bg.G + (dark ? -18 : 22), 0, 255), (byte)Math.Clamp(bg.B + (dark ? -18 : 22), 0, 255));
-                bgPress = Color.FromArgb(255, (byte)Math.Clamp(bg.R + (dark ? -32 : 38), 0, 255), (byte)Math.Clamp(bg.G + (dark ? -32 : 38), 0, 255), (byte)Math.Clamp(bg.B + (dark ? -32 : 38), 0, 255));
-                bgDisabled = Color.FromArgb(dark ? (byte)48 : (byte)96, p.T1.R, p.T1.G, p.T1.B);
-                fg = p.Card;
-                fgDisabled = dark
-                    ? Color.FromArgb(118, p.T1.R, p.T1.G, p.T1.B)
-                    : Color.FromArgb(235, p.Card.R, p.Card.G, p.Card.B);
-                edge = p.T1;
+                bg = tc.Fill;
+                bgHover = Color.FromArgb(255, (byte)Math.Clamp(bg.R + (dark ? 12 : -14), 0, 255), (byte)Math.Clamp(bg.G + (dark ? 12 : -14), 0, 255), (byte)Math.Clamp(bg.B + (dark ? 12 : -14), 0, 255));
+                bgPress = Color.FromArgb(255, (byte)Math.Clamp(bg.R + (dark ? -12 : -26), 0, 255), (byte)Math.Clamp(bg.G + (dark ? -12 : -26), 0, 255), (byte)Math.Clamp(bg.B + (dark ? -12 : -26), 0, 255));
+                bgDisabled = Color.FromArgb(dark ? (byte)64 : (byte)110, bg.R, bg.G, bg.B);
+                fg = Colors.White;
+                fgDisabled = Color.FromArgb(180, 255, 255, 255);
+                edge = bg;
                 borderW = 0;
                 fw = FontWeights.SemiBold;
                 break;
@@ -1380,8 +785,8 @@ public static class YYChrome
                 fg = p.T1;
                 fgDisabled = p.T3;
                 edge = p.Line;
-                borderW = 0.75;
-                fw = FontWeights.Medium;
+                borderW = 1;
+                fw = FontWeights.Normal;
                 break;
         }
 
@@ -1391,10 +796,10 @@ public static class YYChrome
 
         var btn = new Button
         {
-            Height = height,
-            MinHeight = height,
+            Height = clampedH,
+            MinHeight = clampedH,
             Padding = new Thickness(horizontalPadding, 0, horizontalPadding, 0),
-            CornerRadius = new CornerRadius(height / 2.0),
+            CornerRadius = new CornerRadius(6),
             Background = ThemeHelper.Brush(bg),
             Foreground = ThemeHelper.Brush(fg),
             BorderBrush = ThemeHelper.Brush(edge),
@@ -1423,56 +828,51 @@ public static class YYChrome
     }
 
     /// <summary>
-    /// GPU Composition vertical fade+slide entrance (macOS spring curve, zero layout cost).
+    /// Smooth XAML RenderTransform vertical fade+slide entrance.
     /// </summary>
-    public static void AnimateEntrance(UIElement element, float fromY = 8f, int durationMs = 170)
+    public static void AnimateEntrance(UIElement element, float fromY = 6f, int durationMs = 140)
     {
         try
         {
-            ElementCompositionPreview.SetIsTranslationEnabled(element, true);
-            var visual = ElementCompositionPreview.GetElementVisual(element);
-            var comp = visual.Compositor;
-            var ease = comp.CreateCubicBezierEasingFunction(new Vector2(0.22f, 1.0f), new Vector2(0.36f, 1.0f));
+            if (element.RenderTransform is not TranslateTransform tt)
+            {
+                tt = new TranslateTransform();
+                element.RenderTransform = tt;
+            }
+            tt.X = 0;
+            tt.Y = fromY;
+            element.Opacity = 0.0;
 
-            var offsetAnim = comp.CreateVector3KeyFrameAnimation();
-            offsetAnim.InsertKeyFrame(0f, new Vector3(0f, fromY, 0f));
-            offsetAnim.InsertKeyFrame(1f, Vector3.Zero, ease);
-            offsetAnim.Duration = System.TimeSpan.FromMilliseconds(durationMs);
-            visual.StartAnimation("Translation", offsetAnim);
+            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+            var sb = new Storyboard();
 
-            var opAnim = comp.CreateScalarKeyFrameAnimation();
-            opAnim.InsertKeyFrame(0f, 0.0f);
-            opAnim.InsertKeyFrame(1f, 1.0f, ease);
-            opAnim.Duration = System.TimeSpan.FromMilliseconds(Math.Max(90, durationMs - 30));
-            visual.StartAnimation("Opacity", opAnim);
+            var yAnim = new DoubleAnimation
+            {
+                From = fromY,
+                To = 0,
+                Duration = new Duration(System.TimeSpan.FromMilliseconds(durationMs)),
+                EasingFunction = ease,
+            };
+            Storyboard.SetTarget(yAnim, tt);
+            Storyboard.SetTargetProperty(yAnim, "Y");
+            sb.Children.Add(yAnim);
+
+            var opAnim = new DoubleAnimation
+            {
+                From = 0.0,
+                To = 1.0,
+                Duration = new Duration(System.TimeSpan.FromMilliseconds(Math.Max(80, durationMs - 20))),
+                EasingFunction = ease,
+            };
+            Storyboard.SetTarget(opAnim, element);
+            Storyboard.SetTargetProperty(opAnim, "Opacity");
+            sb.Children.Add(opAnim);
+
+            sb.Begin();
         }
-        catch { }
-    }
-
-    /// <summary>
-    /// GPU Composition horizontal slide+fade entrance for side drawers/panels.
-    /// </summary>
-    public static void AnimateSlideX(UIElement element, float fromX = 20f, int durationMs = 190)
-    {
-        try
+        catch
         {
-            ElementCompositionPreview.SetIsTranslationEnabled(element, true);
-            var visual = ElementCompositionPreview.GetElementVisual(element);
-            var comp = visual.Compositor;
-            var ease = comp.CreateCubicBezierEasingFunction(new Vector2(0.22f, 1.0f), new Vector2(0.36f, 1.0f));
-
-            var offsetAnim = comp.CreateVector3KeyFrameAnimation();
-            offsetAnim.InsertKeyFrame(0f, new Vector3(fromX, 0f, 0f));
-            offsetAnim.InsertKeyFrame(1f, Vector3.Zero, ease);
-            offsetAnim.Duration = System.TimeSpan.FromMilliseconds(durationMs);
-            visual.StartAnimation("Translation", offsetAnim);
-
-            var opAnim = comp.CreateScalarKeyFrameAnimation();
-            opAnim.InsertKeyFrame(0f, 0.25f);
-            opAnim.InsertKeyFrame(1f, 1.0f, ease);
-            opAnim.Duration = System.TimeSpan.FromMilliseconds(Math.Max(90, durationMs - 40));
-            visual.StartAnimation("Opacity", opAnim);
+            element.Opacity = 1.0;
         }
-        catch { }
     }
 }

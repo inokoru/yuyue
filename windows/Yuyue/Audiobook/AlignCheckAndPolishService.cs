@@ -235,11 +235,11 @@ public static class AlignCheckAndPolishService
 
         var rightTools = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
         var stopCounterTb = new TextBlock { FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) };
-        var prevStopBtn = new Button { Style = (Style)Application.Current.Resources["YYIconButtonStyle"], Content = YYIcons.Make("chevron-left", 11.5, ThemeHelper.Brush(p.T1)) };
+        var prevStopBtn = new Button { Style = (Style)Application.Current.Resources["YYToolbarIconButtonStyle"], Content = YYIcons.Make("chevron-left", 11.5, ThemeHelper.Brush(p.T1)) };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(prevStopBtn, L10n.T("上一处待确认"));
-        var nextStopBtn = new Button { Style = (Style)Application.Current.Resources["YYIconButtonStyle"], Content = YYIcons.Make("chevron-right", 11.5, ThemeHelper.Brush(p.T1)) };
+        var nextStopBtn = new Button { Style = (Style)Application.Current.Resources["YYToolbarIconButtonStyle"], Content = YYIcons.Make("chevron-right", 11.5, ThemeHelper.Brush(p.T1)) };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(nextStopBtn, L10n.T("下一处待确认"));
-        var doneBtn = new Button { Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"], Height = 28, MinHeight = 28, Padding = new Thickness(14, 0, 14, 0), Content = L10n.T("完成") };
+        var doneBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentSoftAccentButtonStyle"], Height = 28, MinHeight = 28, Padding = new Thickness(14, 0, 14, 0), Content = L10n.T("完成") };
         doneBtn.Click += (_, _) => { onSaved?.Invoke(); win.Close(); };
 
         rightTools.Children.Add(stopCounterTb);
@@ -581,7 +581,7 @@ public static class AlignCheckAndPolishService
 
             var playBtn = new Button
             {
-                Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"],
+                Style = (Style)Application.Current.Resources["YYFluentSoftAccentButtonStyle"],
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 Height = 34,
                 Content = "▶ 试听这一句（空格）",
@@ -620,7 +620,7 @@ public static class AlignCheckAndPolishService
                 var (lbl, d) = nudges[ni];
                 var nb = new Button
                 {
-                    Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+                    Style = (Style)Application.Current.Resources["YYFluentButtonStyle"],
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                     Padding = new Thickness(0),
                     Height = 30,
@@ -637,9 +637,9 @@ public static class AlignCheckAndPolishService
             var navSentRow = new Grid { ColumnSpacing = 8 };
             navSentRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             navSentRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var upBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = "↑ 上一句", IsEnabled = at > 0 };
+            var upBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = "↑ 上一句", IsEnabled = at > 0 };
             upBtn.Click += (_, _) => { at = Math.Max(0, at - 1); RenderAll(); };
-            var downBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = "↓ 下一句", IsEnabled = at + 1 < map.Rows.Length };
+            var downBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = "↓ 下一句", IsEnabled = at + 1 < map.Rows.Length };
             downBtn.Click += (_, _) => { at = Math.Min(map.Rows.Length - 1, at + 1); RenderAll(); };
             Grid.SetColumn(downBtn, 1);
             navSentRow.Children.Add(upBtn);
@@ -950,7 +950,7 @@ public static class AlignCheckAndPolishService
         };
         PolishStateChanged += onChanged;
 
-        var startBtn = YYChrome.MakeSheetPillButton(startBtnLabel, () =>
+        var startBtn = YYChrome.MakeDialogButton(startBtnLabel, () =>
         {
             if (job.Running)
             {
@@ -1028,7 +1028,7 @@ public static class AlignCheckAndPolishService
             Spacing = 14,
             Padding = new Thickness(22, 18, 22, 18),
         };
-        sheetBody.Children.Add(YYChrome.MakeSheetHeader(L10n.T("整理文字版错字"), null, () => dlgRef?.Hide(), dark, titleSize: 17));
+        sheetBody.Children.Add(YYChrome.MakeDialogHeader(L10n.T("整理文字版错字"), null, () => dlgRef?.Hide(), dark, titleSize: 17));
         sheetBody.Children.Add(new Border
         {
             CornerRadius = new CornerRadius(12),
@@ -1039,7 +1039,7 @@ public static class AlignCheckAndPolishService
         });
         sheetBody.Children.Add(startBtn);
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 420, sheetBody, tint: library.Prefs.Tint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 420, sheetBody, tint: library.Prefs.Tint);
         try
         {
             await dlgRef.ShowSafeAsync(library.Prefs.Tint);

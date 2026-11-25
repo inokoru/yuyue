@@ -369,7 +369,7 @@ public static class CustomPaperDialog
             {
                 var dupBtn = new Button
                 {
-                    Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+                    Style = (Style)Application.Current.Resources["YYFluentButtonStyle"],
                     Content = L10n.T("复制一张"),
                     Height = 26,
                     MinHeight = 26,
@@ -639,7 +639,7 @@ public static class CustomPaperDialog
                 bool on = draft.Layout == lk;
                 var lb = new Button
                 {
-                    Style = (Style)Application.Current.Resources[on ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"],
+                    Style = (Style)Application.Current.Resources[on ? "YYFluentSoftAccentButtonStyle" : "YYFluentButtonStyle"],
                     Content = L10n.T(ll),
                     Height = 24,
                     MinHeight = 24,
@@ -745,7 +745,7 @@ public static class CustomPaperDialog
 
         string sheetTitle = string.IsNullOrEmpty(initial.Id) ? L10n.T("调纸") : $"{L10n.T("调整")}“{initial.Name}”";
         var outer = new StackPanel { Spacing = 12, Padding = new Thickness(18, 16, 18, 16) };
-        outer.Children.Add(YYChrome.MakeSheetHeader(sheetTitle, null, () => dlgRef?.Hide(), darkUi, titleSize: 16));
+        outer.Children.Add(YYChrome.MakeDialogHeader(sheetTitle, null, () => dlgRef?.Hide(), darkUi, titleSize: 16));
         outer.Children.Add(new ScrollViewer
         {
             MaxHeight = 500,
@@ -756,15 +756,15 @@ public static class CustomPaperDialog
         var footGrid = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 2, 0, 0) };
         footGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         footGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var cancelBtn = YYChrome.MakeSheetPillButton(L10n.T("取消"), () => dlgRef?.Hide(), darkUi, library.Prefs.Tint, "secondary", height: 34, stretch: true);
-        var saveBtn = YYChrome.MakeSheetPillButton(L10n.T("完成"), () => { confirmedSave = true; dlgRef?.Hide(); }, darkUi, library.Prefs.Tint, "warm", height: 34, stretch: true);
+        var cancelBtn = YYChrome.MakeDialogButton(L10n.T("取消"), () => dlgRef?.Hide(), darkUi, library.Prefs.Tint, "secondary", height: 34, stretch: true);
+        var saveBtn = YYChrome.MakeDialogButton(L10n.T("完成"), () => { confirmedSave = true; dlgRef?.Hide(); }, darkUi, library.Prefs.Tint, "warm", height: 34, stretch: true);
         Grid.SetColumn(cancelBtn, 0);
         Grid.SetColumn(saveBtn, 1);
         footGrid.Children.Add(cancelBtn);
         footGrid.Children.Add(saveBtn);
         outer.Children.Add(footGrid);
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, darkUi, 340, outer, maxHeight: 740, tint: library.Prefs.Tint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, darkUi, 340, outer, maxHeight: 740, tint: library.Prefs.Tint);
         await dlgRef.ShowSafeAsync(library.Prefs.Tint);
 
         if (duplicatedPaper is not null)
@@ -824,19 +824,19 @@ public static class CustomPaperDialog
             {
                 status = s;
                 foreach (var (itemSt, itemBtn) in statusBtns)
-                    itemBtn.Style = (Style)Application.Current.Resources[itemSt == status ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
+                    itemBtn.Style = (Style)Application.Current.Resources[itemSt == status ? "YYFluentSoftAccentButtonStyle" : "YYFluentButtonStyle"];
             };
             statusBtns.Add((s, b));
             statusRow.Children.Add(b);
         }
         foreach (var (itemSt, itemBtn) in statusBtns)
-            itemBtn.Style = (Style)Application.Current.Resources[itemSt == status ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
+            itemBtn.Style = (Style)Application.Current.Resources[itemSt == status ? "YYFluentSoftAccentButtonStyle" : "YYFluentButtonStyle"];
 
         var foot = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 4, 0, 0) };
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var cancelBtn = YYChrome.MakeSheetPillButton(L10n.T("取消"), () => dlgRef?.Hide(), dark, library.Prefs.Tint, "secondary", height: 36, stretch: true);
-        var okBtn = YYChrome.MakeSheetPillButton(L10n.T("加入进度架"), () =>
+        var cancelBtn = YYChrome.MakeDialogButton(L10n.T("取消"), () => dlgRef?.Hide(), dark, library.Prefs.Tint, "secondary", height: 36, stretch: true);
+        var okBtn = YYChrome.MakeDialogButton(L10n.T("加入进度架"), () =>
         {
             if (!string.IsNullOrWhiteSpace(titleBox.Text))
             {
@@ -855,7 +855,7 @@ public static class CustomPaperDialog
             Padding = new Thickness(22, 18, 22, 18),
             Children =
             {
-                YYChrome.MakeSheetHeader(L10n.T("记一本纸书 / 外部书"), null, () => dlgRef?.Hide(), dark, titleSize: 17),
+                YYChrome.MakeDialogHeader(L10n.T("记一本纸书 / 外部书"), null, () => dlgRef?.Hide(), dark, titleSize: 17),
                 new TextBlock
                 {
                     Text = L10n.T("无需电子书文件，也能在语阅里记录页码进度、评分与读后短评，并跨端同步。"),
@@ -870,7 +870,7 @@ public static class CustomPaperDialog
             },
         };
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 412, body, tint: library.Prefs.Tint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 412, body, tint: library.Prefs.Tint);
         await dlgRef.ShowSafeAsync(library.Prefs.Tint);
         if (!confirmed || string.IsNullOrWhiteSpace(titleBox.Text))
             return null;
@@ -892,7 +892,7 @@ public static class CustomPaperDialog
 
         byte? rating = book.Rating;
         var root = new StackPanel { Spacing = 12, Padding = new Thickness(22, 18, 22, 18) };
-        root.Children.Add(YYChrome.MakeSheetHeader(L10n.T("阅读档案"), book.Title, () => dlgRef?.Hide(), dark, titleSize: 17));
+        root.Children.Add(YYChrome.MakeDialogHeader(L10n.T("阅读档案"), book.Title, () => dlgRef?.Hide(), dark, titleSize: 17));
 
         var starRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         var starBtns = new List<(byte Val, Button Btn)>();
@@ -902,7 +902,7 @@ public static class CustomPaperDialog
             {
                 bool lit = rating is byte r && v <= r;
                 b.Content = lit ? "★" : "☆";
-                b.Style = (Style)Application.Current.Resources[lit ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
+                b.Style = (Style)Application.Current.Resources[lit ? "YYFluentSoftAccentButtonStyle" : "YYFluentButtonStyle"];
             }
         }
         for (byte s = 1; s <= 5; s++)
@@ -945,15 +945,15 @@ public static class CustomPaperDialog
         var foot = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 4, 0, 0) };
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var cancelBtn = YYChrome.MakeSheetPillButton(L10n.T("取消"), () => dlgRef?.Hide(), dark, library.Prefs.Tint, "secondary", height: 36, stretch: true);
-        var saveBtn = YYChrome.MakeSheetPillButton(L10n.T("保存"), () => { confirmed = true; dlgRef?.Hide(); }, dark, library.Prefs.Tint, "warm", height: 36, stretch: true);
+        var cancelBtn = YYChrome.MakeDialogButton(L10n.T("取消"), () => dlgRef?.Hide(), dark, library.Prefs.Tint, "secondary", height: 36, stretch: true);
+        var saveBtn = YYChrome.MakeDialogButton(L10n.T("保存"), () => { confirmed = true; dlgRef?.Hide(); }, dark, library.Prefs.Tint, "warm", height: 36, stretch: true);
         Grid.SetColumn(cancelBtn, 0);
         Grid.SetColumn(saveBtn, 1);
         foot.Children.Add(cancelBtn);
         foot.Children.Add(saveBtn);
         root.Children.Add(foot);
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 440, root, tint: library.Prefs.Tint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 440, root, tint: library.Prefs.Tint);
         await dlgRef.ShowSafeAsync(library.Prefs.Tint);
         if (!confirmed) return false;
 

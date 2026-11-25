@@ -23,7 +23,7 @@ public sealed class DevicePrefs
     public bool PaperFollowAppearance { get; set; } = true;
     public string PaperLightId { get; set; } = "";
     public string PaperDarkId { get; set; } = "";
-    public double CoverWidth { get; set; } = 100.0;
+    public double CoverWidth { get; set; } = 118.0;
     public bool ShowProgress { get; set; } = true;
     public bool TwoColumns { get; set; } = true;
     public bool ReopenLast { get; set; } = false;
@@ -199,6 +199,24 @@ public sealed class DevicePrefs
     public string AnalyticsDistinctId { get; set; } = "";
     public string AnalyticsLastVersion { get; set; } = "";
 
+    // Windows 11 原生交互与窗口壳层偏好
+    public bool OpenBookInTab { get; set; } = true;
+    public bool RestoreLastTabs { get; set; } = true;
+    public List<SavedTabEntry> LastOpenTabs { get; set; } = [];
+    public string CloseWindowBehavior { get; set; } = "tray_when_playing"; // tray_when_playing | always_tray | exit
+    public bool ShelfSingleClickOpen { get; set; } = false; // false = 单击选中 + 双击打开 (Win11默认); true = 单击直开
+    public string ShelfViewMode { get; set; } = "grid"; // grid | list
+    public string ShelfSortDirection { get; set; } = "desc"; // asc | desc
+    public bool NavPaneCompact { get; set; } = false;
+    public string ReaderSpaceAction { get; set; } = "smart"; // smart (静读翻页/听书暂停) | listen (始终朗读暂停)
+    public bool UseWarmMica { get; set; } = true;
+    public double ReaderLeftPaneWidth { get; set; } = 260.0;
+    public bool ReaderLeftPaneOpen { get; set; } = false;
+    public string ReaderLeftPaneTab { get; set; } = "toc"; // toc | bookmarks | search
+    public int MainWindowWidth { get; set; } = 1240;
+    public int MainWindowHeight { get; set; } = 780;
+    public bool MainWindowMaximized { get; set; } = false;
+
     public ElementTheme ToElementTheme() => ThemeMode switch
     {
         "light" => ElementTheme.Light,
@@ -206,8 +224,10 @@ public sealed class DevicePrefs
         _ => ElementTheme.Default,
     };
 
-    public YYTint Tint => YYTints.All.FirstOrDefault(t => t.Id == TintId) ?? YYTints.Default;
+    public YYTint Tint => ThemeHelper.ResolveTint(TintId);
 }
+
+public sealed record SavedTabEntry(string BookId, string Kind, string? SplitBookId = null);
 
 /// <summary>
 /// Single process-wide facade over <see cref="YuyueCore"/> (Rust).

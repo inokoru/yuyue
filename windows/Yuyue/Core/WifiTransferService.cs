@@ -51,13 +51,21 @@ public sealed class WifiTransferService : IDisposable
         TcpListener? listener = null;
         try
         {
+            bool port8080Busy = IPGlobalProperties.GetIPGlobalProperties()
+                .GetActiveTcpListeners()
+                .Any(ep => ep.Port == 8080);
+            if (port8080Busy)
+                throw new SocketException((int)SocketError.AddressAlreadyInUse);
+
             listener = new TcpListener(IPAddress.Any, 8080);
+            listener.ExclusiveAddressUse = true;
             listener.Start();
         }
         catch
         {
             try { listener?.Stop(); } catch { }
             listener = new TcpListener(IPAddress.Any, 0);
+            listener.ExclusiveAddressUse = true;
             listener.Start();
         }
         _listener = listener;

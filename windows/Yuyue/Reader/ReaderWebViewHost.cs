@@ -218,15 +218,17 @@ public sealed class ReaderWebViewHost : IDisposable
                     const c = e.code || '';
                     if (ctrl && (k === 'c' || k === 'C' || k === 'a' || k === 'A')) return;
                     const isCtrlShortcut = ctrl && (
-                        ['f','F','k','K','g','G','d','D','b','B','z','Z','w','W','0','[',']','=','+','-','_',','].includes(k) ||
-                        c === 'BracketLeft' || c === 'BracketRight' || c === 'Digit0' || c === 'Numpad0' ||
+                        ['f','F','k','K','g','G','d','D','b','B','z','Z','w','W','0','1','2','3','4','5','6','7','8','9','[',']','=','+','-','_',',','Tab'].includes(k) ||
+                        (shift && (k === 't' || k === 'T')) ||
+                        c === 'BracketLeft' || c === 'BracketRight' || /^Digit[0-9]$/.test(c) || /^Numpad[0-9]$/.test(c) ||
                         (alt && ['t','T','n','N','ArrowUp','ArrowDown'].includes(k))
                     );
+                    const isAltShortcut = !ctrl && alt && (k === 'ArrowLeft' || k === 'ArrowRight');
                     const isNavKey = !ctrl && !alt && (
-                        ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','PageUp','PageDown',' ','Escape','F11','1','2','3','4','c','C','n','N','Delete','Backspace'].includes(k) ||
+                        ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','PageUp','PageDown',' ','Escape','F3','F11','1','2','3','4','c','C','n','N','Delete','Backspace'].includes(k) ||
                         c === 'Numpad1' || c === 'Numpad2' || c === 'Numpad3' || c === 'Numpad4'
                     );
-                    if (isCtrlShortcut || isNavKey) {
+                    if (isCtrlShortcut || isAltShortcut || isNavKey) {
                         e.preventDefault();
                         e.stopPropagation();
                         window.chrome?.webview?.postMessage({ type: 'winKey', key: k, code: c, ctrl, shift, alt });
@@ -586,6 +588,8 @@ public sealed class ReaderWebViewHost : IDisposable
 
     private string BuildSectionHtml(string path, string body)
     {
+        body = InjectWoff2FontFaces(body);
+
         if (_library.Prefs.GlobalEinkMode)
         {
             body = PaperAppearance.ApplyToHtml(body, "eink", null, null);
@@ -621,6 +625,37 @@ public sealed class ReaderWebViewHost : IDisposable
             catch { }
         }
 
+        return body;
+    }
+
+    private string InjectWoff2FontFaces(string body)
+    {
+        try
+        {
+            if (!Directory.Exists(_library.FontsDir)) return body;
+            StringBuilder? css = null;
+            foreach (string full in Directory.EnumerateFiles(_library.FontsDir, "*.woff2"))
+            {
+                string name = Path.GetFileName(full);
+                if (string.IsNullOrEmpty(name) || name.StartsWith('.') || name.Contains('"') || name.Contains('\''))
+                    continue;
+                var clean = new StringBuilder(name.Length);
+                foreach (char ch in name)
+                {
+                    if (ch is not ('"' or '\\' or '<' or '>' or ';' or '{' or '}'))
+                        clean.Append(ch);
+                }
+                css ??= new StringBuilder();
+                css.Append($"@font-face{{font-family:\"yy-file:{clean}\";src:url(\"/fonts/{Uri.EscapeDataString(name)}\");font-display:swap}}");
+            }
+            if (css is not null)
+            {
+                int headEnd = body.IndexOf("</head>", StringComparison.OrdinalIgnoreCase);
+                if (headEnd >= 0)
+                    body = body.Insert(headEnd, $"<style>{css}</style>\n");
+            }
+        }
+        catch { }
         return body;
     }
 
@@ -668,9 +703,17 @@ public sealed class ReaderWebViewHost : IDisposable
 
     public void Dispose()
     {
-        if (!_initialized || _webView.CoreWebView2 is null) return;
-        _webView.CoreWebView2.WebResourceRequested -= OnWebResourceRequested;
-        _webView.CoreWebView2.WebMessageReceived -= OnWebMessageReceived;
-        _webView.CoreWebView2.NewWindowRequested -= OnNewWindowRequested;
+        if (_initialized && _webView.CoreWebView2 is not null)
+        {
+            try
+            {
+                _webView.CoreWebView2.WebResourceRequested -= OnWebResourceRequested;
+                _webView.CoreWebView2.WebMessageReceived -= OnWebMessageReceived;
+                _webView.CoreWebView2.NewWindowRequested -= OnNewWindowRequested;
+            }
+            catch { }
+        }
+        _initialized = false;
+        try { _webView.Close(); } catch { }
     }
 }

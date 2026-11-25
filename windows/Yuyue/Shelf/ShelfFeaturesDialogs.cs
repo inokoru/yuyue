@@ -47,7 +47,7 @@ public static class ShelfFeaturesDialogs
         });
 
         Button? copyBtn = null;
-        copyBtn = YYChrome.MakeSheetPillButton("复制传书地址", () =>
+        copyBtn = YYChrome.MakeDialogButton("复制传书地址", () =>
         {
             var dp = new DataPackage();
             dp.SetText(url);
@@ -178,10 +178,10 @@ public static class ShelfFeaturesDialogs
             Padding = new Thickness(22, 18, 22, 18),
             Children =
             {
-                YYChrome.MakeSheetHeader("局域网无线传书", "同一 Wi-Fi 下浏览器直传", () => dlgRef?.Hide(), dark, titleSize: 17),
+                YYChrome.MakeDialogHeader("局域网无线传书", "同一 Wi-Fi 下浏览器直传", () => dlgRef?.Hide(), dark, titleSize: 17),
                 urlCard,
                 rowsCard,
-                YYChrome.MakeSheetPillButton("关闭传书服务", () => dlgRef?.Hide(), dark, library.Prefs.Tint, "dark", height: 38, stretch: true),
+                YYChrome.MakeDialogButton("关闭传书服务", () => dlgRef?.Hide(), dark, library.Prefs.Tint, "dark", height: 38, stretch: true),
             },
         };
 
@@ -267,7 +267,7 @@ public static class ShelfFeaturesDialogs
 
         try
         {
-            dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 440, root, tint: library.Prefs.Tint);
+            dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 440, root, tint: library.Prefs.Tint);
             await dlgRef.ShowSafeAsync(library.Prefs.Tint);
         }
         finally

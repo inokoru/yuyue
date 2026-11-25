@@ -982,7 +982,7 @@ public static class VoiceCloneAndDramaDialogs
                 var actRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
                 if (importedFile)
                 {
-                    actRow.Children.Add(YYChrome.MakeSheetPillButton("改好文字再检一次", () =>
+                    actRow.Children.Add(YYChrome.MakeDialogButton("改好文字再检一次", () =>
                     {
                         if (capturedSamples24k is null || string.IsNullOrWhiteSpace(transcriptText)) return;
                         var chk = library.Core.CardCheck(capturedSamples24k, 24_000, transcriptText.Trim(), null);
@@ -992,7 +992,7 @@ public static class VoiceCloneAndDramaDialogs
                         if (chk.Ok) _ = PlayAuditionPreviewAsync();
                     }, dark, useTint, kind: "secondary", height: 30, horizontalPadding: 13));
                 }
-                actRow.Children.Add(YYChrome.MakeSheetPillButton("再录一次", ResetToRecord, dark, useTint, kind: "warm", height: 30, horizontalPadding: 14));
+                actRow.Children.Add(YYChrome.MakeDialogButton("再录一次", ResetToRecord, dark, useTint, kind: "warm", height: 30, horizontalPadding: 14));
                 outerRoot.Children.Add(actRow);
             }
             else if (step == "ready")
@@ -1151,8 +1151,8 @@ public static class VoiceCloneAndDramaDialogs
                 }
 
                 var footer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
-                footer.Children.Add(YYChrome.MakeSheetPillButton("再录一次", ResetToRecord, dark, useTint, kind: "secondary", height: 32, horizontalPadding: 14));
-                saveBtn = YYChrome.MakeSheetPillButton(
+                footer.Children.Add(YYChrome.MakeDialogButton("再录一次", ResetToRecord, dark, useTint, kind: "secondary", height: 32, horizontalPadding: 14));
+                saveBtn = YYChrome.MakeDialogButton(
                     savingCard ? "保存中…" : (existingCard is not null ? "保存新录音" : "保存这个声音"),
                     () => _ = SaveVoiceCardNowAsync(),
                     dark, useTint, kind: "warm", height: 32, horizontalPadding: 16);
@@ -1249,7 +1249,7 @@ public static class VoiceCloneAndDramaDialogs
         }
 
         RebuildSheet();
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 348, outerRoot, maxHeight: 680, tint: useTint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 348, outerRoot, maxHeight: 680, tint: useTint);
         await dlgRef.ShowSafeAsync(useTint);
 
         recTimer.Stop();
@@ -1362,12 +1362,12 @@ public static class VoiceCloneAndDramaDialogs
             var card = library.LiveVoice.GetClonedCards().FirstOrDefault(c => c.Id == cardId);
             if (card is null)
             {
-                outer.Children.Add(YYChrome.MakeSheetHeader("克隆声音详情", null, () => dlgRef?.Hide(), dark));
+                outer.Children.Add(YYChrome.MakeDialogHeader("克隆声音详情", null, () => dlgRef?.Hide(), dark));
                 outer.Children.Add(new TextBlock { Text = L10n.T("找不到该克隆声音卡。"), Foreground = ThemeHelper.Brush(p.T2) });
                 return;
             }
 
-            outer.Children.Add(YYChrome.MakeSheetHeader(card.Name, "克隆声音", () => dlgRef?.Hide(), dark));
+            outer.Children.Add(YYChrome.MakeDialogHeader(card.Name, "克隆声音", () => dlgRef?.Hide(), dark));
 
             // 1. 6 Emotional Style Clips
             var styleHdr = new Grid();
@@ -1401,7 +1401,7 @@ public static class VoiceCloneAndDramaDialogs
 
                 if (existing is not null)
                 {
-                    var playB = YYChrome.MakeSheetPillButton("▶ 试听", async () =>
+                    var playB = YYChrome.MakeDialogButton("▶ 试听", async () =>
                     {
                         try
                         {
@@ -1434,7 +1434,7 @@ public static class VoiceCloneAndDramaDialogs
                 }
 
                 CardStyle capSt = st;
-                var recB = YYChrome.MakeSheetPillButton(existing is not null ? "重录" : "录制", () =>
+                var recB = YYChrome.MakeDialogButton(existing is not null ? "重录" : "录制", () =>
                 {
                     pendingRecordStyle = capSt;
                     dlgRef?.Hide();
@@ -1520,14 +1520,14 @@ public static class VoiceCloneAndDramaDialogs
             outer.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) });
             var footRow = new Grid();
             var leftFoot = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            var renameBtn = YYChrome.MakeSheetPillButton("重命名", () =>
+            var renameBtn = YYChrome.MakeDialogButton("重命名", () =>
             {
                 pendingRename = true;
                 dlgRef?.Hide();
             }, dark, useTint, kind: "secondary", height: 30, horizontalPadding: 14);
             leftFoot.Children.Add(renameBtn);
 
-            var rerecordBtn = YYChrome.MakeSheetPillButton("重新录一段", () =>
+            var rerecordBtn = YYChrome.MakeDialogButton("重新录一段", () =>
             {
                 pendingRerecordBase = true;
                 dlgRef?.Hide();
@@ -1569,8 +1569,9 @@ public static class VoiceCloneAndDramaDialogs
             Rebuild();
 
             var scroll = new ScrollViewer { MaxHeight = 560, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = outer };
-            dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 380, scroll, maxHeight: 620, tint: useTint);
+            dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 380, scroll, maxHeight: 620, tint: useTint);
             await dlgRef.ShowSafeAsync(useTint);
+            scroll.Content = null;
             StopClonePreview();
             AudioPlayer.StopActivePreview();
 
@@ -1765,7 +1766,7 @@ public static class VoiceCloneAndDramaDialogs
         {
             outer.Children.Clear();
             recHint = null;
-            outer.Children.Add(YYChrome.MakeSheetHeader($"录制「{styleName}」", instruction, () => dlgRef?.Hide(), dark));
+            outer.Children.Add(YYChrome.MakeDialogHeader($"录制「{styleName}」", instruction, () => dlgRef?.Hide(), dark));
 
             if (imported)
             {
@@ -1961,7 +1962,7 @@ public static class VoiceCloneAndDramaDialogs
             };
             foot.Children.Add(impLink);
 
-            var saveBtn = YYChrome.MakeSheetPillButton("保存情绪样本", () =>
+            var saveBtn = YYChrome.MakeDialogButton("保存情绪样本", () =>
             {
                 if (chk is { Ok: true })
                 {
@@ -1979,7 +1980,7 @@ public static class VoiceCloneAndDramaDialogs
         }
 
         Rebuild();
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 348, outer, maxHeight: 620, tint: useTint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 348, outer, maxHeight: 620, tint: useTint);
         await dlgRef.ShowSafeAsync(useTint);
 
         recTimer.Stop();
@@ -2459,7 +2460,7 @@ public static class VoiceCloneAndDramaDialogs
             : $"我是{roleName}。";
     }
 
-    // ---------- 3. Searchable PeoplePicker (1:1 DramaViews.swift PeoplePicker: 340px CreateMacSheet) ----------
+    // ---------- 3. Searchable PeoplePicker (1:1 DramaViews.swift PeoplePicker: 340px CreateFluentDialog) ----------
 
     public static async Task<UserChoice?> ShowPeoplePickerDialogAsync(
         XamlRoot xamlRoot, LibraryService library, string bookId, uint currentSection, string title = "选择说话人", bool includeGroup = true)
@@ -2479,7 +2480,7 @@ public static class VoiceCloneAndDramaDialogs
         ContentDialog? dlgRef = null;
 
         var outer = new StackPanel { Spacing = 10, Padding = new Thickness(16, 15, 16, 15) };
-        outer.Children.Add(YYChrome.MakeSheetHeader(title, null, () => dlgRef?.Hide(), dark));
+        outer.Children.Add(YYChrome.MakeDialogHeader(title, null, () => dlgRef?.Hide(), dark));
 
         var searchRow = new Grid { ColumnSpacing = 6 };
         searchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -2627,13 +2628,13 @@ public static class VoiceCloneAndDramaDialogs
         });
 
         L10n.ApplyTree(outer);
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 340, outer, maxHeight: 480, tint: useTint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 340, outer, maxHeight: 480, tint: useTint);
         dlgRef.Opened += (_, _) => searchBox.Focus(FocusState.Programmatic);
         await dlgRef.ShowSafeAsync(useTint);
         return picked;
     }
 
-    // ---------- 4. Active-Learning Unsure Speaker Review (1:1 DramaViews.swift UnsureView: 400px CreateMacSheet) ----------
+    // ---------- 4. Active-Learning Unsure Speaker Review (1:1 DramaViews.swift UnsureView: 400px CreateFluentDialog) ----------
 
     public static async Task ShowUnsureSpeakerReviewAsync(
         XamlRoot xamlRoot, LibraryService library, string bookId, uint currentSection, Action onChanged)
@@ -2706,7 +2707,7 @@ public static class VoiceCloneAndDramaDialogs
             outer.Children.Clear();
             activeLine = null;
 
-            outer.Children.Add(YYChrome.MakeSheetHeader("待确认的台词", null, () => dlgRef?.Hide(), dark));
+            outer.Children.Add(YYChrome.MakeDialogHeader("待确认的台词", null, () => dlgRef?.Hide(), dark));
 
             var ordered = cachedRaw
                 .OrderByDescending(u => u.Section == currentSection)
@@ -2739,7 +2740,7 @@ public static class VoiceCloneAndDramaDialogs
                 }
                 undoRow.Children.Add(undoLeft);
 
-                var undoBtn = YYChrome.MakeSheetPillButton("撤销", () =>
+                var undoBtn = YYChrome.MakeDialogButton("撤销", () =>
                 {
                     lastDecision = null;
                     resolvedCount = Math.Max(0, resolvedCount - 1);
@@ -2944,9 +2945,9 @@ public static class VoiceCloneAndDramaDialogs
             subActions.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             subActions.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            var otherBtn = YYChrome.MakeSheetPillButton("别人…", () => { openPickerNext = true; dlgRef?.Hide(); }, dark, useTint, kind: "secondary", height: 26, horizontalPadding: 11);
-            var notSpeechBtn = YYChrome.MakeSheetPillButton("不是台词", () => CommitChoice(cur, new UserChoice.NotSpeech(), "不是台词"), dark, useTint, kind: "secondary", height: 26, horizontalPadding: 11);
-            var grpBtn = YYChrome.MakeSheetPillButton("众人", () => CommitChoice(cur, new UserChoice.Group("众人"), "众人"), dark, useTint, kind: "secondary", height: 26, horizontalPadding: 11);
+            var otherBtn = YYChrome.MakeDialogButton("别人…", () => { openPickerNext = true; dlgRef?.Hide(); }, dark, useTint, kind: "secondary", height: 26, horizontalPadding: 11);
+            var notSpeechBtn = YYChrome.MakeDialogButton("不是台词", () => CommitChoice(cur, new UserChoice.NotSpeech(), "不是台词"), dark, useTint, kind: "secondary", height: 26, horizontalPadding: 11);
+            var grpBtn = YYChrome.MakeDialogButton("众人", () => CommitChoice(cur, new UserChoice.Group("众人"), "众人"), dark, useTint, kind: "secondary", height: 26, horizontalPadding: 11);
             Grid.SetColumn(notSpeechBtn, 1);
             Grid.SetColumn(grpBtn, 2);
 
@@ -3002,7 +3003,7 @@ public static class VoiceCloneAndDramaDialogs
             openPickerNext = false;
             RebuildCard();
 
-            dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 400, outer, maxHeight: 640, tint: useTint);
+            dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 400, outer, maxHeight: 640, tint: useTint);
             dlgRef.PreviewKeyDown += (_, e) =>
             {
                 if (activeLine is null) return;
@@ -3024,6 +3025,7 @@ public static class VoiceCloneAndDramaDialogs
                 }
             };
             await dlgRef.ShowSafeAsync(useTint);
+            if (outer.Parent is Border b) b.Child = null;
 
             if (openPickerNext && activeLine is not null)
             {
@@ -3056,7 +3058,7 @@ public static class VoiceCloneAndDramaDialogs
         }
     }
 
-    // ---------- 5. Role Detail Sheet (1:1 CastView.swift RoleView: 380px CreateMacSheet, real book lines & debounced sliders) ----------
+    // ---------- 5. Role Detail Sheet (1:1 CastView.swift RoleView: 380px CreateFluentDialog, real book lines & debounced sliders) ----------
 
     public static async Task ShowRoleDetailDialogAsync(
         Window ownerWindow, XamlRoot xamlRoot, LibraryService library, string bookId, string roleName,
@@ -3189,7 +3191,7 @@ public static class VoiceCloneAndDramaDialogs
             string avGlyph = castMember?.Avatar ?? (currentRole.Length > 0 ? currentRole[^1].ToString() : "?");
             string? lineCountSub = castMember is not null ? $"{castMember.LinesSoFar} 句" : null;
 
-            outer.Children.Add(YYChrome.MakeSheetHeader(currentRole, lineCountSub, () => roleDlg?.Hide(), dark, MakeDramaAvatar(avGlyph, avColor, 30)));
+            outer.Children.Add(YYChrome.MakeDialogHeader(currentRole, lineCountSub, () => roleDlg?.Hide(), dark, MakeDramaAvatar(avGlyph, avColor, 30)));
 
             // 1. Names & Gender card (1:1 RoleNamesSection)
             var namesCard = new StackPanel { Spacing = 8 };
@@ -3345,8 +3347,8 @@ public static class VoiceCloneAndDramaDialogs
             vMeta.Children.Add(L10n.Skip(new TextBlock { Text = voiceDisplay, FontSize = 11, Foreground = ThemeHelper.Brush(string.IsNullOrEmpty(curVid) ? p.T3 : tint.Accent), TextTrimming = TextTrimming.CharacterEllipsis }));
             vRow.Children.Add(vMeta);
 
-            var pickBtn = YYChrome.MakeSheetPillButton("换声音…", () => { FlushRoleSave(); pendingAction = "pick"; roleDlg?.Hide(); }, dark, useTint, kind: "warm", height: 27, horizontalPadding: 11);
-            var cloneBtn = YYChrome.MakeSheetPillButton("录声音…", () => { FlushRoleSave(); pendingAction = "clone"; roleDlg?.Hide(); }, dark, useTint, kind: "secondary", height: 27, horizontalPadding: 11);
+            var pickBtn = YYChrome.MakeDialogButton("换声音…", () => { FlushRoleSave(); pendingAction = "pick"; roleDlg?.Hide(); }, dark, useTint, kind: "warm", height: 27, horizontalPadding: 11);
+            var cloneBtn = YYChrome.MakeDialogButton("录声音…", () => { FlushRoleSave(); pendingAction = "clone"; roleDlg?.Hide(); }, dark, useTint, kind: "secondary", height: 27, horizontalPadding: 11);
             Grid.SetColumn(pickBtn, 1);
             Grid.SetColumn(cloneBtn, 2);
             vRow.Children.Add(pickBtn);
@@ -3489,7 +3491,7 @@ public static class VoiceCloneAndDramaDialogs
 
             if (!string.IsNullOrEmpty(curVid) || Math.Abs(curRate - 1.0) > 0.02 || Math.Abs(curPitch) > 0.05 || curRight)
             {
-                var resetBtn = YYChrome.MakeSheetPillButton(dramaOn ? "恢复自动选角" : "改回跟旁白", () =>
+                var resetBtn = YYChrome.MakeDialogButton(dramaOn ? "恢复自动选角" : "改回跟旁白", () =>
                 {
                     saveDebounce.Stop();
                     dirtySliders = false;
@@ -3513,8 +3515,9 @@ public static class VoiceCloneAndDramaDialogs
             pendingAction = null;
             await RebuildRoleAsync();
             var scroll = new ScrollViewer { MaxHeight = 560, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = outer };
-            roleDlg = YYChrome.CreateMacSheet(xamlRoot, dark, 380, scroll, maxHeight: 620, tint: useTint);
+            roleDlg = YYChrome.CreateFluentDialog(xamlRoot, dark, 380, scroll, maxHeight: 620, tint: useTint);
             await roleDlg.ShowSafeAsync(useTint);
+            scroll.Content = null;
 
             saveDebounce.Stop();
             FlushRoleSave();

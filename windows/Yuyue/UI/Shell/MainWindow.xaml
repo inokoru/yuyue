@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="Yuyue.UI.Shell.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="语阅">
+
+    <!-- Windows 11 原生单主窗口 + 40px Warm Mica Alt 标题栏与悬浮式 Fluent 2 多标签条 -->
+    <Grid
+        x:Name="RootGrid"
+        Background="{ThemeResource YYMicaTintBrush}"
+        AllowDrop="True"
+        DragOver="RootGrid_DragOver"
+        DragLeave="RootGrid_DragLeave"
+        Drop="RootGrid_Drop"
+        PreviewKeyDown="RootGrid_PreviewKeyDown">
+        <Grid.RowDefinitions>
+            <RowDefinition x:Name="TitleBarRow" Height="40" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- 顶部 40px 原生标题栏与悬浮式多标签条：左槽严格对齐 214px 侧栏（品牌+收起键 / 设置返回），标签条与右侧画布左边线齐平；阅读器/PDF 激活时自动全宽融合纸色 -->
+        <Grid x:Name="TitleBarChrome" Grid.Row="0" Background="Transparent" Padding="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="TitleBarLeftSlotCol" Width="214" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 左侧 214px / 54px 品牌标识与侧栏控制槽（书库/设置页显示，阅读器页自动收起） -->
+            <Grid x:Name="TitleBarLeftSlot" Grid.Column="0">
+                <!-- 书库态：16×16 精致双色矢量「门 + 暖色声波三竖」（可点回书库首页，与下方图标列同轴），右侧折叠键 -->
+                <Grid x:Name="LibraryHeaderHost">
+                    <Button
+                        x:Name="BrandMarkPanel"
+                        Style="{StaticResource YYToolbarIconButtonStyle}"
+                        Width="28"
+                        Height="28"
+                        MinWidth="28"
+                        MinHeight="28"
+                        Padding="0"
+                        Margin="10,0,0,0"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        ToolTipService.ToolTip="语阅 · 回到全部书籍"
+                        Click="BrandMark_Click">
+                        <Viewbox Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Canvas Width="1000" Height="1000">
+                                <Path
+                                    x:Name="BrandDoorPath"
+                                    Fill="{ThemeResource YYText1Brush}"
+                                    Opacity="0.84"
+                                    Data="M712,979 Q652,978 653,934 Q654,891 715,893 Q751,895 761,894 Q793,891 800,891 Q807,891 813,885.5 Q819,880 819,865 V190 Q819,185 814,185 H423 Q363,185 363,140 Q363,96 423,96 H853 Q913,96 913,156 V866 Q913,907 901.5,929.5 Q890,952 876,957 Q862,962 835,973 Q817,980 712,979 Z M139,979 Q92,979 92,919 V329 Q92,269 139,269 Q186,269 186,329 V919 Q186,979 139,979 Z M302,266 Q262,290 232,237 Q220,216 167,155 Q128,109 160,81 Q192,53 232,98 Q305,181 311,191 Q342,243 302,266 Z" />
+                                <Path
+                                    x:Name="BrandBarsPath"
+                                    Stroke="{ThemeResource YYAccentBrush}"
+                                    StrokeThickness="56"
+                                    StrokeStartLineCap="Round"
+                                    StrokeEndLineCap="Round"
+                                    Data="M330,520 V660 M502,400 V780 M674,470 V710" />
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
+                    <Button
+                        x:Name="SidebarToggleBtn"
+                        Style="{StaticResource YYToolbarIconButtonStyle}"
+                        Width="30"
+                        Height="28"
+                        MinWidth="30"
+                        MinHeight="28"
+                        Padding="0"
+                        Margin="0,0,8,0"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        ToolTipService.ToolTip="折叠或展开导航栏 (Ctrl+B)"
+                        Click="SidebarToggleBtn_Click" />
+                </Grid>
+
+                <!-- 设置态：返回书库按钮直接融入标题栏左槽，下方搜索框与书库对齐 -->
+                <Grid x:Name="SettingsHeaderHost" Visibility="Collapsed">
+                    <Button
+                        x:Name="TitleBarBackBtn"
+                        Style="{StaticResource YYTextActionButtonStyle}"
+                        Height="28"
+                        MinHeight="28"
+                        Margin="8,0,8,0"
+                        Padding="8,0"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        Click="TitleBarBackBtn_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                            <ContentPresenter x:Name="TitleBarBackIcon" VerticalAlignment="Center" />
+                            <TextBlock Text="返回书库" FontSize="12.5" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+            </Grid>
+
+            <!-- 水平多标签滚动区（与右侧主画布左边线齐平） -->
+            <ScrollViewer
+                x:Name="TabStripScroller"
+                Grid.Column="1"
+                HorizontalScrollMode="Auto"
+                HorizontalScrollBarVisibility="Hidden"
+                VerticalScrollMode="Disabled"
+                VerticalScrollBarVisibility="Disabled"
+                VerticalAlignment="Center">
+                <StackPanel
+                    x:Name="TabStripPanel"
+                    Orientation="Horizontal"
+                    Spacing="3"
+                    VerticalAlignment="Center" />
+            </ScrollViewer>
+
+            <!-- 新建 / 快搜打开按钮 (+) -->
+            <Button
+                x:Name="AddTabBtn"
+                Grid.Column="2"
+                Width="28"
+                Height="28"
+                MinWidth="28"
+                MinHeight="28"
+                Margin="4,0,0,0"
+                Padding="0"
+                CornerRadius="6"
+                BorderThickness="0"
+                Background="Transparent"
+                VerticalAlignment="Center"
+                UseSystemFocusVisuals="False"
+                ToolTipService.ToolTip="搜索或打开书籍 (Ctrl+K)"
+                Click="AddTabBtn_Click" />
+
+            <!-- 右侧空白标题栏拖动区，留出 146px 给 Windows 11 原生 [ — □ × ] 窗控键 -->
+            <Grid
+                x:Name="TabDragRegion"
+                Grid.Column="3"
+                MinWidth="168"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch"
+                Background="Transparent">
+                <Grid Width="146" HorizontalAlignment="Right" IsHitTestVisible="False" />
+            </Grid>
+        </Grid>
+
+        <!-- 主内容舞台：承载当前激活标签页（书库 / 书籍 / PDF / 有声书 / 设置） -->
+        <Grid x:Name="ContentStage" Grid.Row="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+
+        <!-- F11 沉浸全屏时的顶部边缘悬停呼出条 -->
+        <Border
+            x:Name="FullScreenPeekZone"
+            Grid.RowSpan="2"
+            Height="10"
+            VerticalAlignment="Top"
+            Background="Transparent"
+            Visibility="Collapsed"
+            PointerEntered="FullScreenPeek_Entered" />
+
+        <Border
+            x:Name="FullScreenPeekBar"
+            Grid.RowSpan="2"
+            Height="36"
+            VerticalAlignment="Top"
+            HorizontalAlignment="Center"
+            Margin="0,8,0,0"
+            Padding="14,0"
+            CornerRadius="8"
+            Visibility="Collapsed"
+            Background="{ThemeResource YYCardBrush}"
+            BorderBrush="{ThemeResource YYLineBrush}"
+            BorderThickness="1"
+            PointerExited="FullScreenPeek_Exited">
+            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <TextBlock
+                    x:Name="FullScreenTitleText"
+                    Text="语阅 · 沉浸全屏"
+                    FontSize="12"
+                    FontWeight="Medium"
+                    Foreground="{ThemeResource YYText1Brush}"
+                    VerticalAlignment="Center" />
+                <Button
+                    Style="{StaticResource YYFluentButtonStyle}"
+                    Height="26"
+                    MinHeight="26"
+                    Padding="10,0"
+                    FontSize="11.5"
+                    Content="退出全屏 (F11)"
+                    Click="ExitFullScreen_Click" />
+            </StackPanel>
+        </Border>
+
+        <!-- 全局文件拖放导入提示浮层 -->
+        <Grid
+            x:Name="DropOverlay"
+            Grid.RowSpan="2"
+            Visibility="Collapsed"
+            IsHitTestVisible="False"
+            Background="#88181614">
+            <Border
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Padding="28,20"
+                CornerRadius="10"
+                Background="{ThemeResource YYCardBrush}"
+                BorderBrush="{ThemeResource YYAccentBrush}"
+                BorderThickness="1.5">
+                <StackPanel Spacing="8" HorizontalAlignment="Center">
+                    <ContentPresenter x:Name="DropOverlayIcon" HorizontalAlignment="Center" />
+                    <TextBlock
+                        x:Name="DropOverlayText"
+                        Text="松开即可导入书籍"
+                        FontSize="15"
+                        FontWeight="SemiBold"
+                        Foreground="{ThemeResource YYText1Brush}"
+                        HorizontalAlignment="Center" />
+                    <TextBlock
+                        Text="支持 EPUB / PDF / TXT / MOBI / AZW3 与有声书文件夹"
+                        FontSize="12"
+                        Foreground="{ThemeResource YYText2Brush}"
+                        HorizontalAlignment="Center" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- 顶部居中轻量提示横幅（Toast） -->
+        <Border
+            x:Name="ShellToastBanner"
+            Grid.Row="1"
+            Visibility="Collapsed"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Top"
+            Margin="0,12,0,0"
+            Padding="14,7"
+            CornerRadius="8"
+            Background="{ThemeResource YYCardBrush}"
+            BorderBrush="{ThemeResource YYLineBrush}"
+            BorderThickness="1">
+            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <TextBlock
+                    x:Name="ShellToastText"
+                    FontSize="12.5"
+                    Foreground="{ThemeResource YYText1Brush}"
+                    VerticalAlignment="Center" />
+                <Button
+                    x:Name="ShellToastActionBtn"
+                    Style="{StaticResource YYTextActionButtonStyle}"
+                    Foreground="{ThemeResource YYAccentBrush}"
+                    Visibility="Collapsed"
+                    Padding="6,2"
+                    MinHeight="22"
+                    Click="ShellToastAction_Click" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

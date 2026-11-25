@@ -154,7 +154,7 @@ public static class QuickSearchDialog
                 Width = 20,
                 Height = 28,
                 CornerRadius = new CornerRadius(3),
-                Background = ThemeHelper.Brush(b.Record ? ShelfWindow.PaperClothColor(b.Title, dark) : p.Inset),
+                Background = ThemeHelper.Brush(b.Record ? BookVisuals.PaperClothColor(b.Title, dark) : p.Inset),
                 BorderBrush = ThemeHelper.Brush(p.Line),
                 BorderThickness = new Thickness(0.5),
                 Opacity = b.Available || b.Record ? 1.0 : 0.55,
@@ -724,8 +724,8 @@ public static class QuickSearchDialog
         Grid.SetColumn(searchBox, 1);
         topGrid.Children.Add(searchBox);
         var rightTop = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
-        rightTop.Children.Add(YYChrome.MakeKeycap("esc", dark));
-        rightTop.Children.Add(YYChrome.MakeSheetCloseButton(() => dlg?.Hide(), dark, size: 24));
+        rightTop.Children.Add(YYChrome.MakeKeycap("Esc", dark));
+        rightTop.Children.Add(YYChrome.MakeDialogCloseButton(() => dlg?.Hide(), dark, size: 28));
         Grid.SetColumn(rightTop, 2);
         topGrid.Children.Add(rightTop);
 
@@ -773,11 +773,11 @@ public static class QuickSearchDialog
         var cardSurface = new Border
         {
             Background = ThemeHelper.Brush(p.Card),
-            CornerRadius = new CornerRadius(18),
+            CornerRadius = new CornerRadius(10),
             Child = spotlightGrid,
         };
 
-        dlg = YYChrome.CreateMacSheet(xamlRoot, dark, 640, cardSurface, maxHeight: 540, tint: library.Prefs.Tint);
+        dlg = YYChrome.CreateFluentDialog(xamlRoot, dark, 640, cardSurface, maxHeight: 540, tint: library.Prefs.Tint);
         dlg.Opened += (_, _) =>
         {
             searchBox.Focus(FocusState.Programmatic);

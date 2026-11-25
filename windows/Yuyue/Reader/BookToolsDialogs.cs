@@ -148,7 +148,7 @@ public static class BookToolsDialogs
             var rules = scopeBook ? mine : shared;
 
             var root = new StackPanel { Spacing = 12, Padding = new Thickness(22, 18, 22, 18) };
-            root.Children.Add(YYChrome.MakeSheetHeader("替换规则", bookTitle, () => dlgRef?.Hide(), dark, titleSize: 18));
+            root.Children.Add(YYChrome.MakeDialogHeader("替换规则", bookTitle, () => dlgRef?.Hide(), dark, titleSize: 18));
 
             // Segmented scope bar with counts (1:1 reader-rule-edit/3.png: "这本书 0 | 全部书 0")
             var segGrid = new Grid { ColumnSpacing = 3 };
@@ -279,14 +279,14 @@ public static class BookToolsDialogs
                 if (rules.Length > 1)
                 {
                     var orderBtns = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-                    var upBtn = new Button { Style = (Style)Application.Current.Resources["YYIconButtonStyle"], Content = "↑", Width = 22, Height = 24, FontSize = 11, IsEnabled = idx > 0 };
+                    var upBtn = new Button { Style = (Style)Application.Current.Resources["YYToolbarIconButtonStyle"], Content = "↑", Width = 22, Height = 24, FontSize = 11, IsEnabled = idx > 0 };
                     upBtn.Click += (_, _) =>
                     {
                         MoveRule(rules, idx, idx - 1);
                         NotifyRulesChanged();
                         RenderHost();
                     };
-                    var downBtn = new Button { Style = (Style)Application.Current.Resources["YYIconButtonStyle"], Content = "↓", Width = 22, Height = 24, FontSize = 11, IsEnabled = idx < rules.Length - 1 };
+                    var downBtn = new Button { Style = (Style)Application.Current.Resources["YYToolbarIconButtonStyle"], Content = "↓", Width = 22, Height = 24, FontSize = 11, IsEnabled = idx < rules.Length - 1 };
                     downBtn.Click += (_, _) =>
                     {
                         MoveRule(rules, idx, idx + 1);
@@ -309,7 +309,7 @@ public static class BookToolsDialogs
 
                 var delBtn = new Button
                 {
-                    Style = (Style)Application.Current.Resources["YYIconButtonStyle"],
+                    Style = (Style)Application.Current.Resources["YYToolbarIconButtonStyle"],
                     Content = "✕",
                     Width = 24,
                     Height = 24,
@@ -472,8 +472,8 @@ public static class BookToolsDialogs
 
             var footRow = new Grid { Margin = new Thickness(0, 4, 0, 0) };
             var leftActs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Left };
-            var commonPill = YYChrome.MakeSheetPillButton(L10n.T("＋  常用规则"), () => { subMode = "common"; RenderHost(); }, dark, library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 14);
-            var importJsonPill = YYChrome.MakeSheetPillButton(L10n.T("导入 JSON…"), async () =>
+            var commonPill = YYChrome.MakeDialogButton(L10n.T("＋  常用规则"), () => { subMode = "common"; RenderHost(); }, dark, library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 14);
+            var importJsonPill = YYChrome.MakeDialogButton(L10n.T("导入 JSON…"), async () =>
             {
                 try
                 {
@@ -501,7 +501,7 @@ public static class BookToolsDialogs
             leftActs.Children.Add(commonPill);
             leftActs.Children.Add(importJsonPill);
 
-            var donePill = YYChrome.MakeSheetPillButton(L10n.T("好了"), () => dlgRef?.Hide(), dark, library.Prefs.Tint, "warm", height: 36, horizontalPadding: 20);
+            var donePill = YYChrome.MakeDialogButton(L10n.T("好了"), () => dlgRef?.Hide(), dark, library.Prefs.Tint, "warm", height: 36, horizontalPadding: 20);
             donePill.HorizontalAlignment = HorizontalAlignment.Right;
             footRow.Children.Add(leftActs);
             footRow.Children.Add(donePill);
@@ -536,7 +536,7 @@ public static class BookToolsDialogs
             bool isNew = string.IsNullOrEmpty(initial.Id);
             var draft = initial;
             var root = new StackPanel { Spacing = 10, Padding = new Thickness(22, 18, 22, 18) };
-            root.Children.Add(YYChrome.MakeSheetHeader(isNew ? "添加规则" : "编辑规则", bookTitle, () => { subMode = "list"; RenderHost(); }, dark, titleSize: 18));
+            root.Children.Add(YYChrome.MakeDialogHeader(isNew ? "添加规则" : "编辑规则", bookTitle, () => { subMode = "list"; RenderHost(); }, dark, titleSize: 18));
 
             var findBox = new TextBox
             {
@@ -609,7 +609,7 @@ public static class BookToolsDialogs
 
             var saveBtn = new Button
             {
-                Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"],
+                Style = (Style)Application.Current.Resources["YYFluentSoftAccentButtonStyle"],
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 Height = 34,
                 Content = "保存",
@@ -646,10 +646,10 @@ public static class BookToolsDialogs
 
             void RefreshOptionPills()
             {
-                bothBtn.Style = (Style)Application.Current.Resources[!draft.SpeechOnly ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
-                speechBtn.Style = (Style)Application.Current.Resources[draft.SpeechOnly ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
-                thisBookBtn.Style = (Style)Application.Current.Resources[draft.Book is not null ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
-                allBookBtn.Style = (Style)Application.Current.Resources[draft.Book is null ? "YYPrimaryPillButtonStyle" : "YYPillButtonStyle"];
+                bothBtn.Style = (Style)Application.Current.Resources[!draft.SpeechOnly ? "YYFluentSoftAccentButtonStyle" : "YYFluentButtonStyle"];
+                speechBtn.Style = (Style)Application.Current.Resources[draft.SpeechOnly ? "YYFluentSoftAccentButtonStyle" : "YYFluentButtonStyle"];
+                thisBookBtn.Style = (Style)Application.Current.Resources[draft.Book is not null ? "YYFluentSoftAccentButtonStyle" : "YYFluentButtonStyle"];
+                allBookBtn.Style = (Style)Application.Current.Resources[draft.Book is null ? "YYFluentSoftAccentButtonStyle" : "YYFluentButtonStyle"];
                 findBox.FontFamily = new FontFamily(draft.Regex ? YYFontFamily.Mono.WindowsFamily() : YYFontFamily.Sans.WindowsFamily());
                 replaceBox.FontFamily = new FontFamily(draft.Regex ? YYFontFamily.Mono.WindowsFamily() : YYFontFamily.Sans.WindowsFamily());
             }
@@ -810,7 +810,7 @@ public static class BookToolsDialogs
             try { existing = library.Core.ReplaceRules(scopeBook ? bookId : null); } catch { existing = []; }
 
             var root = new StackPanel { Spacing = 12, Padding = new Thickness(22, 18, 22, 18) };
-            root.Children.Add(YYChrome.MakeSheetHeader(
+            root.Children.Add(YYChrome.MakeDialogHeader(
                 scopeBook ? "加到这本书" : "加到全部书",
                 scopeBook ? bookTitle : null,
                 () => { subMode = "list"; RenderHost(); },
@@ -883,7 +883,7 @@ public static class BookToolsDialogs
 
             var footRow = new Grid { Margin = new Thickness(2, 2, 0, 0) };
             footRow.Children.Add(new TextBlock { Text = "加完还能改、能关", FontSize = 12, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center });
-            var okBtn = YYChrome.MakeSheetPillButton("好了", () => { subMode = "list"; RenderHost(); }, dark, library.Prefs.Tint, "warm", height: 36, horizontalPadding: 20);
+            var okBtn = YYChrome.MakeDialogButton("好了", () => { subMode = "list"; RenderHost(); }, dark, library.Prefs.Tint, "warm", height: 36, horizontalPadding: 20);
             okBtn.HorizontalAlignment = HorizontalAlignment.Right;
             footRow.Children.Add(okBtn);
             root.Children.Add(footRow);
@@ -892,7 +892,7 @@ public static class BookToolsDialogs
 
         RenderHost();
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 472, host, tint: library.Prefs.Tint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 472, host, tint: library.Prefs.Tint);
         await dlgRef.ShowSafeAsync(library.Prefs.Tint);
         previewCts?.Cancel();
         return anyChanged;
@@ -1035,6 +1035,7 @@ public static class BookToolsDialogs
             Visibility = Visibility.Collapsed,
         };
         var warningHost = new ContentControl();
+        StackPanel? mainView = null;
 
         ruleBox.TextChanged += (_, _) =>
         {
@@ -1084,7 +1085,7 @@ public static class BookToolsDialogs
             if (currentLayout is null) return;
             host.Children.Clear();
             var sp = new StackPanel { Spacing = 10, Padding = new Thickness(22, 18, 22, 18) };
-            sp.Children.Add(YYChrome.MakeSheetHeader($"全部 {currentLayout.Chapters.Length} 章", bookTitle, () =>
+            sp.Children.Add(YYChrome.MakeDialogHeader($"全部 {currentLayout.Chapters.Length} 章", bookTitle, () =>
             {
                 showAllChapters = false;
                 BuildMainFrame();
@@ -1298,7 +1299,7 @@ public static class BookToolsDialogs
                     uint targetSec = c.Section;
                     var goBtn = new Button
                     {
-                        Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+                        Style = (Style)Application.Current.Resources["YYFluentButtonStyle"],
                         Content = $"去第 {n} 章看看",
                         Height = 26,
                         MinHeight = 26,
@@ -1339,13 +1340,21 @@ public static class BookToolsDialogs
 
         void BuildMainFrame()
         {
+            if (mainView is not null)
+            {
+                resetRuleBtn.Visibility = !string.IsNullOrWhiteSpace(ruleText) ? Visibility.Visible : Visibility.Collapsed;
+                host.Children.Clear();
+                host.Children.Add(mainView);
+                return;
+            }
+
             host.Children.Clear();
             var topHead = new Grid();
             var topLeft = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
             topLeft.Children.Add(new TextBlock { Text = L10n.T("编码和目录"), FontSize = 18, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
             topLeft.Children.Add(headerSubtitleTb);
             topHead.Children.Add(topLeft);
-            var closeCircle = YYChrome.MakeSheetCloseButton(() => { if (!working) dlgRef?.Hide(); }, dark);
+            var closeCircle = YYChrome.MakeDialogCloseButton(() => { if (!working) dlgRef?.Hide(); }, dark);
             closeCircle.HorizontalAlignment = HorizontalAlignment.Right;
             topHead.Children.Add(closeCircle);
 
@@ -1490,8 +1499,8 @@ public static class BookToolsDialogs
                 }
             };
 
-            cancelSheetBtn = YYChrome.MakeSheetPillButton("取消", () => { if (!working) dlgRef?.Hide(); }, dark, library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 18);
-            saveSheetBtn = YYChrome.MakeSheetPillButton(saveSp, async () =>
+            cancelSheetBtn = YYChrome.MakeDialogButton("取消", () => { if (!working) dlgRef?.Hide(); }, dark, library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 18);
+            saveSheetBtn = YYChrome.MakeDialogButton(saveSp, async () =>
             {
                 if (working) return;
                 if (!IsChoiceChanged())
@@ -1551,14 +1560,15 @@ public static class BookToolsDialogs
                     footRow,
                 },
             };
-            host.Children.Add(outer);
+            mainView = outer;
+            host.Children.Add(mainView);
         }
 
         BuildMainFrame();
         RenderMainContent();
         RefreshLayout(debounce: false);
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 504, host, maxHeight: 780, tint: library.Prefs.Tint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 504, host, maxHeight: 780, tint: library.Prefs.Tint);
         dlgRef.Closing += (_, args) =>
         {
             if (working) args.Cancel = true;

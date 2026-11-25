@@ -1,0 +1,27 @@
+afterEach:
+  - yuyue.close: {}
+
+cases:
+  - name: 首次启动空书架状态与导入入口检查
+    steps:
+      - yuyue.launch: {}
+      - aiWaitFor:
+          prompt: 语阅（Yuyue）桌面应用窗口已出现在屏幕上并完成加载
+          options:
+            timeoutMs: 20000
+      - aiAssert:
+          prompt: 窗口中显示的是空书架状态，并且能看到导入书籍的入口按钮或提示，没有崩溃弹窗或遮挡报错框
+          message: 空书架首屏状态检查失败，请查看报告截图确认界面
+
+  - name: 导入并打开背影 EPUB 校验中文书页渲染
+    steps:
+      - yuyue.launch:
+          fixtures:
+            - beiying.epub
+      - aiWaitFor:
+          prompt: 语阅阅读界面已打开，并显示《背影》的中文正文内容
+          options:
+            timeoutMs: 25000
+      - aiAssert:
+          prompt: 中文正文排版清晰可读，没有乱码、没有文字重叠或明显裁切，界面无异常报错框
+          message: 《背影》EPUB 中文书页视觉校验失败

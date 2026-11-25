@@ -413,7 +413,7 @@ public static class QuoteShareDialog
         RebuildCard();
 
         var rootStack = new StackPanel { Spacing = 12, Padding = new Thickness(22, 18, 22, 18) };
-        rootStack.Children.Add(YYChrome.MakeSheetHeader("分享书摘", null, () => dlgRef?.Hide(), darkUi, titleSize: 16));
+        rootStack.Children.Add(YYChrome.MakeDialogHeader("分享书摘", null, () => dlgRef?.Hide(), darkUi, titleSize: 16));
         rootStack.Children.Add(previewHost);
         rootStack.Children.Add(dotsRow);
         rootStack.Children.Add(shapeWrap);
@@ -466,7 +466,7 @@ public static class QuoteShareDialog
         }
 
         var tc = ThemeHelper.TintColors(tint, darkUi);
-        var textBtn = YYChrome.MakeSheetPillButton(MakeActionLabel("text-quote", "纯文字", uiPalette.T1), () =>
+        var textBtn = YYChrome.MakeDialogButton(MakeActionLabel("text-quote", "纯文字", uiPalette.T1), () =>
         {
             var dp = new DataPackage();
             dp.SetText(BuildPlainShareText());
@@ -475,7 +475,7 @@ public static class QuoteShareDialog
             statusText.Visibility = Visibility.Visible;
         }, darkUi, tint, "secondary", height: 40, stretch: true);
 
-        var savePngBtn = YYChrome.MakeSheetPillButton(MakeActionLabel("share-down", "存图", uiPalette.T1), async () =>
+        var savePngBtn = YYChrome.MakeDialogButton(MakeActionLabel("share-down", "存图", uiPalette.T1), async () =>
         {
             try
             {
@@ -496,7 +496,7 @@ public static class QuoteShareDialog
             catch (Exception ex) { statusText.Text = L10n.T($"保存失败：{ex.Message}"); statusText.Visibility = Visibility.Visible; }
         }, darkUi, tint, "secondary", height: 40, stretch: true);
 
-        var shareBtn = YYChrome.MakeSheetPillButton(MakeActionLabel("share-up", "分享", tc.Accent), async () =>
+        var shareBtn = YYChrome.MakeDialogButton(MakeActionLabel("share-up", "分享", tc.Accent), async () =>
         {
             try
             {
@@ -544,7 +544,7 @@ public static class QuoteShareDialog
         rootStack.Children.Add(statusText);
         L10n.ApplyTree(rootStack);
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, darkUi, 456, rootStack, maxHeight: 820, tint: tint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, darkUi, 456, rootStack, maxHeight: 820, tint: tint);
         await dlgRef.ShowSafeAsync(tint);
     }
 

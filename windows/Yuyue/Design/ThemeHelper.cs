@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Microsoft.UI;
+using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
@@ -10,10 +11,72 @@ using WinRT.Interop;
 namespace Yuyue.Design;
 
 /// <summary>
-/// Theme, brush, shadow &amp; titlebar helpers backed by <see cref="YYColors"/>, <see cref="YYTints"/>, and <see cref="YYPapers"/>.
+/// Theme, Fluent 2 Warm Mica backdrop, brush, shadow &amp; paper-matched titlebar helpers
+/// backed by <see cref="YYColors"/>, <see cref="YYTints"/>, and <see cref="YYPapers"/>.
 /// </summary>
 public static class ThemeHelper
 {
+    /// <summary>
+    /// Optional Windows 11 System Accent Blue tint alongside Yuyue's 4 oriental low-chroma tints.
+    /// </summary>
+    public static readonly YYTint WinBlue = new(
+        Id: "winblue",
+        Name: "系统蓝",
+        Light: new YYTintColors(
+            Black: Color.FromArgb(255, 224, 238, 250),
+            OnBlack: Color.FromArgb(255, 0, 103, 192),
+            Accent: Color.FromArgb(255, 0, 103, 192),
+            AccentSoft: Color.FromArgb(255, 224, 238, 250),
+            Edge: Color.FromArgb(255, 152, 196, 235),
+            Fill: Color.FromArgb(255, 0, 103, 192),
+            Soft: Color.FromArgb(255, 224, 238, 250),
+            OnSoft: Color.FromArgb(255, 0, 103, 192)),
+        Dark: new YYTintColors(
+            Black: Color.FromArgb(255, 26, 44, 62),
+            OnBlack: Color.FromArgb(255, 96, 205, 255),
+            Accent: Color.FromArgb(255, 96, 205, 255),
+            AccentSoft: Color.FromArgb(255, 26, 44, 62),
+            Edge: Color.FromArgb(255, 52, 92, 128),
+            Fill: Color.FromArgb(255, 27, 123, 194),
+            Soft: Color.FromArgb(255, 26, 44, 62),
+            OnSoft: Color.FromArgb(255, 96, 205, 255)),
+        PaperAccentLight: Color.FromArgb(255, 0, 103, 192),
+        PaperAccentDark: Color.FromArgb(255, 96, 205, 255),
+        PlayPlain: Color.FromArgb(255, 0, 103, 192),
+        PlayKami: Color.FromArgb(255, 0, 103, 192),
+        PlayDark: Color.FromArgb(255, 96, 205, 255),
+        PlayKaminight: Color.FromArgb(255, 96, 205, 255),
+        PlaySage: Color.FromArgb(255, 0, 103, 192));
+
+    public static readonly IReadOnlyList<YYTint> AllTints = [.. YYTints.All, WinBlue];
+
+    public static YYTint ResolveTint(string? id)
+    {
+        if (string.Equals(id, WinBlue.Id, StringComparison.OrdinalIgnoreCase)) return WinBlue;
+        return YYTints.All.FirstOrDefault(t => string.Equals(t.Id, id, StringComparison.OrdinalIgnoreCase)) ?? YYTints.Default;
+    }
+
+    public static void ConfigureWindowBackdrop(Window window, bool useWarmMica)
+    {
+        try
+        {
+            if (useWarmMica && MicaController.IsSupported())
+            {
+                if (window.SystemBackdrop is not MicaBackdrop mb || mb.Kind != MicaKind.BaseAlt)
+                    window.SystemBackdrop = new MicaBackdrop { Kind = MicaKind.BaseAlt };
+            }
+            else
+            {
+                if (window.SystemBackdrop is not null)
+                    window.SystemBackdrop = null;
+            }
+        }
+        catch
+        {
+            // Fallback cleanly on Windows 10 builds without Mica
+        }
+    }
+
     public static bool IsSystemDark()
     {
         try
@@ -74,28 +137,29 @@ public static class ThemeHelper
         SetBrush("AccentFillColorSecondaryBrush", accentHover);
         SetBrush("AccentFillColorTertiaryBrush", accentPress);
 
-        // Slider (macOS white thumb with subtle hairline border + soft warm unfilled track)
-        SetBrush("SliderTrackFill", dark ? Color.FromArgb(255, 50, 51, 55) : Color.FromArgb(255, 228, 225, 219));
-        SetBrush("SliderTrackFillPointerOver", dark ? Color.FromArgb(255, 60, 61, 66) : Color.FromArgb(255, 221, 218, 211));
-        SetBrush("SliderTrackFillPressed", dark ? Color.FromArgb(255, 69, 70, 75) : Color.FromArgb(255, 213, 209, 201));
+        // Slider (Native Windows 11 Fluent 2: crisp warm accent center dot inside white/surface ring)
+        SetBrush("SliderTrackFill", dark ? Color.FromArgb(255, 52, 50, 47) : Color.FromArgb(255, 224, 220, 213));
+        SetBrush("SliderTrackFillPointerOver", dark ? Color.FromArgb(255, 62, 60, 56) : Color.FromArgb(255, 214, 209, 201));
+        SetBrush("SliderTrackFillPressed", dark ? Color.FromArgb(255, 72, 69, 65) : Color.FromArgb(255, 204, 198, 190));
         SetBrush("SliderTrackValueFill", accent);
         SetBrush("SliderTrackValueFillPointerOver", accentHover);
         SetBrush("SliderTrackValueFillPressed", accentPress);
-        SetBrush("SliderThumbBackground", Colors.White);
-        SetBrush("SliderThumbBackgroundPointerOver", Colors.White);
-        SetBrush("SliderThumbBackgroundPressed", dark ? Color.FromArgb(255, 237, 237, 238) : Color.FromArgb(255, 247, 245, 241));
-        SetBrush("SliderOuterThumbBackground", dark ? Color.FromArgb(255, 242, 242, 243) : Colors.White);
-        SetBrush("SliderThumbBorderBrush", dark ? Color.FromArgb(255, 68, 70, 76) : Color.FromArgb(255, 204, 200, 192));
+        SetBrush("SliderThumbBackground", accent);
+        SetBrush("SliderThumbBackgroundPointerOver", accentHover);
+        SetBrush("SliderThumbBackgroundPressed", accentPress);
+        SetBrush("SliderOuterThumbBackground", dark ? Color.FromArgb(255, 58, 55, 52) : Colors.White);
+        SetBrush("SliderThumbBorderBrush", dark ? Color.FromArgb(255, 84, 80, 75) : Color.FromArgb(255, 202, 196, 188));
 
         // TextBox clean 1px warm border
-        SetBrush("TextControlBorderBrush", dark ? Color.FromArgb(255, 51, 52, 56) : Color.FromArgb(255, 226, 223, 218));
-        SetBrush("TextControlBorderBrushPointerOver", dark ? Color.FromArgb(255, 70, 71, 76) : Color.FromArgb(255, 207, 203, 196));
+        SetBrush("TextControlBorderBrush", dark ? Color.FromArgb(255, 56, 53, 50) : Color.FromArgb(255, 220, 215, 207));
+        SetBrush("TextControlBorderBrushPointerOver", dark ? Color.FromArgb(255, 74, 70, 66) : Color.FromArgb(255, 201, 195, 186));
         SetBrush("TextControlBorderBrushFocused", accent);
         target["TextControlBorderThemeThickness"] = new Thickness(1);
-        target["TextControlBorderThemeThicknessFocused"] = new Thickness(1.5);
+        target["TextControlBorderThemeThicknessFocused"] = new Thickness(1, 1, 1, 2);
 
-        // ToggleSwitch (borderless macOS pill; PointerOver/Pressed/Disabled OFF keys MUST be Color for LinearColorKeyFrame)
+        // ToggleSwitch (Fluent 2 warm pill with subtle off-stroke + warm accent on-fill)
         Color transparent = Colors.Transparent;
+        Color offStroke = dark ? Color.FromArgb(88, 255, 255, 255) : Color.FromArgb(132, 114, 109, 103);
         SetBrush("ToggleSwitchFillOn", accent);
         SetBrush("ToggleSwitchFillOnPointerOver", accentHover);
         SetBrush("ToggleSwitchFillOnPressed", accentPress);
@@ -109,18 +173,26 @@ public static class ThemeHelper
         SetBrush("ToggleSwitchKnobFillOnPressed", Colors.White);
         SetBrush("ToggleSwitchKnobFillOnDisabled", dark ? Color.FromArgb(255, 126, 124, 121) : Colors.White);
 
-        SetBrush("ToggleSwitchFillOff", dark ? Color.FromArgb(255, 56, 57, 61) : Color.FromArgb(255, 221, 218, 212));
-        SetBrush("ToggleSwitchFillOffPointerOver", dark ? Color.FromArgb(255, 67, 68, 73) : Color.FromArgb(255, 210, 206, 199));
-        SetBrush("ToggleSwitchFillOffPressed", dark ? Color.FromArgb(255, 77, 78, 84) : Color.FromArgb(255, 199, 194, 186));
+        SetBrush("ToggleSwitchFillOff", dark ? Color.FromArgb(24, 255, 255, 255) : Color.FromArgb(14, 42, 43, 46));
+        SetBrush("ToggleSwitchFillOffPointerOver", dark ? Color.FromArgb(36, 255, 255, 255) : Color.FromArgb(24, 42, 43, 46));
+        SetBrush("ToggleSwitchFillOffPressed", dark ? Color.FromArgb(48, 255, 255, 255) : Color.FromArgb(34, 42, 43, 46));
         SetBrush("ToggleSwitchFillOffDisabled", dark ? Color.FromArgb(255, 44, 45, 48) : Color.FromArgb(255, 228, 226, 220));
-        SetBrush("ToggleSwitchStrokeOff", transparent);
-        SetBrush("ToggleSwitchStrokeOffPointerOver", transparent);
-        SetBrush("ToggleSwitchStrokeOffPressed", transparent);
-        SetBrush("ToggleSwitchStrokeOffDisabled", transparent);
-        SetBrush("ToggleSwitchKnobFillOff", dark ? Color.FromArgb(255, 237, 237, 238) : Colors.White);
-        SetBrush("ToggleSwitchKnobFillOffPointerOver", Colors.White);
-        SetBrush("ToggleSwitchKnobFillOffPressed", Colors.White);
-        SetBrush("ToggleSwitchKnobFillOffDisabled", dark ? Color.FromArgb(255, 126, 124, 121) : Colors.White);
+        SetBrush("ToggleSwitchStrokeOff", offStroke);
+        SetBrush("ToggleSwitchStrokeOffPointerOver", offStroke);
+        SetBrush("ToggleSwitchStrokeOffPressed", offStroke);
+        SetBrush("ToggleSwitchStrokeOffDisabled", dark ? Color.FromArgb(60, 255, 255, 255) : Color.FromArgb(50, 42, 43, 46));
+        SetBrush("ToggleSwitchKnobFillOff", dark ? Color.FromArgb(220, 237, 237, 238) : Color.FromArgb(200, 90, 86, 82));
+        SetBrush("ToggleSwitchKnobFillOffPointerOver", dark ? Colors.White : Color.FromArgb(230, 56, 54, 52));
+        SetBrush("ToggleSwitchKnobFillOffPressed", dark ? Colors.White : Color.FromArgb(255, 42, 43, 46));
+        SetBrush("ToggleSwitchKnobFillOffDisabled", dark ? Color.FromArgb(255, 126, 124, 121) : Color.FromArgb(120, 110, 107, 104));
+
+        // CheckBox & RadioButton warm accent alignment
+        SetBrush("CheckBoxCheckBackgroundFillChecked", accent);
+        SetBrush("CheckBoxCheckBackgroundFillCheckedPointerOver", accentHover);
+        SetBrush("CheckBoxCheckBackgroundFillCheckedPressed", accentPress);
+        SetBrush("CheckBoxCheckBackgroundStrokeChecked", accent);
+        SetBrush("CheckBoxCheckBackgroundStrokeCheckedPointerOver", accentHover);
+        SetBrush("CheckBoxCheckBackgroundStrokeCheckedPressed", accentPress);
     }
 
     /// <summary>
@@ -172,7 +244,13 @@ public static class ThemeHelper
 
     public static void ConfigureTitleBar(Window window, bool dark, Color? buttonHoverBg = null)
     {
-        window.ExtendsContentIntoTitleBar = true;
+        // IMPORTANT: Use ONLY Window.ExtendsContentIntoTitleBar + Window.SetTitleBar(dragElement).
+        // Never also set AppWindow.TitleBar.ExtendsContentIntoTitleBar = true, because in Windows App SDK
+        // that overrides Window.SetTitleBar's Passthrough regions and swallows physical mouse clicks on
+        // top-bar buttons/inputs as HTCAPTION window drags (microsoft/microsoft-ui-xaml#8456).
+        if (!window.ExtendsContentIntoTitleBar)
+            window.ExtendsContentIntoTitleBar = true;
+
         var appWindow = window.AppWindow;
         if (appWindow is null) return;
 
@@ -187,8 +265,6 @@ public static class ThemeHelper
         if (!AppWindowTitleBar.IsCustomizationSupported()) return;
 
         var titleBar = appWindow.TitleBar;
-        titleBar.ExtendsContentIntoTitleBar = true;
-        titleBar.PreferredHeightOption = TitleBarHeightOption.Standard;
         titleBar.ButtonBackgroundColor = Colors.Transparent;
         titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
 
@@ -203,6 +279,33 @@ public static class ThemeHelper
         titleBar.ButtonPressedBackgroundColor = dark
             ? Color.FromArgb(36, 255, 255, 255)
             : Color.FromArgb(24, 42, 43, 46);
+    }
+
+    /// <summary>
+    /// Tints the native Windows 11 titlebar caption buttons to harmonize with the active Reader tab's paper color.
+    /// </summary>
+    public static void ConfigureTitleBarForPaper(Window window, Color? ink1, Color? ink2, bool paperDark)
+    {
+        var appWindow = window.AppWindow;
+        if (appWindow is null || !AppWindowTitleBar.IsCustomizationSupported()) return;
+
+        var titleBar = appWindow.TitleBar;
+        titleBar.ButtonBackgroundColor = Colors.Transparent;
+        titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
+
+        var palette = Palette(paperDark);
+        Color fg1 = ink1 ?? palette.T1;
+        Color fg2 = ink2 ?? palette.T2;
+        titleBar.ButtonForegroundColor = fg2;
+        titleBar.ButtonInactiveForegroundColor = Color.FromArgb(140, fg2.R, fg2.G, fg2.B);
+        titleBar.ButtonHoverForegroundColor = fg1;
+        titleBar.ButtonPressedForegroundColor = fg1;
+        titleBar.ButtonHoverBackgroundColor = paperDark
+            ? Color.FromArgb(22, 255, 255, 255)
+            : Color.FromArgb(16, fg1.R, fg1.G, fg1.B);
+        titleBar.ButtonPressedBackgroundColor = paperDark
+            ? Color.FromArgb(38, 255, 255, 255)
+            : Color.FromArgb(28, fg1.R, fg1.G, fg1.B);
     }
 
     [DllImport("user32.dll")]
@@ -246,6 +349,7 @@ public static class ThemeHelper
     {
         if (uMsg == WM_GETMINMAXINFO && lParam != IntPtr.Zero)
         {
+            IntPtr res = DefSubclassProc(hWnd, uMsg, wParam, lParam);
             (int minWDip, int minHDip) bounds;
             bool found;
             lock (s_windowMinBounds) found = s_windowMinBounds.TryGetValue(hWnd, out bounds);
@@ -259,6 +363,7 @@ public static class ThemeHelper
                 Marshal.StructureToPtr(mmi, lParam, fDeleteOld: false);
                 return IntPtr.Zero;
             }
+            return res;
         }
         else if (uMsg == WM_NCDESTROY)
         {
@@ -341,8 +446,18 @@ public static class ThemeHelper
 
         double scale = GetWindowScale(window);
 
+        DisplayArea? area = null;
+        try { area = DisplayArea.GetFromWindowId(appWindow.Id, DisplayAreaFallback.Primary); } catch { }
+
         if (minWidthDip > 0 && minHeightDip > 0)
         {
+            if (area is not null)
+            {
+                int maxWorkWDip = Math.Max(320, (int)Math.Floor(area.WorkArea.Width / scale));
+                int maxWorkHDip = Math.Max(240, (int)Math.Floor(area.WorkArea.Height / scale));
+                minWidthDip = Math.Min(minWidthDip, maxWorkWDip);
+                minHeightDip = Math.Min(minHeightDip, maxWorkHDip);
+            }
             widthDip = Math.Max(widthDip, minWidthDip);
             heightDip = Math.Max(heightDip, minHeightDip);
             SetWindowMinimumSize(window, minWidthDip, minHeightDip);
@@ -356,11 +471,18 @@ public static class ThemeHelper
 
         try
         {
-            var area = DisplayArea.GetFromWindowId(appWindow.Id, DisplayAreaFallback.Primary);
             if (area is not null)
             {
-                pw = Math.Min(pw, (int)(area.WorkArea.Width * 0.94));
-                ph = Math.Min(ph, (int)(area.WorkArea.Height * 0.94));
+                int maxInitialW = (int)(area.WorkArea.Width * 0.90);
+                int maxInitialH = (int)(area.WorkArea.Height * 0.88);
+                int minPhysW = minWidthDip > 0 ? Math.Min(area.WorkArea.Width, (int)Math.Round(minWidthDip * scale)) : 0;
+                int minPhysH = minHeightDip > 0 ? Math.Min(area.WorkArea.Height, (int)Math.Round(minHeightDip * scale)) : 0;
+                pw = Math.Clamp(pw, minPhysW, Math.Max(minPhysW, maxInitialW));
+                ph = Math.Clamp(ph, minPhysH, Math.Max(minPhysH, maxInitialH));
+                int cx = area.WorkArea.X + Math.Max(0, (area.WorkArea.Width - pw) / 2);
+                int cy = area.WorkArea.Y + Math.Max(0, (area.WorkArea.Height - ph) / 2);
+                appWindow.MoveAndResize(new Windows.Graphics.RectInt32(cx, cy, pw, ph));
+                return;
             }
         }
         catch { }

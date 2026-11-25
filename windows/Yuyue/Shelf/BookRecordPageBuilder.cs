@@ -19,19 +19,20 @@ namespace Yuyue.Shelf;
 /// </summary>
 public sealed class BookRecordPageBuilder
 {
-    private readonly ShelfWindow _shelf;
+    private readonly UI.Shell.ILibraryHost _shelf;
     private readonly LibraryService _library;
 
     public ReadingStatus ActiveStatus { get; set; } = ReadingStatus.Reading;
     public string SortKey { get; set; } = "recent"; // recent | added | title | rating
     public string? OpenBookId { get; set; }
+    public void SetSubTab(string subTab) { if (!string.IsNullOrWhiteSpace(subTab)) _subTab = subTab; }
 
     // Inline BookRecordPage sub-state
     private string _subTab = "toc"; // toc | desc | notes | log | podcast
     private bool _tocGridMode;
     private bool _tocExpanded;
 
-    public BookRecordPageBuilder(ShelfWindow shelf, LibraryService library)
+    public BookRecordPageBuilder(UI.Shell.ILibraryHost shelf, LibraryService library)
     {
         _shelf = shelf;
         _library = library;
@@ -63,11 +64,24 @@ public sealed class BookRecordPageBuilder
     {
         var p = ThemeHelper.Palette(dark);
         var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
-        Color chosenBg = dark ? Color.FromArgb(22, 255, 255, 255) : Color.FromArgb(18, 42, 43, 46);
 
-        // StatusTabs + 右侧排序菜单（无边框扁平标签，0 本也始终显示数字，第 3 项为「读过」）
-        var topBar = new Grid { Margin = new Thickness(0, 0, 0, 8) };
-        var tabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+        // StatusTabs + 右侧排序菜单（明确两列 Grid 绝不重叠，Fluent 2 6px 分段轨道）
+        var topBar = new Grid { Margin = new Thickness(0, 0, 0, 10), ColumnSpacing = 12 };
+        topBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        topBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var tabsWrap = new Border
+        {
+            Height = 32,
+            CornerRadius = new CornerRadius(6),
+            Background = ThemeHelper.Brush(p.Inset),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(2),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var tabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
         (ReadingStatus St, string Name)[] statuses =
         [
             (ReadingStatus.Reading, "在读"),
@@ -85,26 +99,29 @@ public sealed class BookRecordPageBuilder
             sp.Children.Add(new TextBlock
             {
                 Text = name,
-                FontSize = 12.5,
+                FontSize = 12,
                 FontWeight = on ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
-                Foreground = ThemeHelper.Brush(on ? p.T1 : p.T2),
+                Foreground = ThemeHelper.Brush(on ? tint.Accent : p.T2),
+                VerticalAlignment = VerticalAlignment.Center,
             });
             sp.Children.Add(new TextBlock
             {
                 Text = $"{n}",
                 FontSize = 10.5,
-                Foreground = ThemeHelper.Brush(p.T3),
+                Foreground = ThemeHelper.Brush(on ? tint.Accent : p.T3),
+                Opacity = on ? 0.85 : 0.75,
                 VerticalAlignment = VerticalAlignment.Center,
             });
 
             var btn = new Button
             {
-                Height = 28,
-                MinHeight = 28,
+                Height = 26,
+                MinHeight = 26,
                 Padding = new Thickness(10, 0, 10, 0),
-                CornerRadius = new CornerRadius(8),
-                BorderThickness = new Thickness(0),
-                Background = on ? ThemeHelper.Brush(chosenBg) : new SolidColorBrush(Colors.Transparent),
+                CornerRadius = new CornerRadius(4),
+                BorderThickness = new Thickness(on ? 1 : 0),
+                BorderBrush = on ? ThemeHelper.Brush(dark ? Color.FromArgb(24, 255, 255, 255) : Color.FromArgb(18, 42, 43, 46)) : null,
+                Background = on ? ThemeHelper.Brush(p.Card) : new SolidColorBrush(Colors.Transparent),
                 UseSystemFocusVisuals = false,
                 Content = sp,
             };
@@ -116,7 +133,9 @@ public sealed class BookRecordPageBuilder
             };
             tabs.Children.Add(btn);
         }
-        topBar.Children.Add(tabs);
+        tabsWrap.Child = tabs;
+        Grid.SetColumn(tabsWrap, 0);
+        topBar.Children.Add(tabsWrap);
 
         // 右侧排序菜单：最近读过 / 加入时间 / 书名 / 评分
         string sortTitle = SortKey switch
@@ -126,9 +145,9 @@ public sealed class BookRecordPageBuilder
             "rating" => "评分",
             _ => "最近读过",
         };
-        var sortSp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
-        sortSp.Children.Add(new TextBlock { Text = sortTitle, FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3) });
-        sortSp.Children.Add(YYIcons.Make("updown", 11, ThemeHelper.Brush(p.T3)));
+        var sortSp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, VerticalAlignment = VerticalAlignment.Center };
+        sortSp.Children.Add(YYIcons.Make("updown", 12, ThemeHelper.Brush(p.T2)));
+        sortSp.Children.Add(new TextBlock { Text = sortTitle, FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center });
         var sortMenu = new MenuFlyout();
         foreach (var (k, lbl) in new[] { ("recent", "最近读过"), ("added", "加入时间"), ("title", "书名"), ("rating", "评分") })
         {
@@ -146,16 +165,17 @@ public sealed class BookRecordPageBuilder
         }
         var sortBtn = new Button
         {
+            Style = (Style)Application.Current.Resources["YYFluentButtonStyle"],
+            Height = 32,
+            MinHeight = 32,
+            Padding = new Thickness(10, 0, 10, 0),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
-            Background = new SolidColorBrush(Colors.Transparent),
-            BorderThickness = new Thickness(0),
-            Padding = new Thickness(6, 3, 6, 3),
-            UseSystemFocusVisuals = false,
             Content = sortSp,
             Flyout = sortMenu,
         };
         AutomationProperties.SetName(sortBtn, L10n.T(sortTitle));
+        Grid.SetColumn(sortBtn, 1);
         topBar.Children.Add(sortBtn);
         host.Children.Add(topBar);
 
@@ -530,10 +550,10 @@ public sealed class BookRecordPageBuilder
 
         return new Border
         {
-            CornerRadius = new CornerRadius(14),
+            CornerRadius = new CornerRadius(8),
             Background = ThemeHelper.Brush(cardBg),
             BorderBrush = ThemeHelper.Brush(cardBorder),
-            BorderThickness = new Thickness(0.5),
+            BorderThickness = new Thickness(1),
             Child = outer,
         };
     }
@@ -710,9 +730,24 @@ public sealed class BookRecordPageBuilder
         var p = ThemeHelper.Palette(dark);
         var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
         var serif = new FontFamily(YYFontFamily.Serif.WindowsFamily());
-        Color chosenBg = dark ? Color.FromArgb(22, 255, 255, 255) : Color.FromArgb(18, 42, 43, 46);
 
-        var page = new StackPanel { MaxWidth = 760, Spacing = 22, HorizontalAlignment = HorizontalAlignment.Left };
+        double pageW = Math.Min(820, Math.Max(480, _shelf.SubPageAvailableWidth));
+        var page = new StackPanel { Width = pageW, Spacing = 18, HorizontalAlignment = HorizontalAlignment.Left };
+
+        // 顶部返回阅读进度列表按钮
+        var backSp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        backSp.Children.Add(YYIcons.Make("arrow-left", 13, ThemeHelper.Brush(p.T2)));
+        backSp.Children.Add(new TextBlock { Text = "返回阅读进度", FontSize = 12.5, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center });
+        var backBtn = new Button
+        {
+            Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
+            Padding = new Thickness(6, 4, 10, 4),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(-6, -4, 0, -4),
+            Content = backSp,
+        };
+        backBtn.Click += (_, _) => { OpenBookId = null; _shelf.RefreshCurrentSubPage(); };
+        page.Children.Add(backBtn);
 
         BookDetail? detail = null;
         if (!book.Record && book.Format != BookFormat.Podcast)
@@ -828,11 +863,12 @@ public sealed class BookRecordPageBuilder
         var stBtn = new Button
         {
             Height = 32,
+            MinHeight = 32,
             Padding = new Thickness(12, 0, 10, 0),
-            CornerRadius = new CornerRadius(10),
+            CornerRadius = new CornerRadius(6),
             Background = ThemeHelper.Brush(p.Card),
             BorderBrush = ThemeHelper.Brush(p.Line),
-            BorderThickness = new Thickness(0.5),
+            BorderThickness = new Thickness(1),
             UseSystemFocusVisuals = false,
             Content = stBtnSp,
             Flyout = BuildStatusMenuFlyout(book, dark, p, tint),
@@ -887,9 +923,24 @@ public sealed class BookRecordPageBuilder
         if (_subTab == "podcast" && podcastMentions.Length == 0)
             _subTab = book.Record ? "notes" : (chapterCount > 0 ? "toc" : "desc");
 
-        // 子标签栏：目录 / 简介 / 笔记 / 记录（提及数 > 0 时才显示播客）+ 右侧「书房电台」胶囊（播客子页隐藏）
-        var subBar = new Grid();
-        var subTabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+        // 子标签栏：明确两列 Grid（* | Auto），彻底杜绝标签与右侧「书房电台」按钮任何重叠或截断
+        var subSection = new StackPanel { Spacing = 10 };
+        var subBar = new Grid { ColumnSpacing = 12 };
+        subBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        subBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var subTabsWrap = new Border
+        {
+            Height = 32,
+            CornerRadius = new CornerRadius(6),
+            Background = ThemeHelper.Brush(p.Inset),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(2),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var subTabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
         var tabDefs = new List<(string Key, string Icon, string Label, int? Count)>();
         if (!book.Record && chapterCount > 0) tabDefs.Add(("toc", "book", "目录", chapterCount));
         tabDefs.Add(("desc", "note-card", "简介", null));
@@ -902,17 +953,35 @@ public sealed class BookRecordPageBuilder
         {
             bool on = _subTab == key;
             var tsp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, VerticalAlignment = VerticalAlignment.Center };
-            tsp.Children.Add(YYIcons.Make(icon, 12, ThemeHelper.Brush(on ? p.T1 : p.T3)));
-            tsp.Children.Add(new TextBlock { Text = lbl, FontSize = 12.5, FontWeight = on ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal, Foreground = ThemeHelper.Brush(on ? p.T1 : p.T2) });
-            if (cnt is int c) tsp.Children.Add(new TextBlock { Text = $"{c}", FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Center });
+            tsp.Children.Add(YYIcons.Make(icon, 12, ThemeHelper.Brush(on ? tint.Accent : p.T3)));
+            tsp.Children.Add(new TextBlock
+            {
+                Text = lbl,
+                FontSize = 12,
+                FontWeight = on ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
+                Foreground = ThemeHelper.Brush(on ? tint.Accent : p.T2),
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            if (cnt is int c)
+            {
+                tsp.Children.Add(new TextBlock
+                {
+                    Text = $"{c}",
+                    FontSize = 10.5,
+                    Foreground = ThemeHelper.Brush(on ? tint.Accent : p.T3),
+                    Opacity = on ? 0.85 : 0.75,
+                    VerticalAlignment = VerticalAlignment.Center,
+                });
+            }
             var tb = new Button
             {
-                Height = 28,
-                MinHeight = 28,
-                Padding = new Thickness(10, 0, 10, 0),
-                CornerRadius = new CornerRadius(8),
-                BorderThickness = new Thickness(0),
-                Background = on ? ThemeHelper.Brush(chosenBg) : new SolidColorBrush(Colors.Transparent),
+                Height = 26,
+                MinHeight = 26,
+                Padding = new Thickness(11, 0, 11, 0),
+                CornerRadius = new CornerRadius(4),
+                BorderThickness = new Thickness(on ? 1 : 0),
+                BorderBrush = on ? ThemeHelper.Brush(dark ? Color.FromArgb(24, 255, 255, 255) : Color.FromArgb(18, 42, 43, 46)) : null,
+                Background = on ? ThemeHelper.Brush(p.Card) : new SolidColorBrush(Colors.Transparent),
                 UseSystemFocusVisuals = false,
                 Content = tsp,
             };
@@ -920,25 +989,30 @@ public sealed class BookRecordPageBuilder
             tb.Click += (_, _) => { _subTab = nextK; _shelf.RefreshCurrentSubPage(); };
             subTabs.Children.Add(tb);
         }
-        subBar.Children.Add(subTabs);
+        subTabsWrap.Child = subTabs;
+        Grid.SetColumn(subTabsWrap, 0);
+        subBar.Children.Add(subTabsWrap);
 
         if (_subTab != "podcast")
         {
             var studioPill = new Button
             {
                 HorizontalAlignment = HorizontalAlignment.Right,
-                Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
-                Height = 26,
-                MinHeight = 26,
-                Padding = new Thickness(10, 0, 10, 0),
-                FontSize = 11.5,
+                VerticalAlignment = VerticalAlignment.Center,
+                Style = (Style)Application.Current.Resources["YYFluentButtonStyle"],
+                Height = 32,
+                MinHeight = 32,
+                Padding = new Thickness(12, 0, 12, 0),
+                FontSize = 12,
                 Content = "✦ 书房电台",
             };
             studioPill.Click += async (_, _) => await _shelf.OpenStudioSheetForBookAsync(book.Id);
+            Grid.SetColumn(studioPill, 1);
             subBar.Children.Add(studioPill);
         }
-        page.Children.Add(subBar);
-        page.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(0, -12, 0, -6) });
+        subSection.Children.Add(subBar);
+        subSection.Children.Add(new Border { Height = 1, Background = ThemeHelper.Brush(p.Line) });
+        page.Children.Add(subSection);
 
         // 子标签内容区（直接铺在温润纸面 p.Bg 上，无笨重白底卡片外框）
         switch (_subTab)
@@ -1228,7 +1302,7 @@ public sealed class BookRecordPageBuilder
                 if (i > 0) mStack.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) });
                 var mk = marks[i];
                 var item = new StackPanel { Spacing = 6, Padding = new Thickness(0, 12, 0, 12) };
-                item.Children.Add(ShelfWindow.BuildHighlightedQuote(mk, p, dark, 13.5));
+                item.Children.Add(BookVisuals.BuildHighlightedQuote(mk, p, dark, 13.5));
                 if (!string.IsNullOrWhiteSpace(mk.Note))
                 {
                     var tRow = new Grid { ColumnSpacing = 8 };
@@ -1297,8 +1371,12 @@ public sealed class BookRecordPageBuilder
                 string markChap = ResolveMarkChapter(mk);
                 string? chapArg = string.IsNullOrWhiteSpace(markChap) ? null : markChap;
                 var shareMi = new MenuFlyoutItem { Text = L10n.T("分享书摘…") };
-                shareMi.Click += async (_, _) => await Yuyue.Reader.QuoteShareDialog.ShowAsync(
-                    _shelf, _shelf.WindowXamlRoot, mk.Text, mk.Note, book.Title, book.Authors.FirstOrDefault(), book.CoverPath, chapter: chapArg, library: _library);
+                shareMi.Click += async (_, _) =>
+                {
+                    if (_shelf.WindowXamlRoot is { } xr)
+                        await Yuyue.Reader.QuoteShareDialog.ShowAsync(
+                            _shelf.OwnerWindow, xr, mk.Text, mk.Note, book.Title, book.Authors.FirstOrDefault(), book.CoverPath, chapter: chapArg, library: _library);
+                };
                 var delMi = new MenuFlyoutItem { Text = L10n.T("删除划线"), Foreground = ThemeHelper.Brush(p.Danger) };
                 delMi.Click += (_, _) =>
                 {
@@ -1539,88 +1617,39 @@ public sealed class BookRecordPageBuilder
         return stack;
     }
 
-    private Flyout BuildStatusMenuFlyout(BookSummary book, bool dark, YYPalette p, YYTintColors tint)
+    private MenuFlyout BuildStatusMenuFlyout(BookSummary book, bool dark, YYPalette p, YYTintColors tint)
     {
-        var flyout = new Flyout
+        var menu = new MenuFlyout();
+        foreach (var (lbl, st) in new[]
         {
-            FlyoutPresenterStyle = (Style)Application.Current.Resources["YYFloatFlyoutPresenterStyle"],
-            ShouldConstrainToRootBounds = true,
-        };
-        var root = new StackPanel { Width = 196, Spacing = 0, Padding = new Thickness(0, 4, 0, 4) };
-
-        Button MakeRow(string label, string rightIcon, Color fg, bool bold, Action onClick)
-        {
-            var g = new Grid { ColumnSpacing = 8 };
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.Children.Add(new TextBlock
-            {
-                Text = label,
-                FontSize = 12.5,
-                FontWeight = bold ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
-                Foreground = ThemeHelper.Brush(fg),
-                VerticalAlignment = VerticalAlignment.Center,
-            });
-            var ic = YYIcons.Make(rightIcon, 13, ThemeHelper.Brush(fg));
-            ic.VerticalAlignment = VerticalAlignment.Center;
-            Grid.SetColumn(ic, 1);
-            g.Children.Add(ic);
-
-            var btn = new Button
-            {
-                Height = 28,
-                MinHeight = 28,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                Background = new SolidColorBrush(Colors.Transparent),
-                BorderThickness = new Thickness(0),
-                CornerRadius = new CornerRadius(7),
-                Margin = new Thickness(5, 0, 5, 0),
-                Padding = new Thickness(9, 0, 9, 0),
-                UseSystemFocusVisuals = false,
-                Content = g,
-            };
-            btn.PointerEntered += (_, _) => btn.Background = ThemeHelper.Brush(p.Inset);
-            btn.PointerExited += (_, _) => btn.Background = new SolidColorBrush(Colors.Transparent);
-            btn.Click += (_, _) =>
-            {
-                flyout.Hide();
-                onClick();
-            };
-            return btn;
-        }
-
-        foreach (var (lbl, st, icon) in new[]
-        {
-            ("在读", ReadingStatus.Reading, "book"),
-            ("想读", ReadingStatus.Want, "bookmark"),
-            ("读过", ReadingStatus.Finished, "check-circle"),
-            ("搁置", ReadingStatus.Paused, "pause-circle"),
-            ("弃读", ReadingStatus.Dropped, "xmark-circle"),
+            ("在读", ReadingStatus.Reading),
+            ("想读", ReadingStatus.Want),
+            ("读过", ReadingStatus.Finished),
+            ("搁置", ReadingStatus.Paused),
+            ("弃读", ReadingStatus.Dropped),
         })
         {
             var target = st;
-            bool cur = book.Status == target;
-            root.Children.Add(MakeRow(lbl, cur ? "checkmark" : icon, cur ? tint.Accent : p.T1, cur, () =>
+            var item = new ToggleMenuFlyoutItem { Text = L10n.T(lbl), IsChecked = book.Status == target };
+            item.Click += (_, _) =>
             {
                 _library.SetStatus(book.Id, target);
                 _shelf.RefreshBooks();
-            }));
+            };
+            menu.Items.Add(item);
         }
 
-        root.Children.Add(new Border
-        {
-            Height = 0.5,
-            Background = ThemeHelper.Brush(p.Line),
-            Margin = new Thickness(14, 4, 14, 4),
-        });
+        menu.Items.Add(new MenuFlyoutSeparator());
 
-        root.Children.Add(MakeRow("放进合集…", "stack", p.T1, false, () => _shelf.OpenPickCollectionForBook(book)));
-        root.Children.Add(MakeRow("删除…", "trash", p.Danger, false, () => _shelf.OpenDeleteForBook(book)));
+        var colItem = new MenuFlyoutItem { Text = L10n.T("放进合集…") };
+        colItem.Click += (_, _) => _shelf.OpenPickCollectionForBook(book);
+        menu.Items.Add(colItem);
 
-        L10n.ApplyTree(root);
-        flyout.Content = root;
-        return flyout;
+        var delItem = new MenuFlyoutItem { Text = L10n.T("删除…"), Foreground = ThemeHelper.Brush(p.Danger) };
+        delItem.Click += (_, _) => _shelf.OpenDeleteForBook(book);
+        menu.Items.Add(delItem);
+
+        return menu;
     }
 
     internal static async Task<(bool Saved, string? Note)> ShowThoughtEditorSheetAsync(
@@ -1637,7 +1666,7 @@ public sealed class BookRecordPageBuilder
         bool saved = false;
 
         var root = new StackPanel { Spacing = 14, Padding = new Thickness(22, 18, 22, 18) };
-        root.Children.Add(YYChrome.MakeSheetHeader(
+        root.Children.Add(YYChrome.MakeDialogHeader(
             string.IsNullOrWhiteSpace(initialNote) ? "写想法" : "改想法",
             null,
             () => dlgRef?.Hide(),
@@ -1664,10 +1693,10 @@ public sealed class BookRecordPageBuilder
             PlaceholderText = "写下此刻的想法…",
             FontFamily = new FontFamily(YYFontFamily.Kaiti.WindowsFamily()),
             FontSize = 13.5,
-            CornerRadius = new CornerRadius(12),
+            CornerRadius = new CornerRadius(6),
             Background = ThemeHelper.Brush(p.Card),
             BorderBrush = ThemeHelper.Brush(p.Line),
-            BorderThickness = new Thickness(0.5),
+            BorderThickness = new Thickness(1),
             Padding = new Thickness(12, 10, 12, 10),
         };
         root.Children.Add(box);
@@ -1678,11 +1707,11 @@ public sealed class BookRecordPageBuilder
             Spacing = 8,
             HorizontalAlignment = HorizontalAlignment.Right,
         };
-        foot.Children.Add(YYChrome.MakeSheetPillButton("取消", () => dlgRef?.Hide(), dark, tint, "secondary", height: 34, horizontalPadding: 16));
-        foot.Children.Add(YYChrome.MakeSheetPillButton("保存", () => { saved = true; dlgRef?.Hide(); }, dark, tint, "dark", height: 34, horizontalPadding: 18));
+        foot.Children.Add(YYChrome.MakeDialogButton("取消", () => dlgRef?.Hide(), dark, tint, "secondary", height: 34, horizontalPadding: 16));
+        foot.Children.Add(YYChrome.MakeDialogButton("保存", () => { saved = true; dlgRef?.Hide(); }, dark, tint, "dark", height: 34, horizontalPadding: 18));
         root.Children.Add(foot);
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 396, root, tint: tint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 396, root, tint: tint);
         dlgRef.Opened += (_, _) =>
         {
             box.Focus(FocusState.Programmatic);
@@ -1696,21 +1725,23 @@ public sealed class BookRecordPageBuilder
 
     private FrameworkElement BuildTagsRow(BookSummary book, YYPalette p, YYTintColors tint)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
         foreach (var tag in book.Tags ?? [])
         {
             string t = tag;
             var chip = L10n.Skip(new Button
             {
-                Content = $"#{t} ×",
-                Height = 24,
-                MinHeight = 24,
-                Padding = new Thickness(9, 0, 9, 0),
-                CornerRadius = new CornerRadius(12),
-                FontSize = 11,
+                Content = $"#{t}  ×",
+                Height = 28,
+                MinHeight = 28,
+                Padding = new Thickness(10, 0, 10, 0),
+                CornerRadius = new CornerRadius(6),
+                FontSize = 12,
                 Foreground = ThemeHelper.Brush(tint.Accent),
                 Background = ThemeHelper.Brush(tint.Soft),
-                BorderThickness = new Thickness(0),
+                BorderBrush = ThemeHelper.Brush(tint.Edge),
+                BorderThickness = new Thickness(1),
+                VerticalAlignment = VerticalAlignment.Center,
                 UseSystemFocusVisuals = false,
             });
             chip.Click += (_, _) => { try { _library.Core.SetTag(book.Id, t, false); _shelf.RefreshBooks(); } catch { } };
@@ -1719,11 +1750,13 @@ public sealed class BookRecordPageBuilder
 
         var addBox = new TextBox
         {
-            PlaceholderText = "+ 标签",
-            Width = 84,
-            FontSize = 11.5,
-            CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(8, 2, 8, 2),
+            Style = (Style)Application.Current.Resources["YYSingleLineTextBoxStyle"],
+            PlaceholderText = "+ 添加标签",
+            Width = 116,
+            Height = 28,
+            MinHeight = 28,
+            FontSize = 12,
+            Padding = new Thickness(9, 0, 9, 0),
         };
         addBox.KeyDown += (_, e) =>
         {
@@ -1767,13 +1800,13 @@ public sealed class BookRecordPageBuilder
             Height = 32,
             MinHeight = 32,
             Padding = new Thickness(14, 0, 14, 0),
-            CornerRadius = new CornerRadius(10),
+            CornerRadius = new CornerRadius(6),
             FontSize = 12.5,
             FontWeight = main ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
-            Foreground = ThemeHelper.Brush(main ? tint.Accent : p.T1),
-            Background = ThemeHelper.Brush(main ? tint.Soft : p.Card),
-            BorderBrush = ThemeHelper.Brush(main ? tint.Edge : p.Line),
-            BorderThickness = new Thickness(0.5),
+            Foreground = ThemeHelper.Brush(main ? Colors.White : p.T1),
+            Background = ThemeHelper.Brush(main ? tint.Fill : p.Card),
+            BorderBrush = ThemeHelper.Brush(main ? tint.Fill : p.Line),
+            BorderThickness = new Thickness(main ? 0 : 1),
             UseSystemFocusVisuals = false,
         };
     }
@@ -1783,16 +1816,16 @@ public sealed class BookRecordPageBuilder
         return new Button
         {
             Content = label,
-            Height = 24,
-            MinHeight = 24,
-            Padding = new Thickness(9, 0, 9, 0),
-            CornerRadius = new CornerRadius(7),
-            FontSize = 11,
+            Height = 26,
+            MinHeight = 26,
+            Padding = new Thickness(10, 0, 10, 0),
+            CornerRadius = new CornerRadius(5),
+            FontSize = 11.5,
             FontWeight = main ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Medium,
             Foreground = ThemeHelper.Brush(main ? tint.Accent : p.T2),
             Background = ThemeHelper.Brush(main ? tint.Soft : p.Card),
             BorderBrush = ThemeHelper.Brush(main ? tint.Edge : p.Line),
-            BorderThickness = new Thickness(0.5),
+            BorderThickness = new Thickness(1),
             UseSystemFocusVisuals = false,
         };
     }

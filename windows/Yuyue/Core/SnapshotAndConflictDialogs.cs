@@ -200,7 +200,7 @@ public static class SnapshotAndConflictDialogs
             return diff > 0 ? $"{before}→{after} (+{diff})" : $"{before}→{after} ({diff})";
         }
 
-        var importBtn = YYChrome.MakeSheetPillButton("导入", () => { confirmedImport = true; dlg?.Hide(); }, dark, library.Prefs.Tint, "dark", height: 40, stretch: true);
+        var importBtn = YYChrome.MakeDialogButton("导入", () => { confirmedImport = true; dlg?.Hide(); }, dark, library.Prefs.Tint, "dark", height: 40, stretch: true);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(importBtn, "SnapshotConfirmImportBtn");
 
         void SyncModeVisuals()
@@ -242,7 +242,7 @@ public static class SnapshotAndConflictDialogs
             Padding = new Thickness(22, 18, 22, 18),
             Children =
             {
-                YYChrome.MakeSheetHeader("导入快照", null, () => dlg?.Hide(), dark, titleSize: 17),
+                YYChrome.MakeDialogHeader("导入快照", null, () => dlg?.Hide(), dark, titleSize: 17),
                 fileCard,
                 modeGrid,
                 diffText,
@@ -250,7 +250,7 @@ public static class SnapshotAndConflictDialogs
             },
         };
 
-        dlg = YYChrome.CreateMacSheet(xamlRoot, dark, 400, root, tint: library.Prefs.Tint);
+        dlg = YYChrome.CreateFluentDialog(xamlRoot, dark, 400, root, tint: library.Prefs.Tint);
         await dlg.ShowSafeAsync(library.Prefs.Tint);
         if (!confirmedImport) return false;
 
@@ -335,7 +335,7 @@ public static class SnapshotAndConflictDialogs
         });
         var isbnNote = L10n.Skip(new TextBlock { FontSize = 11, Foreground = ThemeHelper.Brush(p.T3), TextWrapping = TextWrapping.Wrap });
         ReadingExport currentExport = await Task.Run(() => library.Core.ReadingExport(site, utcOffsetMin));
-        var exportBtn = YYChrome.MakeSheetPillButton("导出 CSV", () => { saveCsv = true; dlgRef?.Hide(); }, dark, library.Prefs.Tint, "dark", height: 40, stretch: true);
+        var exportBtn = YYChrome.MakeDialogButton("导出 CSV", () => { saveCsv = true; dlgRef?.Hide(); }, dark, library.Prefs.Tint, "dark", height: 40, stretch: true);
         bool sheetClosed = false;
         int exportReqSeq = 0;
 
@@ -392,7 +392,7 @@ public static class SnapshotAndConflictDialogs
             Padding = new Thickness(22, 18, 22, 18),
             Children =
             {
-                YYChrome.MakeSheetHeader("导出阅读记录", null, () => dlgRef?.Hide(), dark, titleSize: 17),
+                YYChrome.MakeDialogHeader("导出阅读记录", null, () => dlgRef?.Hide(), dark, titleSize: 17),
                 segHost,
                 groupCard,
                 new Border
@@ -411,7 +411,7 @@ public static class SnapshotAndConflictDialogs
 
         try
         {
-            dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 400, root, tint: library.Prefs.Tint);
+            dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 400, root, tint: library.Prefs.Tint);
             await dlgRef.ShowSafeAsync(library.Prefs.Tint);
         }
         finally
@@ -462,7 +462,7 @@ public static class SnapshotAndConflictDialogs
 
             // Top bar: left X close button + centered "同步冲突" / "第 X 处，共 Y 处"
             var topBar = new Grid();
-            var closeBtn = YYChrome.MakeSheetCloseButton(() => dlgRef?.Hide(), dark, 28);
+            var closeBtn = YYChrome.MakeDialogCloseButton(() => dlgRef?.Hide(), dark, 28);
             closeBtn.HorizontalAlignment = HorizontalAlignment.Left;
             topBar.Children.Add(closeBtn);
 
@@ -577,7 +577,7 @@ public static class SnapshotAndConflictDialogs
                 }
                 head.Children.Add(devLabel);
 
-                var keepBtn = YYChrome.MakeSheetPillButton("留这份", () =>
+                var keepBtn = YYChrome.MakeDialogButton("留这份", () =>
                 {
                     try { library.Core.ResolveNoteConflict(c.Book, c.Mark, choice); } catch { }
                     onResolved();
@@ -637,13 +637,13 @@ public static class SnapshotAndConflictDialogs
             bottomActions.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             bottomActions.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            var bothBtn = YYChrome.MakeSheetPillButton("两份都留", () =>
+            var bothBtn = YYChrome.MakeDialogButton("两份都留", () =>
             {
                 try { library.Core.ResolveNoteConflict(c.Book, c.Mark, ConflictChoice.Both); } catch { }
                 onResolved();
                 RebuildConflicts();
             }, dark, library.Prefs.Tint, "secondary", height: 38, stretch: true);
-            var newerBtn = YYChrome.MakeSheetPillButton("用较新的", () =>
+            var newerBtn = YYChrome.MakeDialogButton("用较新的", () =>
             {
                 try { library.Core.ResolveNoteConflict(c.Book, c.Mark, ConflictChoice.Newer); } catch { }
                 onResolved();
@@ -659,7 +659,7 @@ public static class SnapshotAndConflictDialogs
         RebuildConflicts();
         if (host.Children.Count == 0) return;
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 440, new ScrollViewer { MaxHeight = 640, Content = host }, maxHeight: 680, tint: library.Prefs.Tint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 440, new ScrollViewer { MaxHeight = 640, Content = host }, maxHeight: 680, tint: library.Prefs.Tint);
         await dlgRef.ShowSafeAsync(library.Prefs.Tint);
     }
 

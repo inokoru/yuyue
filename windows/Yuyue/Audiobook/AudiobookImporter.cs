@@ -562,14 +562,14 @@ public static class AudiobookImporter
                 if (pending.Files.Count > 1)
                 {
                     var moveStack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
-                    var upBtn = new Button { Style = (Style)Application.Current.Resources["YYIconButtonStyle"], Content = "↑", Width = 22, Height = 22, FontSize = 10.5, IsEnabled = idx > 0 };
+                    var upBtn = new Button { Style = (Style)Application.Current.Resources["YYToolbarIconButtonStyle"], Content = "↑", Width = 22, Height = 22, FontSize = 10.5, IsEnabled = idx > 0 };
                     upBtn.Click += (_, _) =>
                     {
                         (pending.Files[idx - 1], pending.Files[idx]) = (pending.Files[idx], pending.Files[idx - 1]);
                         (pending.DisplayNames[idx - 1], pending.DisplayNames[idx]) = (pending.DisplayNames[idx], pending.DisplayNames[idx - 1]);
                         RebuildTrackList();
                     };
-                    var downBtn = new Button { Style = (Style)Application.Current.Resources["YYIconButtonStyle"], Content = "↓", Width = 22, Height = 22, FontSize = 10.5, IsEnabled = idx < pending.Files.Count - 1 };
+                    var downBtn = new Button { Style = (Style)Application.Current.Resources["YYToolbarIconButtonStyle"], Content = "↓", Width = 22, Height = 22, FontSize = 10.5, IsEnabled = idx < pending.Files.Count - 1 };
                     downBtn.Click += (_, _) =>
                     {
                         (pending.Files[idx + 1], pending.Files[idx]) = (pending.Files[idx], pending.Files[idx + 1]);
@@ -637,7 +637,7 @@ public static class AudiobookImporter
             });
         }
 
-        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 420, root, maxHeight: 680, tint: library.Prefs.Tint);
+        dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 420, root, maxHeight: 680, tint: library.Prefs.Tint);
 
         try
         {

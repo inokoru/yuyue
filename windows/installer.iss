@@ -5,7 +5,7 @@
   #define MyAppVersion "0.1.3"
 #endif
 #ifndef MyBuildNumber
-  #define MyBuildNumber "5"
+  #define MyBuildNumber "6"
 #endif
 #ifndef MyArch
   #define MyArch "x64"

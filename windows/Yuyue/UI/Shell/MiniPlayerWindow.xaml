@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="Yuyue.UI.Shell.MiniPlayerWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="语阅 · 迷你播放器">
+
+    <Grid x:Name="RootGrid" Background="Transparent" PreviewKeyDown="RootGrid_PreviewKeyDown">
+        <Border
+            x:Name="CardShell"
+            Background="{ThemeResource YYCardBrush}"
+            BorderBrush="{ThemeResource YYLineBrush}"
+            BorderThickness="1"
+            CornerRadius="10"
+            Padding="12,10,10,10">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="72" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- 左侧封面（可拖动窗口） -->
+                <Grid x:Name="CoverDragHost" Grid.Column="0" Width="72" Height="96" VerticalAlignment="Center">
+                    <Border
+                        x:Name="CoverBorder"
+                        Width="72"
+                        Height="96"
+                        CornerRadius="6"
+                        Background="{ThemeResource YYInsetBrush}"
+                        BorderBrush="{ThemeResource YYLineBrush}"
+                        BorderThickness="0.5">
+                        <Grid>
+                            <Image x:Name="CoverImage" Stretch="UniformToFill" Visibility="Collapsed" />
+                            <ContentPresenter x:Name="CoverFallbackIcon" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <!-- 右侧信息 + 进度 + 播控 -->
+                <Grid Grid.Column="1" RowSpacing="6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Row 0: 拖动标题区 + 跳转回书页 + 关闭 -->
+                    <Grid Grid.Row="0" ColumnSpacing="4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <Grid x:Name="TitleDragArea" Grid.Column="0" Background="Transparent" VerticalAlignment="Center" Padding="0,2">
+                            <TextBlock
+                                x:Name="TitleText"
+                                Text="正在播放"
+                                FontSize="13.5"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource YYText1Brush}"
+                                MaxLines="1"
+                                TextTrimming="CharacterEllipsis" />
+                        </Grid>
+
+                        <Button
+                            x:Name="JumpBackBtn"
+                            Grid.Column="1"
+                            Style="{StaticResource YYToolbarIconButtonStyle}"
+                            Width="26"
+                            Height="24"
+                            MinWidth="26"
+                            MinHeight="24"
+                            Padding="0"
+                            ToolTipService.ToolTip="回到书页"
+                            Click="JumpBack_Click" />
+
+                        <Button
+                            x:Name="CloseBtn"
+                            Grid.Column="2"
+                            Style="{StaticResource YYToolbarIconButtonStyle}"
+                            Width="26"
+                            Height="24"
+                            MinWidth="26"
+                            MinHeight="24"
+                            Padding="0"
+                            ToolTipService.ToolTip="关闭迷你窗"
+                            Click="Close_Click" />
+                    </Grid>
+
+                    <!-- Row 1: 当前章节/朗读句实时副标题 -->
+                    <TextBlock
+                        x:Name="SubtitleText"
+                        Grid.Row="1"
+                        Text="听书就绪"
+                        FontSize="11.5"
+                        Foreground="{ThemeResource YYText2Brush}"
+                        MaxLines="2"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="Wrap"
+                        Height="32" />
+
+                    <!-- Row 2: 细进度条 -->
+                    <Grid Grid.Row="2" Height="3" CornerRadius="1.5" Background="{ThemeResource YYInsetBrush}">
+                        <Border
+                            x:Name="ProgressFill"
+                            HorizontalAlignment="Left"
+                            Width="0"
+                            CornerRadius="1.5"
+                            Background="{ThemeResource YYAccentBrush}" />
+                    </Grid>
+
+                    <!-- Row 3: 播控按钮组 -->
+                    <Grid Grid.Row="3" VerticalAlignment="Bottom">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <Button
+                            x:Name="RateBtn"
+                            Grid.Column="0"
+                            Style="{StaticResource YYTextActionButtonStyle}"
+                            Content="1.0×"
+                            FontSize="11.5"
+                            MinHeight="26"
+                            Padding="6,2"
+                            ToolTipService.ToolTip="切换倍速"
+                            Click="Rate_Click" />
+
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Button
+                                x:Name="PrevBtn"
+                                Style="{StaticResource YYToolbarIconButtonStyle}"
+                                Width="30"
+                                Height="28"
+                                Padding="0"
+                                ToolTipService.ToolTip="上一句 / 后退"
+                                Click="Prev_Click" />
+                            <Button
+                                x:Name="PlayPauseBtn"
+                                Style="{StaticResource YYFluentAccentButtonStyle}"
+                                Width="42"
+                                Height="28"
+                                MinHeight="28"
+                                Padding="0"
+                                CornerRadius="14"
+                                ToolTipService.ToolTip="播放 / 暂停 (空格)"
+                                Click="PlayPause_Click" />
+                            <Button
+                                x:Name="NextBtn"
+                                Style="{StaticResource YYToolbarIconButtonStyle}"
+                                Width="30"
+                                Height="28"
+                                Padding="0"
+                                ToolTipService.ToolTip="下一句 / 前进"
+                                Click="Next_Click" />
+                        </StackPanel>
+
+                        <TextBlock
+                            x:Name="StatusBadge"
+                            Grid.Column="2"
+                            Text="置顶"
+                            FontSize="10.5"
+                            Foreground="{ThemeResource YYText3Brush}"
+                            VerticalAlignment="Center" />
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

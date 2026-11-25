@@ -1,0 +1,42 @@
+afterEach:
+  - yuyue.close: {}
+
+cases:
+  - name: 导入 GBK 编码 TXT 验证中文解码不乱码
+    steps:
+      - yuyue.launch:
+          fixtures:
+            - beiying-gbk.txt
+      - aiWaitFor:
+          prompt: 语阅窗口已打开并显示《背影》相关中文正文内容
+          options:
+            timeoutMs: 25000
+      - aiAssert:
+          prompt: 页面上的中文文字清晰正常，没有出现乱码（如问号块或错乱符号），无崩溃弹窗
+          message: GBK 编码 TXT 文件解码或渲染异常
+
+  - name: 导入英文原著 EPUB 验证西文排版
+    steps:
+      - yuyue.launch:
+          fixtures:
+            - great-gatsby.epub
+      - aiWaitFor:
+          prompt: 语阅阅读界面已打开《The Great Gatsby》英文内容或封面页
+          options:
+            timeoutMs: 25000
+      - aiAssert:
+          prompt: 英文排版清晰对齐，没有文字溢出窗口边界或异常报错框
+
+  - name: 导入空文件与损坏 EPUB 验证容错不崩溃
+    steps:
+      - yuyue.launch:
+          fixtures:
+            - empty.txt
+            - broken.epub
+      - aiWaitFor:
+          prompt: 语阅桌面应用窗口仍然正常显示在屏幕上
+          options:
+            timeoutMs: 20000
+      - aiAssert:
+          prompt: 语阅主窗口保持正常响应状态（书架仍为空状态或给出友好提示），没有系统崩溃弹窗，也没有把损坏文件加入书架
+          message: 空文件或损坏 EPUB 导入容错检查失败

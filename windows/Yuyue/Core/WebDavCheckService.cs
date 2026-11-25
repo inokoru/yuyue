@@ -483,7 +483,7 @@ public static class WebDavCheckService
                 {
                     var linkBtn = new Button
                     {
-                        Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+                        Style = (Style)Application.Current.Resources["YYFluentButtonStyle"],
                         Height = 24,
                         MinHeight = 24,
                         FontSize = 11,

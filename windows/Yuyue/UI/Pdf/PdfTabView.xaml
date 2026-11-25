@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="Yuyue.UI.Pdf.PdfTabView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Yuyue.UI.Controls">
+
+    <!-- Windows 11 Edge 风格原生 PDF 标签页：40px 工具栏 + 左目录/搜索栏 + 高清渲染画布 + 右标注栏 + 听书条 + 28px 底栏 -->
+    <Grid x:Name="RootGrid" Background="{ThemeResource YYCanvasBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition x:Name="TopBarRow" Height="40" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="28" />
+        </Grid.RowDefinitions>
+
+        <!-- Row 0: Edge 灵感 40px 顶部工具栏（与标签栏统一暖纸色阶） -->
+        <Grid
+            x:Name="TopBar"
+            Grid.Row="0"
+            Padding="10,0,10,0"
+            BorderThickness="0,0,0,1"
+            ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 左：左侧栏开关 + 书名 + 页码快跳 -->
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <Button x:Name="LeftPaneBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="目录与搜索" Click="LeftPaneBtn_Click" />
+                <TextBlock x:Name="TitleText" FontSize="12.5" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" MaxWidth="220" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <!-- 中：页码导航 + 缩放控制 -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Button x:Name="PrevPageBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="上一页 (←)" Click="PrevPage_Click" />
+                <TextBlock x:Name="PageCounterText" Text="1 / 1" FontSize="12" Foreground="{ThemeResource YYText1Brush}" VerticalAlignment="Center" Margin="4,0" />
+                <Button x:Name="NextPageBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="下一页 (→)" Click="NextPage_Click" />
+
+                <Border Width="1" Height="16" Background="{ThemeResource YYLineBrush}" Margin="6,0" />
+
+                <Button Style="{StaticResource YYToolbarIconButtonStyle}" Content="−" FontSize="14" ToolTipService.ToolTip="缩小 (Ctrl+滚轮)" Click="ZoomOut_Click" />
+                <TextBlock x:Name="ZoomLabelText" Text="100%" FontSize="12" Foreground="{ThemeResource YYText2Brush}" VerticalAlignment="Center" Width="42" TextAlignment="Center" />
+                <Button Style="{StaticResource YYToolbarIconButtonStyle}" Content="+" FontSize="14" ToolTipService.ToolTip="放大 (Ctrl+滚轮)" Click="ZoomIn_Click" />
+            </StackPanel>
+
+            <!-- 右：布局切换 + 护眼夜间 + 朗读 + 标注栏 -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="3" VerticalAlignment="Center">
+                <Button x:Name="LayoutModeBtn" Style="{StaticResource YYToolbarIconButtonStyle}" Padding="9,0" FontSize="12" Content="连续滚动" ToolTipService.ToolTip="切换连续 / 单页 / 双页" Click="CycleLayout_Click" />
+                <Border Width="1" Height="14" Background="{ThemeResource YYLineBrush}" Margin="3,0" />
+                <Button x:Name="NightBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="护眼夜间阅读" Click="ToggleNight_Click" />
+                <Button x:Name="ListenBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="朗读当前页" Click="ToggleListen_Click" />
+                <Button x:Name="NotesPaneBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="PDF 标注与书签" Click="RightPaneBtn_Click" />
+                <Button x:Name="DetachBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="撕出到独立窗口" Click="Detach_Click" />
+            </StackPanel>
+        </Grid>
+
+        <!-- Row 1: 三栏工作区 -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="LeftCol" Width="0" />
+                <ColumnDefinition x:Name="LeftSplitCol" Width="0" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition x:Name="RightSplitCol" Width="0" />
+                <ColumnDefinition x:Name="RightCol" Width="0" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 左侧目录/搜索栏 -->
+            <Grid x:Name="LeftPaneHost" Grid.Column="0" Visibility="Collapsed" Background="{ThemeResource YYSettingsSideBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0,0,1,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <StackPanel x:Name="LeftTabsBar" Grid.Row="0" Orientation="Horizontal" Spacing="4" Padding="10,8" />
+                <Grid x:Name="LeftPaneBody" Grid.Row="1" />
+            </Grid>
+            <controls:PaneSplitter x:Name="LeftSplitter" Grid.Column="1" Visibility="Collapsed" />
+
+            <!-- 中央 PDF 渲染舞台 -->
+            <Grid x:Name="CanvasHost" Grid.Column="2">
+                <ScrollViewer
+                    x:Name="PdfScroller"
+                    HorizontalScrollBarVisibility="Auto"
+                    VerticalScrollBarVisibility="Auto"
+                    PointerWheelChanged="PdfScroller_PointerWheelChanged"
+                    ViewChanged="PdfScroller_ViewChanged">
+                    <StackPanel x:Name="PagesStack" Spacing="16" HorizontalAlignment="Center" Padding="24,20,24,28" />
+                </ScrollViewer>
+
+                <TextBlock
+                    x:Name="ErrorText"
+                    Visibility="Collapsed"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    FontSize="13.5"
+                    Foreground="{ThemeResource YYText2Brush}"
+                    TextWrapping="Wrap"
+                    MaxWidth="420" />
+            </Grid>
+
+            <controls:PaneSplitter x:Name="RightSplitter" Grid.Column="3" Visibility="Collapsed" />
+
+            <!-- 右侧标注栏 -->
+            <Grid x:Name="RightPaneHost" Grid.Column="4" Visibility="Collapsed" Background="{ThemeResource YYSettingsSideBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="1,0,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0" Padding="12,10">
+                    <TextBlock Text="PDF 标注与划线" FontSize="13" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" VerticalAlignment="Center" />
+                    <Button HorizontalAlignment="Right" Style="{StaticResource YYTextActionButtonStyle}" Content="+ 记当前页" FontSize="11.5" Click="AddPageNote_Click" />
+                </Grid>
+                <ScrollViewer Grid.Row="1" Padding="12,0,12,16">
+                    <StackPanel x:Name="PdfNotesStack" Spacing="8" />
+                </ScrollViewer>
+            </Grid>
+        </Grid>
+
+        <!-- Row 2: 原位朗读条 -->
+        <Border
+            x:Name="TtsBarHost"
+            Grid.Row="2"
+            Visibility="Collapsed"
+            Height="42"
+            Padding="14,0"
+            Background="{ThemeResource YYCardBrush}"
+            BorderBrush="{ThemeResource YYLineBrush}"
+            BorderThickness="0,1,0,0">
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                    <Button x:Name="TtsPrevBtn" Style="{StaticResource YYToolbarIconButtonStyle}" Width="28" Height="28" Padding="0" Click="TtsPrev_Click" />
+                    <Button x:Name="TtsPlayBtn" Style="{StaticResource YYFluentAccentButtonStyle}" Width="34" Height="26" MinHeight="26" Padding="0" CornerRadius="13" Click="ToggleListen_Click" />
+                    <Button x:Name="TtsNextBtn" Style="{StaticResource YYToolbarIconButtonStyle}" Width="28" Height="28" Padding="0" Click="TtsNext_Click" />
+                </StackPanel>
+                <TextBlock x:Name="TtsLineText" Grid.Column="1" FontSize="12" Foreground="{ThemeResource YYText1Brush}" MaxLines="1" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                    <Button x:Name="TtsRateBtn" Style="{StaticResource YYTextActionButtonStyle}" Content="1.0×" FontSize="11.5" Click="TtsRate_Click" />
+                    <Button x:Name="TtsPipBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="弹出置顶迷你听书浮窗" Click="OpenMiniPlayer_Click" />
+                    <Button x:Name="TtsStopBtn" Style="{StaticResource YYToolbarIconButtonStyle}" Width="26" Height="26" Padding="0" Click="TtsStop_Click" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Row 3: 28px 底部状态栏 -->
+        <Border x:Name="StatusBarHost" Grid.Row="3" Padding="14,0" BorderThickness="0,1,0,0">
+            <Grid>
+                <TextBlock x:Name="StatusLeftText" Text="PDF 文档" FontSize="11" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                <TextBlock x:Name="StatusRightText" Text="Ctrl+滚轮缩放 · F11 全屏" FontSize="11" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

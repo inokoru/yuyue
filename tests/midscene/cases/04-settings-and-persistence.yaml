@@ -1,0 +1,41 @@
+afterEach:
+  - yuyue.close: {}
+
+cases:
+  - name: 深色模式下设置页可视化与切换检查
+    steps:
+      - yuyue.launch:
+          theme: dark
+          settings: true
+      - aiWaitFor:
+          prompt: 语阅窗口已打开并进入深色模式的设置页面
+          options:
+            timeoutMs: 20000
+      - aiAssert:
+          prompt: 设置页左侧导航与右侧设置卡片均为深色风格，所有文字清晰可读，没有白底白字或黑底黑字等明显对比度异常，也没有控件裁切或重叠
+      - aiAct: 点击设置左侧导航中的「阅读」或「朗读」分类项
+      - sleep:
+          ms: 800
+      - aiAssert:
+          prompt: 右侧设置内容已正常切换，滑块、下拉框或开关控件布局完整可读，无崩溃或空白页
+
+  - name: 导入书籍后重启应用验证书库持久化
+    steps:
+      - yuyue.launch:
+          fixtures:
+            - beiying.epub
+      - aiWaitFor:
+          prompt: 语阅窗口已加载《背影》阅读界面
+          options:
+            timeoutMs: 25000
+      - yuyue.close:
+          keepLibrary: true
+      - yuyue.launch:
+          reuseLibrary: true
+      - aiWaitFor:
+          prompt: 语阅桌面应用窗口已重新打开并完成加载
+          options:
+            timeoutMs: 20000
+      - aiAssert:
+          prompt: 重启后的窗口中仍然能看到《背影》的正文界面或书架中的《背影》，不是空白新书库
+          message: 重启后书库数据未能正确持久化恢复

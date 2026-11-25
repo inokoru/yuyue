@@ -33,7 +33,7 @@ namespace Yuyue.Podcast;
 /// - Overlay 386px stationery right drawer with contextually paired tabs (<c>原声书摘 | 稍后听</c> vs <c>声音卡 | 本机整理</c>)
 /// - Zero-button lightweight <see cref="TextBlock"/> / <see cref="Hyperlink"/> transcript rendering + in-place turn &amp; scrubber updates
 /// - Single-row 44px slim player bar with dynamic-width segmented chapter/ad/clip scrubber + non-modal floating <c>插话</c> card
-/// - Frameless warm-paper <c>PodcastStudioSheet</c> and <c>PodcastAddSheet</c> via <see cref="YYChrome.CreateMacSheet"/> + <see cref="YYChrome.ShowSafeAsync"/>.
+/// - Frameless warm-paper <c>PodcastStudioSheet</c> and <c>PodcastAddSheet</c> via <see cref="YYChrome.CreateFluentDialog"/> + <see cref="YYChrome.ShowSafeAsync"/>.
 /// </summary>
 public sealed class PodcastWorkspaceBuilder : IDisposable
 {
@@ -66,7 +66,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         public bool IsClipped { get; set; }
     }
 
-    private readonly ShelfWindow _shelf;
+    private readonly UI.Shell.ILibraryHost _shelf;
     private readonly LibraryService _library;
     private readonly AudioPlayer _ttsPlayer;
     private readonly MediaPlayer _mediaPlayer;
@@ -75,6 +75,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
     private readonly DispatcherTimer _eqPulseTimer;
 
     public string? OpenIssueId { get; set; }
+    public bool IsPlaying => _playing;
 
     private string _selectedShowKey = "all"; // all | studio | show:<titleOrChannel>
     private bool _allCollapsed;
@@ -156,7 +157,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
     private Border? _interruptCardHost;
     private TextBox? _interruptInputBox;
 
-    public PodcastWorkspaceBuilder(ShelfWindow shelf, LibraryService library)
+    public PodcastWorkspaceBuilder(UI.Shell.ILibraryHost shelf, LibraryService library)
     {
         _shelf = shelf;
         _library = library;
@@ -570,13 +571,13 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             backSp.Children.Add(new TextBlock { Text = L10n.T("返回收听台"), FontSize = 12.5, FontWeight = FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) });
             var backBtn = new Button
             {
-                Height = 30,
-                MinHeight = 30,
+                Height = 32,
+                MinHeight = 32,
                 Padding = new Thickness(10, 0, 12, 0),
-                CornerRadius = new CornerRadius(15),
+                CornerRadius = new CornerRadius(6),
                 Background = ThemeHelper.Brush(p.Card),
                 BorderBrush = ThemeHelper.Brush(p.Line),
-                BorderThickness = new Thickness(0.75),
+                BorderThickness = new Thickness(1),
                 UseSystemFocusVisuals = false,
                 Content = backSp,
             };
@@ -666,15 +667,15 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         bool allOn = _selectedShowKey == "all";
         var allBtn = new Button
         {
-            Width = 30,
-            Height = 28,
-            MinWidth = 30,
-            MinHeight = 28,
+            Width = 28,
+            Height = 26,
+            MinWidth = 28,
+            MinHeight = 26,
             Padding = new Thickness(0),
-            CornerRadius = new CornerRadius(8),
+            CornerRadius = new CornerRadius(4),
             Background = allOn ? ThemeHelper.Brush(p.Card) : new SolidColorBrush(Colors.Transparent),
             BorderBrush = allOn ? ThemeHelper.Brush(dark ? Color.FromArgb(24, 255, 255, 255) : p.Line) : null,
-            BorderThickness = new Thickness(allOn ? 0.5 : 0),
+            BorderThickness = new Thickness(allOn ? 1 : 0),
             UseSystemFocusVisuals = false,
             Content = YYIcons.Make("grid-all", 13.5, ThemeHelper.Brush(allOn ? tint.Accent : p.T3)),
         };
@@ -741,11 +742,13 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         };
         leftAfterToggleHost.Children.Add(new Border
         {
-            CornerRadius = new CornerRadius(11),
+            Height = 32,
+            CornerRadius = new CornerRadius(6),
             Background = ThemeHelper.Brush(p.Inset),
             BorderBrush = ThemeHelper.Brush(p.Line),
-            BorderThickness = new Thickness(0.5),
-            Padding = new Thickness(3),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(2),
+            VerticalAlignment = VerticalAlignment.Center,
             Child = trayScroll,
         });
 
@@ -1080,13 +1083,13 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         {
             HorizontalAlignment = HorizontalAlignment.Right,
             Content = foldSp,
-            Height = 26,
-            MinHeight = 26,
+            Height = 28,
+            MinHeight = 28,
             Padding = new Thickness(10, 0, 10, 0),
-            CornerRadius = new CornerRadius(13),
+            CornerRadius = new CornerRadius(6),
             Background = ThemeHelper.Brush(p.Card),
             BorderBrush = ThemeHelper.Brush(p.Line),
-            BorderThickness = new Thickness(0.5),
+            BorderThickness = new Thickness(1),
             UseSystemFocusVisuals = false,
         };
         foldBtn.Click += (_, _) =>
@@ -1633,7 +1636,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
     private async Task PickAndImportLocalAudioAsync()
     {
-        string? path = await NativePickerHelper.PickSingleFileAsync(_shelf, [".mp3", ".m4a", ".wav", ".flac"]);
+        string? path = await NativePickerHelper.PickSingleFileAsync(_shelf.OwnerWindow, [".mp3", ".m4a", ".wav", ".flac"]);
         if (string.IsNullOrEmpty(path)) return;
         try
         {
@@ -1649,7 +1652,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
     private async Task PickAndImportOpmlAsync()
     {
-        string? path = await NativePickerHelper.PickSingleFileAsync(_shelf, [".opml", ".xml"]);
+        string? path = await NativePickerHelper.PickSingleFileAsync(_shelf.OwnerWindow, [".opml", ".xml"]);
         if (string.IsNullOrEmpty(path)) return;
         try
         {
@@ -2204,15 +2207,18 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
                 var cloneBtn = new Button
                 {
-                    Style = (Style)Application.Current.Resources["YYPillButtonStyle"],
+                    Style = (Style)Application.Current.Resources["YYFluentButtonStyle"],
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                     Content = L10n.T("🎙 克隆一段自己的主播声音…"),
                     FontSize = 11.5,
                 };
                 cloneBtn.Click += async (_, _) =>
                 {
-                    var saved = await VoiceCloneAndDramaDialogs.ShowCloneVoiceDialogAsync(_shelf, _shelf.WindowXamlRoot, _library);
-                    if (saved is not null) _shelf.RefreshCurrentSubPage();
+                    if (_shelf.WindowXamlRoot is { } xr)
+                    {
+                        var saved = await VoiceCloneAndDramaDialogs.ShowCloneVoiceDialogAsync(_shelf.OwnerWindow, xr, _library);
+                        if (saved is not null) _shelf.RefreshCurrentSubPage();
+                    }
                 };
                 bodyStack.Children.Add(cloneBtn);
                 break;
@@ -5131,6 +5137,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 if (OpenIssueId == issue.Id) RefreshPlayButtonsInPlace();
                 else _shelf.RefreshCurrentSubPage();
             }));
+        App.CurrentApp?.ClearActiveMiniPlayerSource(null);
         UpdateSmtcState(issue, playing: true);
 
         bool hasAudioStream = (!string.IsNullOrEmpty(issue.LocalAudioPath) && File.Exists(issue.LocalAudioPath))
@@ -5587,7 +5594,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             leftActs.Children.Add(typeFollowBtn);
             lower.Children.Add(leftActs);
 
-            var resumeBtn = YYChrome.MakeSheetPillButton(L10n.T("明白了，继续 -3s"), () => CloseInterrupt(resumeAudio: true), dark, _library.Prefs.Tint, "dark", height: 26, horizontalPadding: 13);
+            var resumeBtn = YYChrome.MakeDialogButton(L10n.T("明白了，继续 -3s"), () => CloseInterrupt(resumeAudio: true), dark, _library.Prefs.Tint, "dark", height: 26, horizontalPadding: 13);
             resumeBtn.FontSize = 11.5;
             resumeBtn.HorizontalAlignment = HorizontalAlignment.Right;
             resumeBtn.VerticalAlignment = VerticalAlignment.Center;
@@ -5856,7 +5863,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
     public async Task ShowStudioSheetAsync(StudioKind initialKind = StudioKind.WeeklyDigest, string? preselectedBookId = null)
     {
-        bool dark = ThemeHelper.IsDark(_shelf.WindowXamlRoot.Content is FrameworkElement fe ? fe.ActualTheme : ElementTheme.Light);
+        bool dark = ThemeHelper.IsDark(_shelf.WindowXamlRoot?.Content is FrameworkElement fe ? fe.ActualTheme : ElementTheme.Light);
         var p = ThemeHelper.Palette(dark);
         var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
         var serif = new FontFamily(YYFontFamily.Serif.WindowsFamily());
@@ -6244,6 +6251,36 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             BorderThickness = new Thickness(0.5),
         };
 
+        var topFilterBar = new Grid
+        {
+            Height = 42,
+            Padding = new Thickness(10, 0, 10, 0),
+            ColumnSpacing = 8,
+            Background = ThemeHelper.Brush(leafSurface),
+            CornerRadius = new CornerRadius(13, 13, 0, 0),
+        };
+        topFilterBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        topFilterBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        topFilterBar.Children.Add(searchPill);
+        Grid.SetColumn(filterSegWrap, 1);
+        topFilterBar.Children.Add(filterSegWrap);
+
+        var booksListHost = new ContentControl
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        };
+        var booksPickerInner = new StackPanel
+        {
+            Spacing = 0,
+            Children =
+            {
+                topFilterBar,
+                new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) },
+                booksListHost,
+            },
+        };
+
         void RebuildForm()
         {
             headerSubtitle.Text = chosenKind switch
@@ -6484,33 +6521,16 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 selectedTokenHost.Visibility = Visibility.Collapsed;
             }
 
-            var cardInner = new StackPanel { Spacing = 0 };
-            var topFilterBar = new Grid
-            {
-                Height = 42,
-                Padding = new Thickness(10, 0, 10, 0),
-                ColumnSpacing = 8,
-                Background = ThemeHelper.Brush(leafSurface),
-                CornerRadius = new CornerRadius(13, 13, 0, 0),
-            };
-            topFilterBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            topFilterBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            topFilterBar.Children.Add(searchPill);
-            Grid.SetColumn(filterSegWrap, 1);
-            topFilterBar.Children.Add(filterSegWrap);
-            cardInner.Children.Add(topFilterBar);
-            cardInner.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) });
-
             if (allBooks.Length == 0)
             {
-                cardInner.Children.Add(new TextBlock
+                booksListHost.Content = new TextBlock
                 {
                     Text = L10n.T("书架里还没有书，将根据你的选题直接生成。"),
                     FontSize = 12,
                     Foreground = ThemeHelper.Brush(p.T3),
                     HorizontalAlignment = HorizontalAlignment.Center,
                     Margin = new Thickness(14, 48, 14, 48),
-                });
+                };
             }
             else if (filtered.Length == 0)
             {
@@ -6520,7 +6540,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 showAllBtn.HorizontalAlignment = HorizontalAlignment.Center;
                 showAllBtn.Click += (_, _) => { searchBox.Text = ""; bookSearch = ""; bookFilter = "all"; RebuildForm(); };
                 emptyFiltered.Children.Add(showAllBtn);
-                cardInner.Children.Add(emptyFiltered);
+                booksListHost.Content = emptyFiltered;
             }
             else
             {
@@ -6621,15 +6641,16 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                     bGrid.Children.Add(bBtn);
                 }
 
-                cardInner.Children.Add(new ScrollViewer
+                booksListHost.Content = new ScrollViewer
                 {
                     MaxHeight = showPinnedTokens ? 136 : 160,
                     VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
                     Content = bGrid,
-                });
+                };
             }
 
-            booksCard.Child = cardInner;
+            if (!ReferenceEquals(booksCard.Child, booksPickerInner))
+                booksCard.Child = booksPickerInner;
         }
 
         searchBox.TextChanged += (_, _) => { bookSearch = searchBox.Text; RebuildForm(); };
@@ -6642,7 +6663,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         topLeft.Children.Add(new TextBlock { Text = L10n.T("酿一期书房电台"), FontFamily = serif, FontSize = 19, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
         topLeft.Children.Add(headerSubtitle);
         topHead.Children.Add(topLeft);
-        var closeBtn = YYChrome.MakeSheetCloseButton(() => { if (!isBrewing) dlgRef?.Hide(); }, dark);
+        var closeBtn = YYChrome.MakeDialogCloseButton(() => { if (!isBrewing) dlgRef?.Hide(); }, dark);
         closeBtn.HorizontalAlignment = HorizontalAlignment.Right;
         topHead.Children.Add(closeBtn);
 
@@ -6834,8 +6855,8 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             }
         }
 
-        cancelBtn = YYChrome.MakeSheetPillButton(L10n.T("取消"), () => { if (!isBrewing) dlgRef?.Hide(); }, dark, _library.Prefs.Tint, "secondary", height: 30, horizontalPadding: 14);
-        startBtn = YYChrome.MakeSheetPillButton(L10n.T("开始生成"), () => _ = RunGenerateInsideSheetAsync(), dark, _library.Prefs.Tint, "dark", height: 30, horizontalPadding: 16);
+        cancelBtn = YYChrome.MakeDialogButton(L10n.T("取消"), () => { if (!isBrewing) dlgRef?.Hide(); }, dark, _library.Prefs.Tint, "secondary", height: 30, horizontalPadding: 14);
+        startBtn = YYChrome.MakeDialogButton(L10n.T("开始生成"), () => _ = RunGenerateInsideSheetAsync(), dark, _library.Prefs.Tint, "dark", height: 30, horizontalPadding: 16);
 
         var bottomBar = new Grid { Padding = new Thickness(20, 2, 20, 16), ColumnSpacing = 10 };
         bottomBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -6846,7 +6867,8 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         bottomBar.Children.Add(rightActs);
 
         var sheetStack = new StackPanel { Spacing = 0, Children = { topHead, columnsGrid, bottomBar } };
-        dlgRef = YYChrome.CreateMacSheet(_shelf.WindowXamlRoot, dark, 720, sheetStack, maxHeight: 760, tint: _library.Prefs.Tint);
+        if (_shelf.WindowXamlRoot is not { } xr) return;
+        dlgRef = YYChrome.CreateFluentDialog(xr, dark, 720, sheetStack, maxHeight: 760, tint: _library.Prefs.Tint);
         await dlgRef.ShowSafeAsync(_library.Prefs.Tint);
     }
 
@@ -6854,7 +6876,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
     public async Task ShowAddPodcastSheetAsync(string initialQuery = "")
     {
-        bool dark = ThemeHelper.IsDark(_shelf.WindowXamlRoot.Content is FrameworkElement fe ? fe.ActualTheme : ElementTheme.Light);
+        bool dark = ThemeHelper.IsDark(_shelf.WindowXamlRoot?.Content is FrameworkElement fe ? fe.ActualTheme : ElementTheme.Light);
         var p = ThemeHelper.Palette(dark);
         var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
         var serif = new FontFamily(YYFontFamily.Serif.WindowsFamily());
@@ -6875,7 +6897,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         headTitles.Children.Add(new TextBlock { Text = L10n.T("搜播客目录、贴单集或导入本地音频"), FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 2) });
         topHead.Children.Add(headTitles);
 
-        var closeBtn = YYChrome.MakeSheetCloseButton(() => dlgRef?.Hide(), dark);
+        var closeBtn = YYChrome.MakeDialogCloseButton(() => dlgRef?.Hide(), dark);
         Grid.SetColumn(closeBtn, 1);
         topHead.Children.Add(closeBtn);
         root.Children.Add(topHead);
@@ -7126,7 +7148,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
             if (isUrl)
             {
-                var putBtn = YYChrome.MakeSheetPillButton(busyAdding ? L10n.T("解析中…") : L10n.T("放入收听台"), () => _ = SubmitQueryAsync(), dark, _library.Prefs.Tint, "dark", height: 24, horizontalPadding: 11);
+                var putBtn = YYChrome.MakeDialogButton(busyAdding ? L10n.T("解析中…") : L10n.T("放入收听台"), () => _ = SubmitQueryAsync(), dark, _library.Prefs.Tint, "dark", height: 24, horizontalPadding: 11);
                 putBtn.FontSize = 11.5;
                 putBtn.IsEnabled = !busyAdding;
                 rightActionHost.Content = putBtn;
@@ -7232,7 +7254,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         opmlBtn.Height = 28;
         opmlBtn.Click += async (_, _) =>
         {
-            string? path = await NativePickerHelper.PickSingleFileAsync(_shelf, [".opml", ".xml"]);
+            string? path = await NativePickerHelper.PickSingleFileAsync(_shelf.OwnerWindow, [".opml", ".xml"]);
             if (string.IsNullOrEmpty(path)) return;
             statusTb.Text = L10n.T("正在批量导入 OPML 订阅源…");
             statusTb.Foreground = ThemeHelper.Brush(tint.Accent);
@@ -7254,7 +7276,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         localAudioBtn.Height = 28;
         localAudioBtn.Click += async (_, _) =>
         {
-            string? path = await NativePickerHelper.PickSingleFileAsync(_shelf, [".mp3", ".m4a", ".wav", ".flac"]);
+            string? path = await NativePickerHelper.PickSingleFileAsync(_shelf.OwnerWindow, [".mp3", ".m4a", ".wav", ".flac"]);
             if (string.IsNullOrEmpty(path)) return;
             try
             {
@@ -7284,7 +7306,8 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         });
         root.Children.Add(footGrid);
 
-        dlgRef = YYChrome.CreateMacSheet(_shelf.WindowXamlRoot, dark, 500, root, maxHeight: 460, tint: _library.Prefs.Tint);
+        if (_shelf.WindowXamlRoot is not { } xr) return;
+        dlgRef = YYChrome.CreateFluentDialog(xr, dark, 500, root, maxHeight: 460, tint: _library.Prefs.Tint);
         if (!string.IsNullOrWhiteSpace(initialQuery) && !LooksLikePodcastUrl(initialQuery))
             _ = SubmitQueryAsync();
 
@@ -7519,10 +7542,10 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             Width = 32,
             Height = 32,
             Padding = new Thickness(0),
-            CornerRadius = new CornerRadius(16),
+            CornerRadius = new CornerRadius(6),
             Background = ThemeHelper.Brush(p.Card),
             BorderBrush = ThemeHelper.Brush(p.Line),
-            BorderThickness = new Thickness(0.75),
+            BorderThickness = new Thickness(1),
             UseSystemFocusVisuals = false,
             Content = grid,
         };
@@ -7533,16 +7556,16 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
     private static Button MakePaperPill(string text, bool accent, YYPalette p, YYTintColors tint) => new()
     {
         Content = text,
-        Height = 26,
-        MinHeight = 26,
+        Height = 28,
+        MinHeight = 28,
         Padding = new Thickness(11, 0, 11, 0),
-        CornerRadius = new CornerRadius(13),
+        CornerRadius = new CornerRadius(6),
         FontSize = 11.5,
         FontWeight = accent ? FontWeights.SemiBold : FontWeights.Medium,
         Foreground = ThemeHelper.Brush(accent ? tint.Accent : p.T1),
         Background = ThemeHelper.Brush(accent ? tint.Soft : p.Card),
         BorderBrush = ThemeHelper.Brush(accent ? tint.Edge : p.Line),
-        BorderThickness = new Thickness(0.75),
+        BorderThickness = new Thickness(1),
         UseSystemFocusVisuals = false,
     };
 

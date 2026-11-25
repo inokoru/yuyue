@@ -1057,7 +1057,7 @@ public sealed class RemoteLibraryService
                 if (!string.IsNullOrEmpty(nextUrl))
                 {
                     string nu = nextUrl!;
-                    var moreBtn = YYChrome.MakeSheetPillButton("下一页 ›", () => { navStack.Push(url ?? reqSrc.Url); _ = LoadUrlAsync(nu); }, dark, _library.Prefs.Tint, "secondary", height: 28, horizontalPadding: 14);
+                    var moreBtn = YYChrome.MakeDialogButton("下一页 ›", () => { navStack.Push(url ?? reqSrc.Url); _ = LoadUrlAsync(nu); }, dark, _library.Prefs.Tint, "secondary", height: 28, horizontalPadding: 14);
                     moreBtn.HorizontalAlignment = HorizontalAlignment.Center;
                     entriesPanel.Children.Add(moreBtn);
                 }
@@ -1228,7 +1228,7 @@ public sealed class RemoteLibraryService
         root.Children.Add(rightStack);
 
         ContentDialog? dlgRef = null;
-        var doneBtn = YYChrome.MakeSheetPillButton("完成", () => dlgRef?.Hide(), dark, _library.Prefs.Tint, "dark", height: 34, horizontalPadding: 20);
+        var doneBtn = YYChrome.MakeDialogButton("完成", () => dlgRef?.Hide(), dark, _library.Prefs.Tint, "dark", height: 34, horizontalPadding: 20);
         doneBtn.HorizontalAlignment = HorizontalAlignment.Right;
 
         var sheetBody = new StackPanel
@@ -1237,7 +1237,7 @@ public sealed class RemoteLibraryService
             Padding = new Thickness(22, 18, 22, 18),
             Children =
             {
-                YYChrome.MakeSheetHeader("OPDS 与 WebDAV 远程书库", "连接 Calibre-Web、Komga 或 WebDAV 云端书库", () => dlgRef?.Hide(), dark, titleSize: 17),
+                YYChrome.MakeDialogHeader("OPDS 与 WebDAV 远程书库", "连接 Calibre-Web、Komga 或 WebDAV 云端书库", () => dlgRef?.Hide(), dark, titleSize: 17),
                 new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) },
                 root,
                 doneBtn,
@@ -1246,7 +1246,7 @@ public sealed class RemoteLibraryService
 
         try
         {
-            dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 668, sheetBody, maxHeight: 740, tint: _library.Prefs.Tint);
+            dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 668, sheetBody, maxHeight: 740, tint: _library.Prefs.Tint);
             await dlgRef.ShowSafeAsync(_library.Prefs.Tint);
         }
         finally
