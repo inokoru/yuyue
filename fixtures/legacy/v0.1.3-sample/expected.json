@@ -1,0 +1,18 @@
+{
+  "version": "0.1.3",
+  "description": "Frozen minimal v0.1.3 library + .yuyue snapshot containing beiying.txt, progress, highlight thought, vocabulary word, and custom reader settings.",
+  "books": [
+    {
+      "title_contains": "背影",
+      "latest_progress": { "section": 0, "sentence": 3 },
+      "marks": [
+        { "note": "v0.1.3 冻结样本笔记" }
+      ]
+    }
+  ],
+  "words": ["legacy"],
+  "settings": {
+    "paper": "kami",
+    "font_size": 20.0
+  }
+}

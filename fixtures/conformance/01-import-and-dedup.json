@@ -1,0 +1,48 @@
+{
+  "id": "01-import-and-dedup",
+  "description": "Import EPUB, UTF-8 TXT, and GBK TXT; verify deduplication and error handling on empty/broken files.",
+  "steps": [
+    { "op": "open", "device": "a", "name": "ConformA", "platform": "test" },
+    {
+      "op": "import_book",
+      "device": "a",
+      "fixture": "books/beiying.epub",
+      "save_as": "epub1",
+      "expect": { "format": "epub", "available": true }
+    },
+    {
+      "op": "import_book",
+      "device": "a",
+      "fixture": "books/beiying.epub",
+      "expect": { "format": "epub", "same_id_as": "epub1" }
+    },
+    {
+      "op": "import_book",
+      "device": "a",
+      "fixture": "books/beiying-gbk.txt",
+      "save_as": "gbk",
+      "expect": { "format": "txt", "available": true }
+    },
+    {
+      "op": "assert_sentences",
+      "device": "a",
+      "book": "gbk",
+      "section": 0,
+      "min_count": 5,
+      "any_contains": "父亲"
+    },
+    {
+      "op": "import_book",
+      "device": "a",
+      "fixture": "books/empty.txt",
+      "expect_error": true
+    },
+    {
+      "op": "import_book",
+      "device": "a",
+      "fixture": "books/broken.epub",
+      "expect_error": true
+    },
+    { "op": "assert_books", "device": "a", "count": 2 }
+  ]
+}

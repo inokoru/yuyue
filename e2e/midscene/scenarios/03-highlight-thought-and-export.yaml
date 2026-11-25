@@ -1,0 +1,31 @@
+id: 03-highlight-thought-and-export
+title: 选字划线、写想法、笔记页查看与 Markdown 导出
+testing_ref: testing.md#一.7-8
+parity_ids:
+  - notes.highlights_and_thoughts
+  - notes.export
+fixtures:
+  - books/beiying.epub
+platforms:
+  - windows
+  - macos
+  - android
+  - ios
+
+tasks:
+  - name: 选段划线并添加想法
+    flow:
+      - ai: 打开《背影》阅读页，选中正文中的一句话
+      - sleep: 800
+      - ai: 在弹出的选中菜单中点击黄色划线，再点击「写想法」输入「Midscene 验收想法」并保存
+      - sleep: 1000
+      - aiAssert: 正文中刚才选中的句子带有高亮划线标记
+
+  - name: 在笔记面板核对并验证导出入口
+    flow:
+      - ai: 打开笔记列表页或侧边笔记面板
+      - sleep: 1000
+      - aiAssert: 笔记列表中可以看到刚添加的划线原文以及「Midscene 验收想法」
+      - ai: 打开笔记导出菜单
+      - sleep: 600
+      - aiAssert: 导出菜单中可见 Markdown 导出选项

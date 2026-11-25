@@ -1,0 +1,31 @@
+{
+  "version": 3,
+  "id": "099e38ff2955287817cc0ce6281282db",
+  "format": "txt",
+  "title": "背影",
+  "authors": [
+    "朱自清"
+  ],
+  "language": "zh-Hans",
+  "cover": null,
+  "start": 0,
+  "sections": [
+    {
+      "title": "背影",
+      "linear": true,
+      "kind": "text",
+      "sentences": 58,
+      "units": 1143
+    }
+  ],
+  "toc": [
+    {
+      "title": "背影",
+      "depth": 0,
+      "section": 0
+    }
+  ],
+  "units": 1143,
+  "read_minutes": 4,
+  "listen_minutes": 5
+}

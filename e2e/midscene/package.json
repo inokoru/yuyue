@@ -1,0 +1,20 @@
+{
+  "name": "yuyue-midscene-e2e",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Layer 4: Cross-platform visual UI smoke suite for Yuyue powered by Midscene.js (Windows, macOS, Android, iOS, Web).",
+  "type": "module",
+  "scripts": {
+    "validate": "node scripts/validate-flows.mjs",
+    "verify:model": "midscene model verify",
+    "render": "node scripts/run-midscene.mjs --platform windows --render-only",
+    "run:windows": "node scripts/run-midscene.mjs --platform windows",
+    "run:macos": "node scripts/run-midscene.mjs --platform macos",
+    "run:android": "node scripts/run-midscene.mjs --platform android",
+    "run:ios": "node scripts/run-midscene.mjs --platform ios",
+    "run:web": "node scripts/run-midscene.mjs --platform web"
+  },
+  "devDependencies": {
+    "@midscene/cli": "^1.18.2"
+  }
+}

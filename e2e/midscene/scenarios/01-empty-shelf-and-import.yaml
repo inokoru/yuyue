@@ -1,0 +1,38 @@
+id: 01-empty-shelf-and-import
+title: 空书架状态、多格式导入与 GBK / 坏文件兜底
+testing_ref: testing.md#一.1-4
+parity_ids:
+  - reading.import.formats
+  - reading.import.gbk
+fixtures:
+  - books/beiying-gbk.txt
+  - books/beiying.epub
+  - books/empty.txt
+  - books/broken.epub
+platforms:
+  - windows
+  - macos
+  - android
+  - ios
+
+tasks:
+  - name: 检查空书架入口并导入 GBK 文本与 EPUB
+    flow:
+      - aiAssert: 当前处于语阅书架主界面，可见导入入口且没有意外弹窗阻塞
+      - ai: 点击导入按钮，选择测试夹具中的 beiying-gbk.txt 完成导入
+      - sleep: 1500
+      - aiAssert: 书架上出现《背影》相关条目，书名与中文内容无乱码
+      - ai: 再次点击导入，选择测试夹具中的 beiying.epub 完成导入
+      - sleep: 1500
+      - ai: 再次导入同一个 beiying.epub 文件
+      - sleep: 1000
+      - aiAssert: 书架上不会重复出现两本相同的 beiying.epub
+
+  - name: 坏文件与空文件不崩溃且提示明确
+    flow:
+      - ai: 点击导入，尝试导入测试夹具中的 empty.txt
+      - sleep: 1000
+      - aiAssert: 界面出现空文件提示，应用未崩溃且未将该空文件加入书架
+      - ai: 点击导入，尝试导入测试夹具中的 broken.epub
+      - sleep: 1000
+      - aiAssert: 界面出现无法打开或损坏提示，应用未崩溃

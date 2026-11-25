@@ -1,0 +1,78 @@
+{
+  "id": "02-progress-and-settings",
+  "description": "Persist reading progress, shared ReaderSettings across reopen, and per-book settings override reflected in section_document.",
+  "steps": [
+    { "op": "open", "device": "a", "name": "ReaderDev", "platform": "test" },
+    {
+      "op": "import_book",
+      "device": "a",
+      "fixture": "books/pride-and-prejudice.epub",
+      "save_as": "book",
+      "expect": { "format": "epub", "available": true }
+    },
+    { "op": "save_progress", "device": "a", "book": "book", "section": 4, "sentence": 3 },
+    {
+      "op": "assert_progress",
+      "device": "a",
+      "book": "book",
+      "kind": "own",
+      "present": true,
+      "section": 4,
+      "sentence": 3,
+      "this_device": true,
+      "min_fraction": 0.0001
+    },
+    {
+      "op": "set_reader_settings",
+      "device": "a",
+      "paper": "kami",
+      "font": "serif",
+      "font_size": 20.0,
+      "compress": true
+    },
+    { "op": "close", "device": "a" },
+    { "op": "open", "device": "a", "name": "ReaderDev", "platform": "test" },
+    {
+      "op": "assert_reader_settings",
+      "device": "a",
+      "paper": "kami",
+      "font": "serif",
+      "font_size": 20.0,
+      "compress": true
+    },
+    {
+      "op": "assert_section_document",
+      "device": "a",
+      "book": "book",
+      "section": 4,
+      "contains": ["data-yy-paper=\"kami\"", "--yy-fs:20px", "--yy-font:var(--yy-serif)"]
+    },
+    {
+      "op": "set_book_reader_settings",
+      "device": "a",
+      "book": "book",
+      "paper": "dark",
+      "font_size": 26.0
+    },
+    {
+      "op": "assert_section_document",
+      "device": "a",
+      "book": "book",
+      "section": 4,
+      "contains": ["data-yy-paper=\"dark\"", "--yy-fs:26px"]
+    },
+    {
+      "op": "set_book_reader_settings",
+      "device": "a",
+      "book": "book",
+      "clear": true
+    },
+    {
+      "op": "assert_section_document",
+      "device": "a",
+      "book": "book",
+      "section": 4,
+      "contains": ["data-yy-paper=\"kami\"", "--yy-fs:20px"]
+    }
+  ]
+}

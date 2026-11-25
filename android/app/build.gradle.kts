@@ -72,6 +72,12 @@ android {
     if (project.hasProperty("play")) sourceSets["release"].manifest.srcFile("src/play/AndroidManifest.xml")
 
     packaging { jniLibs { useLegacyPackaging = false } }
+
+    testOptions {
+        unitTests.all { test ->
+            System.getProperty("jna.library.path")?.let { test.systemProperty("jna.library.path", it) }
+        }
+    }
 }
 
 kotlin { jvmToolchain(21) }
@@ -151,6 +157,8 @@ dependencies {
     // Anonymous usage analytics (AirTraffic / PostHog; pinned to 3.77.1 for /batch compatibility).
     implementation("com.posthog:posthog-android:3.77.1")
     testImplementation("junit:junit:4.13.2")
+    // Desktop JNA JAR for host JVM conformance tests against libyuyue_core.
+    testImplementation("net.java.dev.jna:jna:5.18.1")
     // @PreviewTest renders on the host JVM (layoutlib), not on a device. Previews live in
     // src/screenshotTest and call the app's composables with fixture data.
     screenshotTestImplementation(bom)

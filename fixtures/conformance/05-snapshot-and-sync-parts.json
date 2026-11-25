@@ -1,0 +1,84 @@
+{
+  "id": "05-snapshot-and-sync-parts",
+  "description": "Verify SyncPart exclusion/re-inclusion and .yuyue snapshot backup & merge restore onto a clean device.",
+  "steps": [
+    { "op": "open", "device": "a", "name": "Source", "platform": "macos" },
+    { "op": "open", "device": "b", "name": "Filtered", "platform": "windows" },
+    { "op": "open", "device": "c", "name": "Restored", "platform": "ios" },
+    {
+      "op": "import_book",
+      "device": "a",
+      "fixture": "books/edge-cases.epub",
+      "save_as": "book"
+    },
+    {
+      "op": "import_book",
+      "device": "b",
+      "fixture": "books/edge-cases.epub",
+      "expect": { "same_id_as": "book" }
+    },
+    { "op": "save_progress", "device": "a", "book": "book", "section": 1, "sentence": 2 },
+    { "op": "set_reader_settings", "device": "a", "paper": "sage", "font_size": 21.0 },
+    {
+      "op": "add_mark",
+      "device": "a",
+      "book": "book",
+      "section": 1,
+      "start_sentence": 0,
+      "start_offset": 0,
+      "end_sentence": 0,
+      "end_offset": 4,
+      "text": "test",
+      "style": "blue",
+      "note": "快照笔记",
+      "save_as": "m1"
+    },
+    {
+      "op": "sync",
+      "from": "a",
+      "to": "b",
+      "full": true,
+      "left_out": ["settings"],
+      "min_changed": 1
+    },
+    {
+      "op": "assert_progress",
+      "device": "b",
+      "book": "book",
+      "kind": "latest",
+      "present": true,
+      "section": 1,
+      "sentence": 2,
+      "this_device": false
+    },
+    { "op": "assert_reader_settings", "device": "b", "paper": "plain" },
+    { "op": "sync", "from": "a", "to": "b", "full": true, "min_changed": 1 },
+    { "op": "assert_reader_settings", "device": "b", "paper": "sage", "font_size": 21.0 },
+    {
+      "op": "make_snapshot",
+      "device": "a",
+      "snapshot_name": "backup.yuyue",
+      "progress": true,
+      "notes": true,
+      "words": true,
+      "settings": true,
+      "files": true
+    },
+    {
+      "op": "restore_snapshot",
+      "device": "c",
+      "snapshot_name": "backup.yuyue",
+      "replace": false
+    },
+    { "op": "assert_snapshot_counts", "device": "c", "min_books": 1, "min_notes": 1 },
+    { "op": "assert_reader_settings", "device": "c", "paper": "sage", "font_size": 21.0 },
+    {
+      "op": "assert_marks",
+      "device": "c",
+      "book": "book",
+      "count": 1,
+      "first_style": "blue",
+      "first_note": "快照笔记"
+    }
+  ]
+}

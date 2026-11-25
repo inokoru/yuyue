@@ -69,12 +69,24 @@ fn main() -> ExitCode {
 
 fn run(args: &[String]) -> Result<(), String> {
     let native = args.iter().any(|a| a == "--native");
-    let app = args.iter().position(|a| a == "--app").map(|i| args.get(i + 1).cloned().ok_or("--app needs a folder"));
-    let app = app.transpose()?;
+    let flag_value = |flag: &str| -> Result<Option<String>, String> {
+        args.iter()
+            .position(|a| a == flag)
+            .map(|i| args.get(i + 1).cloned().ok_or_else(|| format!("{flag} needs a value")))
+            .transpose()
+    };
+    let app = flag_value("--app")?;
+    let device_name = flag_value("--device")?.unwrap_or_else(|| "yuyue cli".into());
+    let platform_name = flag_value("--platform")?.unwrap_or_else(|| "cli".into());
+    let value_flags = ["--app", "--device", "--platform"];
     let plain: Vec<&str> = args
         .iter()
         .enumerate()
-        .filter(|(i, a)| *a != "--native" && *a != "--app" && !(*i > 0 && args[i - 1] == "--app"))
+        .filter(|(i, a)| {
+            *a != "--native"
+                && !value_flags.contains(&a.as_str())
+                && !(*i > 0 && value_flags.contains(&args[i - 1].as_str()))
+        })
         .map(|(_, a)| a.as_str())
         .collect();
     let geometry = PageGeometry {
@@ -85,7 +97,7 @@ fn run(args: &[String]) -> Result<(), String> {
         columns: 1,
         reduced_motion: false,
     };
-    let open = |library: &str| YuyueCore::open(library.to_string(), "yuyue cli".into(), "cli".into()).map_err(err);
+    let open = |library: &str| YuyueCore::open(library.to_string(), device_name.clone(), platform_name.clone()).map_err(err);
     match plain.as_slice() {
         ["import", library, files @ ..] if !files.is_empty() => {
             let core = open(library)?;
@@ -217,6 +229,129 @@ fn run(args: &[String]) -> Result<(), String> {
                 let this = if d.this_device { " (this)" } else { "" };
                 println!("{}  {} [{}]{this}  last: {:?} {:?} at {:?}", d.id, d.name, d.platform, d.last_book, d.last_fraction, d.last_at);
             }
+            Ok(())
+        }
+        ["device-id", library] => {
+            println!("{}", open(library)?.device_id());
+            Ok(())
+        }
+        ["original-file", library, book] => {
+            let core = open(library)?;
+            let id = find(&core, book)?.id;
+            println!("{}", core.original_file(id).map_err(err)?);
+            Ok(())
+        }
+        ["delete-book", library, book] => {
+            let core = open(library)?;
+            let id = find(&core, book)?.id;
+            core.delete_book(id).map_err(err)
+        }
+        ["mark", library, book, section, sentence, text, note] => {
+            let core = open(library)?;
+            let id = find(&core, book)?.id;
+            let sen = number(sentence)?;
+            let len = text.encode_utf16().count() as u32;
+            let note_opt = if *note == "-" { None } else { Some(note.to_string()) };
+            let m = core
+                .add_mark(
+                    id,
+                    number(section)?,
+                    TextPoint { sentence: sen, offset: 0 },
+                    TextPoint { sentence: sen, offset: len },
+                    text.to_string(),
+                    MarkStyle::Yellow,
+                    note_opt,
+                )
+                .map_err(err)?;
+            println!("{}", m.id);
+            Ok(())
+        }
+        ["mark-note", library, book, mark_id, note] => {
+            let core = open(library)?;
+            let id = find(&core, book)?.id;
+            let note_opt = if *note == "-" { None } else { Some(note.to_string()) };
+            core.set_mark_note(id, mark_id.to_string(), note_opt).map_err(err)
+        }
+        ["marks", library, book] => {
+            let core = open(library)?;
+            let id = find(&core, book)?.id;
+            let items: Vec<_> = core
+                .marks(id)
+                .map_err(err)?
+                .into_iter()
+                .map(|m| serde_json::json!({ "id": m.id, "section": m.section, "text": m.text, "note": m.note, "style": format!("{:?}", m.style) }))
+                .collect();
+            println!("{}", serde_json::to_string(&items).map_err(|e| e.to_string())?);
+            Ok(())
+        }
+        ["conflicts", library] => {
+            let items: Vec<_> = open(library)?
+                .note_conflicts()
+                .map_err(err)?
+                .into_iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "book": c.book,
+                        "mark": c.mark,
+                        "older_note": c.older.note,
+                        "newer_note": c.newer.note,
+                        "older_device": c.older.device_name,
+                        "newer_device": c.newer.device_name,
+                    })
+                })
+                .collect();
+            println!("{}", serde_json::to_string(&items).map_err(|e| e.to_string())?);
+            Ok(())
+        }
+        ["resolve-conflict", library, book, mark_id, choice] => {
+            use yuyue_core::conflicts::ConflictChoice;
+            let core = open(library)?;
+            let id = find(&core, book)?.id;
+            let c = match *choice {
+                "older" => ConflictChoice::Older,
+                "newer" => ConflictChoice::Newer,
+                "both" => ConflictChoice::Both,
+                _ => return Err("choice: older | newer | both".into()),
+            };
+            core.resolve_note_conflict(id, mark_id.to_string(), c).map_err(err)
+        }
+        ["settings", library] => {
+            let s = open(library)?.reader_settings().map_err(err)?;
+            println!(
+                "{}",
+                serde_json::json!({ "paper": s.paper, "mode": s.mode, "font": s.font, "font_size": s.font_size, "compress": s.compress })
+            );
+            Ok(())
+        }
+        ["settings", library, paper, font_size] => {
+            use yuyue_core::document::Paper;
+            let core = open(library)?;
+            let mut s = core.reader_settings().map_err(err)?;
+            if *paper != "-" {
+                s.paper = match *paper {
+                    "plain" => Paper::Plain,
+                    "dark" => Paper::Dark,
+                    "kami" => Paper::Kami,
+                    "kaminight" => Paper::KamiNight,
+                    "sage" => Paper::Sage,
+                    "eink" => Paper::Eink,
+                    _ => return Err(format!("unknown paper: {paper}")),
+                };
+            }
+            if *font_size != "-" {
+                s.font_size = font_size.parse().map_err(|_| format!("bad font_size: {font_size}"))?;
+            }
+            core.set_reader_settings(s).map_err(err)
+        }
+        ["make-snapshot", library, out_file] => {
+            use yuyue_core::snapshot::SnapshotParts;
+            let bytes = open(library)?
+                .make_snapshot(
+                    out_file.to_string(),
+                    SnapshotParts { progress: true, notes: true, words: true, settings: true, files: true },
+                )
+                .map_err(err)?;
+            println!("{bytes}");
             Ok(())
         }
         ["drama", library, book, section] => {

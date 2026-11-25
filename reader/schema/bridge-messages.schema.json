@@ -1,0 +1,767 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yuyue.app/schema/bridge-messages.schema.json",
+  "title": "Yuyue Reader <-> Native Bridge Contract",
+  "description": "Generated from reader/src/bridge.ts (Message), reader/src/settings.ts (Settings), and reader/src/marks.ts (MarkSpec). Do not edit by hand; run `cd reader && pnpm schema`.",
+  "x-message-types": [
+    "activePage",
+    "bubble",
+    "context",
+    "doubleTap",
+    "layout",
+    "log",
+    "page",
+    "ready",
+    "scroll",
+    "selection",
+    "tap"
+  ],
+  "$defs": {
+    "ReaderToNativeMessage": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "activePage"
+            },
+            "sentence": {
+              "type": "number"
+            },
+            "page": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "type",
+            "sentence",
+            "page"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "bubble"
+            },
+            "line": {
+              "type": "number"
+            },
+            "choice": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "type",
+            "line",
+            "choice",
+            "x",
+            "y"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "context"
+            },
+            "sentence": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "offset": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "type",
+            "sentence",
+            "offset",
+            "x",
+            "y"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "doubleTap"
+            },
+            "sentence": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "type",
+            "sentence",
+            "x",
+            "y"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "layout"
+            },
+            "section": {
+              "type": "number"
+            },
+            "pageCount": {
+              "type": "number"
+            },
+            "pageWidth": {
+              "type": "number"
+            },
+            "pageHeight": {
+              "type": "number"
+            },
+            "sentencePages": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            },
+            "pageFirstSentence": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            }
+          },
+          "required": [
+            "type",
+            "section",
+            "pageCount",
+            "pageWidth",
+            "pageHeight",
+            "sentencePages",
+            "pageFirstSentence"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "log"
+            },
+            "level": {
+              "type": "string",
+              "enum": [
+                "debug",
+                "info",
+                "warn",
+                "error"
+              ]
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "level",
+            "message"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "page"
+            },
+            "page": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "type",
+            "page"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "ready"
+            },
+            "section": {
+              "type": "number"
+            },
+            "pageCount": {
+              "type": "number"
+            },
+            "pageWidth": {
+              "type": "number"
+            },
+            "pageHeight": {
+              "type": "number"
+            },
+            "sentencePages": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            },
+            "pageFirstSentence": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            }
+          },
+          "required": [
+            "type",
+            "section",
+            "pageCount",
+            "pageWidth",
+            "pageHeight",
+            "sentencePages",
+            "pageFirstSentence"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "scroll"
+            },
+            "sentence": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "progress": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "type",
+            "sentence",
+            "progress"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "selection"
+            },
+            "start": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "s": {
+                      "type": "number"
+                    },
+                    "o": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "s",
+                    "o"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "s": {
+                      "type": "number"
+                    },
+                    "o": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "s",
+                    "o"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "text": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rect": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "width": {
+                      "type": "number"
+                    },
+                    "height": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "width",
+                    "height"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "start",
+            "end",
+            "text",
+            "rect"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "tap"
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "width": {
+              "type": "number"
+            },
+            "height": {
+              "type": "number"
+            },
+            "sentence": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "link": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "target": {
+                          "type": "string"
+                        },
+                        "note": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "label": {
+                              "type": "string"
+                            },
+                            "before": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "label",
+                            "before"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "target"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "external": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "external"
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "mark": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "word": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "start": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "s": {
+                          "type": "number"
+                        },
+                        "o": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "s",
+                        "o"
+                      ]
+                    },
+                    "end": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "s": {
+                          "type": "number"
+                        },
+                        "o": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "s",
+                        "o"
+                      ]
+                    },
+                    "sentence": {
+                      "type": "string"
+                    },
+                    "rect": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "x": {
+                          "type": "number"
+                        },
+                        "y": {
+                          "type": "number"
+                        },
+                        "width": {
+                          "type": "number"
+                        },
+                        "height": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y",
+                        "width",
+                        "height"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "text",
+                    "start",
+                    "end",
+                    "sentence",
+                    "rect"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "x",
+            "y",
+            "width",
+            "height",
+            "sentence",
+            "link",
+            "mark",
+            "word"
+          ]
+        }
+      ]
+    },
+    "NativeToReaderSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "paper": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "paperStyle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "texture": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "paging": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "justify": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        "indent": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        "compress": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        "motion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "eink": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        "einkGray": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        "tint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fontSize": {
+          "type": [
+            "number",
+            "string",
+            "null"
+          ]
+        },
+        "lineHeight": {
+          "type": [
+            "number",
+            "string",
+            "null"
+          ]
+        },
+        "paragraphSpacing": {
+          "type": [
+            "number",
+            "string",
+            "null"
+          ]
+        },
+        "font": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "margin": {
+          "type": [
+            "number",
+            "string",
+            "null"
+          ]
+        },
+        "top": {
+          "type": [
+            "number",
+            "string",
+            "null"
+          ]
+        },
+        "bottom": {
+          "type": [
+            "number",
+            "string",
+            "null"
+          ]
+        },
+        "cols": {
+          "type": [
+            "number",
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "NativeToReaderMarkSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "start": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "s": {
+              "type": "number"
+            },
+            "o": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "s",
+            "o"
+          ]
+        },
+        "end": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "s": {
+              "type": "number"
+            },
+            "o": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "s",
+            "o"
+          ]
+        },
+        "style": {
+          "type": "string",
+          "enum": [
+            "yellow",
+            "blue",
+            "pink",
+            "wave",
+            "underline",
+            "dotted"
+          ]
+        },
+        "note": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "start",
+        "end",
+        "style"
+      ]
+    }
+  },
+  "$ref": "#/$defs/ReaderToNativeMessage"
+}

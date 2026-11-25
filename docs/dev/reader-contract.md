@@ -127,13 +127,20 @@ Posted with `window.webkit.messageHandlers.yy.postMessage(obj)` on Apple,
 `window.yyNative.postMessage(JSON.stringify(obj))` on Android, and
 `window.chrome.webview.postMessage(obj)` on Windows (WebView2).
 
+The machine-readable JSON Schema is generated from `reader/src/bridge.ts` and `reader/src/settings.ts`
+into `reader/schema/bridge-messages.schema.json` (`cd reader && pnpm schema:check`), with canonical
+payload fixtures in `fixtures/conformance/reader-messages.json`.
+
 | `type` | Fields | When |
 |---|---|---|
 | `ready` | `section`, `pageCount`, `pageWidth`, `pageHeight`, `sentencePages`, `pageFirstSentence` | first layout done (after fonts) |
 | `layout` | same as `ready` | any later re-layout (settings, resize, late images) |
-| `tap` | `x`, `y`, `width`, `height`, `sentence` (index or null), `link` (`{target}` or `{external}` or null), `mark` (highlight id or null) | a tap that was not part of a scroll |
+| `tap` | `x`, `y`, `width`, `height`, `sentence` (index or null), `link` (`{target, note?}` or `{external}` or null), `mark` (highlight id or null), `word` (`WordHit` or null) | a tap that was not part of a scroll |
+| `doubleTap` | `sentence` (index or null), `x`, `y` | double tap on a sentence (e.g. translate) |
+| `context` | `sentence`, `offset`, `x`, `y` | right-click / long-press before context menu opens |
 | `selection` | `start`, `end` (`{s, o}`), `text`, `rect` (the selected lines on this page, viewport coordinates); all null when the selection goes away | text selected, after the mouse or finger lets go |
 | `activePage` | `sentence`, `page` | the ink line starts, or enters a new page partway through a long sentence; native turns the page if it is following playback |
+| `bubble` | `line`, `choice` (string or null), `x`, `y` | bubble avatar/name clicked in 气泡模式 |
 | `page` | `page` | snap paging: the visible page changed |
 | `scroll` | `sentence`, `progress` (0–1 within the section) | scrolled mode: first visible sentence changed (throttled) |
 | `log` | `level`, `message` | debugging; native forwards to its log |

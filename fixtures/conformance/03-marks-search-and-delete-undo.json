@@ -1,0 +1,51 @@
+{
+  "id": "03-marks-search-and-delete-undo",
+  "description": "Add/update highlights and thoughts, search in book, delete book and restore without losing marks.",
+  "steps": [
+    { "op": "open", "device": "a", "name": "NotesDev", "platform": "test" },
+    {
+      "op": "import_book",
+      "device": "a",
+      "fixture": "books/beiying.epub",
+      "save_as": "book",
+      "expect": { "format": "epub", "available": true }
+    },
+    {
+      "op": "add_mark",
+      "device": "a",
+      "book": "book",
+      "section": 1,
+      "start_sentence": 0,
+      "start_offset": 0,
+      "end_sentence": 0,
+      "end_offset": 4,
+      "text": "我与父亲",
+      "style": "yellow",
+      "note": "开篇第一句",
+      "save_as": "m1"
+    },
+    { "op": "set_mark_style", "device": "a", "book": "book", "mark": "m1", "style": "wave" },
+    { "op": "set_mark_note", "device": "a", "book": "book", "mark": "m1", "note": "修订后的想法" },
+    {
+      "op": "assert_marks",
+      "device": "a",
+      "book": "book",
+      "count": 1,
+      "first_style": "wave",
+      "first_note": "修订后的想法"
+    },
+    { "op": "search_book", "device": "a", "book": "book", "query": "父亲", "min_hits": 1 },
+    { "op": "delete_book", "device": "a", "book": "book" },
+    { "op": "assert_books", "device": "a", "count": 0 },
+    { "op": "restore_book", "device": "a", "book": "book" },
+    { "op": "assert_books", "device": "a", "count": 1, "first_id_ref": "book" },
+    {
+      "op": "assert_marks",
+      "device": "a",
+      "book": "book",
+      "count": 1,
+      "first_style": "wave",
+      "first_note": "修订后的想法"
+    }
+  ]
+}

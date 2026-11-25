@@ -1,0 +1,32 @@
+id: 04-tts-listen-and-sleep
+title: 朗读启动、墨线逐句推进与睡眠定时设置
+testing_ref: testing.md#二.1-3
+parity_ids:
+  - listening.tts_and_ink
+  - listening.sleep_timer
+fixtures:
+  - books/beiying.epub
+platforms:
+  - windows
+  - macos
+  - android
+  - ios
+
+tasks:
+  - name: 开始朗读并检查墨线跟读与播控条
+    flow:
+      - ai: 打开《背影》阅读页并点击朗读播放按钮
+      - sleep: 2000
+      - aiAssert: 界面显示正在朗读的播放控制条（带暂停按钮），且正文中出现当前朗读句子的墨线高亮
+      - ai: 点击下一句按钮
+      - sleep: 1000
+      - aiAssert: 墨线高亮向前移动到后续句子
+
+  - name: 设置本章结束睡眠定时并暂停
+    flow:
+      - ai: 打开睡眠定时选项，选择「本章结束」
+      - sleep: 800
+      - aiAssert: 播控条或定时按钮显示已开启「本章结束」定时状态
+      - ai: 点击暂停按钮停止朗读
+      - sleep: 500
+      - aiAssert: 播放状态切换为已暂停

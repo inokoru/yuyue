@@ -1,0 +1,36 @@
+---
+source: yuyue-core/tests/snapshots.rs
+expression: pieces
+---
+[
+  {
+    "end": 27,
+    "start": 0,
+    "text": "我与父亲不相见已二年余了，我最不能忘记的是他的背影。“"
+  },
+  {
+    "end": 38,
+    "start": 27,
+    "text": "不要紧，他们去不好！”"
+  },
+  {
+    "end": 47,
+    "start": 38,
+    "text": "他往车外看了看说。"
+  },
+  {
+    "end": 136,
+    "start": 49,
+    "text": "Mr. Bennet was so odd a mixture of quick parts, sarcastic humour, reserve, and caprice."
+  },
+  {
+    "end": 144,
+    "start": 137,
+    "text": "Indeed!"
+  },
+  {
+    "end": 152,
+    "start": 145,
+    "text": "Really?"
+  }
+]

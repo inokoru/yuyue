@@ -25,6 +25,23 @@ jobs:
         env:
           TITLE: ${{ github.event.pull_request.title }}
 
+  parity:
+    name: 多端对照与契约检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: 功能对照表校验（Layer 1）
+        run: node scripts/check-parity.mjs
+      - name: 三端 Core UniFFI / 书页 API 覆盖审计（Layer 0 & 1）
+        run: node scripts/audit-api-parity.mjs
+      - name: 书页通信 Schema 同步校验（Layer 3）
+        run: node reader/scripts/generate-schema.mjs --check
+      - name: Midscene 跨端剧本校验（Layer 4）
+        run: node e2e/midscene/scripts/validate-flows.mjs
+
   core:
     name: 核心测试
     runs-on: ubuntu-latest
@@ -34,8 +51,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: core
-      - run: cargo test --workspace --locked
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: 核心单测、共享用例、属性测试、快照与旧库兼容（Layer 2 & 5）
+        run: cargo test --workspace --locked
         working-directory: core
+      - name: 构建 yuyue-cli
+        run: cargo build -p yuyue-cli --locked
+        working-directory: core
+      - name: WebDAV 跨设备同步与冲突模拟（Layer 5）
+        run: node scripts/sync-webdav-e2e.mjs
 
   reader:
     name: 书页测试
@@ -55,6 +81,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: reader/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - run: pnpm schema:check
       - run: pnpm typecheck
       - run: pnpm exec playwright install --with-deps webkit chromium
       - run: pnpm test
@@ -116,6 +143,12 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/30.0.16248370
       - uses: gradle/actions/setup-gradle@v5
+      - name: 宿主核心库（供 Kotlin 共享用例加载）
+        run: cargo build -p yuyue-core --lib --locked
+        working-directory: core
+      - name: Android 单元测试与共享用例（Layer 2 & 3）
+        run: ./gradlew testDebugUnitTest --no-daemon -Djna.library.path="$PWD/../core/target/debug"
+        working-directory: android
       - run: ./gradlew assembleDebug --no-daemon
         working-directory: android
       - uses: actions/upload-artifact@v5
@@ -169,6 +202,14 @@ jobs:
               exit 1
             }
           tail -10 /tmp/xcodebuild-mac.log
+      - name: Mac 共享用例与书页契约测试（Layer 2 & 3）
+        working-directory: apple
+        run: |
+          xcodebuild test -project Yuyue.xcodeproj -scheme Yuyue \
+            -destination 'platform=macOS' -derivedDataPath build/dd \
+            -only-testing:YuyueSnapshotTests/ConformanceTests \
+            -only-testing:YuyueSnapshotTests/ReaderBridgeContractTests \
+            CODE_SIGNING_ALLOWED=NO
       - name: iPhone
         working-directory: apple
         run: |

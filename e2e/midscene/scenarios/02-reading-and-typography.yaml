@@ -1,0 +1,37 @@
+id: 02-reading-and-typography
+title: 打开阅读、翻页、目录跳转与纸张字号排版持久化
+testing_ref: testing.md#一.5-6,10
+parity_ids:
+  - reading.pagination
+  - reading.typography
+  - reading.progress_persistence
+fixtures:
+  - books/hongloumeng.epub
+platforms:
+  - windows
+  - macos
+  - android
+  - ios
+  - web
+
+tasks:
+  - name: 打开书页并验证翻页与目录跳转
+    flow:
+      - ai: 从书架打开《红楼梦》（若已在阅读页则直接继续）
+      - sleep: 1500
+      - aiAssert: 正文排版完整清晰，文字不贴边、不裁切
+      - ai: 向后翻两页
+      - sleep: 800
+      - aiAssert: 页面内容已前进到新的一页
+      - ai: 打开目录面板，选择第三回跳转
+      - sleep: 1000
+      - aiAssert: 正文已跳转到第三回章节内容，且没有排版错乱
+
+  - name: 切换纸张主题与字号并验证生效
+    flow:
+      - ai: 打开排版或外观设置，切换为「纸本」暖色纸张并将字号调大两档
+      - sleep: 1000
+      - aiAssert: 书页背景变为暖纸色调，正文字体明显变大且仍然按整页对齐
+      - ai: 关闭排版面板，切换回暗黑纸张后再切回素白纸张
+      - sleep: 800
+      - aiAssert: 页面背景与文字对比度清晰可读，无闪白或文字不可见

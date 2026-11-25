@@ -8,6 +8,8 @@
     "build": "node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit -p .",
+    "schema": "node scripts/generate-schema.mjs",
+    "schema:check": "node scripts/generate-schema.mjs --check",
     "tokens": "node ../design/generate.mjs",
     "fixtures": "node scripts/make-fixtures.mjs",
     "serve": "node scripts/serve.mjs",

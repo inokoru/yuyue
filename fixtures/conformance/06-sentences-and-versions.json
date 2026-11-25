@@ -1,0 +1,21 @@
+{
+  "id": "06-sentences-and-versions",
+  "description": "Verify pure top-level UniFFI functions (page_sentences and compare_versions) match identically across Rust, C#, Swift, and Kotlin.",
+  "steps": [
+    {
+      "op": "assert_page_sentences",
+      "text": "第一句。第二句！\n\n第三句？",
+      "expected_texts": ["第一句。", "第二句！", "第三句？"]
+    },
+    {
+      "op": "assert_compare_versions",
+      "cases": [
+        { "a": "0.1.3", "b": "0.1.2", "sign": 1 },
+        { "a": "0.1.10", "b": "0.1.2", "sign": 1 },
+        { "a": "v0.1.3", "b": "0.1.3", "sign": 0 },
+        { "a": "0.1.2", "b": "0.2.0", "sign": -1 },
+        { "a": "1.0.0", "b": "0.99.9", "sign": 1 }
+      ]
+    }
+  ]
+}

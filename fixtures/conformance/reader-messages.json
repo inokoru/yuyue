@@ -1,0 +1,124 @@
+{
+  "description": "Canonical Reader -> Native bridge messages (contract §5) validated against reader/schema/bridge-messages.schema.json and parsed by Windows (C#), Apple (Swift), and Android (Kotlin) contract tests.",
+  "valid": [
+    {
+      "type": "ready",
+      "section": 1,
+      "pageCount": 4,
+      "pageWidth": 393,
+      "pageHeight": 852,
+      "sentencePages": [0, 0, 1, 2, 3],
+      "pageFirstSentence": [0, 2, 3, 4]
+    },
+    {
+      "type": "layout",
+      "section": 1,
+      "pageCount": 5,
+      "pageWidth": 393,
+      "pageHeight": 852,
+      "sentencePages": [0, 1, 2, 3, 4],
+      "pageFirstSentence": [0, 1, 2, 3, 4]
+    },
+    {
+      "type": "tap",
+      "x": 180.5,
+      "y": 320.0,
+      "width": 393,
+      "height": 852,
+      "sentence": 2,
+      "link": null,
+      "mark": null,
+      "word": null
+    },
+    {
+      "type": "tap",
+      "x": 112.0,
+      "y": 240.0,
+      "width": 393,
+      "height": 852,
+      "sentence": 5,
+      "link": {
+        "target": "2#fn1",
+        "note": { "label": "1", "before": "我与父亲不相见" }
+      },
+      "mark": "mark-123",
+      "word": {
+        "text": "serendipity",
+        "start": { "s": 5, "o": 4 },
+        "end": { "s": 5, "o": 15 },
+        "sentence": "Pure serendipity indeed.",
+        "rect": { "x": 100.0, "y": 230.0, "width": 72.0, "height": 20.0 }
+      }
+    },
+    {
+      "type": "tap",
+      "x": 90.0,
+      "y": 150.0,
+      "width": 393,
+      "height": 852,
+      "sentence": null,
+      "link": { "external": "https://example.com/" },
+      "mark": null,
+      "word": null
+    },
+    {
+      "type": "doubleTap",
+      "sentence": 3,
+      "x": 200.0,
+      "y": 410.0
+    },
+    {
+      "type": "context",
+      "sentence": 3,
+      "offset": 12,
+      "x": 210.0,
+      "y": 415.0
+    },
+    {
+      "type": "selection",
+      "start": { "s": 1, "o": 0 },
+      "end": { "s": 1, "o": 8 },
+      "text": "我与父亲不相见已",
+      "rect": { "x": 24.0, "y": 120.0, "width": 160.0, "height": 24.0 }
+    },
+    {
+      "type": "selection",
+      "start": null,
+      "end": null,
+      "text": null,
+      "rect": null
+    },
+    {
+      "type": "activePage",
+      "sentence": 4,
+      "page": 2
+    },
+    {
+      "type": "bubble",
+      "line": 0,
+      "choice": "贾宝玉",
+      "x": 88.0,
+      "y": 310.0
+    },
+    {
+      "type": "page",
+      "page": 3
+    },
+    {
+      "type": "scroll",
+      "sentence": 7,
+      "progress": 0.425
+    },
+    {
+      "type": "log",
+      "level": "info",
+      "message": "reader booted"
+    }
+  ],
+  "invalid": [
+    { "type": "unknownType", "foo": 1 },
+    { "type": "ready", "section": 0 },
+    { "type": "page", "page": "not-a-number" },
+    { "type": "log", "level": "fatal", "message": "bad level" }
+  ]
+}
