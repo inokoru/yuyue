@@ -4,6 +4,20 @@
 
 Each version has a section, newest first. The app's changelog page and update notices come from here.
 
+## 0.1.4 · 2026-11-26
+
+### zh
+- 阅读快捷控制与护眼柔光：重构 Mac、iPhone / iPad 与 Android 的阅读页「更多」菜单，新增独立亮度调节与跟随系统开关、保留各自纸色偏好的「日间 / 夜间」一键切换，以及可叠加于任意纸色之上的独立「护眼柔光」暖色滤蓝光模式。
+- 三态译文与 AI 书伴升级：译文支持「原文 / 双语对照 / 仅译文」三态即时切换（macOS 顶栏 `译` 升级为带图标三态菜单，并精简 `Aa` 与顶栏按钮）；AI 书伴新增快捷指令、多选保存与段落翻译。
+- 翻页动效、书架样式与外观增强：全端新增「滑动 / 覆盖阴影 / 无动画」三档翻页动效及可选轻翻页音效；手机端书架新增「书脊排列」与「浅木层板」样式；Android 端补齐液态玻璃质感开关；Apple 端新增 6 款液态玻璃应用图标及年度阅读热力图。
+- 同步与稳定性修复：新增 WebDAV 同步检查视图，优化离线语音就绪提示球与选词浮卡定位，并修复多项跨端朗读、字体、反馈与多语言问题。
+
+### en
+- Redesigned reader More controls & Eye-Care Warmth: rebuilt the reader `···` menu across Mac, iPhone / iPad, and Android with an independent brightness bar + Follow System switch, a Day/Night polarity toggle that preserves your `Aa` paper choices, and an independent warm blue-light Eye-Care filter.
+- Three-mode translation & Book Companion upgrades: added Original / Bilingual / Translation-Only instant switching (with an icon-equipped toolbar menu on macOS and streamlined `Aa` / toolbar controls), plus Book Companion slash commands, multi-select save, and AI paragraph translation.
+- Page turns, shelf styles & visual polish: added Slide / Cover (with edge shadow) / None page turns and optional turn sound; added Spine view and Light Wood Ledge shelf styles on mobile; brought Liquid Glass controls to Android; and added six Liquid Glass app icons and an annual reading heatmap on Apple.
+- Sync & stability fixes: added a WebDAV sync inspector, refined the offline-voice ready orb and floating selection cards, and resolved cross-platform voice, font, feedback, and localization issues.
+
 ## 0.1.3 · 2026-11-24
 
 ### zh
