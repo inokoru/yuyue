@@ -111,8 +111,8 @@ final class ReaderPager: PlatformView {
     #if os(iOS)
     private let outer = SectionScrollView()
     private let pullCue = PullCueView()
-    /// Whether the bottom floating capsule is currently visible (used to position the bottom pull cue clear of it).
-    var bottomCapsuleVisible = true
+    /// Bottom clearance above safe area for the scrolled pull-to-cross cue, matching whatever control is visible.
+    var bottomClearance: CGFloat = 28
     /// Directions the outer scroll view may move during the current drag.
     private var outerMayMove: (forward: Bool, backward: Bool) = (false, false)
     /// Scrolled vertical pull-to-cross state.
@@ -1065,7 +1065,8 @@ final class ReaderPager: PlatformView {
             margin = max(width < 500 ? 24 : 40, (width / Double(columns) - measure) / 2).rounded()
         }
         let top = Double(safeAreaInsets.top) + 28
-        let bottom = Double(safeAreaInsets.bottom) + (book ? Self.spreadBottom : 40)
+        let extraBottom: Double = book ? Self.spreadBottom : (mode == .scrolled ? 68 : 44)
+        let bottom = Double(safeAreaInsets.bottom) + extraBottom
         let paging = Paging.native
         #else
         let margin = max(width < 500 ? 24 : 40, (width / Double(columns) - measure) / 2).rounded()
@@ -1721,8 +1722,7 @@ extension ReaderPager: UIScrollViewDelegate {
         let x = ((bounds.width - size.width) / 2).rounded()
         let y: CGFloat
         if edge == .next {
-            let clearance: CGFloat = bottomCapsuleVisible ? 66 : 16
-            y = bounds.height - safeAreaInsets.bottom - clearance - size.height
+            y = bounds.height - safeAreaInsets.bottom - bottomClearance - size.height
         } else {
             y = safeAreaInsets.top + 14
         }

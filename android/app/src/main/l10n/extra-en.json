@@ -650,5 +650,8 @@
   "支持导入 .ttf、.otf 字体文件，仅保存在本机。": "Import .ttf or .otf font files. They stay on this device.",
   "这台设备内存不足 6 GB，暂不支持离线克隆": "Offline voice cloning needs 6 GB+ memory",
   "已存本机 · 内存不足 6 GB，暂不能朗读": "Saved on device · needs 6 GB+ memory",
-  "这台设备内存不足 6 GB，暂不支持用本机克隆声音朗读": "This device needs 6 GB+ memory to use local cloned voices"
+  "这台设备内存不足 6 GB，暂不支持用本机克隆声音朗读": "This device needs 6 GB+ memory to use local cloned voices",
+  "在 %@ 使用 ID：%@": "Use ID on %1$@: %2$@",
+  "添加 OpenAI、Claude、DeepSeek、Kimi、通义或本机 Ollama 后即可在这里一键切换模型。": "Add OpenAI, Claude, DeepSeek, Kimi, Qwen, or local Ollama to switch models here with one tap.",
+  "还没添加模型服务商": "No model providers added yet"
 }

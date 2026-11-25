@@ -54,9 +54,15 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
     var ownSettings by mutableStateOf(false)
         private set
     var chromeShown by mutableStateOf(false)
-    /** Scrolling down the page sent the capsule away, and the top bar if it was up. */
+    /** User tucked the slim listening pill into a corner orb while reading along. */
+    var playerTucked by mutableStateOf(false)
+    /** Scrolling down the page sent the controls away, and the top bar if it was up. */
     var barsAway by mutableStateOf(false)
         private set
+    fun expandListenBar() {
+        playerTucked = false
+        barsAway = false
+    }
     private var chromeComesBack = false
     var tocShown by mutableStateOf(false)
     var settingsShown by mutableStateOf(false)
@@ -408,6 +414,7 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
     }
 
     private fun setListening(playing: Boolean) {
+        if (!playing && playerTucked) playerTucked = false
         if (playing) { if (library.listening != bookID) library.listening = bookID }
         else if (library.listening == bookID) library.listening = null
     }

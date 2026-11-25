@@ -18,10 +18,11 @@ enum ReaderBrightness {
     }
 }
 
-/// The phone's page: only the words and one glass capsule at the
-/// bottom — 目录, where the reader is, ‹ 朗读 ›, Aa. A tap in the middle floats 返回, the book's
-/// name and page, 搜索, 书签 and 更多 along the top. 书内搜索 takes over both: the field on top,
-/// 第 3 / 11 处 in the capsule. 沉浸阅读 leaves only a hairline.
+/// The phone's page: only the words and a quiet single-line footer at the bottom. A tap in the
+/// middle floats 返回, the book's name and page, 搜索, 书签 and 更多 along the top together with
+/// the full glass capsule at the bottom (目录, where the reader is, ‹ 朗读 ›, Aa). While reading
+/// aloud with the chrome tucked away, a slim mini listening pill (swipe down to fold into a corner
+/// orb) stays clear of the text. 书内搜索 takes over both; 沉浸阅读 leaves only a hairline.
 struct PhoneReaderChrome: View {
     @Bindable var model: ReaderModel
     let close: () -> Void
@@ -44,9 +45,30 @@ struct PhoneReaderChrome: View {
     @State private var savedSystemBrightness: CGFloat?
 
     private var paper: YYPaper { model.paperTokens }
-    /// 沉浸阅读 hides the capsule until the middle is tapped; scrolling down the page, until back up it;
-    /// 点词 hides it so two glass surfaces never stack at the bottom.
-    private var capsuleShown: Bool { model.lookup == nil && ((!model.immersive && !model.barsAway) || model.chromeShown || model.searchShown) }
+
+    private enum BottomBarMode: Equatable {
+        case search, fullCapsule, miniListen, miniOrb, footer, none
+    }
+
+    /// Mutually exclusive bottom chrome state:
+    /// - 书内搜索 → searchCapsule
+    /// - 点中央唤出 / 有重要录音提示 → fullCapsule (float over bottom margin without reflow)
+    /// - 听书中且收起顶栏 → slim miniListen (or corner miniOrb when tucked / scrolling down)
+    /// - 纯看书（非沉浸、非双页） → quiet single-line footer clear of the text
+    private var bottomMode: BottomBarMode {
+        if model.searchShown { return .search }
+        guard model.lookup == nil else { return .none }
+        if model.chromeShown || (model.capsuleAlert != nil && !model.immersive && !model.barsAway) {
+            return .fullCapsule
+        }
+        if !model.immersive && model.isPlaying {
+            return (model.playerTucked || model.barsAway) ? .miniOrb : .miniListen
+        }
+        if !model.immersive && !model.barsAway && !InnerDisplay.isOn(sizeClass) {
+            return .footer
+        }
+        return .none
+    }
     /// The bars and cards: quick, no overshoot; with 减弱动态效果 they only fade.
     private static var barMotion: Animation { YYMotion.reduce ? .easeOut(duration: 0.15) : .spring(duration: 0.22, bounce: 0) }
     private static func slide(_ edge: Edge) -> AnyTransition { YYMotion.reduce ? .opacity : .move(edge: edge).combined(with: .opacity) }
@@ -83,6 +105,7 @@ struct PhoneReaderChrome: View {
         .animation(Self.barMotion, value: model.searchShown)
         .animation(Self.barMotion, value: model.immersive)
         .animation(Self.barMotion, value: model.barsAway)
+        .animation(Self.barMotion, value: bottomMode)
         .animation(Self.barMotion, value: model.returnTo == nil)
         .animation(Self.barMotion, value: model.txtDoubt)
         .animation(Self.barMotion, value: model.recap)
@@ -110,11 +133,6 @@ struct PhoneReaderChrome: View {
                 action()
             }
         }) {
-            let showTurn = model.settings.mode == .paginated && !EInk.on
-            let showTranslate = model.detail?.summary.format != .pdf && model.detail?.summary.format != .podcast
-            let sheetHeight: CGFloat = EInk.on
-                ? (showTranslate ? 364 : 310)
-                : (420 + (showTranslate ? 54 : 0) + (showTurn ? 56 : 0))
             PhoneReaderMoreSheet(
                 model: model,
                 openNotes: {
@@ -146,9 +164,6 @@ struct PhoneReaderChrome: View {
                 },
                 dismiss: { moreShown = false }
             )
-            .presentationDetents([.height(sheetHeight), .medium])
-            .presentationDragIndicator(.visible)
-            .presentationBackgroundInteraction(.enabled)
         }
         .sheet(isPresented: $listenShown) {
             ScrollView { ListenCard(model: model) }
@@ -295,7 +310,7 @@ struct PhoneReaderChrome: View {
         // The pages' rectangle; the keyboard still pushes the search capsule up.
         .ignoresSafeArea(.container)
         .overlay(alignment: .bottom) {
-            if model.immersive, !capsuleShown, hidesProgress, ImmersivePrefs.keepsLine { hairline }
+            if model.immersive, bottomMode == .none, hidesProgress, ImmersivePrefs.keepsLine { hairline }
         }
     }
 
@@ -324,9 +339,11 @@ struct PhoneReaderChrome: View {
         .animation(YYMotion.standard, value: model.recap)
     }
 
-    /// The capsule, and the cards and pills that come up above it.
+    /// The bottom control surface (quiet footer, mini listen pill/orb, full capsule or search),
+    /// plus transient cards and pills stacked cleanly above it.
     private var bottom: some View {
-        VStack(spacing: 0) {
+        let pillsAllowed = !model.barsAway && !model.immersive && !model.searchShown && model.lookup == nil
+        return VStack(spacing: 0) {
             if let e = model.elsewhere {
                 ElsewhereCard(elsewhere: e, tint: .standard, stay: { model.elsewhere = nil }, jump: { model.jumpElsewhere() })
                     .padding(.bottom, 10)
@@ -344,13 +361,13 @@ struct PhoneReaderChrome: View {
                     .padding(.bottom, 10)
                     .transition(Self.slide(.bottom))
             }
-            if let back = model.returnTo, capsuleShown, !model.searchShown {
+            if let back = model.returnTo, pillsAllowed {
                 ReturnPill(page: back.page, paper: paper) { model.goBack() }
-                    .padding(.bottom, 8)
+                    .padding(.bottom, bottomMode == .footer ? 10 : 8)
                     .transition(Self.slide(.bottom))
-            } else if let doubt = model.txtDoubt, capsuleShown, !model.searchShown {
+            } else if let doubt = model.txtDoubt, pillsAllowed {
                 DoubtPill(doubt: doubt, paper: paper, open: { model.txtShown = true }, dismiss: { model.dismissDoubt() })
-                    .padding(.bottom, 8)
+                    .padding(.bottom, bottomMode == .footer ? 10 : 8)
                     .transition(Self.slide(.bottom))
             }
             if let ready = model.player?.readyOfflineVoice,
@@ -368,21 +385,82 @@ struct PhoneReaderChrome: View {
                         dismiss: { model.player?.dismissReadyOfflineVoice() }
                     )
                 }
-                .padding(.bottom, capsuleShown ? 10 : 12)
+                .padding(.bottom, bottomMode == .none ? 12 : 10)
                 .transition(Self.slide(.bottom))
             }
-            if capsuleShown {
-                Group {
-                    if model.searchShown { searchCapsule } else { capsule }
+            switch bottomMode {
+            case .search:
+                searchCapsule
+                    .transition(Self.slide(.bottom))
+            case .fullCapsule:
+                capsule
+                    .transition(Self.slide(.bottom))
+            case .miniListen:
+                miniListenPill
+                    .transition(Self.slide(.bottom))
+            case .miniOrb:
+                HStack {
+                    Spacer(minLength: 0)
+                    PhoneMiniListenOrb(
+                        paper: paper,
+                        progress: model.chapterProgress,
+                        onExpand: { model.expandListenBar() }
+                    )
                 }
-                .transition(Self.slide(.bottom))
+                .transition(YYMotion.reduce ? .opacity : .scale(scale: 0.85, anchor: .bottomTrailing).combined(with: .opacity))
+            case .footer:
+                readingFooter
+                    .transition(.opacity)
+            case .none:
+                EmptyView()
             }
         }
     }
 
+    /// Quiet single-line reading footer shown when pure-reading with the full chrome tucked away.
+    /// Aligned with the page's text margins and non-interactive so edge taps always turn pages.
+    private var readingFooter: some View {
+        HStack(spacing: 12) {
+            Text(model.chapterTitle ?? model.detail?.summary.title ?? "")
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 8)
+            Text(model.capsuleNote)
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .font(.yy(size: 11))
+        .foregroundStyle(paper.ink2.opacity(0.8))
+        .padding(.horizontal, 12)
+        .padding(.bottom, 4)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var miniListenPill: some View {
+        let n = model.sentenceCount
+        let label = n > 0
+            ? String(localized: "第 \(min(model.sentence + 1, n)) / \(n) 句")
+            : (model.chapterTitle ?? model.detail?.summary.title ?? "")
+        let rateBadge: String? = abs(model.rate - 1.0) >= 0.05
+            ? "\(model.rate.formatted(.number.precision(.fractionLength(0...1))))×"
+            : nil
+        return PhoneMiniListenPill(
+            paper: paper,
+            label: label,
+            rateBadge: rateBadge,
+            progress: model.chapterProgress,
+            onOpenListen: { listenShown = true },
+            onPrevious: { model.stepSentence(forward: false) },
+            onPause: { model.togglePlay() },
+            onNext: { model.stepSentence(forward: true) },
+            onTuck: { model.playerTucked = true }
+        )
+    }
+
     /// 沉浸, with the capsule away: the progress line, or the hairline.
     @ViewBuilder private var immersiveNote: some View {
-        if model.immersive, !capsuleShown {
+        if model.immersive, bottomMode == .none {
             if !hidesProgress {
                 Text(model.capsuleNote)
                     .font(.yy(size: 10).monospacedDigit())
@@ -893,6 +971,167 @@ struct PhoneReaderCapsule: View {
 
     private func capButton(_ name: String) -> some View {
         Image(systemName: name).font(.yy(size: 14, weight: .semibold)).frame(minWidth: 38, minHeight: 44).contentShape(.rect)
+    }
+}
+
+/// Slim 34pt listening pill shown while reading aloud with top chrome dismissed.
+/// Fits strictly below `--yy-bottom` (`safeArea + 44`), so it never covers the last line of text.
+/// Swipe down or tap the trailing chevron to tuck into `PhoneMiniListenOrb`.
+struct PhoneMiniListenPill: View {
+    var paper: YYPaper
+    var label: String
+    var rateBadge: String?
+    var progress: Double
+    var onOpenListen: () -> Void
+    var onPrevious: () -> Void
+    var onPause: () -> Void
+    var onNext: () -> Void
+    var onTuck: () -> Void
+
+    @State private var dragY: CGFloat = 0
+
+    private var accentColor: Color {
+        paper.isEink ? paper.ink : YYTint.standard.accent
+    }
+
+    var body: some View {
+        let clampedProgress = min(1, max(0, progress))
+        HStack(spacing: 2) {
+            Button(action: onOpenListen) {
+                HStack(spacing: 5) {
+                    Image(systemName: "waveform")
+                        .font(.yy(size: 11.5, weight: .semibold))
+                        .foregroundStyle(accentColor)
+                    Text(label)
+                        .font(.yy(size: 11.5, weight: .medium))
+                        .foregroundStyle(paper.ink)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                    if let rateBadge {
+                        Text(rateBadge)
+                            .font(.yy(size: 10, weight: .medium))
+                            .foregroundStyle(paper.ink2)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                    }
+                }
+                .padding(.leading, 10)
+                .padding(.trailing, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: 34)
+                .contentShape(Rectangle().inset(by: -5))
+            }
+            .accessibilityLabel(label)
+            .accessibilityHint(String(localized: "听书：声音、速度、睡眠定时"))
+
+            Button(action: onPrevious) {
+                Image(systemName: "chevron.left")
+                    .font(.yy(size: 12, weight: .semibold))
+                    .foregroundStyle(paper.ink)
+                    .frame(width: 28, height: 34)
+                    .contentShape(Rectangle().inset(by: -5))
+            }
+            .buttonStyle(YYPressStyle(scale: 0.9))
+            .accessibilityLabel("上一句")
+
+            Button(action: onPause) {
+                Image(systemName: "pause.fill")
+                    .font(.yy(size: 11, weight: .semibold))
+                    .foregroundStyle(paper.onMain)
+                    .frame(width: 26, height: 26)
+                    .background(YYTint.standard.play(on: paper), in: .circle)
+                    .contentShape(Circle().inset(by: -9))
+            }
+            .buttonStyle(YYPressStyle(scale: 0.9))
+            .accessibilityLabel("暂停")
+
+            Button(action: onNext) {
+                Image(systemName: "chevron.right")
+                    .font(.yy(size: 12, weight: .semibold))
+                    .foregroundStyle(paper.ink)
+                    .frame(width: 28, height: 34)
+                    .contentShape(Rectangle().inset(by: -5))
+            }
+            .buttonStyle(YYPressStyle(scale: 0.9))
+            .accessibilityLabel("下一句")
+
+            Button(action: onTuck) {
+                Image(systemName: "chevron.down")
+                    .font(.yy(size: 11, weight: .semibold))
+                    .foregroundStyle(paper.ink2)
+                    .frame(width: 26, height: 34)
+                    .contentShape(Rectangle().inset(by: -5))
+            }
+            .buttonStyle(YYPressStyle(scale: 0.9))
+            .accessibilityLabel("收起播放条")
+        }
+        .padding(.trailing, 4)
+        .frame(height: 34)
+        .frame(maxWidth: 340)
+        .glass(paper, in: Capsule())
+        .overlay(alignment: .bottom) {
+            GeometryReader { g in
+                Capsule().fill(paper.line)
+                Capsule().fill(accentColor).frame(width: g.size.width * clampedProgress)
+            }
+            .animation(YYMotion.standard, value: clampedProgress)
+            .frame(height: 1.5)
+            .padding(.horizontal, 18)
+        }
+        .offset(y: YYMotion.reduce ? 0 : (dragY >= 0 ? dragY : dragY * 0.18))
+        .opacity(YYMotion.reduce ? 1 : max(0.35, 1.0 - Double(max(0, dragY)) / 80.0))
+        .gesture(
+            DragGesture(minimumDistance: 8)
+                .onChanged { value in
+                    guard !YYMotion.reduce else { return }
+                    guard abs(value.translation.height) >= abs(value.translation.width) else { return }
+                    dragY = value.translation.height
+                }
+                .onEnded { value in
+                    if value.translation.height > 28 || value.predictedEndTranslation.height > 72 {
+                        dragY = 0
+                        withAnimation(YYMotion.standard) { onTuck() }
+                    } else {
+                        withAnimation(YYMotion.quick) { dragY = 0 }
+                    }
+                }
+        )
+    }
+}
+
+/// Compact 36pt corner listening orb shown when the user tucks `PhoneMiniListenPill` or scrolls down
+/// while listening. Displays a hairline progress ring; tapping expands back to the mini pill.
+struct PhoneMiniListenOrb: View {
+    var paper: YYPaper
+    var progress: Double
+    var onExpand: () -> Void
+
+    private var accentColor: Color {
+        paper.isEink ? paper.ink : YYTint.standard.accent
+    }
+
+    var body: some View {
+        let clamped = min(1, max(0, progress))
+        Button(action: onExpand) {
+            ZStack {
+                Circle()
+                    .stroke(paper.line, lineWidth: 2)
+                Circle()
+                    .trim(from: 0, to: clamped)
+                    .stroke(accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(YYMotion.standard, value: clamped)
+                Image(systemName: "waveform")
+                    .font(.yy(size: 13.5, weight: .semibold))
+                    .foregroundStyle(accentColor)
+            }
+            .frame(width: 36, height: 36)
+            .glass(paper, in: Circle())
+            .contentShape(Circle().inset(by: -4))
+        }
+        .buttonStyle(YYPressStyle(scale: 0.92))
+        .accessibilityLabel("展开播放条")
+        .accessibilityValue("\(Int((clamped * 100).rounded()))%")
     }
 }
 

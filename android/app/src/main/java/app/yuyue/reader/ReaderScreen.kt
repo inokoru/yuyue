@@ -5,12 +5,19 @@ import androidx.compose.ui.semantics.semantics
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.runtime.rememberCoroutineScope
 import app.yuyue.design.pressable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -410,6 +417,10 @@ private fun Modifier.glass(paper: YYPaper, @Suppress("UNUSED_PARAMETER") haze: H
         .border(0.5.dp, if (paper.isDark) Color.White.copy(alpha = 0.10f) else paper.line, shape)
 }
 
+private enum class BottomBarMode {
+    Search, FullCapsule, MiniListen, MiniOrb, Footer, None
+}
+
 @Composable
 private fun Chrome(
     model: ReaderModel,
@@ -482,26 +493,38 @@ private fun Chrome(
             Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.navigationBars).padding(horizontal = 12.dp).padding(bottom = 4.dp).widthIn(max = 560.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // The pill and the cards rise in over the capsule and sink away, the last one drawn as it goes.
-            val capsule = ((!model.immersive && !model.barsAway) || model.chromeShown || model.searchShown) && !popupOpen
-            val back = model.returnTo?.takeIf { !model.barsAway && !popupOpen }
+            // Mutually exclusive bottom chrome state:
+            // - Search → SearchCapsule
+            // - Center tap / actionable recording alert → FullCapsule
+            // - Reading aloud with chrome tucked → slim 34dp MiniListenPill (or corner MiniListenOrb)
+            // - Pure reading (non-immersive) → quiet single-line ReadingFooter clear of text
+            val bottomMode = when {
+                popupOpen -> BottomBarMode.None
+                model.searchShown -> BottomBarMode.Search
+                model.chromeShown || (model.capsuleAlert != null && !model.immersive && !model.barsAway) -> BottomBarMode.FullCapsule
+                !model.immersive && model.isPlaying -> if (model.playerTucked || model.barsAway) BottomBarMode.MiniOrb else BottomBarMode.MiniListen
+                !model.immersive && !model.barsAway -> BottomBarMode.Footer
+                else -> BottomBarMode.None
+            }
+            val pillsAllowed = !model.barsAway && !model.immersive && !model.searchShown && !popupOpen
+            val back = model.returnTo?.takeIf { pillsAllowed }
             var lastBack by remember { mutableStateOf(back) }
             if (back != null) lastBack = back
             AnimatedVisibility(back != null, enter = YYMotion.barIn(false, reduce), exit = YYMotion.barOut(false, reduce)) { lastBack?.let { (_, page) ->
                 Row(
-                    Modifier.padding(bottom = 8.dp).glass(paper, haze).pressable(scale = 0.97f, role = null) { model.goBack() }.padding(horizontal = 14.dp, vertical = 8.dp),
+                    Modifier.padding(bottom = if (bottomMode == BottomBarMode.Footer) 10.dp else 8.dp).glass(paper, haze).pressable(scale = 0.97f, role = null) { model.goBack() }.padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Icon(Icons.undo, null, tint = paper.ink, modifier = Modifier.size(15.dp))
                     Text(page?.let { t("回到第 %lld 页", it) } ?: t("回到原处"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = paper.ink, style = YY.tnum)
                 }
             } }
-            val doubt = model.txtDoubt?.takeIf { back == null && capsule && !model.searchShown && !popupOpen }
+            val doubt = model.txtDoubt?.takeIf { back == null && pillsAllowed }
             var lastDoubt by remember { mutableStateOf(doubt) }
             if (doubt != null) lastDoubt = doubt
             AnimatedVisibility(doubt != null, enter = YYMotion.barIn(false, reduce), exit = YYMotion.barOut(false, reduce)) { lastDoubt?.let { message ->
                 Row(
-                    Modifier.padding(bottom = 8.dp).glass(paper, haze),
+                    Modifier.padding(bottom = if (bottomMode == BottomBarMode.Footer) 10.dp else 8.dp).glass(paper, haze),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Row(
@@ -533,7 +556,6 @@ private fun Chrome(
             AnimatedVisibility(sleep != null, enter = YYMotion.barIn(false, reduce), exit = YYMotion.barOut(false, reduce)) {
                 lastSleep?.let { r -> SleepReturnCard(r.whenText, "${r.chapter} ${r.at}", paper, haze) { model.answerSleepReturn(it) } }
             }
-            // 沉浸阅读 hides the capsule until the middle is tapped; scrolling down the page, until back up it.
             val readyVoice = model.player?.readyOfflineVoice?.takeIf { !model.searchShown && !popupOpen }
             var lastReadyVoice by remember { mutableStateOf(readyVoice) }
             if (readyVoice != null) lastReadyVoice = readyVoice
@@ -551,15 +573,46 @@ private fun Chrome(
                         haze = haze,
                         openPicker = { openReadyVoicePicker(ready.id) },
                         dismiss = { model.player?.dismissReadyOfflineVoice() },
-                        modifier = Modifier.padding(bottom = if (capsule) 10.dp else 12.dp),
+                        modifier = Modifier.padding(bottom = if (bottomMode == BottomBarMode.None) 12.dp else 10.dp),
                     )
                 }
             }
-            model.pager.bottomCapsuleVisible = capsule
-            AnimatedVisibility(capsule, enter = YYMotion.barIn(fromTop = false, reduce), exit = YYMotion.barOut(toTop = false, reduce)) {
+            model.pager.bottomClearanceDp = when (bottomMode) {
+                BottomBarMode.Search, BottomBarMode.FullCapsule -> 68f
+                BottomBarMode.MiniListen, BottomBarMode.MiniOrb -> 48f
+                BottomBarMode.Footer -> 28f
+                BottomBarMode.None -> 16f
+            }
+            AnimatedVisibility(
+                bottomMode == BottomBarMode.Search || bottomMode == BottomBarMode.FullCapsule,
+                enter = YYMotion.barIn(fromTop = false, reduce),
+                exit = YYMotion.barOut(toTop = false, reduce),
+            ) {
                 if (model.searchShown) SearchCapsule(model, paper, haze) else Capsule(model, paper, haze, openToc)
             }
-            AnimatedVisibility(!capsule && model.immersive && !popupOpen, enter = androidx.compose.animation.fadeIn(YYMotion.standard()), exit = androidx.compose.animation.fadeOut(YYMotion.exit())) {
+            AnimatedVisibility(
+                bottomMode == BottomBarMode.MiniListen,
+                enter = YYMotion.barIn(fromTop = false, reduce),
+                exit = YYMotion.barOut(toTop = false, reduce),
+            ) {
+                MiniListenPill(model, paper, haze, reduce)
+            }
+            AnimatedVisibility(
+                bottomMode == BottomBarMode.MiniOrb,
+                modifier = Modifier.align(Alignment.End),
+                enter = if (reduce) fadeIn(YYMotion.standard()) else fadeIn(YYMotion.standard()) + scaleIn(YYMotion.standard(), initialScale = 0.85f, transformOrigin = TransformOrigin(1f, 1f)),
+                exit = if (reduce) fadeOut(YYMotion.exit()) else fadeOut(YYMotion.exit()) + scaleOut(YYMotion.exit(), targetScale = 0.85f, transformOrigin = TransformOrigin(1f, 1f)),
+            ) {
+                MiniListenOrb(model, paper, haze)
+            }
+            AnimatedVisibility(
+                bottomMode == BottomBarMode.Footer,
+                enter = fadeIn(YYMotion.standard()),
+                exit = fadeOut(YYMotion.exit()),
+            ) {
+                ReadingFooter(model, paper)
+            }
+            AnimatedVisibility(bottomMode == BottomBarMode.None && model.immersive && !popupOpen, enter = fadeIn(YYMotion.standard()), exit = fadeOut(YYMotion.exit())) {
                 if (!ImmersivePrefs.hidesProgress) {
                     Text(model.capsuleNote, fontSize = 12.sp, color = paper.ink2, style = YY.tnum, modifier = Modifier.padding(bottom = 2.dp))
                 } else if (ImmersivePrefs.keepsLine) {
@@ -703,6 +756,191 @@ internal fun ReaderCapsuleBar(
             drawRoundRect(trackColor, cornerRadius = r)
             if (share > 0f) drawRoundRect(fillColor, size = Size(size.width * share, size.height), cornerRadius = r)
         })
+    }
+}
+
+/** Quiet single-line reading footer shown during pure reading when full chrome is tucked away. */
+@Composable
+private fun ReadingFooter(model: ReaderModel, paper: YYPaper) {
+    val label = model.chapterTitle ?: model.detail?.summary?.title ?: ""
+    val ink = paper.ink2.copy(alpha = 0.8f)
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            label,
+            fontSize = 11.sp,
+            color = ink,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            model.capsuleNote,
+            fontSize = 11.sp,
+            color = ink,
+            style = YY.tnum,
+            maxLines = 1,
+        )
+    }
+}
+
+/** Slim 34dp listening pill shown while reading aloud with top chrome dismissed.
+ *  Fits strictly below `--yy-bottom` (`navBar + 44dp`), so it never overlaps the last line of text.
+ *  Swipe down or tap the trailing chevron to tuck into [MiniListenOrb]. */
+@Composable
+private fun MiniListenPill(model: ReaderModel, paper: YYPaper, haze: HazeState, reduce: Boolean) {
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+    val dragY = remember { Animatable(0f) }
+    val tuckThresholdPx = with(density) { 28.dp.toPx() }
+    val fadeRangePx = with(density) { 80.dp.toPx() }
+    val accentColor = if (EInk.on) paper.ink else YY.tint.accent
+    val n = model.sentenceCount
+    val label = if (n > 0) t("第 %lld / %lld 句", minOf(model.sentence + 1, n), n) else (model.chapterTitle ?: model.detail?.summary?.title ?: "")
+    val rate = model.player?.rate ?: 1f
+    val rateBadge = if (abs(rate - 1f) >= 0.05f) {
+        if (rate == rate.roundToInt().toFloat()) "${rate.roundToInt()}×" else "%.1f×".format(rate)
+    } else null
+    val share = model.chapterProgress.toFloat().coerceIn(0f, 1f)
+
+    val offsetPx = if (reduce) 0f else if (dragY.value >= 0f) dragY.value else dragY.value * 0.18f
+    val dragAlpha = if (reduce) 1f else (1f - (dragY.value.coerceAtLeast(0f) / fadeRangePx)).coerceIn(0.35f, 1f)
+
+    Box(
+        Modifier
+            .widthIn(max = 340.dp)
+            .fillMaxWidth()
+            .height(34.dp)
+            .offset { IntOffset(0, offsetPx.roundToInt()) }
+            .alpha(dragAlpha)
+            .pointerInput(reduce) {
+                var totalY = 0f
+                detectVerticalDragGestures(
+                    onDragStart = { totalY = 0f },
+                    onVerticalDrag = { _, dragAmount ->
+                        totalY += dragAmount
+                        if (!reduce) {
+                            scope.launch { dragY.snapTo(totalY) }
+                        }
+                    },
+                    onDragEnd = {
+                        if (totalY > tuckThresholdPx) {
+                            scope.launch { dragY.snapTo(0f) }
+                            model.playerTucked = true
+                        } else {
+                            scope.launch { dragY.animateTo(0f, YYMotion.quick()) }
+                        }
+                    },
+                    onDragCancel = {
+                        scope.launch { dragY.animateTo(0f, YYMotion.quick()) }
+                    },
+                )
+            }
+            .glass(paper, haze),
+    ) {
+        Row(
+            Modifier.fillMaxSize().padding(end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Row(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clickable { model.listenShown = true }
+                    .padding(start = 10.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Icon(Icons.waveform, null, tint = accentColor, modifier = Modifier.size(13.dp))
+                Text(
+                    label,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = paper.ink,
+                    style = YY.tnum,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (rateBadge != null) {
+                    Text(
+                        rateBadge,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = paper.ink2,
+                        style = YY.tnum,
+                        maxLines = 1,
+                    )
+                }
+            }
+            Box(
+                Modifier.size(width = 28.dp, height = 34.dp).clip(CircleShape).pressable(label = t("上一句"), scale = 0.9f) { model.step(false) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.chevronLeft, t("上一句"), tint = paper.ink, modifier = Modifier.size(14.dp))
+            }
+            Box(
+                Modifier.size(26.dp).clip(CircleShape).background(LocalTint.current.play(paper)).pressable(label = t("暂停"), scale = 0.9f) { model.togglePlay() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.pause, t("暂停"), tint = paper.onMain, modifier = Modifier.size(13.dp))
+            }
+            Box(
+                Modifier.size(width = 28.dp, height = 34.dp).clip(CircleShape).pressable(label = t("下一句"), scale = 0.9f) { model.step(true) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.chevronRight, t("下一句"), tint = paper.ink, modifier = Modifier.size(14.dp))
+            }
+            Box(
+                Modifier.size(width = 26.dp, height = 34.dp).clip(CircleShape).pressable(label = t("收起播放条"), scale = 0.9f) { model.playerTucked = true },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.chevronDown, t("收起播放条"), tint = paper.ink2, modifier = Modifier.size(13.dp))
+            }
+        }
+        val trackColor = paper.line
+        Box(
+            Modifier.align(Alignment.BottomCenter).padding(horizontal = 18.dp).fillMaxWidth().height(1.5.dp).drawBehind {
+                val r = CornerRadius(size.height / 2f)
+                drawRoundRect(trackColor, cornerRadius = r)
+                if (share > 0f) drawRoundRect(accentColor, size = Size(size.width * share, size.height), cornerRadius = r)
+            },
+        )
+    }
+}
+
+/** Compact 36dp corner listening orb shown when the user tucks [MiniListenPill] or scrolls down
+ *  while listening. Displays a hairline progress ring; tapping expands back to the mini pill. */
+@Composable
+private fun MiniListenOrb(model: ReaderModel, paper: YYPaper, haze: HazeState) {
+    val accentColor = if (EInk.on) paper.ink else YY.tint.accent
+    val trackColor = paper.line
+    val share = model.chapterProgress.toFloat().coerceIn(0f, 1f)
+    Box(
+        Modifier
+            .size(36.dp)
+            .glass(paper, haze, CircleShape)
+            .drawBehind {
+                val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                drawCircle(color = trackColor, style = stroke)
+                if (share > 0f) {
+                    drawArc(
+                        color = accentColor,
+                        startAngle = -90f,
+                        sweepAngle = 360f * share,
+                        useCenter = false,
+                        style = stroke,
+                    )
+                }
+            }
+            .pressable(label = t("展开播放条"), scale = 0.92f) { model.expandListenBar() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.waveform, t("展开播放条"), tint = accentColor, modifier = Modifier.size(15.dp))
     }
 }
 

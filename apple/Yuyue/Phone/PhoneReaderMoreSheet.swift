@@ -26,12 +26,24 @@ struct PhoneReaderMoreSheet: View {
     @AppStorage(PageTurnPrefs.soundKey) private var pageTurnSound = false
     @AppStorage(EInk.key) private var einkOn = false
     @State private var activeRuleCount = 0
+    @State private var measuredHeight: CGFloat = 0
 
     private var dark: Bool { scheme == .dark }
     private var format: BookFormat? { model.detail?.summary.format }
     private var isPdf: Bool { format == .pdf }
     private var isTxt: Bool { format == .txt }
+    private var showTranslate: Bool { !isPdf && format != .podcast }
+    private var showTurn: Bool { model.settings.mode == .paginated && !einkOn }
     private var resolvedPaper: PaperAppearance.Resolved { PaperAppearance.shared.resolve(model.settings) }
+    private var estimatedHeight: CGFloat {
+        if einkOn {
+            return 350 + (showTranslate ? 54 : 0)
+        }
+        return 456 + (showTranslate ? 54 : 0) + (showTurn ? 56 : 0)
+    }
+    private var sheetHeight: CGFloat {
+        measuredHeight > 0 ? measuredHeight : estimatedHeight
+    }
 
     // Palette tuned to warm paper-and-ink clarity matching the finalized prototype.
     private var sheetBg: Color { einkOn ? YYColor.bg : (dark ? Color(hex: "#1C1D20") : Color(hex: "#F4F1EA")) }
@@ -53,35 +65,48 @@ struct PhoneReaderMoreSheet: View {
     private var strokeWidth: CGFloat { einkOn ? 1 : 0.5 }
 
     var body: some View {
-        VStack(spacing: 10) {
-            // 1. Brightness micro-header + full-width luminous light-bar + Day/Night + Eye-Care Warmth
-            VStack(spacing: 8) {
-                brightnessSection
-                if !einkOn {
-                    paperRow
-                    eyeCareRow
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 10) {
+                // 1. Brightness micro-header + full-width luminous light-bar + Day/Night + Eye-Care Warmth
+                VStack(spacing: 8) {
+                    brightnessSection
+                    if !einkOn {
+                        paperRow
+                        eyeCareRow
+                    }
+                }
+
+                // 2. Core switches (Focus Reading + Dialogue Bubbles) & Action entries (AI Companion + Book Notes)
+                coreStage
+
+                // 3. Translation 3-mode strip (原文 / 对照 / 仅译文) + Page Turn strip
+                if showTranslate {
+                    translationStrip
+                }
+                if showTurn {
+                    pageTurnStrip
+                }
+
+                // 4. Bottom 3-Card (4-Card for TXT) Bookstore Tool Footer
+                footerRow
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, YYUI.sheetGrabberTop)
+            .padding(.bottom, 18)
+            .frame(maxWidth: .infinity)
+            .onGeometryChange(for: CGFloat.self, of: \.size.height) { h in
+                let rounded = ceil(h)
+                if rounded > 0, abs(rounded - measuredHeight) > 0.5 {
+                    measuredHeight = rounded
                 }
             }
-
-            // 2. Core switches (Focus Reading + Dialogue Bubbles) & Action entries (AI Companion + Book Notes)
-            coreStage
-
-            // 3. Translation 3-mode strip (原文 / 对照 / 仅译文) + Page Turn strip
-            if !isPdf, format != .podcast {
-                translationStrip
-            }
-            if model.settings.mode == .paginated, !einkOn {
-                pageTurnStrip
-            }
-
-            // 4. Bottom 3-Card (4-Card for TXT) Bookstore Tool Footer
-            footerRow
         }
-        .padding(.horizontal, 16)
-        .padding(.top, YYUI.sheetGrabberTop)
-        .padding(.bottom, 18)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .scrollBounceBehavior(.basedOnSize)
         .background(sheetBg.ignoresSafeArea())
+        .presentationDetents([.height(sheetHeight)])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(sheetBg)
+        .presentationBackgroundInteraction(.enabled)
         .task(id: model.bookID) {
             guard !isPdf else { return }
             let mine = (try? model.core.replaceRules(book: model.bookID)) ?? []
@@ -151,7 +176,7 @@ struct PhoneReaderMoreSheet: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(borderColor, lineWidth: strokeWidth))
                 .contentShape(.rect)
-                .gesture(
+                .highPriorityGesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
                             let ratio = min(max(value.location.x / max(1, g.size.width), 0), 1)

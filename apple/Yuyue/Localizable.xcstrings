@@ -20258,6 +20258,16 @@
         }
       }
     },
+    "展开播放条" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Expand Playback Bar"
+          }
+        }
+      }
+    },
     "展开访谈书页" : {
       "localizations" : {
         "en" : {
@@ -26193,6 +26203,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Close Esc"
+          }
+        }
+      }
+    },
+    "收起播放条" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Minimize Playback Bar"
           }
         }
       }
@@ -48659,6 +48679,56 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Offline voice “%@” is ready · Click to choose voice"
+          }
+        }
+      }
+    },
+    "在 %@ 使用 ID：" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use ID on %@: "
+          }
+        }
+      }
+    },
+    "搜模型名、ID 或缩写（如 co46 / dsr1）…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search model name, ID, or alias (e.g. co46 / dsr1)…"
+          }
+        }
+      }
+    },
+    "收藏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Favorites"
+          }
+        }
+      }
+    },
+    "最近" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recent"
+          }
+        }
+      }
+    },
+    "未配" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unset"
           }
         }
       }

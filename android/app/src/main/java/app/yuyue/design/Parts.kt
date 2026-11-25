@@ -61,6 +61,7 @@ import app.yuyue.L10n
 import app.yuyue.t
 import kotlin.math.ceil
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 private val LocalFieldLabelWidth = compositionLocalOf<MutableIntState?> { null }
 
@@ -226,43 +227,95 @@ fun YYField(label: String, labelWidth: Float = 58f, field: @Composable () -> Uni
     }
 }
 
-/** Choices on an inset track, the chosen one lifted on a white chip. */
+/** Choices on a capsule inset track, with a smoothly sliding white pill behind the chosen one. */
 @Composable
 fun <T> YYSegments(items: List<Pair<T, String>>, selection: T, onSelect: (T) -> Unit, small: Boolean = false, modifier: Modifier = Modifier) {
-    Row(
-        modifier
-            .width(IntrinsicSize.Max)
-            .clip(RoundedCornerShape(YY.s(if (small) 10 else 12)))
-            .background(YY.c.inset)
-            .padding(3.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        for ((value, title) in items) {
-            val on = value == selection
-            // The chosen chip fades across rather than jumping.
-            val chip by androidx.compose.animation.animateColorAsState(if (on) YY.c.card else YY.c.card.copy(alpha = 0f), YYMotion.quick(), label = "segment")
-            val lift by androidx.compose.animation.core.animateDpAsState(if (on) 1.dp else 0.dp, YYMotion.quick(), label = "segmentShadow")
-            val ink by androidx.compose.animation.animateColorAsState(if (on) YY.c.t1 else YY.c.t2, YYMotion.quick(), label = "segmentInk")
+    if (items.isEmpty()) return
+    val selectedIndex = items.indexOfFirst { it.first == selection }
+    val thumbPos by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = selectedIndex.coerceAtLeast(0).toFloat(),
+        animationSpec = YYMotion.quick(),
+        label = "segmentThumb",
+    )
+    val pad = 3.dp
+    val minSegHeight = YY.s(if (small) 22 else 26)
+    val hPad = if (small) YY.s(8) else YY.s(6)
+    val vPad = YY.s(2)
+    val fontSize = if (small) 10f else 11f
+    val borderColor = YY.c.line
+
+    Layout(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(YY.c.inset, CircleShape)
+            .border(0.5.dp, borderColor, CircleShape),
+        content = {
+            // Child 0: sliding active capsule thumb
             Box(
                 Modifier
-                    .weight(1f, fill = true)
-                    .heightIn(min = YY.s(if (small) 22 else 28))
-                    .shadow(lift, RoundedCornerShape(YY.s(if (small) 7 else 9)))
-                    .clip(RoundedCornerShape(YY.s(if (small) 7 else 9)))
-                    .background(chip)
-                    .selectable(selected = on, role = androidx.compose.ui.semantics.Role.Tab) { onSelect(value) }
-                    .padding(horizontal = if (small) YY.s(8) else YY.s(6), vertical = YY.s(2)),
-                contentAlignment = Alignment.Center,
-            ) {
-                // A longer English title (Medium line spacing) gets smaller rather than cut off.
-                val size = if (small) 10f else 11f
-                androidx.compose.foundation.text.BasicText(
-                    title,
-                    style = YY.font(size, if (on) FontWeight.SemiBold else FontWeight.Normal, tnum = true).copy(color = ink),
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    autoSize = androidx.compose.foundation.text.TextAutoSize.StepBased(minFontSize = YY.sp(size * 0.78f), maxFontSize = YY.sp(size), stepSize = 0.5.sp),
-                )
+                    .background(YY.c.card, CircleShape)
+                    .border(0.5.dp, borderColor.copy(alpha = 0.7f), CircleShape),
+            )
+            // Children 1..N: equal-width segment tabs
+            for ((value, title) in items) {
+                val on = value == selection
+                val ink by androidx.compose.animation.animateColorAsState(if (on) YY.c.t1 else YY.c.t2, YYMotion.quick(), label = "segmentInk")
+                val interaction = remember { MutableInteractionSource() }
+                Box(
+                    Modifier
+                        .clip(CircleShape)
+                        .selectable(
+                            selected = on,
+                            interactionSource = interaction,
+                            indication = null,
+                            role = androidx.compose.ui.semantics.Role.Tab,
+                        ) { onSelect(value) }
+                        .padding(horizontal = hPad, vertical = vPad),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    androidx.compose.foundation.text.BasicText(
+                        title,
+                        style = YY.font(fontSize, if (on) FontWeight.SemiBold else FontWeight.Normal, tnum = true).copy(color = ink),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        autoSize = androidx.compose.foundation.text.TextAutoSize.StepBased(minFontSize = YY.sp(fontSize * 0.78f), maxFontSize = YY.sp(fontSize), stepSize = 0.5.sp),
+                    )
+                }
+            }
+        },
+    ) { measurables, constraints ->
+        val count = items.size
+        val padPx = pad.roundToPx()
+        val minSegHPx = minSegHeight.roundToPx()
+        val tabMeasurables = measurables.drop(1)
+
+        val totalW = if (constraints.hasFixedWidth) {
+            constraints.maxWidth
+        } else {
+            val maxIntrinsic = tabMeasurables.maxOfOrNull { it.maxIntrinsicWidth(Constraints.Infinity) } ?: 0
+            val naturalW = maxIntrinsic * count + padPx * 2
+            naturalW.coerceIn(constraints.minWidth, constraints.maxWidth)
+        }
+        val innerW = (totalW - padPx * 2).coerceAtLeast(0)
+        val segW = if (count > 0) innerW / count else 0
+        val tabConstraints = Constraints(
+            minWidth = segW,
+            maxWidth = segW,
+            minHeight = minSegHPx,
+            maxHeight = if (constraints.hasBoundedHeight) (constraints.maxHeight - padPx * 2).coerceAtLeast(minSegHPx) else Constraints.Infinity,
+        )
+        val tabPlaceables = tabMeasurables.map { it.measure(tabConstraints) }
+        val segH = max(minSegHPx, tabPlaceables.maxOfOrNull { it.height } ?: minSegHPx)
+        val thumbPlaceable = measurables[0].measure(Constraints.fixed(segW, segH))
+        val totalH = segH + padPx * 2
+
+        layout(totalW, totalH) {
+            if (selectedIndex >= 0 && segW > 0) {
+                val thumbX = padPx + (thumbPos * segW).roundToInt()
+                thumbPlaceable.placeRelative(thumbX, padPx)
+            }
+            tabPlaceables.forEachIndexed { i, p ->
+                p.placeRelative(padPx + i * segW, padPx + (segH - p.height) / 2)
             }
         }
     }

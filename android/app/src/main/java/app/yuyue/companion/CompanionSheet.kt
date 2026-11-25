@@ -35,8 +35,10 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,7 +46,9 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
@@ -53,6 +57,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -60,14 +65,17 @@ import androidx.compose.ui.unit.sp
 import app.yuyue.design.ButtonKind
 import app.yuyue.design.ButtonSize
 import app.yuyue.design.Icons
+import app.yuyue.design.Prefs
 import app.yuyue.design.YY
 import app.yuyue.design.YYButton
 import app.yuyue.design.YYMotion
 import app.yuyue.design.YYSegments
 import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.pressable
+import app.yuyue.design.rememberPref
 import app.yuyue.reader.ReaderModel
 import app.yuyue.t
+import kotlinx.coroutines.launch
 
 /** 书伴 on the phone, as on iPhone: the talk in a sheet over the page; a 出处
  *  tag turns the page underneath, `/` opens quick reading commands, and answers can be saved
@@ -79,10 +87,17 @@ fun CompanionSheet(model: ReaderModel, settings: () -> Unit, dismiss: () -> Unit
     var draft by remember { mutableStateOf(TextFieldValue("")) }
     var slashDismissedFor by remember { mutableStateOf<String?>(null) }
     var slashManualOpen by remember { mutableStateOf(false) }
+    var linesOpen by remember { mutableStateOf(false) }
+    var modelPickerOpen by remember { mutableStateOf(false) }
+    var modelTick by remember { mutableIntStateOf(0) }
     var pickingThought by remember { mutableStateOf(false) }
     var pickedMessages by remember { mutableStateOf<Set<BookCompanion.MessagePick>>(emptySet()) }
     var previewMerged by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val activeProviderPref by rememberPref("companion.provider", "")
+    val addedProvidersPref by rememberPref("companion.added", "")
+    val currentConfig = remember(activeProviderPref, addedProvidersPref, modelTick) { CompanionConfig.current }
     val readUpTo = model.bookPage?.let { t("截至第 %lld 页", it) } ?: t("截至当前位置")
 
     fun allSelectablePicks(): Set<BookCompanion.MessagePick> {
@@ -94,9 +109,15 @@ fun CompanionSheet(model: ReaderModel, settings: () -> Unit, dismiss: () -> Unit
         return out
     }
 
+    fun dismissSlashMenu() {
+        slashManualOpen = false
+        if (CompanionCommand.slashQuery(draft.text) != null) slashDismissedFor = draft.text
+    }
+
     fun enterPicking(initial: BookCompanion.MessagePick? = null) {
         slashManualOpen = false
         slashDismissedFor = null
+        linesOpen = false
         pickedMessages = initial?.let { setOf(it) } ?: emptySet()
         previewMerged = false
         pickingThought = true
@@ -119,12 +140,21 @@ fun CompanionSheet(model: ReaderModel, settings: () -> Unit, dismiss: () -> Unit
     val slashMatches = remember(slashQuery, promptVersion) {
         if (slashQuery != null) CompanionCommand.matching(slashQuery) else emptyList()
     }
+    val readyQuestions = remember(model.companionQuote, companion.turns.lastOrNull()?.answer?.next, promptVersion) {
+        CompanionPrompts.suggestions(
+            hasQuote = model.companionQuote != null,
+            followUps = companion.turns.lastOrNull()?.answer?.next,
+            quoteDefaults = listOf(t("这句是什么意思？"), t("为什么这么写？")),
+            startDefaults = listOf(t("前面发生了什么？"), t("这一章讲了什么？")),
+        )
+    }
 
     fun send(text: String, action: CompanionCommand.Action? = null) {
         val q = text.trim()
         if (q.isEmpty() || companion.busy) return
         companion.ask(q, model.companionQuote, anchor = model.companionAnchor, action = action)
         draft = TextFieldValue("")
+        linesOpen = false
         slashManualOpen = false
         slashDismissedFor = null
         model.clearCompanionQuote()
@@ -144,6 +174,7 @@ fun CompanionSheet(model: ReaderModel, settings: () -> Unit, dismiss: () -> Unit
                 command.question(arg, model.companionQuote != null, model.chapterTitle)?.let { q ->
                     slashManualOpen = false
                     slashDismissedFor = null
+                    linesOpen = false
                     send(q, act)
                 }
             }
@@ -157,10 +188,20 @@ fun CompanionSheet(model: ReaderModel, settings: () -> Unit, dismiss: () -> Unit
                     model.clearCompanionQuote()
                 }
             }
-            CompanionCommand.Action.Model, CompanionCommand.Action.Settings -> {
+            CompanionCommand.Action.Model -> {
                 slashManualOpen = false
                 slashDismissedFor = null
+                linesOpen = false
                 draft = TextFieldValue("")
+                keyboard?.hide()
+                modelPickerOpen = true
+            }
+            CompanionCommand.Action.Settings -> {
+                slashManualOpen = false
+                slashDismissedFor = null
+                linesOpen = false
+                draft = TextFieldValue("")
+                keyboard?.hide()
                 settings()
             }
             CompanionCommand.Action.Clear -> {
@@ -334,13 +375,24 @@ fun CompanionSheet(model: ReaderModel, settings: () -> Unit, dismiss: () -> Unit
                         }
                     }
                 }
-            } else Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            } else Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (slashMatches.isNotEmpty()) {
                     SlashCommandCard(
                         commands = slashMatches,
                         currentScope = companion.scope,
                         busy = companion.busy,
+                        onDismiss = {
+                            if (draft.text == "/" || draft.text == "／") draft = TextFieldValue("")
+                            dismissSlashMenu()
+                        },
                         onSelect = { executeCommand(it, "") },
+                    )
+                } else if (linesOpen && readyQuestions.isNotEmpty()) {
+                    ReadyLinesCard(
+                        questions = readyQuestions,
+                        busy = companion.busy,
+                        onDismiss = { linesOpen = false },
+                        onSelect = { send(it) },
                     )
                 } else {
                     val quote = model.companionQuote
@@ -361,69 +413,33 @@ fun CompanionSheet(model: ReaderModel, settings: () -> Unit, dismiss: () -> Unit
                             }
                         }
                     }
-                    val suggestions = remember(model.companionQuote, companion.turns.lastOrNull()?.answer?.next, promptVersion) {
-                        CompanionPrompts.suggestions(
-                            hasQuote = model.companionQuote != null,
-                            followUps = companion.turns.lastOrNull()?.answer?.next,
-                            quoteDefaults = listOf(t("这句是什么意思？"), t("为什么这么写？")),
-                            startDefaults = listOf(t("前面发生了什么？"), t("这一章讲了什么？")),
-                        )
-                    }
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for (s in suggestions) {
-                            Box(
-                                Modifier.heightIn(min = 32.dp).background(YY.c.card, CircleShape).border(0.5.dp, YY.c.line, CircleShape)
-                                    .clip(CircleShape).pressable(enabled = !companion.busy, scale = 0.97f) { send(s) }.padding(horizontal = 13.dp, vertical = 6.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(s, fontSize = 13.sp, color = YY.c.t2)
-                            }
-                        }
-                    }
                 }
-                Row(
-                    Modifier.fillMaxWidth().background(YY.c.card, RoundedCornerShape(22.dp)).border(0.5.dp, YY.c.line, RoundedCornerShape(22.dp)).padding(start = 8.dp, end = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                Column(
+                    Modifier.fillMaxWidth()
+                        .background(YY.c.card, RoundedCornerShape(18.dp))
+                        .border(0.5.dp, YY.c.line, RoundedCornerShape(18.dp))
+                        .padding(start = 12.dp, end = 10.dp, top = 10.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    val slashActive = slashMatches.isNotEmpty()
-                    Box(
-                        Modifier.size(34.dp).clip(CircleShape)
-                            .background(if (slashActive) YY.c.inset else androidx.compose.ui.graphics.Color.Transparent, CircleShape)
-                            .clickable(onClickLabel = t("快捷指令")) {
-                                if (slashActive) {
-                                    if (draft.text == "/" || draft.text == "／") draft = TextFieldValue("")
-                                    slashManualOpen = false
-                                    if (CompanionCommand.slashQuery(draft.text) != null) slashDismissedFor = draft.text
-                                } else {
-                                    slashDismissedFor = null
-                                    if (draft.text.isEmpty()) {
-                                        draft = TextFieldValue("/", TextRange(1))
-                                    } else {
-                                        slashManualOpen = true
-                                    }
-                                    runCatching { focusRequester.requestFocus() }
-                                }
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("/", fontFamily = FontFamily.Monospace, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = if (slashActive) YY.c.t1 else YY.c.t2)
-                    }
                     BasicTextField(
                         draft,
                         onValueChange = { next ->
                             if (slashDismissedFor != next.text) slashDismissedFor = null
-                            if (CompanionCommand.slashQuery(next.text) != null || next.text.isNotEmpty()) slashManualOpen = false
+                            if (CompanionCommand.slashQuery(next.text) != null || next.text.isNotEmpty()) {
+                                slashManualOpen = false
+                                linesOpen = false
+                            }
                             draft = next
                         },
-                        maxLines = 4,
-                        textStyle = TextStyle(fontSize = 16.sp, color = YY.c.t1),
+                        maxLines = 5,
+                        textStyle = TextStyle(fontSize = 15.5.sp, color = YY.c.t1),
                         cursorBrush = SolidColor(YY.tint.accent),
-                        modifier = Modifier.weight(1f).heightIn(min = 44.dp).padding(horizontal = 6.dp, vertical = 11.dp).focusRequester(focusRequester),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp).focusRequester(focusRequester),
                         decorationBox = { inner ->
                             if (draft.text.isEmpty()) {
                                 Text(
                                     if (companion.turns.isEmpty()) t("问这本书，或输入 / …") else t("继续问，或输入 / …"),
-                                    fontSize = 16.sp,
+                                    fontSize = 15.5.sp,
                                     color = YY.c.t3,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -432,13 +448,162 @@ fun CompanionSheet(model: ReaderModel, settings: () -> Unit, dismiss: () -> Unit
                             inner()
                         },
                     )
-                    Box(Modifier.size(40.dp).clip(CircleShape).clickable(enabled = canSubmit, onClickLabel = t("发送")) { submitDraft() }, contentAlignment = Alignment.Center) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (readyQuestions.isNotEmpty()) {
+                            Box(
+                                Modifier.size(32.dp).clip(CircleShape)
+                                    .background(if (linesOpen) YY.c.inset else Color.Transparent, CircleShape)
+                                    .clickable(enabled = !companion.busy, onClickLabel = t("挑一句现成的")) {
+                                        val next = !linesOpen
+                                        if (next) {
+                                            dismissSlashMenu()
+                                            keyboard?.hide()
+                                        }
+                                        linesOpen = next
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(Icons.quote, t("挑一句现成的"), tint = if (linesOpen) YY.c.t1 else YY.c.t2, modifier = Modifier.size(16.dp))
+                            }
+                        }
+
+                        val slashActive = slashMatches.isNotEmpty()
+                        Box(
+                            Modifier.size(32.dp).clip(CircleShape)
+                                .background(if (slashActive) YY.c.inset else Color.Transparent, CircleShape)
+                                .clickable(onClickLabel = t("快捷指令")) {
+                                    linesOpen = false
+                                    if (slashActive) {
+                                        if (draft.text == "/" || draft.text == "／") draft = TextFieldValue("")
+                                        dismissSlashMenu()
+                                    } else {
+                                        slashDismissedFor = null
+                                        if (draft.text.isEmpty()) {
+                                            draft = TextFieldValue("/", TextRange(1))
+                                        } else {
+                                            slashManualOpen = true
+                                        }
+                                        runCatching { focusRequester.requestFocus() }
+                                    }
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("/", fontFamily = FontFamily.Monospace, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = if (slashActive) YY.c.t1 else YY.c.t2)
+                        }
+
+                        val modelLabel = when {
+                            currentConfig == null -> t("选择模型…")
+                            currentConfig.model.isEmpty() -> currentConfig.provider.title
+                            else -> CompanionModelCatalog.prettyName(currentConfig.model)
+                        }
+                        Row(
+                            Modifier.height(32.dp)
+                                .weight(1f, fill = false)
+                                .background(YY.c.bg, CircleShape)
+                                .border(0.5.dp, YY.c.line, CircleShape)
+                                .clip(CircleShape)
+                                .pressable(scale = 0.97f) {
+                                    linesOpen = false
+                                    dismissSlashMenu()
+                                    keyboard?.hide()
+                                    modelPickerOpen = true
+                                }
+                                .padding(start = 7.dp, end = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            if (currentConfig != null) {
+                                ProviderLogo(currentConfig.provider, 16.dp)
+                            } else {
+                                Icon(Icons.sparkle, null, tint = YY.c.t3, modifier = Modifier.size(14.dp))
+                            }
+                            Text(
+                                modelLabel,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (currentConfig?.isReady == true) YY.c.t1 else YY.c.t2,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            Icon(Icons.chevronUpDown, null, tint = YY.c.t3, modifier = Modifier.size(11.dp))
+                        }
+
+                        Spacer(Modifier.weight(1f))
+
                         val ground by androidx.compose.animation.animateColorAsState(if (canSubmit) YY.tint.black else YY.c.inset, YYMotion.quick(), label = "send")
                         val ink by androidx.compose.animation.animateColorAsState(if (canSubmit) YY.tint.onBlack else YY.c.t3, YYMotion.quick(), label = "sendInk")
-                        Box(Modifier.size(34.dp).background(ground, CircleShape), contentAlignment = Alignment.Center) {
-                            Icon(Icons.send, t("发送"), tint = ink, modifier = Modifier.size(16.dp))
+                        Box(
+                            Modifier.size(32.dp)
+                                .clip(CircleShape)
+                                .background(ground, CircleShape)
+                                .clickable(enabled = canSubmit, onClickLabel = t("发送")) { submitDraft() },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.send, t("发送"), tint = ink, modifier = Modifier.size(15.dp))
                         }
                     }
+                }
+            }
+        }
+    }
+
+    if (modelPickerOpen) {
+        CompanionModelPickerSheet(
+            openSettings = {
+                modelPickerOpen = false
+                settings()
+            },
+            onPicked = {
+                modelTick++
+                modelPickerOpen = false
+            },
+            dismiss = { modelPickerOpen = false },
+        )
+    }
+}
+
+@Composable
+private fun ReadyLinesCard(
+    questions: List<String>,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth()
+            .background(YY.c.card, RoundedCornerShape(14.dp))
+            .border(0.5.dp, YY.c.line, RoundedCornerShape(14.dp)),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(t("挑一句现成的"), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t3, modifier = Modifier.weight(1f))
+            Box(Modifier.size(28.dp).clip(CircleShape).clickable(onClickLabel = t("关闭"), onClick = onDismiss), contentAlignment = Alignment.Center) {
+                Icon(Icons.close, t("关闭"), tint = YY.c.t3, modifier = Modifier.size(14.dp))
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(0.5.dp).background(YY.c.line))
+        Column(
+            Modifier.fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState()).padding(6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            for (q in questions) {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                        .clickable(enabled = !busy) { onSelect(q) }
+                        .alpha(if (busy) 0.42f else 1f)
+                        .padding(horizontal = 10.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(q, fontFamily = YY.serif, fontSize = 14.sp, lineHeight = 20.sp, color = YY.c.t1, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Icon(Icons.external, null, tint = YY.c.t3, modifier = Modifier.size(13.dp))
                 }
             }
         }
@@ -450,44 +615,553 @@ private fun SlashCommandCard(
     commands: List<CompanionCommand>,
     currentScope: BookCompanion.Scope,
     busy: Boolean,
+    onDismiss: () -> Unit,
     onSelect: (CompanionCommand) -> Unit,
 ) {
     Column(
-        Modifier.fillMaxWidth().heightIn(max = 220.dp)
+        Modifier.fillMaxWidth()
             .background(YY.c.card, RoundedCornerShape(14.dp))
-            .border(0.5.dp, YY.c.line, RoundedCornerShape(14.dp))
-            .verticalScroll(rememberScrollState())
-            .padding(6.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+            .border(0.5.dp, YY.c.line, RoundedCornerShape(14.dp)),
     ) {
-        for (cmd in commands) {
-            val disabled = busy && cmd.category == CompanionCommand.Category.Ask
-            val isCurrentScope = (cmd.action as? CompanionCommand.Action.Scope)?.scope == currentScope
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(RoundedCornerShape(10.dp))
-                    .clickable(enabled = !disabled) { onSelect(cmd) }
-                    .alpha(if (disabled) 0.42f else 1f)
-                    .padding(horizontal = 10.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Box(Modifier.size(28.dp).background(YY.c.inset, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
-                    Icon(cmd.icon, null, tint = YY.c.t2, modifier = Modifier.size(15.dp))
-                }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(cmd.slashName, fontFamily = FontFamily.Monospace, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1)
-                        Text(cmd.title, fontSize = 13.5.sp, fontWeight = FontWeight.Medium, color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(t("指令"), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t3, modifier = Modifier.weight(1f))
+            Box(Modifier.size(28.dp).clip(CircleShape).clickable(onClickLabel = t("关闭"), onClick = onDismiss), contentAlignment = Alignment.Center) {
+                Icon(Icons.close, t("关闭"), tint = YY.c.t3, modifier = Modifier.size(14.dp))
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(0.5.dp).background(YY.c.line))
+        Column(
+            Modifier.fillMaxWidth().heightIn(max = 220.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            for (cmd in commands) {
+                val disabled = busy && cmd.category == CompanionCommand.Category.Ask
+                val isCurrentScope = (cmd.action as? CompanionCommand.Action.Scope)?.scope == currentScope
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(RoundedCornerShape(10.dp))
+                        .clickable(enabled = !disabled) { onSelect(cmd) }
+                        .alpha(if (disabled) 0.42f else 1f)
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Box(Modifier.size(28.dp).background(YY.c.inset, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
+                        Icon(cmd.icon, null, tint = YY.c.t2, modifier = Modifier.size(15.dp))
                     }
-                    Text(cmd.subtitle, fontSize = 12.sp, color = YY.c.t3, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                if (isCurrentScope) {
-                    Box(Modifier.background(YY.tint.accentSoft, CircleShape).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                        Text(t("当前"), fontSize = 11.sp, fontWeight = FontWeight.Medium, color = YY.tint.accent)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(cmd.slashName, fontFamily = FontFamily.Monospace, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1)
+                            Text(cmd.title, fontSize = 13.5.sp, fontWeight = FontWeight.Medium, color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Text(cmd.subtitle, fontSize = 12.sp, color = YY.c.t3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    if (isCurrentScope) {
+                        Box(Modifier.background(YY.tint.accentSoft, CircleShape).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                            Text(t("当前"), fontSize = 11.sp, fontWeight = FontWeight.Medium, color = YY.tint.accent)
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+private enum class ModelPickerNav { Starred, Recent, Provider }
+
+private data class ModelEntry(val provider: CompanionProvider, val model: String)
+
+private object CompanionModelCatalog {
+    private val starredKey = "companion.models.starred"
+    private val recentKey = "companion.models.recent"
+    private fun cacheKey(providerId: String) = "companion.models.cache.$providerId"
+
+    fun prettyName(id: String): String {
+        val trimmed = id.trim()
+        if (trimmed.isEmpty()) return id
+        val core = trimmed.substringAfterLast('/')
+        return core.replace(Regex("-20\\d{6}$"), "")
+    }
+
+    fun routeBadge(id: String): String? {
+        val idx = id.indexOf('/')
+        if (idx <= 0) return null
+        val prefix = id.substring(0, idx).trim()
+        return prefix.takeIf { it.isNotEmpty() && it.length <= 14 }
+    }
+
+    fun family(id: String): String {
+        val lower = id.lowercase()
+        return when {
+            "claude" in lower -> "Claude"
+            "gpt" in lower || lower.startsWith("o1") || lower.startsWith("o3") || lower.startsWith("o4") -> "OpenAI"
+            "gemini" in lower -> "Gemini"
+            "deepseek" in lower -> "DeepSeek"
+            "qwen" in lower || "qwq" in lower -> "Qwen"
+            "kimi" in lower || "moonshot" in lower -> "Kimi"
+            "glm" in lower -> "GLM"
+            "doubao" in lower -> "豆包"
+            "grok" in lower -> "Grok"
+            "llama" in lower -> "Llama"
+            "mistral" in lower -> "Mistral"
+            "minimax" in lower -> "MiniMax"
+            else -> routeBadge(id)?.replaceFirstChar { it.uppercase() } ?: t("其他")
+        }
+    }
+
+    fun matches(query: String, id: String, providerTitle: String): Boolean {
+        val q = query.lowercase().filterNot { it in " -_./:" }
+        if (q.isEmpty()) return true
+        val hay = "$id ${prettyName(id)} $providerTitle".lowercase().filterNot { it in " -_./:" }
+        if (q in hay) return true
+        var qi = 0
+        for (ch in hay) {
+            if (ch == q[qi]) {
+                qi++
+                if (qi == q.length) return true
+            }
+        }
+        return false
+    }
+
+    private fun readPairs(key: String): List<Pair<String, String>> =
+        Prefs.string(key).split('\n').mapNotNull { line ->
+            val sep = line.indexOf('|')
+            if (sep <= 0 || sep >= line.lastIndex) null
+            else line.substring(0, sep) to line.substring(sep + 1)
+        }
+
+    private fun writePairs(key: String, pairs: List<Pair<String, String>>) {
+        Prefs.set(key, pairs.joinToString("\n") { "${it.first}|${it.second}" })
+    }
+
+    fun isStarred(providerId: String, model: String): Boolean =
+        readPairs(starredKey).any { it.first == providerId && it.second == model }
+
+    fun toggleStar(providerId: String, model: String) {
+        val cur = readPairs(starredKey).toMutableList()
+        val idx = cur.indexOfFirst { it.first == providerId && it.second == model }
+        if (idx >= 0) cur.removeAt(idx) else cur.add(0, providerId to model)
+        writePairs(starredKey, cur.take(40))
+    }
+
+    fun starredEntries(providers: List<CompanionProvider>): List<ModelEntry> {
+        val byId = providers.associateBy { it.id }
+        return readPairs(starredKey).mapNotNull { (pid, m) -> byId[pid]?.let { ModelEntry(it, m) } }
+    }
+
+    fun recordRecent(providerId: String, model: String) {
+        if (model.isBlank()) return
+        val cur = readPairs(recentKey).filterNot { it.first == providerId && it.second == model }
+        writePairs(recentKey, (listOf(providerId to model) + cur).take(20))
+    }
+
+    fun recentEntries(providers: List<CompanionProvider>): List<ModelEntry> {
+        val byId = providers.associateBy { it.id }
+        return readPairs(recentKey).mapNotNull { (pid, m) -> byId[pid]?.let { ModelEntry(it, m) } }
+    }
+
+    fun cached(providerId: String): List<String> =
+        Prefs.string(cacheKey(providerId)).split('\n').filter { it.isNotBlank() }
+
+    fun saveCache(providerId: String, models: List<String>) {
+        Prefs.set(cacheKey(providerId), models.distinct().joinToString("\n"))
+    }
+
+    fun pool(provider: CompanionProvider, live: List<String>?): List<String> {
+        val saved = CompanionConfig.saved(provider).model
+        val base = when {
+            !live.isNullOrEmpty() -> live
+            cached(provider.id).isNotEmpty() -> cached(provider.id)
+            else -> listOfNotNull(saved.ifBlank { null }, provider.defaultModel.ifBlank { null }, provider.defaultFastModel.ifBlank { null })
+        }
+        val out = LinkedHashSet<String>()
+        if (saved.isNotBlank()) out += saved
+        out.addAll(base)
+        return out.toList()
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CompanionModelPickerSheet(
+    openSettings: () -> Unit,
+    onPicked: () -> Unit,
+    dismiss: () -> Unit,
+) {
+    val allProviders = remember { CompanionProvider.added }
+    val readyProviders = remember(allProviders) { allProviders.filter { CompanionConfig.saved(it).isConnected } }
+    val current = remember { CompanionConfig.current }
+    var starTick by remember { mutableIntStateOf(0) }
+    val starred = remember(starTick, readyProviders) { CompanionModelCatalog.starredEntries(readyProviders) }
+    val recents = remember(starTick, readyProviders) { CompanionModelCatalog.recentEntries(readyProviders) }
+
+    var navKind by remember {
+        mutableStateOf(
+            when {
+                starred.isNotEmpty() && current?.isReady == true -> ModelPickerNav.Starred
+                current != null -> ModelPickerNav.Provider
+                readyProviders.isNotEmpty() -> ModelPickerNav.Provider
+                else -> ModelPickerNav.Starred
+            }
+        )
+    }
+    var selectedProviderId by remember { mutableStateOf(current?.provider?.id ?: allProviders.firstOrNull()?.id) }
+    var query by remember { mutableStateOf("") }
+    var selectedFamily by remember { mutableStateOf<String?>(null) }
+    var livePools by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
+    var loadingProvider by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    fun fetchModels(p: CompanionProvider, force: Boolean) {
+        if (!force && livePools.containsKey(p.id)) return
+        val cfg = CompanionConfig.saved(p)
+        if (!cfg.isConnected) return
+        scope.launch {
+            loadingProvider = p.id
+            val fetched = runCatching { Companion.models(cfg).sorted() }.getOrNull()
+            if (!fetched.isNullOrEmpty()) {
+                CompanionModelCatalog.saveCache(p.id, fetched)
+                livePools = livePools + (p.id to fetched)
+            }
+            if (loadingProvider == p.id) loadingProvider = null
+        }
+    }
+
+    LaunchedEffect(readyProviders) {
+        for (p in readyProviders) {
+            if (CompanionModelCatalog.cached(p.id).isEmpty()) fetchModels(p, force = false)
+        }
+    }
+
+    LaunchedEffect(navKind, selectedProviderId) {
+        selectedFamily = null
+        if (navKind == ModelPickerNav.Provider) {
+            allProviders.firstOrNull { it.id == selectedProviderId }?.let { p ->
+                if (CompanionConfig.saved(p).isConnected) fetchModels(p, force = false)
+            }
+        }
+    }
+
+    fun pick(entry: ModelEntry) {
+        current?.takeIf { it.isReady }?.let { CompanionModelCatalog.recordRecent(it.provider.id, it.model) }
+        val next = CompanionConfig.saved(entry.provider).copy(model = entry.model)
+        next.choose()
+        CompanionModelCatalog.recordRecent(entry.provider.id, entry.model)
+        onPicked()
+    }
+
+    ModalBottomSheet(
+        dismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = YY.c.bg,
+        dragHandle = { YYSheetDragHandle(bottom = 2.dp) },
+    ) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(0.86f).imePadding()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(t("书伴设置"), fontSize = 13.5.sp, color = YY.tint.accent, modifier = Modifier.clickable(onClick = openSettings).padding(vertical = 8.dp))
+                Text(t("选择模型"), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
+                Text(t("完成"), fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = YY.tint.accent, modifier = Modifier.clickable(onClick = dismiss).padding(vertical = 8.dp))
+            }
+
+            if (allProviders.isEmpty()) {
+                Column(
+                    Modifier.fillMaxWidth().weight(1f).padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Icon(Icons.sparkle, null, tint = YY.c.t3, modifier = Modifier.size(32.dp))
+                    Spacer(Modifier.height(10.dp))
+                    Text(t("还没添加模型服务商"), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1)
+                    Spacer(Modifier.height(4.dp))
+                    Text(t("添加 OpenAI、Claude、DeepSeek、Kimi、通义或本机 Ollama 后即可在这里一键切换模型。"), fontSize = 13.sp, color = YY.c.t3, textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(14.dp))
+                    YYButton(t("去设置 · 书伴"), ButtonKind.Main, ButtonSize.Small, onClick = openSettings)
+                }
+                return@ModalBottomSheet
+            }
+
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
+                    .height(38.dp)
+                    .background(YY.c.card, RoundedCornerShape(12.dp))
+                    .border(0.5.dp, YY.c.line, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(Icons.search, null, tint = YY.c.t3, modifier = Modifier.size(15.dp))
+                BasicTextField(
+                    query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    textStyle = TextStyle(fontSize = 14.sp, color = YY.c.t1),
+                    cursorBrush = SolidColor(YY.tint.accent),
+                    modifier = Modifier.weight(1f),
+                    decorationBox = { inner ->
+                        if (query.isEmpty()) Text(t("搜模型名、ID 或缩写（如 co46 / dsr1）…"), fontSize = 14.sp, color = YY.c.t3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        inner()
+                    },
+                )
+                if (query.isNotEmpty()) {
+                    Icon(Icons.close, t("清除"), tint = YY.c.t3, modifier = Modifier.size(15.dp).clickable { query = "" })
+                }
+            }
+
+            val trimmed = query.trim()
+            if (trimmed.isEmpty()) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ModelNavChip(
+                        selected = navKind == ModelPickerNav.Starred,
+                        title = t("收藏"),
+                        count = starred.size.takeIf { it > 0 }?.toString(),
+                        icon = { Icon(Icons.starFill, null, tint = Color(0xFFD99126), modifier = Modifier.size(13.dp)) },
+                    ) { navKind = ModelPickerNav.Starred }
+
+                    ModelNavChip(
+                        selected = navKind == ModelPickerNav.Recent,
+                        title = t("最近"),
+                        count = recents.size.takeIf { it > 0 }?.toString(),
+                        icon = { Icon(Icons.clock, null, tint = YY.c.t2, modifier = Modifier.size(13.dp)) },
+                    ) { navKind = ModelPickerNav.Recent }
+
+                    for (p in allProviders) {
+                        val cfg = CompanionConfig.saved(p)
+                        val cnt = if (cfg.isConnected) CompanionModelCatalog.pool(p, livePools[p.id]).size.toString() else t("未配")
+                        ModelNavChip(
+                            selected = navKind == ModelPickerNav.Provider && selectedProviderId == p.id,
+                            title = p.title,
+                            count = cnt,
+                            dimmed = !cfg.isConnected,
+                            icon = { ProviderLogo(p, 16.dp) },
+                        ) {
+                            navKind = ModelPickerNav.Provider
+                            selectedProviderId = p.id
+                        }
+                    }
+                }
+            }
+
+            Box(Modifier.fillMaxWidth().height(0.5.dp).background(YY.c.line))
+
+            val activeProvider = if (trimmed.isEmpty() && navKind == ModelPickerNav.Provider) allProviders.firstOrNull { it.id == selectedProviderId } else null
+            if (activeProvider != null && !CompanionConfig.saved(activeProvider).isConnected) {
+                Column(
+                    Modifier.fillMaxWidth().weight(1f).padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    ProviderLogo(activeProvider, 32.dp)
+                    Spacer(Modifier.height(10.dp))
+                    Text(t("还没填好 %@ 的 Key", activeProvider.title), fontSize = 14.sp, color = YY.c.t2)
+                    Spacer(Modifier.height(12.dp))
+                    YYButton(t("去设置 · 书伴"), ButtonKind.Main, ButtonSize.Small, onClick = openSettings)
+                }
+            } else {
+                val (entries, families, showProvider) = remember(trimmed, navKind, selectedProviderId, selectedFamily, livePools, starred, recents) {
+                    if (trimmed.isNotEmpty()) {
+                        val hits = readyProviders.flatMap { p ->
+                            CompanionModelCatalog.pool(p, livePools[p.id])
+                                .filter { CompanionModelCatalog.matches(trimmed, it, p.title) }
+                                .map { ModelEntry(p, it) }
+                        }
+                        Triple(hits, emptyList<String>(), true)
+                    } else when (navKind) {
+                        ModelPickerNav.Starred -> Triple(starred, emptyList(), true)
+                        ModelPickerNav.Recent -> Triple(recents, emptyList(), true)
+                        ModelPickerNav.Provider -> {
+                            val p = activeProvider
+                            if (p == null) Triple(emptyList(), emptyList(), false)
+                            else {
+                                val models = CompanionModelCatalog.pool(p, livePools[p.id])
+                                val fams = models.map { CompanionModelCatalog.family(it) }.distinct()
+                                val filtered = models.filter { selectedFamily == null || CompanionModelCatalog.family(it) == selectedFamily }
+                                Triple(filtered.map { ModelEntry(p, it) }, if (fams.size > 1) fams else emptyList(), false)
+                            }
+                        }
+                    }
+                }
+
+                if (families.isNotEmpty() || activeProvider != null) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        if (families.isNotEmpty()) {
+                            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                FamilyChip(t("全部"), selectedFamily == null) { selectedFamily = null }
+                                for (f in families) FamilyChip(f, selectedFamily == f) { selectedFamily = f }
+                            }
+                        } else {
+                            Text(activeProvider?.title ?: "", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t2, modifier = Modifier.weight(1f))
+                        }
+                        if (activeProvider != null) {
+                            Box(
+                                Modifier.size(28.dp).clip(CircleShape)
+                                    .clickable(enabled = loadingProvider != activeProvider.id, onClickLabel = t("刷新模型列表")) { fetchModels(activeProvider, force = true) },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (loadingProvider == activeProvider.id) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp, color = YY.c.t3)
+                                else Icon(Icons.clockwise, t("刷新模型列表"), tint = YY.c.t2, modifier = Modifier.size(15.dp))
+                            }
+                        }
+                    }
+                    Box(Modifier.fillMaxWidth().height(0.5.dp).background(YY.c.line))
+                }
+
+                val customTarget = activeProvider?.takeIf { CompanionConfig.saved(it).isConnected }
+                    ?: current?.provider?.takeIf { CompanionConfig.saved(it).isConnected }
+                    ?: readyProviders.firstOrNull()
+
+                LazyColumn(
+                    Modifier.fillMaxWidth().weight(1f),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(entries, key = { "${it.provider.id}:${it.model}" }) { entry ->
+                        val isActive = current?.provider?.id == entry.provider.id && current.model == entry.model
+                        val isStarred = CompanionModelCatalog.isStarred(entry.provider.id, entry.model)
+                        val displayName = CompanionModelCatalog.prettyName(entry.model)
+                        val route = CompanionModelCatalog.routeBadge(entry.model)
+                        val sub = listOfNotNull(
+                            entry.provider.title.takeIf { showProvider },
+                            entry.model.takeIf { it != displayName },
+                        ).joinToString(" · ")
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isActive) YY.tint.accentSoft.copy(alpha = 0.55f) else YY.c.card)
+                                .border(0.5.dp, if (isActive) YY.tint.accent.copy(alpha = 0.35f) else YY.c.line, RoundedCornerShape(12.dp))
+                                .clickable { pick(entry) }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            if (showProvider) ProviderLogo(entry.provider, 20.dp)
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(displayName, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                                    if (route != null) {
+                                        Text(
+                                            route,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 10.5.sp,
+                                            color = YY.c.t2,
+                                            modifier = Modifier.background(YY.c.inset, RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp),
+                                        )
+                                    }
+                                }
+                                if (sub.isNotEmpty()) Text(sub, fontSize = 11.5.sp, color = YY.c.t3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            Box(
+                                Modifier.size(32.dp).clip(CircleShape).clickable {
+                                    CompanionModelCatalog.toggleStar(entry.provider.id, entry.model)
+                                    starTick++
+                                },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.starFill,
+                                    if (isStarred) t("移出常用收藏") else t("加入常用收藏"),
+                                    tint = if (isStarred) Color(0xFFD99126) else YY.c.t3.copy(alpha = 0.35f),
+                                    modifier = Modifier.size(15.dp),
+                                )
+                            }
+                            if (isActive) {
+                                Icon(Icons.check, t("在用"), tint = YY.tint.accent, modifier = Modifier.size(15.dp))
+                            }
+                        }
+                    }
+
+                    if (customTarget != null && trimmed.isNotEmpty() && entries.none { it.provider.id == customTarget.id && it.model == trimmed }) {
+                        item(key = "custom:$trimmed") {
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(YY.c.card)
+                                    .border(0.8.dp, YY.c.line, RoundedCornerShape(12.dp))
+                                    .clickable { pick(ModelEntry(customTarget, trimmed)) }
+                                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                ProviderLogo(customTarget, 18.dp)
+                                Text(t("在 %@ 使用 ID：%@", customTarget.title, trimmed), fontSize = 13.sp, color = YY.tint.accent, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+
+                    if (entries.isEmpty() && trimmed.isEmpty()) {
+                        item(key = "empty") {
+                            Column(
+                                Modifier.fillMaxWidth().padding(vertical = 56.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(if (navKind == ModelPickerNav.Starred) Icons.starFill else Icons.clock, null, tint = YY.c.t3.copy(alpha = 0.45f), modifier = Modifier.size(24.dp))
+                                Text(
+                                    if (navKind == ModelPickerNav.Starred) t("点模型右侧的 ★ 把常用模型收进这里") else t("切换过的模型会出现在这里"),
+                                    fontSize = 13.sp,
+                                    color = YY.c.t3,
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelNavChip(
+    selected: Boolean,
+    title: String,
+    count: String?,
+    dimmed: Boolean = false,
+    icon: @Composable () -> Unit,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier.height(32.dp)
+            .alpha(if (dimmed) 0.55f else 1f)
+            .background(if (selected) YY.c.card else YY.c.inset, CircleShape)
+            .border(if (selected) 1.dp else 0.5.dp, if (selected) YY.tint.accent.copy(alpha = 0.45f) else YY.c.line, CircleShape)
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        icon()
+        Text(title, fontSize = 12.5.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, color = if (selected) YY.c.t1 else YY.c.t2, maxLines = 1)
+        if (count != null) Text(count, fontSize = 10.5.sp, color = YY.c.t3, style = YY.tnum)
+    }
+}
+
+@Composable
+private fun FamilyChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.height(26.dp)
+            .background(if (selected) YY.tint.accentSoft else YY.c.inset, CircleShape)
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, fontSize = 12.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, color = if (selected) YY.tint.accent else YY.c.t2)
     }
 }
 

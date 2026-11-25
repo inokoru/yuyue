@@ -100,8 +100,8 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
         }
     /** Optional chapter title lookup for the pull-to-cross cue. */
     var chapterTitle: ((Int) -> String?)? = null
-    /** Whether the floating bottom capsule is visible (keeps the bottom pull cue clear of it). */
-    var bottomCapsuleVisible: Boolean = true
+    /** Bottom clearance in dp above navigation bar so the pull-to-cross cue stays clear of active chrome. */
+    var bottomClearanceDp: Float = 28f
 
     private val scope: CoroutineScope = MainScope()
     private val slots = mutableListOf<SectionPage>()
@@ -213,7 +213,8 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
         val measure = fontSize * 34
         val margin = maxOf(if (width < 500) 24.0 else 40.0, (width - measure) / 2).roundToInt().toDouble()
         val top = (insetTop / density + 28).roundToInt().toDouble()
-        val bottom = (insetBottom / density + 40).roundToInt().toDouble()
+        val extraBottom = if (mode == LayoutMode.SCROLLED) 68.0 else 44.0
+        val bottom = (insetBottom / density + extraBottom).roundToInt().toDouble()
         return PageGeometry(Paging.NATIVE, margin, top, bottom, 1u, calm)
     }
 
@@ -930,7 +931,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
         updatePullCueColors(armed)
         val lp = pullCue.layoutParams as LayoutParams
         val wantGravity = Gravity.CENTER_HORIZONTAL or if (forward) Gravity.BOTTOM else Gravity.TOP
-        val wantBottom = if (forward) insetBottom + (if (bottomCapsuleVisible) (68f * density).roundToInt() else (16f * density).roundToInt()) else 0
+        val wantBottom = if (forward) insetBottom + (bottomClearanceDp * density).roundToInt() else 0
         val wantTop = if (forward) 0 else insetTop + (14f * density).roundToInt()
         if (lp.gravity != wantGravity || lp.bottomMargin != wantBottom || lp.topMargin != wantTop) {
             lp.gravity = wantGravity

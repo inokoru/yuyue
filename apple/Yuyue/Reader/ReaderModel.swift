@@ -34,7 +34,7 @@ final class ReaderModel {
     var quickSearchShown = false
     /// 外文原著: the word clicked, and its card.
     var lookup: WordLookup? {
-        didSet { syncBottomCapsuleVisible() }
+        didSet { syncBottomClearance() }
     }
     /// This book's words in the 生词本, in reading order.
     var bookWords: [VocabWord] = []
@@ -62,13 +62,23 @@ final class ReaderModel {
         pager.calm = (immersive && ImmersivePrefs.stillPages) || einkOn
         pager.marksHidden = immersive && ImmersivePrefs.hidesMarks
         pager.glossesHidden = immersive && ImmersivePrefs.hidesHints
-        syncBottomCapsuleVisible()
+        syncBottomClearance()
         if immersive { panel = nil }
     }
 
-    private func syncBottomCapsuleVisible() {
+    private func syncBottomClearance() {
         #if os(iOS)
-        pager.bottomCapsuleVisible = lookup == nil && ((!immersive && !barsAway) || chromeShown || searchShown)
+        if lookup != nil {
+            pager.bottomClearance = 16
+        } else if searchShown || chromeShown || (capsuleAlert != nil && !immersive && !barsAway) {
+            pager.bottomClearance = 66
+        } else if !immersive && isPlaying {
+            pager.bottomClearance = 48
+        } else if !immersive && !barsAway {
+            pager.bottomClearance = 28
+        } else {
+            pager.bottomClearance = 16
+        }
         #endif
     }
     /// Local device 墨水屏模式 state (never synced across devices).
@@ -83,12 +93,20 @@ final class ReaderModel {
     var chromeShown = false {
         didSet {
             if chromeShown { barsAway = false }
-            syncBottomCapsuleVisible()
+            syncBottomClearance()
         }
     }
-    /// Scrolling down the page sent the capsule away, and the top bar if it was up.
+    /// User swiped the mini listening pill down into a compact corner orb while reading along.
+    var playerTucked = false {
+        didSet { syncBottomClearance() }
+    }
+    /// Scrolling down the page sent the controls away, and the top bar if it was up.
     private(set) var barsAway = false {
-        didSet { syncBottomCapsuleVisible() }
+        didSet { syncBottomClearance() }
+    }
+    func expandListenBar() {
+        playerTucked = false
+        barsAway = false
     }
     private var chromeComesBack = false
     var tocShown = false
@@ -139,7 +157,7 @@ final class ReaderModel {
     var openNote: OpenNote?
     /// 书内搜索.
     var searchShown = false {
-        didSet { syncBottomCapsuleVisible() }
+        didSet { syncBottomClearance() }
     }
     /// Bumped when the open search field should take the keyboard again.
     var searchFieldWanted = 0
@@ -701,6 +719,8 @@ final class ReaderModel {
 
     /// Lets the shelf show 听中 on this book.
     private func setListening(_ playing: Bool) {
+        if !playing && playerTucked { playerTucked = false }
+        syncBottomClearance()
         guard let library else { return }
         if playing {
             if library.listening != bookID { library.listening = bookID }
@@ -1035,6 +1055,9 @@ extension ReaderModel: ReaderPagerDelegate {
 
     func pagerTurnedByHand(_ pager: ReaderPager) {
         turnedByHand()
+        #if os(iOS)
+        if chromeShown { chromeShown = false }
+        #endif
         if openNote != nil { openNote = nil }
         if recap != nil { recap = nil }
         // Read on a few pages where the jump landed: no going back any more.
