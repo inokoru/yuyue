@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -107,67 +109,183 @@ fun CompanionSettings(open: (String) -> Unit) {
     if (adding) ProviderSheet { adding = false; version++ }
 }
 
-/** 常用提问: user-saved quick prompts shown in 书伴 suggestion bar and `/` menu. */
+/** 常用提问: user-saved quick prompts with editable `/command` tokens, shown in 书伴 suggestion bar and `/` menu. */
 @Composable
 private fun CompanionQuickPromptsSection() {
     val promptVersion = CompanionPrompts.version
-    val prompts = remember(promptVersion) { CompanionPrompts.list }
-    var draft by remember { mutableStateOf("") }
-    val trimmed = draft.trim()
-    val canAdd = trimmed.isNotEmpty() && prompts.size < CompanionPrompts.MAX_COUNT && trimmed !in prompts
-    val presets = remember(prompts) {
-        if (prompts.size >= CompanionPrompts.MAX_COUNT) emptyList()
-        else CompanionPrompts.presets.filter { it !in prompts }
-    }
+    val items = remember(promptVersion) { CompanionPrompts.items }
+    val isDefault = remember(items) { items == CompanionPrompts.defaults }
+    var editingID by remember { mutableStateOf<String?>(null) }
 
-    YYLabel(t("常用提问"))
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = YY.s(4)).padding(top = YY.s(14), bottom = YY.s(6)),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(t("常用提问"), style = YY.font(10.5f, FontWeight.SemiBold), color = YY.c.t2, modifier = Modifier.weight(1f))
+        if (!isDefault) {
+            Text(
+                t("恢复默认"),
+                style = YY.font(10.5f),
+                color = YY.c.t3,
+                modifier = Modifier.clickable { CompanionPrompts.resetDefaults() }.padding(vertical = YY.s(2), horizontal = YY.s(4)),
+            )
+        }
+    }
     YYGroup {
-        for ((idx, item) in prompts.withIndex()) {
+        for (item in items) {
             row {
                 Row(
-                    Modifier.fillMaxWidth().padding(vertical = YY.s(9)),
+                    Modifier.fillMaxWidth().clickable { editingID = item.id }.padding(vertical = YY.s(10)),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(YY.s(8)),
+                    horizontalArrangement = Arrangement.spacedBy(YY.s(10)),
                 ) {
-                    Text("/p${idx + 1}", style = YY.font(10.5f, FontWeight.Medium), color = YY.c.t3)
-                    Text(item, style = YY.font(11.5f), color = YY.c.t1, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Box(
-                        Modifier.size(YY.s(28)).clip(CircleShape).clickable(onClickLabel = t("删除")) { CompanionPrompts.remove(item) },
-                        contentAlignment = Alignment.Center,
+                        Modifier.background(YY.tint.accentSoft, RoundedCornerShape(YY.s(6)))
+                            .padding(horizontal = YY.s(7), vertical = YY.s(3)),
                     ) {
-                        Icon(Icons.close, t("删除"), tint = YY.c.t3, modifier = Modifier.size(YY.s(14)))
+                        Text(
+                            "/${item.command}",
+                            style = YY.font(10.5f, FontWeight.SemiBold).copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                            color = YY.tint.accent,
+                        )
                     }
+                    Text(
+                        item.prompt,
+                        style = YY.font(11.5f, FontWeight.Medium),
+                        color = YY.c.t1,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(Icons.chevronRight, null, tint = YY.c.t3, modifier = Modifier.size(YY.s(12)))
                 }
             }
         }
-        row {
-            Column(Modifier.fillMaxWidth().padding(vertical = YY.s(10)), verticalArrangement = Arrangement.spacedBy(YY.s(8))) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(8))) {
-                    Box(Modifier.weight(1f).background(YY.c.inset, RoundedCornerShape(YY.s(8))).padding(horizontal = YY.s(10), vertical = YY.s(6))) {
-                        Field(draft, t("添加一句常问的话")) { draft = it }
+        if (items.size < CompanionPrompts.MAX_COUNT) {
+            row {
+                Row(
+                    Modifier.fillMaxWidth().clickable { editingID = "new" }.padding(vertical = YY.s(10)),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(YY.s(10)),
+                ) {
+                    Box(
+                        Modifier.size(YY.s(24)).background(YY.c.inset, RoundedCornerShape(YY.s(6)))
+                            .border(0.5.dp, YY.c.line, RoundedCornerShape(YY.s(6))),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.add, null, tint = YY.c.t2, modifier = Modifier.size(YY.s(12)))
                     }
-                    YYButton(t("添加"), ButtonKind.Raised, ButtonSize.Small, enabled = canAdd) {
-                        CompanionPrompts.add(trimmed)
-                        draft = ""
-                    }
+                    Text(t("添加常用提问"), style = YY.font(11.5f, FontWeight.Medium), color = YY.c.t2, modifier = Modifier.weight(1f))
+                    Text(t("最多 %lld 条", CompanionPrompts.MAX_COUNT), style = YY.font(10f, tnum = true), color = YY.c.t3)
+                    Icon(Icons.chevronRight, null, tint = YY.c.t3, modifier = Modifier.size(YY.s(12)))
                 }
-                if (presets.isNotEmpty()) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(YY.s(6))) {
-                        for (preset in presets.take(3)) {
-                            Box(
-                                Modifier.weight(1f, fill = false).background(YY.c.inset, CircleShape).clip(CircleShape)
-                                    .clickable { CompanionPrompts.add(preset) }
-                                    .padding(horizontal = YY.s(9), vertical = YY.s(5)),
-                            ) {
-                                Text("+ $preset", style = YY.font(10f), color = YY.c.t2, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
+        }
+    }
+    YYNote(t("点进去可修改 / 指令名与提问内容；同时出现在书伴底部建议栏与 / 快捷指令菜单中。"))
+
+    val openID = editingID
+    if (openID != null) {
+        PromptEditorSheet(promptID = openID, close = { editingID = null })
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PromptEditorSheet(promptID: String, close: () -> Unit) {
+    val items = remember(CompanionPrompts.version) { CompanionPrompts.items }
+    val existing = remember(promptID, items) { if (promptID == "new") null else items.firstOrNull { it.id == promptID } }
+    val defaultCmd = remember(existing, items) { existing?.command ?: CompanionPrompts.nextDefaultCommand(items) }
+    var commandText by remember(promptID) { mutableStateOf(existing?.command ?: CompanionPrompts.nextDefaultCommand(items)) }
+    var promptText by remember(promptID) { mutableStateOf(existing?.prompt ?: "") }
+
+    val resolvedCmd = CompanionPrompts.sanitizeCommand(
+        raw = commandText,
+        fallback = defaultCmd,
+        existing = items,
+        excludingID = existing?.id,
+    )
+    val trimmedPrompt = promptText.trim().take(CompanionPrompts.MAX_LENGTH)
+    val isDuplicate = trimmedPrompt.isNotEmpty() && items.any { it.id != existing?.id && it.prompt == trimmedPrompt }
+    val canSave = trimmedPrompt.isNotEmpty() && !isDuplicate && (existing != null || items.size < CompanionPrompts.MAX_COUNT)
+
+    ModalBottomSheet(
+        close,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = YY.c.bg,
+        dragHandle = { YYSheetDragHandle(bottom = 2.dp) },
+    ) {
+        Column(
+            Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp).padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(YY.s(10)),
+        ) {
+            YYSheetHeader(if (existing == null) t("添加常用提问") else t("编辑常用提问"), "/$resolvedCmd", close)
+
+            YYGroup {
+                row {
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = YY.s(42)),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(YY.s(10)),
+                    ) {
+                        Text(t("快捷指令"), style = YY.font(11.5f), color = YY.c.t1)
+                        Spacer(Modifier.weight(1f))
+                        Row(
+                            Modifier.background(YY.c.inset, RoundedCornerShape(YY.s(7)))
+                                .padding(horizontal = YY.s(9), vertical = YY.s(5)),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(YY.s(2)),
+                        ) {
+                            Text(
+                                "/",
+                                style = YY.font(11.5f, FontWeight.SemiBold).copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                                color = YY.tint.accent,
+                            )
+                            Box(Modifier.width(YY.s(110))) {
+                                Field(commandText, defaultCmd) { commandText = it }
                             }
                         }
                     }
                 }
+                row {
+                    Column(
+                        Modifier.fillMaxWidth().padding(vertical = YY.s(10)),
+                        verticalArrangement = Arrangement.spacedBy(YY.s(6)),
+                    ) {
+                        Text(t("提问内容"), style = YY.font(11.5f), color = if (isDuplicate) YY.c.danger else YY.c.t1)
+                        Field(promptText, t("例如：拆解这句语法与长难句")) { promptText = it }
+                    }
+                }
+            }
+
+            if (isDuplicate) {
+                YYNote(t("这条提问已经存在了。"), YY.c.danger)
+            } else {
+                YYNote(t("在书伴输入框输入 /%@ 回车即可直接提问；留空时自动使用默认指令 /%@。", resolvedCmd, defaultCmd))
+            }
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(YY.s(10))) {
+                if (existing != null) {
+                    YYButton(t("删除这条提问"), ButtonKind.Danger, ButtonSize.Regular, modifier = Modifier.weight(1f)) {
+                        CompanionPrompts.remove(existing.id)
+                        close()
+                    }
+                }
+                YYButton(
+                    if (existing == null) t("添加到常用提问") else t("保存修改"),
+                    ButtonKind.Main,
+                    ButtonSize.Regular,
+                    enabled = canSave,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    val targetID = existing?.id ?: java.util.UUID.randomUUID().toString()
+                    CompanionPrompts.upsert(CompanionPrompts.Item(id = targetID, command = resolvedCmd, prompt = trimmedPrompt))
+                    close()
+                }
             }
         }
     }
-    YYNote(t("保存在书伴底部建议栏与 / 快捷指令中，点一下即可提问（最多 8 条）。"))
 }
 
 /** 用量与省费: 30-day Token 用量 chart + 2-row 省费 card. */

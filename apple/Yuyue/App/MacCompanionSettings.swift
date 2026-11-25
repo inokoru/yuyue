@@ -98,6 +98,7 @@ final class CompanionFocus {
     enum Page: Hashable {
         case service(String)
         case models(String)
+        case prompt(String)
     }
 
     /// nil: the service 书伴 uses.
@@ -111,6 +112,7 @@ final class CompanionFocus {
     func reload() {
         choice.reload()
         if case .service(let id) = page, id != CompanionProvider.apple.id, CompanionProvider.find(id).map({ p in choice.added.contains(p) }) != true { page = nil }
+        if case .prompt(let id) = page, id != "new", !CompanionPrompts.items.contains(where: { $0.id == id }) { page = nil }
         tick &+= 1
     }
 
@@ -120,14 +122,14 @@ final class CompanionFocus {
     var provider: CompanionProvider {
         switch page {
         case .service(let id), .models(let id): CompanionProvider.find(id) ?? choice.current.provider
-        case nil: choice.current.provider
+        case .prompt, nil: choice.current.provider
         }
     }
 }
 
 // MARK: - The right column
 
-/// 书伴 in the right column: the service chosen in the middle, or its models.
+/// 书伴 in the right column: the service chosen in the middle, its models, or a quick prompt.
 struct CompanionInspector: View {
     private var focus: CompanionFocus { .shared }
 
@@ -135,9 +137,12 @@ struct CompanionInspector: View {
         let _ = focus.tick
         let p = focus.provider
         Group {
-            if case .models = focus.page {
+            switch focus.page {
+            case .models:
                 ModelList(provider: p)
-            } else {
+            case .prompt(let promptID):
+                CompanionPromptPanel(promptID: promptID)
+            case .service, nil:
                 ServicePanel(provider: p)
             }
         }
@@ -1757,168 +1762,424 @@ private struct DailyCapPills: View {
     }
 }
 
-/// 常用提问: user-saved quick prompts shown in 书伴 suggestion bar and `/` menu on macOS and iOS.
+/// 常用提问: user-saved quick prompts with customizable `/command` tokens, integrated into
+/// 书伴's master-detail settings on macOS and NavigationStack on iOS.
 struct CompanionQuickPromptsSection: View {
-    @State private var prompts = CompanionPrompts.list
-    @State private var draft = ""
-
-    private var canAdd: Bool {
-        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmed.isEmpty && prompts.count < CompanionPrompts.maxCount && !prompts.contains(trimmed)
-    }
-
-    private var availablePresets: [String] {
-        guard prompts.count < CompanionPrompts.maxCount else { return [] }
-        return CompanionPrompts.presets.filter { !prompts.contains($0) }
-    }
+    @State private var items = CompanionPrompts.items
+    private var focus: CompanionFocus { .shared }
+    private let tint = YYTint.standard
 
     var body: some View {
+        let isDefault = items == CompanionPrompts.defaults
         #if os(macOS)
-        SettingsHeading(String(localized: "常用提问"))
-        SettingsCard {
-            ForEach(Array(prompts.enumerated()), id: \.element) { idx, item in
-                HStack(spacing: 10) {
-                    Text("/p\(idx + 1)")
-                        .font(.yy(size: 11, weight: .medium)).monospaced()
-                        .foregroundStyle(YYColor.t3)
-                        .frame(width: 26, alignment: .leading)
-                    Text(item)
-                        .font(.yy(size: 12.5))
-                        .foregroundStyle(YYColor.t1)
-                        .lineLimit(2)
-                    Spacer(minLength: 8)
-                    Button {
-                        CompanionPrompts.remove(item)
-                        prompts = CompanionPrompts.list
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.yy(size: 13))
-                            .foregroundStyle(YYColor.t3)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(Text("删除"))
+        HStack(alignment: .firstTextBaseline) {
+            Text(String(localized: "常用提问"))
+                .font(.yy(size: 11.5, weight: .semibold))
+                .foregroundStyle(YYColor.t2)
+            Spacer(minLength: 8)
+            if !isDefault {
+                Button(String(localized: "恢复默认")) {
+                    CompanionPrompts.resetDefaults()
+                    items = CompanionPrompts.items
+                    if case .prompt = focus.page { focus.page = nil }
+                    focus.reload()
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                .font(.yy(size: 11))
+                .foregroundStyle(YYColor.t3)
+                .buttonStyle(.plain)
             }
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    TextField("添加一句常问的话，例如：拆解这句长难句", text: $draft)
-                        .textFieldStyle(.plain)
-                        .font(.yy(size: 12.5))
-                        .foregroundStyle(YYColor.t1)
-                        .padding(.horizontal, 10)
-                        .frame(height: 28)
-                        .background(YYColor.inset, in: .rect(cornerRadius: 7))
-                        .onSubmit { submit() }
-                    Button("添加") { submit() }
-                        .buttonStyle(YYButtonStyle(kind: .raised, size: .small))
-                        .disabled(!canAdd)
-                }
-                if !availablePresets.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(availablePresets, id: \.self) { preset in
-                                Button {
-                                    CompanionPrompts.add(preset)
-                                    prompts = CompanionPrompts.list
-                                } label: {
-                                    Text("+ " + preset)
-                                        .font(.yy(size: 11))
-                                        .foregroundStyle(YYColor.t2)
-                                        .padding(.horizontal, 9)
-                                        .frame(height: 24)
-                                        .background(YYColor.inset, in: .capsule)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 11)
         }
-        SettingsNote(String(localized: "保存在书伴底部建议栏与 / 快捷指令中，点一下即可提问（最多 8 条）。"))
+        SettingsCard {
+            ForEach(items) { item in
+                PromptListRow(
+                    selected: focus.page == .prompt(item.id),
+                    command: item.command,
+                    prompt: item.prompt,
+                    accent: tint.accent,
+                    accentSoft: tint.accentSoft
+                ) {
+                    focus.page = .prompt(item.id)
+                }
+            }
+            if items.count < CompanionPrompts.maxCount {
+                AddPromptListRow(
+                    selected: focus.page == .prompt("new"),
+                    remainingCount: CompanionPrompts.maxCount
+                ) {
+                    focus.page = .prompt("new")
+                }
+            }
+        }
+        SettingsNote(String(localized: "点选右侧可修改 / 指令名与提问内容；同时出现在书伴底部建议栏与 / 快捷指令菜单中。"))
             .onReceive(NotificationCenter.default.publisher(for: CompanionPrompts.changed)) { _ in
-                prompts = CompanionPrompts.list
+                items = CompanionPrompts.items
+                focus.tick &+= 1
             }
         #else
-        PhoneSettingsHeading(String(localized: "常用提问"))
+        HStack(alignment: .firstTextBaseline) {
+            Text(String(localized: "常用提问"))
+                .font(YYUI.font(10.5, .semibold))
+                .foregroundStyle(YYColor.t2)
+            Spacer(minLength: YYUI.s(8))
+            if !isDefault {
+                Button(String(localized: "恢复默认")) {
+                    CompanionPrompts.resetDefaults()
+                    items = CompanionPrompts.items
+                    focus.reload()
+                }
+                .font(YYUI.font(10.5))
+                .foregroundStyle(YYColor.t3)
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, YYUI.s(4))
+        .padding(.top, YYUI.s(16))
+        .padding(.bottom, YYUI.s(6))
+
         YYGroup {
-            ForEach(Array(prompts.enumerated()), id: \.element) { idx, item in
-                HStack(spacing: 8) {
-                    Text("/p\(idx + 1)")
-                        .font(.yy(size: 10.5, weight: .medium)).monospaced()
-                        .foregroundStyle(YYColor.t3)
-                        .frame(width: 24, alignment: .leading)
-                    Text(item)
-                        .font(YYUI.font(11.5))
-                        .foregroundStyle(YYColor.t1)
-                        .lineLimit(2)
-                    Spacer(minLength: 6)
-                    Button {
-                        CompanionPrompts.remove(item)
-                        prompts = CompanionPrompts.list
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.yy(size: 14))
+            ForEach(items) { item in
+                NavigationLink {
+                    PhoneCompanionPromptPage(promptID: item.id)
+                } label: {
+                    HStack(spacing: YYUI.s(10)) {
+                        PromptCommandBadge(command: item.command, accent: tint.accent, accentSoft: tint.accentSoft)
+                        Text(item.prompt)
+                            .font(YYUI.font(11.5, .medium))
+                            .foregroundStyle(YYColor.t1)
+                            .lineLimit(1)
+                        Spacer(minLength: YYUI.s(6))
+                        Image(systemName: "chevron.right")
+                            .font(YYUI.font(9, .semibold))
                             .foregroundStyle(YYColor.t3)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(Text("删除"))
+                    .padding(.vertical, YYUI.s(9))
+                    .contentShape(.rect)
                 }
-                .padding(.vertical, 9)
+                .buttonStyle(.plain)
             }
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    TextField("添加一句常问的话", text: $draft)
-                        .font(YYUI.font(11.5))
-                        .foregroundStyle(YYColor.t1)
-                        .padding(.horizontal, 10)
-                        .frame(height: 32)
-                        .background(YYColor.inset, in: .rect(cornerRadius: 8))
-                        .onSubmit { submit() }
-                    Button("添加") { submit() }
-                        .buttonStyle(YYButtonStyle(kind: .raised, size: .small))
-                        .disabled(!canAdd)
-                }
-                if !availablePresets.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(availablePresets, id: \.self) { preset in
-                                Button {
-                                    CompanionPrompts.add(preset)
-                                    prompts = CompanionPrompts.list
-                                } label: {
-                                    Text("+ " + preset)
-                                        .font(YYUI.font(10.5))
-                                        .foregroundStyle(YYColor.t2)
-                                        .padding(.horizontal, 9)
-                                        .frame(height: 26)
-                                        .background(YYColor.inset, in: .capsule)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
+            if items.count < CompanionPrompts.maxCount {
+                NavigationLink {
+                    PhoneCompanionPromptPage(promptID: "new")
+                } label: {
+                    HStack(spacing: YYUI.s(10)) {
+                        ServiceTile(mark: .add, size: YYUI.s(24))
+                        Text(String(localized: "添加常用提问"))
+                            .font(YYUI.font(11.5, .medium))
+                            .foregroundStyle(YYColor.t2)
+                        Spacer(minLength: YYUI.s(6))
+                        Text(String(localized: "最多 \(CompanionPrompts.maxCount) 条"))
+                            .font(YYUI.font(10))
+                            .foregroundStyle(YYColor.t3)
+                        Image(systemName: "chevron.right")
+                            .font(YYUI.font(9, .semibold))
+                            .foregroundStyle(YYColor.t3)
                     }
+                    .padding(.vertical, YYUI.s(9))
+                    .contentShape(.rect)
                 }
+                .buttonStyle(.plain)
             }
-            .padding(.vertical, 10)
         }
-        YYNote(String(localized: "保存在书伴底部建议栏与 / 快捷指令中，点一下即可提问（最多 8 条）。"))
+        YYNote(String(localized: "点进去可修改 / 指令名与提问内容；同时出现在书伴底部建议栏与 / 快捷指令菜单中。"))
             .onReceive(NotificationCenter.default.publisher(for: CompanionPrompts.changed)) { _ in
-                prompts = CompanionPrompts.list
+                items = CompanionPrompts.items
+                focus.tick &+= 1
             }
         #endif
     }
+}
 
-    private func submit() {
-        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        CompanionPrompts.add(trimmed)
-        prompts = CompanionPrompts.list
-        draft = ""
+private struct PromptCommandBadge: View {
+    let command: String
+    let accent: Color
+    let accentSoft: Color
+
+    var body: some View {
+        Text(verbatim: "/\(command)")
+            .font(.yy(size: PanelScale.k * 11, weight: .semibold, design: .monospaced))
+            .foregroundStyle(accent)
+            .lineLimit(1)
+            .padding(.horizontal, 7)
+            .frame(height: 22 * PanelScale.k)
+            .background(accentSoft, in: .rect(cornerRadius: 6))
+            .fixedSize()
+    }
+}
+
+#if os(macOS)
+private struct PromptListRow: View {
+    let selected: Bool
+    let command: String
+    let prompt: String
+    let accent: Color
+    let accentSoft: Color
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                PromptCommandBadge(command: command, accent: accent, accentSoft: accentSoft)
+                Text(prompt)
+                    .font(.yy(size: 13, weight: .medium))
+                    .foregroundStyle(YYColor.t1)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.yy(size: 10, weight: .semibold))
+                    .foregroundStyle(YYColor.t3)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(minHeight: 42)
+            .background(selected ? YYColor.t1.opacity(0.06) : hovering ? YYColor.t1.opacity(0.04) : .clear,
+                        in: .rect(cornerRadius: 9))
+            .padding(4)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+}
+
+private struct AddPromptListRow: View {
+    let selected: Bool
+    let remainingCount: Int
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                ServiceTile(mark: .add, size: 22)
+                Text(String(localized: "添加常用提问"))
+                    .font(.yy(size: 13, weight: .medium))
+                    .foregroundStyle(YYColor.t2)
+                Spacer(minLength: 8)
+                Text(String(localized: "最多 \(remainingCount) 条"))
+                    .font(.yy(size: 11))
+                    .foregroundStyle(YYColor.t3)
+                Image(systemName: "chevron.right")
+                    .font(.yy(size: 10, weight: .semibold))
+                    .foregroundStyle(YYColor.t3)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(minHeight: 42)
+            .background(selected ? YYColor.t1.opacity(0.06) : hovering ? YYColor.t1.opacity(0.04) : .clear,
+                        in: .rect(cornerRadius: 9))
+            .padding(4)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+}
+#else
+struct PhoneCompanionPromptPage: View {
+    let promptID: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView {
+            CompanionPromptPanel(promptID: promptID, finished: { dismiss() })
+                .padding(.top, YYUI.s(10))
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .background(YYColor.bg)
+        .navigationTitle(promptID == "new" ? String(localized: "添加常用提问") : String(localized: "常用提问"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+#endif
+
+/// Right-column inspector (macOS) and pushed detail view (iOS) for creating or editing a quick prompt.
+struct CompanionPromptPanel: View {
+    let promptID: String
+    var finished: (() -> Void)? = nil
+
+    @State private var commandText = ""
+    @State private var promptText = ""
+    @State private var deleted = false
+    @FocusState private var focusedField: Field?
+    private var focus: CompanionFocus { .shared }
+    private let tint = YYTint.standard
+
+    private enum Field { case command, prompt }
+
+    private var existing: CompanionPrompts.Item? {
+        guard promptID != "new" else { return nil }
+        return CompanionPrompts.items.first { $0.id == promptID }
+    }
+
+    private var isNew: Bool { promptID == "new" }
+
+    private var defaultCommand: String {
+        existing?.command ?? CompanionPrompts.nextDefaultCommand()
+    }
+
+    private var resolvedCommand: String {
+        CompanionPrompts.sanitizeCommand(
+            commandText,
+            fallback: defaultCommand,
+            existing: CompanionPrompts.items,
+            excludingID: existing?.id
+        )
+    }
+
+    private var trimmedPrompt: String {
+        String(promptText.trimmingCharacters(in: .whitespacesAndNewlines).prefix(CompanionPrompts.maxLength))
+    }
+
+    private var isDuplicatePrompt: Bool {
+        !trimmedPrompt.isEmpty && CompanionPrompts.items.contains { $0.id != existing?.id && $0.prompt == trimmedPrompt }
+    }
+
+    private var canSave: Bool {
+        !trimmedPrompt.isEmpty && !isDuplicatePrompt && (existing != nil || CompanionPrompts.items.count < CompanionPrompts.maxCount)
+    }
+
+    private var hasChanges: Bool {
+        guard let existing else { return !trimmedPrompt.isEmpty }
+        return trimmedPrompt != existing.prompt || resolvedCommand != existing.command
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            PanelHeader(
+                title: isNew ? String(localized: "添加常用提问") : String(localized: "编辑常用提问"),
+                detail: "/\(resolvedCommand)"
+            ) {
+                Text("/")
+                    .font(.yy(size: PanelScale.k * 14, weight: .bold, design: .monospaced))
+                    .foregroundStyle(tint.accent)
+                    .frame(width: 28 * PanelScale.k, height: 28 * PanelScale.k)
+                    .background(tint.accentSoft, in: .rect(cornerRadius: 8))
+            }
+
+            PanelCard {
+                HStack(spacing: 10) {
+                    Text(String(localized: "快捷指令"))
+                        .font(.yy(size: PanelScale.k * 12.5))
+                        .foregroundStyle(YYColor.t1)
+                        .fixedSize()
+                    Spacer(minLength: 8)
+                    HStack(spacing: 3) {
+                        Text("/")
+                            .font(.yy(size: PanelScale.k * 12, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(tint.accent)
+                        TextField("", text: $commandText, prompt: Text(verbatim: defaultCommand).foregroundStyle(YYColor.t3))
+                            .textFieldStyle(.plain)
+                            .font(.yy(size: PanelScale.k * 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(YYColor.t1)
+                            .autocorrectionDisabled()
+                            #if os(iOS)
+                            .textInputAutocapitalization(.never)
+                            #endif
+                            .focused($focusedField, equals: .command)
+                            .frame(minWidth: 56, maxWidth: 132)
+                            .onSubmit {
+                                if isNew { focusedField = .prompt } else { save(closeIfDone: false) }
+                            }
+                    }
+                    .padding(.horizontal, 9)
+                    .frame(height: 27 * PanelScale.k)
+                    .background(YYColor.inset, in: .rect(cornerRadius: 7))
+                }
+                .padding(.horizontal, 10)
+                .frame(minHeight: 40 * PanelScale.k)
+                .contentShape(.rect)
+                .onTapGesture { focusedField = .command }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(String(localized: "提问内容"))
+                        .font(.yy(size: PanelScale.k * 12.5))
+                        .foregroundStyle(isDuplicatePrompt ? YYColor.danger : YYColor.t1)
+                    TextField(
+                        "",
+                        text: $promptText,
+                        prompt: Text(String(localized: "例如：拆解这句语法与长难句")).foregroundStyle(YYColor.t3),
+                        axis: .vertical
+                    )
+                    .textFieldStyle(.plain)
+                    .font(.yy(size: PanelScale.k * 12.5))
+                    .foregroundStyle(YYColor.t1)
+                    .lineLimit(3 ... 6)
+                    .focused($focusedField, equals: .prompt)
+                    .onSubmit { save(closeIfDone: true) }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
+                .onTapGesture { focusedField = .prompt }
+            }
+
+            if isDuplicatePrompt {
+                PanelHint(String(localized: "这条提问已经存在了。"))
+            } else {
+                PanelHint(String(localized: "在书伴输入框输入 /\(resolvedCommand) 回车即可直接提问；留空时自动使用默认指令 /\(defaultCommand)。"))
+            }
+
+            PanelCard {
+                PanelButton(
+                    systemImage: isNew ? "plus.circle.fill" : "checkmark.circle.fill",
+                    tint: canSave && hasChanges ? tint.accent : YYColor.t3
+                ) {
+                    Text(isNew ? String(localized: "添加到常用提问") : (hasChanges ? String(localized: "保存修改") : String(localized: "已保存")))
+                        .fontWeight(canSave && hasChanges ? .medium : .regular)
+                } action: {
+                    save(closeIfDone: true)
+                }
+                .disabled(!canSave || !hasChanges)
+            }
+
+            if !isNew {
+                PanelDestructive(String(localized: "删除这条提问")) {
+                    deleted = true
+                    CompanionPrompts.remove(id: promptID)
+                    focus.page = nil
+                    focus.reload()
+                    finished?()
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 14)
+        .onAppear { loadState() }
+        .onChange(of: promptID) { _, _ in loadState() }
+        .onDisappear {
+            if !isNew, !deleted, canSave, hasChanges, CompanionPrompts.items.contains(where: { $0.id == promptID }) {
+                CompanionPrompts.upsert(CompanionPrompts.Item(id: promptID, command: resolvedCommand, prompt: trimmedPrompt))
+                focus.reload()
+            }
+        }
+    }
+
+    private func loadState() {
+        deleted = false
+        if let existing {
+            commandText = existing.command
+            promptText = existing.prompt
+        } else {
+            commandText = CompanionPrompts.nextDefaultCommand()
+            promptText = ""
+            focusedField = .prompt
+        }
+    }
+
+    private func save(closeIfDone: Bool) {
+        guard canSave else { return }
+        let targetID = existing?.id ?? UUID().uuidString
+        CompanionPrompts.upsert(CompanionPrompts.Item(id: targetID, command: resolvedCommand, prompt: trimmedPrompt))
+        commandText = CompanionPrompts.items.first(where: { $0.id == targetID })?.command ?? resolvedCommand
+        if isNew {
+            #if os(macOS)
+            focus.page = .prompt(targetID)
+            #endif
+        }
+        focus.reload()
+        if closeIfDone { finished?() }
     }
 }
 

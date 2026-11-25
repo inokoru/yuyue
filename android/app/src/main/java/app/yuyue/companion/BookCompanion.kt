@@ -215,6 +215,23 @@ class BookCompanion(private val model: ReaderModel) {
         model.pager.setSource(Position(s.section.toUInt(), s.sentence.toUInt()))
     }
 
+    data class MessagePick(val turnID: String, val role: Role) {
+        enum class Role { Question, Answer }
+    }
+
+    sealed interface RichSegment {
+        data class Text(val value: String) : RichSegment
+        data class Bold(val value: String) : RichSegment
+        data class Italic(val value: String) : RichSegment
+        data class Code(val value: String) : RichSegment
+        data class Strike(val value: String) : RichSegment
+        data object Bullet : RichSegment
+        data object QuoteBar : RichSegment
+        data class Heading(val value: String) : RichSegment
+        data class Citation(val number: Int) : RichSegment
+        data object Newline : RichSegment
+    }
+
     /** Saves a completed answer onto the anchor highlight (or the cited / current sentence) as a thought. */
     fun saveThought(turnID: String) {
         val index = turns.indexOfFirst { it.id == turnID }
@@ -230,61 +247,119 @@ class BookCompanion(private val model: ReaderModel) {
         }
         val clean = noteText(answer.text)
         if (clean.isEmpty()) return
+        val firstCited = answer.sources.keys.minOrNull()?.let { answer.sources[it] }
+        persistThought(
+            clean = clean,
+            anchor = turn.anchor,
+            fallbackSource = firstCited,
+            askedAt = turn.askedAt,
+            markTurnIDs = listOf(turnID),
+            merged = false,
+        )
+    }
+
+    /** Merges any chosen combination of user questions and Companion replies into a single thought note. */
+    fun saveThought(picks: Set<MessagePick>): Boolean {
+        val clean = composedThought(turns, picks)
+        if (clean.isEmpty()) return false
+        val pickedTurns = turns.filter {
+            MessagePick(it.id, MessagePick.Role.Question) in picks || MessagePick(it.id, MessagePick.Role.Answer) in picks
+        }
+        val firstTurn = pickedTurns.firstOrNull() ?: return false
+        val anchor = pickedTurns.mapNotNull { it.anchor }.firstOrNull { it.markID != null }
+            ?: pickedTurns.mapNotNull { it.anchor }.firstOrNull()
+        val firstCited = pickedTurns.firstNotNullOfOrNull { t ->
+            val a = t.answer?.takeIf { !it.notYet } ?: return@firstNotNullOfOrNull null
+            a.sources.keys.minOrNull()?.let { a.sources[it] }
+        }
+        val answerTurnIDs = pickedTurns.mapNotNull { t ->
+            if (MessagePick(t.id, MessagePick.Role.Answer) in picks) t.id else null
+        }
+        return persistThought(
+            clean = clean,
+            anchor = anchor,
+            fallbackSource = firstCited,
+            askedAt = firstTurn.askedAt,
+            markTurnIDs = answerTurnIDs,
+            merged = picks.size > 1,
+        )
+    }
+
+    private fun persistThought(
+        clean: String,
+        anchor: CompanionAnchor?,
+        fallbackSource: Source?,
+        askedAt: Position,
+        markTurnIDs: List<String>,
+        merged: Boolean,
+    ): Boolean {
+        val toastTitle = if (merged) t("已合并存进想法") else t("已存进想法")
+        val previousSaved = markTurnIDs.mapNotNull { tid ->
+            turns.firstOrNull { it.id == tid }?.let { tid to it.savedMarkID }
+        }.toMap()
+        fun stampSaved(markID: String?) {
+            for (tid in markTurnIDs) {
+                val i = turns.indexOfFirst { it.id == tid }
+                if (i >= 0) turns[i] = turns[i].copy(savedMarkID = markID)
+            }
+        }
+        fun restoreSaved() {
+            for ((tid, prev) in previousSaved) {
+                val i = turns.indexOfFirst { it.id == tid }
+                if (i >= 0) turns[i] = turns[i].copy(savedMarkID = prev)
+            }
+        }
 
         // 1. Existing highlight tapped via 问: append/update its thought.
-        val existingMark = turn.anchor?.markID?.let { id -> model.marks.firstOrNull { it.id == id } }
+        val existingMark = anchor?.markID?.let { id -> model.marks.firstOrNull { it.id == id } }
         if (existingMark != null) {
             val previousNote = existingMark.note
             val combined = mergeNote(previousNote, clean)
-            runCatching {
+            return runCatching {
                 model.core.setMarkNote(model.bookID, existingMark.id, combined)
                 model.reloadNotes()
-                turns[index] = turns[index].copy(savedMarkID = existingMark.id)
-                model.show(Library.Toast(Library.Toast.Icon.Highlight, t("已存进想法"), "“${existingMark.text.take(16)}”") {
+                stampSaved(existingMark.id)
+                model.show(Library.Toast(Library.Toast.Icon.Highlight, toastTitle, "“${existingMark.text.take(16)}”") {
                     runCatching {
                         model.core.setMarkNote(model.bookID, existingMark.id, previousNote)
                         model.reloadNotes()
-                        val i = turns.indexOfFirst { it.id == turnID }
-                        if (i >= 0) turns[i] = turns[i].copy(savedMarkID = null)
+                        restoreSaved()
                     }
                 })
-            }.onFailure { model.failure = Library.message(it) }
-            return
+                true
+            }.onFailure { model.failure = Library.message(it) }.getOrDefault(false)
         }
 
         // 2. Fresh text selection handed via 问: highlight that exact span with the thought.
-        val anchor = turn.anchor
         if (anchor != null && anchor.text.isNotEmpty()) {
-            runCatching {
+            return runCatching {
                 val created = model.core.addMark(model.bookID, anchor.section, anchor.start, anchor.end, anchor.text, model.lastStyle, clean)
                 model.pager.keepShown(created.id)
                 model.reloadNotes()
-                turns[index] = turns[index].copy(savedMarkID = created.id)
-                model.show(Library.Toast(Library.Toast.Icon.Highlight, t("已存进想法"), "“${created.text.take(16)}”") {
+                stampSaved(created.id)
+                model.show(Library.Toast(Library.Toast.Icon.Highlight, toastTitle, "“${created.text.take(16)}”") {
                     runCatching {
                         model.core.deleteMark(model.bookID, created.id)
                         model.reloadNotes()
-                        val i = turns.indexOfFirst { it.id == turnID }
-                        if (i >= 0) turns[i] = turns[i].copy(savedMarkID = null)
+                        restoreSaved()
                     }
                 })
-            }.onFailure { model.failure = Library.message(it) }
-            return
+                true
+            }.onFailure { model.failure = Library.message(it) }.getOrDefault(false)
         }
 
         // 3. No selection quote: anchor to the first cited sentence, or where the question was asked.
-        val firstCited = answer.sources.keys.minOrNull()?.let { answer.sources[it] }
-        val targetSection = firstCited?.section?.toUInt() ?: turn.askedAt.section
-        val targetSentence = firstCited?.sentence ?: turn.askedAt.sentence.toInt()
+        val targetSection = fallbackSource?.section?.toUInt() ?: askedAt.section
+        val targetSentence = fallbackSource?.sentence ?: askedAt.sentence.toInt()
         val all = runCatching { model.core.sentences(model.bookID, targetSection) }.getOrDefault(emptyList())
-        if (all.isEmpty()) return
+        if (all.isEmpty()) return false
         val clamped = targetSentence.coerceIn(0, all.lastIndex)
         val chosenIndex = (clamped..all.lastIndex).firstOrNull { all[it].trim().isNotEmpty() }
             ?: (clamped - 1 downTo 0).firstOrNull { all[it].trim().isNotEmpty() }
             ?: clamped
         val raw = all[chosenIndex]
         val trimmed = raw.trim()
-        if (trimmed.isEmpty()) return
+        if (trimmed.isEmpty()) return false
         val charStart = raw.indexOf(trimmed).coerceAtLeast(0)
         val utf16Start = raw.substring(0, charStart).length
         val utf16End = utf16Start + trimmed.length
@@ -295,36 +370,35 @@ class BookCompanion(private val model: ReaderModel) {
         if (sameSpan != null) {
             val previousNote = sameSpan.note
             val combined = mergeNote(previousNote, clean)
-            runCatching {
+            return runCatching {
                 model.core.setMarkNote(model.bookID, sameSpan.id, combined)
                 model.reloadNotes()
-                turns[index] = turns[index].copy(savedMarkID = sameSpan.id)
-                model.show(Library.Toast(Library.Toast.Icon.Highlight, t("已存进想法"), "“${sameSpan.text.take(16)}”") {
+                stampSaved(sameSpan.id)
+                model.show(Library.Toast(Library.Toast.Icon.Highlight, toastTitle, "“${sameSpan.text.take(16)}”") {
                     runCatching {
                         model.core.setMarkNote(model.bookID, sameSpan.id, previousNote)
                         model.reloadNotes()
-                        val i = turns.indexOfFirst { it.id == turnID }
-                        if (i >= 0) turns[i] = turns[i].copy(savedMarkID = null)
+                        restoreSaved()
                     }
                 })
-            }.onFailure { model.failure = Library.message(it) }
-            return
+                true
+            }.onFailure { model.failure = Library.message(it) }.getOrDefault(false)
         }
 
-        runCatching {
+        return runCatching {
             val created = model.core.addMark(model.bookID, targetSection, start, end, trimmed, model.lastStyle, clean)
             model.pager.keepShown(created.id)
             model.reloadNotes()
-            turns[index] = turns[index].copy(savedMarkID = created.id)
-            model.show(Library.Toast(Library.Toast.Icon.Highlight, t("已存进想法"), "“${created.text.take(16)}”") {
+            stampSaved(created.id)
+            model.show(Library.Toast(Library.Toast.Icon.Highlight, toastTitle, "“${created.text.take(16)}”") {
                 runCatching {
                     model.core.deleteMark(model.bookID, created.id)
                     model.reloadNotes()
-                    val i = turns.indexOfFirst { it.id == turnID }
-                    if (i >= 0) turns[i] = turns[i].copy(savedMarkID = null)
+                    restoreSaved()
                 }
             })
-        }.onFailure { model.failure = Library.message(it) }
+            true
+        }.onFailure { model.failure = Library.message(it) }.getOrDefault(false)
     }
 
     // MARK: Finding the sentences
@@ -538,14 +612,183 @@ class BookCompanion(private val model: ReaderModel) {
             return body to thinking
         }
 
-        /** Strips `[n]` citation markers so an answer saved into 想法 reads cleanly in notes & exports. */
-        fun noteText(answerText: String): String = citationStripRegex.replace(answerText, "").trim()
+        private val hrRegex = Regex("""^\s*([-*_])\1{2,}\s*$""")
+        private val headingRegex = Regex("""^\s{0,3}#{1,6}\s+(.*)$""")
+        private val bulletRegex = Regex("""^\s*[-*•]\s+(.*)$""")
+        private val quoteBarRegex = Regex("""^\s*>\s?(.*)$""")
+        private val multiNewlineRegex = Regex("""\n{3,}""")
+        private val trailingMdTokenRegex = Regex("""(?:\*\*|\*|`|~~)$""")
+        private val boldRegex = Regex("""\*\*(.+?)\*\*""")
+        private val underscoreBoldRegex = Regex("""__(.+?)__""")
+        private val inlineCodeRegex = Regex("""`([^`\n]+)`""")
+        private val strikeRegex = Regex("""~~(.+?)~~""")
+        private val italicRegex = Regex("""(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)""")
+        private val prefixCiteRegex = Regex("""^\s?\[(\d+)]""")
+
+        /** Strips `[n]` citation markers and raw Markdown syntax so an answer saved into 想法 or copied
+         *  reads cleanly in notes & exports. */
+        fun noteText(answerText: String): String {
+            val noCites = citationStripRegex.replace(answerText, "")
+            val lines = noCites.split("\n").map { rawLine ->
+                if (hrRegex.matches(rawLine)) return@map ""
+                val line = when {
+                    headingRegex.matches(rawLine) -> headingRegex.find(rawLine)!!.groupValues[1]
+                    bulletRegex.matches(rawLine) -> "• " + bulletRegex.find(rawLine)!!.groupValues[1]
+                    quoteBarRegex.matches(rawLine) -> quoteBarRegex.find(rawLine)!!.groupValues[1]
+                    else -> rawLine
+                }
+                stripInlineMarkdown(line)
+            }
+            return multiNewlineRegex.replace(lines.joinToString("\n"), "\n\n").trim()
+        }
+
+        private fun stripInlineMarkdown(line: String): String {
+            var s = boldRegex.replace(line, "$1")
+            s = underscoreBoldRegex.replace(s, "$1")
+            s = inlineCodeRegex.replace(s, "$1")
+            s = strikeRegex.replace(s, "$1")
+            s = italicRegex.replace(s, "$1")
+            return s
+        }
+
+        fun richSegments(rawText: String, streaming: Boolean = false): List<RichSegment> {
+            var text = rawText.replace("\r\n", "\n")
+            if (streaming) {
+                text = trailingMdTokenRegex.replace(text, "")
+            }
+            text = multiNewlineRegex.replace(text, "\n\n")
+            val lines = text.split("\n")
+            val out = ArrayList<RichSegment>()
+            lines.forEachIndexed { idx, rawLine ->
+                if (idx > 0) out += RichSegment.Newline
+                if (hrRegex.matches(rawLine)) return@forEachIndexed
+                headingRegex.find(rawLine)?.let { m ->
+                    val title = stripInlineMarkdown(m.groupValues[1]).trim()
+                    if (title.isNotEmpty()) out += RichSegment.Heading(title)
+                    return@forEachIndexed
+                }
+                val rest = when {
+                    bulletRegex.matches(rawLine) -> {
+                        out += RichSegment.Bullet
+                        bulletRegex.find(rawLine)!!.groupValues[1]
+                    }
+                    quoteBarRegex.matches(rawLine) -> {
+                        out += RichSegment.QuoteBar
+                        quoteBarRegex.find(rawLine)!!.groupValues[1]
+                    }
+                    else -> rawLine
+                }
+                parseInlineSegments(rest, out)
+            }
+            return out
+        }
+
+        private fun parseInlineSegments(input: String, out: MutableList<RichSegment>) {
+            var i = 0
+            var plainStart = 0
+            fun flushPlain(end: Int) {
+                if (plainStart < end) out += RichSegment.Text(input.substring(plainStart, end))
+            }
+            while (i < input.length) {
+                val slice = input.substring(i)
+                val cite = prefixCiteRegex.find(slice)
+                if (cite != null) {
+                    flushPlain(i)
+                    cite.groupValues[1].toIntOrNull()?.let { out += RichSegment.Citation(it) }
+                    i += cite.value.length
+                    plainStart = i
+                    continue
+                }
+                if (slice.startsWith("**")) {
+                    val close = input.indexOf("**", startIndex = i + 2)
+                    if (close > i + 2) {
+                        flushPlain(i)
+                        val inner = input.substring(i + 2, close)
+                        if (citationFindRegex.containsMatchIn(inner)) {
+                            val sub = ArrayList<RichSegment>()
+                            parseInlineSegments(inner, sub)
+                            for (seg in sub) {
+                                out += if (seg is RichSegment.Text) RichSegment.Bold(seg.value) else seg
+                            }
+                        } else {
+                            out += RichSegment.Bold(inner)
+                        }
+                        i = close + 2
+                        plainStart = i
+                        continue
+                    }
+                }
+                if (input[i] == '`') {
+                    val close = input.indexOf('`', startIndex = i + 1)
+                    if (close > i + 1) {
+                        flushPlain(i)
+                        out += RichSegment.Code(input.substring(i + 1, close))
+                        i = close + 1
+                        plainStart = i
+                        continue
+                    }
+                }
+                if (slice.startsWith("~~")) {
+                    val close = input.indexOf("~~", startIndex = i + 2)
+                    if (close > i + 2) {
+                        flushPlain(i)
+                        out += RichSegment.Strike(input.substring(i + 2, close))
+                        i = close + 2
+                        plainStart = i
+                        continue
+                    }
+                }
+                if (input[i] == '*' && !slice.startsWith("**")) {
+                    val innerStart = i + 1
+                    if (innerStart < input.length && !input[innerStart].isWhitespace()) {
+                        val close = input.indexOf('*', startIndex = innerStart)
+                        if (close > innerStart && !input[close - 1].isWhitespace()) {
+                            val afterClose = close + 1
+                            if (afterClose == input.length || input[afterClose] != '*') {
+                                flushPlain(i)
+                                out += RichSegment.Italic(input.substring(innerStart, close))
+                                i = afterClose
+                                plainStart = i
+                                continue
+                            }
+                        }
+                    }
+                }
+                i++
+            }
+            flushPlain(input.length)
+        }
 
         internal fun mergeNote(existing: String?, addition: String): String {
             val old = existing?.trim().orEmpty()
             if (old.isEmpty()) return addition
             if (addition in old) return old
             return "$old\n\n$addition"
+        }
+
+        /** Combines user-selected questions and/or Companion answers into one clean thought note. */
+        fun composedThought(turns: List<Turn>, picks: Set<MessagePick>): String {
+            if (picks.isEmpty()) return ""
+            val hasQuestions = turns.any { MessagePick(it.id, MessagePick.Role.Question) in picks && it.question.trim().isNotEmpty() }
+            val hasAnswers = turns.any { turn ->
+                MessagePick(turn.id, MessagePick.Role.Answer) in picks &&
+                    turn.answer?.takeIf { !it.notYet }?.let { noteText(it.text).isNotEmpty() } == true
+            }
+            val labelBoth = hasQuestions && hasAnswers
+            val blocks = ArrayList<String>()
+            for (turn in turns) {
+                val lines = ArrayList<String>()
+                if (MessagePick(turn.id, MessagePick.Role.Question) in picks) {
+                    val q = turn.question.trim()
+                    if (q.isNotEmpty()) lines += if (labelBoth) t("问：%@", q) else q
+                }
+                if (MessagePick(turn.id, MessagePick.Role.Answer) in picks) {
+                    val a = turn.answer?.takeIf { !it.notYet }?.let { noteText(it.text) }.orEmpty()
+                    if (a.isNotEmpty()) lines += if (labelBoth) t("答：%@", a) else a
+                }
+                if (lines.isNotEmpty()) blocks += lines.joinToString("\n")
+            }
+            return blocks.joinToString("\n\n")
         }
 
         /** The answer (with `<think>` blocks removed), and the 接着问 line taken off its end. */
@@ -608,67 +851,151 @@ class BookCompanion(private val model: ReaderModel) {
     }
 }
 
-/** 用户保存在「设置 · 书伴」里的常用提问，同时出现在底部建议栏和 `/` 快捷指令里. */
+/** 用户保存在「设置 · 书伴」里的常用提问，支持默认 `/指令` 与用户自定义修改，同时出现在底部建议栏和 `/` 快捷指令里. */
 object CompanionPrompts {
+    data class Item(
+        val id: String,
+        val command: String,
+        val prompt: String,
+    )
+
     const val KEY = "companion.customPrompts"
     const val MAX_COUNT = 8
-    const val MAX_LENGTH = 120
+    const val MAX_LENGTH = 160
+    const val MAX_COMMAND_LENGTH = 20
+
+    val reservedCommands = setOf(
+        "recap", "chapter", "characters", "explain", "quote", "quiz",
+        "read", "whole", "model", "clear", "settings",
+    )
 
     var version by androidx.compose.runtime.mutableIntStateOf(0)
         private set
 
-    val presets: List<String>
+    val defaults: List<Item>
         get() = listOf(
-            t("拆解这句语法与长难句"),
-            t("把这段古文译成现代白话"),
-            t("提炼核心论点与逻辑"),
+            Item(id = "default-grammar", command = "grammar", prompt = t("拆解这句语法与长难句")),
+            Item(id = "default-baihua", command = "baihua", prompt = t("把这段古文译成现代白话")),
+            Item(id = "default-logic", command = "logic", prompt = t("提炼核心论点与逻辑")),
         )
 
-    val list: List<String>
+    val items: List<Item>
         get() {
-            if (!app.yuyue.design.Prefs.isReady) return emptyList()
-            val raw = app.yuyue.design.Prefs.string(KEY, "[]")
-            val arr = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
-            return normalized((0 until arr.length()).mapNotNull { arr.optString(it, "").ifEmpty { null } })
+            if (!app.yuyue.design.Prefs.isReady) return defaults
+            val raw = app.yuyue.design.Prefs.string(KEY, "")
+            if (raw.isNotEmpty()) {
+                val arr = runCatching { JSONArray(raw) }.getOrNull()
+                if (arr != null) {
+                    val parsed = (0 until arr.length()).mapNotNull { idx ->
+                        val obj = arr.optJSONObject(idx) ?: return@mapNotNull null
+                        Item(
+                            id = obj.optString("id", ""),
+                            command = obj.optString("command", ""),
+                            prompt = obj.optString("prompt", ""),
+                        )
+                    }
+                    return normalized(parsed)
+                }
+            }
+            return defaults
         }
 
-    fun normalized(items: List<String>): List<String> {
-        val seen = LinkedHashSet<String>()
-        for (raw in items) {
-            val trimmed = raw.trim().take(MAX_LENGTH)
-            if (trimmed.isNotEmpty() && seen.add(trimmed) && seen.size >= MAX_COUNT) break
-        }
-        return seen.toList()
+    val list: List<String> get() = items.map { it.prompt }
+
+    val isDefault: Boolean get() = items == defaults
+
+    fun nextDefaultCommand(existing: List<Item> = items): String {
+        val used = reservedCommands + existing.map { it.command.lowercase() }
+        var n = 1
+        while ("ask$n" in used) n++
+        return "ask$n"
     }
 
-    fun adding(prompt: String, current: List<String>): List<String> {
-        val trimmed = prompt.trim().take(MAX_LENGTH)
+    fun sanitizeCommand(
+        raw: String,
+        fallback: String,
+        existing: List<Item> = emptyList(),
+        excludingID: String? = null,
+    ): String {
+        val stripped = raw.trim().trimStart('/', '／').filterNot { it.isWhitespace() }.lowercase()
+        val cleanFallback = fallback.trim().trimStart('/', '／').filterNot { it.isWhitespace() }.lowercase()
+        val base = (stripped.ifEmpty { cleanFallback.ifEmpty { "ask1" } }).take(MAX_COMMAND_LENGTH)
+        val used = reservedCommands + existing.filter { it.id != excludingID }.map { it.command.lowercase() }
+        if (base !in used) return base
+        var n = 2
+        while (true) {
+            val suffix = n.toString()
+            val candidate = base.take(maxOf(1, MAX_COMMAND_LENGTH - suffix.length)) + suffix
+            if (candidate !in used) return candidate
+            n++
+        }
+    }
+
+    fun normalized(rawItems: List<Item>): List<Item> {
+        val seenPrompts = HashSet<String>()
+        val seenIDs = HashSet<String>()
+        val out = ArrayList<Item>()
+        for (raw in rawItems) {
+            val trimmedPrompt = raw.prompt.trim().take(MAX_LENGTH)
+            if (trimmedPrompt.isEmpty() || !seenPrompts.add(trimmedPrompt)) continue
+            val cleanID = raw.id.trim()
+            val resolvedID = if (cleanID.isEmpty() || !seenIDs.add(cleanID)) UUID.randomUUID().toString() else cleanID
+            val fallback = nextDefaultCommand(out)
+            val cmd = sanitizeCommand(raw.command, fallback = fallback, existing = out, excludingID = resolvedID)
+            out += Item(id = resolvedID, command = cmd, prompt = trimmedPrompt)
+            if (out.size >= MAX_COUNT) break
+        }
+        return out
+    }
+
+    fun upserting(item: Item, current: List<Item>): List<Item> {
         val base = normalized(current)
-        if (trimmed.isEmpty() || trimmed in base || base.size >= MAX_COUNT) return base
-        return base + trimmed
+        val trimmedPrompt = item.prompt.trim().take(MAX_LENGTH)
+        if (trimmedPrompt.isEmpty()) return base
+        val idx = base.indexOfFirst { it.id == item.id }
+        if (idx >= 0) {
+            if (base.withIndex().any { it.index != idx && it.value.prompt == trimmedPrompt }) return base
+            val copy = base.toMutableList()
+            val cmd = sanitizeCommand(item.command, fallback = copy[idx].command, existing = copy, excludingID = item.id)
+            copy[idx] = Item(id = item.id, command = cmd, prompt = trimmedPrompt)
+            return copy
+        }
+        if (base.size >= MAX_COUNT || base.any { it.prompt == trimmedPrompt }) return base
+        val resolvedID = item.id.trim().ifEmpty { UUID.randomUUID().toString() }
+        val fallback = nextDefaultCommand(base)
+        val cmd = sanitizeCommand(item.command, fallback = fallback, existing = base, excludingID = resolvedID)
+        return base + Item(id = resolvedID, command = cmd, prompt = trimmedPrompt)
     }
 
-    fun removing(prompt: String, current: List<String>): List<String> =
-        normalized(current).filter { it != prompt }
+    fun removing(id: String, current: List<Item>): List<Item> =
+        normalized(current).filter { it.id != id }
 
-    fun add(prompt: String) {
-        val cur = list
-        val next = adding(prompt, cur)
-        if (next == cur) return
+    fun upsert(item: Item) {
+        val cur = items
+        val next = upserting(item, cur)
+        if (next == cur && app.yuyue.design.Prefs.string(KEY, "").isNotEmpty()) return
         save(next)
     }
 
-    fun remove(prompt: String) {
-        val cur = list
-        val next = removing(prompt, cur)
-        if (next == cur) return
+    fun remove(id: String) {
+        val cur = items
+        val next = removing(id, cur)
+        if (next == cur && app.yuyue.design.Prefs.string(KEY, "").isNotEmpty()) return
         save(next)
     }
 
-    private fun save(items: List<String>) {
+    fun resetDefaults() {
+        if (!app.yuyue.design.Prefs.isReady) return
+        app.yuyue.design.Prefs.set(KEY, "")
+        version++
+    }
+
+    private fun save(next: List<Item>) {
         if (!app.yuyue.design.Prefs.isReady) return
         val arr = JSONArray()
-        for (item in items) arr.put(item)
+        for (item in normalized(next)) {
+            arr.put(JSONObject().put("id", item.id).put("command", item.command).put("prompt", item.prompt))
+        }
         app.yuyue.design.Prefs.set(KEY, arr.toString())
         version++
     }
@@ -786,7 +1113,7 @@ data class CompanionCommand(
                     icon = Icons.textBubble, category = Category.Ask, action = Action.Quiz,
                     takesArgument = true, keywords = listOf("考考我", "测验", "提问", "思考", "test"),
                 ),
-            ) + customCommands(CompanionPrompts.list) + listOf(
+            ) + customCommands(CompanionPrompts.items) + listOf(
                 CompanionCommand(
                     id = "read", name = "read",
                     title = t("仅限已读"), subtitle = t("切回不剧透模式"),
@@ -819,16 +1146,16 @@ data class CompanionCommand(
                 ),
             )
 
-        fun customCommands(prompts: List<String>): List<CompanionCommand> =
-            prompts.mapIndexed { index, prompt ->
+        fun customCommands(items: List<CompanionPrompts.Item>): List<CompanionCommand> =
+            items.map { item ->
                 CompanionCommand(
-                    id = "custom-${index + 1}",
-                    name = "p${index + 1}",
-                    title = prompt,
+                    id = "custom-${item.id}",
+                    name = item.command,
+                    title = item.prompt,
                     subtitle = t("常用提问"),
                     icon = Icons.textBubble,
                     category = Category.Ask,
-                    action = Action.Custom(prompt),
+                    action = Action.Custom(item.prompt),
                     takesArgument = true,
                     keywords = listOf("常用", "自定义", "custom", "prompt"),
                 )

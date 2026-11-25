@@ -204,7 +204,7 @@ struct WalkthroughRegressionTests {
         #expect(BookCompanion.classify(question: "这里为什么写橘子？") == .focused)
     }
 
-    @Test func `companion streaming strips reasoning blocks, trailing follow-ups, and clean note citations`() {
+    @MainActor @Test func `companion streaming strips reasoning blocks, trailing follow-ups, and clean note citations`() {
         let thinkingOnly = BookCompanion.streamingPreview(from: "<think>正在推理人物动机", hideNotYet: true)
         #expect(thinkingOnly.visible.isEmpty)
         #expect(thinkingOnly.thinking == true)
@@ -229,6 +229,44 @@ struct WalkthroughRegressionTests {
         #expect(finalBody == "第一段分析 [1]。\n第二段补充 [3]。")
         #expect(asks == ["为什么买橘子？", "两次流泪有什么不同？"])
         #expect(BookCompanion.noteText(from: finalBody) == "第一段分析。\n第二段补充。")
+
+        // Markdown rendering next to CJK punctuation & bullet list cleanup
+        let mdReply = "* **神经症的根源在于性格结构**：人格紊乱是精神疾病的根源 [1]。\n* **文化因素**：不同于前人 [2]。"
+        let segs = BookCompanion.richSegments(from: mdReply)
+        #expect(segs.contains(.bullet))
+        #expect(segs.contains(.bold("神经症的根源在于性格结构")))
+        #expect(segs.contains(.citation(1)))
+        #expect(BookCompanion.noteText(from: mdReply) == "• 神经症的根源在于性格结构：人格紊乱是精神疾病的根源。\n• 文化因素：不同于前人。")
+
+        // Multi-select composed thought: replies only vs Q+A combined
+        let t1 = BookCompanion.Turn(
+            question: "这一章讲了什么？",
+            quote: nil,
+            scope: .read,
+            anchor: nil,
+            askedAt: Position(section: 0, sentence: 0),
+            answer: BookCompanion.Answer(text: "* **核心观点**：性格冲突 [1]。", sources: [:], label: "m", notYet: false)
+        )
+        let t2 = BookCompanion.Turn(
+            question: "那弗洛伊德怎么看？",
+            quote: nil,
+            scope: .read,
+            anchor: nil,
+            askedAt: Position(section: 0, sentence: 1),
+            answer: BookCompanion.Answer(text: "他更强调本能 [2]。", sources: [:], label: "m", notYet: false)
+        )
+        let answersOnly = BookCompanion.composedThought(from: [t1, t2], picks: [
+            .init(turnID: t1.id, role: .answer),
+            .init(turnID: t2.id, role: .answer),
+        ])
+        #expect(answersOnly == "• 核心观点：性格冲突。\n\n他更强调本能。")
+
+        let qaMixed = BookCompanion.composedThought(from: [t1, t2], picks: [
+            .init(turnID: t1.id, role: .question),
+            .init(turnID: t1.id, role: .answer),
+            .init(turnID: t2.id, role: .question),
+        ])
+        #expect(qaMixed == "问：这一章讲了什么？\n答：• 核心观点：性格冲突。\n\n问：那弗洛伊德怎么看？")
     }
 
     @Test func `paragraph translation detects classical Chinese vs Japanese vs English and parses numbered batches`() {
@@ -253,25 +291,50 @@ struct WalkthroughRegressionTests {
         #expect(ParagraphTranslation.parseNumbered("单段直接返回译文。", count: 1) == ["单段直接返回译文。"])
     }
 
-    @Test func `custom companion prompts deduplicate, cap at eight, and wire into slash commands`() {
-        var list: [String] = []
-        list = CompanionPrompts.adding("  拆解这句语法与长难句  ", to: list)
-        list = CompanionPrompts.adding("拆解这句语法与长难句", to: list)
-        list = CompanionPrompts.adding("把这段古文译成现代白话", to: list)
-        #expect(list == ["拆解这句语法与长难句", "把这段古文译成现代白话"])
+    @Test func `custom companion prompts deduplicate, sanitize commands, cap at eight, and wire into slash commands`() {
+        #expect(CompanionPrompts.defaults.map(\.command) == ["grammar", "baihua", "logic"])
+
+        var items: [CompanionPrompts.Item] = []
+        items = CompanionPrompts.upserting(
+            CompanionPrompts.Item(id: "a", command: "  /Syntax  ", prompt: "  拆解这句语法与长难句  "),
+            in: items
+        )
+        items = CompanionPrompts.upserting(
+            CompanionPrompts.Item(id: "dup", command: "other", prompt: "拆解这句语法与长难句"),
+            in: items
+        )
+        items = CompanionPrompts.upserting(
+            CompanionPrompts.Item(id: "b", command: "", prompt: "把这段古文译成现代白话"),
+            in: items
+        )
+        #expect(items.map(\.command) == ["syntax", "ask1"])
+        #expect(items.map(\.prompt) == ["拆解这句语法与长难句", "把这段古文译成现代白话"])
+
+        // Editing an existing item updates its command and avoids reserved command collisions.
+        items = CompanionPrompts.upserting(
+            CompanionPrompts.Item(id: "b", command: "/recap", prompt: "把这段古文译成现代白话"),
+            in: items
+        )
+        #expect(items[1].command == "recap2")
 
         for i in 1 ... 10 {
-            list = CompanionPrompts.adding("提问 \(i)", to: list)
+            items = CompanionPrompts.upserting(
+                CompanionPrompts.Item(id: "item-\(i)", command: "", prompt: "提问 \(i)"),
+                in: items
+            )
         }
-        #expect(list.count == CompanionPrompts.maxCount)
-        list = CompanionPrompts.removing("把这段古文译成现代白话", from: list)
-        #expect(list.count == CompanionPrompts.maxCount - 1)
+        #expect(items.count == CompanionPrompts.maxCount)
+        items = CompanionPrompts.removing(id: "b", from: items)
+        #expect(items.count == CompanionPrompts.maxCount - 1)
 
-        let cmds = CompanionCommand.customCommands(from: ["拆解这句长难句", "文言译白话"])
-        #expect(cmds.map(\.name) == ["p1", "p2"])
+        let cmds = CompanionCommand.customCommands(from: [
+            CompanionPrompts.Item(id: "1", command: "grammar", prompt: "拆解这句长难句"),
+            CompanionPrompts.Item(id: "2", command: "fy", prompt: "文言译白话"),
+        ])
+        #expect(cmds.map(\.name) == ["grammar", "fy"])
         let matched = CompanionCommand.matching("文言", in: cmds)
         #expect(matched.first?.action == .custom("文言译白话"))
-        let parsed = CompanionCommand.parse("/p1 重点看从句", in: cmds)
+        let parsed = CompanionCommand.parse("/grammar 重点看从句", in: cmds)
         #expect(parsed?.command.question(argument: parsed?.argument ?? "", hasQuote: true, chapterTitle: nil) == "拆解这句长难句\n重点看从句")
     }
 

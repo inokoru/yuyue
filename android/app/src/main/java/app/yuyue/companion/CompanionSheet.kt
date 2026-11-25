@@ -79,8 +79,39 @@ fun CompanionSheet(model: ReaderModel, settings: () -> Unit, dismiss: () -> Unit
     var draft by remember { mutableStateOf(TextFieldValue("")) }
     var slashDismissedFor by remember { mutableStateOf<String?>(null) }
     var slashManualOpen by remember { mutableStateOf(false) }
+    var pickingThought by remember { mutableStateOf(false) }
+    var pickedMessages by remember { mutableStateOf<Set<BookCompanion.MessagePick>>(emptySet()) }
+    var previewMerged by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val readUpTo = model.bookPage?.let { t("截至第 %lld 页", it) } ?: t("截至当前位置")
+
+    fun allSelectablePicks(): Set<BookCompanion.MessagePick> {
+        val out = LinkedHashSet<BookCompanion.MessagePick>()
+        for (turn in companion.turns) {
+            if (turn.question.trim().isNotEmpty()) out += BookCompanion.MessagePick(turn.id, BookCompanion.MessagePick.Role.Question)
+            if (turn.answer?.notYet == false) out += BookCompanion.MessagePick(turn.id, BookCompanion.MessagePick.Role.Answer)
+        }
+        return out
+    }
+
+    fun enterPicking(initial: BookCompanion.MessagePick? = null) {
+        slashManualOpen = false
+        slashDismissedFor = null
+        pickedMessages = initial?.let { setOf(it) } ?: emptySet()
+        previewMerged = false
+        pickingThought = true
+    }
+
+    fun exitPicking() {
+        pickingThought = false
+        previewMerged = false
+        pickedMessages = emptySet()
+    }
+
+    fun togglePick(pick: BookCompanion.MessagePick) {
+        pickedMessages = if (pick in pickedMessages) pickedMessages - pick else pickedMessages + pick
+        if (pickedMessages.isEmpty()) previewMerged = false
+    }
 
     val promptVersion = CompanionPrompts.version
     val slashQuery = CompanionCommand.slashQuery(draft.text)?.takeIf { slashDismissedFor != draft.text }
@@ -163,15 +194,46 @@ fun CompanionSheet(model: ReaderModel, settings: () -> Unit, dismiss: () -> Unit
     ModalBottomSheet({ model.pager.setSource(null); dismiss() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle(bottom = 2.dp) }) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).imePadding()) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.size(26.dp).background(YY.tint.accentSoft, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
-                        Icon(Icons.sparkle, null, tint = YY.tint.accent, modifier = Modifier.size(14.dp))
+                if (pickingThought) {
+                    val all = allSelectablePicks()
+                    val allChosen = all.isNotEmpty() && pickedMessages == all
+                    Text(
+                        if (pickedMessages.isEmpty()) t("勾选要存的消息") else t("已选 %lld 条", pickedMessages.size),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = YY.c.t1,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        if (allChosen) t("取消全选") else t("全选"),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = YY.tint.accent,
+                        modifier = Modifier.clickable {
+                            pickedMessages = if (allChosen) emptySet() else all
+                            if (allChosen) previewMerged = false
+                        }.padding(horizontal = 8.dp, vertical = 10.dp),
+                    )
+                    Text(
+                        t("取消"),
+                        fontSize = 13.sp,
+                        color = YY.c.t2,
+                        modifier = Modifier.clickable { exitPicking() }.padding(horizontal = 8.dp, vertical = 10.dp),
+                    )
+                } else {
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.size(26.dp).background(YY.tint.accentSoft, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
+                            Icon(Icons.sparkle, null, tint = YY.tint.accent, modifier = Modifier.size(14.dp))
+                        }
+                        Text(t("书伴"), fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1)
                     }
-                    Text(t("书伴"), fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1)
-                }
-                if (companion.turns.isNotEmpty()) Text(t("清空对话"), fontSize = 13.sp, color = YY.c.t2, modifier = Modifier.clickable { companion.clear() }.padding(horizontal = 8.dp, vertical = 10.dp))
-                Box(Modifier.size(44.dp).clip(CircleShape).clickable(onClickLabel = t("书伴设置"), onClick = settings), contentAlignment = Alignment.Center) {
-                    Icon(Icons.settings, t("书伴设置"), tint = YY.c.t2, modifier = Modifier.size(20.dp))
+                    if (companion.turns.isNotEmpty()) {
+                        Text(t("多选存"), fontSize = 13.sp, color = YY.c.t2, modifier = Modifier.clickable { enterPicking() }.padding(horizontal = 8.dp, vertical = 10.dp))
+                        Text(t("清空对话"), fontSize = 13.sp, color = YY.c.t2, modifier = Modifier.clickable { companion.clear() }.padding(horizontal = 8.dp, vertical = 10.dp))
+                    }
+                    Box(Modifier.size(44.dp).clip(CircleShape).clickable(onClickLabel = t("书伴设置"), onClick = settings), contentAlignment = Alignment.Center) {
+                        Icon(Icons.settings, t("书伴设置"), tint = YY.c.t2, modifier = Modifier.size(20.dp))
+                    }
                 }
             }
             Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -191,21 +253,88 @@ fun CompanionSheet(model: ReaderModel, settings: () -> Unit, dismiss: () -> Unit
                 if (companion.turns.isEmpty()) item(key = "welcome") { Box(Modifier.animateItem(fadeInSpec = YYMotion.standard(), placementSpec = YYMotion.place(), fadeOutSpec = YYMotion.exit())) { Welcome(settings) } }
                 items(companion.turns, key = { it.id }) { turn ->
                     Column(Modifier.animateItem(fadeInSpec = YYMotion.standard(), placementSpec = YYMotion.place(), fadeOutSpec = YYMotion.exit()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row { Spacer(Modifier.weight(1f).width(48.dp)); Bubble(turn.question) }
-                        androidx.compose.animation.AnimatedContent(
-                            targetState = when {
-                                turn.answer != null -> 2
-                                turn.failed != null -> 3
-                                !turn.streaming.isNullOrEmpty() -> 1
-                                else -> 0
-                            },
-                            transitionSpec = { YYMotion.swap(reduce) },
-                            label = "reply",
-                        ) { _ -> Reply(model, turn, readUpTo) }
+                        val qPick = BookCompanion.MessagePick(turn.id, BookCompanion.MessagePick.Role.Question)
+                        SelectableMessage(enabled = pickingThought, selected = qPick in pickedMessages, onToggle = { togglePick(qPick) }) {
+                            Row(Modifier.fillMaxWidth()) { Spacer(Modifier.weight(1f).width(48.dp)); Bubble(turn.question) }
+                        }
+                        val aPick = BookCompanion.MessagePick(turn.id, BookCompanion.MessagePick.Role.Answer)
+                        SelectableMessage(enabled = pickingThought && turn.answer?.notYet == false, selected = aPick in pickedMessages, onToggle = { togglePick(aPick) }) {
+                            androidx.compose.animation.AnimatedContent(
+                                targetState = when {
+                                    turn.answer != null -> 2
+                                    turn.failed != null -> 3
+                                    !turn.streaming.isNullOrEmpty() -> 1
+                                    else -> 0
+                                },
+                                transitionSpec = { YYMotion.swap(reduce) },
+                                label = "reply",
+                            ) { _ ->
+                                Reply(
+                                    model = model,
+                                    turn = turn,
+                                    readUpTo = readUpTo,
+                                    pickingThought = pickingThought,
+                                    onStartPicking = { enterPicking(aPick) },
+                                )
+                            }
+                        }
                     }
                 }
             }
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (pickingThought) {
+                val previewText = if (previewMerged && pickedMessages.isNotEmpty()) {
+                    BookCompanion.composedThought(companion.turns, pickedMessages)
+                } else ""
+                Column(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)
+                        .background(YY.c.card, RoundedCornerShape(16.dp))
+                        .border(0.5.dp, YY.c.line, RoundedCornerShape(16.dp))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            t("可同时勾选你的提问与多条回答，合并存为 1 条想法"),
+                            fontSize = 12.sp,
+                            color = YY.c.t3,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (pickedMessages.isNotEmpty()) {
+                            Text(
+                                if (previewMerged) t("收起预览") else t("预览合并"),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = YY.tint.accent,
+                                modifier = Modifier.clickable { previewMerged = !previewMerged }.padding(horizontal = 2.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
+                    if (previewText.isNotEmpty()) {
+                        Box(
+                            Modifier.fillMaxWidth().heightIn(max = 124.dp)
+                                .background(YY.c.inset, RoundedCornerShape(12.dp))
+                                .verticalScroll(rememberScrollState())
+                                .padding(horizontal = 12.dp, vertical = 9.dp),
+                        ) {
+                            Text(previewText, fontSize = 13.sp, lineHeight = 20.sp, color = YY.c.t2)
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        YYButton(t("取消"), ButtonKind.Raised, ButtonSize.Small, onClick = { exitPicking() })
+                        Spacer(Modifier.weight(1f))
+                        YYButton(
+                            if (pickedMessages.size > 1) t("合并存为想法 (%lld)", pickedMessages.size) else t("存为想法 (%lld)", pickedMessages.size),
+                            ButtonKind.Main,
+                            ButtonSize.Small,
+                            enabled = pickedMessages.isNotEmpty(),
+                        ) {
+                            if (companion.saveThought(pickedMessages)) exitPicking()
+                        }
+                    }
+                }
+            } else Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (slashMatches.isNotEmpty()) {
                     SlashCommandCard(
                         commands = slashMatches,
@@ -367,7 +496,7 @@ private fun Welcome(settings: () -> Unit) {
     val config = CompanionConfig.current
     Column(Modifier.fillMaxWidth().background(YY.c.inset, RoundedCornerShape(16.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(t("读到哪儿问到哪儿"), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1)
-        Text(t("可以问人物关系、这句是什么意思、前面发生了什么。回答标着出处，点一下就翻到那句。"), fontSize = 14.sp, lineHeight = 21.sp, color = YY.c.t2)
+        Text(t("可以问人物关系、这句是什么意思、前面发生了什么。回答标着出处，点一下就翻到那句；也可点回答下方的「存为想法」收进笔记。"), fontSize = 14.sp, lineHeight = 21.sp, color = YY.c.t2)
         if (config?.isReady != true) {
             Text(if (config == null) t("还没添加服务商") else t("还没填好 %@ 的 Key", config.provider.title), fontSize = 13.sp, color = YY.c.t3)
             YYButton(t("去设置 · 书伴"), ButtonKind.Raised, ButtonSize.Small, onClick = settings)
@@ -387,7 +516,44 @@ private fun Bubble(text: String) {
 }
 
 @Composable
-private fun Reply(model: ReaderModel, turn: BookCompanion.Turn, readUpTo: String) {
+private fun SelectableMessage(
+    enabled: Boolean,
+    selected: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    if (!enabled) {
+        content()
+        return
+    }
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) YY.tint.accentSoft.copy(alpha = 0.45f) else androidx.compose.ui.graphics.Color.Transparent)
+            .border(1.dp, if (selected) YY.tint.accent.copy(alpha = 0.34f) else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(12.dp))
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(
+            if (selected) Icons.checkCircleFill else Icons.circle,
+            null,
+            tint = if (selected) YY.tint.accent else YY.c.t3,
+            modifier = Modifier.padding(top = 4.dp).size(18.dp),
+        )
+        Box(Modifier.weight(1f)) { content() }
+    }
+}
+
+@Composable
+private fun Reply(
+    model: ReaderModel,
+    turn: BookCompanion.Turn,
+    readUpTo: String,
+    pickingThought: Boolean,
+    onStartPicking: () -> Unit,
+) {
     val companion = model.companion
     val answer = turn.answer
     when {
@@ -403,25 +569,36 @@ private fun Reply(model: ReaderModel, turn: BookCompanion.Turn, readUpTo: String
         }
         answer != null -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             val text = cited(answer.text, answer.sources, companion.shown)
-            @Suppress("DEPRECATION")
-            ClickableText(text, style = TextStyle(fontSize = 15.sp, lineHeight = 23.sp, color = YY.c.t1)) { offset ->
-                text.getStringAnnotations("cite", offset, offset).firstOrNull()?.item?.toIntOrNull()?.let { n -> answer.sources[n]?.let(companion::show) }
+            if (pickingThought) {
+                Text(text, style = TextStyle(fontSize = 15.sp, lineHeight = 23.sp, color = YY.c.t1))
+            } else {
+                @Suppress("DEPRECATION")
+                ClickableText(text, style = TextStyle(fontSize = 15.sp, lineHeight = 23.sp, color = YY.c.t1)) { offset ->
+                    text.getStringAnnotations("cite", offset, offset).firstOrNull()?.item?.toIntOrNull()?.let { n -> answer.sources[n]?.let(companion::show) }
+                }
             }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    if (turn.scope == BookCompanion.Scope.Whole) answer.label + t(" · 用了全书") else answer.label,
-                    fontSize = 11.sp,
-                    color = YY.c.t3,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                SaveThoughtChip(saved = turn.savedMarkID != null) { companion.saveThought(turn.id) }
+            if (!pickingThought) {
+                val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SaveThoughtChip(saved = turn.savedMarkID != null) { companion.saveThought(turn.id) }
+                    CopyAnswerChip {
+                        clipboard.setText(AnnotatedString(BookCompanion.noteText(answer.text)))
+                        model.show(app.yuyue.library.Library.Toast(app.yuyue.library.Library.Toast.Icon.Check, t("复制好了"), ""))
+                    }
+                    MultiPickChip(onClick = onStartPicking)
+                }
             }
+            Text(
+                if (turn.scope == BookCompanion.Scope.Whole) answer.label + t(" · 用了全书") else answer.label,
+                fontSize = 11.sp,
+                color = YY.c.t3,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
         turn.failed != null -> Text(turn.failed, fontSize = 13.sp, color = YY.c.danger)
         !turn.streaming.isNullOrEmpty() -> {
-            val preview = cited(turn.streaming, emptyMap(), null)
+            val preview = cited(turn.streaming, emptyMap(), null, streaming = true)
             Text(preview, style = TextStyle(fontSize = 15.sp, lineHeight = 23.sp, color = YY.c.t1))
         }
         else -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -434,49 +611,92 @@ private fun Reply(model: ReaderModel, turn: BookCompanion.Turn, readUpTo: String
 @Composable
 private fun SaveThoughtChip(saved: Boolean, onClick: () -> Unit) {
     Row(
-        Modifier.height(26.dp)
-            .background(if (saved) YY.tint.accentSoft else YY.c.inset, CircleShape)
+        Modifier.height(28.dp)
+            .background(if (saved) YY.c.ok.copy(alpha = 0.12f) else YY.c.card, CircleShape)
+            .border(0.5.dp, if (saved) YY.c.ok.copy(alpha = 0.32f) else YY.c.line, CircleShape)
             .clip(CircleShape)
             .pressable(scale = 0.96f, onClick = onClick)
-            .padding(horizontal = 9.dp),
+            .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Icon(if (saved) Icons.check else Icons.noteEdit, null, tint = if (saved) YY.tint.accent else YY.c.t2, modifier = Modifier.size(12.dp))
+        Icon(if (saved) Icons.check else Icons.noteEdit, null, tint = if (saved) YY.c.ok else YY.c.t1, modifier = Modifier.size(12.dp))
         Text(
             if (saved) t("已存想法") else t("存为想法"),
-            fontSize = 11.5.sp,
+            fontSize = 12.sp,
             fontWeight = if (saved) FontWeight.SemiBold else FontWeight.Medium,
-            color = if (saved) YY.tint.accent else YY.c.t2,
+            color = if (saved) YY.c.ok else YY.c.t1,
         )
     }
 }
 
-/** The answer with each [n] turned into a little 第 N 页 tag that goes there. */
 @Composable
-private fun cited(rawText: String, sources: Map<Int, BookCompanion.Source>, shown: BookCompanion.Source?): AnnotatedString {
+private fun CopyAnswerChip(onClick: () -> Unit) {
+    Row(
+        Modifier.height(28.dp)
+            .background(YY.c.card, CircleShape)
+            .border(0.5.dp, YY.c.line, CircleShape)
+            .clip(CircleShape)
+            .pressable(scale = 0.96f, onClick = onClick)
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(Icons.copy, null, tint = YY.c.t2, modifier = Modifier.size(12.dp))
+        Text(t("复制"), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = YY.c.t2)
+    }
+}
+
+@Composable
+private fun MultiPickChip(onClick: () -> Unit) {
+    Row(
+        Modifier.height(28.dp)
+            .background(YY.c.card, CircleShape)
+            .border(0.5.dp, YY.c.line, CircleShape)
+            .clip(CircleShape)
+            .pressable(scale = 0.96f, onClick = onClick)
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(Icons.list, null, tint = YY.c.t2, modifier = Modifier.size(12.dp))
+        Text(t("多选"), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = YY.c.t2)
+    }
+}
+
+/** Renders Markdown (bold, lists, headings, inline code) and turns each `[n]` into a clickable `第 N 页` tag. */
+@Composable
+private fun cited(rawText: String, sources: Map<Int, BookCompanion.Source>, shown: BookCompanion.Source?, streaming: Boolean = false): AnnotatedString {
     val accent = YY.tint.accent
     val soft = YY.tint.accentSoft
     val card = YY.c.card
+    val inset = YY.c.inset
+    val t3 = YY.c.t3
     return buildAnnotatedString {
-        var rest = rawText
-        val re = Regex("""\s?\[(\d+)]""")
-        while (true) {
-            val m = re.find(rest) ?: break
-            append(rest.substring(0, m.range.first))
-            val n = m.groupValues[1].toIntOrNull()
-            val source = n?.let { sources[it] }
-            if (source != null) {
-                val place = source.page?.let { t("第 %lld 页", it) } ?: t("出处")
-                val label = " " + place + (if (source.later) t(" · 未读") else "") + " "
-                val on = shown == source
-                append(" ")
-                pushStringAnnotation("cite", "$n")
-                withStyle(SpanStyle(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum", color = if (on) card else accent, background = if (on) accent else soft)) { append(label) }
-                pop()
+        for (segment in BookCompanion.richSegments(rawText, streaming = streaming)) {
+            when (segment) {
+                is BookCompanion.RichSegment.Text -> append(segment.value)
+                is BookCompanion.RichSegment.Bold -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(segment.value) }
+                is BookCompanion.RichSegment.Italic -> withStyle(SpanStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)) { append(segment.value) }
+                is BookCompanion.RichSegment.Code -> withStyle(SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 13.5.sp, background = inset)) { append(" ${segment.value} ") }
+                is BookCompanion.RichSegment.Strike -> withStyle(SpanStyle(color = t3, textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough)) { append(segment.value) }
+                BookCompanion.RichSegment.Bullet -> withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = accent)) { append("•\u00A0") }
+                BookCompanion.RichSegment.QuoteBar -> withStyle(SpanStyle(color = t3)) { append("▎\u00A0") }
+                is BookCompanion.RichSegment.Heading -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, fontSize = 15.5.sp)) { append(segment.value) }
+                is BookCompanion.RichSegment.Citation -> {
+                    val source = sources[segment.number]
+                    if (source != null) {
+                        val place = source.page?.let { t("第 %lld 页", it) } ?: t("出处")
+                        val label = "\u00A0" + place + (if (source.later) t(" · 未读") else "") + "\u00A0"
+                        val on = shown == source
+                        append(" ")
+                        pushStringAnnotation("cite", "${segment.number}")
+                        withStyle(SpanStyle(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum", color = if (on) card else accent, background = if (on) accent else soft)) { append(label) }
+                        pop()
+                    }
+                }
+                BookCompanion.RichSegment.Newline -> append("\n")
             }
-            rest = rest.substring(m.range.last + 1)
         }
-        append(rest)
     }
 }

@@ -1163,6 +1163,9 @@ struct CompanionPanel: View {
     /// The quote and the box: the ready lines and slash menu float just above them.
     @State private var askHeight: CGFloat = 76
     @State private var typing = false
+    @State private var pickingThought = false
+    @State private var pickedMessages: Set<BookCompanion.MessagePick> = []
+    @State private var previewMerged = false
     @Environment(\.openSettings) private var openSettings
     @Environment(\.colorScheme) private var scheme
     @Environment(\.yyButtonOnPaper) private var onPaper
@@ -1191,12 +1194,16 @@ struct CompanionPanel: View {
             mode.padding(.top, 12)
             Rectangle().fill(YYColor.line).frame(height: 1).padding(.top, 14)
             chat
-            VStack(alignment: .leading, spacing: 0) {
-                if let quote = model.companionQuote { quoted(quote) }
-                input
+            if pickingThought {
+                pickBar.padding(.top, 10)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    if let quote = model.companionQuote { quoted(quote) }
+                    input
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { askHeight = $0 }
+                .padding(.top, 10)
             }
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { askHeight = $0 }
-            .padding(.top, 10)
         }
         .padding(.horizontal, 14)
         .padding(.top, 16)
@@ -1261,29 +1268,149 @@ struct CompanionPanel: View {
         #endif
     }
 
+    private var allSelectablePicks: Set<BookCompanion.MessagePick> {
+        var out = Set<BookCompanion.MessagePick>()
+        for turn in companion.turns {
+            if !turn.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                out.insert(.init(turnID: turn.id, role: .question))
+            }
+            if let a = turn.answer, !a.notYet {
+                out.insert(.init(turnID: turn.id, role: .answer))
+            }
+        }
+        return out
+    }
+
+    private func enterPicking(initial: BookCompanion.MessagePick? = nil) {
+        linesOpen = false
+        modelPickerOpen = false
+        dismissSlashMenu()
+        pickedMessages = initial.map { [$0] } ?? []
+        previewMerged = false
+        withAnimation(YYMotion.quick) { pickingThought = true }
+    }
+
+    private func exitPicking() {
+        withAnimation(YYMotion.quick) {
+            pickingThought = false
+            previewMerged = false
+            pickedMessages.removeAll()
+        }
+    }
+
+    private func togglePick(_ pick: BookCompanion.MessagePick) {
+        withAnimation(YYMotion.quick) {
+            if pickedMessages.contains(pick) {
+                pickedMessages.remove(pick)
+                if pickedMessages.isEmpty { previewMerged = false }
+            } else {
+                pickedMessages.insert(pick)
+            }
+        }
+    }
+
     private var header: some View {
         HStack(spacing: 8) {
-            Image(systemName: "sparkle").font(.yy(size: 12, weight: .semibold))
+            if pickingThought {
+                let all = allSelectablePicks
+                let allChosen = !all.isEmpty && pickedMessages == all
+                Text(pickedMessages.isEmpty ? String(localized: "勾选要存的消息") : String(localized: "已选 \(pickedMessages.count) 条"))
+                    .font(.yy(size: 13.5, weight: .bold))
+                    .foregroundStyle(YYColor.t1)
+                    .monospacedDigit()
+                Spacer()
+                Button(allChosen ? String(localized: "取消全选") : String(localized: "全选")) {
+                    withAnimation(YYMotion.quick) {
+                        pickedMessages = allChosen ? [] : all
+                        if allChosen { previewMerged = false }
+                    }
+                }
+                .font(.yy(size: 11.5, weight: .medium))
                 .foregroundStyle(tint.accent)
-                .frame(width: 24, height: 24)
-                .background(tint.accentSoft, in: .rect(cornerRadius: 7))
-            Text("书伴").font(.yy(size: 14, weight: .bold)).foregroundStyle(YYColor.t1)
-            Text(model.detail?.summary.title ?? "").font(.yy(size: 10.5)).foregroundStyle(YYColor.t3).lineLimit(1)
-            Spacer()
-            Menu {
-                Button("清空对话") { companion.clear() }.disabled(companion.turns.isEmpty)
-                Button("书伴设置…") { openCompanionSettings() }
-            } label: {
-                Image(systemName: "ellipsis").font(.yy(size: 12, weight: .semibold))
+                .buttonStyle(.plain)
+                Button(String(localized: "取消")) { exitPicking() }
+                    .font(.yy(size: 11.5))
                     .foregroundStyle(YYColor.t2)
-                    .frame(width: 26, height: 26)
-                    .background(YYColor.inset, in: .circle)
+                    .buttonStyle(.plain)
+            } else {
+                Image(systemName: "sparkle").font(.yy(size: 12, weight: .semibold))
+                    .foregroundStyle(tint.accent)
+                    .frame(width: 24, height: 24)
+                    .background(tint.accentSoft, in: .rect(cornerRadius: 7))
+                Text("书伴").font(.yy(size: 14, weight: .bold)).foregroundStyle(YYColor.t1)
+                Text(model.detail?.summary.title ?? "").font(.yy(size: 10.5)).foregroundStyle(YYColor.t3).lineLimit(1)
+                Spacer()
+                Menu {
+                    Button("多选存为想法") { enterPicking() }.disabled(companion.turns.isEmpty)
+                    Divider()
+                    Button("清空对话") { companion.clear() }.disabled(companion.turns.isEmpty)
+                    Button("书伴设置…") { openCompanionSettings() }
+                } label: {
+                    Image(systemName: "ellipsis").font(.yy(size: 12, weight: .semibold))
+                        .foregroundStyle(YYColor.t2)
+                        .frame(width: 26, height: 26)
+                        .background(YYColor.inset, in: .circle)
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .fixedSize()
             }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
         }
+    }
+
+    private var pickBar: some View {
+        let previewText = previewMerged && !pickedMessages.isEmpty
+            ? BookCompanion.composedThought(from: companion.turns, picks: pickedMessages)
+            : ""
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(String(localized: "可同时勾选你的提问与多条回答，合并存为 1 条想法"))
+                    .font(.yy(size: 10.5))
+                    .foregroundStyle(YYColor.t3)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if !pickedMessages.isEmpty {
+                    Button(previewMerged ? String(localized: "收起预览") : String(localized: "预览合并")) {
+                        withAnimation(YYMotion.quick) { previewMerged.toggle() }
+                    }
+                    .font(.yy(size: 11, weight: .semibold))
+                    .foregroundStyle(tint.accent)
+                    .buttonStyle(.plain)
+                    .fixedSize()
+                }
+            }
+            if !previewText.isEmpty {
+                ScrollView {
+                    Text(previewText)
+                        .font(.yy(size: 11.5))
+                        .lineSpacing(4)
+                        .foregroundStyle(YYColor.t2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .frame(maxHeight: 116)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(YYColor.inset, in: .rect(cornerRadius: 10))
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+            HStack(spacing: 8) {
+                Button(String(localized: "取消")) { exitPicking() }
+                    .buttonStyle(YYButtonStyle(kind: .raised, size: .small))
+                Spacer(minLength: 4)
+                Button(pickedMessages.count > 1 ? String(localized: "合并存为想法 (\(pickedMessages.count))") : String(localized: "存为想法 (\(pickedMessages.count))")) {
+                    if companion.saveThought(picks: pickedMessages) {
+                        exitPicking()
+                    }
+                }
+                .buttonStyle(YYButtonStyle(kind: .main, size: .small))
+                .disabled(pickedMessages.isEmpty)
+            }
+        }
+        .padding(10)
+        .background(model.paperTokens.bg, in: .rect(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(YYColor.line, lineWidth: 0.5))
     }
 
     private var mode: some View {
@@ -1309,8 +1436,15 @@ struct CompanionPanel: View {
                     if companion.turns.isEmpty { welcome.transition(.opacity) }
                     ForEach(companion.turns) { turn in
                         VStack(alignment: .leading, spacing: 10) {
-                            bubble(turn.question)
-                            reply(turn).transition(.opacity)
+                            selectableMessage(pick: .init(turnID: turn.id, role: .question), enabled: pickingThought) {
+                                bubble(turn.question)
+                            }
+                            selectableMessage(
+                                pick: .init(turnID: turn.id, role: .answer),
+                                enabled: pickingThought && (turn.answer.map { !$0.notYet } ?? false)
+                            ) {
+                                reply(turn).transition(.opacity)
+                            }
                         }
                         // 正在翻阅原文… gives way to the answer (or the failure) with a fade.
                         .animation(YYMotion.standard, value: turn.answer != nil || turn.failed != nil)
@@ -1340,7 +1474,7 @@ struct CompanionPanel: View {
         let config = CompanionConfig.current
         VStack(alignment: .leading, spacing: 8) {
             Text("读到哪儿问到哪儿").font(.yy(size: 13, weight: .semibold)).foregroundStyle(YYColor.t1)
-            Text("可以问人物关系、这句是什么意思、前面发生了什么。回答标着出处，点一下就翻到那句。")
+            Text("可以问人物关系、这句是什么意思、前面发生了什么。回答标着出处，点一下就翻到那句；也可点回答下方的「存为想法」收进笔记。")
                 .font(.yy(size: 12)).foregroundStyle(YYColor.t2).lineSpacing(3)
             if !config.isReady {
                 Text(config.provider == .apple ? Companion.appleAvailability ?? "" : String(localized: "还没填好 \(config.provider.title) 的 Key"))
@@ -1352,6 +1486,39 @@ struct CompanionPanel: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(YYColor.inset, in: .rect(cornerRadius: 14))
+    }
+
+    @ViewBuilder
+    private func selectableMessage<Content: View>(
+        pick: BookCompanion.MessagePick,
+        enabled: Bool,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if enabled {
+            let selected = pickedMessages.contains(pick)
+            Button { togglePick(pick) } label: {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .font(.yy(size: 15, weight: .medium))
+                        .foregroundStyle(selected ? tint.accent : YYColor.t3)
+                        .padding(.top, 6)
+                    content()
+                        .allowsHitTesting(false)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 5)
+                .background(selected ? tint.accentSoft.opacity(0.45) : .clear, in: .rect(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(selected ? tint.accent.opacity(0.32) : .clear, lineWidth: 1)
+                )
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+        } else {
+            content()
+        }
     }
 
     private func bubble(_ text: String) -> some View {
@@ -1400,23 +1567,29 @@ struct CompanionPanel: View {
                             if let n = Int(url.host() ?? ""), let source = answer.sources[n] { companion.show(source) }
                             return .handled
                         })
-                    HStack(spacing: 6) {
-                        HStack(spacing: 4) {
-                            Image(systemName: turn.scope == .whole ? "book" : "sparkle").font(.yy(size: 9))
-                            Text(turn.scope == .whole ? answer.label + String(localized: " · 用了全书") : answer.label)
+                    if !pickingThought {
+                        HStack(spacing: 6) {
+                            saveThoughtButton(turn)
+                            copyAnswerButton(answer)
+                            multiPickButton(turn)
+                            Spacer(minLength: 0)
                         }
-                        .font(.yy(size: 10)).foregroundStyle(YYColor.t3)
-                        .lineLimit(1)
-                        Spacer(minLength: 4)
-                        saveThoughtButton(turn)
+                        .padding(.top, 2)
                     }
+                    HStack(spacing: 4) {
+                        Image(systemName: turn.scope == .whole ? "book" : "sparkle").font(.yy(size: 9))
+                        Text(turn.scope == .whole ? answer.label + String(localized: " · 用了全书") : answer.label)
+                            .truncationMode(.middle)
+                    }
+                    .font(.yy(size: 10)).foregroundStyle(YYColor.t3)
+                    .lineLimit(1)
                 }
             }
         } else if let failed = turn.failed {
             Label(failed, systemImage: "exclamationmark.circle")
                 .font(.yy(size: 11.5)).foregroundStyle(YYColor.danger)
         } else if let streaming = turn.streaming, !streaming.isEmpty {
-            Text(cited(streaming, sources: [:]))
+            Text(cited(streaming, sources: [:], streaming: true))
                 .font(.yy(size: 12.5))
                 .lineSpacing(9)
                 .foregroundStyle(YYColor.t1)
@@ -1433,48 +1606,129 @@ struct CompanionPanel: View {
     private func saveThoughtButton(_ turn: BookCompanion.Turn) -> some View {
         let saved = turn.savedMarkID != nil
         return Button { companion.saveThought(for: turn.id) } label: {
-            HStack(spacing: 3.5) {
+            HStack(spacing: 4) {
                 Image(systemName: saved ? "checkmark" : "square.and.pencil")
-                    .font(.yy(size: 9, weight: .semibold))
+                    .font(.yy(size: 10, weight: .semibold))
                 Text(saved ? String(localized: "已存想法") : String(localized: "存为想法"))
-                    .font(.yy(size: 10.5, weight: saved ? .semibold : .medium))
+                    .font(.yy(size: 11, weight: saved ? .semibold : .medium))
             }
-            .foregroundStyle(saved ? tint.accent : YYColor.t2)
-            .padding(.horizontal, 8)
-            .frame(height: 22)
-            .background(saved ? tint.accentSoft : YYColor.inset, in: .capsule)
+            .foregroundStyle(saved ? YYColor.ok : YYColor.t1)
+            .padding(.horizontal, 10)
+            .frame(height: 25)
+            .background(saved ? YYColor.ok.opacity(0.12) : YYColor.card, in: .capsule)
+            .overlay(Capsule().strokeBorder(saved ? YYColor.ok.opacity(0.32) : YYColor.line, lineWidth: 0.5))
             .contentShape(.capsule)
         }
         .buttonStyle(YYPressStyle(scale: 0.96))
+        .fixedSize()
         .help(saved ? String(localized: "跳到这条想法") : String(localized: "把这段回答存进划线想法"))
     }
 
-    /// The answer with each [n] turned into a little 第 N 页 tag that goes there.
-    private func cited(_ text: String, sources: [Int: BookCompanion.Source]) -> AttributedString {
-        var out = AttributedString()
-        var rest = Substring(text)
-        while let m = rest.firstMatch(of: /\s?\[(\d+)\]/) {
-            out += AttributedString(String(rest[..<m.range.lowerBound]))
-            if let n = Int(m.1), let source = sources[n] {
-                let place = source.page.map { String(localized: "第 \($0) 页") } ?? String(localized: "出处")
-                // Kept on one line.
-                let label = " " + place + (source.later == true ? String(localized: " · 未读") : "") + " "
-                var tag = AttributedString(label.replacingOccurrences(of: " ", with: "\u{00A0}"))
-                tag.font = .yy(size: 10, weight: .semibold)
-                if source.later == true, companion.shown != source {
-                    // 空心: from the part not read yet.
-                    tag.foregroundColor = tint.accent
-                    tag.underlineStyle = Text.LineStyle(pattern: .dash, color: tint.accent)
-                } else {
-                    tag.foregroundColor = companion.shown == source ? YYColor.card : tint.accent
-                    tag.backgroundColor = companion.shown == source ? tint.accent : tint.accentSoft
-                }
-                tag.link = URL(string: "yuyue-cite://\(n)")
-                out += AttributedString(" ") + tag
+    private func copyAnswerButton(_ answer: BookCompanion.Answer) -> some View {
+        Button {
+            let clean = BookCompanion.noteText(from: answer.text)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(clean, forType: .string)
+            model.show(Library.Toast(icon: "checkmark", title: String(localized: "复制好了"), detail: ""))
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "doc.on.doc")
+                    .font(.yy(size: 9.5, weight: .medium))
+                Text(String(localized: "复制"))
+                    .font(.yy(size: 11, weight: .medium))
             }
-            rest = rest[m.range.upperBound...]
+            .foregroundStyle(YYColor.t2)
+            .padding(.horizontal, 9)
+            .frame(height: 25)
+            .background(YYColor.card, in: .capsule)
+            .overlay(Capsule().strokeBorder(YYColor.line, lineWidth: 0.5))
+            .contentShape(.capsule)
         }
-        out += AttributedString(String(rest))
+        .buttonStyle(YYPressStyle(scale: 0.96))
+        .fixedSize()
+        .help(String(localized: "复制回答内容"))
+    }
+
+    private func multiPickButton(_ turn: BookCompanion.Turn) -> some View {
+        Button {
+            enterPicking(initial: .init(turnID: turn.id, role: .answer))
+        } label: {
+            HStack(spacing: 3.5) {
+                Image(systemName: "checklist")
+                    .font(.yy(size: 9.5, weight: .medium))
+                Text(String(localized: "多选"))
+                    .font(.yy(size: 11, weight: .medium))
+            }
+            .foregroundStyle(YYColor.t2)
+            .padding(.horizontal, 9)
+            .frame(height: 25)
+            .background(YYColor.card, in: .capsule)
+            .overlay(Capsule().strokeBorder(YYColor.line, lineWidth: 0.5))
+            .contentShape(.capsule)
+        }
+        .buttonStyle(YYPressStyle(scale: 0.96))
+        .fixedSize()
+        .help(String(localized: "勾选你的提问和多条回答，合并存为一条想法"))
+    }
+
+    /// Renders Markdown (bold, lists, headings, inline code) and turns each `[n]` into a clickable `第 N 页` tag.
+    private func cited(_ text: String, sources: [Int: BookCompanion.Source], streaming: Bool = false) -> AttributedString {
+        var out = AttributedString()
+        for segment in BookCompanion.richSegments(from: text, streaming: streaming) {
+            switch segment {
+            case .text(let s):
+                out += AttributedString(s)
+            case .bold(let s):
+                var part = AttributedString(s)
+                part.font = .yy(size: 12.5, weight: .semibold)
+                out += part
+            case .italic(let s):
+                var part = AttributedString(s)
+                part.font = .yy(size: 12.5).italic()
+                out += part
+            case .code(let s):
+                var part = AttributedString(" \(s) ")
+                part.font = .yy(size: 11.5, design: .monospaced)
+                part.backgroundColor = YYColor.inset
+                out += part
+            case .strike(let s):
+                var part = AttributedString(s)
+                part.strikethroughStyle = .single
+                part.foregroundColor = YYColor.t3
+                out += part
+            case .bullet:
+                var dot = AttributedString("•\u{00A0}")
+                dot.font = .yy(size: 12.5, weight: .bold)
+                dot.foregroundColor = tint.accent
+                out += dot
+            case .quoteBar:
+                var bar = AttributedString("▎\u{00A0}")
+                bar.foregroundColor = YYColor.t3
+                out += bar
+            case .heading(let s):
+                var part = AttributedString(s)
+                part.font = .yy(size: 13, weight: .semibold)
+                out += part
+            case .citation(let n):
+                if let source = sources[n] {
+                    let place = source.page.map { String(localized: "第 \($0) 页") } ?? String(localized: "出处")
+                    let label = " " + place + (source.later == true ? String(localized: " · 未读") : "") + " "
+                    var tag = AttributedString(label.replacingOccurrences(of: " ", with: "\u{00A0}"))
+                    tag.font = .yy(size: 10, weight: .semibold)
+                    if source.later == true, companion.shown != source {
+                        tag.foregroundColor = tint.accent
+                        tag.underlineStyle = Text.LineStyle(pattern: .dash, color: tint.accent)
+                    } else {
+                        tag.foregroundColor = companion.shown == source ? YYColor.card : tint.accent
+                        tag.backgroundColor = companion.shown == source ? tint.accent : tint.accentSoft
+                    }
+                    tag.link = URL(string: "yuyue-cite://\(n)")
+                    out += AttributedString(" ") + tag
+                }
+            case .newline:
+                out += AttributedString("\n")
+            }
+        }
         return out
     }
 
@@ -1793,6 +2047,7 @@ private struct CompanionSlashCard: View {
                                             Text(cmd.slashName)
                                                 .font(.system(size: YYUI.s(11.5), weight: .semibold, design: .monospaced))
                                                 .foregroundStyle(selected ? accent : YYColor.t1)
+                                                .fixedSize()
                                             Text(cmd.title)
                                                 .font(.yy(size: 11.5, weight: .medium))
                                                 .foregroundStyle(YYColor.t1)

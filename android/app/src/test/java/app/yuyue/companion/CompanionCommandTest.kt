@@ -86,6 +86,46 @@ class CompanionCommandTest {
         assertEquals("第一点。\n第二点。", BookCompanion.noteText(body))
         assertEquals("已有想法\n\n第一点。", BookCompanion.mergeNote("已有想法", "第一点。"))
         assertEquals("已有想法\n\n第一点。", BookCompanion.mergeNote("已有想法\n\n第一点。", "第一点。"))
+
+        val mdReply = "* **神经症的根源在于性格结构**：人格紊乱是精神疾病的根源 [1]。\n* **文化因素**：不同于前人 [2]。"
+        val segs = BookCompanion.richSegments(mdReply)
+        assertTrue(BookCompanion.RichSegment.Bullet in segs)
+        assertTrue(BookCompanion.RichSegment.Bold("神经症的根源在于性格结构") in segs)
+        assertTrue(BookCompanion.RichSegment.Citation(1) in segs)
+        assertEquals("• 神经症的根源在于性格结构：人格紊乱是精神疾病的根源。\n• 文化因素：不同于前人。", BookCompanion.noteText(mdReply))
+
+        val t1 = BookCompanion.Turn(
+            id = "t1",
+            question = "这一章讲了什么？",
+            quote = null,
+            scope = BookCompanion.Scope.Read,
+            answer = BookCompanion.Answer("* **核心观点**：性格冲突 [1]。", emptyMap(), "m", false, null),
+        )
+        val t2 = BookCompanion.Turn(
+            id = "t2",
+            question = "那弗洛伊德怎么看？",
+            quote = null,
+            scope = BookCompanion.Scope.Read,
+            answer = BookCompanion.Answer("他更强调本能 [2]。", emptyMap(), "m", false, null),
+        )
+        val answersOnly = BookCompanion.composedThought(
+            listOf(t1, t2),
+            setOf(
+                BookCompanion.MessagePick("t1", BookCompanion.MessagePick.Role.Answer),
+                BookCompanion.MessagePick("t2", BookCompanion.MessagePick.Role.Answer),
+            ),
+        )
+        assertEquals("• 核心观点：性格冲突。\n\n他更强调本能。", answersOnly)
+
+        val qaMixed = BookCompanion.composedThought(
+            listOf(t1, t2),
+            setOf(
+                BookCompanion.MessagePick("t1", BookCompanion.MessagePick.Role.Question),
+                BookCompanion.MessagePick("t1", BookCompanion.MessagePick.Role.Answer),
+                BookCompanion.MessagePick("t2", BookCompanion.MessagePick.Role.Question),
+            ),
+        )
+        assertEquals("问：这一章讲了什么？\n答：• 核心观点：性格冲突。\n\n问：那弗洛伊德怎么看？", qaMixed)
     }
 
     @Test
@@ -122,22 +162,51 @@ class CompanionCommandTest {
     }
 
     @Test
-    fun customPromptsDeduplicateCapAndWireIntoSlashCommands() {
-        var list = emptyList<String>()
-        list = CompanionPrompts.adding("  拆解这句长难句  ", list)
-        list = CompanionPrompts.adding("拆解这句长难句", list)
-        list = CompanionPrompts.adding("文言译白话", list)
-        assertEquals(listOf("拆解这句长难句", "文言译白话"), list)
-        for (i in 1..10) list = CompanionPrompts.adding("问题 $i", list)
-        assertEquals(CompanionPrompts.MAX_COUNT, list.size)
-        list = CompanionPrompts.removing("文言译白话", list)
-        assertEquals(CompanionPrompts.MAX_COUNT - 1, list.size)
+    fun customPromptsDeduplicateSanitizeCapAndWireIntoSlashCommands() {
+        assertEquals(listOf("grammar", "baihua", "logic"), CompanionPrompts.defaults.map { it.command })
 
-        val cmds = CompanionCommand.customCommands(listOf("拆解这句长难句", "文言译白话"))
-        assertEquals(listOf("p1", "p2"), cmds.map { it.name })
+        var items = emptyList<CompanionPrompts.Item>()
+        items = CompanionPrompts.upserting(
+            CompanionPrompts.Item(id = "a", command = "  /Syntax  ", prompt = "  拆解这句长难句  "),
+            items,
+        )
+        items = CompanionPrompts.upserting(
+            CompanionPrompts.Item(id = "dup", command = "other", prompt = "拆解这句长难句"),
+            items,
+        )
+        items = CompanionPrompts.upserting(
+            CompanionPrompts.Item(id = "b", command = "", prompt = "文言译白话"),
+            items,
+        )
+        assertEquals(listOf("syntax", "ask1"), items.map { it.command })
+        assertEquals(listOf("拆解这句长难句", "文言译白话"), items.map { it.prompt })
+
+        items = CompanionPrompts.upserting(
+            CompanionPrompts.Item(id = "b", command = "/recap", prompt = "文言译白话"),
+            items,
+        )
+        assertEquals("recap2", items[1].command)
+
+        for (i in 1..10) {
+            items = CompanionPrompts.upserting(
+                CompanionPrompts.Item(id = "item-$i", command = "", prompt = "问题 $i"),
+                items,
+            )
+        }
+        assertEquals(CompanionPrompts.MAX_COUNT, items.size)
+        items = CompanionPrompts.removing("b", items)
+        assertEquals(CompanionPrompts.MAX_COUNT - 1, items.size)
+
+        val cmds = CompanionCommand.customCommands(
+            listOf(
+                CompanionPrompts.Item(id = "1", command = "grammar", prompt = "拆解这句长难句"),
+                CompanionPrompts.Item(id = "2", command = "fy", prompt = "文言译白话"),
+            ),
+        )
+        assertEquals(listOf("grammar", "fy"), cmds.map { it.name })
         val matched = CompanionCommand.matching("文言", cmds)
         assertEquals(CompanionCommand.Action.Custom("文言译白话"), matched.firstOrNull()?.action)
-        val parsed = CompanionCommand.parse("/p1 注意倒装", cmds)
+        val parsed = CompanionCommand.parse("/grammar 注意倒装", cmds)
         assertEquals("拆解这句长难句\n注意倒装", parsed?.command?.question(parsed.argument, hasQuote = true, chapterTitle = null))
     }
 

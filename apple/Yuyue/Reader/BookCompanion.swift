@@ -228,6 +228,43 @@ final class BookCompanion {
         model?.pager.setSource(Position(section: source.section, sentence: source.sentence))
     }
 
+    nonisolated struct MessagePick: Hashable, Sendable {
+        enum Role: Hashable, Sendable { case question, answer }
+        let turnID: UUID
+        let role: Role
+    }
+
+    /// Combines user-selected questions and/or Companion answers into one clean thought note.
+    nonisolated static func composedThought(from turns: [Turn], picks: Set<MessagePick>) -> String {
+        guard !picks.isEmpty else { return "" }
+        let hasQuestions = turns.contains { picks.contains(MessagePick(turnID: $0.id, role: .question)) && !$0.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let hasAnswers = turns.contains { t in
+            guard picks.contains(MessagePick(turnID: t.id, role: .answer)), let a = t.answer, !a.notYet else { return false }
+            return !noteText(from: a.text).isEmpty
+        }
+        let labelBoth = hasQuestions && hasAnswers
+        var blocks: [String] = []
+        for turn in turns {
+            var lines: [String] = []
+            if picks.contains(MessagePick(turnID: turn.id, role: .question)) {
+                let q = turn.question.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !q.isEmpty {
+                    lines.append(labelBoth ? String(localized: "问：\(q)") : q)
+                }
+            }
+            if picks.contains(MessagePick(turnID: turn.id, role: .answer)), let answer = turn.answer, !answer.notYet {
+                let a = noteText(from: answer.text)
+                if !a.isEmpty {
+                    lines.append(labelBoth ? String(localized: "答：\(a)") : a)
+                }
+            }
+            if !lines.isEmpty {
+                blocks.append(lines.joined(separator: "\n"))
+            }
+        }
+        return blocks.joined(separator: "\n\n")
+    }
+
     /// Saves a completed answer onto the anchor highlight (or the cited / current sentence) as a thought.
     func saveThought(for turnID: UUID) {
         guard let index = turns.firstIndex(where: { $0.id == turnID }),
@@ -241,37 +278,108 @@ final class BookCompanion {
         let clean = Self.noteText(from: answer.text)
         guard !clean.isEmpty else { return }
         let turn = turns[index]
+        let firstCited = answer.sources.keys.sorted().first.flatMap { answer.sources[$0] }
+        persistThought(
+            clean,
+            anchor: turn.anchor,
+            fallbackSource: firstCited,
+            askedAt: turn.askedAt,
+            markTurnIDs: [turnID],
+            merged: false
+        )
+    }
+
+    /// Merges any chosen combination of user questions and Companion replies into a single thought note.
+    @discardableResult
+    func saveThought(picks: Set<MessagePick>) -> Bool {
+        let clean = Self.composedThought(from: turns, picks: picks)
+        guard !clean.isEmpty else { return false }
+        let pickedTurns = turns.filter {
+            picks.contains(MessagePick(turnID: $0.id, role: .question))
+                || picks.contains(MessagePick(turnID: $0.id, role: .answer))
+        }
+        guard let firstTurn = pickedTurns.first else { return false }
+        let anchor = pickedTurns.compactMap(\.anchor).first(where: { $0.markID != nil })
+            ?? pickedTurns.compactMap(\.anchor).first
+        let firstCited = pickedTurns.compactMap { turn -> Source? in
+            guard let answer = turn.answer, !answer.notYet else { return nil }
+            return answer.sources.keys.sorted().first.flatMap { answer.sources[$0] }
+        }.first
+        let answerTurnIDs = pickedTurns.compactMap { t -> UUID? in
+            picks.contains(MessagePick(turnID: t.id, role: .answer)) ? t.id : nil
+        }
+        return persistThought(
+            clean,
+            anchor: anchor,
+            fallbackSource: firstCited,
+            askedAt: firstTurn.askedAt,
+            markTurnIDs: answerTurnIDs,
+            merged: picks.count > 1
+        )
+    }
+
+    @discardableResult
+    private func persistThought(
+        _ clean: String,
+        anchor: CompanionAnchor?,
+        fallbackSource: Source?,
+        askedAt: Position,
+        markTurnIDs: [UUID],
+        merged: Bool
+    ) -> Bool {
+        guard let model else { return false }
+        let toastTitle = merged ? String(localized: "已合并存进想法") : String(localized: "已存进想法")
+        func stampSaved(_ markID: String?) {
+            for tid in markTurnIDs {
+                if let i = turns.firstIndex(where: { $0.id == tid }) {
+                    turns[i].savedMarkID = markID
+                }
+            }
+        }
+        let previousSaved: [UUID: String?] = Dictionary(uniqueKeysWithValues: markTurnIDs.compactMap { tid in
+            turns.first(where: { $0.id == tid }).map { (tid, $0.savedMarkID) }
+        })
+        func restoreSaved() {
+            for (tid, prev) in previousSaved {
+                if let i = turns.firstIndex(where: { $0.id == tid }) {
+                    turns[i].savedMarkID = prev
+                }
+            }
+        }
 
         // 1. Existing highlight tapped via 问: append/update its thought.
-        if let markID = turn.anchor?.markID,
+        if let markID = anchor?.markID,
            let targetMark = model.marks.first(where: { $0.id == markID }) {
             let previousNote = targetMark.note
             let combined = Self.mergeNote(existing: previousNote, addition: clean)
             do {
                 try model.core.setMarkNote(book: model.bookID, id: markID, note: combined)
                 model.reloadNotes()
-                turns[index].savedMarkID = markID
+                stampSaved(markID)
                 model.show(Library.Toast(
                     icon: "square.and.pencil",
-                    title: String(localized: "已存进想法"),
+                    title: toastTitle,
                     detail: "“\(targetMark.text.prefix(16))”",
                     undo: { [weak self, weak model] in
                         guard let model else { return }
                         try? model.core.setMarkNote(book: model.bookID, id: markID, note: previousNote)
                         model.reloadNotes()
-                        if let i = self?.turns.firstIndex(where: { $0.id == turnID }) {
-                            self?.turns[i].savedMarkID = nil
+                        for (tid, prev) in previousSaved {
+                            if let i = self?.turns.firstIndex(where: { $0.id == tid }) {
+                                self?.turns[i].savedMarkID = prev
+                            }
                         }
                     }
                 ))
+                return true
             } catch {
                 model.failure = Library.message(for: error)
+                return false
             }
-            return
         }
 
         // 2. Fresh text selection handed via 问: highlight that exact span with the thought.
-        if let anchor = turn.anchor, !anchor.text.isEmpty {
+        if let anchor, !anchor.text.isEmpty {
             do {
                 let created = try model.core.addMark(
                     book: model.bookID,
@@ -284,38 +392,40 @@ final class BookCompanion {
                 )
                 model.pager.keepShown(created.id)
                 model.reloadNotes()
-                turns[index].savedMarkID = created.id
+                stampSaved(created.id)
                 model.show(Library.Toast(
                     icon: "square.and.pencil",
-                    title: String(localized: "已存进想法"),
+                    title: toastTitle,
                     detail: "“\(created.text.prefix(16))”",
                     undo: { [weak self, weak model] in
                         guard let model else { return }
                         try? model.core.deleteMark(book: model.bookID, id: created.id)
                         model.reloadNotes()
-                        if let i = self?.turns.firstIndex(where: { $0.id == turnID }) {
-                            self?.turns[i].savedMarkID = nil
+                        for (tid, prev) in previousSaved {
+                            if let i = self?.turns.firstIndex(where: { $0.id == tid }) {
+                                self?.turns[i].savedMarkID = prev
+                            }
                         }
                     }
                 ))
+                return true
             } catch {
                 model.failure = Library.message(for: error)
+                return false
             }
-            return
         }
 
         // 3. No selection quote: anchor to the first cited sentence, or the sentence where the question was asked.
-        let firstCited = answer.sources.keys.sorted().first.flatMap { answer.sources[$0] }
-        let targetSection = firstCited?.section ?? turn.askedAt.section
-        let targetSentence = Int(firstCited?.sentence ?? turn.askedAt.sentence)
-        guard let all = try? model.core.sentences(bookId: model.bookID, section: targetSection), !all.isEmpty else { return }
+        let targetSection = fallbackSource?.section ?? askedAt.section
+        let targetSentence = Int(fallbackSource?.sentence ?? askedAt.sentence)
+        guard let all = try? model.core.sentences(bookId: model.bookID, section: targetSection), !all.isEmpty else { return false }
         let clamped = min(max(0, targetSentence), all.count - 1)
         let chosenIndex = (clamped ..< all.count).first { !all[$0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             ?? (0 ..< clamped).reversed().first { !all[$0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             ?? clamped
         let raw = all[chosenIndex]
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let range = raw.range(of: trimmed) else { return }
+        guard !trimmed.isEmpty, let range = raw.range(of: trimmed) else { return false }
         let start = TextPoint(sentence: UInt32(chosenIndex), offset: UInt32(raw.utf16.distance(from: raw.startIndex, to: range.lowerBound)))
         let end = TextPoint(sentence: UInt32(chosenIndex), offset: UInt32(raw.utf16.distance(from: raw.startIndex, to: range.upperBound)))
 
@@ -325,24 +435,27 @@ final class BookCompanion {
             do {
                 try model.core.setMarkNote(book: model.bookID, id: existing.id, note: combined)
                 model.reloadNotes()
-                turns[index].savedMarkID = existing.id
+                stampSaved(existing.id)
                 model.show(Library.Toast(
                     icon: "square.and.pencil",
-                    title: String(localized: "已存进想法"),
+                    title: toastTitle,
                     detail: "“\(existing.text.prefix(16))”",
                     undo: { [weak self, weak model] in
                         guard let model else { return }
                         try? model.core.setMarkNote(book: model.bookID, id: existing.id, note: previousNote)
                         model.reloadNotes()
-                        if let i = self?.turns.firstIndex(where: { $0.id == turnID }) {
-                            self?.turns[i].savedMarkID = nil
+                        for (tid, prev) in previousSaved {
+                            if let i = self?.turns.firstIndex(where: { $0.id == tid }) {
+                                self?.turns[i].savedMarkID = prev
+                            }
                         }
                     }
                 ))
+                return true
             } catch {
                 model.failure = Library.message(for: error)
+                return false
             }
-            return
         }
 
         do {
@@ -357,22 +470,27 @@ final class BookCompanion {
             )
             model.pager.keepShown(created.id)
             model.reloadNotes()
-            turns[index].savedMarkID = created.id
+            stampSaved(created.id)
             model.show(Library.Toast(
                 icon: "square.and.pencil",
-                title: String(localized: "已存进想法"),
+                title: toastTitle,
                 detail: "“\(created.text.prefix(16))”",
                 undo: { [weak self, weak model] in
                     guard let model else { return }
                     try? model.core.deleteMark(book: model.bookID, id: created.id)
                     model.reloadNotes()
-                    if let i = self?.turns.firstIndex(where: { $0.id == turnID }) {
-                        self?.turns[i].savedMarkID = nil
+                    for (tid, prev) in previousSaved {
+                        if let i = self?.turns.firstIndex(where: { $0.id == tid }) {
+                            self?.turns[i].savedMarkID = prev
+                        }
                     }
                 }
             ))
+            _ = restoreSaved
+            return true
         } catch {
             model.failure = Library.message(for: error)
+            return false
         }
     }
 
@@ -384,11 +502,164 @@ final class BookCompanion {
         return "\(old)\n\n\(addition)"
     }
 
-    /// Strips `[n]` citation markers so an answer saved into 想法 reads cleanly in notes & exports.
+    /// Strips `[n]` citation markers and raw Markdown syntax so an answer saved into 想法 or copied
+    /// to the clipboard reads cleanly in notes & exports.
     nonisolated static func noteText(from answerText: String) -> String {
-        answerText
-            .replacingOccurrences(of: #"[ \t\u00A0]*\[\d+\]"#, with: "", options: .regularExpression)
+        let noCites = answerText.replacingOccurrences(of: #"[ \t\u00A0]*\[\d+\]"#, with: "", options: .regularExpression)
+        let lines = noCites.components(separatedBy: "\n").map { rawLine -> String in
+            var line = rawLine
+            if line.firstMatch(of: /^\s*([-*_])\1{2,}\s*$/) != nil { return "" }
+            if let m = line.firstMatch(of: /^\s{0,3}#{1,6}\s+(.*)$/) {
+                line = String(m.1)
+            } else if let m = line.firstMatch(of: /^\s*[-*•]\s+(.*)$/) {
+                line = "• " + String(m.1)
+            } else if let m = line.firstMatch(of: /^\s*>\s?(.*)$/) {
+                line = String(m.1)
+            }
+            return stripInlineMarkdown(line)
+        }
+        return lines.joined(separator: "\n")
+            .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    nonisolated private static func stripInlineMarkdown(_ line: String) -> String {
+        var s = line
+        s = s.replacingOccurrences(of: #"\*\*(.+?)\*\*"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"__(.+?)__"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"`([^`\n]+)`"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"~~(.+?)~~"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)"#, with: "$1", options: .regularExpression)
+        return s
+    }
+
+    /// Parses block + inline Markdown (headings, bullets, bold even next to CJK punctuation,
+    /// inline code, italic, strikethrough) and `[n]` citation markers into structured segments
+    /// for Apple and UI rendering without CommonMark's CJK punctuation delimiter bugs.
+    nonisolated enum RichSegment: Equatable, Sendable {
+        case text(String)
+        case bold(String)
+        case italic(String)
+        case code(String)
+        case strike(String)
+        case bullet
+        case quoteBar
+        case heading(String)
+        case citation(Int)
+        case newline
+    }
+
+    nonisolated static func richSegments(from rawText: String, streaming: Bool = false) -> [RichSegment] {
+        var text = rawText.replacingOccurrences(of: "\r\n", with: "\n")
+        if streaming {
+            // Hide an unclosed trailing `**` or `*` / `` ` `` token while streaming so raw markers don't flicker.
+            text = text.replacingOccurrences(of: #"(?:\*\*|\*|`|~~)$"#, with: "", options: .regularExpression)
+        }
+        text = text.replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+        let lines = text.components(separatedBy: "\n")
+        var out: [RichSegment] = []
+        for (lineIdx, rawLine) in lines.enumerated() {
+            if lineIdx > 0 { out.append(.newline) }
+            if rawLine.firstMatch(of: /^\s*([-*_])\1{2,}\s*$/) != nil { continue }
+            if let m = rawLine.firstMatch(of: /^\s{0,3}#{1,6}\s+(.*)$/) {
+                let title = stripInlineMarkdown(String(m.1)).trimmingCharacters(in: .whitespaces)
+                if !title.isEmpty { out.append(.heading(title)) }
+                continue
+            }
+            var rest = Substring(rawLine)
+            if let m = rawLine.firstMatch(of: /^\s*[-*•]\s+(.*)$/) {
+                out.append(.bullet)
+                rest = m.1
+            } else if let m = rawLine.firstMatch(of: /^\s*>\s?(.*)$/) {
+                out.append(.quoteBar)
+                rest = m.1
+            }
+            parseInlineSegments(rest, into: &out)
+        }
+        return out
+    }
+
+    nonisolated private static func parseInlineSegments(_ input: Substring, into out: inout [RichSegment]) {
+        var i = input.startIndex
+        var plainStart = i
+        func flushPlain(upTo end: String.Index) {
+            if plainStart < end {
+                out.append(.text(String(input[plainStart ..< end])))
+            }
+        }
+        while i < input.endIndex {
+            let slice = input[i...]
+            // 1. Citation `[n]` (with optional single leading space)
+            if let m = slice.prefixMatch(of: /\s?\[(\d+)\]/) {
+                flushPlain(upTo: i)
+                if let n = Int(m.1) { out.append(.citation(n)) }
+                i = m.range.upperBound
+                plainStart = i
+                continue
+            }
+            // 2. Bold `**...**` (works cleanly next to CJK punctuation such as `**标题**：`)
+            if slice.hasPrefix("**") {
+                let innerStart = input.index(i, offsetBy: 2)
+                if let close = input[innerStart...].range(of: "**"), close.lowerBound > innerStart {
+                    flushPlain(upTo: i)
+                    let inner = String(input[innerStart ..< close.lowerBound])
+                    if inner.firstMatch(of: /\[\d+\]/) != nil {
+                        // Bold span containing a citation: split citations out cleanly.
+                        var sub: [RichSegment] = []
+                        parseInlineSegments(input[innerStart ..< close.lowerBound], into: &sub)
+                        for seg in sub {
+                            if case .text(let t) = seg { out.append(.bold(t)) } else { out.append(seg) }
+                        }
+                    } else {
+                        out.append(.bold(inner))
+                    }
+                    i = close.upperBound
+                    plainStart = i
+                    continue
+                }
+            }
+            // 3. Inline code `` `...` ``
+            if slice.hasPrefix("`") {
+                let innerStart = input.index(after: i)
+                if let close = input[innerStart...].firstIndex(of: "`"), close > innerStart {
+                    flushPlain(upTo: i)
+                    out.append(.code(String(input[innerStart ..< close])))
+                    i = input.index(after: close)
+                    plainStart = i
+                    continue
+                }
+            }
+            // 4. Strikethrough `~~...~~`
+            if slice.hasPrefix("~~") {
+                let innerStart = input.index(i, offsetBy: 2)
+                if let close = input[innerStart...].range(of: "~~"), close.lowerBound > innerStart {
+                    flushPlain(upTo: i)
+                    out.append(.strike(String(input[innerStart ..< close.lowerBound])))
+                    i = close.upperBound
+                    plainStart = i
+                    continue
+                }
+            }
+            // 5. Italic `*...*` (single asterisk not followed by space or `*`)
+            if slice.hasPrefix("*"), !slice.hasPrefix("**") {
+                let innerStart = input.index(after: i)
+                if innerStart < input.endIndex, !input[innerStart].isWhitespace,
+                   let close = input[innerStart...].firstIndex(of: "*"),
+                   close > innerStart,
+                   !input[input.index(before: close)].isWhitespace {
+                    let afterClose = input.index(after: close)
+                    if afterClose == input.endIndex || input[afterClose] != "*" {
+                        flushPlain(upTo: i)
+                        out.append(.italic(String(input[innerStart ..< close])))
+                        i = afterClose
+                        plainStart = i
+                        continue
+                    }
+                }
+            }
+            i = input.index(after: i)
+        }
+        flushPlain(upTo: input.endIndex)
     }
 
     /// Removes `<think>…</think>` blocks from reasoning models, reporting whether an unclosed `<think>` is still streaming.
@@ -661,61 +932,148 @@ final class BookCompanion {
 
 // MARK: - Custom quick prompts
 
-/// 用户保存在「设置 · 书伴」里的常用提问，同时出现在底部建议栏和 `/` 快捷指令里.
+/// 用户保存在「设置 · 书伴」里的常用提问，支持默认 `/指令` 与用户自定义修改，同时出现在底部建议栏和 `/` 快捷指令里.
 nonisolated enum CompanionPrompts {
+    struct Item: Codable, Identifiable, Equatable, Hashable, Sendable {
+        var id: String
+        var command: String
+        var prompt: String
+    }
+
     static let key = "companion.customPrompts"
     static let maxCount = 8
-    static let maxLength = 120
+    static let maxLength = 160
+    static let maxCommandLength = 20
     static let changed = Notification.Name("yuyue.companionPromptsChanged")
 
-    static var presets: [String] {
+    static let reservedCommands: Set<String> = [
+        "recap", "chapter", "characters", "explain", "quote", "quiz",
+        "read", "whole", "model", "clear", "settings",
+    ]
+
+    static var defaults: [Item] {
         [
-            String(localized: "拆解这句语法与长难句"),
-            String(localized: "把这段古文译成现代白话"),
-            String(localized: "提炼核心论点与逻辑"),
+            Item(id: "default-grammar", command: "grammar", prompt: String(localized: "拆解这句语法与长难句")),
+            Item(id: "default-baihua", command: "baihua", prompt: String(localized: "把这段古文译成现代白话")),
+            Item(id: "default-logic", command: "logic", prompt: String(localized: "提炼核心论点与逻辑")),
         ]
     }
 
-    static var list: [String] {
-        normalized(UserDefaults.standard.stringArray(forKey: key) ?? [])
+    static var items: [Item] {
+        if let data = UserDefaults.standard.data(forKey: key),
+           let decoded = try? JSONDecoder().decode([Item].self, from: data) {
+            return normalized(decoded)
+        }
+        return defaults
     }
 
-    static func normalized(_ items: [String]) -> [String] {
-        var seen = Set<String>()
-        var out: [String] = []
-        for raw in items {
-            let trimmed = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maxLength))
-            guard !trimmed.isEmpty, seen.insert(trimmed).inserted else { continue }
-            out.append(trimmed)
+    static var list: [String] { items.map(\.prompt) }
+
+    static var isDefault: Bool { items == defaults }
+
+    static func nextDefaultCommand(existing: [Item] = items) -> String {
+        let used = reservedCommands.union(existing.map { $0.command.lowercased() })
+        var n = 1
+        while used.contains("ask\(n)") { n += 1 }
+        return "ask\(n)"
+    }
+
+    static func sanitizeCommand(
+        _ raw: String,
+        fallback: String,
+        existing: [Item] = [],
+        excludingID: String? = nil
+    ) -> String {
+        let stripped = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .drop(while: { $0 == "/" || $0 == "／" })
+            .filter { !$0.isWhitespace }
+            .lowercased()
+        let cleanFallback = fallback
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .drop(while: { $0 == "/" || $0 == "／" })
+            .filter { !$0.isWhitespace }
+            .lowercased()
+        let base = String((stripped.isEmpty ? (cleanFallback.isEmpty ? "ask1" : cleanFallback) : stripped).prefix(maxCommandLength))
+        let used = reservedCommands.union(
+            existing.filter { $0.id != excludingID }.map { $0.command.lowercased() }
+        )
+        if !used.contains(base) { return base }
+        var n = 2
+        while true {
+            let suffix = "\(n)"
+            let candidate = String(base.prefix(max(1, maxCommandLength - suffix.count))) + suffix
+            if !used.contains(candidate) { return candidate }
+            n += 1
+        }
+    }
+
+    static func normalized(_ rawItems: [Item]) -> [Item] {
+        var seenPrompts = Set<String>()
+        var seenIDs = Set<String>()
+        var out: [Item] = []
+        for raw in rawItems {
+            let trimmedPrompt = String(raw.prompt.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maxLength))
+            guard !trimmedPrompt.isEmpty, seenPrompts.insert(trimmedPrompt).inserted else { continue }
+            let cleanID = raw.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedID = (cleanID.isEmpty || !seenIDs.insert(cleanID).inserted) ? UUID().uuidString : cleanID
+            let fallback = nextDefaultCommand(existing: out)
+            let cmd = sanitizeCommand(raw.command, fallback: fallback, existing: out, excludingID: resolvedID)
+            out.append(Item(id: resolvedID, command: cmd, prompt: trimmedPrompt))
             if out.count >= maxCount { break }
         }
         return out
     }
 
-    static func adding(_ prompt: String, to current: [String]) -> [String] {
-        let trimmed = String(prompt.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maxLength))
-        guard !trimmed.isEmpty else { return normalized(current) }
+    static func upserting(_ item: Item, in current: [Item]) -> [Item] {
         let base = normalized(current)
-        if base.contains(trimmed) || base.count >= maxCount { return base }
-        return base + [trimmed]
+        let trimmedPrompt = String(item.prompt.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maxLength))
+        guard !trimmedPrompt.isEmpty else { return base }
+        if let idx = base.firstIndex(where: { $0.id == item.id }) {
+            if base.enumerated().contains(where: { $0.offset != idx && $0.element.prompt == trimmedPrompt }) {
+                return base
+            }
+            var copy = base
+            let fallback = copy[idx].command
+            let cmd = sanitizeCommand(item.command, fallback: fallback, existing: copy, excludingID: item.id)
+            copy[idx] = Item(id: item.id, command: cmd, prompt: trimmedPrompt)
+            return copy
+        }
+        guard base.count < maxCount, !base.contains(where: { $0.prompt == trimmedPrompt }) else { return base }
+        let resolvedID = item.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? UUID().uuidString : item.id
+        let fallback = nextDefaultCommand(existing: base)
+        let cmd = sanitizeCommand(item.command, fallback: fallback, existing: base, excludingID: resolvedID)
+        return base + [Item(id: resolvedID, command: cmd, prompt: trimmedPrompt)]
     }
 
-    static func removing(_ prompt: String, from current: [String]) -> [String] {
-        normalized(current).filter { $0 != prompt }
+    static func removing(id: String, from current: [Item]) -> [Item] {
+        normalized(current).filter { $0.id != id }
     }
 
-    static func add(_ prompt: String) {
-        let next = adding(prompt, to: list)
-        guard next != list else { return }
-        UserDefaults.standard.set(next, forKey: key)
+    static func upsert(_ item: Item) {
+        let current = items
+        let next = upserting(item, in: current)
+        guard next != current || UserDefaults.standard.data(forKey: key) == nil else { return }
+        save(next)
+    }
+
+    static func remove(id: String) {
+        let current = items
+        let next = removing(id: id, from: current)
+        guard next != current || UserDefaults.standard.data(forKey: key) == nil else { return }
+        save(next)
+    }
+
+    static func resetDefaults() {
+        UserDefaults.standard.removeObject(forKey: key)
         NotificationCenter.default.post(name: changed, object: nil)
     }
 
-    static func remove(_ prompt: String) {
-        let next = removing(prompt, from: list)
-        guard next != list else { return }
-        UserDefaults.standard.set(next, forKey: key)
-        NotificationCenter.default.post(name: changed, object: nil)
+    private static func save(_ next: [Item]) {
+        if let data = try? JSONEncoder().encode(normalized(next)) {
+            UserDefaults.standard.set(data, forKey: key)
+            NotificationCenter.default.post(name: changed, object: nil)
+        }
     }
 
     static func suggestions(
@@ -855,7 +1213,7 @@ nonisolated struct CompanionCommand: Identifiable, Hashable, Sendable {
                 takesArgument: true,
                 keywords: ["考考我", "测验", "提问", "思考", "test"]
             ),
-        ] + customCommands(from: CompanionPrompts.list) + [
+        ] + customCommands(from: CompanionPrompts.items) + [
             CompanionCommand(
                 id: "read",
                 name: "read",
@@ -914,16 +1272,16 @@ nonisolated struct CompanionCommand: Identifiable, Hashable, Sendable {
         ]
     }
 
-    static func customCommands(from prompts: [String]) -> [CompanionCommand] {
-        prompts.enumerated().map { index, prompt in
+    static func customCommands(from items: [CompanionPrompts.Item]) -> [CompanionCommand] {
+        items.map { item in
             CompanionCommand(
-                id: "custom-\(index + 1)",
-                name: "p\(index + 1)",
-                title: prompt,
+                id: "custom-\(item.id)",
+                name: item.command,
+                title: item.prompt,
                 subtitle: String(localized: "常用提问"),
                 icon: "text.bubble",
                 category: .ask,
-                action: .custom(prompt),
+                action: .custom(item.prompt),
                 takesArgument: true,
                 keywords: ["常用", "自定义", "custom", "prompt"]
             )
