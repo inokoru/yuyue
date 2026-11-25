@@ -844,6 +844,30 @@ struct WalkthroughRegressionTests {
         #expect(tall.origin.y >= 12)
         #expect(tall.origin.y + card.height <= viewport.height - insets.bottom - 12)
     }
+
+    @Test
+    @MainActor
+    func macAboutSpreadMetricsFitNarrowDefaultAndWideWindows() {
+        let narrow = AboutSpreadMetrics(viewportWidth: 676) // 860pt window − 184pt sidebar
+        #expect(narrow.leftWidth + narrow.gutter + narrow.rightWidth + narrow.horizontalMargin * 2 <= 676)
+        #expect(narrow.leftWidth >= 204)
+        #expect(narrow.rightWidth >= 388)
+
+        let standard = AboutSpreadMetrics(viewportWidth: 836) // 1020pt default window
+        #expect(standard.leftWidth + standard.gutter + standard.rightWidth + standard.horizontalMargin * 2 <= 836)
+        #expect(standard.rightWidth > narrow.rightWidth)
+
+        let wide = AboutSpreadMetrics(viewportWidth: 1196) // 1380pt wide window
+        let ultrawide = AboutSpreadMetrics(viewportWidth: 1600)
+        #expect(wide.rightWidth == 600)
+        #expect(wide.leftWidth == 218)
+        #expect(wide.gutter == 48)
+        #expect(ultrawide.rightWidth == wide.rightWidth)
+        #expect(ultrawide.leftWidth == wide.leftWidth)
+
+        let tight = AboutSpreadMetrics(viewportWidth: 560)
+        #expect(tight.leftWidth + tight.gutter + tight.rightWidth + tight.horizontalMargin * 2 <= 560.5)
+    }
     #endif
 }
 

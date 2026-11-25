@@ -47,20 +47,11 @@ struct MacSettings: View {
                         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
                         .ignoresSafeArea(.container, edges: .top)
                 } else if page == .update {
-                    ScrollView {
-                        MacUpdateSettings(windowHeight: height)
-                            .padding(.leading, 24)
-                            .padding(.trailing, 26)
-                            .padding(.top, 10)
-                            .padding(.bottom, 24)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .buttonStyle(SettingsActionStyle())
-                    }
-                    .scrollBounceBehavior(.basedOnSize)
-                    .padding(.trailing, 6)
-                    .ignoresSafeArea(.container, edges: .top)
-                    .id(page)
-                    .transition(YYMotion.swap)
+                    MacUpdateSettings()
+                        .buttonStyle(SettingsActionStyle())
+                        .ignoresSafeArea(.container, edges: .top)
+                        .id(page)
+                        .transition(YYMotion.swap)
                 } else {
                     SettingsPageHeader(page: page)
                     ZStack(alignment: .top) {
@@ -189,7 +180,7 @@ struct MacSettings: View {
             case .sync: SyncSettings(library: library)
             case .storage: StorageSettings(library: library)
             case .data: DataSettings(library: library)
-            case .update: MacUpdateSettings(windowHeight: height)
+            case .update: MacUpdateSettings()
             }
         }
         .padding(.leading, 24)

@@ -115,16 +115,15 @@ extension View {
     }
 }
 
-/// 设置 › 关于: a two-page bookplate layout (书扉 + 牌记). The left folio carries the 阅 seal,
-/// Songti title, three-line creed, and graphite signature; the right folio holds version & updates,
-/// changelog, feedback, privacy, and open-source credits without stretching across 750pt.
+/// 设置 › 关于: a centered, responsive two-page bookplate spread (书扉 + 牌记). The left folio
+/// carries the 阅 seal, Songti title, three-line creed, and graphite signature aligned flush with
+/// the cards' foot; the right folio holds version & updates, changelog, feedback, privacy, and
+/// open-source credits, flexing smoothly across narrow and wide windows.
 struct MacUpdateSettings: View {
     fileprivate enum SheetKind: String, Identifiable {
         case changelog, feedback, privacy, licences
         var id: String { rawValue }
     }
-
-    var windowHeight: CGFloat = 640
 
     private var center: UpdateCenter { UpdateCenter.shared }
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
@@ -133,7 +132,6 @@ struct MacUpdateSettings: View {
     @State private var hoverAuthor = false
     @State private var hoverSig = false
     @State private var hoverSkip = false
-    @State private var rightHeight: CGFloat = 0
     /// A click on the signature or the line under it writes the signature out.
     @State private var signRun = 0
     @State private var releases: [Release] = Self.bundledReleases
@@ -154,19 +152,24 @@ struct MacUpdateSettings: View {
     }
 
     var body: some View {
-        let minTrackHeight = max(400, windowHeight - 110)
-        let trackHeight = max(minTrackHeight, rightHeight)
-        HStack(alignment: .top, spacing: 38) {
-            leftFolio
-                .frame(width: 214, height: trackHeight, alignment: .topLeading)
-            rightFolio
-                .frame(width: 468, alignment: .topLeading)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rightHeight = $0 }
+        GeometryReader { proxy in
+            let metrics = AboutSpreadMetrics(viewportWidth: proxy.size.width)
+            ScrollView {
+                OpticalCenterLayout(viewportHeight: proxy.size.height) {
+                    BookplateSpreadLayout(
+                        leftWidth: metrics.leftWidth,
+                        rightWidth: metrics.rightWidth,
+                        spacing: metrics.gutter
+                    ) {
+                        leftFolio
+                        rightFolio
+                    }
+                    .padding(.horizontal, metrics.horizontalMargin)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .scrollBounceBehavior(.basedOnSize)
         }
-        .padding(.leading, 18)
-        .padding(.top, 28)
-        .padding(.bottom, 8)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
         .onAppear { center.boot() }
         .sheet(item: $activeSheet) { kind in
             sheetView(for: kind)
@@ -242,7 +245,8 @@ struct MacUpdateSettings: View {
             .onTapGesture { signRun += 1 }
         }
         .padding(.top, 6)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .padding(.bottom, 4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     // MARK: Right Folio (牌记与操作)
@@ -358,6 +362,7 @@ struct MacUpdateSettings: View {
                 }
                 if center.phase != .release {
                     versionStatusLine
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 10)
@@ -541,6 +546,117 @@ struct MacUpdateSettings: View {
         let primary = isEn ? release.notesEn : release.notesZh
         let fallback = isEn ? release.notesZh : release.notesEn
         return primary.isEmpty ? fallback : primary
+    }
+}
+
+// MARK: - Responsive Bookplate Layout
+
+/// Responsive geometry for the two-folio bookplate spread across narrow (860pt),
+/// default (1020pt), and wide (1380pt+) macOS Settings windows.
+struct AboutSpreadMetrics {
+    let leftWidth: CGFloat
+    let gutter: CGFloat
+    let rightWidth: CGFloat
+    let horizontalMargin: CGFloat
+
+    init(viewportWidth: CGFloat) {
+        let minMargin: CGFloat = 28
+        let narrowViewport: CGFloat = 676  // 860pt min window - 184pt sidebar
+        let wideViewport: CGFloat = 1120   // ~1304pt window - 184pt sidebar
+        let t = min(max((viewportWidth - narrowViewport) / (wideViewport - narrowViewport), 0), 1)
+
+        let desiredLeft = Self.lerp(204, 218, t).rounded()
+        let desiredGutter = Self.lerp(28, 48, t).rounded()
+        let desiredRight = Self.lerp(388, 600, t).rounded()
+
+        let usable = max(0, viewportWidth - minMargin * 2)
+        let desiredTotal = desiredLeft + desiredGutter + desiredRight
+
+        if usable >= desiredTotal || usable == 0 {
+            leftWidth = desiredLeft
+            gutter = desiredGutter
+            rightWidth = desiredRight
+            horizontalMargin = minMargin
+        } else {
+            let compactGutter = max(20, min(desiredGutter, usable * 0.045)).rounded()
+            let compactLeft = max(184, min(desiredLeft, usable * 0.34)).rounded()
+            let compactRight = max(280, usable - compactLeft - compactGutter)
+            leftWidth = compactLeft
+            gutter = compactGutter
+            rightWidth = compactRight
+            horizontalMargin = minMargin
+        }
+    }
+
+    private static func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat {
+        a + (b - a) * t
+    }
+}
+
+/// Places the left bookplate folio and right info folio side by side, matching the left folio's
+/// height to the taller sibling in a single layout pass so the colophon aligns flush with the cards.
+private nonisolated struct BookplateSpreadLayout: Layout {
+    let leftWidth: CGFloat
+    let rightWidth: CGFloat
+    let spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 2 else { return .zero }
+        let leftMin = subviews[0].sizeThatFits(ProposedViewSize(width: leftWidth, height: nil))
+        let right = subviews[1].sizeThatFits(ProposedViewSize(width: rightWidth, height: nil))
+        return CGSize(width: leftWidth + spacing + rightWidth, height: max(leftMin.height, right.height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else { return }
+        let right = subviews[1].sizeThatFits(ProposedViewSize(width: rightWidth, height: nil))
+        let height = max(bounds.height, right.height)
+        subviews[0].place(
+            at: CGPoint(x: bounds.minX, y: bounds.minY),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: leftWidth, height: height)
+        )
+        subviews[1].place(
+            at: CGPoint(x: bounds.minX + leftWidth + spacing, y: bounds.minY),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: rightWidth, height: right.height)
+        )
+    }
+}
+
+/// Centers its child horizontally and places it at an optical vertical balance (`topRatio` of spare
+/// height, clamped to `minTop` / `minBottom`) when shorter than the viewport, while allowing natural
+/// scrolling when taller.
+private nonisolated struct OpticalCenterLayout: Layout {
+    let viewportHeight: CGFloat
+    var topRatio: CGFloat = 0.38
+    var minTop: CGFloat = 48
+    var minBottom: CGFloat = 32
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let child = subviews.first else { return .zero }
+        let childSize = child.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+        let width = proposal.width ?? childSize.width
+        let minContentHeight = childSize.height + minTop + minBottom
+        return CGSize(width: width, height: max(viewportHeight, minContentHeight))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let child = subviews.first else { return }
+        let childSize = child.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+        let spare = bounds.height - childSize.height
+        let top: CGFloat
+        if spare <= minTop + minBottom {
+            top = minTop
+        } else {
+            top = min(max(minTop, (spare * topRatio).rounded()), spare - minBottom)
+        }
+        let x = bounds.minX + ((bounds.width - childSize.width) / 2).rounded()
+        child.place(
+            at: CGPoint(x: x, y: bounds.minY + top),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: childSize.width, height: childSize.height)
+        )
     }
 }
 
