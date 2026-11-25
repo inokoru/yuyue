@@ -638,7 +638,7 @@ struct PhoneAbout: View {
         YYPage {
             VStack(spacing: 0) {
                 // 阅 on paper, the blue rule under it.
-                Text("阅")
+                Text(verbatim: "阅")
                     .font(YYUI.font(30, .bold, design: .serif))
                     .foregroundStyle(Color(yy: YYRGBA(28, 29, 32)))
                     .padding(.bottom, YYUI.s(6))

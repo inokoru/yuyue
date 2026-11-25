@@ -239,7 +239,10 @@ struct SelectionCard: View {
         Button(action: run) {
             VStack(spacing: 4) {
                 Image(systemName: symbol).font(.yy(size: Self.touch ? 13.5 : 14.5)).frame(height: 16)
-                Text(title).font(.yy(size: Self.touch ? 10.5 : 11, weight: accent ? .semibold : .regular))
+                Text(title)
+                    .font(.yy(size: Self.touch ? 10.5 : 11, weight: accent ? .semibold : .regular))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .foregroundStyle(accent ? tint.accent : YYColor.t1)
             .frame(maxWidth: .infinity)

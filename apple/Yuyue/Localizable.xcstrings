@@ -14231,9 +14231,21 @@
     "定了这句，后面 %u 句也跟着定。" : {
       "localizations" : {
         "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Settling this sentence settles the next %u too."
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Setting this also sets %u following line."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Setting this also sets %u following lines."
+                }
+              }
+            }
           }
         }
       }
@@ -37353,7 +37365,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Braving the bitter cold, I returned to my hometown over two thousand li away, after twenty years apart."
+            "value" : "Braving the bitter cold, I travelled more than seven hundred miles back to the old home I had left over twenty years before."
           }
         }
       }
@@ -43572,7 +43584,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Listen from here"
+            "value" : "Listen"
           }
         }
       }
@@ -46223,6 +46235,690 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Changing app icon"
+          }
+        }
+      }
+    },
+    "%@ · 推荐" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · Recommended"
+          }
+        }
+      }
+    },
+    "%@ · 系统语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · System Voices"
+          }
+        }
+      }
+    },
+    "%@（不推荐 · 仅断网兜底）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ (Not recommended · Offline fallback only)"
+          }
+        }
+      }
+    },
+    "%@（不推荐）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ (Not recommended)"
+          }
+        }
+      }
+    },
+    "%@（免 Key）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ (No key)"
+          }
+        }
+      }
+    },
+    "%@（推荐）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ (Recommended)"
+          }
+        }
+      }
+    },
+    "%lld 万字 · 约 %lld 万" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld0K chars · ~%2$lld0K tokens"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld 万字 · 约 %2$lld 万"
+          }
+        }
+      }
+    },
+    "%lld 个中英自然音色 · 克隆 %lld 个 · 免费免联网" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@n@ · %2$lld cloned · Free, offline"
+          },
+          "substitutions" : {
+            "n" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voice"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voices"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld 个中英自然音色 · 克隆 %2$lld 个 · 免费免联网"
+          }
+        }
+      }
+    },
+    "%lld 个中英自然音色 · 跨端轻量离线" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@n@ · Lightweight, offline"
+          },
+          "substitutions" : {
+            "n" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voice"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voices"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld 个中英音色 · 免注册开箱即听，已读缓存在本机" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@n@ · Ready to play, cached locally"
+          },
+          "substitutions" : {
+            "n" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voice"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voices"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld 个音色 · 本地免费免联网" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@n@ · Free, offline"
+          },
+          "substitutions" : {
+            "n" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voice"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voices"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld 个音色 · 机械音明显，仅作断网兜底" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@n@ · Robotic, offline fallback only"
+          },
+          "substitutions" : {
+            "n" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voice"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voices"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld 个音色 · 跨端轻量离线，无需联网" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@n@ · Lightweight, works offline"
+          },
+          "substitutions" : {
+            "n" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voice"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voices"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "一键下载 Kokoro 离线语音（%lld MB）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download Kokoro Offline Voice (%lld MB)"
+          }
+        }
+      }
+    },
+    "一键下载（%lld MB）· 跨端离线自然语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download (%lld MB) · Natural offline voices"
+          }
+        }
+      }
+    },
+    "下好后将自动启用「%@」· 下载期间可先听在线自然语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Will switch to “%@” once downloaded · Listen with Free Online Voices meanwhile"
+          }
+        }
+      }
+    },
+    "下载 Kokoro 离线语音（%lld MB）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download Kokoro Offline Voice (%lld MB)"
+          }
+        }
+      }
+    },
+    "下载 Kokoro 跨端轻量语音 · 约 %lld MB" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download Kokoro Offline Voice · ~%lld MB"
+          }
+        }
+      }
+    },
+    "下载中 %lld%% · 下好后自动启用" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloading %lld%% · Switches when ready"
+          }
+        }
+      }
+    },
+    "下载中 %lld%% · 点此预约选用" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloading %lld%% · Tap to select when ready"
+          }
+        }
+      }
+    },
+    "书库在“我的 › 通用 › 书库来源”里添加，一次填好，以后在这里直接翻。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add libraries in Me › General › Library Sources. Set one up once, then browse it here."
+          }
+        }
+      }
+    },
+    "余 %lld 句未写明说话人" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld line without a named speaker"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld lines without a named speaker"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "刷新音色与状态" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh voices & status"
+          }
+        }
+      }
+    },
+    "已发出约 %@ 字" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sent about %@ characters"
+          }
+        }
+      }
+    },
+    "已认出 %lld / %lld 句" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cast %1$lld / %2$lld lines"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "已认出 %1$lld / %2$lld 句"
+          }
+        }
+      }
+    },
+    "已认出 %lld / %lld 句 · 轻量模型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cast %1$lld / %2$lld lines · Lightweight model"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "已认出 %1$lld / %2$lld 句 · 轻量模型"
+          }
+        }
+      }
+    },
+    "待下载 · %lld MB" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not downloaded · %lld MB"
+          }
+        }
+      }
+    },
+    "截至当前共有 %lld 句待确认" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld line so far needs confirmation"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld lines so far need confirmation"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "打开 %@ 后即可使用 · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open %1$@ to use · %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "打开 %1$@ 后即可使用 · %2$@"
+          }
+        }
+      }
+    },
+    "支持导入 .ttf、.otf 字体文件，仅保存在本机。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import .ttf or .otf font files. They stay on this device."
+          }
+        }
+      }
+    },
+    "时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It was the dead of winter, and as I drew near, the weather turned bleak and overcast; a cold wind whistled through the boat's cabin. Peering out through a crack in the awning, beneath a sallow sky, I saw several desolate villages scattered near and far, without a sign of life."
+          }
+        }
+      }
+    },
+    "本机自动发现" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detected locally"
+          }
+        }
+      }
+    },
+    "本机运行中" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Running locally"
+          }
+        }
+      }
+    },
+    "本章台词 · %lld / %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chapter lines · %1$lld / %2$lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "本章台词 · %1$lld / %2$lld"
+          }
+        }
+      }
+    },
+    "正在下载 %lld%% · 下载期间可先听在线自然语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloading %lld%% · Listen online meanwhile"
+          }
+        }
+      }
+    },
+    "正在下载离线语音 %lld%%" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloading offline voices %lld%%"
+          }
+        }
+      }
+    },
+    "正在下载轻量离线语音 %lld%% · 免费免联网" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloading offline voices %lld%% · Free, offline"
+          }
+        }
+      }
+    },
+    "正在准备离线语音 %lld%%" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing offline voices %lld%%"
+          }
+        }
+      }
+    },
+    "正在重连 %@…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reconnecting %@…"
+          }
+        }
+      }
+    },
+    "约 %@ token" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "~%@ tokens"
+          }
+        }
+      }
+    },
+    "语阅离线语音（Kokoro） · %lld MB" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yuyue Offline Voice (Kokoro) · %lld MB"
+          }
+        }
+      }
+    },
+    "语音对齐模型 · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speech alignment model · %@"
+          }
+        }
+      }
+    },
+    "跨端轻量中英自然人声 · 点进去一键下载（约 %lld MB）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Natural offline voices · Open to download (~%lld MB)"
+          }
+        }
+      }
+    },
+    "还没有自定义字体" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No custom fonts yet"
+          }
+        }
+      }
+    },
+    "这一章 %lld 句台词已认全" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "The 1 line in this chapter is cast"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "All %lld lines in this chapter are cast"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "隐藏 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide %@"
+          }
+        }
+      }
+    },
+    "隐藏 %@？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide %@?"
+          }
+        }
+      }
+    },
+    "隐藏后可在「添加声音来源」重新开启。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can re-enable it in Add Voice Source."
           }
         }
       }

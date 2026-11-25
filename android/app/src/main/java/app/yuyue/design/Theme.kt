@@ -4,15 +4,23 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
+import android.view.View
+import android.view.ViewParent
+import android.view.Window
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -24,12 +32,45 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 
 /** The palette for the appearance in effect: 浅色, 深色 or 跟随系统 (设置 · 外观). */
 val LocalPalette = staticCompositionLocalOf { YYColors.Light }
 val LocalDark = staticCompositionLocalOf { false }
 val LocalTint = staticCompositionLocalOf { YYTints.Default }
+
+/**
+ * Effective darkness behind the status bar (`true` = dark background -> light/white icons).
+ * Outside the reader this matches [LocalDark]; inside [app.yuyue.reader.ReaderScreen] it follows
+ * the active reading paper's `isDark`, so modal sheets inherit the right status bar contrast.
+ */
+val LocalStatusBarDark = compositionLocalOf { false }
+
+/** Coordinates Activity system bar overrides so [YuyueTheme] recompositions never clobber the reader. */
+internal class SystemBarOverride {
+    private var owner: Any? = null
+    var statusBarDark by mutableStateOf<Boolean?>(null)
+        private set
+    var navBarDark by mutableStateOf<Boolean?>(null)
+        private set
+
+    fun set(owner: Any, statusBarDark: Boolean, navBarDark: Boolean) {
+        this.owner = owner
+        this.statusBarDark = statusBarDark
+        this.navBarDark = navBarDark
+    }
+
+    fun clear(owner: Any): Boolean {
+        if (this.owner !== owner) return false
+        this.owner = null
+        this.statusBarDark = null
+        this.navBarDark = null
+        return true
+    }
+}
+
+internal val LocalSystemBarOverride = staticCompositionLocalOf<SystemBarOverride?> { null }
 
 /** The UI colours and the 主题色, as the iPhone's `YYColor` and `YYTint.standard`. */
 object YY {
@@ -77,28 +118,72 @@ fun YuyueTheme(content: @Composable () -> Unit) {
         Appearance.DARK -> true
         else -> isSystemInDarkTheme()
     }
+    val override = remember { SystemBarOverride() }
+    val statusBarDark = override.statusBarDark ?: dark
+    val navBarDark = override.navBarDark ?: dark
     val view = LocalView.current
     val context = LocalContext.current
     SideEffect {
         app.yuyue.reader.PaperAppearance.syncAppearance(dark)
+    }
+    LaunchedEffect(view, statusBarDark, navBarDark) {
         if (!view.isInEditMode) {
-            val window = context.findActivity()?.window
-            if (window != null) {
-                val controller = WindowCompat.getInsetsController(window, view)
-                controller.isAppearanceLightStatusBars = !dark
-                controller.isAppearanceLightNavigationBars = !dark
-            }
+            val window = context.findActivity()?.window ?: return@LaunchedEffect
+            val controller = WindowCompat.getInsetsController(window, window.decorView)
+            controller.isAppearanceLightStatusBars = !(override.statusBarDark ?: dark)
+            controller.isAppearanceLightNavigationBars = !(override.navBarDark ?: dark)
         }
     }
     CompositionLocalProvider(
         LocalPalette provides if (dark) YYColors.Dark else YYColors.Light,
         LocalDark provides dark,
+        LocalStatusBarDark provides dark,
+        LocalSystemBarOverride provides override,
         LocalTint provides (YYTints.All.firstOrNull { it.id == tintID.value } ?: YYTints.Default),
         content = content,
     )
 }
 
-private tailrec fun Context.findActivity(): Activity? = when (this) {
+/**
+ * Syncs the enclosing Dialog window's system bar icon contrast (e.g. Material 3's
+ * `ModalBottomSheet`, whose Dialog window otherwise inherits the light theme / system dark mode).
+ */
+@Composable
+fun SyncDialogSystemBars(
+    statusBarDark: Boolean = LocalStatusBarDark.current,
+    navBarDark: Boolean = LocalDark.current,
+) {
+    val view = LocalView.current
+    if (view.isInEditMode) return
+    val latestStatusDark by rememberUpdatedState(statusBarDark)
+    val latestNavDark by rememberUpdatedState(navBarDark)
+    fun apply() {
+        val window = view.findDialogWindow() ?: return
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightStatusBars = !latestStatusDark
+        controller.isAppearanceLightNavigationBars = !latestNavDark
+    }
+    SideEffect { apply() }
+    LaunchedEffect(view, statusBarDark, navBarDark) {
+        apply()
+        view.post { apply() }
+    }
+}
+
+private fun View.findDialogWindow(): Window? {
+    var cur: Any? = this
+    while (cur != null) {
+        if (cur is DialogWindowProvider) return cur.window
+        cur = when (cur) {
+            is View -> cur.parent
+            is ViewParent -> cur.parent
+            else -> null
+        }
+    }
+    return null
+}
+
+internal tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null

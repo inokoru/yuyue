@@ -75,18 +75,20 @@ fun UpdateScreen() {
         // checking → a release → downloading → ready: each fades in where the last one was.
         val reduce = app.yuyue.design.YYMotion.isReduceMotion()
         androidx.compose.animation.AnimatedContent(u.phase, transitionSpec = { app.yuyue.design.YYMotion.swap(reduce) }, contentKey = { it::class }, label = "update") { phase ->
-        when (phase) {
-            UpdatePhase.Checking -> Status(checking = true)
-            UpdatePhase.CheckFailed -> FailedCheck()
-            UpdatePhase.Skipped -> Skipped()
-            UpdatePhase.Later -> Later()
-            UpdatePhase.Release -> u.offer?.let { Release(it) { scope.launch { u.download(context) } } } ?: Status(checking = false)
-            is UpdatePhase.Downloading -> Progress(phase.done)
-            is UpdatePhase.DownloadFailed -> FailedDownload(phase.why) { scope.launch { u.download(context) } }
-            UpdatePhase.Ready -> Ready { scope.launch { u.install(context) } }
-            UpdatePhase.NeedPermission -> Permission({ u.openInstallSettings(context) }, { u.installLater() })
-            else -> Status(checking = false)
-        }
+            Column(Modifier.fillMaxWidth()) {
+                when (phase) {
+                    UpdatePhase.Checking -> Status(checking = true)
+                    UpdatePhase.CheckFailed -> FailedCheck()
+                    UpdatePhase.Skipped -> Skipped()
+                    UpdatePhase.Later -> Later()
+                    UpdatePhase.Release -> u.offer?.let { Release(it) { scope.launch { u.download(context) } } } ?: Status(checking = false)
+                    is UpdatePhase.Downloading -> Progress(phase.done)
+                    is UpdatePhase.DownloadFailed -> FailedDownload(phase.why) { scope.launch { u.download(context) } }
+                    UpdatePhase.Ready -> Ready { scope.launch { u.install(context) } }
+                    UpdatePhase.NeedPermission -> Permission({ u.openInstallSettings(context) }, { u.installLater() })
+                    else -> Status(checking = false)
+                }
+            }
         }
     }
 }

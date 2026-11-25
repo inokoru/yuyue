@@ -67,10 +67,10 @@ import kotlin.math.roundToInt
 fun ListenSheet(model: ReaderModel, dismiss: () -> Unit) {
     val player = model.player ?: return dismiss()
     var pickingVoice by remember { mutableStateOf(false) }
-    var currentVoiceId by remember { mutableStateOf<String?>(null) }
+    var currentVoice by remember { mutableStateOf<BookVoice?>(null) }
     ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.card, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            VoiceRow(model, player, onCurrentChanged = { currentVoiceId = it?.id }) { pickingVoice = true }
+            VoiceRow(model, player, currentVoice, onCurrentChanged = { currentVoice = it }) { pickingVoice = true }
             val readyVoice = player.readyOfflineVoice
             if (readyVoice != null) {
                 Row(
@@ -118,7 +118,7 @@ fun ListenSheet(model: ReaderModel, dismiss: () -> Unit) {
                             .background(YY.tint.accentSoft)
                             .clickable {
                                 player.acceptReadyOfflineVoice()
-                                currentVoiceId = readyVoice.id
+                                currentVoice = readyVoice
                             }
                             .padding(horizontal = 10.dp, vertical = 5.dp),
                     )
@@ -184,11 +184,11 @@ fun ListenSheet(model: ReaderModel, dismiss: () -> Unit) {
             bookID = model.bookID,
             bookTitle = model.detail?.summary?.title,
             language = player.language,
-            selectedId = currentVoiceId,
+            selectedId = currentVoice?.id,
             nextBookSentence = nextLine,
             onSelect = { v ->
                 player.choose(v, player.language)
-                currentVoiceId = v.id
+                currentVoice = v
             },
             dismiss = { pickingVoice = false },
         )
@@ -199,19 +199,18 @@ fun ListenSheet(model: ReaderModel, dismiss: () -> Unit) {
 private fun VoiceRow(
     model: ReaderModel,
     player: Player,
+    current: BookVoice?,
     onCurrentChanged: (BookVoice?) -> Unit,
     openPicker: () -> Unit,
 ) {
     val language = player.language
     val kokoroState = app.yuyue.speech.KokoroModel.state
     val liveState = app.yuyue.speech.LiveVoiceModel.state
-    var current by remember { mutableStateOf<BookVoice?>(null) }
     var previewing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     DisposableEffect(Unit) { onDispose { SystemVoice.Engine.stopPreview() } }
-    LaunchedEffect(language, kokoroState, liveState, player.spot?.section) {
-        current = player.currentVoice(language)
-        onCurrentChanged(current)
+    LaunchedEffect(language, kokoroState, liveState, player.spot?.section, player.voiceVersion, current?.id) {
+        onCurrentChanged(player.currentVoice(language))
     }
     Row(
         Modifier.fillMaxWidth().background(YY.c.inset, RoundedCornerShape(14.dp)).padding(start = 9.dp, end = 8.dp, top = 9.dp, bottom = 9.dp),
