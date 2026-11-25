@@ -33,7 +33,7 @@
       } catch (_) {}
     })();
   </script>
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=20261125c">
 </head>
 <body>
   <a class="skip-link" href="#main"><span class="i18n-zh">跳到正文</span><span class="i18n-en">Skip to content</span></a>
@@ -65,11 +65,10 @@
         <a href="/support/" aria-current="page"><span class="i18n-zh">帮助</span><span class="i18n-en">Support</span></a>
         <a href="/privacy/"><span class="i18n-zh">隐私</span><span class="i18n-en">Privacy</span></a>
       </nav>
-      <div class="lang-switch" role="group" data-aria-zh="切换语言" data-aria-en="Switch language">
-        <button type="button" class="lang-btn" data-set-lang="zh" aria-pressed="true">中文</button>
-        <span class="lang-dot" aria-hidden="true">·</span>
-        <button type="button" class="lang-btn" data-set-lang="en" aria-pressed="false">EN</button>
-      </div>
+      <button type="button" class="lang-toggle" data-toggle-lang data-aria-zh="切换为英文" data-aria-en="Switch to Chinese">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+        <span class="i18n-zh">EN</span><span class="i18n-en">中文</span>
+      </button>
       <button type="button" class="theme-btn" data-toggle-theme data-aria-zh="切换深浅色" data-aria-en="Toggle appearance">
         <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
@@ -161,6 +160,6 @@
     </div>
   </footer>
 
-  <script src="/site.js" defer></script>
+  <script src="/site.js?v=20261125c" defer></script>
 </body>
 </html>

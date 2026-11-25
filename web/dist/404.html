@@ -27,16 +27,15 @@
       } catch (_) {}
     })();
   </script>
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=20261125c">
 </head>
 <body>
   <header class="col top-strip">
     <a class="mark-link" href="/"><div class="mark" aria-hidden="true">阅</div></a>
-    <div class="lang-switch" role="group" data-aria-zh="切换语言" data-aria-en="Switch language">
-      <button type="button" class="lang-btn" data-set-lang="zh" aria-pressed="true">中文</button>
-      <span class="lang-dot" aria-hidden="true">·</span>
-      <button type="button" class="lang-btn" data-set-lang="en" aria-pressed="false">EN</button>
-    </div>
+    <button type="button" class="lang-toggle" data-toggle-lang data-aria-zh="切换为英文" data-aria-en="Switch to Chinese">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+      <span class="i18n-zh">EN</span><span class="i18n-en">中文</span>
+    </button>
   </header>
 
   <main class="col" style="padding: 48px 20px 96px">
@@ -55,6 +54,6 @@
     </div>
   </main>
 
-  <script src="/site.js" defer></script>
+  <script src="/site.js?v=20261125c" defer></script>
 </body>
 </html>

@@ -69,6 +69,9 @@
   langButtons.forEach((btn) => {
     btn.addEventListener('click', () => setLang(btn.dataset.setLang, { userInitiated: true }));
   });
+  document.querySelectorAll('[data-toggle-lang]').forEach((btn) => {
+    btn.addEventListener('click', () => setLang(getLang() === 'en' ? 'zh' : 'en', { userInitiated: true }));
+  });
   syncLocalizedMeta(getLang());
 
   /* ------------------------------------------------------------------------
@@ -967,7 +970,7 @@
   }
 
   /* ------------------------------------------------------------------------
-     9. Platform Hint, Copy Code, Changelog Filter
+     9. Platform Hint, Download Mirror Switch, Copy Code, Changelog Filter
      ------------------------------------------------------------------------ */
   const platformCards = document.querySelectorAll('[data-platform]');
   if (platformCards.length) {
@@ -977,10 +980,66 @@
     if (/android/i.test(ua)) detected = 'android';
     else if (/iphone|ipad|ipod/i.test(ua) || (/mac/i.test(plat) && navigator.maxTouchPoints > 1)) detected = 'ios';
     else if (/mac/i.test(plat) || /macintosh/i.test(ua)) detected = 'mac';
-    else if (/win/i.test(plat) || /windows/i.test(ua)) detected = 'windows';
+    else if (/win|linux/i.test(plat) || /windows|linux/i.test(ua)) detected = 'windows';
     if (detected) {
       platformCards.forEach((c) => { if (c.dataset.platform === detected) c.classList.add('is-detected'); });
     }
+  }
+
+  const mirrorBtns = Array.from(document.querySelectorAll('[data-set-mirror]'));
+  const mirrorLinks = Array.from(document.querySelectorAll('[data-dl-cn][data-dl-gh]'));
+  const mirrorSeg = document.querySelector('.dl-mirror-seg');
+  const mirrorThumb = mirrorSeg ? mirrorSeg.querySelector('.dl-mirror-thumb') : null;
+  if (mirrorBtns.length && mirrorLinks.length) {
+    let userPickedMirror = false;
+
+    function syncMirrorThumb({ instant = false } = {}) {
+      if (!mirrorSeg || !mirrorThumb) return;
+      const active = mirrorBtns.find((b) => b.getAttribute('aria-pressed') === 'true');
+      if (!active || active.offsetWidth === 0) return;
+      if (instant) mirrorThumb.style.transition = 'none';
+      mirrorThumb.style.width = `${active.offsetWidth}px`;
+      mirrorThumb.style.transform = `translateX(${active.offsetLeft}px)`;
+      mirrorSeg.classList.add('has-thumb');
+      if (instant) {
+        void mirrorThumb.offsetWidth;
+        mirrorThumb.style.transition = '';
+      }
+    }
+
+    function applyMirror(mirror, { persist = false, instant = false } = {}) {
+      const next = mirror === 'github' ? 'github' : 'cn';
+      if (persist) {
+        userPickedMirror = true;
+        try { localStorage.setItem('yuyue-mirror', next); } catch (_) {}
+      }
+      mirrorBtns.forEach((btn) => {
+        btn.setAttribute('aria-pressed', String(btn.dataset.setMirror === next));
+      });
+      mirrorLinks.forEach((link) => {
+        const href = next === 'github' ? link.dataset.dlGh : link.dataset.dlCn;
+        if (href) link.setAttribute('href', href);
+      });
+      requestAnimationFrame(() => syncMirrorThumb({ instant }));
+    }
+
+    let savedMirror = null;
+    try { savedMirror = localStorage.getItem('yuyue-mirror'); } catch (_) {}
+    if (savedMirror === 'cn' || savedMirror === 'github') {
+      userPickedMirror = true;
+      applyMirror(savedMirror, { instant: true });
+    } else {
+      applyMirror(getLang() === 'en' ? 'github' : 'cn', { instant: true });
+    }
+
+    mirrorBtns.forEach((btn) => {
+      btn.addEventListener('click', () => applyMirror(btn.dataset.setMirror, { persist: true }));
+    });
+    window.addEventListener('yuyue:langchange', (e) => {
+      if (!userPickedMirror) applyMirror(e.detail.lang === 'en' ? 'github' : 'cn', { instant: true });
+      else requestAnimationFrame(() => syncMirrorThumb({ instant: true }));
+    });
+    window.addEventListener('resize', () => syncMirrorThumb({ instant: true }), { passive: true });
   }
 
   document.querySelectorAll('[data-copy]').forEach((btn) => {
@@ -1008,12 +1067,26 @@
 
   const filterBtns = Array.from(document.querySelectorAll('[data-filter]'));
   const changeItems = Array.from(document.querySelectorAll('[data-cat]'));
+  const releaseSections = Array.from(document.querySelectorAll('[data-release]'));
+  const emptyFilters = Array.from(document.querySelectorAll('[data-empty-filter]'));
   if (filterBtns.length && changeItems.length) {
     filterBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
         const cat = btn.dataset.filter;
         filterBtns.forEach((b) => b.setAttribute('aria-pressed', String(b === btn)));
-        changeItems.forEach((item) => { item.hidden = cat !== 'all' && item.dataset.cat !== cat; });
+        changeItems.forEach((item) => {
+          const cats = (item.dataset.cat || '').split(/\s+/).filter(Boolean);
+          item.hidden = cat !== 'all' && !cats.includes(cat);
+        });
+        let visibleReleases = 0;
+        releaseSections.forEach((sec) => {
+          const items = Array.from(sec.querySelectorAll('[data-cat]'));
+          sec.hidden = items.length > 0 && items.every((it) => it.hidden);
+          if (!sec.hidden) visibleReleases += 1;
+        });
+        emptyFilters.forEach((el) => {
+          el.hidden = !(visibleReleases === 0 && el.dataset.emptyFilter === cat);
+        });
       });
     });
   }

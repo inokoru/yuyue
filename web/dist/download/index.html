@@ -33,7 +33,7 @@
       } catch (_) {}
     })();
   </script>
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=20261125c">
 </head>
 <body>
   <a class="skip-link" href="#main"><span class="i18n-zh">跳到正文</span><span class="i18n-en">Skip to content</span></a>
@@ -65,11 +65,10 @@
         <a href="/support/"><span class="i18n-zh">帮助</span><span class="i18n-en">Support</span></a>
         <a href="/privacy/"><span class="i18n-zh">隐私</span><span class="i18n-en">Privacy</span></a>
       </nav>
-      <div class="lang-switch" role="group" data-aria-zh="切换语言" data-aria-en="Switch language">
-        <button type="button" class="lang-btn" data-set-lang="zh" aria-pressed="true">中文</button>
-        <span class="lang-dot" aria-hidden="true">·</span>
-        <button type="button" class="lang-btn" data-set-lang="en" aria-pressed="false">EN</button>
-      </div>
+      <button type="button" class="lang-toggle" data-toggle-lang data-aria-zh="切换为英文" data-aria-en="Switch to Chinese">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+        <span class="i18n-zh">EN</span><span class="i18n-en">中文</span>
+      </button>
       <button type="button" class="theme-btn" data-toggle-theme data-aria-zh="切换深浅色" data-aria-en="Toggle appearance">
         <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
@@ -85,33 +84,123 @@
     <div class="doc-head">
       <h1><span class="i18n-zh">免费下载语阅</span><span class="i18n-en">Download Yuyue</span></h1>
       <p class="doc-lead">
-        <span class="i18n-zh">免费使用，没有广告，无需注册。目前通过发布页直接提供安装包，Mac 与 Android 几步就能装好。</span>
-        <span class="i18n-en">Free, ad-free, and no sign-in needed. Mac and Android take just a moment to set up.</span>
+        <span class="i18n-zh">免费使用，没有广告，无需注册。点下方对应平台即可直接下载最新版安装包，Mac 与 Android 几步就能装好。</span>
+        <span class="i18n-en">Free, ad-free, and no sign-in needed. Pick your platform below to download the latest installer directly—Mac and Android take just a moment.</span>
       </p>
       <div style="margin-top:18px;display:flex;flex-wrap:wrap;gap:10px">
-        <a class="btn btn-primary i18n-zh" href="https://cnb.cool/inokoru/yuyue/-/releases" target="_blank" rel="noopener">国内高速下载（CNB 镜像）</a>
-        <a class="btn btn-ghost i18n-zh" href="https://github.com/inokoru/yuyue/releases" target="_blank" rel="noopener">GitHub 下载</a>
-        <a class="btn btn-primary i18n-en" href="https://github.com/inokoru/yuyue/releases" target="_blank" rel="noopener">Get Latest Installer (GitHub)</a>
-        <a class="btn btn-ghost i18n-en" href="https://cnb.cool/inokoru/yuyue/-/releases" target="_blank" rel="noopener">China Mirror (CNB)</a>
         <a class="btn btn-ghost" href="/changelog/">
           <span class="i18n-zh">看看更新了什么</span><span class="i18n-en">What’s New</span>
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/inokoru/yuyue/releases" target="_blank" rel="noopener">
+          <span class="i18n-zh">全部历史版本</span><span class="i18n-en">All Releases</span>
         </a>
       </div>
     </div>
 
-    <section class="doc">
+    <div class="dl-toolbar">
+      <div class="dl-release-pill">
+        <span><span class="i18n-zh">当前最新</span><span class="i18n-en">Latest</span></span>
+        <span class="dl-release-ver">v0.1.3</span>
+        <span class="dl-release-dot" aria-hidden="true">·</span>
+        <span class="dl-release-date">2026-11-24</span>
+      </div>
+      <div class="dl-mirror">
+        <span><span class="i18n-zh">下载线路</span><span class="i18n-en">Mirror</span></span>
+        <div class="dl-mirror-seg" role="group" data-aria-zh="选择下载线路" data-aria-en="Choose download mirror">
+          <span class="dl-mirror-thumb" aria-hidden="true"></span>
+          <button type="button" class="dl-mirror-btn" data-set-mirror="cn" aria-pressed="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            <span class="i18n-zh">国内直链</span><span class="i18n-en">China Direct</span>
+          </button>
+          <button type="button" class="dl-mirror-btn" data-set-mirror="github" aria-pressed="false">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.58 2 12.26c0 4.54 2.87 8.39 6.84 9.75.5.09.68-.22.68-.49 0-.24-.01-.88-.01-1.73-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.9 1.57 2.35 1.12 2.92.85.09-.66.35-1.12.63-1.37-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.31.1-2.72 0 0 .84-.28 2.75 1.05A9.36 9.36 0 0 1 12 6.84c.85 0 1.71.12 2.51.35 1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.46.1 2.72.64.72 1.03 1.63 1.03 2.75 0 3.93-2.34 4.8-4.57 5.05.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.59.69.49A10.27 10.27 0 0 0 22 12.26C22 6.58 17.52 2 12 2Z"/></svg>
+            <span>GitHub</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="platform-grid">
+      <article class="platform-card" data-platform="mac">
+        <div class="platform-head">
+          <h3>Mac</h3>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span class="platform-detected"><span class="i18n-zh">当前设备</span><span class="i18n-en">This device</span></span>
+            <span class="platform-tag"><span class="i18n-zh">推荐</span><span class="i18n-en">Ready</span></span>
+          </div>
+        </div>
+        <div class="platform-req"><span class="i18n-zh">Apple 芯片 / Intel · macOS 14 及以上</span><span class="i18n-en">Apple Silicon / Intel · macOS 14+</span></div>
+        <p><span class="i18n-zh">下载 <code>.dmg</code> 拖进应用程序即可，应用内自动提醒更新。</span><span class="i18n-en">Download the <code>.dmg</code> and drag into Applications; updates notify inside the app.</span></p>
+        <div class="dl-card-actions">
+          <a class="btn btn-primary btn-sm" href="https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-mac-arm64.dmg" data-dl-cn="https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-mac-arm64.dmg" data-dl-gh="https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-mac-arm64.dmg">
+            <span class="i18n-zh">Apple 芯片 (.dmg)</span><span class="i18n-en">Apple Silicon (.dmg)</span>
+          </a>
+          <a class="btn btn-ghost btn-sm" href="https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-mac-x86_64.dmg" data-dl-cn="https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-mac-x86_64.dmg" data-dl-gh="https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-mac-x86_64.dmg">
+            <span class="i18n-zh">Intel 芯片 (.dmg)</span><span class="i18n-en">Intel (.dmg)</span>
+          </a>
+        </div>
+      </article>
+
+      <article class="platform-card" data-platform="android">
+        <div class="platform-head">
+          <h3>Android</h3>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span class="platform-detected"><span class="i18n-zh">当前设备</span><span class="i18n-en">This device</span></span>
+            <span class="platform-tag"><span class="i18n-zh">推荐</span><span class="i18n-en">Ready</span></span>
+          </div>
+        </div>
+        <div class="platform-req"><span class="i18n-zh">Android 8.0 及以上</span><span class="i18n-en">Android 8.0+</span></div>
+        <p><span class="i18n-zh">直接安装 <code>.apk</code>，后续新版会在应用内提醒更新。</span><span class="i18n-en">Install the <code>.apk</code> directly; future updates appear inside the app.</span></p>
+        <div class="dl-card-actions">
+          <a class="btn btn-primary btn-sm" href="https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-android.apk" data-dl-cn="https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-android.apk" data-dl-gh="https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-android.apk">
+            <span class="i18n-zh">下载 Android (.apk)</span><span class="i18n-en">Download Android (.apk)</span>
+          </a>
+        </div>
+      </article>
+
+      <article class="platform-card" data-platform="ios">
+        <div class="platform-head">
+          <h3>iPhone &amp; iPad</h3>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span class="platform-detected"><span class="i18n-zh">当前设备</span><span class="i18n-en">This device</span></span>
+            <span class="platform-tag"><span class="i18n-zh">需自签安装</span><span class="i18n-en">Sideload</span></span>
+          </div>
+        </div>
+        <div class="platform-req"><span class="i18n-zh">iOS / iPadOS 17 及以上</span><span class="i18n-en">iOS / iPadOS 17+</span></div>
+        <p><span class="i18n-zh">提供未签名 <code>.ipa</code>，配合电脑自签安装，步骤见下方。</span><span class="i18n-en">Unsigned <code>.ipa</code> for computer sideloading—see steps below.</span></p>
+        <div class="dl-card-actions">
+          <a class="btn btn-ghost btn-sm" href="https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-ios-unsigned.ipa" data-dl-cn="https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-ios-unsigned.ipa" data-dl-gh="https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-ios-unsigned.ipa">
+            <span class="i18n-zh">下载未签名 (.ipa)</span><span class="i18n-en">Unsigned (.ipa)</span>
+          </a>
+        </div>
+      </article>
+
+      <article class="platform-card" data-platform="windows">
+        <div class="platform-head">
+          <h3>Windows &amp; Linux</h3>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span class="platform-detected"><span class="i18n-zh">当前设备</span><span class="i18n-en">This device</span></span>
+            <span class="platform-tag"><span class="i18n-zh">准备中</span><span class="i18n-en">Coming soon</span></span>
+          </div>
+        </div>
+        <div class="platform-req"><span class="i18n-zh">桌面版同步推进中</span><span class="i18n-en">Desktop apps in progress</span></div>
+        <p><span class="i18n-zh">优先带来书架、阅读、划线、离线朗读与跨设备同步，进展见 <a href="/roadmap/">未来计划</a>。</span><span class="i18n-en">Bringing library, reading, highlights, offline voices, and cross-device sync—see the <a href="/roadmap/">Roadmap</a>.</span></p>
+      </article>
+    </div>
+
+    <section class="doc" style="margin-top:22px">
       <h2 id="mac"><span class="i18n-zh">Mac（Apple 芯片 / Intel · macOS 14 及以上）</span><span class="i18n-en">Mac (Apple Silicon / Intel · macOS 14+)</span></h2>
       <div class="i18n-zh">
         <p><strong>目前最省心的版本</strong>，装好后软件内会自动提醒更新。</p>
         <ol>
-          <li>在发布页下载对应芯片的 <code>.dmg</code> 安装包（Apple 芯片选 <code>arm64</code>，Intel 选 <code>x86_64</code>），打开后把「语阅」拖进「应用程序」。</li>
+          <li>在上方选择对应芯片的 <code>.dmg</code> 安装包（M 系列选 Apple 芯片版，老款选 Intel 版），打开后把「语阅」拖进「应用程序」。</li>
           <li>因为语阅是个人免费开源软件、暂未购买苹果商业签名，第一次双击打开时系统会提醒无法验证开发者。请打开「系统设置 → 隐私与安全性」，拉到下面点一次「仍要打开」即可，以后就不再提示。</li>
         </ol>
       </div>
       <div class="i18n-en">
         <p><strong>Easiest way to try Yuyue today</strong>, with built-in update notices.</p>
         <ol>
-          <li>Download the <code>.dmg</code> installer for your Mac (<code>arm64</code> for Apple Silicon, <code>x86_64</code> for Intel) and drag Yuyue into Applications.</li>
+          <li>Download the <code>.dmg</code> installer for your Mac above and drag Yuyue into Applications.</li>
           <li>Because Yuyue is an independent free app without a paid Apple developer certificate yet, macOS warns on the very first launch. Open System Settings → Privacy &amp; Security and click Open Anyway once.</li>
         </ol>
       </div>
@@ -122,7 +211,7 @@
 
       <h2 id="ios"><span class="i18n-zh">iPhone &amp; iPad（iOS / iPadOS 17 及以上）</span><span class="i18n-en">iPhone &amp; iPad (iOS / iPadOS 17+)</span></h2>
       <div class="i18n-zh">
-        <p>语阅暂未上架 App Store，目前提供未签名 <code>.ipa</code> 安装包，适合熟悉侧载的朋友配合电脑使用 <a href="https://github.com/claration/Impactor" target="_blank" rel="noopener">Impactor</a> 用自己的 Apple ID 签名安装：</p>
+        <p>语阅暂未上架 App Store，目前提供未签名 <code>.ipa</code> 安装包（<a href="https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-ios-unsigned.ipa" data-dl-cn="https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-ios-unsigned.ipa" data-dl-gh="https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-ios-unsigned.ipa">直链下载 .ipa</a>），适合熟悉侧载的朋友配合电脑使用 <a href="https://github.com/claration/Impactor" target="_blank" rel="noopener">Impactor</a> 用自己的 Apple ID 签名安装：</p>
         <ul>
           <li>免费 Apple ID 签名的应用每 <b>7 天</b>需要重新续签一次；</li>
           <li>需在手机设置里开启开发者模式，并连接电脑操作；</li>
@@ -183,6 +272,6 @@ android/build-core.sh &amp;&amp; (cd android &amp;&amp; ./gradlew assembleDebug)
     </div>
   </footer>
 
-  <script src="/site.js" defer></script>
+  <script src="/site.js?v=20261125c" defer></script>
 </body>
 </html>

@@ -33,7 +33,7 @@
       } catch (_) {}
     })();
   </script>
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=20261125c">
 </head>
 <body>
   <a class="skip-link" href="#main"><span class="i18n-zh">跳到正文</span><span class="i18n-en">Skip to content</span></a>
@@ -65,11 +65,10 @@
         <a href="/support/"><span class="i18n-zh">帮助</span><span class="i18n-en">Support</span></a>
         <a href="/privacy/"><span class="i18n-zh">隐私</span><span class="i18n-en">Privacy</span></a>
       </nav>
-      <div class="lang-switch" role="group" data-aria-zh="切换语言" data-aria-en="Switch language">
-        <button type="button" class="lang-btn" data-set-lang="zh" aria-pressed="true">中文</button>
-        <span class="lang-dot" aria-hidden="true">·</span>
-        <button type="button" class="lang-btn" data-set-lang="en" aria-pressed="false">EN</button>
-      </div>
+      <button type="button" class="lang-toggle" data-toggle-lang data-aria-zh="切换为英文" data-aria-en="Switch to Chinese">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+        <span class="i18n-zh">EN</span><span class="i18n-en">中文</span>
+      </button>
       <button type="button" class="theme-btn" data-toggle-theme data-aria-zh="切换深浅色" data-aria-en="Toggle appearance">
         <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
@@ -90,59 +89,185 @@
       </p>
     </div>
 
-    <div class="filter-row" role="group" data-aria-zh="按功能筛选" data-aria-en="Filter by area">
+    <div class="filter-row" role="group" data-aria-zh="按平台筛选" data-aria-en="Filter by platform">
       <button type="button" class="filter-btn" data-filter="all" aria-pressed="true"><span class="i18n-zh">全部</span><span class="i18n-en">All</span></button>
-      <button type="button" class="filter-btn" data-filter="read" aria-pressed="false"><span class="i18n-zh">阅读与书架</span><span class="i18n-en">Reading</span></button>
-      <button type="button" class="filter-btn" data-filter="audio" aria-pressed="false"><span class="i18n-zh">听书与播客</span><span class="i18n-en">Listening</span></button>
-      <button type="button" class="filter-btn" data-filter="notes" aria-pressed="false"><span class="i18n-zh">笔记与同步</span><span class="i18n-en">Notes &amp; Sync</span></button>
+      <button type="button" class="filter-btn" data-filter="mac" aria-pressed="false">Mac</button>
+      <button type="button" class="filter-btn" data-filter="ios" aria-pressed="false">iPhone &amp; iPad</button>
+      <button type="button" class="filter-btn" data-filter="android" aria-pressed="false">Android</button>
+      <button type="button" class="filter-btn" data-filter="windows" aria-pressed="false">Windows</button>
     </div>
 
-    <section class="doc" style="padding-bottom:24px">
+    <section class="doc" data-empty-filter="windows" hidden style="padding-bottom:24px">
+      <div class="release-meta">
+        <span class="release-ver">
+          <span>Windows</span>
+          <span class="release-latest"><span class="i18n-zh">准备中</span><span class="i18n-en">Coming soon</span></span>
+        </span>
+      </div>
+      <p class="i18n-zh" style="margin-bottom:0">Windows 桌面版正在同步推进中，尚未发布公开安装包。优先带来书架、阅读、划线、离线朗读与跨设备同步，首个公开版发布后会第一时间更新在这里；最新进展可看 <a href="/roadmap/">未来计划</a>。</p>
+      <p class="i18n-en" style="margin-bottom:0">The Windows desktop app is currently in active development and has not shipped a public release yet. Library, reading, highlights, offline voices, and cross-device sync will appear here as soon as the first public build lands—follow progress on the <a href="/roadmap/">Roadmap</a>.</p>
+    </section>
+
+    <section class="doc" data-release style="padding-bottom:24px">
+      <div class="release-meta">
+        <span class="release-ver">
+          <span>0.1.3</span>
+          <span class="release-latest"><span class="i18n-zh">最新</span><span class="i18n-en">Latest</span></span>
+        </span>
+        <span class="release-date">2026-11-24</span>
+      </div>
+      <ul class="change-list">
+        <li class="change-item" data-cat="mac ios android">
+          <span class="change-cat"><span class="i18n-zh">全平台</span><span class="i18n-en">All</span></span>
+          <div class="change-text">
+            <span class="i18n-zh"><strong>上下滚动拉动切章</strong>：在 Mac、iPhone / iPad 与 Android 的上下滚动阅读模式下，滑到章首或章末继续上拉/下拉即可顺滑切换上一章或下一章（支持触觉反馈、纸面拉动提示，以及读至全书末尾时的读完提示），并在滚动模式下统一纵向翻章动效。</span>
+            <span class="i18n-en"><strong>Pull-to-cross chapters in scrolled mode</strong>: on Mac, iPhone / iPad, and Android, pull past the top or bottom of a chapter in vertical scrolled mode to cross smoothly into the previous or next chapter (with haptic arming, edge pull cues, vertical chapter transitions, and a finished-book prompt at book end).</span>
+          </div>
+        </li>
+        <li class="change-item" data-cat="mac ios android">
+          <span class="change-cat"><span class="i18n-zh">全平台</span><span class="i18n-en">All</span></span>
+          <div class="change-text">
+            <span class="i18n-zh"><strong>国内更新与下载加速</strong>：新增国内高速更新与下载线路，中文环境下检查更新与下载安装包将优先走国内直链，网络不可用时自动回退至 GitHub。</span>
+            <span class="i18n-en"><strong>Faster China download &amp; update mirror</strong>: added a direct China mirror for release downloads and in-app updates, prioritized automatically for mainland Chinese locales with seamless fallback to GitHub.</span>
+          </div>
+        </li>
+        <li class="change-item" data-cat="mac ios">
+          <span class="change-cat">Mac · iOS</span>
+          <div class="change-text">
+            <span class="i18n-zh"><strong>性能优化</strong>：修复 macOS 设置页从「外观」切到「通用」时的卡顿，将语音合成、云同步与监听文件夹扫描等耗时操作移出主线程，并优化阅读目录缓存、纸张纹理渲染、PDF 内存回收与播客阅读页滚动流畅度。</span>
+            <span class="i18n-en"><strong>Performance improvements</strong>: fixed stutter when switching from Appearance to General in macOS Settings, moved speech synthesis, sync, and watched-folder scanning off the main thread, and optimized reader TOC caching, paper textures, PDF memory cleanup, and podcast reading scroll smoothness.</span>
+          </div>
+        </li>
+        <li class="change-item" data-cat="mac ios android">
+          <span class="change-cat"><span class="i18n-zh">全平台</span><span class="i18n-en">All</span></span>
+          <div class="change-text">
+            <span class="i18n-zh"><strong>版本号与更新状态修复</strong>：区分版本版次与显示版本号，升级到新版本后自动清理旧的更新检查残留状态。</span>
+            <span class="i18n-en"><strong>Update state &amp; version display fixes</strong>: separated release edition ordinal from the display version string and cleared stale update-check state after upgrading.</span>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <section class="doc" data-release style="padding-bottom:24px">
+      <div class="release-meta">
+        <span class="release-ver">0.1.2</span>
+        <span class="release-date">2026-11-24</span>
+      </div>
+      <ul class="change-list">
+        <li class="change-item" data-cat="android">
+          <span class="change-cat">Android</span>
+          <div class="change-text">
+            <span class="i18n-zh"><strong>打开书籍闪退修复</strong>：修复 0.1.1 版本在 Android 上点击书籍（EPUB、TXT、MOBI 等，包含旧版本已导入的书籍）进入阅读时直接闪退回桌面的问题。</span>
+            <span class="i18n-en"><strong>Book-opening crash fix</strong>: fixed a 0.1.1 regression on Android that crashed back to the home screen when opening books (EPUB, TXT, MOBI, etc., including books imported in earlier versions).</span>
+          </div>
+        </li>
+        <li class="change-item" data-cat="mac ios android">
+          <span class="change-cat"><span class="i18n-zh">全平台</span><span class="i18n-en">All</span></span>
+          <div class="change-text">
+            <span class="i18n-zh"><strong>部分 MOBI 导入与格式识别修复</strong>：修复含长章节、旧版编码或特殊文件头的 MOBI 书籍导入失败的问题，并补齐 Android 打开 MOBI 文件的格式识别。</span>
+            <span class="i18n-en"><strong>MOBI import fixes</strong>: fixed import failures on MOBI files with long chapters, legacy encodings, or older header layouts, and added Android file-type associations for opening MOBI files.</span>
+          </div>
+        </li>
+        <li class="change-item" data-cat="mac ios android">
+          <span class="change-cat"><span class="i18n-zh">全平台</span><span class="i18n-en">All</span></span>
+          <div class="change-text">
+            <span class="i18n-zh"><strong>部分 EPUB 误报 DRM 修复</strong>：修复正文实际未加密、仅残留加密标记或仅锁定内嵌字体的 EPUB 书籍导入时被误判为「有 DRM 无法导入」的问题。</span>
+            <span class="i18n-en"><strong>False EPUB DRM warnings</strong>: fixed unencrypted EPUBs (such as files with leftover DRM metadata or encrypted/obfuscated embedded fonts) being wrongly rejected as DRM-protected on import.</span>
+          </div>
+        </li>
+        <li class="change-item" data-cat="mac ios android">
+          <span class="change-cat"><span class="i18n-zh">全平台</span><span class="i18n-en">All</span></span>
+          <div class="change-text">
+            <span class="i18n-zh"><strong>跨端稳定性修复</strong>：同步修复多项跨端朗读与语音下载、Wi‑Fi 传书、自定义字体、应用内更新、旧版苹果系统兼容以及界面与多语言细节问题。</span>
+            <span class="i18n-en"><strong>Other stability fixes</strong>: improved cross-platform read-aloud and voice downloads, Wi‑Fi transfer, custom fonts, in-app update installation, macOS 14 / iOS 17 compatibility, and UI/localization details.</span>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <section class="doc" data-release style="padding-bottom:24px">
+      <div class="release-meta">
+        <span class="release-ver">0.1.1</span>
+        <span class="release-date">2026-11-24</span>
+      </div>
+      <ul class="change-list">
+        <li class="change-item" data-cat="mac ios">
+          <span class="change-cat">Mac · iOS</span>
+          <div class="change-text">
+            <span class="i18n-zh"><strong>Intel Mac 与旧系统支持</strong>：新增 Mac Intel（<code>x86_64</code>）安装包与独立更新通道；Mac 最低系统要求下调至 macOS 14（Sonoma），iPhone / iPad 下调至 iOS / iPadOS 17。</span>
+            <span class="i18n-en"><strong>Intel Mac &amp; broader Apple OS support</strong>: added Intel (<code>x86_64</code>) Mac builds with a dedicated update feed, and lowered minimum requirements to macOS 14 (Sonoma) and iOS / iPadOS 17.</span>
+          </div>
+        </li>
+        <li class="change-item" data-cat="mac ios android">
+          <span class="change-cat"><span class="i18n-zh">全平台</span><span class="i18n-en">All</span></span>
+          <div class="change-text">
+            <span class="i18n-zh"><strong>朗读声音增强</strong>：Mac、iPhone / iPad 与 Android 新增免 Key 的 Microsoft Edge 在线神经朗读来源（内置 22 个精选音色）；修复 Android 正式包下本机离线语音（Kokoro / 声音卡）闪退以及部分免费在线语音不可用的问题。</span>
+            <span class="i18n-en"><strong>Read-aloud voices</strong>: added a keyless Microsoft Edge neural TTS provider (22 curated voices) on Mac, iOS and Android; fixed release-build crashes for offline ONNX voices (Kokoro / voice cards) on Android and broken free online routes.</span>
+          </div>
+        </li>
+        <li class="change-item" data-cat="mac ios android">
+          <span class="change-cat"><span class="i18n-zh">全平台</span><span class="i18n-en">All</span></span>
+          <div class="change-text">
+            <span class="i18n-zh"><strong>EPUB 字体与外观跟随</strong>：修复部分 EPUB 书籍因内联字体规则或错误语言标记导致切换字体不生效、以及含空格/中文名导入字体无法加载的问题；阅读纸张支持随应用深浅外观自动切换。</span>
+            <span class="i18n-en"><strong>Reliable EPUB fonts &amp; appearance matching</strong>: fixed publisher inline font rules and mislabeled language tags overriding reader font choices, fixed URL-encoded custom font filenames, and added automatic reading-paper matching with app light/dark appearance.</span>
+          </div>
+        </li>
+        <li class="change-item" data-cat="mac ios android">
+          <span class="change-cat"><span class="i18n-zh">全平台</span><span class="i18n-en">All</span></span>
+          <div class="change-text">
+            <span class="i18n-zh"><strong>稳定性与交互修复</strong>：修复 Mac 下载本机离线语音模型时的界面卡顿，修复各端听读切句与睡眠定时音量恢复、系统声音试听、有声书播放、OPDS / WebDAV 远程书库、应用内更新安装以及多处英文界面截断问题。</span>
+            <span class="i18n-en"><strong>Stability &amp; UI fixes</strong>: eliminated macOS UI freezes during offline voice downloads, and fixed playback/sleep-timer volume recovery, system voice previews, audiobook streaming, OPDS / WebDAV remote libraries, in-app update handling, and English UI truncation across platforms.</span>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <section class="doc" data-release style="padding-bottom:24px">
       <div class="release-meta">
         <span class="release-ver"><span class="i18n-zh">0.1.0 · 首个公开版</span><span class="i18n-en">0.1.0 · First Public Release</span></span>
         <span class="release-date">2026-11-23</span>
       </div>
       <ul class="change-list">
-        <li class="change-item" data-cat="read">
-          <span class="change-cat"><span class="i18n-zh">阅读与书架</span><span class="i18n-en">Reading</span></span>
+        <li class="change-item" data-cat="mac ios android">
+          <span class="change-cat"><span class="i18n-zh">全平台</span><span class="i18n-en">All</span></span>
           <div class="change-text">
             <span class="i18n-zh"><strong>安静的本地书房</strong>：支持在 Mac、Android、iPhone 与 iPad 上打开 EPUB、PDF、TXT 与无加密 MOBI / AZW3 电子书（Windows 端开发中），内置多套纸张与单双栏排版；支持 Wi‑Fi 无线传书与连接家庭书库。</span>
             <span class="i18n-en"><strong>A quiet local library</strong>: read EPUB, PDF, TXT, and DRM-free MOBI / AZW3 across Mac, Android, iPhone, and iPad (Windows in progress) with custom papers, local Wi‑Fi transfer, and home library connections.</span>
           </div>
         </li>
-        <li class="change-item" data-cat="audio">
-          <span class="change-cat"><span class="i18n-zh">逐句听读</span><span class="i18n-en">Read Aloud</span></span>
+        <li class="change-item" data-cat="mac ios android">
+          <span class="change-cat"><span class="i18n-zh">全平台</span><span class="i18n-en">All</span></span>
           <div class="change-text">
-            <span class="i18n-zh">点任意一句开始朗读，墨线跟着声音逐句推进、自动翻页；支持本机离线声音、系统声音与自接云端人声，锁屏和耳机线控都能切句暂停。</span>
-            <span class="i18n-en">Tap any sentence to hear it aloud as the ink line moves forward and pages turn automatically—supporting local offline voices, system voices, cloud voices, and lock-screen controls.</span>
+            <span class="i18n-zh"><strong>逐句听读</strong>：点任意一句开始朗读，墨线跟着声音逐句推进、自动翻页；支持本机离线声音、系统声音与自接云端人声，锁屏和耳机线控都能切句暂停。</span>
+            <span class="i18n-en"><strong>Read aloud</strong>: tap any sentence to hear it aloud as the ink line moves forward and pages turn automatically—supporting local offline voices, system voices, cloud voices, and lock-screen controls.</span>
           </div>
         </li>
-        <li class="change-item" data-cat="audio">
-          <span class="change-cat"><span class="i18n-zh">播客与有声</span><span class="i18n-en">Podcasts</span></span>
+        <li class="change-item" data-cat="mac ios android">
+          <span class="change-cat"><span class="i18n-zh">全平台</span><span class="i18n-en">All</span></span>
           <div class="change-text">
-            <span class="i18n-zh">订阅播客节目或导入有声书，排成清爽可查词、可划原声切片的阅读页（有声书录音对齐与分角色朗读亦在持续打磨中）。</span>
-            <span class="i18n-en">Subscribe to podcasts or import audiobooks into readable, searchable pages where you can look up words and save audio clips (forced alignment and character voices continue in active polish).</span>
+            <span class="i18n-zh"><strong>播客与有声空间</strong>：订阅播客节目或导入有声书，排成清爽可查词、可划原声切片的阅读页（有声书录音对齐与分角色朗读亦在持续打磨中）。</span>
+            <span class="i18n-en"><strong>Podcasts &amp; audiobooks</strong>: subscribe to podcasts or import audiobooks into readable, searchable pages where you can look up words and save audio clips (forced alignment and character voices continue in active polish).</span>
           </div>
         </li>
-        <li class="change-item" data-cat="read">
-          <span class="change-cat"><span class="i18n-zh">外文与书伴</span><span class="i18n-en">Companion</span></span>
+        <li class="change-item" data-cat="mac ios android">
+          <span class="change-cat"><span class="i18n-zh">全平台</span><span class="i18n-en">All</span></span>
           <div class="change-text">
-            <span class="i18n-zh">外文书支持离线查词、行间难词简注、双击整句翻译与生词本；<strong>防剧透「书伴」</strong>默认只在你已读过的部分里回答，每句话都能直接点回原文。</span>
-            <span class="i18n-en">Offline dictionary, subtle interlinear glosses, sentence translation, and word list—paired with a <strong>spoiler-free Reading Companion</strong> grounded strictly in what you’ve already read.</span>
+            <span class="i18n-zh"><strong>外文精读与防剧透「书伴」</strong>：外文书支持离线查词、行间难词简注、双击整句翻译与生词本；防剧透「书伴」默认只在你已读过的部分里回答，每句话都能直接点回原文。</span>
+            <span class="i18n-en"><strong>Foreign reading &amp; spoiler-free Companion</strong>: offline dictionary, subtle interlinear glosses, sentence translation, and word list—paired with a spoiler-free Reading Companion grounded strictly in what you’ve already read.</span>
           </div>
         </li>
-        <li class="change-item" data-cat="notes">
-          <span class="change-cat"><span class="i18n-zh">笔记与回顾</span><span class="i18n-en">Notes</span></span>
+        <li class="change-item" data-cat="mac ios android">
+          <span class="change-cat"><span class="i18n-zh">全平台</span><span class="i18n-en">All</span></span>
           <div class="change-text">
-            <span class="i18n-zh">多样式划线、想法、今日回顾、书摘卡片与纸书记录；随时一键导出到 Markdown、Obsidian、Notion、flomo、新枝、Anki、带划线的 EPUB 与阅读记录表。</span>
-            <span class="i18n-en">Multi-style highlights, thoughts, Daily Review, quote cards, and paper-book logging—exportable to Markdown, Obsidian, Notion, flomo, Xinzhi, Anki, highlighted EPUB, and CSV.</span>
+            <span class="i18n-zh"><strong>笔记、回顾与导出</strong>：多样式划线、想法、今日回顾、书摘卡片与纸书记录；随时一键导出到 Markdown、Obsidian、Notion、flomo、新枝、Anki、带划线的 EPUB 与阅读记录表。</span>
+            <span class="i18n-en"><strong>Notes, review &amp; export</strong>: multi-style highlights, thoughts, Daily Review, quote cards, and paper-book logging—exportable to Markdown, Obsidian, Notion, flomo, Xinzhi, Anki, highlighted EPUB, and CSV.</span>
           </div>
         </li>
-        <li class="change-item" data-cat="notes">
-          <span class="change-cat"><span class="i18n-zh">同步与反馈</span><span class="i18n-en">Sync</span></span>
+        <li class="change-item" data-cat="mac ios android">
+          <span class="change-cat"><span class="i18n-zh">全平台</span><span class="i18n-en">All</span></span>
           <div class="change-text">
-            <span class="i18n-zh">经由你自己的 iCloud 云盘或私人网盘同步阅读进度、划线与播客（遇到冲突并排自选），支持整库一键备份，以及应用内直接反馈问题。</span>
-            <span class="i18n-en">Sync progress, notes, and podcasts via your own iCloud Drive or personal cloud storage with side-by-side conflict resolution, full-library backups, and in-app feedback.</span>
+            <span class="i18n-zh"><strong>同步与反馈</strong>：经由你自己的 iCloud 云盘或私人网盘同步阅读进度、划线与播客（遇到冲突并排自选），支持整库一键备份，以及应用内直接反馈问题。</span>
+            <span class="i18n-en"><strong>Sync &amp; feedback</strong>: sync progress, notes, and podcasts via your own iCloud Drive or personal cloud storage with side-by-side conflict resolution, full-library backups, and in-app feedback.</span>
           </div>
         </li>
       </ul>
@@ -162,6 +287,6 @@
     </div>
   </footer>
 
-  <script src="/site.js" defer></script>
+  <script src="/site.js?v=20261125d" defer></script>
 </body>
 </html>
