@@ -367,6 +367,137 @@ public sealed class ConformanceTests
                         }
                         break;
                     }
+                    case "assert_review_today":
+                    {
+                        var core = cores[step.GetProperty("device").GetString()!];
+                        string? book = step.TryGetProperty("book", out var bp) && bp.ValueKind == JsonValueKind.String ? vars[bp.GetString()!] : null;
+                        var deck = core.ReviewToday(book, step.GetProperty("day_start").GetInt64(), step.GetProperty("count").GetUInt32());
+                        if (step.TryGetProperty("exact_items", out var ei))
+                            Assert.Equal(ei.GetInt32(), deck.Items.Length);
+                        if (step.TryGetProperty("exact_done_today", out var ed))
+                            Assert.Equal(ed.GetUInt32(), deck.DoneToday);
+                        break;
+                    }
+                    case "set_mark_review":
+                    {
+                        var core = cores[step.GetProperty("device").GetString()!];
+                        core.SetMarkReview(
+                            vars[step.GetProperty("book").GetString()!],
+                            vars[step.GetProperty("mark").GetString()!],
+                            step.GetProperty("keep").GetBoolean());
+                        break;
+                    }
+                    case "add_time":
+                    {
+                        var core = cores[step.GetProperty("device").GetString()!];
+                        core.AddTime(
+                            vars[step.GetProperty("book").GetString()!],
+                            step.GetProperty("section").GetUInt32(),
+                            step.GetProperty("read_seconds").GetUInt32(),
+                            step.GetProperty("listen_seconds").GetUInt32(),
+                            step.GetProperty("day").GetString()!);
+                        break;
+                    }
+                    case "assert_day_times":
+                    {
+                        var core = cores[step.GetProperty("device").GetString()!];
+                        var rows = core.DayTimes(step.GetProperty("from").GetString()!, step.GetProperty("to").GetString()!);
+                        long totalR = rows.Sum(r => (long)r.ReadSeconds);
+                        long totalL = rows.Sum(r => (long)r.ListenSeconds);
+                        if (step.TryGetProperty("min_entries", out var me))
+                            Assert.True(rows.Length >= me.GetInt32(), $"{ctx}: entries {rows.Length}");
+                        if (step.TryGetProperty("min_read_seconds", out var mr))
+                            Assert.True(totalR >= mr.GetInt64(), $"{ctx}: read {totalR}");
+                        if (step.TryGetProperty("min_listen_seconds", out var ml))
+                            Assert.True(totalL >= ml.GetInt64(), $"{ctx}: listen {totalL}");
+                        break;
+                    }
+                    case "bookmark_undo_roundtrip":
+                    {
+                        var core = cores[step.GetProperty("device").GetString()!];
+                        string book = vars[step.GetProperty("book").GetString()!];
+                        var bm = core.AddBookmark(book, step.GetProperty("section").GetUInt32(), step.GetProperty("sentence").GetUInt32());
+                        core.DeleteBookmark(book, bm.Id);
+                        Assert.Empty(core.Bookmarks(book));
+                        core.RestoreBookmark(book, bm.Id);
+                        Assert.Single(core.Bookmarks(book));
+                        break;
+                    }
+                    case "collection_undo_roundtrip":
+                    {
+                        var core = cores[step.GetProperty("device").GetString()!];
+                        string book = vars[step.GetProperty("book").GetString()!];
+                        var col = core.CreateCollection(step.GetProperty("name").GetString()!, null, book);
+                        core.DeleteCollection(col.Id);
+                        Assert.DoesNotContain(core.Collections(), c => c.Id == col.Id);
+                        core.RestoreCollection(col.Id);
+                        Assert.Contains(core.Collections(), c => c.Id == col.Id);
+                        break;
+                    }
+                    case "custom_paper_undo_roundtrip":
+                    {
+                        var core = cores[step.GetProperty("device").GetString()!];
+                        var paper = core.SaveCustomPaper(new CustomPaper("", step.GetProperty("name").GetString()!, step.GetProperty("bg").GetString()!, null, Paper.Kami, PaperTexture.None));
+                        core.DeleteCustomPaper(paper.Id);
+                        Assert.DoesNotContain(core.CustomPapers(), p => p.Id == paper.Id);
+                        core.RestoreCustomPaper(paper.Id);
+                        Assert.Contains(core.CustomPapers(), p => p.Id == paper.Id);
+                        break;
+                    }
+                    case "word_undo_and_count":
+                    {
+                        var core = cores[step.GetProperty("device").GetString()!];
+                        string book = vars[step.GetProperty("book").GetString()!];
+                        string word = step.GetProperty("word").GetString()!;
+                        core.AddWord(word, null, "family name", book, 0, 0, "Mr. Bennet");
+                        uint cnt = core.BookWordCount(book, word);
+                        Assert.True(cnt >= step.GetProperty("min_book_count").GetUInt32(), $"{ctx}: count {cnt}");
+                        core.DeleteWord(word);
+                        Assert.DoesNotContain(core.Words(), w => w.Word.Equals(word, StringComparison.OrdinalIgnoreCase));
+                        core.RestoreWord(word);
+                        Assert.Contains(core.Words(), w => w.Word.Equals(word, StringComparison.OrdinalIgnoreCase));
+                        break;
+                    }
+                    case "replace_rule_reorder":
+                    {
+                        var core = cores[step.GetProperty("device").GetString()!];
+                        string book = vars[step.GetProperty("book").GetString()!];
+                        var r1 = core.SaveReplaceRule(new ReplaceRule("", book, "甲", "乙", false, false, true, 1.0));
+                        var r2 = core.SaveReplaceRule(new ReplaceRule("", book, "丙", "丁", false, false, true, 2.0));
+                        core.MoveReplaceRule(r2.Id, 0.5);
+                        var ordered = core.ReplaceRules(book).OrderBy(r => r.Order).ToList();
+                        int p2 = ordered.FindIndex(r => r.Id == r2.Id);
+                        int p1 = ordered.FindIndex(r => r.Id == r1.Id);
+                        Assert.True(p2 >= 0 && p1 >= 0 && p2 < p1, $"{ctx}: p2={p2}, p1={p1}");
+                        break;
+                    }
+                    case "set_finished":
+                    {
+                        var core = cores[step.GetProperty("device").GetString()!];
+                        string book = vars[step.GetProperty("book").GetString()!];
+                        bool finished = step.GetProperty("finished").GetBoolean();
+                        core.SetFinished(book, finished);
+                        var b = core.Books().First(x => x.Id == book);
+                        Assert.Equal(finished ? ReadingStatus.Finished : ReadingStatus.Reading, b.Status);
+                        break;
+                    }
+                    case "keep_record_only":
+                    {
+                        var core = cores[step.GetProperty("device").GetString()!];
+                        string book = vars[step.GetProperty("book").GetString()!];
+                        var updated = core.KeepRecordOnly(book);
+                        Assert.True(updated.Record);
+                        Assert.False(updated.Available);
+                        break;
+                    }
+                    case "purge_deleted":
+                    {
+                        var core = cores[step.GetProperty("device").GetString()!];
+                        uint purged = core.PurgeDeleted(step.GetProperty("older_than_ms").GetInt64());
+                        if (step.TryGetProperty("min_purged", out var mp))
+                            Assert.True(purged >= mp.GetUInt32(), $"{ctx}: purged {purged}");
+                        break;
+                    }
                     default:
                         throw new InvalidOperationException($"{ctx}: unsupported op '{op}'");
                 }

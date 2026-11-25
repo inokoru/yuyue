@@ -1690,12 +1690,25 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
             var subItem = new ToggleMenuFlyoutItem { Text = L10n.T(lbl), IsChecked = book.Status == st };
             subItem.Click += (_, _) =>
             {
-                _library.SetStatus(book.Id, sCap);
+                if (sCap == ReadingStatus.Finished)
+                    _library.SetFinished(book.Id, true);
+                else if (book.Status == ReadingStatus.Finished && sCap == ReadingStatus.Reading)
+                    _library.SetFinished(book.Id, false);
+                else
+                    _library.SetStatus(book.Id, sCap);
                 RefreshBooks();
             };
             statusSub.Items.Add(subItem);
         }
         menu.Items.Add(statusSub);
+        menu.Items.Add(MakeItem(
+            book.Status == ReadingStatus.Finished ? "取消读完标记" : "标为读完",
+            "check",
+            () =>
+            {
+                _library.SetFinished(book.Id, book.Status != ReadingStatus.Finished);
+                RefreshBooks();
+            }));
         menu.Items.Add(MakeItem("加入合集…", "stack", () => OpenPickCollectionForBook(book)));
         if (book.Format != BookFormat.Audio && !book.Record)
         {
@@ -1713,6 +1726,23 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
             }
         }
         menu.Items.Add(new MenuFlyoutSeparator());
+        if (!book.Record)
+        {
+            menu.Items.Add(MakeItem("只删文件，留下记录", "archive", () =>
+            {
+                try
+                {
+                    App.CurrentApp.CloseBookWindows(book.Id);
+                    _library.KeepRecordOnly(book.Id);
+                    RefreshBooks();
+                    ShowToast($"已删除《{book.Title}》原文件，保留阅读记录与笔记");
+                }
+                catch (Exception ex)
+                {
+                    ShowToast($"操作失败：{ex.Message}");
+                }
+            }));
+        }
         menu.Items.Add(MakeItem("移出书库", "trash", () => OpenDeleteForBook(book), "Del", danger: true));
         return menu;
     }

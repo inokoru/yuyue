@@ -1481,4 +1481,58 @@ public static class RecordingShareClient
         using var resp = await Http.SendAsync(req, ct);
         return resp.IsSuccessStatusCode;
     }
+
+    /// <summary>
+    /// Pulls pre-rendered drama clip manifest and designed voice cards from a LAN peer and adopts them via
+    /// <see cref="YuyueCore.DramaAdoptClips"/> &amp; <see cref="YuyueCore.CardsAdoptBookJson"/>
+    /// (parity with Apple <c>RecordingShare.swift</c>).
+    /// </summary>
+    public static async Task<int> AdoptPeerDramaAsync(
+        LibraryService library,
+        string baseUrl,
+        string token,
+        string bookId,
+        string peerDeviceName,
+        CancellationToken ct = default)
+    {
+        int downloaded = 0;
+        var pulled = await PullDramaManifestAsync(baseUrl, token, bookId, ct);
+        if (pulled is { } offer)
+        {
+            string clipsDir = DramaSynthService.ClipsFolder(library.DataDir, bookId);
+            Directory.CreateDirectory(clipsDir);
+            foreach (string key in offer.Keys)
+            {
+                if (DramaSynthService.IsClipMade(library.DataDir, bookId, key)) continue;
+                using var clipReq = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl.TrimEnd('/')}/drama-clip?id={Uri.EscapeDataString(bookId)}&key={Uri.EscapeDataString(key)}");
+                clipReq.Headers.TryAddWithoutValidation("x-yuyue-token", token);
+                using var clipResp = await Http.SendAsync(clipReq, ct);
+                if (!clipResp.IsSuccessStatusCode) continue;
+                byte[] wav = await clipResp.Content.ReadAsByteArrayAsync(ct);
+                if (wav.Length > 0)
+                {
+                    await File.WriteAllBytesAsync(DramaSynthService.ClipPath(library.DataDir, bookId, key), wav, ct);
+                    downloaded++;
+                }
+            }
+            DramaSynthService.AdoptRemoteClips(library, bookId, peerDeviceName, offer.Manifest, offer.Keys);
+        }
+
+        // Also adopt designed voice cards for this book if the peer exposes `/card`.
+        try
+        {
+            using var cardReq = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl.TrimEnd('/')}/card?book={Uri.EscapeDataString(bookId)}");
+            cardReq.Headers.TryAddWithoutValidation("x-yuyue-token", token);
+            using var cardResp = await Http.SendAsync(cardReq, ct);
+            if (cardResp.IsSuccessStatusCode)
+            {
+                string json = await cardResp.Content.ReadAsStringAsync(ct);
+                if (!string.IsNullOrWhiteSpace(json))
+                    DramaSynthService.AdoptRemoteCardsJson(library, bookId, json);
+            }
+        }
+        catch { }
+
+        return downloaded;
+    }
 }

@@ -15,7 +15,10 @@ use yuyue_core::changelog::compare_versions;
 use yuyue_core::conflicts::ConflictChoice;
 use yuyue_core::document::{Font, LayoutMode, Paging, Paper};
 use yuyue_core::notes::{MarkStyle, TextPoint};
+use yuyue_core::paper::{CustomPaper, PaperTexture};
+use yuyue_core::rules::ReplaceRule;
 use yuyue_core::segment::page_sentences;
+use yuyue_core::shelf::ReadingStatus;
 use yuyue_core::snapshot::SnapshotParts;
 use yuyue_core::{BookFormat, PageGeometry, Position, SyncPart, YuyueCore};
 
@@ -452,6 +455,161 @@ fn run_scenario(path: &Path) {
                     let exp = c["sign"].as_i64().unwrap() as i32;
                     let got = compare_versions(a.clone(), b.clone()).signum();
                     assert_eq!(got, exp, "{ctx}: compare_versions({a}, {b})");
+                }
+            }
+            "assert_review_today" => {
+                let core = &cores[step["device"].as_str().unwrap()];
+                let book = step.get("book").and_then(|v| v.as_str()).map(|k| vars[k].clone());
+                let day_start = step["day_start"].as_i64().unwrap();
+                let count = step["count"].as_u64().unwrap() as u32;
+                let deck = core.review_today(book, day_start, count).unwrap();
+                if let Some(exp) = step["exact_items"].as_u64() {
+                    assert_eq!(deck.items.len() as u64, exp, "{ctx}: review items");
+                }
+                if let Some(done) = step["exact_done_today"].as_u64() {
+                    assert_eq!(deck.done_today as u64, done, "{ctx}: done_today");
+                }
+            }
+            "set_mark_review" => {
+                let core = &cores[step["device"].as_str().unwrap()];
+                let book = vars[step["book"].as_str().unwrap()].clone();
+                let mark = vars[step["mark"].as_str().unwrap()].clone();
+                let keep = step["keep"].as_bool().unwrap();
+                core.set_mark_review(book, mark, keep).unwrap();
+            }
+            "add_time" => {
+                let core = &cores[step["device"].as_str().unwrap()];
+                let book = vars[step["book"].as_str().unwrap()].clone();
+                core.add_time(
+                    book,
+                    step["section"].as_u64().unwrap() as u32,
+                    step["read_seconds"].as_u64().unwrap() as u32,
+                    step["listen_seconds"].as_u64().unwrap() as u32,
+                    step["day"].as_str().unwrap().to_string(),
+                )
+                .unwrap();
+            }
+            "assert_day_times" => {
+                let core = &cores[step["device"].as_str().unwrap()];
+                let rows = core
+                    .day_times(step["from"].as_str().unwrap().to_string(), step["to"].as_str().unwrap().to_string())
+                    .unwrap();
+                let total_r: u64 = rows.iter().map(|r| r.read_seconds as u64).sum();
+                let total_l: u64 = rows.iter().map(|r| r.listen_seconds as u64).sum();
+                if let Some(m) = step["min_entries"].as_u64() {
+                    assert!(rows.len() as u64 >= m, "{ctx}: entries {} < {m}", rows.len());
+                }
+                if let Some(mr) = step["min_read_seconds"].as_u64() {
+                    assert!(total_r >= mr, "{ctx}: read_seconds {total_r} < {mr}");
+                }
+                if let Some(ml) = step["min_listen_seconds"].as_u64() {
+                    assert!(total_l >= ml, "{ctx}: listen_seconds {total_l} < {ml}");
+                }
+            }
+            "bookmark_undo_roundtrip" => {
+                let core = &cores[step["device"].as_str().unwrap()];
+                let book = vars[step["book"].as_str().unwrap()].clone();
+                let bm = core
+                    .add_bookmark(book.clone(), step["section"].as_u64().unwrap() as u32, step["sentence"].as_u64().unwrap() as u32)
+                    .unwrap();
+                core.delete_bookmark(book.clone(), bm.id.clone()).unwrap();
+                assert_eq!(core.bookmarks(book.clone()).unwrap().len(), 0, "{ctx}: after delete");
+                core.restore_bookmark(book.clone(), bm.id).unwrap();
+                assert_eq!(core.bookmarks(book).unwrap().len(), 1, "{ctx}: after restore");
+            }
+            "collection_undo_roundtrip" => {
+                let core = &cores[step["device"].as_str().unwrap()];
+                let book = vars[step["book"].as_str().unwrap()].clone();
+                let col = core.create_collection(step["name"].as_str().unwrap().to_string(), None, Some(book)).unwrap();
+                core.delete_collection(col.id.clone()).unwrap();
+                assert!(core.collections().unwrap().iter().all(|c| c.id != col.id), "{ctx}: after delete");
+                core.restore_collection(col.id.clone()).unwrap();
+                assert!(core.collections().unwrap().iter().any(|c| c.id == col.id), "{ctx}: after restore");
+            }
+            "custom_paper_undo_roundtrip" => {
+                let core = &cores[step["device"].as_str().unwrap()];
+                let paper = core
+                    .save_custom_paper(CustomPaper {
+                        id: String::new(),
+                        name: step["name"].as_str().unwrap().to_string(),
+                        bg: step["bg"].as_str().unwrap().to_string(),
+                        ink: None,
+                        layout: Paper::Kami,
+                        texture: PaperTexture::None,
+                    })
+                    .unwrap();
+                core.delete_custom_paper(paper.id.clone()).unwrap();
+                assert!(core.custom_papers().unwrap().iter().all(|p| p.id != paper.id), "{ctx}: after delete");
+                core.restore_custom_paper(paper.id.clone()).unwrap();
+                assert!(core.custom_papers().unwrap().iter().any(|p| p.id == paper.id), "{ctx}: after restore");
+            }
+            "word_undo_and_count" => {
+                let core = &cores[step["device"].as_str().unwrap()];
+                let book = vars[step["book"].as_str().unwrap()].clone();
+                let word = step["word"].as_str().unwrap().to_string();
+                core.add_word(word.clone(), None, Some("family name".into()), book.clone(), 0, 0, "Mr. Bennet".into()).unwrap();
+                let cnt = core.book_word_count(book, word.clone()).unwrap();
+                assert!(cnt as u64 >= step["min_book_count"].as_u64().unwrap(), "{ctx}: book_word_count {cnt}");
+                core.delete_word(word.clone()).unwrap();
+                assert!(core.words().unwrap().iter().all(|w| !w.word.eq_ignore_ascii_case(&word)), "{ctx}: after delete");
+                core.restore_word(word.clone()).unwrap();
+                assert!(core.words().unwrap().iter().any(|w| w.word.eq_ignore_ascii_case(&word)), "{ctx}: after restore");
+            }
+            "replace_rule_reorder" => {
+                let core = &cores[step["device"].as_str().unwrap()];
+                let book = vars[step["book"].as_str().unwrap()].clone();
+                let r1 = core
+                    .save_replace_rule(ReplaceRule {
+                        id: String::new(),
+                        book: Some(book.clone()),
+                        find: "甲".into(),
+                        replace: "乙".into(),
+                        regex: false,
+                        speech_only: false,
+                        enabled: true,
+                        order: 1.0,
+                    })
+                    .unwrap();
+                let r2 = core
+                    .save_replace_rule(ReplaceRule {
+                        id: String::new(),
+                        book: Some(book.clone()),
+                        find: "丙".into(),
+                        replace: "丁".into(),
+                        regex: false,
+                        speech_only: false,
+                        enabled: true,
+                        order: 2.0,
+                    })
+                    .unwrap();
+                core.move_replace_rule(r2.id.clone(), 0.5).unwrap();
+                let mut rules = core.replace_rules(Some(book)).unwrap();
+                rules.sort_by(|a, b| a.order.total_cmp(&b.order));
+                let pos2 = rules.iter().position(|r| r.id == r2.id).unwrap();
+                let pos1 = rules.iter().position(|r| r.id == r1.id).unwrap();
+                assert!(pos2 < pos1, "{ctx}: expected moved rule before first rule");
+            }
+            "set_finished" => {
+                let core = &cores[step["device"].as_str().unwrap()];
+                let book = vars[step["book"].as_str().unwrap()].clone();
+                let finished = step["finished"].as_bool().unwrap();
+                core.set_finished(book.clone(), finished).unwrap();
+                let b = core.books().unwrap().into_iter().find(|x| x.id == book).unwrap();
+                let expected = if finished { ReadingStatus::Finished } else { ReadingStatus::Reading };
+                assert_eq!(b.status, expected, "{ctx}: status mismatch");
+            }
+            "keep_record_only" => {
+                let core = &cores[step["device"].as_str().unwrap()];
+                let book = vars[step["book"].as_str().unwrap()].clone();
+                let updated = core.keep_record_only(book).unwrap();
+                assert!(updated.record, "{ctx}: expected record=true");
+                assert!(!updated.available, "{ctx}: expected available=false");
+            }
+            "purge_deleted" => {
+                let core = &cores[step["device"].as_str().unwrap()];
+                let purged = core.purge_deleted(step["older_than_ms"].as_i64().unwrap()).unwrap();
+                if let Some(min_p) = step["min_purged"].as_u64() {
+                    assert!(purged as u64 >= min_p, "{ctx}: purged {purged} < {min_p}");
                 }
             }
             other => panic!("{ctx}: unsupported op '{other}'"),

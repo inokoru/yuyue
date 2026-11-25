@@ -9,13 +9,17 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 import uniffi.yuyue_core.BookFormat
 import uniffi.yuyue_core.ConflictChoice
+import uniffi.yuyue_core.CustomPaper
 import uniffi.yuyue_core.Font
 import uniffi.yuyue_core.LayoutMode
 import uniffi.yuyue_core.MarkStyle
 import uniffi.yuyue_core.PageGeometry
 import uniffi.yuyue_core.Paging
 import uniffi.yuyue_core.Paper
+import uniffi.yuyue_core.PaperTexture
 import uniffi.yuyue_core.Position
+import uniffi.yuyue_core.ReadingStatus
+import uniffi.yuyue_core.ReplaceRule
 import uniffi.yuyue_core.SnapshotParts
 import uniffi.yuyue_core.SyncPart
 import uniffi.yuyue_core.TextPoint
@@ -281,6 +285,105 @@ class ConformanceTest {
                             val got = compareVersions(c["a"] as String, c["b"] as String).sign
                             assertEquals(ctx, (c["sign"] as Number).toInt(), got)
                         }
+                    }
+                    "assert_review_today" -> {
+                        val core = cores.getValue(step["device"] as String)
+                        val book = (step["book"] as? String)?.let { vars.getValue(it) }
+                        val deck = core.reviewToday(book, (step["day_start"] as Number).toLong(), (step["count"] as Number).toInt().toUInt())
+                        (step["exact_items"] as? Number)?.let { assertEquals(ctx, it.toInt(), deck.items.size) }
+                        (step["exact_done_today"] as? Number)?.let { assertEquals(ctx, it.toInt().toUInt(), deck.doneToday) }
+                    }
+                    "set_mark_review" -> {
+                        cores.getValue(step["device"] as String).setMarkReview(
+                            vars.getValue(step["book"] as String),
+                            vars.getValue(step["mark"] as String),
+                            step["keep"] as Boolean,
+                        )
+                    }
+                    "add_time" -> {
+                        cores.getValue(step["device"] as String).addTime(
+                            vars.getValue(step["book"] as String),
+                            (step["section"] as Number).toInt().toUInt(),
+                            (step["read_seconds"] as Number).toInt().toUInt(),
+                            (step["listen_seconds"] as Number).toInt().toUInt(),
+                            step["day"] as String,
+                        )
+                    }
+                    "assert_day_times" -> {
+                        val rows = cores.getValue(step["device"] as String).dayTimes(step["from"] as String, step["to"] as String)
+                        val totalR = rows.sumOf { it.readSeconds.toLong() }
+                        val totalL = rows.sumOf { it.listenSeconds.toLong() }
+                        (step["min_entries"] as? Number)?.let { assertTrue(ctx, rows.size >= it.toInt()) }
+                        (step["min_read_seconds"] as? Number)?.let { assertTrue(ctx, totalR >= it.toLong()) }
+                        (step["min_listen_seconds"] as? Number)?.let { assertTrue(ctx, totalL >= it.toLong()) }
+                    }
+                    "bookmark_undo_roundtrip" -> {
+                        val core = cores.getValue(step["device"] as String)
+                        val book = vars.getValue(step["book"] as String)
+                        val bm = core.addBookmark(book, (step["section"] as Number).toInt().toUInt(), (step["sentence"] as Number).toInt().toUInt())
+                        core.deleteBookmark(book, bm.id)
+                        assertEquals(ctx, 0, core.bookmarks(book).size)
+                        core.restoreBookmark(book, bm.id)
+                        assertEquals(ctx, 1, core.bookmarks(book).size)
+                    }
+                    "collection_undo_roundtrip" -> {
+                        val core = cores.getValue(step["device"] as String)
+                        val book = vars.getValue(step["book"] as String)
+                        val col = core.createCollection(step["name"] as String, null, book)
+                        core.deleteCollection(col.id)
+                        assertTrue(ctx, core.collections().none { it.id == col.id })
+                        core.restoreCollection(col.id)
+                        assertTrue(ctx, core.collections().any { it.id == col.id })
+                    }
+                    "custom_paper_undo_roundtrip" -> {
+                        val core = cores.getValue(step["device"] as String)
+                        val paper = core.saveCustomPaper(CustomPaper("", step["name"] as String, step["bg"] as String, null, Paper.KAMI, PaperTexture.NONE))
+                        core.deleteCustomPaper(paper.id)
+                        assertTrue(ctx, core.customPapers().none { it.id == paper.id })
+                        core.restoreCustomPaper(paper.id)
+                        assertTrue(ctx, core.customPapers().any { it.id == paper.id })
+                    }
+                    "word_undo_and_count" -> {
+                        val core = cores.getValue(step["device"] as String)
+                        val book = vars.getValue(step["book"] as String)
+                        val word = step["word"] as String
+                        core.addWord(word, null, "family name", book, 0u, 0u, "Mr. Bennet")
+                        val cnt = core.bookWordCount(book, word)
+                        assertTrue(ctx, cnt.toInt() >= (step["min_book_count"] as Number).toInt())
+                        core.deleteWord(word)
+                        assertTrue(ctx, core.words().none { it.word.equals(word, ignoreCase = true) })
+                        core.restoreWord(word)
+                        assertTrue(ctx, core.words().any { it.word.equals(word, ignoreCase = true) })
+                    }
+                    "replace_rule_reorder" -> {
+                        val core = cores.getValue(step["device"] as String)
+                        val book = vars.getValue(step["book"] as String)
+                        val r1 = core.saveReplaceRule(ReplaceRule("", book, "甲", "乙", false, false, true, 1.0))
+                        val r2 = core.saveReplaceRule(ReplaceRule("", book, "丙", "丁", false, false, true, 2.0))
+                        core.moveReplaceRule(r2.id, 0.5)
+                        val ordered = core.replaceRules(book).sortedBy { it.order }
+                        val p2 = ordered.indexOfFirst { it.id == r2.id }
+                        val p1 = ordered.indexOfFirst { it.id == r1.id }
+                        assertTrue(ctx, p2 in 0 until p1)
+                    }
+                    "set_finished" -> {
+                        val core = cores.getValue(step["device"] as String)
+                        val book = vars.getValue(step["book"] as String)
+                        val finished = step["finished"] as Boolean
+                        core.setFinished(book, finished)
+                        val b = core.books().first { it.id == book }
+                        assertEquals(ctx, if (finished) ReadingStatus.FINISHED else ReadingStatus.READING, b.status)
+                    }
+                    "keep_record_only" -> {
+                        val core = cores.getValue(step["device"] as String)
+                        val book = vars.getValue(step["book"] as String)
+                        val updated = core.keepRecordOnly(book)
+                        assertTrue(ctx, updated.record)
+                        assertTrue(ctx, !updated.available)
+                    }
+                    "purge_deleted" -> {
+                        val purged = cores.getValue(step["device"] as String).purgeDeleted((step["older_than_ms"] as Number).toLong())
+                        (step["min_purged"] as? Number)?.let { assertTrue(ctx, purged.toInt() >= it.toInt()) }
                     }
                     else -> fail("$ctx: unsupported op $op")
                 }

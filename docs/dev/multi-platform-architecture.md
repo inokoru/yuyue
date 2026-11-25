@@ -72,6 +72,7 @@
   - `04-sync-two-devices-and-conflict`（双设备独立设置合并、离线想法冲突、`Both` 解决与幂等性）
   - `05-snapshot-and-sync-parts`（`SyncPart` 过滤回补、`.yuyue` 快照导出合并恢复）
   - `06-sentences-and-versions`（`page_sentences` 与 `compare_versions` 纯函数）
+  - `07-review-stats-undo-and-rules`（今日回顾、每日阅读统计、书签/合集/我的纸/生词撤销、单书词频、替换规则排序、只留记录与清理已删文件）
 - `core/yuyue-core/tests/sync_properties.rs` 用 `proptest` 验证 CRDT 同步的**幂等性**、**乱序交换律**以及 **±24 小时时钟偏差下离线并发想法不丢失**。
 - `core/yuyue-core/tests/snapshots.rs` 用 `insta` 锁定中英混排断句、4 套纸张 HTML 头部与更新日志解析输出。
 
@@ -92,29 +93,29 @@
 
 ---
 
-## 五、首轮代码级审计基线（2026-11-25）
+## 五、代码级审计基线与缺口清零记录（2026-11-25）
 
-运行 `node scripts/audit-api-parity.mjs` 得到的全仓覆盖现状：
+运行 `node scripts/audit-api-parity.mjs` 得到的全仓覆盖变化（首轮审计 → 缺口补齐后）：
 
 | 维度 | Apple | Android | Windows |
 |---|---:|---:|---:|
-| `YuyueCore` UniFFI（271 个导出方法） | 261 / 271 | 253 / 271 | 228 / 271 |
+| `YuyueCore` UniFFI（271 个导出方法） | 261 / 271 | 253 → **257 / 271** | 228 → **257 / 271** |
 | 书页 `window.yy.*`（25 个接口） | 24 / 25 | 19 / 25 | 25 / 25 |
 | 桥接消息（11 种 Schema 类型） | 11 / 11 | 9 / 11 | 11 / 11 |
-| [docs/parity.yaml](../parity.yaml)（31 项功能） | 30 done / 1 partial | 27 done / 3 partial / 1 N/A | 22 done / 3 partial / 5 planned / 1 N/A |
+| [docs/parity.yaml](../parity.yaml)（31 项功能） | 30 done / 1 partial | **29 done** / 1 partial / 1 N/A | **27 done** / 3 partial / 1 N/A |
 
-已记录到 [docs/parity.yaml](../parity.yaml) 待按优先级补齐的显式缺口：
+已全部补齐并入库的原审计缺口（`[A K -]` 缺口清零，Android 功能型 `[A - W]` 缺口清零）：
 
-- **Android**：
-  1. 同步想法冲突并排解决界面（`note_conflicts` / `resolve_note_conflict`）
-  2. 替换规则排序（`move_replace_rule`）与 TXT 排版疑点检测（`txt_doubt`）
-- **Windows**：
-  1. 今日回顾（`review_today` / `set_mark_review`）
-  2. 阅读统计与年度热力图（`day_times`）
-  3. 只留记录、标记读完与清理已删文件（`keep_record_only` / `set_finished` / `purge_deleted`）
+- **Android（已补齐）**：
+  1. 同步想法冲突并排解决界面（`note_conflicts` / `resolve_note_conflict`，`ConflictSheet.kt` + `Sync.kt` + `DataPages.kt`）
+  2. 替换规则上移/下移排序（`move_replace_rule`，`ReplaceRulesSheet.kt`）与 TXT 排版疑点检测提示（`txt_doubt`，`ReaderModel.kt` / `ReaderScreen.kt` / `ShelfSheets.kt`）
+- **Windows（已补齐）**：
+  1. 今日回顾（`review_today` / `set_mark_review`，`LibraryView.SubViews.cs`）
+  2. 阅读统计与 26 周热力图（`day_times`，`ReadingHeatmapBuilder.cs` + `BookRecordPageBuilder.cs`）
+  3. 只留记录、标记读完与定时/手动清理已删文件（`keep_record_only` / `set_finished` / `purge_deleted`）
   4. 书签 / 合集 / 我的纸 / 生词删除撤销（`restore_bookmark` / `restore_collection` / `restore_custom_paper` / `restore_word`）
-  5. 听书独立断点保存（`save_listening`）
-  6. 单书生词数（`book_word_count`）及部分有声书 / 广播剧进阶接口
+  5. 单书生词出现次数（`book_word_count`）与听读书对齐时间轴同步（`save_listening`）
+  6. 有声书章节重命名、声学缓存快速重对齐、跳过/停顿省时、同步时间轴 EPUB 导出、录音转写文字版提示、搜索按词定位及广播剧模式/层/角色/局域网借用片段与音色卡导入（共 18 项接口）
 
 ---
 

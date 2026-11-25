@@ -325,6 +325,18 @@ public sealed class LibraryService : IDisposable
                 Core.DramaSetSoundLibrary(soundsDir);
         }
         catch { }
+
+        // Background purge of books deleted more than 30 days ago (1:1 Apple Library.swift)
+        var coreRef = Core;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(3000).ConfigureAwait(false);
+                coreRef.PurgeDeleted(30L * 24 * 3600 * 1000);
+            }
+            catch { }
+        });
     }
 
     public void ApplyUiLanguage()
@@ -451,10 +463,15 @@ public sealed class LibraryService : IDisposable
     public string? TryOriginalFile(string bookId) { try { return Core.OriginalFile(bookId); } catch { return null; } }
     public void DeleteBook(string bookId) => Core.DeleteBook(bookId);
     public BookSummary RestoreBook(string bookId) => Core.RestoreBook(bookId);
+    public BookSummary KeepRecordOnly(string bookId) => Core.KeepRecordOnly(bookId);
+    public void SetFinished(string bookId, bool finished) => Core.SetFinished(bookId, finished);
+    public uint PurgeDeleted(long olderThanMs) => Core.PurgeDeleted(olderThanMs);
     public void SetStatus(string bookId, ReadingStatus status) => Core.SetStatus(bookId, status);
     public BookCollection CreateCollection(string name, string? bookId = null) => Core.CreateCollection(name, null, bookId);
     public void DeleteCollection(string collectionId) => Core.DeleteCollection(collectionId);
+    public void RestoreCollection(string collectionId) => Core.RestoreCollection(collectionId);
     public void SetInCollection(string collectionId, string bookId, bool inside) => Core.SetInCollection(collectionId, bookId, inside);
+    public void RestoreCustomPaper(string paperId) => Core.RestoreCustomPaper(paperId);
 
     // Reader settings & progress
     public ReaderSettings GetReaderSettings() => Core.ReaderSettings();
@@ -463,19 +480,25 @@ public sealed class LibraryService : IDisposable
     public void SetBookReaderSettings(string bookId, ReaderSettings? settings) => Core.SetBookReaderSettings(bookId, settings);
     public Progress? GetProgress(string bookId) => Core.Progress(bookId);
     public void SaveProgress(string bookId, uint section, uint sentence) => Core.SaveProgress(bookId, new Position(section, sentence));
+    public void SaveListening(Listening listening) => Core.SaveListening(listening);
     public void AddTime(string bookId, uint section, uint readSec, uint listenSec) =>
         Core.AddTime(bookId, section, readSec, listenSec, DateTime.Now.ToString("yyyy-MM-dd"));
+    public IReadOnlyList<DayTime> GetDayTimes(string fromDay, string toDay) => Core.DayTimes(fromDay, toDay);
 
-    // Marks, Bookmarks, Search, Footnotes
+    // Marks, Bookmarks, Daily Review, Search, Footnotes
     public IReadOnlyList<Mark> GetMarks(string bookId) => Core.Marks(bookId);
     public Mark AddMark(string bookId, uint section, TextPoint start, TextPoint end, string text, MarkStyle style, string? note = null) =>
         Core.AddMark(bookId, section, start, end, text, style, note);
     public void SetMarkNote(string bookId, string markId, string? note) => Core.SetMarkNote(bookId, markId, note);
     public void SetMarkStyle(string bookId, string markId, MarkStyle style) => Core.SetMarkStyle(bookId, markId, style);
     public void DeleteMark(string bookId, string markId) => Core.DeleteMark(bookId, markId);
+    public ReviewDeck GetReviewToday(string? bookId = null, long? dayStartMs = null, uint count = 5) =>
+        Core.ReviewToday(bookId, dayStartMs ?? ReadingHeatmapBuilder.LocalDayStartUnixMs(DateTimeOffset.Now), count);
+    public void SetMarkReview(string bookId, string markId, bool keep) => Core.SetMarkReview(bookId, markId, keep);
     public IReadOnlyList<Bookmark> GetBookmarks(string bookId) => Core.Bookmarks(bookId);
     public Bookmark AddBookmark(string bookId, uint section, uint sentence) => Core.AddBookmark(bookId, section, sentence);
     public void DeleteBookmark(string bookId, string bookmarkId) => Core.DeleteBookmark(bookId, bookmarkId);
+    public void RestoreBookmark(string bookId, string bookmarkId) => Core.RestoreBookmark(bookId, bookmarkId);
     public IReadOnlyList<SearchHit> SearchBook(string bookId, string query) => Core.SearchBook(bookId, query);
     public Footnote? GetFootnote(string bookId, uint fromSection, string target) => Core.Footnote(bookId, fromSection, target);
 
@@ -485,6 +508,8 @@ public sealed class LibraryService : IDisposable
         Core.AddWord(word, phonetic, meaning, bookId, section, sentence, context);
     public void SetWordKnown(string word, bool known) => Core.SetWordKnown(word, known);
     public void DeleteWord(string word) => Core.DeleteWord(word);
+    public void RestoreWord(string word) => Core.RestoreWord(word);
+    public uint GetBookWordCount(string bookId, string word) => Core.BookWordCount(bookId, word);
     public IReadOnlyList<DictionaryInfo> GetDictionaries() => Core.Dictionaries();
     public DictionaryInfo ImportDictionary(string path) => Core.ImportDictionary(path);
     public void SetDictionaryEnabled(string id, bool enabled) => Core.SetDictionary(id, enabled);

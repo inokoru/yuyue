@@ -917,7 +917,18 @@ public sealed partial class ReaderPaneView
         WordPhoneticText.Visibility = string.IsNullOrWhiteSpace(WordPhoneticText.Text) ? Visibility.Collapsed : Visibility.Visible;
         WordMeaningText.MaxLines = 5;
         WordMeaningText.Text = _activeWordLookup?.Summary ?? L10n.T("本地词典未收录该词，可划选后点击「翻译」或「问书伴」。");
-        WordSourceText.Text = _activeWordLookup?.Source ?? "";
+        string sourceText = _activeWordLookup?.Source ?? "";
+        try
+        {
+            uint bookCount = _library.GetBookWordCount(_bookId, headword);
+            if (bookCount > 0)
+            {
+                string countNote = L10n.T($"本书出现 {bookCount} 次");
+                sourceText = string.IsNullOrEmpty(sourceText) ? countNote : $"{sourceText} · {countNote}";
+            }
+        }
+        catch { }
+        WordSourceText.Text = sourceText;
 
         bool hasRichHtml = !string.IsNullOrWhiteSpace(_activeWordLookup?.Html);
         FullDictEntryBtn.Content = L10n.T("更多释义");

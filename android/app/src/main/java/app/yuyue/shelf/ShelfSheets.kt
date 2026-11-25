@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,6 +40,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.yuyue.design.ButtonKind
 import app.yuyue.design.YYSheetDragHandle
@@ -54,7 +56,11 @@ import app.yuyue.design.YYRow
 import app.yuyue.library.Library
 import app.yuyue.library.ShelfFilter
 import app.yuyue.library.title
+import app.yuyue.reader.TxtLayoutSheet
 import app.yuyue.t
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import uniffi.yuyue_core.BookFormat
 import uniffi.yuyue_core.ReadingStatus
 import java.io.ByteArrayOutputStream
 
@@ -131,8 +137,17 @@ fun BookInfoSheet(library: Library, book: uniffi.yuyue_core.BookSummary, dismiss
     var title by remember { mutableStateOf(book.title) }
     var author by remember { mutableStateOf(book.authors.joinToString(t("、"))) }
     var picking by remember { mutableStateOf(false) }
+    var txtLayoutShown by remember { mutableStateOf(false) }
+    var txtDoubt by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val current = library.books.firstOrNull { it.id == book.id } ?: book
+    LaunchedEffect(current.id, current.format) {
+        txtDoubt = if (current.format == BookFormat.TXT) {
+            withContext(Dispatchers.IO) { runCatching { library.core.txtDoubt(current.id) }.getOrNull() }
+        } else {
+            null
+        }
+    }
     val photo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@rememberLauncherForActivityResult
@@ -165,6 +180,21 @@ fun BookInfoSheet(library: Library, book: uniffi.yuyue_core.BookSummary, dismiss
                     val names = library.collections.filter { it.id in current.collections }.joinToString(t("、")) { it.name }
                     YYRow(t("合集"), value = names.ifEmpty { t("没有") }, chevron = true, onClick = { picking = true })
                 }
+                if (current.format == BookFormat.TXT) row {
+                    YYRow(
+                        t("编码和目录"),
+                        chevron = true,
+                        trailing = {
+                            txtDoubt?.let { doubt ->
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Icon(Icons.warning, null, tint = YY.c.warn, modifier = Modifier.size(YY.s(12)))
+                                    Text(doubt, style = YY.font(10.5f), color = YY.c.warn, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        },
+                        onClick = { txtLayoutShown = true },
+                    )
+                }
                 if (current.readMinutes > 0u) row { YYRow(t("全书阅读"), value = t("约 %@", app.yuyue.library.hoursText(current.readMinutes.toInt()))) }
                 if (current.listenMinutes > 0u) row { YYRow(t("全书听书"), value = t("约 %@", app.yuyue.library.hoursText(current.listenMinutes.toInt()))) }
             }
@@ -172,6 +202,7 @@ fun BookInfoSheet(library: Library, book: uniffi.yuyue_core.BookSummary, dismiss
         }
     }
     if (picking) CollectionPickerSheet(library, current.id) { picking = false }
+    if (txtLayoutShown) TxtLayoutSheet(library, current.id, current.title, rebuilt = { txtLayoutShown = false; dismiss() }) { txtLayoutShown = false }
 }
 
 @Composable

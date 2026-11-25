@@ -151,6 +151,9 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
     var infoShown by mutableStateOf(false)
     var rulesShown by mutableStateOf(false)
     var txtShown by mutableStateOf(false)
+    /** Why a TXT may have been decoded or split wrong, for the hint pill leading to 编码和目录. */
+    var txtDoubt by mutableStateOf<String?>(null)
+        private set
     /** 外文原著: the word tapped, and its card. */
     var lookup by mutableStateOf<WordLookup?>(null)
     /** 译: translations under every paragraph. */
@@ -239,6 +242,12 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         // 我的 › 沉浸阅读 on: every book opens with only its words.
         immersive = ImmersivePrefs.always
         setUpForeign()
+        if (detail?.summary?.format == BookFormat.TXT) {
+            val doubt = runCatching { core.txtDoubt(bookID) }.getOrNull()
+            if (doubt != null && Prefs.string("txtDoubtDismissed.$bookID") != doubt) {
+                txtDoubt = doubt
+            }
+        }
         player?.let { p ->
             p.onSentence = { spot, duration, elapsed, playing -> reading(spot, duration, elapsed, playing); setListening(playing) }
             p.onStop = { pager.clearInk(); setListening(false) }
@@ -288,6 +297,12 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
     /** Guarded in unit tests: no backing field or Compose delegate may be declared below `init`. */
     @Suppress("unused")
     private val initCompleted = true
+
+    /** 不用了 on the TXT layout hint: won't come back for the same doubt message. */
+    fun dismissDoubt() {
+        txtDoubt?.let { Prefs.set("txtDoubtDismissed.$bookID", it) }
+        txtDoubt = null
+    }
 
     /** Opens 书伴 with a question. */
 

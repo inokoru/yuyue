@@ -260,6 +260,99 @@ struct ConformanceTests {
                     let got = raw < 0 ? -1 : (raw > 0 ? 1 : 0)
                     #expect(got == sign)
                 }
+            case "assert_review_today":
+                let core = try #require(cores[step["device"] as? String ?? ""])
+                let book = (step["book"] as? String).flatMap { vars[$0] }
+                let dayStart = Int64(try #require(step["day_start"] as? Int))
+                let count = UInt32(try #require(step["count"] as? Int))
+                let deck = try core.reviewToday(book: book, dayStart: dayStart, count: count)
+                if let ei = step["exact_items"] as? Int { #expect(deck.items.count == ei) }
+                if let ed = step["exact_done_today"] as? Int { #expect(deck.doneToday == UInt32(ed)) }
+            case "set_mark_review":
+                let core = try #require(cores[step["device"] as? String ?? ""])
+                try core.setMarkReview(
+                    book: try #require(vars[step["book"] as? String ?? ""]),
+                    id: try #require(vars[step["mark"] as? String ?? ""]),
+                    keep: try #require(step["keep"] as? Bool)
+                )
+            case "add_time":
+                let core = try #require(cores[step["device"] as? String ?? ""])
+                try core.addTime(
+                    book: try #require(vars[step["book"] as? String ?? ""]),
+                    section: UInt32(try #require(step["section"] as? Int)),
+                    readSeconds: UInt32(try #require(step["read_seconds"] as? Int)),
+                    listenSeconds: UInt32(try #require(step["listen_seconds"] as? Int)),
+                    day: try #require(step["day"] as? String)
+                )
+            case "assert_day_times":
+                let core = try #require(cores[step["device"] as? String ?? ""])
+                let rows = try core.dayTimes(from: try #require(step["from"] as? String), to: try #require(step["to"] as? String))
+                let totalR = rows.reduce(0) { $0 + Int($1.readSeconds) }
+                let totalL = rows.reduce(0) { $0 + Int($1.listenSeconds) }
+                if let me = step["min_entries"] as? Int { #expect(rows.count >= me) }
+                if let mr = step["min_read_seconds"] as? Int { #expect(totalR >= mr) }
+                if let ml = step["min_listen_seconds"] as? Int { #expect(totalL >= ml) }
+            case "bookmark_undo_roundtrip":
+                let core = try #require(cores[step["device"] as? String ?? ""])
+                let book = try #require(vars[step["book"] as? String ?? ""])
+                let bm = try core.addBookmark(book: book, section: UInt32(try #require(step["section"] as? Int)), sentence: UInt32(try #require(step["sentence"] as? Int)))
+                try core.deleteBookmark(book: book, id: bm.id)
+                #expect(try core.bookmarks(book: book).isEmpty)
+                try core.restoreBookmark(book: book, id: bm.id)
+                #expect(try core.bookmarks(book: book).count == 1)
+            case "collection_undo_roundtrip":
+                let core = try #require(cores[step["device"] as? String ?? ""])
+                let book = try #require(vars[step["book"] as? String ?? ""])
+                let col = try core.createCollection(name: try #require(step["name"] as? String), icon: nil, book: book)
+                try core.deleteCollection(id: col.id)
+                #expect(try !core.collections().contains { $0.id == col.id })
+                try core.restoreCollection(id: col.id)
+                #expect(try core.collections().contains { $0.id == col.id })
+            case "custom_paper_undo_roundtrip":
+                let core = try #require(cores[step["device"] as? String ?? ""])
+                let paper = try core.saveCustomPaper(paper: CustomPaper(id: "", name: try #require(step["name"] as? String), bg: try #require(step["bg"] as? String), ink: nil, layout: .kami, texture: .none))
+                try core.deleteCustomPaper(id: paper.id)
+                #expect(try !core.customPapers().contains { $0.id == paper.id })
+                try core.restoreCustomPaper(id: paper.id)
+                #expect(try core.customPapers().contains { $0.id == paper.id })
+            case "word_undo_and_count":
+                let core = try #require(cores[step["device"] as? String ?? ""])
+                let book = try #require(vars[step["book"] as? String ?? ""])
+                let word = try #require(step["word"] as? String)
+                _ = try core.addWord(word: word, phonetic: nil, meaning: "family name", book: book, section: 0, sentence: 0, context: "Mr. Bennet")
+                let cnt = try core.bookWordCount(book: book, word: word)
+                #expect(Int(cnt) >= (step["min_book_count"] as? Int ?? 0))
+                try core.deleteWord(word: word)
+                #expect(try !core.words().contains { $0.word.caseInsensitiveCompare(word) == .orderedSame })
+                try core.restoreWord(word: word)
+                #expect(try core.words().contains { $0.word.caseInsensitiveCompare(word) == .orderedSame })
+            case "replace_rule_reorder":
+                let core = try #require(cores[step["device"] as? String ?? ""])
+                let book = try #require(vars[step["book"] as? String ?? ""])
+                let r1 = try core.saveReplaceRule(rule: ReplaceRule(id: "", book: book, find: "甲", replace: "乙", regex: false, speechOnly: false, enabled: true, order: 1.0))
+                let r2 = try core.saveReplaceRule(rule: ReplaceRule(id: "", book: book, find: "丙", replace: "丁", regex: false, speechOnly: false, enabled: true, order: 2.0))
+                try core.moveReplaceRule(id: r2.id, order: 0.5)
+                let ordered = try core.replaceRules(book: book).sorted { $0.order < $1.order }
+                let p2 = try #require(ordered.firstIndex { $0.id == r2.id })
+                let p1 = try #require(ordered.firstIndex { $0.id == r1.id })
+                #expect(p2 < p1)
+            case "set_finished":
+                let core = try #require(cores[step["device"] as? String ?? ""])
+                let book = try #require(vars[step["book"] as? String ?? ""])
+                let finished = try #require(step["finished"] as? Bool)
+                try core.setFinished(book: book, finished: finished)
+                let b = try #require(try core.books().first { $0.id == book })
+                #expect(b.status == (finished ? .finished : .reading))
+            case "keep_record_only":
+                let core = try #require(cores[step["device"] as? String ?? ""])
+                let book = try #require(vars[step["book"] as? String ?? ""])
+                let updated = try core.keepRecordOnly(book: book)
+                #expect(updated.record)
+                #expect(!updated.available)
+            case "purge_deleted":
+                let core = try #require(cores[step["device"] as? String ?? ""])
+                let purged = try core.purgeDeleted(olderThanMs: Int64(try #require(step["older_than_ms"] as? Int)))
+                if let mp = step["min_purged"] as? Int { #expect(Int(purged) >= mp) }
             default:
                 Issue.record("\(id)[\(idx)]: unsupported op \(op)")
             }

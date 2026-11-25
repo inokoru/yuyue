@@ -5,16 +5,20 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -29,6 +33,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -56,6 +62,26 @@ import uniffi.yuyue_core.ReplaceRule
 import uniffi.yuyue_core.RulePreview
 import uniffi.yuyue_core.YuyueCore
 
+/** Pure order-key calculator for moving a replace rule between neighbours (matching Apple's ReplaceRules). */
+object ReplaceRuleOrder {
+    fun orderForMove(orders: List<Double>, from: Int, to: Int): Double {
+        if (from !in orders.indices || to !in orders.indices || from == to) {
+            return orders.getOrElse(from) { 0.0 }
+        }
+        val list = orders.toMutableList()
+        val moved = list.removeAt(from)
+        list.add(to, moved)
+        val before = if (to > 0) list[to - 1] else null
+        val after = if (to < list.lastIndex) list[to + 1] else null
+        return when {
+            before != null && after != null -> (before + after) / 2.0
+            before != null -> before + 1.0
+            after != null -> after - 1.0
+            else -> moved
+        }
+    }
+}
+
 /** 替换规则, as on Apple: what this book's words are changed into — on the page and
  *  in the voice, or only in the voice. Rules for this book, or for every book; each can be
  *  turned off, changed, or taken away; common ones can be picked from a list. */
@@ -73,6 +99,13 @@ fun ReplaceRulesSheet(core: YuyueCore, bookID: String, changed: () -> Unit, dism
         runCatching { core.replaceRules(bookID) }.getOrDefault(emptyList()).filter { (it.book != null) == forBook }.sortedBy { it.order }
     }
     fun touched() { version++; changed() }
+    fun moveRule(from: Int, to: Int) {
+        val target = rules.getOrNull(from) ?: return
+        if (to !in rules.indices || from == to) return
+        val order = ReplaceRuleOrder.orderForMove(rules.map { it.order }, from, to)
+        runCatching { core.moveReplaceRule(target.id, order) }
+        touched()
+    }
     ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.bg, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 28.dp)) {
             Text(t("替换规则"), style = YY.font(14f, FontWeight.Bold), color = YY.c.t1, modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
@@ -80,24 +113,50 @@ fun ReplaceRulesSheet(core: YuyueCore, bookID: String, changed: () -> Unit, dism
             Spacer(Modifier.height(12.dp))
             YYGroup {
                 if (rules.isEmpty()) row { YYRow(if (forBook) t("这本书还没有自己的规则") else t("还没有用于全部书的规则"), titleColor = YY.c.t3) }
-                for (r in rules) row {
-                    Row(Modifier.fillMaxWidth().clickable { editing = r }.padding(vertical = YY.s(9)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(8))) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(
-                                buildAnnotatedString {
-                                    append(r.find)
-                                    withStyle(SpanStyle(color = YY.c.t3)) { append("  →  ") }
-                                    if (r.replace.isEmpty()) withStyle(SpanStyle(color = YY.c.t3, textDecoration = TextDecoration.None)) { append(t("删掉")) } else append(r.replace)
-                                },
-                                style = YY.font(11.5f), color = if (r.enabled) YY.c.t1 else YY.c.t3, maxLines = 2,
-                            )
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                if (r.regex) YYTag(t("正则"))
-                                if (r.speechOnly) YYTag(t("只改朗读"), Icons.ear)
+                rules.forEachIndexed { idx, r ->
+                    row {
+                        Row(Modifier.fillMaxWidth().clickable { editing = r }.padding(vertical = YY.s(9)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(8))) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(
+                                    buildAnnotatedString {
+                                        append(r.find)
+                                        withStyle(SpanStyle(color = YY.c.t3)) { append("  →  ") }
+                                        if (r.replace.isEmpty()) withStyle(SpanStyle(color = YY.c.t3, textDecoration = TextDecoration.None)) { append(t("删掉")) } else append(r.replace)
+                                    },
+                                    style = YY.font(11.5f), color = if (r.enabled) YY.c.t1 else YY.c.t3, maxLines = 2,
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    if (r.regex) YYTag(t("正则"))
+                                    if (r.speechOnly) YYTag(t("只改朗读"), Icons.ear)
+                                }
                             }
+                            if (rules.size > 1) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        Modifier
+                                            .size(YY.s(28))
+                                            .clip(CircleShape)
+                                            .alpha(if (idx > 0) 1f else 0.3f)
+                                            .clickable(enabled = idx > 0) { moveRule(idx, idx - 1) },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(Icons.chevronUp, t("上移"), tint = YY.c.t2, modifier = Modifier.size(YY.s(14)))
+                                    }
+                                    Box(
+                                        Modifier
+                                            .size(YY.s(28))
+                                            .clip(CircleShape)
+                                            .alpha(if (idx < rules.lastIndex) 1f else 0.3f)
+                                            .clickable(enabled = idx < rules.lastIndex) { moveRule(idx, idx + 1) },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(Icons.chevronDown, t("下移"), tint = YY.c.t2, modifier = Modifier.size(YY.s(14)))
+                                    }
+                                }
+                            }
+                            Switch(r.enabled, { on -> runCatching { core.setReplaceRuleEnabled(r.id, on) }; touched() }, modifier = Modifier.semantics { contentDescription = t("启用这条规则") },
+                                colors = SwitchDefaults.colors(checkedTrackColor = YY.tint.fill, checkedThumbColor = YY.c.card, uncheckedTrackColor = YY.c.inset, uncheckedBorderColor = YY.c.line))
                         }
-                        Switch(r.enabled, { on -> runCatching { core.setReplaceRuleEnabled(r.id, on) }; touched() }, modifier = Modifier.semantics { contentDescription = t("启用这条规则") },
-                            colors = SwitchDefaults.colors(checkedTrackColor = YY.tint.fill, checkedThumbColor = YY.c.card, uncheckedTrackColor = YY.c.inset, uncheckedBorderColor = YY.c.line))
                     }
                 }
                 removed?.let { gone ->

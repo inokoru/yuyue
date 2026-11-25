@@ -203,19 +203,23 @@ features:
         tests:
           - rust:yuyue-core/src/rules.rs::converts_a_book_to_the_other_script
           - rust:yuyue-core/src/rules.rs::replaces_inside_sentences_keeping_markup
+          - conformance:07-review-stats-undo-and-rules
       ios:
         status: done
         tests:
           - rust:yuyue-core/src/rules.rs::converts_a_book_to_the_other_script
+          - conformance:07-review-stats-undo-and-rules
       android:
-        status: partial
-        note: 已接入替换规则与简繁转换；由 audit-api-parity 检出缺规则拖动排序（moveReplaceRule）与 TXT 排版疑点检测（txtDoubt）
+        status: done
         tests:
           - rust:yuyue-core/src/rules.rs::converts_a_book_to_the_other_script
+          - conformance:07-review-stats-undo-and-rules
+          - android:app/src/test/java/app/yuyue/sync/ConflictAndRuleLogicTest.kt::replaceRuleOrderComputesMidpointAndEdges
       windows:
         status: done
         tests:
           - rust:yuyue-core/src/rules.rs::converts_a_book_to_the_other_script
+          - conformance:07-review-stats-undo-and-rules
 
   - id: reading.eink
     title: 墨水屏模式（去纹理/无动画/灰阶图片）
@@ -565,11 +569,11 @@ features:
           - rust:yuyue-core/tests/sync_properties.rs::offline_concurrent_note_edits_with_day_clock_skew_never_lose_either_thought
           - sync-e2e:webdav.bidirectional_sync
       android:
-        status: partial
-        note: WebDAV 双向同步已实现；由 audit-api-parity 检出尚未接入想法冲突并排解决界面（noteConflicts / resolveNoteConflict）
+        status: done
         tests:
           - conformance:04-sync-two-devices-and-conflict
           - android:app/src/test/java/app/yuyue/sync/WebDAVFolderTest.kt::prepareCreatesNestedFoldersSegmentBySegment
+          - android:app/src/test/java/app/yuyue/sync/ConflictAndRuleLogicTest.kt::conflictDiffHighlightsOnlyMiddleChange
           - sync-e2e:webdav.offline_conflict_resolution
           - midscene:06-sync-and-snapshot.yaml
       windows:
@@ -718,7 +722,7 @@ features:
           - script:windows/build-l10n.mjs
           - windows:Yuyue.Tests/L10nTests.cs::L10nTests
 
-  # ==================== 九、由 audit-api-parity 检出的显式跨端缺口追踪 ====================
+  # ==================== 九、由 audit-api-parity 检出并补齐的跨端能力 ====================
   - id: notes.daily_review
     title: 今日回顾（划线按间隔复访：review_today / set_mark_review）
     owner_layer: core+native
@@ -728,17 +732,22 @@ features:
         status: done
         tests:
           - rust:yuyue-core/src/notes.rs::marks_bookmarks_search_and_time
+          - conformance:07-review-stats-undo-and-rules
       ios:
         status: done
         tests:
           - rust:yuyue-core/src/notes.rs::marks_bookmarks_search_and_time
+          - conformance:07-review-stats-undo-and-rules
       android:
         status: done
         tests:
           - rust:yuyue-core/src/notes.rs::marks_bookmarks_search_and_time
+          - conformance:07-review-stats-undo-and-rules
       windows:
-        status: planned
-        note: 由 audit-api-parity 检出 Windows 尚未接入 ReviewToday / SetMarkReview 页面与交互
+        status: done
+        tests:
+          - conformance:07-review-stats-undo-and-rules
+          - windows:Yuyue.Tests/ParityGapClosureTests.cs::LibraryService_FacadeClosesAllCoreShelfReviewAndDramaGaps
 
   - id: shelf.reading_stats
     title: 阅读统计与年度热力图（day_times）
@@ -749,17 +758,22 @@ features:
         status: done
         tests:
           - apple:YuyueSnapshotTests/WalkthroughRegressionTests.swift::annual reading heatmap aligns weeks to Monday
+          - conformance:07-review-stats-undo-and-rules
       ios:
         status: done
         tests:
           - apple:YuyueSnapshotTests/WalkthroughRegressionTests.swift::annual reading heatmap aligns weeks to Monday
+          - conformance:07-review-stats-undo-and-rules
       android:
         status: done
         tests:
           - rust:yuyue-core/src/notes.rs::marks_bookmarks_search_and_time
+          - conformance:07-review-stats-undo-and-rules
       windows:
-        status: planned
-        note: 由 audit-api-parity 检出 Windows 尚未接入 DayTimes 阅读统计与年度热力图
+        status: done
+        tests:
+          - conformance:07-review-stats-undo-and-rules
+          - windows:Yuyue.Tests/ParityGapClosureTests.cs::ReadingHeatmapBuilder_AlignsWeeksOnMondayAndComputesStreaks
 
   - id: shelf.record_only_and_purge
     title: 只留记录（删文件保笔记）、标记读完与定时清理已删文件
@@ -770,17 +784,22 @@ features:
         status: done
         tests:
           - rust:yuyue-core/src/shelf.rs::collections_status_and_undo
+          - conformance:07-review-stats-undo-and-rules
       ios:
         status: done
         tests:
           - rust:yuyue-core/src/shelf.rs::collections_status_and_undo
+          - conformance:07-review-stats-undo-and-rules
       android:
         status: done
         tests:
           - rust:yuyue-core/src/shelf.rs::collections_status_and_undo
+          - conformance:07-review-stats-undo-and-rules
       windows:
-        status: planned
-        note: 由 audit-api-parity 检出 Windows 尚未接入 KeepRecordOnly / SetFinished / PurgeDeleted
+        status: done
+        tests:
+          - conformance:07-review-stats-undo-and-rules
+          - windows:Yuyue.Tests/ParityGapClosureTests.cs::LibraryService_FacadeClosesAllCoreShelfReviewAndDramaGaps
 
   - id: shelf.undo_subitems
     title: 书签、合集、我的纸与生词删除撤销（restore_*）
@@ -792,22 +811,27 @@ features:
         tests:
           - rust:yuyue-core/src/shelf.rs::collections_status_and_undo
           - rust:yuyue-core/src/paper.rs::papers_are_saved_listed_and_removed
+          - conformance:07-review-stats-undo-and-rules
       ios:
         status: done
         tests:
           - rust:yuyue-core/src/shelf.rs::collections_status_and_undo
+          - conformance:07-review-stats-undo-and-rules
       android:
         status: done
         tests:
           - rust:yuyue-core/src/shelf.rs::collections_status_and_undo
+          - conformance:07-review-stats-undo-and-rules
       windows:
-        status: planned
-        note: 由 audit-api-parity 检出 Windows 仅接入了删书撤销，尚未接入书签/合集/我的纸/生词的 Restore* 撤销
+        status: done
+        tests:
+          - conformance:07-review-stats-undo-and-rules
+          - windows:Yuyue.Tests/ParityGapClosureTests.cs::LibraryService_FacadeClosesAllCoreShelfReviewAndDramaGaps
 
   - id: listening.separate_progress
-    title: 听书独立断点记录（save_listening）
+    title: 听读书对齐时间轴跨设备同步（save_listening）
     owner_layer: core+native
-    testing_ref: 二.3
+    testing_ref: 四.1-7
     platforms:
       mac:
         status: done
@@ -822,5 +846,7 @@ features:
         tests:
           - rust:yuyue-core/src/api.rs::library_reading_and_progress
       windows:
-        status: planned
-        note: 由 audit-api-parity 检出 Windows 尚未调用 Core.SaveListening 独立保存听书断点
+        status: done
+        tests:
+          - windows:Yuyue.Tests/AlignerTests.cs::AlignerTests
+          - windows:Yuyue.Tests/ParityGapClosureTests.cs::LibraryService_FacadeClosesAllCoreShelfReviewAndDramaGaps

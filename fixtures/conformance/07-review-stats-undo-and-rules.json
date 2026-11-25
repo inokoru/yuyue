@@ -1,0 +1,36 @@
+{
+  "id": "07-review-stats-undo-and-rules",
+  "description": "Cross-platform parity for daily review, reading day_times stats, sub-item undo (bookmark/collection/paper/word), book word count, replace-rule reordering, finished/record-only, and purge_deleted.",
+  "steps": [
+    { "op": "open", "device": "a", "name": "Dev-A", "platform": "windows" },
+    { "op": "import_book", "device": "a", "fixture": "books/beiying.epub", "save_as": "book1" },
+    { "op": "import_book", "device": "a", "fixture": "books/pride-and-prejudice.epub", "save_as": "book2" },
+
+    { "op": "add_mark", "device": "a", "book": "book1", "section": 0, "start_sentence": 0, "start_offset": 0, "end_sentence": 0, "end_offset": 6, "text": "我与父亲不相见", "style": "yellow", "note": "第一条想法", "save_as": "m1" },
+    { "op": "add_mark", "device": "a", "book": "book1", "section": 0, "start_sentence": 1, "start_offset": 0, "end_sentence": 1, "end_offset": 5, "text": "背影", "style": "blue", "note": "第二条想法", "save_as": "m2" },
+    { "op": "assert_review_today", "device": "a", "day_start": 0, "count": 5, "exact_items": 2, "exact_done_today": 0 },
+    { "op": "set_mark_review", "device": "a", "book": "book1", "mark": "m1", "keep": true },
+    { "op": "assert_review_today", "device": "a", "day_start": 0, "count": 5, "exact_items": 1, "exact_done_today": 1 },
+    { "op": "set_mark_review", "device": "a", "book": "book1", "mark": "m2", "keep": false },
+    { "op": "assert_review_today", "device": "a", "day_start": 0, "count": 5, "exact_items": 0, "exact_done_today": 2 },
+
+    { "op": "add_time", "device": "a", "book": "book1", "section": 0, "read_seconds": 900, "listen_seconds": 300, "day": "2026-03-10" },
+    { "op": "add_time", "device": "a", "book": "book2", "section": 0, "read_seconds": 600, "listen_seconds": 0, "day": "2026-03-11" },
+    { "op": "assert_day_times", "device": "a", "from": "2026-03-01", "to": "2026-03-31", "min_entries": 2, "min_read_seconds": 1500, "min_listen_seconds": 300 },
+
+    { "op": "bookmark_undo_roundtrip", "device": "a", "book": "book1", "section": 0, "sentence": 1 },
+    { "op": "collection_undo_roundtrip", "device": "a", "name": "散文精选", "book": "book1" },
+    { "op": "custom_paper_undo_roundtrip", "device": "a", "name": "暖杏纸", "bg": "#F4ECD8" },
+    { "op": "word_undo_and_count", "device": "a", "book": "book2", "word": "Bennet", "min_book_count": 1 },
+    { "op": "replace_rule_reorder", "device": "a", "book": "book1" },
+
+    { "op": "save_progress", "device": "a", "book": "book1", "section": 0, "sentence": 1 },
+    { "op": "set_finished", "device": "a", "book": "book1", "finished": true },
+    { "op": "set_finished", "device": "a", "book": "book1", "finished": false },
+    { "op": "keep_record_only", "device": "a", "book": "book1" },
+    { "op": "assert_marks", "device": "a", "book": "book1", "count": 2 },
+
+    { "op": "delete_book", "device": "a", "book": "book2" },
+    { "op": "purge_deleted", "device": "a", "older_than_ms": 0, "min_purged": 1 }
+  ]
+}

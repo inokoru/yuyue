@@ -764,19 +764,23 @@ public sealed partial class SettingsView
         UpdateVoiceModelCards();
         PageBodyStack.Children.Add(storageModelsCard);
 
-        // Audio & temp cache cleanup card (1:1 macOS Storage)
+        // Audio & temp cache + tombstoned deleted book files cleanup card (1:1 macOS Storage)
         long cacheBytes = ComputeAudioCacheBytes();
         string cacheMb = $"{cacheBytes / (1024.0 * 1024.0):0.0} MB";
-        var cleanBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Content = L10n.T("清理缓存"), IsEnabled = cacheBytes > 0 };
+        var cleanBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Content = L10n.T("清理缓存") };
         cleanBtn.Click += (_, _) =>
         {
             ClearAudioAndTempCaches();
-            _ownerWindow.ShowToast("已清理云端语音与临时音频缓存");
+            uint purgedBooks = 0;
+            try { purgedBooks = _library.PurgeDeleted(0); } catch { }
+            _ownerWindow.ShowToast(purgedBooks > 0
+                ? $"已清理音频缓存并彻底移除 {purgedBooks} 本已删书籍文件"
+                : "已清理云端语音与临时音频缓存");
             RenderActivePage();
         };
         PageBodyStack.Children.Add(new FluentSettingsCard(
             "音频与临时缓存",
-            cacheBytes > 0 ? $"当前占用 {cacheMb}（云端 TTS 缓存与广播剧临时切片，清理不影响书籍与笔记）" : "当前暂无可清理的临时音频缓存",
+            cacheBytes > 0 ? $"当前占用 {cacheMb}（云端 TTS 缓存、广播剧临时切片与已删书籍残留文件）" : "清理云端语音缓存与已删除书籍残留文件（不影响书架中的书籍与笔记）",
             "trash",
             cleanBtn,
             dark: dark));

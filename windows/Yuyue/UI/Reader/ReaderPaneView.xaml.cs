@@ -68,6 +68,7 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
     private bool _translationsActive;
     private bool _bubblesOn;
     private bool _dramaModeOn;
+    private bool _isTextVersion;
     private BubbleLine[] _sectionBubbles = [];
     private long? _previousOpenedAtMs;
     private bool _finishedPrompted;
@@ -148,6 +149,7 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
         _previousOpenedAtMs = _detail.Summary.OpenedAt;
         try { _bubblesOn = _library.Core.BookBubbles(_bookId); } catch { _bubblesOn = false; }
         try { _dramaModeOn = _library.Core.DramaEnabled(_bookId); } catch { _dramaModeOn = false; }
+        try { _isTextVersion = _library.Core.AudiobookIsTextVersion(_bookId); } catch { _isTextVersion = false; }
         _translationsActive = _library.Prefs.BookTranslationsActive.TryGetValue(_bookId, out var savedTr) && savedTr;
         TranslateBtn.Visibility = IsForeignBook() ? Visibility.Visible : Visibility.Collapsed;
         var perBook = _library.GetBookReaderSettings(bookId);
@@ -888,6 +890,19 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
             }
             catch (Exception ex) { ShowReaderAlert($"导出失败：{ex.Message}"); }
         });
+        if (_isTextVersion)
+        {
+            Add("整理录音转写错字…", async () =>
+            {
+                if (RootGrid.XamlRoot is { } xr)
+                {
+                    await global::Yuyue.Audiobook.AlignCheckAndPolishService.ShowTextPolishDialogAsync(xr, _library, _bookId, () =>
+                    {
+                        if (!_disposed) LoadSection(_currentSection);
+                    });
+                }
+            });
+        }
         Add("书籍详情与阅读记录", () =>
         {
             App.CurrentApp.ShowShelf();
@@ -910,6 +925,21 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
         var tc = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
         var resolved = PaperAppearance.Resolve(_library, _settings);
         var activePaper = YYPapers.FromId(PaperAppearance.PaperCssId(resolved.Preset));
+
+        // 0. Audio-transcribed text version notice (parity with Apple TextVersionBanner & Android ReaderScreen)
+        if (_isTextVersion)
+        {
+            ShowReaderAlert("这是录音转出来的文字版，可能有错字", "整理错字", () =>
+            {
+                if (RootGrid.XamlRoot is { } xr)
+                {
+                    _ = global::Yuyue.Audiobook.AlignCheckAndPolishService.ShowTextPolishDialogAsync(xr, _library, _bookId, () =>
+                    {
+                        if (!_disposed) LoadSection(_currentSection);
+                    });
+                }
+            }, seconds: 7);
+        }
 
         // 1. TXT encoding/chapter doubt pill (ReaderReturn.swift)
         if (_detail.Summary.Format == BookFormat.Txt && !_library.Prefs.DismissedTxtDoubtBooks.Contains(_bookId))
@@ -1237,6 +1267,50 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
                     PushSettingsToReader(save: true);
                     flyoutRef?.Hide();
                 };
+                var cpMenu = new MenuFlyout();
+                var editPaperMi = new MenuFlyoutItem { Text = L10n.T("调整这张纸…") };
+                editPaperMi.Click += async (_, _) =>
+                {
+                    flyoutRef?.Hide();
+                    if (RootGrid.XamlRoot is not { } xr) return;
+                    var edited = await CustomPaperDialog.ShowEditorAsync(
+                        xr,
+                        _library,
+                        existing: cpCap,
+                        currentSettings: _settings,
+                        onDeleted: deleted =>
+                        {
+                            ShowReaderAlert($"已删除纸张「{deleted.Name}」", "撤销", () =>
+                            {
+                                try { _library.RestoreCustomPaper(deleted.Id); } catch { }
+                                ShowReaderAlert($"已恢复纸张「{deleted.Name}」");
+                            });
+                        });
+                    if (edited is not null)
+                    {
+                        if (PaperAppearance.PickCustom(_library, edited, _settings, out var updated, perBookOverride: _ownSettings))
+                            _settings = updated;
+                        PushSettingsToReader(save: true);
+                    }
+                };
+                var delPaperMi = new MenuFlyoutItem { Text = L10n.T("删除这张纸"), Foreground = ThemeHelper.Brush(p.Danger) };
+                delPaperMi.Click += (_, _) =>
+                {
+                    flyoutRef?.Hide();
+                    string deletedId = cpCap.Id;
+                    string deletedName = cpCap.Name;
+                    try { _library.Core.DeleteCustomPaper(deletedId); } catch { }
+                    PaperAppearance.Forget(_library, deletedId);
+                    PushSettingsToReader(save: false);
+                    ShowReaderAlert($"已删除纸张「{deletedName}」", "撤销", () =>
+                    {
+                        try { _library.RestoreCustomPaper(deletedId); } catch { }
+                        ShowReaderAlert($"已恢复纸张「{deletedName}」");
+                    });
+                };
+                cpMenu.Items.Add(editPaperMi);
+                cpMenu.Items.Add(delPaperMi);
+                cBtn.ContextFlyout = cpMenu;
                 cpWrap.Children.Add(cBtn);
             }
             root.Children.Add(cpWrap);

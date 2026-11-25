@@ -180,6 +180,7 @@ public sealed class AudiobookWork : IDisposable
                 var curProg = SafeProgress(recordingId);
                 if (curProg?.Done == true)
                 {
+                    SyncListeningGuide(recordingId);
                     CleanupTempPcmFiles(folder);
                     Publish(new AudiobookWorkStatus(
                         recordingId,
@@ -230,6 +231,7 @@ public sealed class AudiobookWork : IDisposable
 
             if (progress.Done)
             {
+                SyncListeningGuide(recordingId);
                 CleanupTempPcmFiles(folder);
                 Publish(new AudiobookWorkStatus(
                     recordingId,
@@ -392,6 +394,98 @@ public sealed class AudiobookWork : IDisposable
         float[] result = new float[floats];
         MemoryMarshal.Cast<byte, float>(bytes.AsSpan(0, floats * 4)).CopyTo(result);
         return result;
+    }
+
+    /// <summary>
+    /// Fast re-alignment reusing already cached <c>emissions-*.f32</c> acoustic matrices via
+    /// <see cref="YuyueCore.AlignRecordingSaved"/> without re-running ONNX inference.
+    /// </summary>
+    public Alignment? RealignFromSavedEmissions(string recordingId)
+    {
+        AudioRecording rec;
+        try { rec = _core.AudioRecording(recordingId); }
+        catch { return null; }
+
+        string folder = WorkFolderOf(recordingId);
+        var saved = new List<SavedEmissions>(rec.Files.Length);
+        for (int i = 0; i < rec.Files.Length; i++)
+        {
+            string emPath = Path.Combine(folder, $"emissions-{i}.f32");
+            if (!File.Exists(emPath) || new FileInfo(emPath).Length == 0)
+                return null;
+            saved.Add(new SavedEmissions(emPath, rec.Files[i].Seconds));
+        }
+        if (saved.Count == 0) return null;
+
+        var alignment = _core.AlignRecordingSaved(recordingId, saved.ToArray());
+        SyncListeningGuide(recordingId);
+        return alignment;
+    }
+
+    public bool HasSavedEmissions(string recordingId)
+    {
+        try
+        {
+            var rec = _core.AudioRecording(recordingId);
+            if (rec.Files.Length == 0) return false;
+            string folder = Path.Combine(_dataDir, "audiobook-work", recordingId);
+            for (int i = 0; i < rec.Files.Length; i++)
+            {
+                string emPath = Path.Combine(folder, $"emissions-{i}.f32");
+                if (!File.Exists(emPath) || new FileInfo(emPath).Length == 0)
+                    return false;
+            }
+            return true;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Writes the aligned listening timeline into the CRDT store via <see cref="YuyueCore.SaveListening"/>
+    /// so paired phones/Macs inherit the Windows alignment without re-aligning (parity with Apple Audiobooks.swift).
+    /// </summary>
+    public void SyncListeningGuide(string recordingId)
+    {
+        try
+        {
+            var map = _core.AudiobookMap(recordingId);
+            if (map is null || string.IsNullOrEmpty(map.BookId) || map.Rows.Length == 0) return;
+            var rec = _core.AudioRecording(recordingId);
+            var sentences = map.Rows
+                .Select(r => new ListenSentence(
+                    Section: r.Section,
+                    Sentence: r.Sentence,
+                    Start: r.By == SyncBy.Unread ? -1.0 : r.T0Ms / 1000.0,
+                    End: r.By == SyncBy.Unread ? -1.0 : r.T1Ms / 1000.0,
+                    Heard: r.Conf / 255f,
+                    Adjusted: r.By == SyncBy.User))
+                .ToArray();
+            var sections = map.Rows
+                .GroupBy(r => r.Section)
+                .Select(g =>
+                {
+                    uint total = (uint)g.Count();
+                    uint missing = (uint)g.Count(r => r.By == SyncBy.Unread);
+                    uint unsure = (uint)g.Count(r => r.By != SyncBy.Unread && r.Conf < 140);
+                    float heard = total == 0 ? 0f : g.Average(r => r.Conf / 255f);
+                    return new SectionFit(g.Key, total, heard, missing, unsure);
+                })
+                .ToArray();
+            double intro = map.Rows.Where(r => r.By != SyncBy.Unread).Select(r => r.T0Ms / 1000.0).DefaultIfEmpty(0.0).Min();
+            var skip = _core.AudiobookSkipSettings(recordingId);
+            var listening = new Listening(
+                Recording: recordingId,
+                Book: map.BookId,
+                Sentences: sentences,
+                Sections: sections,
+                Intro: intro,
+                Through: rec.Seconds,
+                IntroSkipped: skip.HeadTail,
+                MadeMs: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                Took: null);
+            _core.SaveListening(listening);
+        }
+        catch { }
     }
 
     private static void CleanupTempPcmFiles(string folder)

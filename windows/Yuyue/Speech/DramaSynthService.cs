@@ -143,15 +143,81 @@ public static class DramaSynthService
     }
 
     /// <summary>
-    /// Whether the currently effective voice pool supports expressive acting (ZipVoice cards or acting cloud providers).
-    /// Matches <c>CastView.swift:688-692</c> (<c>dramaCanAct</c>).
+    /// Whether the currently effective voice pool supports expressive acting (ZipVoice cards, acting cloud providers,
+    /// or core's persisted <see cref="YuyueCore.DramaCanAct"/>). Matches <c>CastView.swift:796</c>.
     /// </summary>
-    public static bool CanAct(LibraryService library, string language, string? narrator = null)
+    public static bool CanAct(LibraryService library, string language, string? narrator = null, string? bookId = null)
     {
+        if (!string.IsNullOrEmpty(bookId))
+        {
+            try
+            {
+                if (library.Core.DramaCanAct(bookId)) return true;
+            }
+            catch { }
+        }
         string? eff = EffectiveNarrator(library, language, narrator);
         if (library.LiveVoice.IsReady && CardVoiceEngine.SpeaksLanguage(language)) return true;
         if (eff is not null && eff.StartsWith("cloud.", StringComparison.Ordinal)) return true;
         return false;
+    }
+
+    /// <summary>
+    /// Switches drama vs. single-narrator playback mode in core so all synced devices follow.
+    /// </summary>
+    public static void SetDramaMode(LibraryService library, string bookId, bool dramaMode)
+    {
+        try { library.Core.DramaSetMode(bookId, dramaMode); } catch { }
+    }
+
+    /// <summary>
+    /// Queries whether <paramref name="section"/> has pre-rendered studio clips ready or should synthesize live.
+    /// </summary>
+    public static DramaLayer GetSectionLayer(LibraryService library, string bookId, uint section, string studioEngine = "zipvoice")
+    {
+        try { return library.Core.DramaSectionLayer(bookId, section, studioEngine); }
+        catch { return DramaLayer.Live; }
+    }
+
+    /// <summary>
+    /// Resolves per-sentence speaking role names for <paramref name="section"/> from core.
+    /// </summary>
+    public static string?[] GetSectionRoles(LibraryService library, string bookId, uint section)
+    {
+        try { return library.Core.SectionRoles(bookId, section); }
+        catch { return []; }
+    }
+
+    /// <summary>
+    /// Returns the name of the LAN peer device whose pre-rendered drama clips were adopted for <paramref name="bookId"/>.
+    /// </summary>
+    public static string? GetBorrowedFrom(LibraryService library, string bookId)
+    {
+        try { return library.Core.DramaBorrowedFrom(bookId); }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Adopts pre-rendered drama clips received from a peer device on the LAN (parity with Apple RecordingShare.swift).
+    /// </summary>
+    public static void AdoptRemoteClips(LibraryService library, string bookId, string device, string manifest, IEnumerable<string> keys)
+    {
+        string[] have = keys.Where(k => IsClipMade(library.DataDir, bookId, k)).ToArray();
+        library.Core.DramaAdoptClips(bookId, device, manifest, have);
+        if (have.Length > 0)
+        {
+            try { library.Core.DramaSetEnabled(bookId, true); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// Adopts designed voice cards JSON shared by a peer device for <paramref name="bookId"/>.
+    /// </summary>
+    public static uint AdoptRemoteCardsJson(LibraryService library, string bookId, string json)
+    {
+        uint adopted = library.Core.CardsAdoptBookJson(bookId, json);
+        if (adopted > 0) InvalidateCast(bookId);
+        return adopted;
     }
 
     /// <summary>

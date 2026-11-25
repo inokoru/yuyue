@@ -20,7 +20,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
+import uniffi.yuyue_core.ConflictChoice
 import uniffi.yuyue_core.DeviceInfo
+import uniffi.yuyue_core.NoteConflict
 import uniffi.yuyue_core.SyncPart
 import uniffi.yuyue_core.YuyueCore
 import java.io.File
@@ -63,6 +65,9 @@ class Sync(private val context: Context, private val core: YuyueCore, private va
         private set
     var devices by mutableStateOf<List<DeviceInfo>>(emptyList())
         private set
+    /** Thoughts changed on two devices before either heard from the other. */
+    var conflicts by mutableStateOf<List<NoteConflict>>(emptyList())
+        private set
     /** "webdav", "drive", or "none". */
     var method by mutableStateOf(Prefs.string(METHOD, "none"))
         private set
@@ -80,11 +85,30 @@ class Sync(private val context: Context, private val core: YuyueCore, private va
 
     init {
         loadDevices()
+        loadConflicts()
     }
 
     fun loadDevices() {
         devices = runCatching { core.devices() }.getOrDefault(emptyList())
     }
+
+    fun loadConflicts() {
+        conflicts = runCatching { core.noteConflicts() }.getOrDefault(emptyList())
+    }
+
+    /** Settles one conflicted thought so every device converges on the user's choice. */
+    fun resolveConflict(book: String, mark: String, choice: ConflictChoice): String? =
+        try {
+            core.resolveNoteConflict(book, mark, choice)
+            loadConflicts()
+            library.reload()
+            now()
+            null
+        } catch (e: Exception) {
+            Library.message(e)
+        }
+
+    internal fun bookSummary(id: String) = library.books.firstOrNull { it.id == id }
 
     val webdav: WebDAVAccount?
         get() {
@@ -202,6 +226,7 @@ class Sync(private val context: Context, private val core: YuyueCore, private va
                 state = State.Failed(message(e))
             }
             loadDevices()
+            loadConflicts()
             running = null
         }
     }

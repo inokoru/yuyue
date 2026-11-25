@@ -716,7 +716,8 @@ public static class CustomPaperDialog
         LibraryService library,
         CustomPaper? existing = null,
         Action<CustomPaper?>? onPreview = null,
-        ReaderSettings? currentSettings = null)
+        ReaderSettings? currentSettings = null,
+        Action<CustomPaper>? onDeleted = null)
     {
         var initial = existing ?? NewDraftFromSettings(library, currentSettings ?? library.GetReaderSettings());
         CustomPaper? duplicatedPaper = null;
@@ -778,6 +779,7 @@ public static class CustomPaperDialog
             try { library.Core.DeleteCustomPaper(initial.Id); } catch { }
             PaperAppearance.Forget(library, initial.Id);
             onPreview?.Invoke(null);
+            onDeleted?.Invoke(initial);
             return null;
         }
 

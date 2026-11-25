@@ -429,6 +429,7 @@ private fun Chrome(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // The pill and the cards rise in over the capsule and sink away, the last one drawn as it goes.
+            val capsule = ((!model.immersive && !model.barsAway) || model.chromeShown || model.searchShown) && !popupOpen
             val back = model.returnTo?.takeIf { !model.barsAway && !popupOpen }
             var lastBack by remember { mutableStateOf(back) }
             if (back != null) lastBack = back
@@ -439,6 +440,31 @@ private fun Chrome(
                 ) {
                     Icon(Icons.undo, null, tint = paper.ink, modifier = Modifier.size(15.dp))
                     Text(page?.let { t("回到第 %lld 页", it) } ?: t("回到原处"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = paper.ink, style = YY.tnum)
+                }
+            } }
+            val doubt = model.txtDoubt?.takeIf { back == null && capsule && !model.searchShown && !popupOpen }
+            var lastDoubt by remember { mutableStateOf(doubt) }
+            if (doubt != null) lastDoubt = doubt
+            AnimatedVisibility(doubt != null, enter = YYMotion.barIn(false, reduce), exit = YYMotion.barOut(false, reduce)) { lastDoubt?.let { message ->
+                Row(
+                    Modifier.padding(bottom = 8.dp).glass(paper, haze),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        Modifier.clickable { model.txtShown = true }.padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(Icons.warning, null, tint = YY.c.warn, modifier = Modifier.size(14.dp))
+                        Text(message, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = paper.ink, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                        Text(t("去看看"), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = paper.ink.copy(alpha = 0.6f))
+                    }
+                    Box(
+                        Modifier.size(width = 32.dp, height = 34.dp).clickable { model.dismissDoubt() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.close, t("不用提示了"), tint = paper.ink.copy(alpha = 0.5f), modifier = Modifier.size(11.dp))
+                    }
                 }
             } }
             val flag = model.narrationFlag?.takeIf { !popupOpen }
@@ -454,7 +480,6 @@ private fun Chrome(
                 lastSleep?.let { r -> SleepReturnCard(r.whenText, "${r.chapter} ${r.at}", paper, haze) { model.answerSleepReturn(it) } }
             }
             // 沉浸阅读 hides the capsule until the middle is tapped; scrolling down the page, until back up it.
-            val capsule = ((!model.immersive && !model.barsAway) || model.chromeShown || model.searchShown) && !popupOpen
             val readyVoice = model.player?.readyOfflineVoice?.takeIf { !model.searchShown && !popupOpen }
             var lastReadyVoice by remember { mutableStateOf(readyVoice) }
             if (readyVoice != null) lastReadyVoice = readyVoice

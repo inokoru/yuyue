@@ -101,11 +101,15 @@ fun SyncPage(sync: Sync) {
     val allow = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         if (runCatching { DriveAuth.token(context, result.data) }.isSuccess) connect() else driving = false
     }
-    LaunchedEffect(Unit) { sync.loadDevices() }
+    LaunchedEffect(Unit) {
+        sync.loadDevices()
+        sync.loadConflicts()
+    }
     YYPage {
         SettingsLead(t("通过个人云盘在多台设备间同步"))
         Spacer(Modifier.height(YY.s(10)))
         StatusCard(sync)
+        ConflictsBanner(sync)
         YYLabel(t("同步方式"))
         YYGroup {
             row {

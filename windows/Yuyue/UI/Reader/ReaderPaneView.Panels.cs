@@ -294,6 +294,11 @@ public sealed partial class ReaderPaneView
                 {
                     _library.DeleteBookmark(_bookId, bmId);
                     RenderLeftPane();
+                    ShowReaderAlert("已移除此处书签", "撤销", () =>
+                    {
+                        try { _library.RestoreBookmark(_bookId, bmId); } catch { }
+                        RenderLeftPane();
+                    });
                 };
                 topRow.Children.Add(delBtn);
 
@@ -331,8 +336,13 @@ public sealed partial class ReaderPaneView
         var existing = _library.GetBookmarks(_bookId).FirstOrDefault(b => b.Section == _currentSection && Math.Abs((int)b.Sentence - (int)sent) <= 2);
         if (existing is not null)
         {
-            _library.DeleteBookmark(_bookId, existing.Id);
-            ShowReaderAlert("已移除此处书签");
+            string bmId = existing.Id;
+            _library.DeleteBookmark(_bookId, bmId);
+            ShowReaderAlert("已移除此处书签", "撤销", () =>
+            {
+                try { _library.RestoreBookmark(_bookId, bmId); } catch { }
+                if (_leftPaneOpen && _leftPaneTab == "bookmarks") RenderLeftPane();
+            });
         }
         else
         {
@@ -490,6 +500,24 @@ public sealed partial class ReaderPaneView
         JumpTo(hit.Section, (int)hit.Sentence);
         if (hit.Section == _currentSection && _pager.IsInitialized)
             _ = _pager.Current.SetHitsAsync(_inBookSearchQuery, (int)hit.Sentence, (int)hit.Nth);
+        // When paired with a human audiobook, seek to the exact matched word offset (parity with Apple ReaderNotes.swift)
+        if (_audio.IsUsingPairedRecording && !string.IsNullOrEmpty(_pairedAudioBookId))
+        {
+            try
+            {
+                uint charAt = 0;
+                var sents = _library.GetSentences(_bookId, hit.Section);
+                if (hit.Sentence < sents.Count && !string.IsNullOrEmpty(_inBookSearchQuery))
+                {
+                    int pos = sents[(int)hit.Sentence].IndexOf(_inBookSearchQuery, StringComparison.OrdinalIgnoreCase);
+                    if (pos >= 0) charAt = (uint)pos;
+                }
+                double? wordSec = _library.Core.AudiobookWordTime(_pairedAudioBookId, hit.Section, hit.Sentence, charAt);
+                if (wordSec is double sec && sec >= 0)
+                    _audio.SeekRecordingTo(sec);
+            }
+            catch { }
+        }
         if (_leftPaneOpen && _leftPaneTab == "search") RenderLeftPane();
     }
 
@@ -1411,6 +1439,7 @@ public sealed partial class ReaderPaneView
             {
                 _dramaModeOn = on;
                 try { _library.Core.DramaSetEnabled(_bookId, on); } catch { }
+                DramaSynthService.SetDramaMode(_library, _bookId, on);
                 RefreshCastAndAudio();
             }));
 
@@ -1628,10 +1657,16 @@ public sealed partial class ReaderPaneView
                     catch { }
                 }
 
-                bool canAct = dramaOn && DramaSynthService.CanAct(_library, bookLang);
+                bool canAct = dramaOn && DramaSynthService.CanAct(_library, bookLang, bookId: _bookId);
                 bool preRunning = dramaOn && DramaSynthService.IsPreRendering(_bookId);
                 bool isPreparing = dramaOn && DramaSynthService.IsPreparing(_library, _bookId);
-                return (cast, roles, unsureLines, suggestions, prog, sound, made, autoMap, allVoices, secLines, secKnown, worker, canAct, preRunning, isPreparing);
+                DramaLayer secLayer = dramaOn ? DramaSynthService.GetSectionLayer(_library, _bookId, targetSection) : DramaLayer.Live;
+                string? borrowedFrom = dramaOn ? DramaSynthService.GetBorrowedFrom(_library, _bookId) : null;
+                int sectionSpeakerCount = DramaSynthService.GetSectionRoles(_library, _bookId, targetSection)
+                    .Where(r => !string.IsNullOrWhiteSpace(r))
+                    .Distinct(StringComparer.Ordinal)
+                    .Count();
+                return (cast, roles, unsureLines, suggestions, prog, sound, made, autoMap, allVoices, secLines, secKnown, worker, canAct, preRunning, isPreparing, secLayer, borrowedFrom, sectionSpeakerCount);
             });
 
             if (_disposed || gen != _castRenderGen || !_rightPaneOpen || _rightPaneTab != "cast") return;
@@ -1953,6 +1988,21 @@ public sealed partial class ReaderPaneView
 
                 studioStack.Children.Add(new Border { Height = 1, Background = ThemeHelper.Brush(p.Line) });
             }
+
+            string layerNote = snap.borrowedFrom is not null
+                ? L10n.T($"已借用「{snap.borrowedFrom}」预合成片段")
+                : snap.secLayer == DramaLayer.Studio
+                    ? L10n.T("本章已就绪（工作室预合成层）")
+                    : L10n.T("本章将按实时演播层合成");
+            if (snap.sectionSpeakerCount > 0)
+                layerNote = $"{layerNote} · {L10n.T($"本章 {snap.sectionSpeakerCount} 位角色发声")}";
+            studioStack.Children.Add(new TextBlock
+            {
+                Text = layerNote,
+                FontSize = 11,
+                Foreground = ThemeHelper.Brush(tc.Accent),
+                TextWrapping = TextWrapping.Wrap,
+            });
 
             string preHint = snap.made is { Sections: > 0 } md
                 ? L10n.T($"已预合成 {md.Made} / {md.Sections} 章")

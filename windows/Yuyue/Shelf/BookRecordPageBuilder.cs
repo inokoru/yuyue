@@ -65,6 +65,8 @@ public sealed class BookRecordPageBuilder
         var p = ThemeHelper.Palette(dark);
         var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
 
+        host.Children.Add(BuildReadingStatsCard(dark, p, tint));
+
         // StatusTabs + 右侧排序菜单（明确两列 Grid 绝不重叠，Fluent 2 6px 分段轨道）
         var topBar = new Grid { Margin = new Thickness(0, 0, 0, 10), ColumnSpacing = 12 };
         topBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1645,11 +1647,168 @@ public sealed class BookRecordPageBuilder
         colItem.Click += (_, _) => _shelf.OpenPickCollectionForBook(book);
         menu.Items.Add(colItem);
 
+        if (!book.Record)
+        {
+            var keepRecItem = new MenuFlyoutItem { Text = L10n.T("只删文件，留下记录") };
+            keepRecItem.Click += (_, _) =>
+            {
+                try
+                {
+                    App.CurrentApp.CloseBookWindows(book.Id);
+                    _library.KeepRecordOnly(book.Id);
+                    _shelf.RefreshBooks();
+                    _shelf.ShowToast($"已删除《{book.Title}》原文件，保留阅读记录与笔记");
+                }
+                catch (Exception ex)
+                {
+                    _shelf.ShowToast($"操作失败：{ex.Message}");
+                }
+            };
+            menu.Items.Add(keepRecItem);
+        }
+
         var delItem = new MenuFlyoutItem { Text = L10n.T("删除…"), Foreground = ThemeHelper.Brush(p.Danger) };
         delItem.Click += (_, _) => _shelf.OpenDeleteForBook(book);
         menu.Items.Add(delItem);
 
         return menu;
+    }
+
+    private Border BuildReadingStatsCard(bool dark, YYPalette p, YYTintColors tint)
+    {
+        DateOnly today = DateOnly.FromDateTime(DateTime.Today);
+        const int weeksToShow = 26;
+        int daysSinceMonday = ((int)today.DayOfWeek + 6) % 7;
+        DateOnly startMonday = today.AddDays(-daysSinceMonday - (weeksToShow - 1) * 7);
+
+        IReadOnlyList<DayTime> dayTimes;
+        try
+        {
+            dayTimes = _library.GetDayTimes(
+                ReadingHeatmapBuilder.FormatDayKey(startMonday),
+                ReadingHeatmapBuilder.FormatDayKey(today));
+        }
+        catch
+        {
+            dayTimes = Array.Empty<DayTime>();
+        }
+
+        var summary = ReadingHeatmapBuilder.Build(dayTimes, today, weeksToShow);
+        var card = new Border
+        {
+            Margin = new Thickness(0, 0, 0, 14),
+            CornerRadius = new CornerRadius(10),
+            Background = ThemeHelper.Brush(p.Card),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(16, 14, 16, 14),
+        };
+
+        var root = new StackPanel { Spacing = 10 };
+        var head = new Grid { ColumnSpacing = 12 };
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var titleStack = new StackPanel { Spacing = 2 };
+        titleStack.Children.Add(new TextBlock
+        {
+            Text = L10n.T("阅读统计"),
+            FontSize = 13.5,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush(p.T1),
+        });
+        string totalDuration = FormatDurationMinutes(summary.TotalSeconds);
+        titleStack.Children.Add(new TextBlock
+        {
+            Text = L10n.T($"近半年累计 {totalDuration} · 活跃 {summary.ActiveDays} 天 · 最长连续 {summary.LongestStreak} 天"),
+            FontSize = 11.5,
+            Foreground = ThemeHelper.Brush(p.T2),
+        });
+        Grid.SetColumn(titleStack, 0);
+        head.Children.Add(titleStack);
+
+        if (summary.CurrentStreak > 0)
+        {
+            var streakBadge = new Border
+            {
+                CornerRadius = new CornerRadius(12),
+                Background = ThemeHelper.Brush(tint.Soft),
+                BorderBrush = ThemeHelper.Brush(tint.Edge),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(10, 4, 10, 4),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock
+                {
+                    Text = L10n.T($"连续阅读 {summary.CurrentStreak} 天"),
+                    FontSize = 11,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = ThemeHelper.Brush(tint.Accent),
+                },
+            };
+            Grid.SetColumn(streakBadge, 1);
+            head.Children.Add(streakBadge);
+        }
+        root.Children.Add(head);
+
+        // Monday-aligned heatmap grid (26 weeks × 7 days)
+        var grid = new Grid { ColumnSpacing = 3, RowSpacing = 3, HorizontalAlignment = HorizontalAlignment.Left };
+        for (int r = 0; r < 7; r++)
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(11) });
+        for (int w = 0; w < summary.Weeks.Count; w++)
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(11) });
+            var col = summary.Weeks[w];
+            for (int d = 0; d < 7; d++)
+            {
+                var cell = col[d];
+                Color fill = cell.IsFuture
+                    ? Colors.Transparent
+                    : cell.Level switch
+                    {
+                        0 => p.Inset,
+                        1 => Color.FromArgb(72, tint.Accent.R, tint.Accent.G, tint.Accent.B),
+                        2 => Color.FromArgb(132, tint.Accent.R, tint.Accent.G, tint.Accent.B),
+                        3 => Color.FromArgb(196, tint.Accent.R, tint.Accent.G, tint.Accent.B),
+                        _ => tint.Accent,
+                    };
+                var box = new Border
+                {
+                    Width = 11,
+                    Height = 11,
+                    CornerRadius = new CornerRadius(2.5),
+                    Background = ThemeHelper.Brush(fill),
+                };
+                if (!cell.IsFuture)
+                {
+                    string tip = cell.TotalSeconds > 0
+                        ? $"{cell.DayKey} · {FormatDurationMinutes(cell.TotalSeconds)}"
+                        : $"{cell.DayKey} · {L10n.T("无记录")}";
+                    ToolTipService.SetToolTip(box, tip);
+                }
+                Grid.SetColumn(box, w);
+                Grid.SetRow(box, d);
+                grid.Children.Add(box);
+            }
+        }
+        root.Children.Add(new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = grid,
+        });
+
+        card.Child = root;
+        return card;
+    }
+
+    private static string FormatDurationMinutes(uint totalSeconds)
+    {
+        uint mins = totalSeconds / 60;
+        if (mins < 1 && totalSeconds > 0) mins = 1;
+        if (mins < 60) return $"{mins} 分钟";
+        uint hours = mins / 60;
+        uint rem = mins % 60;
+        return rem > 0 ? $"{hours} 小时 {rem} 分钟" : $"{hours} 小时";
     }
 
     internal static async Task<(bool Saved, string? Note)> ShowThoughtEditorSheetAsync(

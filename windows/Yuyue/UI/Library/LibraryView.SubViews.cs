@@ -120,94 +120,161 @@ public sealed partial class LibraryView
             return;
         }
 
-        // Today's Review spotlight card when unfiltered
-        if (string.IsNullOrWhiteSpace(_notesQuery) && _notesStyleFilter == "all" && allEntries.Count >= 2)
+        // Today's spaced-repetition review spotlight via core.ReviewToday (parity with Apple MacReviewView)
+        if (string.IsNullOrWhiteSpace(_notesQuery) && _notesStyleFilter == "all")
         {
-            int daySeed = DateTime.Today.DayOfYear % allEntries.Count;
-            var spotlight = allEntries[daySeed];
-            var reviewCard = new Border
+            ReviewDeck? deck = null;
+            try { deck = _library.GetReviewToday(bookId: null, count: 5); } catch { }
+            var booksMap = _keptBooks.ToDictionary(b => b.Id, StringComparer.OrdinalIgnoreCase);
+            var reviewItems = deck?.Items
+                .Where(it => booksMap.ContainsKey(it.Book))
+                .Select(it => (Book: booksMap[it.Book], Mark: it.Mark))
+                .ToList() ?? [];
+
+            if (reviewItems.Count > 0 || (deck?.DoneToday ?? 0) > 0)
             {
-                CornerRadius = new CornerRadius(10),
-                Background = ThemeHelper.Brush(tc.Soft),
-                BorderBrush = ThemeHelper.Brush(tc.Edge),
-                BorderThickness = new Thickness(1),
-                Padding = new Thickness(18, 14, 18, 14),
-            };
-            var rStack = new StackPanel { Spacing = 8 };
-            var rHead = new Grid { ColumnSpacing = 8 };
-            rHead.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            rHead.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var rHeadLbl = new TextBlock
-            {
-                Text = L10n.T("今日重温"),
-                FontSize = 11.5,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = ThemeHelper.Brush(tc.Accent),
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            var deckBtn = new Button
-            {
-                Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
-                Content = L10n.T($"闪卡回顾 ({allEntries.Count}) →"),
-                FontSize = 11.5,
-                MinHeight = 24,
-                Foreground = ThemeHelper.Brush(tc.Accent),
-            };
-            var deckSnapshot = allEntries.ToList();
-            deckBtn.Click += async (_, _) =>
-            {
-                try
+                var reviewCard = new Border
                 {
-                    await ShowNotesReviewDeckDialogAsync(deckSnapshot, dark);
+                    CornerRadius = new CornerRadius(10),
+                    Background = ThemeHelper.Brush(tc.Soft),
+                    BorderBrush = ThemeHelper.Brush(tc.Edge),
+                    BorderThickness = new Thickness(1),
+                    Padding = new Thickness(18, 14, 18, 14),
+                };
+                var rStack = new StackPanel { Spacing = 8 };
+                var rHead = new Grid { ColumnSpacing = 8 };
+                rHead.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                rHead.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                uint doneToday = deck?.DoneToday ?? 0;
+                var rHeadLbl = new TextBlock
+                {
+                    Text = doneToday > 0
+                        ? L10n.T($"今日回顾 · 已看 {doneToday} 条")
+                        : L10n.T("今日回顾"),
+                    FontSize = 11.5,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = ThemeHelper.Brush(tc.Accent),
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                Grid.SetColumn(rHeadLbl, 0);
+                rHead.Children.Add(rHeadLbl);
+
+                if (reviewItems.Count > 0)
+                {
+                    var deckBtn = new Button
+                    {
+                        Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
+                        Content = L10n.T($"开始回顾 ({reviewItems.Count}) →"),
+                        FontSize = 11.5,
+                        MinHeight = 24,
+                        Foreground = ThemeHelper.Brush(tc.Accent),
+                    };
+                    var deckSnapshot = reviewItems.ToList();
+                    deckBtn.Click += async (_, _) =>
+                    {
+                        try
+                        {
+                            await ShowNotesReviewDeckDialogAsync(deckSnapshot, dark);
+                            RenderNotesResults(resultsHost, dark);
+                        }
+                        catch (Exception ex)
+                        {
+                            ShowToast($"打开今日回顾失败：{ex.Message}");
+                        }
+                    };
+                    Grid.SetColumn(deckBtn, 1);
+                    rHead.Children.Add(deckBtn);
+                    rStack.Children.Add(rHead);
+
+                    var spotlight = reviewItems[0];
+                    rStack.Children.Add(BookVisuals.BuildHighlightedQuote(spotlight.Mark, p, dark, 14.5));
+                    if (!string.IsNullOrWhiteSpace(spotlight.Mark.Note))
+                    {
+                        rStack.Children.Add(L10n.Skip(new TextBlock
+                        {
+                            Text = spotlight.Mark.Note,
+                            FontSize = 12.5,
+                            Foreground = ThemeHelper.Brush(p.T2),
+                            TextWrapping = TextWrapping.Wrap,
+                        }));
+                    }
+                    var rFoot = new Grid { ColumnSpacing = 12 };
+                    rFoot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    rFoot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    var rBookTb = L10n.Skip(new TextBlock
+                    {
+                        Text = $"——《{spotlight.Book.Title}》",
+                        FontSize = 11.5,
+                        Foreground = ThemeHelper.Brush(p.T2),
+                        VerticalAlignment = VerticalAlignment.Center,
+                        MaxLines = 1,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                    });
+                    Grid.SetColumn(rBookTb, 0);
+                    rFoot.Children.Add(rBookTb);
+
+                    var quickActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+                    var keepBtn = new Button
+                    {
+                        Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
+                        Content = L10n.T("7 天后再看"),
+                        FontSize = 11.5,
+                        MinHeight = 24,
+                    };
+                    keepBtn.Click += (_, _) =>
+                    {
+                        try
+                        {
+                            _library.SetMarkReview(spotlight.Book.Id, spotlight.Mark.Id, keep: true);
+                            RenderNotesResults(resultsHost, dark);
+                        }
+                        catch { }
+                    };
+                    var doneBtn = new Button
+                    {
+                        Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
+                        Content = L10n.T("记住了"),
+                        FontSize = 11.5,
+                        MinHeight = 24,
+                        Foreground = ThemeHelper.Brush(tc.Accent),
+                    };
+                    doneBtn.Click += (_, _) =>
+                    {
+                        try
+                        {
+                            _library.SetMarkReview(spotlight.Book.Id, spotlight.Mark.Id, keep: false);
+                            RenderNotesResults(resultsHost, dark);
+                        }
+                        catch { }
+                    };
+                    var jumpBtn = new Button
+                    {
+                        Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
+                        Content = L10n.T("回到原文 →"),
+                        Foreground = ThemeHelper.Brush(tc.Accent),
+                    };
+                    jumpBtn.Click += (_, _) => TryOpenBook(spotlight.Book, section: spotlight.Mark.Section, sentence: (int)spotlight.Mark.Start.Sentence);
+                    quickActions.Children.Add(keepBtn);
+                    quickActions.Children.Add(doneBtn);
+                    quickActions.Children.Add(jumpBtn);
+                    Grid.SetColumn(quickActions, 1);
+                    rFoot.Children.Add(quickActions);
+                    rStack.Children.Add(rFoot);
                 }
-                catch (Exception ex)
+                else
                 {
-                    ShowToast($"打开闪卡回顾失败：{ex.Message}");
+                    rStack.Children.Add(rHead);
+                    rStack.Children.Add(new TextBlock
+                    {
+                        Text = L10n.T("今天的回顾都看完了，明天再来。"),
+                        FontSize = 12.5,
+                        Foreground = ThemeHelper.Brush(p.T2),
+                    });
                 }
-            };
-            Grid.SetColumn(rHeadLbl, 0);
-            Grid.SetColumn(deckBtn, 1);
-            rHead.Children.Add(rHeadLbl);
-            rHead.Children.Add(deckBtn);
-            rStack.Children.Add(rHead);
-            rStack.Children.Add(BookVisuals.BuildHighlightedQuote(spotlight.Mark, p, dark, 14.5));
-            if (!string.IsNullOrWhiteSpace(spotlight.Mark.Note))
-            {
-                rStack.Children.Add(L10n.Skip(new TextBlock
-                {
-                    Text = spotlight.Mark.Note,
-                    FontSize = 12.5,
-                    Foreground = ThemeHelper.Brush(p.T2),
-                    TextWrapping = TextWrapping.Wrap,
-                }));
+
+                reviewCard.Child = rStack;
+                resultsHost.Children.Add(reviewCard);
             }
-            var rFoot = new Grid { ColumnSpacing = 12 };
-            rFoot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            rFoot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var rBookTb = L10n.Skip(new TextBlock
-            {
-                Text = $"——《{spotlight.Book.Title}》",
-                FontSize = 11.5,
-                Foreground = ThemeHelper.Brush(p.T2),
-                VerticalAlignment = VerticalAlignment.Center,
-                MaxLines = 1,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-            });
-            Grid.SetColumn(rBookTb, 0);
-            rFoot.Children.Add(rBookTb);
-            var jumpBtn = new Button
-            {
-                Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
-                Content = L10n.T("回到原文 →"),
-                Foreground = ThemeHelper.Brush(tc.Accent),
-                HorizontalAlignment = HorizontalAlignment.Right,
-            };
-            jumpBtn.Click += (_, _) => TryOpenBook(spotlight.Book, section: spotlight.Mark.Section, sentence: (int)spotlight.Mark.Start.Sentence);
-            Grid.SetColumn(jumpBtn, 1);
-            rFoot.Children.Add(jumpBtn);
-            rStack.Children.Add(rFoot);
-            reviewCard.Child = rStack;
-            resultsHost.Children.Add(reviewCard);
         }
 
         // Render note cards
@@ -596,8 +663,18 @@ public sealed partial class LibraryView
             {
                 try
                 {
-                    _library.DeleteWord(w.Word);
+                    string removedWord = w.Word;
+                    _library.DeleteWord(removedWord);
                     RefreshBooks();
+                    ShowToast(
+                        $"已移除生词「{removedWord}」",
+                        canUndo: true,
+                        isDelete: true,
+                        undo: () =>
+                        {
+                            try { _library.RestoreWord(removedWord); } catch { }
+                            RefreshBooks();
+                        });
                 }
                 catch (Exception ex)
                 {
@@ -784,11 +861,26 @@ public sealed partial class LibraryView
         var delMi = new MenuFlyoutItem { Text = L10n.T("删除合集"), Foreground = ThemeHelper.Brush(p.Danger) };
         delMi.Click += (_, _) =>
         {
-            _library.Prefs.PinnedCollectionIds.RemoveAll(id => string.Equals(id, col.Id, StringComparison.OrdinalIgnoreCase));
-            _library.SavePrefs();
-            _library.DeleteCollection(col.Id);
+            bool wasPinned = _library.Prefs.PinnedCollectionIds.RemoveAll(id => string.Equals(id, col.Id, StringComparison.OrdinalIgnoreCase)) > 0;
+            if (wasPinned) _library.SavePrefs();
+            string removedId = col.Id;
+            string removedName = col.Name;
+            _library.DeleteCollection(removedId);
             RefreshBooks();
-            ShowToast($"已删除合集「{col.Name}」");
+            ShowToast(
+                $"已删除合集「{removedName}」",
+                canUndo: true,
+                isDelete: true,
+                undo: () =>
+                {
+                    try { _library.RestoreCollection(removedId); } catch { }
+                    if (wasPinned && !_library.Prefs.PinnedCollectionIds.Contains(removedId, StringComparer.OrdinalIgnoreCase))
+                    {
+                        _library.Prefs.PinnedCollectionIds.Insert(0, removedId);
+                        _library.SavePrefs();
+                    }
+                    RefreshBooks();
+                });
         };
         menu.Items.Add(delMi);
         return menu;
@@ -983,7 +1075,8 @@ public sealed partial class LibraryView
         if (RootGrid.XamlRoot is not { } xr || entries.Count == 0) return;
         var p = ThemeHelper.Palette(dark);
         var tc = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
-        int idx = DateTime.Today.DayOfYear % entries.Count;
+        var queue = entries.ToList();
+        int idx = 0;
         ContentDialog? dlgRef = null;
 
         var bodyHost = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch };
@@ -991,8 +1084,14 @@ public sealed partial class LibraryView
 
         void RenderCard()
         {
-            var (book, mk) = entries[idx];
-            counterTb.Text = $"{idx + 1} / {entries.Count}";
+            if (queue.Count == 0)
+            {
+                dlgRef?.Hide();
+                return;
+            }
+            if (idx >= queue.Count) idx = 0;
+            var (book, mk) = queue[idx];
+            counterTb.Text = $"{idx + 1} / {queue.Count}";
             var sp = new StackPanel { Spacing = 12 };
             sp.Children.Add(new Border
             {
@@ -1045,10 +1144,26 @@ public sealed partial class LibraryView
             bodyHost.Content = sp;
         }
 
+        void MarkReviewed(bool keep)
+        {
+            if (queue.Count == 0) return;
+            var (book, mk) = queue[idx];
+            try { _library.SetMarkReview(book.Id, mk.Id, keep); } catch { }
+            queue.RemoveAt(idx);
+            if (queue.Count == 0)
+            {
+                dlgRef?.Hide();
+                ShowToast("今天的回顾都看完了");
+                return;
+            }
+            if (idx >= queue.Count) idx = 0;
+            RenderCard();
+        }
+
         RenderCard();
 
         var root = new StackPanel { Spacing = 14, Padding = new Thickness(22, 18, 22, 18) };
-        root.Children.Add(YYChrome.MakeDialogHeader("笔记闪卡回顾", "重温过往的精彩划线与灵感", () => dlgRef?.Hide(), dark));
+        root.Children.Add(YYChrome.MakeDialogHeader("今日回顾", "挑出的过往划线与想法，看完后自动安排下次回顾", () => dlgRef?.Hide(), dark));
         root.Children.Add(bodyHost);
 
         var foot = new Grid { ColumnSpacing = 8 };
@@ -1057,8 +1172,8 @@ public sealed partial class LibraryView
         Grid.SetColumn(counterTb, 0);
         foot.Children.Add(counterTb);
         var navBtns = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        navBtns.Children.Add(YYChrome.MakeDialogButton("上一条", () => { idx = (idx - 1 + entries.Count) % entries.Count; RenderCard(); }, dark, _library.Prefs.Tint, "secondary", height: 32, horizontalPadding: 14));
-        navBtns.Children.Add(YYChrome.MakeDialogButton("下一条", () => { idx = (idx + 1) % entries.Count; RenderCard(); }, dark, _library.Prefs.Tint, "primary", height: 32, horizontalPadding: 16));
+        navBtns.Children.Add(YYChrome.MakeDialogButton("7 天后再看", () => MarkReviewed(keep: true), dark, _library.Prefs.Tint, "secondary", height: 32, horizontalPadding: 14));
+        navBtns.Children.Add(YYChrome.MakeDialogButton("记住了", () => MarkReviewed(keep: false), dark, _library.Prefs.Tint, "primary", height: 32, horizontalPadding: 16));
         Grid.SetColumn(navBtns, 1);
         foot.Children.Add(navBtns);
         root.Children.Add(foot);

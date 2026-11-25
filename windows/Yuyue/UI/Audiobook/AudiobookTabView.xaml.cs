@@ -29,7 +29,8 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
     private readonly LibraryService _library;
     private readonly string _bookId;
     private readonly BookDetail _detail;
-    private readonly AudioRecording? _recording;
+    private AudioRecording? _recording;
+    private SkipSettings _skipSettings = new(HeadTail: true, Middle: false, ShortenChapterGaps: true, ClearerVoice: false, ShortenPauses: false, FillUnread: false, WordFollow: false);
     private readonly MediaPlayer _player;
     private readonly DispatcherTimer _posTimer;
 
@@ -87,6 +88,7 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
         TabId = $"audio:{bookId}:{Guid.NewGuid():N}";
         _detail = _library.GetBookDetail(bookId);
         try { _recording = _library.Core.AudioRecording(bookId); } catch { }
+        try { _skipSettings = _library.Core.AudiobookSkipSettings(bookId); } catch { }
         _rate = Math.Clamp(_library.Prefs.AudiobookRate, 0.5, 2.5);
 
         InitializeComponent();
@@ -602,6 +604,11 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
         DurationText.Text = FormatClock(chapDur);
 
         double totalRem = Math.Max(0, _recording.Seconds - globalSec);
+        if (_skipSettings.ShortenPauses)
+        {
+            try { totalRem = Math.Max(0, totalRem - _library.Core.AudiobookPauseSavings(_bookId, globalSec)); }
+            catch { }
+        }
         RemainingText.Text = totalRem >= 3600
             ? L10n.T($"全书还剩 {(int)(totalRem / 3600)} 小时 {(int)((totalRem % 3600) / 60)} 分")
             : L10n.T($"全书还剩 {Math.Max(1, (int)(totalRem / 60))} 分钟");
@@ -724,6 +731,13 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
                 g.Children.Add(durTb);
                 row.Content = g;
                 row.Click += (_, _) => SeekGlobalSeconds(startCap, autoPlay: true);
+                int chIdxCap = i;
+                string currentTitleCap = ch.Title ?? "";
+                var chMenu = new MenuFlyout();
+                var renameMi = new MenuFlyoutItem { Text = L10n.T("重命名章节…") };
+                renameMi.Click += async (_, _) => await PromptRenameChapterAsync(chIdxCap, currentTitleCap);
+                chMenu.Items.Add(renameMi);
+                row.ContextFlyout = chMenu;
                 RightPaneStack.Children.Add(row);
             }
         }
@@ -793,6 +807,11 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
                         if (_disposed) return;
                         try { _library.DeleteBookmark(_bookId, bmId); } catch { }
                         RenderRightPane();
+                        _ownerWindow.ShowToast("已删除音频书签", "撤销", () =>
+                        {
+                            try { _library.RestoreBookmark(_bookId, bmId); } catch { }
+                            if (!_disposed) RenderRightPane();
+                        });
                     };
                     Grid.SetColumn(delBtn, 1);
                     rowGrid.Children.Add(delBtn);
@@ -866,6 +885,50 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
                 checkBtn.Click += (_, _) => AlignCheckAndPolishService.OpenAlignCheckWindow(_library, _bookId);
                 RightPaneStack.Children.Add(checkBtn);
 
+                if (_library.AudiobookWork.HasSavedEmissions(_bookId))
+                {
+                    var fastRealignBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("快速重新对齐（复用声学缓存）") };
+                    fastRealignBtn.Click += async (_, _) =>
+                    {
+                        fastRealignBtn.IsEnabled = false;
+                        try
+                        {
+                            var res = await Task.Run(() => _library.AudiobookWork.RealignFromSavedEmissions(_bookId));
+                            if (!_disposed)
+                            {
+                                _ownerWindow.ShowToast(res is not null ? "已基于声学缓存重新完成对齐" : "未能从缓存重新对齐");
+                                RenderRightPane();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            if (!_disposed) _ownerWindow.ShowToast($"快速对齐失败：{ex.Message}");
+                        }
+                        finally
+                        {
+                            if (!_disposed) fastRealignBtn.IsEnabled = true;
+                        }
+                    };
+                    RightPaneStack.Children.Add(fastRealignBtn);
+                }
+
+                var exportEpubBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("导出同步时间轴 EPUB…") };
+                exportEpubBtn.Click += async (_, _) =>
+                {
+                    try
+                    {
+                        string? outPath = await NativePickerHelper.PickSaveFileAsync(_ownerWindow, $"{_detail.Summary.Title}-听读版", [("EPUB", [".epub"])]);
+                        if (string.IsNullOrEmpty(outPath) || _disposed) return;
+                        await Task.Run(() => _library.Core.AudiobookExportEpub(_bookId, outPath));
+                        if (!_disposed) _ownerWindow.ShowToast($"已导出：{Path.GetFileName(outPath)}");
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!_disposed) _ownerWindow.ShowToast($"导出失败：{ex.Message}");
+                    }
+                };
+                RightPaneStack.Children.Add(exportEpubBtn);
+
                 var unpairBtn = new Button { Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("解除电子书配对"), Foreground = ThemeHelper.Brush(p.Danger) };
                 unpairBtn.Click += (_, _) =>
                 {
@@ -938,6 +1001,114 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
                     RightPaneStack.Children.Add(pickBtn);
                 }
             }
+
+            // Skip settings, detected extras & time saved card (parity with Apple AudiobookPlayer.swift)
+            RenderSkipSettingsCard(dark, p, tc);
+        }
+    }
+
+    private void RenderSkipSettingsCard(bool dark, YYPalette p, YYTintColors tc)
+    {
+        try { _skipSettings = _library.Core.AudiobookSkipSettings(_bookId); } catch { }
+        double savedSec = 0;
+        int extrasCount = 0;
+        try { savedSec = _library.Core.AudiobookSaved(_bookId); } catch { }
+        try { extrasCount = _library.Core.AudiobookExtras(_bookId).Length; } catch { }
+
+        var stack = new StackPanel { Spacing = 8 };
+        stack.Children.Add(new TextBlock
+        {
+            Text = L10n.T("跳过与听感"),
+            FontSize = 11.5,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush(p.T2),
+        });
+
+        if (savedSec >= 1.0 || extrasCount > 0)
+        {
+            string meta = savedSec >= 1.0 && extrasCount > 0
+                ? L10n.T($"识别到 {extrasCount} 处片头/插播 · 累计可省 {FormatClock(savedSec)}")
+                : savedSec >= 1.0
+                    ? L10n.T($"缩短停顿与跳过累计可省 {FormatClock(savedSec)}")
+                    : L10n.T($"已识别 {extrasCount} 处非正文片段");
+            stack.Children.Add(new TextBlock
+            {
+                Text = meta,
+                FontSize = 11,
+                Foreground = ThemeHelper.Brush(tc.Accent),
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+
+        void AddToggle(string title, bool initial, Func<SkipSettings, bool, SkipSettings> mutate)
+        {
+            var row = new Grid { ColumnSpacing = 8 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.Children.Add(new TextBlock
+            {
+                Text = L10n.T(title),
+                FontSize = 12,
+                Foreground = ThemeHelper.Brush(p.T1),
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            var sw = new ToggleSwitch { IsOn = initial, OnContent = null, OffContent = null, MinWidth = 0 };
+            sw.Toggled += (_, _) =>
+            {
+                if (_disposed) return;
+                _skipSettings = mutate(_skipSettings, sw.IsOn);
+                try { _library.Core.AudiobookSetSkipSettings(_bookId, _skipSettings); } catch { }
+                OnPositionTick();
+            };
+            Grid.SetColumn(sw, 1);
+            row.Children.Add(sw);
+            stack.Children.Add(row);
+        }
+
+        AddToggle("跳过片头片尾", _skipSettings.HeadTail, (s, on) => s with { HeadTail = on });
+        AddToggle("跳过中间插播", _skipSettings.Middle, (s, on) => s with { Middle = on });
+        AddToggle("缩短长停顿", _skipSettings.ShortenPauses, (s, on) => s with { ShortenPauses = on });
+        AddToggle("人声更清晰", _skipSettings.ClearerVoice, (s, on) => s with { ClearerVoice = on });
+
+        RightPaneStack.Children.Add(new Border
+        {
+            Margin = new Thickness(0, 6, 0, 0),
+            CornerRadius = new CornerRadius(8),
+            Background = ThemeHelper.Brush(p.Card),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(12, 10, 12, 10),
+            Child = stack,
+        });
+    }
+
+    private async Task PromptRenameChapterAsync(int chapterIndex, string currentTitle)
+    {
+        if (_disposed || RootGrid.XamlRoot is not { } xr) return;
+        bool dark = ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
+        string? next = await YYChrome.ShowPromptAsync(
+            xr,
+            dark,
+            "重命名章节",
+            placeholder: $"第 {chapterIndex + 1} 集",
+            initialText: currentTitle,
+            confirmText: "保存",
+            cancelText: "取消",
+            subtitle: "留空将恢复默认章节名：",
+            tint: _library.Prefs.Tint);
+        if (next is null || _disposed) return;
+        string? normalized = string.IsNullOrWhiteSpace(next) ? null : next.Trim();
+        try
+        {
+            _library.Core.RenameAudioChapter(_bookId, (uint)chapterIndex, normalized);
+            _recording = _library.Core.AudioRecording(_bookId);
+            RenderRightPane();
+            OnPositionTick();
+            _ownerWindow.ShowToast("已更新章节名称");
+        }
+        catch (Exception ex)
+        {
+            _ownerWindow.ShowToast($"重命名失败：{ex.Message}");
         }
     }
 
@@ -1032,7 +1203,20 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
         var (chIdx, relMs) = ToChapterPosition(globalSec);
         _library.AddBookmark(_bookId, chIdx, relMs);
         if (_rightTab == "bookmarks") RenderRightPane();
-        _ownerWindow.ShowToast("已添加音频书签");
+        BookSentence? heard = null;
+        try { heard = _library.Core.AudiobookHeardSentence(_bookId, globalSec); } catch { }
+        if (heard is not null)
+        {
+            var captured = heard;
+            _ownerWindow.ShowToast("已添加音频书签（已定位至对应正文句）", "打开原文", () =>
+            {
+                App.CurrentApp.OpenBook(captured.Book, section: captured.Section, sentence: (int)captured.Sentence);
+            });
+        }
+        else
+        {
+            _ownerWindow.ShowToast("已添加音频书签");
+        }
     }
 
     private void OpenMiniPlayer_Click(object sender, RoutedEventArgs e)
