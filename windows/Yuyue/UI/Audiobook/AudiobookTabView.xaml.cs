@@ -12,6 +12,8 @@ using Windows.System;
 using Yuyue.Audiobook;
 using Yuyue.Core;
 using Yuyue.Design;
+using Yuyue.Reader;
+using Yuyue.Speech;
 using Yuyue.UI.Shell;
 
 namespace Yuyue.UI.Audiobook;
@@ -47,6 +49,9 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
     private double _accumulatedListenSec;
     private uint _accumulatedListenChapter;
     private DateTime? _sleepDeadlineUtc;
+    private (uint ChapterIdx, uint RelativeMs)? _sleepArmedPos;
+    private double _loudnessGain = 1.0;
+    private bool _suppressGainSlider;
     private string _rightTab = "chapters"; // chapters | bookmarks | pair
     private bool _disposed;
 
@@ -105,16 +110,101 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
 
         BuildSleepMenu();
         LoadBookMetadata();
+        InitLoudnessGain();
 
         double startSec = 0;
         if (!startFromBeginning && _library.GetProgress(bookId) is { } prog)
             startSec = FromChapterPosition(prog.Position.Section, prog.Position.Sentence);
 
         ApplyAppearance();
+        CheckSleepReturnBanner();
         if (_recording is null || _recording.Files.Length == 0)
             StatusLeftText.Text = L10n.T("未找到该有声书音频文件，请重新导入。");
         else
             SeekGlobalSeconds(startSec, autoPlay);
+    }
+
+    private void InitLoudnessGain()
+    {
+        if (_library.Prefs.AudiobookLoudnessGain.TryGetValue(_bookId, out float savedGain))
+        {
+            ApplyLoudnessGain(Math.Clamp(savedGain, 0.35, 1.0), persist: false);
+        }
+        else
+        {
+            ApplyLoudnessGain(1.0, persist: false);
+            _ = MeasureBookLoudnessAsync();
+        }
+    }
+
+    private void ApplyLoudnessGain(double gain, bool persist)
+    {
+        _loudnessGain = Math.Clamp(gain, 0.35, 1.0);
+        try { _player.Volume = _loudnessGain; } catch { }
+        _suppressGainSlider = true;
+        GainSlider.Value = Math.Round(_loudnessGain * 100.0);
+        GainValueText.Text = $"{Math.Round(_loudnessGain * 100.0):0}%";
+        _suppressGainSlider = false;
+        if (persist)
+        {
+            _library.Prefs.AudiobookLoudnessGain[_bookId] = (float)_loudnessGain;
+            _library.SavePrefs();
+        }
+    }
+
+    private async Task MeasureBookLoudnessAsync()
+    {
+        if (_disposed || _recording is null || _recording.Files.Length == 0) return;
+        string raw = _recording.Files[0].Path;
+        string path = Path.IsPathRooted(raw) ? raw : Path.Combine(_library.DataDir, raw);
+        if (!File.Exists(path)) return;
+        try
+        {
+            string scratch = Path.Combine(_library.DataDir, "audiobooks", _bookId, "pcm-cache");
+            string pcm = await Aligner.EnsurePcm16kWavAsync(path, scratch, 0, CancellationToken.None);
+            if (_disposed) return;
+            float measured = VoiceTapDsp.MeasureLoudnessFromWav(pcm);
+            _library.Prefs.AudiobookLoudnessGain[_bookId] = measured;
+            _library.SavePrefs();
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!_disposed) ApplyLoudnessGain(measured, persist: false);
+            });
+        }
+        catch { }
+    }
+
+    private void CheckSleepReturnBanner()
+    {
+        if (_disposed || _recording is null) return;
+        var info = ReaderRecapAndSleepHelper.TryGetSleepReturn(_library, _bookId);
+        if (info is null) return;
+        int chIdx = _recording.Chapters.Length > 0 ? Math.Clamp((int)info.Section, 0, _recording.Chapters.Length - 1) : 0;
+        double inChSec = info.Sentence / 1000.0;
+        double targetSec = _recording.Chapters.Length > 0 ? _recording.Chapters[chIdx].Start + inChSec : inChSec;
+        string chName = _recording.Chapters.Length > 0 && !string.IsNullOrWhiteSpace(_recording.Chapters[chIdx].Title)
+            ? _recording.Chapters[chIdx].Title!
+            : L10n.T($"第 {chIdx + 1} 集");
+        var enriched = info with { Place = $"{chName} {FormatClock(inChSec)}" };
+
+        bool dark = ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
+        SleepReturnHost.Content = ReaderRecapAndSleepHelper.BuildSleepReturnCard(
+            enriched,
+            ThemeHelper.Palette(dark),
+            ThemeHelper.TintColors(_library.Prefs.Tint, dark),
+            go =>
+            {
+                SleepReturnHost.Visibility = Visibility.Collapsed;
+                ReaderRecapAndSleepHelper.ClearSleepReturn(_library, _bookId);
+                if (go) SeekGlobalSeconds(targetSec, autoPlay: true);
+            });
+        SleepReturnHost.Visibility = Visibility.Visible;
+    }
+
+    private void GainSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (_suppressGainSlider || _disposed) return;
+        ApplyLoudnessGain(e.NewValue / 100.0, persist: true);
     }
 
     private double GetChapterStartSeconds(int chapterIdx)
@@ -283,6 +373,8 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
     private void Play()
     {
         if (_disposed) return;
+        SleepReturnHost.Visibility = Visibility.Collapsed;
+        ReaderRecapAndSleepHelper.ClearSleepReturn(_library, _bookId);
         if (_player.Source is null)
         {
             SeekGlobalSeconds(GetGlobalPositionSeconds(), autoPlay: true);
@@ -454,11 +546,21 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
             var left = dl - DateTime.UtcNow;
             if (left <= System.TimeSpan.Zero)
             {
+                var armed = _sleepArmedPos ?? ToChapterPosition(GetGlobalPositionSeconds());
                 _sleepDeadlineUtc = null;
+                _sleepArmedPos = null;
                 SleepStatusText.Text = "";
                 Pause();
+                ReaderRecapAndSleepHelper.RememberSleepStop(_library, _bookId, armed.ChapterIdx, (int)armed.RelativeMs);
+                try
+                {
+                    var curPos = ToChapterPosition(GetGlobalPositionSeconds());
+                    _library.AddBookmark(_bookId, curPos.ChapterIdx, curPos.RelativeMs);
+                }
+                catch { }
                 bool dark = ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
                 SleepBtn.Content = YYIcons.Make("moon", 16, ThemeHelper.Brush(ThemeHelper.Palette(dark).T2));
+                _ownerWindow.ShowToast("睡眠定时已到，已暂停播放并记下起点");
             }
             else
             {
@@ -710,34 +812,131 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
         else
         {
             var pair = _library.Core.ListeningPairs().FirstOrDefault(x => x.Recording == _bookId);
+            var shelfEbooks = _library.GetShelfBooks().Where(b => b.Id != _bookId && b.Format != BookFormat.Audio).ToList();
+
             if (pair is not null)
             {
                 var ebook = _library.GetKeptBooks().FirstOrDefault(b => b.Id == pair.Book);
-                RightPaneStack.Children.Add(new TextBlock
+                AudiobookProgress? alignProg = null;
+                try { alignProg = _library.Core.AudiobookProgress(_bookId); } catch { }
+                bool workActive = _library.AudiobookWork.IsRunning(_bookId);
+                var workSt = _library.AudiobookWork.GetStatus(_bookId);
+                bool alignDone = alignProg?.Done == true || pair.Made;
+
+                string alignDesc = workActive && workSt is not null
+                    ? workSt.Message
+                    : (alignDone && alignProg is { Sentences: > 0 }
+                        ? L10n.T($"已对齐 {alignProg.Exact} / {alignProg.Sentences} 句 · 电子书内可同步跟读")
+                        : L10n.T("已配对电子书 · 点击下方合成句级声文时间轴"));
+
+                RightPaneStack.Children.Add(new Border
                 {
-                    Text = L10n.T($"已配对电子书：《{ebook?.Title ?? pair.Book}》"),
-                    FontSize = 13,
-                    FontWeight = FontWeights.SemiBold,
-                    Foreground = ThemeHelper.Brush(p.T1),
-                    TextWrapping = TextWrapping.Wrap,
+                    CornerRadius = new CornerRadius(8),
+                    Background = ThemeHelper.Brush(p.Card),
+                    BorderBrush = ThemeHelper.Brush(p.Line),
+                    BorderThickness = new Thickness(1),
+                    Padding = new Thickness(12, 10, 12, 10),
+                    Child = new StackPanel
+                    {
+                        Spacing = 4,
+                        Children =
+                        {
+                            new TextBlock { Text = L10n.T("已配对电子书"), FontSize = 11, Foreground = ThemeHelper.Brush(p.T3) },
+                            L10n.Skip(new TextBlock { Text = $"《{ebook?.Title ?? pair.Book}》", FontSize = 13.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1), TextWrapping = TextWrapping.Wrap }),
+                            new TextBlock { Text = alignDesc, FontSize = 11.5, Foreground = ThemeHelper.Brush(tc.Accent), TextWrapping = TextWrapping.Wrap },
+                        },
+                    },
                 });
+
                 var openEbookBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("打开配对电子书跟读") };
                 openEbookBtn.Click += (_, _) => App.CurrentApp.OpenBook(pair.Book, autoListen: true);
                 RightPaneStack.Children.Add(openEbookBtn);
 
+                string pairBookId = pair.Book;
+                var alignBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T(workActive ? "停止后台声文合成" : (alignDone ? "重新合成声文对齐" : "开始声文对齐合成")) };
+                alignBtn.Click += (_, _) =>
+                {
+                    if (_library.AudiobookWork.IsRunning(_bookId)) _library.AudiobookWork.Stop(_bookId);
+                    else _library.AudiobookWork.Start(_bookId, pairBookId, GetGlobalPositionSeconds(), autoDownloadModel: true);
+                    RenderRightPane();
+                };
+                RightPaneStack.Children.Add(alignBtn);
+
                 var checkBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("检查声文对齐精准度…") };
                 checkBtn.Click += (_, _) => AlignCheckAndPolishService.OpenAlignCheckWindow(_library, _bookId);
                 RightPaneStack.Children.Add(checkBtn);
+
+                var unpairBtn = new Button { Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("解除电子书配对"), Foreground = ThemeHelper.Brush(p.Danger) };
+                unpairBtn.Click += (_, _) =>
+                {
+                    _library.AudiobookWork.Stop(_bookId);
+                    try { _library.Core.AudiobookPair(_bookId, null); } catch { }
+                    _ownerWindow.ShowToast("已解除电子书配对");
+                    RenderRightPane();
+                };
+                RightPaneStack.Children.Add(unpairBtn);
             }
             else
             {
-                RightPaneStack.Children.Add(new TextBlock
+                var candidate = AudiobookImporter.FindMatchingShelfEbook(_library, _detail.Summary.Title);
+                if (candidate is not null)
                 {
-                    Text = L10n.T("尚未配对电子书。配对后可在电子书里边看文字边听真人有声原声。"),
-                    FontSize = 12,
-                    Foreground = ThemeHelper.Brush(p.T2),
-                    TextWrapping = TextWrapping.Wrap,
-                });
+                    var candCap = candidate;
+                    var autoCard = new StackPanel { Spacing = 8 };
+                    autoCard.Children.Add(new TextBlock { Text = L10n.T("发现同名电子书"), FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(tc.Accent) });
+                    autoCard.Children.Add(L10n.Skip(new TextBlock { Text = $"《{candCap.Title}》", FontSize = 13.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1), TextWrapping = TextWrapping.Wrap }));
+                    autoCard.Children.Add(new TextBlock { Text = L10n.T("配对并合成后，在电子书内可直接收听本真人有声书并同步逐句高亮。"), FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T2), TextWrapping = TextWrapping.Wrap });
+                    var autoPairBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("一键配对并开始合成") };
+                    autoPairBtn.Click += (_, _) =>
+                    {
+                        try { _library.Core.AudiobookPair(_bookId, candCap.Id); } catch { }
+                        _library.AudiobookWork.Start(_bookId, candCap.Id, GetGlobalPositionSeconds(), autoDownloadModel: true);
+                        _ownerWindow.ShowToast($"已与《{candCap.Title}》配对，正在后台对齐…");
+                        RenderRightPane();
+                    };
+                    autoCard.Children.Add(autoPairBtn);
+
+                    RightPaneStack.Children.Add(new Border
+                    {
+                        CornerRadius = new CornerRadius(8),
+                        Background = ThemeHelper.Brush(tc.Soft),
+                        BorderBrush = ThemeHelper.Brush(tc.Edge),
+                        BorderThickness = new Thickness(1),
+                        Padding = new Thickness(12, 10, 12, 10),
+                        Child = autoCard,
+                    });
+                }
+                else
+                {
+                    RightPaneStack.Children.Add(new TextBlock
+                    {
+                        Text = L10n.T("尚未配对电子书。配对后可在电子书里边看文字边听真人有声原声。"),
+                        FontSize = 12,
+                        Foreground = ThemeHelper.Brush(p.T2),
+                        TextWrapping = TextWrapping.Wrap,
+                    });
+                }
+
+                if (shelfEbooks.Count > 0)
+                {
+                    var pickBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("从书架手动选择电子书配对…") };
+                    var pickMenu = new MenuFlyout();
+                    foreach (var eb in shelfEbooks.OrderByDescending(b => b.OpenedAt ?? b.AddedAt).Take(16))
+                    {
+                        var ebCap = eb;
+                        var mi = new MenuFlyoutItem { Text = ebCap.Title };
+                        mi.Click += (_, _) =>
+                        {
+                            try { _library.Core.AudiobookPair(_bookId, ebCap.Id); } catch { }
+                            _library.AudiobookWork.Start(_bookId, ebCap.Id, GetGlobalPositionSeconds(), autoDownloadModel: true);
+                            _ownerWindow.ShowToast($"已与《{ebCap.Title}》配对");
+                            RenderRightPane();
+                        };
+                        pickMenu.Items.Add(mi);
+                    }
+                    pickBtn.Flyout = pickMenu;
+                    RightPaneStack.Children.Add(pickBtn);
+                }
             }
         }
     }
@@ -752,6 +951,7 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
             {
                 if (_disposed) return;
                 _sleepDeadlineUtc = minutes > 0 ? DateTime.UtcNow.AddMinutes(minutes) : null;
+                _sleepArmedPos = minutes > 0 ? ToChapterPosition(GetGlobalPositionSeconds()) : null;
                 if (_sleepDeadlineUtc is null) SleepStatusText.Text = "";
                 ApplyAppearance();
             };

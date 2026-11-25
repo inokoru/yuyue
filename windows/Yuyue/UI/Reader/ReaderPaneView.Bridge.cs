@@ -1,8 +1,12 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Foundation;
 using Windows.System;
 using Yuyue.Core;
 using Yuyue.Design;
@@ -204,10 +208,62 @@ public sealed partial class ReaderPaneView
         };
     }
 
+    private async Task ApplySectionBubblesAsync()
+    {
+        uint targetSection = _currentSection;
+        try
+        {
+            if (_bubblesOn)
+            {
+                var lines = await Task.Run(() => _library.Core.SectionBubbles(_bookId, targetSection));
+                if (_disposed || _currentSection != targetSection) return;
+                _sectionBubbles = lines;
+                if (_pager.IsInitialized) await _pager.Current.SetBubblesAsync(lines);
+            }
+            else
+            {
+                _sectionBubbles = [];
+                if (_pager.IsInitialized) await _pager.Current.SetBubblesAsync(null);
+            }
+        }
+        catch { }
+    }
+
     private async Task DecorateSectionHostAsync(ReaderWebViewHost host, uint section)
     {
         try
         {
+            await host.SetUiAsync(L10n.IsEnglish ? "en" : "zh");
+
+            if (_bubblesOn)
+            {
+                BubbleLine[] lines;
+                try { lines = await Task.Run(() => _library.Core.SectionBubbles(_bookId, section)); }
+                catch { lines = []; }
+                if (_disposed) return;
+                if (section == _currentSection) _sectionBubbles = lines;
+                await host.SetBubblesAsync(lines);
+            }
+            else
+            {
+                if (section == _currentSection) _sectionBubbles = [];
+                await host.SetBubblesAsync(null);
+            }
+
+            if (_pairedMap is not null)
+            {
+                try
+                {
+                    var secRows = _pairedMap.Rows.Where(r => r.Section == section).ToArray();
+                    var unread = secRows.Where(r => r.By == SyncBy.Unread).Select(r => (int)r.Sentence).ToArray();
+                    await host.SetUnreadAsync(unread.Length > 0 ? unread : null, unread.Length > 0 ? L10n.Tr("原声略过", "Unread in audio") : null);
+                    var unsure = secRows.Where(r => r.By == SyncBy.Spread || r.Conf < 90).Select(r => (int)r.Sentence).OrderBy(x => x).ToArray();
+                    if (unsure.Length > 0) await host.SetFlagAsync(unsure[0], unsure[^1]);
+                    else await host.SetFlagAsync(null);
+                }
+                catch { }
+            }
+
             var marks = _library.GetMarks(_bookId).Where(m => m.Section == section).ToList();
             await host.SetMarksAsync(marks);
 
@@ -220,10 +276,34 @@ public sealed partial class ReaderPaneView
                 else
                     await host.SetVocabAsync([]);
 
-                if (_library.Prefs.ForeignGlossEnabled && _library.Prefs.GlossLevel > 0)
-                    await host.SetGlossesAsync(_library.GetGlosses(_bookId, section, _library.Prefs.GlossLevel, _library.Prefs.GlossVocabOnly));
+                if (_library.Prefs.ForeignGlossEnabled && (_library.Prefs.GlossLevel > 0 || _library.Prefs.GlossVocabOnly))
+                {
+                    byte lvl = _library.Prefs.GlossLevel > 0 ? _library.Prefs.GlossLevel : (byte)3;
+                    await host.SetGlossesAsync(_library.GetGlosses(_bookId, section, lvl, _library.Prefs.GlossVocabOnly));
+                }
                 else
+                {
                     await host.SetGlossesAsync([]);
+                }
+
+                if (_translationsActive)
+                {
+                    var paragraphs = await host.GetForeignParagraphsAsync();
+                    if (paragraphs.Count > 0 && !_disposed)
+                    {
+                        var cache = await Task.Run(LoadTranslationCache);
+                        var cachedItems = new List<(int Last, string Text)>();
+                        foreach (var para in paragraphs)
+                        {
+                            if (string.IsNullOrWhiteSpace(para.text)) continue;
+                            string key = $"{section}|{para.last}|{HashText32(para.text):X8}";
+                            if (cache.TryGetValue(key, out var cached) && !string.IsNullOrWhiteSpace(cached))
+                                cachedItems.Add((para.last, cached));
+                        }
+                        if (cachedItems.Count > 0 && !_disposed)
+                            await host.SetTranslationsAsync(cachedItems);
+                    }
+                }
             }
         }
         catch { }
@@ -346,6 +426,11 @@ public sealed partial class ReaderPaneView
                             StartListenFromCurrentPage();
                         }
 
+                        if (_translationsActive && IsForeignBook())
+                        {
+                            _ = ApplyCurrentSectionTranslationsAsync();
+                        }
+
                         _ = _pager.PreloadNeighborsAsync(_currentSection);
                     }
                     UpdateHeaderAndStatus();
@@ -358,10 +443,14 @@ public sealed partial class ReaderPaneView
                     {
                         _autoTurnTargetPage = null;
                     }
-                    else if (_audio.IsPlaying && _speakingSentence >= 0 && _layout is not null)
+                    else
                     {
-                        _autoTurnTargetPage = null;
-                        _ttsFollowPage = _currentPage == _layout.PageOf(_speakingSentence);
+                        TickReturnPillTurn();
+                        if (_audio.IsPlaying && _speakingSentence >= 0 && _layout is not null)
+                        {
+                            _autoTurnTargetPage = null;
+                            _ttsFollowPage = _currentPage == _layout.PageOf(_speakingSentence);
+                        }
                     }
                     UpdateHeaderAndStatus();
                     SaveCurrentProgress();
@@ -386,6 +475,13 @@ public sealed partial class ReaderPaneView
                     }
                     UpdateHeaderAndStatus();
                     SaveCurrentProgress();
+                    if (_settings.Mode == LayoutMode.Scrolled
+                        && _library.NextSection(_bookId, _currentSection) is null
+                        && _currentSentences.Count > 0
+                        && _currentSentence >= Math.Max(0, _currentSentences.Count - 2))
+                    {
+                        _ = MaybeOfferFinishedSheetAsync();
+                    }
                     break;
 
                 case "activePage":
@@ -517,6 +613,35 @@ public sealed partial class ReaderPaneView
                     }
                     break;
                 }
+
+                case "doubleTap":
+                    if (IsForeignBook() && msg.Sentence is int tappedSentence)
+                    {
+                        DismissOverlays();
+                        await ShowSentenceTranslationCardAsync(tappedSentence, msg.X, msg.Y);
+                    }
+                    break;
+
+                case "bubble":
+                    if (msg.Line is int lineIdx && msg.X is double bx && msg.Y is double by)
+                    {
+                        if (lineIdx >= 0 && lineIdx < _sectionBubbles.Length)
+                        {
+                            var bl = _sectionBubbles[lineIdx];
+                            ShowBubbleSpeakerFlyout((int)bl.First, (int)bl.LineStart, msg.Choice, new Point(bx, by));
+                        }
+                        else
+                        {
+                            ShowBubbleSpeakerFlyout(lineIdx, msg.Offset ?? 0, msg.Choice, new Point(bx, by));
+                        }
+                    }
+                    break;
+
+                case "context":
+                case "winContext":
+                    if (msg.X is double rcx && msg.Y is double rcy)
+                        ShowPageContextMenu(new Point(rcx, rcy), targetSentence: msg.Sentence, targetOffset: msg.Offset);
+                    break;
 
                 case "winKey":
                     HandleForwardedWebViewKey(msg);
@@ -668,13 +793,32 @@ public sealed partial class ReaderPaneView
         }
         else
         {
-            ShowReaderAlert("已读完本书最后一页", "标为读完", () =>
-            {
-                _library.SetStatus(_bookId, ReadingStatus.Finished);
-                App.CurrentApp.NotifyShelfRefresh();
-                ShowReaderAlert("已标记为读完");
-            });
+            _ = MaybeOfferFinishedSheetAsync();
         }
+    }
+
+    private async Task MaybeOfferFinishedSheetAsync()
+    {
+        if (_disposed) return;
+        if (!_finishedPrompted
+            && _detail.Summary.Status != ReadingStatus.Finished
+            && !_library.Prefs.FinishedPromptedBooks.Contains(_bookId)
+            && RootGrid.XamlRoot is { } xr)
+        {
+            _finishedPrompted = true;
+            _library.Prefs.FinishedPromptedBooks.Add(_bookId);
+            _library.SavePrefs();
+            await ReaderRecapAndSleepHelper.ShowFinishedSheetAsync(xr, _library, _detail);
+            if (_disposed) return;
+            try { _detail = _library.GetBookDetail(_bookId); } catch { }
+            return;
+        }
+        ShowReaderAlert("已读完本书最后一页", "标为读完", () =>
+        {
+            _library.SetStatus(_bookId, ReadingStatus.Finished);
+            App.CurrentApp.NotifyShelfRefresh();
+            ShowReaderAlert("已标记为读完");
+        });
     }
 
     private void MoveToPreviousSection(bool joinAtEnd)
@@ -701,19 +845,24 @@ public sealed partial class ReaderPaneView
         catch { }
     }
 
-    // ---------- Overlays: Selection / Word / Footnote / Translation ----------
+    // ---------- Overlays: Selection / Word / Sentence / Footnote / Translation ----------
     private bool HasOpenOverlay() =>
         SelectionCard.Visibility == Visibility.Visible
         || WordCard.Visibility == Visibility.Visible
+        || SentenceCard.Visibility == Visibility.Visible
         || InfoPopupCard.Visibility == Visibility.Visible;
 
     private void DismissOverlays()
     {
         SelectionCard.Visibility = Visibility.Collapsed;
         WordCard.Visibility = Visibility.Collapsed;
+        SentenceCard.Visibility = Visibility.Collapsed;
         InfoPopupCard.Visibility = Visibility.Collapsed;
+        DictEntryWebView.Visibility = Visibility.Collapsed;
+        _dictFullExpanded = false;
         _activeSelection = null;
         _editingMark = null;
+        try { _sentenceTransCts?.Cancel(); } catch { }
         if (_pager.IsInitialized)
         {
             _ = _pager.Current.ClearSelectionAsync();
@@ -734,6 +883,7 @@ public sealed partial class ReaderPaneView
     private void ShowSelectionCard(ReaderRect rect, Mark? existingMark)
     {
         WordCard.Visibility = Visibility.Collapsed;
+        SentenceCard.Visibility = Visibility.Collapsed;
         InfoPopupCard.Visibility = Visibility.Collapsed;
         if (_pager.IsInitialized)
             _ = _pager.Current.SetLookingAsync(null, null);
@@ -754,7 +904,10 @@ public sealed partial class ReaderPaneView
     private void ShowWordLookupCard(ReaderWord w)
     {
         SelectionCard.Visibility = Visibility.Collapsed;
+        SentenceCard.Visibility = Visibility.Collapsed;
         InfoPopupCard.Visibility = Visibility.Collapsed;
+        DictEntryWebView.Visibility = Visibility.Collapsed;
+        _dictFullExpanded = false;
         _activeWordMsg = w;
         _activeWordLookup = _library.LookUpWordRich(w.Text);
 
@@ -762,18 +915,76 @@ public sealed partial class ReaderPaneView
         WordHeadwordText.Text = headword;
         WordPhoneticText.Text = _activeWordLookup?.Phonetic ?? "";
         WordPhoneticText.Visibility = string.IsNullOrWhiteSpace(WordPhoneticText.Text) ? Visibility.Collapsed : Visibility.Visible;
+        WordMeaningText.MaxLines = 5;
         WordMeaningText.Text = _activeWordLookup?.Summary ?? L10n.T("本地词典未收录该词，可划选后点击「翻译」或「问书伴」。");
         WordSourceText.Text = _activeWordLookup?.Source ?? "";
 
-        _wordAlreadySaved = _library.GetWords().Any(x => string.Equals(x.Word, headword, StringComparison.OrdinalIgnoreCase));
+        bool hasRichHtml = !string.IsNullOrWhiteSpace(_activeWordLookup?.Html);
+        FullDictEntryBtn.Content = L10n.T("更多释义");
+        FullDictEntryBtn.Visibility = hasRichHtml ? Visibility.Visible : Visibility.Collapsed;
+
+        var existingWord = _library.GetWords().FirstOrDefault(x =>
+            string.Equals(x.Word, headword, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(x.Word, w.Text, StringComparison.OrdinalIgnoreCase));
+        _wordAlreadySaved = existingWord is not null && !existingWord.Known;
         WordSaveBtn.Content = L10n.T(_wordAlreadySaved ? "已在生词本" : "加入生词");
 
-        PositionOverlayCard(WordCard, w.Rect, 336, 155);
+        PositionOverlayCard(WordCard, w.Rect, 356, 165);
         WordCard.Visibility = Visibility.Visible;
         _ = _pager.Current.SetLookingAsync(w.Start, w.End);
 
         if (_library.Prefs.ForeignSpeakOnLookup && !string.IsNullOrWhiteSpace(headword))
             _ = SpeakForeignWordSafeAsync(headword);
+    }
+
+    private async void ToggleFullDictEntry_Click(object sender, RoutedEventArgs e)
+    {
+        _dictFullExpanded = !_dictFullExpanded;
+        FullDictEntryBtn.Content = L10n.T(_dictFullExpanded ? "收起释义" : "更多释义");
+        WordMeaningText.MaxLines = _dictFullExpanded ? 24 : 5;
+
+        if (!_dictFullExpanded || string.IsNullOrWhiteSpace(_activeWordLookup?.Html))
+        {
+            DictEntryWebView.Visibility = Visibility.Collapsed;
+            if (_activeWordMsg is not null) PositionOverlayCard(WordCard, _activeWordMsg.Rect, 356, 165);
+            return;
+        }
+
+        DictEntryWebView.Visibility = Visibility.Visible;
+        if (_activeWordMsg is not null) PositionOverlayCard(WordCard, _activeWordMsg.Rect, 356, 380);
+        try
+        {
+            if (!_dictWebReady)
+            {
+                var env = await ReaderWebViewHost.GetSharedEnvironmentAsync(_library.DataDir);
+                await DictEntryWebView.EnsureCoreWebView2Async(env);
+                DictEntryWebView.CoreWebView2.Settings.IsScriptEnabled = false;
+                DictEntryWebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+                DictEntryWebView.CoreWebView2.Settings.IsStatusBarEnabled = false;
+                DictEntryWebView.CoreWebView2.Settings.IsWebMessageEnabled = false;
+                DictEntryWebView.CoreWebView2.NewWindowRequested += (_, ev) => ev.Handled = true;
+                _dictWebReady = true;
+            }
+            bool dark = CurrentPaperChrome?.IsDark ?? ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
+            DictEntryWebView.NavigateToString(BuildDictEntryHtml(_activeWordLookup.Html, dark));
+        }
+        catch { }
+    }
+
+    private static string BuildDictEntryHtml(string rawHtml, bool dark)
+    {
+        string fg = dark ? "#E8E6E1" : "#2A2B2E";
+        string link = dark ? "#8FB0E0" : "#2B4C7E";
+        return $$"""
+            <!doctype html><html><head><meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+            :root { color-scheme: {{(dark ? "dark" : "light")}}; }
+            body { margin: 0; padding: 2px 4px 12px; font: 13px/1.6 "Segoe UI", "Microsoft YaHei UI", sans-serif; color: {{fg}}; background: transparent; overflow-wrap: anywhere; }
+            img { max-width: 100%; height: auto; }
+            a { color: {{link}}; pointer-events: none; text-decoration: none; }
+            </style></head><body>{{rawHtml}}</body></html>
+            """;
     }
 
     private async Task SpeakForeignWordSafeAsync(string word)
@@ -804,6 +1015,7 @@ public sealed partial class ReaderPaneView
             if (uint.TryParse(parts[0], out uint sec))
             {
                 PushHistoryPoint();
+                RecordReturnOrigin();
                 string? anchor = parts.Length > 1 ? parts[1] : null;
                 if (sec == _currentSection && _pager.IsInitialized)
                 {
@@ -1020,7 +1232,25 @@ public sealed partial class ReaderPaneView
     {
         if (_activeWordMsg is null) return;
         string hw = WordHeadwordText.Text;
-        if (!_wordAlreadySaved)
+        var existing = _library.GetWords().FirstOrDefault(w =>
+            string.Equals(w.Word, hw, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(w.Word, _activeWordMsg.Text, StringComparison.OrdinalIgnoreCase));
+
+        if (existing is not null && !existing.Known)
+        {
+            _library.DeleteWord(existing.Word);
+            _wordAlreadySaved = false;
+            WordSaveBtn.Content = L10n.T("加入生词");
+            ShowReaderAlert($"已从生词本移出：{existing.Word}");
+        }
+        else if (existing is not null && existing.Known)
+        {
+            _library.Core.SetWordKnown(existing.Word, false);
+            _wordAlreadySaved = true;
+            WordSaveBtn.Content = L10n.T("已在生词本");
+            ShowReaderAlert($"已重新加入生词本：{existing.Word}");
+        }
+        else
         {
             _library.AddWord(
                 hw,
@@ -1032,9 +1262,471 @@ public sealed partial class ReaderPaneView
                 _activeWordMsg.Sentence);
             _wordAlreadySaved = true;
             WordSaveBtn.Content = L10n.T("✓ 已加入");
-            _ = RefreshSectionOverlaysAsync();
         }
+        _ = RefreshSectionOverlaysAsync();
+        App.CurrentApp.NotifyShelfRefresh();
     }
 
     private void CloseInfoPopup_Click(object sender, RoutedEventArgs e) => InfoPopupCard.Visibility = Visibility.Collapsed;
+
+    private void CloseSentenceCard_Click(object sender, RoutedEventArgs e)
+    {
+        try { _sentenceTransCts?.Cancel(); } catch { }
+        SentenceCard.Visibility = Visibility.Collapsed;
+    }
+
+    private async Task ShowSentenceTranslationCardAsync(int sentenceIdx, double? anchorX = null, double? anchorY = null)
+    {
+        IReadOnlyList<string> sents;
+        try { sents = _library.GetSentences(_bookId, _currentSection); }
+        catch { return; }
+        if (sentenceIdx < 0 || sentenceIdx >= sents.Count) return;
+        await ShowTranslationForStringAsync(sents[sentenceIdx], anchorX, anchorY);
+    }
+
+    private async Task ShowTranslationForStringAsync(string orig, double? anchorX = null, double? anchorY = null)
+    {
+        try { _sentenceTransCts?.Cancel(); _sentenceTransCts?.Dispose(); } catch { }
+        var cts = new CancellationTokenSource();
+        _sentenceTransCts = cts;
+        var ct = cts.Token;
+
+        var rect = new ReaderRect
+        {
+            X = anchorX ?? Math.Max(220, BookStage.ActualWidth * 0.5),
+            Y = anchorY ?? Math.Max(140, BookStage.ActualHeight * 0.3),
+            Width = 2,
+            Height = 20,
+        };
+
+        SentenceOrigText.Text = orig;
+        CopySentenceTransBtn.Content = L10n.T("拷贝");
+        if (!_library.Companion.IsConfigured)
+        {
+            SentenceLoadingRow.Visibility = Visibility.Collapsed;
+            SentenceTransText.Text = L10n.T("尚未配置书伴翻译服务。可在「设置 → 书伴」配置后即时翻译。");
+            SentenceTransText.Visibility = Visibility.Visible;
+            PositionOverlayCard(SentenceCard, rect, 360, 195);
+            SentenceCard.Visibility = Visibility.Visible;
+            return;
+        }
+
+        SentenceLoadingRow.Visibility = Visibility.Visible;
+        SentenceTransText.Text = "";
+        SentenceTransText.Visibility = Visibility.Collapsed;
+        PositionOverlayCard(SentenceCard, rect, 360, 185);
+        SentenceCard.Visibility = Visibility.Visible;
+
+        try
+        {
+            string tr = await _library.Companion.ChatAsync(
+                $"请把下面这句准确自然地译为简体中文（若是中文则译为英文），只输出译文：\n\n{orig}",
+                "你是专业的文学翻译家，只输出译文正文。");
+            if (_disposed || ct.IsCancellationRequested || SentenceCard.Visibility != Visibility.Visible) return;
+            SentenceLoadingRow.Visibility = Visibility.Collapsed;
+            SentenceTransText.Text = tr.Trim();
+            SentenceTransText.Visibility = Visibility.Visible;
+            PositionOverlayCard(SentenceCard, rect, 360, 220);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed || ct.IsCancellationRequested || SentenceCard.Visibility != Visibility.Visible) return;
+            SentenceLoadingRow.Visibility = Visibility.Collapsed;
+            SentenceTransText.Text = $"{L10n.T("翻译失败：")}{CompanionClient.FormatErrorMessage(ex)}";
+            SentenceTransText.Visibility = Visibility.Visible;
+            PositionOverlayCard(SentenceCard, rect, 360, 210);
+        }
+    }
+
+    private void CopySentenceTrans_Click(object sender, RoutedEventArgs e)
+    {
+        string trans = (SentenceTransText.Text ?? "").Trim();
+        if (SentenceLoadingRow.Visibility == Visibility.Visible
+            || string.IsNullOrEmpty(trans)
+            || trans.StartsWith(L10n.T("翻译失败"))
+            || trans.StartsWith(L10n.T("尚未配置")))
+        {
+            ShowReaderAlert("译文尚未就绪");
+            return;
+        }
+        var dp = new DataPackage();
+        dp.SetText(trans);
+        Clipboard.SetContent(dp);
+        CopySentenceTransBtn.Content = L10n.T("已拷贝");
+        ShowReaderAlert("已拷贝译文");
+    }
+
+    // ---------- Full-Section Bilingual Inline Translation ----------
+    private async void ToggleTranslate_Click(object sender, RoutedEventArgs e)
+    {
+        if (_translationsActive)
+        {
+            try { _translateCts?.Cancel(); } catch { }
+            _translationsActive = false;
+            _library.Prefs.BookTranslationsActive[_bookId] = false;
+            _library.SavePrefs();
+            if (_pager.IsInitialized) await _pager.Current.SetTranslationsAsync(null);
+            ApplyPaperAndChrome();
+            return;
+        }
+
+        if (!_library.Companion.IsConfigured)
+        {
+            ShowReaderAlert("整章对照翻译需要先在「设置 → 书伴」配置 AI 模型", "去配置", () => _ownerWindow.ShowSettings("companion"), seconds: 6);
+            return;
+        }
+
+        _translationsActive = true;
+        _library.Prefs.BookTranslationsActive[_bookId] = true;
+        _library.SavePrefs();
+        ApplyPaperAndChrome();
+        await ApplyCurrentSectionTranslationsAsync();
+    }
+
+    private string GetTranslationCachePath()
+    {
+        string dir = Path.Combine(_library.DataDir, "companion");
+        Directory.CreateDirectory(dir);
+        return Path.Combine(dir, $"{_bookId}.trans.json");
+    }
+
+    private Dictionary<string, string> LoadTranslationCache()
+    {
+        try
+        {
+            string path = GetTranslationCachePath();
+            if (File.Exists(path))
+                return JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path)) ?? new();
+        }
+        catch { }
+        return new();
+    }
+
+    private void SaveTranslationCache(Dictionary<string, string> cache)
+    {
+        try { File.WriteAllText(GetTranslationCachePath(), JsonSerializer.Serialize(cache)); }
+        catch { }
+    }
+
+    private async Task ApplyCurrentSectionTranslationsAsync()
+    {
+        if (!_pager.IsInitialized || _disposed) return;
+        try { _translateCts?.Cancel(); _translateCts?.Dispose(); } catch { }
+        var cts = new CancellationTokenSource();
+        _translateCts = cts;
+        uint targetSec = _currentSection;
+
+        var paragraphs = await _pager.Current.GetForeignParagraphsAsync();
+        if (paragraphs.Count == 0 || cts.IsCancellationRequested || _disposed) return;
+
+        var cache = await Task.Run(LoadTranslationCache);
+        var results = new List<(int Last, string Text)>();
+        var uncached = new List<(int Last, string Key, string Text)>();
+
+        foreach (var para in paragraphs)
+        {
+            if (string.IsNullOrWhiteSpace(para.text)) continue;
+            string key = $"{targetSec}|{para.last}|{HashText32(para.text):X8}";
+            if (cache.TryGetValue(key, out var cached) && !string.IsNullOrWhiteSpace(cached))
+                results.Add((para.last, cached));
+            else
+                uncached.Add((para.last, key, para.text));
+        }
+
+        if (results.Count > 0 && !cts.IsCancellationRequested && !_disposed && _currentSection == targetSec && _translationsActive)
+            await _pager.Current.SetTranslationsAsync(results);
+
+        if (uncached.Count == 0) return;
+        if (!_library.Companion.IsConfigured)
+        {
+            _translationsActive = false;
+            _library.Prefs.BookTranslationsActive[_bookId] = false;
+            _library.SavePrefs();
+            if (results.Count == 0) { try { await _pager.Current.SetTranslationsAsync(null); } catch { } }
+            ApplyPaperAndChrome();
+            ShowReaderAlert("翻译暂不可用");
+            return;
+        }
+
+        for (int offset = 0; offset < uncached.Count; offset += 4)
+        {
+            if (cts.IsCancellationRequested || _disposed || !_translationsActive || _currentSection != targetSec) return;
+            var chunk = uncached.Skip(offset).Take(4).ToArray();
+            try
+            {
+                if (chunk.Length == 1)
+                {
+                    string tr = await _library.Companion.ChatAsync(
+                        $"请把下面这段外文准确自然地译为简体中文，只输出译文正文，不要加任何解释：\n\n{chunk[0].Text}",
+                        "你是专业的文学翻译家，译文信达雅、贴合原文语境。");
+                    string clean = tr.Trim();
+                    if (!string.IsNullOrEmpty(clean))
+                    {
+                        cache[chunk[0].Key] = clean;
+                        results.Add((chunk[0].Last, clean));
+                    }
+                }
+                else
+                {
+                    var sb = new StringBuilder();
+                    sb.AppendLine("请将以下按 [1]、[2]… 编号的外文段落逐段准确自然地译为简体中文。严格按相同编号 `[1] 译文`、`[2] 译文` 分段输出，不要遗漏或合并，不要加解释：");
+                    for (int i = 0; i < chunk.Length; i++)
+                        sb.AppendLine($"\n[{i + 1}] {chunk[i].Text}");
+
+                    string reply = await _library.Companion.ChatAsync(sb.ToString(), "你是专业的文学翻译家，严格保持对应编号输出简体中文译文。");
+                    var parsed = ParseNumberedTranslations(reply, chunk.Length);
+                    for (int i = 0; i < chunk.Length; i++)
+                    {
+                        if (!string.IsNullOrWhiteSpace(parsed[i]))
+                        {
+                            cache[chunk[i].Key] = parsed[i]!;
+                            results.Add((chunk[i].Last, parsed[i]!));
+                        }
+                    }
+                }
+
+                SaveTranslationCache(cache);
+                if (!cts.IsCancellationRequested && !_disposed && _translationsActive && _currentSection == targetSec)
+                    await _pager.Current.SetTranslationsAsync(results.OrderBy(x => x.Last));
+            }
+            catch (OperationCanceledException) { break; }
+            catch
+            {
+                if (!cts.IsCancellationRequested && !_disposed)
+                {
+                    _translationsActive = false;
+                    _library.Prefs.BookTranslationsActive[_bookId] = false;
+                    _library.SavePrefs();
+                    try { await _pager.Current.SetTranslationsAsync(null); } catch { }
+                    ApplyPaperAndChrome();
+                    ShowReaderAlert("翻译暂不可用");
+                }
+                break;
+            }
+        }
+    }
+
+    private static uint HashText32(string text)
+    {
+        uint h = 2_166_136_261u;
+        foreach (byte b in Encoding.UTF8.GetBytes(text))
+        {
+            h ^= b;
+            h *= 16_777_619u;
+        }
+        return h;
+    }
+
+    private static string?[] ParseNumberedTranslations(string reply, int expectedCount)
+    {
+        var arr = new string?[expectedCount];
+        var matches = Regex.Matches(reply, @"\[(\d+)\]\s*([\s\S]*?)(?=\n\s*\[\d+\]|\z)");
+        foreach (Match m in matches)
+        {
+            if (int.TryParse(m.Groups[1].Value, out int n) && n >= 1 && n <= expectedCount)
+                arr[n - 1] = m.Groups[2].Value.Trim();
+        }
+        if (arr.All(x => x is null))
+        {
+            var lines = reply.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < Math.Min(expectedCount, lines.Length); i++)
+                arr[i] = Regex.Replace(lines[i].Trim(), @"^\d+[\.\、\)]\s*", "");
+        }
+        return arr;
+    }
+
+    // ---------- Bubble Speaker Assignment & Native Page Context Menu ----------
+    private void ShowBubbleSpeakerFlyout(int sentenceIdx, int startOffset, string? quickChoice, Point pos)
+    {
+        void RefreshAfterSpeakerEdit()
+        {
+            DramaSynthService.InvalidateCast(_bookId);
+            _audio.InvalidateRolesAndSpeakers();
+            _ = ApplySectionBubblesAsync();
+            if (_rightPaneOpen && _rightPaneTab == "cast") RenderRightPane();
+        }
+
+        if (!string.IsNullOrEmpty(quickChoice))
+        {
+            try
+            {
+                _library.Core.DramaSetSpeaker(_bookId, _currentSection, (uint)sentenceIdx, (uint)Math.Max(0, startOffset), new UserChoice.Person(quickChoice));
+                RefreshAfterSpeakerEdit();
+            }
+            catch { }
+            return;
+        }
+
+        var menu = new MenuFlyout();
+        string? topPerson = null;
+        try
+        {
+            var people = _library.Core.DramaLinePeople(_bookId, _currentSection, (uint)sentenceIdx);
+            foreach (var person in people.Take(8))
+            {
+                topPerson ??= person.Name;
+                string nameCap = person.Name;
+                var mi = new MenuFlyoutItem { Text = nameCap };
+                mi.Click += (_, _) =>
+                {
+                    try
+                    {
+                        _library.Core.DramaSetSpeaker(_bookId, _currentSection, (uint)sentenceIdx, (uint)Math.Max(0, startOffset), new UserChoice.Person(nameCap));
+                        RefreshAfterSpeakerEdit();
+                    }
+                    catch { }
+                };
+                menu.Items.Add(mi);
+            }
+        }
+        catch { }
+
+        if (menu.Items.Count > 0) menu.Items.Add(new MenuFlyoutSeparator());
+
+        var otherItem = new MenuFlyoutItem { Text = L10n.T("选择其他人物…") };
+        otherItem.Click += async (_, _) =>
+        {
+            if (RootGrid.XamlRoot is not { } xr) return;
+            var picked = await VoiceCloneAndDramaDialogs.ShowPeoplePickerDialogAsync(xr, _library, _bookId, _currentSection, L10n.T("这句是谁说的？"));
+            if (picked is not null && !_disposed)
+            {
+                try
+                {
+                    _library.Core.DramaSetSpeaker(_bookId, _currentSection, (uint)sentenceIdx, (uint)Math.Max(0, startOffset), picked);
+                    RefreshAfterSpeakerEdit();
+                }
+                catch { }
+            }
+        };
+        menu.Items.Add(otherItem);
+
+        var grpItem = new MenuFlyoutItem { Text = L10n.T("众人齐声") };
+        grpItem.Click += (_, _) =>
+        {
+            try
+            {
+                _library.Core.DramaSetSpeaker(_bookId, _currentSection, (uint)sentenceIdx, (uint)Math.Max(0, startOffset), new UserChoice.Group("众人"));
+                RefreshAfterSpeakerEdit();
+            }
+            catch { }
+        };
+        menu.Items.Add(grpItem);
+
+        if (!string.IsNullOrEmpty(topPerson))
+        {
+            string capWho = topPerson;
+            var voiceOfItem = new MenuFlyoutItem { Text = $"{capWho}{L10n.T("的声音…")}" };
+            voiceOfItem.Click += async (_, _) =>
+            {
+                if (RootGrid.XamlRoot is { } xr)
+                    await VoiceCloneAndDramaDialogs.ShowRoleDetailDialogAsync(
+                        _ownerWindow, xr, _library, _bookId, capWho,
+                        (vt, sel, cb) => ShowVoicePickerSheetAsync(vt, sel, cb, capWho),
+                        RefreshAfterSpeakerEdit);
+            };
+            menu.Items.Add(voiceOfItem);
+        }
+
+        menu.Items.Add(new MenuFlyoutSeparator());
+        var narrItem = new MenuFlyoutItem { Text = L10n.T("不是台词（旁白）") };
+        narrItem.Click += (_, _) =>
+        {
+            try
+            {
+                _library.Core.DramaSetSpeaker(_bookId, _currentSection, (uint)sentenceIdx, (uint)Math.Max(0, startOffset), new UserChoice.NotSpeech());
+                RefreshAfterSpeakerEdit();
+            }
+            catch { }
+        };
+        menu.Items.Add(narrItem);
+
+        var clrItem = new MenuFlyoutItem { Text = L10n.T("恢复自动识别") };
+        clrItem.Click += (_, _) =>
+        {
+            try
+            {
+                _library.Core.DramaClearSpeaker(_bookId, _currentSection, (uint)sentenceIdx, (uint)Math.Max(0, startOffset));
+                RefreshAfterSpeakerEdit();
+            }
+            catch { }
+        };
+        menu.Items.Add(clrItem);
+
+        menu.ShowAt(BookStage, new FlyoutShowOptions { Position = pos });
+    }
+
+    private void ShowPageContextMenu(Point pos, int? targetSentence = null, int? targetOffset = null)
+    {
+        var menu = new MenuFlyout();
+        void AddItem(string text, Action onClick)
+        {
+            var mi = new MenuFlyoutItem { Text = L10n.T(text) };
+            mi.Click += (_, _) => onClick();
+            menu.Items.Add(mi);
+        }
+
+        if (_editingMark is { } existingMark)
+        {
+            AddItem(string.IsNullOrWhiteSpace(existingMark.Note) ? "写想法…" : "改想法…", () => _ = PromptEditThoughtAsync());
+            AddItem("复制", () => CopySelection_Click(this, new RoutedEventArgs()));
+            AddItem("分享书摘…", async () =>
+            {
+                if (RootGrid.XamlRoot is { } xr)
+                    await QuoteShareDialog.ShowAsync(_ownerWindow, xr, existingMark.Text, existingMark.Note, _detail.Summary.Title, _detail.Summary.Authors.FirstOrDefault(), _detail.Summary.CoverPath, library: _library);
+            });
+            menu.Items.Add(new MenuFlyoutSeparator());
+            AddItem("删除划线", () => DeleteOpenMark_Click(this, new RoutedEventArgs()));
+        }
+        else if (_activeSelection is { } sel && !string.IsNullOrWhiteSpace(sel.Text))
+        {
+            AddItem("划黄色 (1)", () => ApplySelectionStyle(MarkStyle.Yellow));
+            AddItem("划蓝色 (2)", () => ApplySelectionStyle(MarkStyle.Blue));
+            AddItem("划粉色 (3)", () => ApplySelectionStyle(MarkStyle.Pink));
+            AddItem("划波浪线 (4)", () => ApplySelectionStyle(MarkStyle.Wave));
+            AddItem("划下划线", () => ApplySelectionStyle(MarkStyle.Underline));
+            menu.Items.Add(new MenuFlyoutSeparator());
+            AddItem("记下想法…", () => _ = PromptEditThoughtAsync());
+            AddItem("从这句听", () => SpeakFromSelection_Click(this, new RoutedEventArgs()));
+            AddItem("问书伴", () => AskSelection_Click(this, new RoutedEventArgs()));
+            AddItem("翻译", () => TranslateSelection_Click(this, new RoutedEventArgs()));
+            AddItem("复制", () => CopySelection_Click(this, new RoutedEventArgs()));
+            AddItem("分享书摘…", async () =>
+            {
+                string quote = sel.Text;
+                DismissOverlays();
+                if (RootGrid.XamlRoot is { } xr)
+                    await QuoteShareDialog.ShowAsync(_ownerWindow, xr, quote, null, _detail.Summary.Title, _detail.Summary.Authors.FirstOrDefault(), _detail.Summary.CoverPath, library: _library);
+            });
+        }
+        else
+        {
+            if (targetSentence is int ts && ts >= 0)
+            {
+                AddItem("从这句朗读", () => StartListenFromSentence(ts));
+                if (_audio.IsPlaying && _audio.CurrentSentence >= 0 && ts > _audio.CurrentSentence)
+                {
+                    int a = _audio.CurrentSentence;
+                    AddItem("从正在念的这句循环到这里", () =>
+                    {
+                        _audio.SetLoopRange(a, ts);
+                        ShowReaderAlert($"已开启 A–B 循环（第 {a + 1}–{ts + 1} 句）", "取消循环", () => { _audio.ClearLoopRange(); ShowReaderAlert("已取消区间循环"); }, seconds: 6);
+                    });
+                }
+                if (_bubblesOn || _dramaModeOn)
+                    AddItem("谁说的…", () => ShowBubbleSpeakerFlyout(ts, targetOffset ?? 0, null, pos));
+                menu.Items.Add(new MenuFlyoutSeparator());
+            }
+            AddItem(_audio.IsPlaying ? "暂停朗读 (空格)" : "从这页朗读 (空格)", ToggleListenPlayback);
+            AddItem("添加或取消书签 (Ctrl+D)", ToggleBookmarkAtCurrentPosition);
+            menu.Items.Add(new MenuFlyoutSeparator());
+            AddItem("书内搜索 (Ctrl+F)", () => { OpenLeftPane("search"); FocusLeftSearchBox(); });
+            AddItem("目录与书签", () => OpenLeftPane("toc"));
+            AddItem("本书笔记", () => OpenRightPane("notes"));
+            AddItem("书伴 AI", () => OpenRightPane("companion"));
+            menu.Items.Add(new MenuFlyoutSeparator());
+            AddItem(_isFullScreen ? "退出全屏 (F11)" : "沉浸全屏 (F11)", () => _ownerWindow.ToggleFullScreen());
+        }
+
+        menu.ShowAt(BookStage, new FlyoutShowOptions { Position = pos });
+    }
 }

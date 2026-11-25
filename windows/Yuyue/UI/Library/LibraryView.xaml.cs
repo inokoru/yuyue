@@ -413,10 +413,15 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         AddNavItem(NavNotesStack, "words", "a-wen", "生词本", _words.Count);
 
         AddNavItem(NavCollectionsStack, "collections", "stack", "全部合集", _collections.Count);
-        foreach (var col in _collections.Take(10))
+        var orderedCols = GetOrderedCollections();
+        for (int ci = 0; ci < Math.Min(orderedCols.Count, 12); ci++)
         {
+            var col = orderedCols[ci];
             string icon = string.IsNullOrWhiteSpace(col.Icon) ? "folder" : col.Icon;
-            AddNavItem(NavCollectionsStack, $"col:{col.Id}", icon, col.Name, (int)col.Count, acceptBookDrop: true);
+            string navKey = $"col:{col.Id}";
+            AddNavItem(NavCollectionsStack, navKey, icon, col.Name, (int)col.Count, acceptBookDrop: true);
+            if (_navControls.TryGetValue(navKey, out var navCtrl))
+                navCtrl.RowBtn.ContextFlyout = BuildCollectionContextMenu(col, dark, ci, orderedCols.Count);
         }
 
         UpdateNavSelectionVisuals();

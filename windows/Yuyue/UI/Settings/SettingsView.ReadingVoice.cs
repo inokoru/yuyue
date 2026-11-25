@@ -198,6 +198,122 @@ public sealed partial class SettingsView
         advExp.AddKeyValueRow("标点挤压", "优化中文引号与句末连续标点的排版间距", compSw);
         PageBodyStack.Children.Add(advExp);
 
+        // Open-source curated Font Shelf (FontShelfService.Catalog) + System CJK Font Picker
+        PageBodyStack.Children.Add(MakeSectionHeader("开源阅读字体架与本机字库", dark));
+
+        int installedPacks = _library.Fonts.Catalog.Count(pk => _library.Fonts.IsPackInstalled(pk.Id));
+        var fontShelfExp = new FluentSettingsExpander(
+            $"开源精选阅读字体包（已安装 {installedPacks} / {_library.Fonts.Catalog.Count}）",
+            "一键下载霞鹜文楷、思源宋体、思源黑体等免费可商用高质量字库",
+            "char-book",
+            dark: dark);
+
+        foreach (var pack in _library.Fonts.Catalog)
+        {
+            var pkCap = pack;
+            bool installed = _library.Fonts.IsPackInstalled(pkCap.Id);
+            bool downloading = _library.Fonts.IsDownloading(pkCap.Id);
+            ulong totalBytes = 0;
+            foreach (var f in pkCap.Files) totalBytes += f.Bytes;
+            double mb = Math.Max(0.1, totalBytes / (1024.0 * 1024.0));
+            bool isCur = (string.Equals(pkCap.Id, "wenkai", StringComparison.OrdinalIgnoreCase) && rs.Font == Font.WenKai && string.IsNullOrEmpty(rs.FontFace))
+                || string.Equals(rs.FontFace, pkCap.Id, StringComparison.OrdinalIgnoreCase);
+
+            var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+            if (downloading)
+            {
+                int pct = (int)Math.Round(_library.Fonts.GetProgress(pkCap.Id) * 100);
+                acts.Children.Add(new TextBlock
+                {
+                    Text = $"{L10n.T("下载中")} {pct}%",
+                    FontSize = 11.5,
+                    Foreground = ThemeHelper.Brush(tc.Accent),
+                    VerticalAlignment = VerticalAlignment.Center,
+                });
+                var cancelBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
+                    Height = 28,
+                    MinHeight = 28,
+                    Content = L10n.T("取消"),
+                };
+                cancelBtn.Click += (_, _) => _library.Fonts.CancelDownload(pkCap.Id);
+                acts.Children.Add(cancelBtn);
+            }
+            else if (installed)
+            {
+                var useBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources[isCur ? "YYFluentSoftAccentButtonStyle" : "YYFluentButtonStyle"],
+                    Height = 28,
+                    MinHeight = 28,
+                    Content = L10n.T(isCur ? "当前使用" : "设为正文"),
+                };
+                useBtn.Click += (_, _) =>
+                {
+                    if (string.Equals(pkCap.Id, "wenkai", StringComparison.OrdinalIgnoreCase))
+                        _library.SaveReaderSettings(_library.GetReaderSettings() with { Font = Font.WenKai, FontFace = null });
+                    else
+                    {
+                        Font fb = pkCap.Kind switch { FontKind.Hei => Font.Sans, FontKind.Kai or FontKind.Hand => Font.Kai, _ => Font.Serif };
+                        _library.SaveReaderSettings(_library.GetReaderSettings() with { Font = fb, FontFace = pkCap.Id });
+                    }
+                    BroadcastReaderSettingsWithoutSelfRefresh();
+                    RenderActivePage();
+                };
+                var delBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
+                    Height = 28,
+                    MinHeight = 28,
+                    Content = L10n.T("删除"),
+                    Foreground = ThemeHelper.Brush(p.Danger),
+                };
+                delBtn.Click += (_, _) =>
+                {
+                    _library.Fonts.DeletePack(pkCap.Id);
+                    var curRs = _library.GetReaderSettings();
+                    if ((string.Equals(pkCap.Id, "wenkai", StringComparison.OrdinalIgnoreCase) && curRs.Font == Font.WenKai)
+                        || string.Equals(curRs.FontFace, pkCap.Id, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _library.SaveReaderSettings(curRs with { Font = null, FontFace = null });
+                        BroadcastReaderSettingsWithoutSelfRefresh();
+                    }
+                    RenderActivePage();
+                };
+                acts.Children.Add(useBtn);
+                acts.Children.Add(delBtn);
+            }
+            else
+            {
+                var dlBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"],
+                    Height = 28,
+                    MinHeight = 28,
+                    Content = $"{L10n.T("下载")} ({mb:0.#} MB)",
+                };
+                dlBtn.Click += (_, _) =>
+                {
+                    _ = _library.Fonts.DownloadPackAsync(pkCap.Id);
+                    _ownerWindow.ShowToast($"正在下载开源字体：{pkCap.Name}…");
+                };
+                acts.Children.Add(dlBtn);
+            }
+
+            string packDesc = installed ? $"已安装 · {mb:0.#} MB" : $"开源免费 · {mb:0.#} MB";
+            fontShelfExp.AddKeyValueRow(pkCap.Name, packDesc, acts);
+        }
+        PageBodyStack.Children.Add(fontShelfExp);
+
+        // Windows Local System CJK Font Picker
+        string curLocalLabel = !string.IsNullOrWhiteSpace(rs.FontFace) && rs.FontFace.StartsWith("local:", StringComparison.OrdinalIgnoreCase)
+            ? $"当前选用本机字体：{rs.FontFace[6..].Trim()}"
+            : "挑选 Windows 已安装的宋体、楷体、仿宋、思源等中文字体作为正文";
+        var pickSysFontBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Content = L10n.T("选择本机字体…") };
+        pickSysFontBtn.Click += async (_, _) => await ShowSystemCjkFontPickerDialogAsync(dark);
+        PageBodyStack.Children.Add(new FluentSettingsCard("本机系统 CJK 字体", curLocalLabel, "char-book", pickSysFontBtn, dark: dark));
+
         // Custom imported fonts list
         var customFonts = _library.Fonts.GetCustomFontFiles();
         if (customFonts.Count > 0)
@@ -495,7 +611,7 @@ public sealed partial class SettingsView
 
         var zhVoices = new List<(string Id, string Label)>
         {
-            ("", "自动推荐（离线 Kokoro / Edge 在线）"),
+            ("", "自动推荐（Kokoro / Edge）"),
             ("edge.zh-CN-XiaoxiaoNeural", "Edge · 晓晓（温暖自然）"),
             ("edge.zh-CN-YunxiNeural", "Edge · 云希（清朗男声）"),
             ("edge.zh-CN-YunjianNeural", "Edge · 云健（沉稳说书）"),
@@ -504,7 +620,8 @@ public sealed partial class SettingsView
         foreach (var sp in _library.Kokoro.GetSpeakers("zh-Hans"))
             zhVoices.Add((sp.Id, $"Kokoro 离线 · {sp.Name}"));
 
-        var zhCombo = new ComboBox { Width = 284 };
+        var zhRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        var zhCombo = new ComboBox { Width = 236 };
         foreach (var (_, lbl) in zhVoices) zhCombo.Items.Add(lbl);
         int zhIdx = zhVoices.FindIndex(v => v.Id == _library.Prefs.VoiceId);
         zhCombo.SelectedIndex = Math.Max(0, zhIdx);
@@ -517,11 +634,25 @@ public sealed partial class SettingsView
                 BroadcastVoiceWithoutSelfRefresh();
             }
         };
-        PageBodyStack.Children.Add(new FluentSettingsCard("中文默认朗读音色", "支持离线 Kokoro 与微软 Edge 神经语音", "headphones", zhCombo, dark: dark));
+        var zhPickAllBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Content = L10n.T("试听 / 全部…") };
+        zhPickAllBtn.Click += async (_, _) =>
+        {
+            if (RootGrid.XamlRoot is not { } xr) return;
+            await Yuyue.UI.Reader.ReaderPaneView.ShowVoicePickerDialogAsync(xr, _library, L10n.T("中文默认朗读音色"), _library.Prefs.VoiceId, vid =>
+            {
+                _library.Prefs.VoiceId = DramaSynthService.NormalizeVoiceId(vid) ?? vid;
+                _library.SavePrefs();
+                BroadcastVoiceWithoutSelfRefresh();
+                RenderActivePage();
+            }, darkOverride: dark);
+        };
+        zhRow.Children.Add(zhCombo);
+        zhRow.Children.Add(zhPickAllBtn);
+        PageBodyStack.Children.Add(new FluentSettingsCard("中文默认朗读音色", "支持离线 Kokoro、克隆音色、Edge 与全部云端声源", "headphones", zhRow, dark: dark));
 
         var enVoices = new List<(string Id, string Label)>
         {
-            ("", "自动推荐（离线 Kokoro / Edge 在线）"),
+            ("", "自动推荐（Kokoro / Edge）"),
             ("edge.en-US-JennyNeural", "Edge · Jenny (US Natural)"),
             ("edge.en-US-AriaNeural", "Edge · Aria (US Expressive)"),
             ("edge.en-US-GuyNeural", "Edge · Guy (US Male)"),
@@ -530,7 +661,8 @@ public sealed partial class SettingsView
         foreach (var sp in _library.Kokoro.GetSpeakers("en"))
             enVoices.Add((sp.Id, $"Kokoro 离线 · {sp.Name}"));
 
-        var enCombo = new ComboBox { Width = 284 };
+        var enRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        var enCombo = new ComboBox { Width = 236 };
         foreach (var (_, lbl) in enVoices) enCombo.Items.Add(lbl);
         int enIdx = enVoices.FindIndex(v => v.Id == _library.Prefs.VoiceIdEn);
         enCombo.SelectedIndex = Math.Max(0, enIdx);
@@ -543,7 +675,21 @@ public sealed partial class SettingsView
                 BroadcastVoiceWithoutSelfRefresh();
             }
         };
-        PageBodyStack.Children.Add(new FluentSettingsCard("英文默认朗读音色", "读英文原版书或英汉双语时自动切换该音色", "globe", enCombo, dark: dark));
+        var enPickAllBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Content = L10n.T("试听 / 全部…") };
+        enPickAllBtn.Click += async (_, _) =>
+        {
+            if (RootGrid.XamlRoot is not { } xr) return;
+            await Yuyue.UI.Reader.ReaderPaneView.ShowVoicePickerDialogAsync(xr, _library, L10n.T("英文默认朗读音色"), _library.Prefs.VoiceIdEn, vid =>
+            {
+                _library.Prefs.VoiceIdEn = DramaSynthService.NormalizeVoiceId(vid) ?? vid;
+                _library.SavePrefs();
+                BroadcastVoiceWithoutSelfRefresh();
+                RenderActivePage();
+            }, darkOverride: dark);
+        };
+        enRow.Children.Add(enCombo);
+        enRow.Children.Add(enPickAllBtn);
+        PageBodyStack.Children.Add(new FluentSettingsCard("英文默认朗读音色", "读英文原版书或英汉双语时自动切换该音色", "globe", enRow, dark: dark));
 
         var rateSlider = new Slider { Width = 180, Minimum = 0.7, Maximum = 2.0, StepFrequency = 0.05, Value = Math.Clamp(_library.Prefs.SpeechRate, 0.7, 2.0) };
         var rateCard = new FluentSettingsCard("默认朗读倍速", $"当前 {_library.Prefs.SpeechRate:0.##}×", "sliders", rateSlider, dark: dark);
@@ -612,10 +758,62 @@ public sealed partial class SettingsView
         };
         int liveLocalCount = CloudVoiceService.AllProviders.Count(pr => CloudVoiceService.IsLocalProvider(pr) && LocalVoiceProbe.Shared.IsLive(pr));
         PageBodyStack.Children.Add(new FluentSettingsCard(
-            "本地 / 云端扩展声源",
-            liveLocalCount > 0 ? $"已连接 {liveLocalCount} 个本地神经语音引擎" : "支持探测本机 CosyVoice、IndexTTS、FishSpeech 与多家云端 TTS",
+            "扫描本地语音服务",
+            liveLocalCount > 0 ? $"已探测到 {liveLocalCount} 个本机运行中的神经语音引擎" : "自动扫描本机 CosyVoice、IndexTTS、GPT-SoVITS、FishSpeech 等端口",
             "server",
             scanVoiceBtn,
+            dark: dark));
+
+        // Full Cloud & Local TTS Provider Manager Expander (1:1 macOS)
+        int configuredCloudCnt = CloudVoiceService.AllProviders.Count(pr => _library.CloudVoices.IsConfigured(pr));
+        var cloudExp = new FluentSettingsExpander(
+            $"云端与本地 TTS 声源配置（已就绪 {configuredCloudCnt} 家）",
+            "支持火山引擎、微软 Azure、硅基流动、阿里百炼、MiniMax、Fish Audio、OpenAI、ElevenLabs 及本机 OpenAI 兼容端点",
+            "cloud",
+            dark: dark);
+
+        foreach (var prov in CloudVoiceService.AllProviders)
+        {
+            var prCap = prov;
+            bool isCfg = _library.CloudVoices.IsConfigured(prCap);
+            bool isLocal = CloudVoiceService.IsLocalProvider(prCap);
+            bool isLive = isLocal && LocalVoiceProbe.Shared.IsLive(prCap);
+            int voiceCnt = isCfg ? _library.CloudVoices.GetVoices(prCap).Count : 0;
+            string badge = CloudVoiceService.ProviderBadge(prCap) is { Length: > 0 } b ? $" · {b}" : "";
+            string sub = isCfg
+                ? $"已就绪 · {voiceCnt} 个可用音色{badge}"
+                : (isLive ? $"本机探测运行中{badge}" : $"{CloudVoiceService.ProviderHelp(prCap)}");
+
+            var cfgBtn = new Button
+            {
+                Style = (Style)Application.Current.Resources[isCfg ? "YYFluentSoftAccentButtonStyle" : "YYFluentButtonStyle"],
+                Height = 28,
+                MinHeight = 28,
+                Content = L10n.T(isCfg ? "已配置 · 管理…" : "配置…"),
+            };
+            cfgBtn.Click += async (_, _) => await ShowVoiceProviderConfigDialogAsync(prCap, dark);
+            cloudExp.AddKeyValueRow(CloudVoiceService.ProviderDisplayName(prCap, _library.Prefs), sub, cfgBtn);
+        }
+        PageBodyStack.Children.Add(cloudExp);
+
+        // Daily Cloud TTS Char Budget Cap
+        var ttsCapSeg = YYChrome.MakeSegmentedBar(
+            [("0", "不限"), ("20000", "2 万字"), ("50000", "5 万字"), ("100000", "10 万字")],
+            _library.Prefs.AiDailyTtsCharCap.ToString(),
+            s =>
+            {
+                _library.Prefs.AiDailyTtsCharCap = long.TryParse(s, out long v) ? v : 0;
+                _library.SavePrefs();
+                RenderActivePage();
+            },
+            dark,
+            fontSize: 11.5,
+            height: 28);
+        PageBodyStack.Children.Add(new FluentSettingsCard(
+            "每日云端语音字数上限",
+            "达到后自动暂停付费云端 TTS 后台预合成，避免意外超额扣费",
+            "sliders",
+            ttsCapSeg,
             dark: dark));
 
         // Drama Sound Effects Library card
@@ -649,5 +847,284 @@ public sealed partial class SettingsView
             "cast",
             sfxPanel,
             dark: dark));
+    }
+
+    private async Task ShowSystemCjkFontPickerDialogAsync(bool dark)
+    {
+        if (RootGrid.XamlRoot is not { } xr) return;
+        var p = ThemeHelper.Palette(dark);
+        var tc = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+        ContentDialog? dlgRef = null;
+
+        var fonts = await _library.Fonts.LoadSystemCjkFontsAsync();
+        if (_disposed) return;
+
+        string curFace = _library.GetReaderSettings().FontFace ?? "";
+        var searchBox = new TextBox
+        {
+            Style = (Style)Application.Current.Resources["YYSingleLineTextBoxStyle"],
+            PlaceholderText = L10n.T("筛选本机字体名称…"),
+            Height = 32,
+            MinHeight = 32,
+        };
+        var listStack = new StackPanel { Spacing = 5, Padding = new Thickness(0, 2, 4, 8) };
+
+        void Rebuild(string q)
+        {
+            listStack.Children.Clear();
+            string query = q.Trim();
+            var items = string.IsNullOrEmpty(query)
+                ? fonts
+                : fonts.Where(f => f.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) || f.FamilyName.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+
+            foreach (var entry in items)
+            {
+                var eCap = entry;
+                string faceKey = $"local:{eCap.FamilyName}";
+                bool isSel = string.Equals(curFace, faceKey, StringComparison.OrdinalIgnoreCase);
+
+                var row = new Grid { ColumnSpacing = 8 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var meta = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+                meta.Children.Add(L10n.Skip(new TextBlock
+                {
+                    Text = eCap.DisplayName,
+                    FontFamily = new Microsoft.UI.Xaml.Media.FontFamily(eCap.FamilyName),
+                    FontSize = 14,
+                    Foreground = ThemeHelper.Brush(isSel ? tc.Accent : p.T1),
+                }));
+                meta.Children.Add(L10n.Skip(new TextBlock
+                {
+                    Text = $"春风吹又生 · {eCap.FamilyName}",
+                    FontFamily = new Microsoft.UI.Xaml.Media.FontFamily(eCap.FamilyName),
+                    FontSize = 11.5,
+                    Foreground = ThemeHelper.Brush(p.T3),
+                }));
+                Grid.SetColumn(meta, 0);
+                row.Children.Add(meta);
+
+                var pickBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources[isSel ? "YYFluentAccentButtonStyle" : "YYFluentButtonStyle"],
+                    Height = 28,
+                    MinHeight = 28,
+                    Content = L10n.T(isSel ? "当前" : "选用"),
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                pickBtn.Click += (_, _) =>
+                {
+                    _library.SaveReaderSettings(_library.GetReaderSettings() with { FontFace = faceKey });
+                    BroadcastReaderSettingsWithoutSelfRefresh();
+                    dlgRef?.Hide();
+                    RenderActivePage();
+                };
+                Grid.SetColumn(pickBtn, 1);
+                row.Children.Add(pickBtn);
+
+                listStack.Children.Add(new Border
+                {
+                    CornerRadius = new CornerRadius(6),
+                    Background = ThemeHelper.Brush(isSel ? tc.Soft : p.Card),
+                    BorderBrush = ThemeHelper.Brush(isSel ? tc.Edge : p.Line),
+                    BorderThickness = new Thickness(1),
+                    Padding = new Thickness(12, 8, 12, 8),
+                    Child = row,
+                });
+            }
+        }
+
+        searchBox.TextChanged += (_, _) => Rebuild(searchBox.Text ?? "");
+        Rebuild("");
+
+        var root = new StackPanel { Spacing = 10, Padding = new Thickness(20, 16, 20, 16) };
+        root.Children.Add(YYChrome.MakeDialogHeader(L10n.T("选择本机中文字体"), L10n.T($"已发现 {fonts.Count} 款已安装的 CJK 字体"), () => dlgRef?.Hide(), dark, titleSize: 16));
+        root.Children.Add(searchBox);
+        root.Children.Add(new ScrollViewer { MaxHeight = 400, Content = listStack });
+
+        dlgRef = YYChrome.CreateFluentDialog(xr, dark, 480, root, tint: _library.Prefs.Tint);
+        await dlgRef.ShowSafeAsync(_library.Prefs.Tint);
+    }
+
+    private async Task ShowVoiceProviderConfigDialogAsync(CloudTtsProvider prov, bool dark)
+    {
+        if (RootGrid.XamlRoot is not { } xr) return;
+        var p = ThemeHelper.Palette(dark);
+        ContentDialog? dlgRef = null;
+
+        string pKey = CloudVoiceEntry.ProviderKey(prov);
+        string title = CloudVoiceService.ProviderDisplayName(prov, _library.Prefs);
+        bool isLocal = CloudVoiceService.IsLocalProvider(prov);
+        bool isFree = CloudVoiceService.IsFreeOnline(prov);
+
+        var body = new StackPanel { Spacing = 10, Padding = new Thickness(20, 16, 20, 16) };
+        body.Children.Add(YYChrome.MakeDialogHeader(title, CloudVoiceService.ProviderHelp(prov), () => dlgRef?.Hide(), dark, titleSize: 16));
+
+        TextBox? customNameBox = null, urlBox = null, mdlBox = null, appBox = null, regionBox = null;
+        PasswordBox? keyBox = null;
+
+        if (!isFree)
+        {
+            if (isLocal)
+            {
+                if (prov == CloudTtsProvider.Local)
+                {
+                    body.Children.Add(new TextBlock { Text = L10n.T("显示名称"), FontSize = 12, Foreground = ThemeHelper.Brush(p.T2) });
+                    customNameBox = new TextBox
+                    {
+                        Style = (Style)Application.Current.Resources["YYSingleLineTextBoxStyle"],
+                        Text = _library.Prefs.CloudVoiceCustomNames.TryGetValue("local", out var cn) ? cn : "",
+                        PlaceholderText = L10n.T("例如：家里的 Kokoro"),
+                    };
+                    body.Children.Add(customNameBox);
+                }
+                body.Children.Add(new TextBlock { Text = L10n.T("服务地址 (OpenAI 兼容 /v1)"), FontSize = 12, Foreground = ThemeHelper.Brush(p.T2) });
+                urlBox = new TextBox
+                {
+                    Style = (Style)Application.Current.Resources["YYSingleLineTextBoxStyle"],
+                    Text = _library.CloudVoices.GetSavedUrl(prov),
+                    PlaceholderText = CloudVoiceService.DefaultLocalUrl(prov),
+                };
+                body.Children.Add(urlBox);
+
+                body.Children.Add(new TextBlock { Text = L10n.T("模型名"), FontSize = 12, Foreground = ThemeHelper.Brush(p.T2) });
+                mdlBox = new TextBox
+                {
+                    Style = (Style)Application.Current.Resources["YYSingleLineTextBoxStyle"],
+                    Text = _library.CloudVoices.GetSavedModel(prov),
+                    PlaceholderText = CloudVoiceService.DefaultLocalModel(prov),
+                };
+                body.Children.Add(mdlBox);
+            }
+
+            if (prov == CloudTtsProvider.Volcengine)
+            {
+                body.Children.Add(new TextBlock { Text = L10n.T("火山引擎 AppID"), FontSize = 12, Foreground = ThemeHelper.Brush(p.T2) });
+                appBox = new TextBox
+                {
+                    Style = (Style)Application.Current.Resources["YYSingleLineTextBoxStyle"],
+                    Text = _library.Secrets.Get("tts.volcengine.appid") ?? "",
+                    PlaceholderText = L10n.T("填写应用 AppID…"),
+                };
+                body.Children.Add(appBox);
+            }
+
+            if (prov == CloudTtsProvider.Azure)
+            {
+                body.Children.Add(new TextBlock { Text = L10n.T("Azure 服务区域 (Region)"), FontSize = 12, Foreground = ThemeHelper.Brush(p.T2) });
+                regionBox = new TextBox
+                {
+                    Style = (Style)Application.Current.Resources["YYSingleLineTextBoxStyle"],
+                    Text = _library.Prefs.CloudVoiceAzureRegion,
+                    PlaceholderText = "eastasia / eastus",
+                };
+                body.Children.Add(regionBox);
+            }
+
+            body.Children.Add(new TextBlock
+            {
+                Text = L10n.T(isLocal ? "API Key（局域网可选，本机可留空）" : (prov == CloudTtsProvider.Volcengine ? "Access Token（DPAPI 本机加密）" : "API Key（DPAPI 本机加密）")),
+                FontSize = 12,
+                Foreground = ThemeHelper.Brush(p.T2),
+            });
+            keyBox = new PasswordBox
+            {
+                Style = (Style)Application.Current.Resources["YYCompactPasswordBoxStyle"],
+                Password = _library.CloudVoices.GetApiKey(prov),
+                PlaceholderText = CloudVoiceService.ProviderKeyHint(prov),
+            };
+            body.Children.Add(keyBox);
+
+            if (!isLocal && string.IsNullOrEmpty(keyBox.Password) && _library.CloudVoices.GetCompanionSharedKey(prov) is { Length: > 0 } sharedKey)
+            {
+                var reuseBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources["YYFluentButtonStyle"],
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    Content = L10n.T("一键复用「书伴」的同厂 API Key"),
+                };
+                reuseBtn.Click += (_, _) => { keyBox.Password = sharedKey; };
+                body.Children.Add(reuseBtn);
+            }
+        }
+
+        var statusTb = new TextBlock { FontSize = 12, Foreground = ThemeHelper.Brush(p.T2), TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        body.Children.Add(statusTb);
+
+        void PersistFields()
+        {
+            if (customNameBox is not null) _library.Prefs.CloudVoiceCustomNames["local"] = (customNameBox.Text ?? "").Trim();
+            if (urlBox is not null) _library.Prefs.CloudVoiceBaseUrls[pKey] = (urlBox.Text ?? "").Trim();
+            if (mdlBox is not null) _library.Prefs.CloudVoiceModels[pKey] = (mdlBox.Text ?? "").Trim();
+            if (appBox is not null) _library.Secrets.Set("tts.volcengine.appid", (appBox.Text ?? "").Trim());
+            if (regionBox is not null) _library.Prefs.CloudVoiceAzureRegion = (regionBox.Text ?? "").Trim();
+            if (keyBox is not null) _library.CloudVoices.SetApiKey(prov, (keyBox.Password ?? "").Trim());
+            _library.Prefs.CloudVoiceEnabled.Add(pKey);
+            _library.SavePrefs();
+        }
+
+        var foot = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 6, 0, 0) };
+        foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        foot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var testBtn = new Button
+        {
+            Style = (Style)Application.Current.Resources["YYFluentButtonStyle"],
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Height = 34,
+            Content = L10n.T("测试并刷新音色"),
+        };
+        testBtn.Click += async (_, _) =>
+        {
+            PersistFields();
+            testBtn.IsEnabled = false;
+            statusTb.Text = L10n.T("正在探测并拉取可用音色…");
+            statusTb.Foreground = ThemeHelper.Brush(p.T2);
+            statusTb.Visibility = Visibility.Visible;
+            try
+            {
+                var (ok, count, msg) = await _library.CloudVoices.RefreshVoicesAsync(prov);
+                if (_disposed) return;
+                statusTb.Text = ok ? L10n.T($"连接成功：已就绪 {count} 个音色") : $"{L10n.T("测试失败：")}{msg}";
+                statusTb.Foreground = ThemeHelper.Brush(ok ? p.T1 : p.Danger);
+            }
+            catch (Exception ex)
+            {
+                if (!_disposed)
+                {
+                    statusTb.Text = $"{L10n.T("测试失败：")}{ex.Message}";
+                    statusTb.Foreground = ThemeHelper.Brush(p.Danger);
+                }
+            }
+            finally
+            {
+                testBtn.IsEnabled = true;
+            }
+        };
+
+        var saveBtn = new Button
+        {
+            Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"],
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Height = 34,
+            Content = L10n.T("保存"),
+        };
+        saveBtn.Click += (_, _) =>
+        {
+            PersistFields();
+            BroadcastVoiceWithoutSelfRefresh();
+            dlgRef?.Hide();
+            RenderActivePage();
+        };
+
+        Grid.SetColumn(testBtn, 0);
+        Grid.SetColumn(saveBtn, 1);
+        foot.Children.Add(testBtn);
+        foot.Children.Add(saveBtn);
+        body.Children.Add(foot);
+
+        dlgRef = YYChrome.CreateFluentDialog(xr, dark, 460, body, tint: _library.Prefs.Tint);
+        await dlgRef.ShowSafeAsync(_library.Prefs.Tint);
     }
 }

@@ -124,8 +124,37 @@
                         <Button x:Name="SleepBtn" Grid.Column="4" Style="{StaticResource YYToolbarIconButtonStyle}" Width="40" Height="40" CornerRadius="20" HorizontalAlignment="Center" ToolTipService.ToolTip="睡眠定时" />
                     </Grid>
 
+                    <!-- 响度均衡与音量增益控制 -->
+                    <Grid Padding="20,0" ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="响度增益" FontSize="11" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                        <Slider
+                            x:Name="GainSlider"
+                            Grid.Column="1"
+                            Minimum="35"
+                            Maximum="100"
+                            Value="100"
+                            StepFrequency="5"
+                            IsThumbToolTipEnabled="False"
+                            VerticalAlignment="Center"
+                            ValueChanged="GainSlider_ValueChanged" />
+                        <TextBlock x:Name="GainValueText" Grid.Column="2" Text="100%" FontSize="11" Width="36" TextAlignment="Right" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" />
+                    </Grid>
+
                     <TextBlock x:Name="SleepStatusText" FontSize="11.5" Foreground="{ThemeResource YYAccentBrush}" HorizontalAlignment="Center" />
                 </StackPanel>
+
+                <!-- 睡前返回浮卡（底部居中） -->
+                <ContentPresenter
+                    x:Name="SleepReturnHost"
+                    Visibility="Collapsed"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom"
+                    Margin="0,0,0,16" />
             </Grid>
 
             <!-- 右侧停靠栏：章节 / 书签 / 配对与对齐 -->

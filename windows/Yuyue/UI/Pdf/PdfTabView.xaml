@@ -98,6 +98,111 @@
                     Foreground="{ThemeResource YYText2Brush}"
                     TextWrapping="Wrap"
                     MaxWidth="420" />
+
+                <!-- PDF 划词标注浮卡（6 种划线样式 + 想法 / 朗读 / 查词 / 翻译 / 复制） -->
+                <Border
+                    x:Name="PdfSelectionCard"
+                    Visibility="Collapsed"
+                    Width="352"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    Padding="10,8"
+                    CornerRadius="10"
+                    Background="{ThemeResource YYCardBrush}"
+                    BorderBrush="{ThemeResource YYLineBrush}"
+                    BorderThickness="1">
+                    <StackPanel Spacing="7">
+                        <StackPanel x:Name="PdfSelNotePreviewBox" Visibility="Collapsed" Spacing="5" PointerPressed="PdfSelNotePreview_Pressed">
+                            <TextBlock x:Name="PdfSelNotePreviewText" FontSize="12" Foreground="{ThemeResource YYText2Brush}" MaxLines="3" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
+                            <Border Height="1" Background="{ThemeResource YYLineBrush}" />
+                        </StackPanel>
+
+                        <Grid ColumnSpacing="6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <Button Tag="yellow" Padding="3" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="黄色划线 (1)" Click="PdfMarkStyle_Click">
+                                    <Border Width="20" Height="20" CornerRadius="10" Background="#FBE7A0" BorderBrush="#28000000" BorderThickness="0.75" />
+                                </Button>
+                                <Button Tag="blue" Padding="3" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="蓝色划线 (2)" Click="PdfMarkStyle_Click">
+                                    <Border Width="20" Height="20" CornerRadius="10" Background="#CFE6F4" BorderBrush="#28000000" BorderThickness="0.75" />
+                                </Button>
+                                <Button Tag="pink" Padding="3" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="粉色划线 (3)" Click="PdfMarkStyle_Click">
+                                    <Border Width="20" Height="20" CornerRadius="10" Background="#F6C7C0" BorderBrush="#28000000" BorderThickness="0.75" />
+                                </Button>
+                                <Button Tag="wave" Padding="3" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="波浪线 (4)" Click="PdfMarkStyle_Click">
+                                    <Border Width="20" Height="20" CornerRadius="10" Background="{ThemeResource YYInsetBrush}">
+                                        <TextBlock Text="~" FontSize="12" FontWeight="Bold" Foreground="#EF7F71" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
+                                    </Border>
+                                </Button>
+                                <Button Tag="underline" Width="26" Height="24" Padding="0" CornerRadius="5" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" ToolTipService.ToolTip="实线下划线" Click="PdfMarkStyle_Click">
+                                    <TextBlock Text="U" FontSize="11.5" FontWeight="SemiBold" TextDecorations="Underline" />
+                                </Button>
+                                <Button Tag="dotted" Width="26" Height="24" Padding="0" CornerRadius="5" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" ToolTipService.ToolTip="点线下划线" Click="PdfMarkStyle_Click">
+                                    <TextBlock Text="···" FontSize="11.5" FontWeight="Bold" />
+                                </Button>
+                            </StackPanel>
+                            <Button
+                                x:Name="PdfSelDeleteBtn"
+                                Grid.Column="1"
+                                Visibility="Collapsed"
+                                Style="{StaticResource YYToolbarIconButtonStyle}"
+                                Width="26"
+                                Height="26"
+                                MinWidth="26"
+                                MinHeight="26"
+                                Padding="0"
+                                ToolTipService.ToolTip="删除划线"
+                                Click="PdfSelDelete_Click" />
+                        </Grid>
+
+                        <Border Height="1" Background="{ThemeResource YYLineBrush}" />
+
+                        <Grid ColumnSpacing="4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" Style="{StaticResource YYTextActionButtonStyle}" HorizontalAlignment="Stretch" Content="想法" FontSize="11.5" Click="PdfSelNote_Click" />
+                            <Button Grid.Column="1" Style="{StaticResource YYTextActionButtonStyle}" HorizontalAlignment="Stretch" Content="朗读" FontSize="11.5" Click="PdfSelSpeak_Click" />
+                            <Button Grid.Column="2" Style="{StaticResource YYTextActionButtonStyle}" HorizontalAlignment="Stretch" Content="查词" FontSize="11.5" Click="PdfSelLookup_Click" />
+                            <Button Grid.Column="3" Style="{StaticResource YYTextActionButtonStyle}" HorizontalAlignment="Stretch" Content="翻译" FontSize="11.5" Foreground="{ThemeResource YYAccentBrush}" Click="PdfSelTranslate_Click" />
+                            <Button Grid.Column="4" Style="{StaticResource YYTextActionButtonStyle}" HorizontalAlignment="Stretch" Content="复制" FontSize="11.5" Click="PdfSelCopy_Click" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- PDF 查词 / 翻译轻浮卡 -->
+                <Border
+                    x:Name="PdfInfoPopupCard"
+                    Visibility="Collapsed"
+                    Width="356"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    Padding="14,12"
+                    CornerRadius="10"
+                    Background="{ThemeResource YYCardBrush}"
+                    BorderBrush="{ThemeResource YYLineBrush}"
+                    BorderThickness="1">
+                    <StackPanel Spacing="6">
+                        <Grid ColumnSpacing="6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="PdfInfoPopupTitle" Grid.Column="0" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource YYAccentBrush}" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" Style="{StaticResource YYToolbarIconButtonStyle}" Width="24" Height="24" MinWidth="24" MinHeight="24" Padding="0" Content="×" Click="ClosePdfInfoPopup_Click" />
+                        </Grid>
+                        <ScrollViewer MaxHeight="220">
+                            <TextBlock x:Name="PdfInfoPopupBody" FontSize="13" LineHeight="21" Foreground="{ThemeResource YYText1Brush}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                        </ScrollViewer>
+                    </StackPanel>
+                </Border>
             </Grid>
 
             <controls:PaneSplitter x:Name="RightSplitter" Grid.Column="3" Visibility="Collapsed" />

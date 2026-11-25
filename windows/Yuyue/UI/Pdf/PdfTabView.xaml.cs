@@ -156,6 +156,8 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
         TitleText.Text = _detail.Summary.Title;
         L10n.Skip(TitleText);
         L10n.Skip(TtsLineText);
+        L10n.Skip(PdfSelNotePreviewText);
+        L10n.Skip(PdfInfoPopupBody);
         ApplyAppearance();
         _ = LoadPdfAsync(autoListen);
     }
@@ -169,6 +171,7 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
             _speakingIdx = idx;
             if (idx >= 0 && idx < _currentPageSentences.Count)
                 TtsLineText.Text = _currentPageSentences[idx];
+            if (_listeningPage >= 0) RefreshPageOverlay(_listeningPage);
             StateChanged?.Invoke();
         });
     }
@@ -369,6 +372,8 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
         _scrollPageContainers.Clear();
         _renderedScrollPages.Clear();
         _renderingScrollPages.Clear();
+        _pageOverlays.Clear();
+        HidePdfSelectionCard();
         _scrollPageHeights = [];
 
         double baseW = Math.Clamp((CanvasHost.ActualWidth > 0 ? CanvasHost.ActualWidth : 900) - 80, 420, 960) * _zoom;
@@ -468,6 +473,7 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
             foreach (int evIdx in toEvict)
             {
                 _renderedScrollPages.Remove(evIdx);
+                _pageOverlays.Remove(evIdx);
                 if (evIdx >= 0 && evIdx < _scrollPageContainers.Count)
                     _scrollPageContainers[evIdx].Child = MakeScrollPlaceholder(evIdx, mutedBrush);
             }
@@ -524,14 +530,7 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
                 _scrollPageHeights[pageIdx] = outerH;
                 border.Height = outerH;
             }
-            border.Child = new Image
-            {
-                Source = bmp,
-                Width = displayW,
-                Height = displayH,
-                Stretch = Stretch.Uniform,
-                Opacity = _nightMode ? 0.88 : 1.0,
-            };
+            border.Child = BuildInteractivePageSurface(pageIdx, bmp, displayW, displayH);
             _renderedScrollPages.Add(pageIdx);
         }
         catch { }
@@ -566,14 +565,7 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
             stream.Seek(0);
             var bmp = new BitmapImage();
             await bmp.SetSourceAsync(stream);
-            border.Child = new Image
-            {
-                Source = bmp,
-                Width = displayW,
-                Height = displayH,
-                Stretch = Stretch.Uniform,
-                Opacity = _nightMode ? 0.88 : 1.0,
-            };
+            border.Child = BuildInteractivePageSurface(pageIdx, bmp, displayW, displayH);
         }
         catch { }
         return border;
@@ -599,20 +591,24 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
 
     public void TriggerListen() => StartReadCurrentPage();
 
-    private void StartReadCurrentPage()
+    private void StartReadCurrentPage(int startSentenceIndex = 0)
     {
         if (_disposed || string.IsNullOrEmpty(_pdfPath)) return;
         try
         {
-            string text = PdfInfoReader.ExtractPageText(_pdfPath, _currentPage);
-            var sents = YuyueCoreMethods.PageSentences(text).Select(s => s.Text.Trim()).Where(s => s.Length > 0).ToArray();
+            var layout = GetOrLoadPageLayoutSync(_currentPage);
+            var spanSents = YuyueCoreMethods.PageSentences(layout.Text);
+            var sents = spanSents.Select(s => s.Text.Trim()).Where(s => s.Length > 0).ToArray();
             if (sents.Length == 0) return;
+            _listeningPage = _currentPage;
+            _activePageSentences = spanSents;
             _currentPageSentences = sents;
             TtsBarHost.Visibility = Visibility.Visible;
             _audio.SetMetadata(_detail.Summary.Title, $"第 {_currentPage + 1} 页", _detail.Summary.CoverPath);
-            _audio.Start(sents, 0);
+            _audio.Start(sents, Math.Clamp(startSentenceIndex, 0, sents.Length - 1));
             App.CurrentApp.SetActiveMiniPlayerSource(this);
             UpdateTtsIcons();
+            RefreshPageOverlay(_listeningPage);
         }
         catch { }
     }
@@ -694,10 +690,12 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
         ListenBtn.Content = YYIcons.Make("headphones", 14, ThemeHelper.Brush(_audio.IsPlaying ? tc.Accent : p.T2));
         NotesPaneBtn.Content = YYIcons.Make("square.and.pencil", 14, ThemeHelper.Brush(_rightOpen ? tc.Accent : p.T2));
         DetachBtn.Content = YYIcons.Make("detach", 13.5, ThemeHelper.Brush(p.T2));
+        PdfSelDeleteBtn.Content = YYIcons.Make("trash", 13, ThemeHelper.Brush(p.Danger));
 
         L10n.ApplyTree(RootGrid);
         UpdateHeaderLabels();
         UpdateTtsIcons();
+        RefreshAllVisibleOverlays();
         if (_leftOpen) RenderLeftPane();
         if (_rightOpen) RenderRightNotesPane();
         TabMetaChanged?.Invoke();
@@ -760,6 +758,8 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
                 foreach (var hit in PdfInfoReader.SearchText(_pdfPath, _searchQuery).Take(80))
                 {
                     int pg = hit.PageZeroBased;
+                    int charOff = hit.CharOffset;
+                    int matchLen = hit.MatchLen;
                     var btn = new Button
                     {
                         HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -771,7 +771,14 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
                         BorderThickness = new Thickness(1),
                         Content = L10n.Skip(new TextBlock { Text = $"P.{pg + 1} · {hit.Snippet}", FontSize = 11.5, Foreground = ThemeHelper.Brush(curP.T1), TextWrapping = TextWrapping.Wrap, MaxLines = 3 }),
                     };
-                    btn.Click += (_, _) => JumpToPage(pg);
+                    btn.Click += (_, _) =>
+                    {
+                        int prevHitPg = _activeSearchHighlight?.Page ?? -1;
+                        _activeSearchHighlight = (pg, charOff, matchLen);
+                        if (prevHitPg >= 0 && prevHitPg != pg) RefreshPageOverlay(prevHitPg);
+                        JumpToPage(pg);
+                        RefreshPageOverlay(pg);
+                    };
                     resStack.Children.Add(btn);
                 }
             }
@@ -882,6 +889,7 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
             {
                 if (_disposed) return;
                 try { _library.DeleteMark(_bookId, markId); } catch { }
+                RefreshPageOverlay(pg);
                 RenderRightNotesPane();
             };
             Grid.SetColumn(delBtn, 1);
@@ -988,8 +996,11 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
     private void TtsStop_Click(object sender, RoutedEventArgs e)
     {
         if (_disposed) return;
+        int prevPg = _listeningPage;
+        _listeningPage = -1;
         _audio.Pause();
         TtsBarHost.Visibility = Visibility.Collapsed;
+        if (prevPg >= 0) RefreshPageOverlay(prevPg);
         ApplyAppearance();
     }
 
@@ -1032,7 +1043,13 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
 
     private void PdfScroller_ViewChanged(object sender, ScrollViewerViewChangedEventArgs e)
     {
-        if (_disposed || _pdfDoc is null || _layoutMode != "scroll" || _scrollPageContainers.Count == 0)
+        if (_disposed || _pdfDoc is null) return;
+        if (PdfSelectionCard.Visibility == Visibility.Visible || PdfInfoPopupCard.Visibility == Visibility.Visible)
+        {
+            PdfSelectionCard.Visibility = Visibility.Collapsed;
+            PdfInfoPopupCard.Visibility = Visibility.Collapsed;
+        }
+        if (_layoutMode != "scroll" || _scrollPageContainers.Count == 0)
             return;
 
         if (_suppressScrollTracking && Environment.TickCount64 < _suppressScrollUntilTick)
@@ -1099,6 +1116,19 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
         if (ctrl && (key == VirtualKey.Number0 || key == VirtualKey.NumberPad0)) { _zoom = 1.0; _ = RenderVisiblePagesAsync(); return true; }
         if (!ctrl && !alt)
         {
+            if (PdfSelectionCard.Visibility == Visibility.Visible)
+            {
+                if (key == VirtualKey.Number1 || key == VirtualKey.NumberPad1) { ApplyPdfMarkStyle(MarkStyle.Yellow); return true; }
+                if (key == VirtualKey.Number2 || key == VirtualKey.NumberPad2) { ApplyPdfMarkStyle(MarkStyle.Blue); return true; }
+                if (key == VirtualKey.Number3 || key == VirtualKey.NumberPad3) { ApplyPdfMarkStyle(MarkStyle.Pink); return true; }
+                if (key == VirtualKey.Number4 || key == VirtualKey.NumberPad4) { ApplyPdfMarkStyle(MarkStyle.Wave); return true; }
+            }
+            if (key == VirtualKey.Escape && (PdfSelectionCard.Visibility == Visibility.Visible || PdfInfoPopupCard.Visibility == Visibility.Visible))
+            {
+                HidePdfSelectionCard();
+                PdfInfoPopupCard.Visibility = Visibility.Collapsed;
+                return true;
+            }
             if (key == VirtualKey.Right || key == VirtualKey.PageDown || (key == VirtualKey.Down && _layoutMode != "scroll")) { NextPage_Click(this, new RoutedEventArgs()); return true; }
             if (key == VirtualKey.Left || key == VirtualKey.PageUp || (key == VirtualKey.Up && _layoutMode != "scroll")) { PrevPage_Click(this, new RoutedEventArgs()); return true; }
             if (key == VirtualKey.Space) { ToggleListen(); return true; }

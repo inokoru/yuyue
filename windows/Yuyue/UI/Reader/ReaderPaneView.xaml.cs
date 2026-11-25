@@ -58,9 +58,27 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
     private string _rightPaneTab = "notes"; // notes | companion | cast
     private double _rightPaneWidth = 328;
 
-    // Navigation history stack (Alt+←/→ & mouse XButton1/XButton2)
+    // Navigation history stack (Alt+←/→ & mouse XButton1/XButton2) + macOS ReturnPill
     private readonly Stack<(uint Section, int Sentence)> _backStack = new();
     private readonly Stack<(uint Section, int Sentence)> _forwardStack = new();
+    private (uint Section, int Sentence)? _returnFrom;
+    private int _returnTurnsRemaining;
+
+    // Foreign translation, dialogue bubbles, drama & context cards state
+    private bool _translationsActive;
+    private bool _bubblesOn;
+    private bool _dramaModeOn;
+    private BubbleLine[] _sectionBubbles = [];
+    private long? _previousOpenedAtMs;
+    private bool _finishedPrompted;
+    private (uint Section, int Sentence, int DaysAway, long LastReadMs)? _pendingRecapOffer;
+    private RecapDto? _readyRecap;
+    private CancellationTokenSource? _translateCts;
+    private CancellationTokenSource? _sentenceTransCts;
+    private bool _dictFullExpanded;
+    private bool _dictWebReady;
+    private SyncMap? _pairedMap;
+    private string? _pairedAudioBookId;
 
     // Reading time tracking
     private readonly DispatcherTimer _timeTracker;
@@ -120,11 +138,18 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
         L10n.Skip(WordPhoneticText);
         L10n.Skip(WordMeaningText);
         L10n.Skip(WordSourceText);
+        L10n.Skip(SentenceOrigText);
+        L10n.Skip(SentenceTransText);
         L10n.Skip(InfoPopupBody);
         L10n.Skip(ListenOnlyTitle);
         L10n.Skip(TtsLiveSentenceText);
 
         _detail = _library.GetBookDetail(bookId);
+        _previousOpenedAtMs = _detail.Summary.OpenedAt;
+        try { _bubblesOn = _library.Core.BookBubbles(_bookId); } catch { _bubblesOn = false; }
+        try { _dramaModeOn = _library.Core.DramaEnabled(_bookId); } catch { _dramaModeOn = false; }
+        _translationsActive = _library.Prefs.BookTranslationsActive.TryGetValue(_bookId, out var savedTr) && savedTr;
+        TranslateBtn.Visibility = IsForeignBook() ? Visibility.Visible : Visibility.Collapsed;
         var perBook = _library.GetBookReaderSettings(bookId);
         _ownSettings = perBook is not null;
         _settings = perBook ?? _library.GetReaderSettings();
@@ -209,6 +234,7 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
             await _pager.InitializeAsync();
             if (_disposed) return;
             LoadSection(_currentSection);
+            CheckInitialContextCards();
             if (!string.IsNullOrWhiteSpace(initialAskQuestion))
             {
                 OpenRightPane("companion");
@@ -347,6 +373,12 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
         LeftPaneBtn.Content = YYIcons.Make("panel-left", 14.5, _leftPaneOpen ? accent : fg2);
         HistBackBtn.Content = YYIcons.Make("arrow-left", 13.5, fg2);
         HistFwdBtn.Content = YYIcons.Make("arrow-right", 13.5, fg2);
+        IconRecapPill.Content = YYIcons.Make("clock-history", 12.5, accent);
+        RecapTopPillLabel.Foreground = accent;
+        TranslateBtnLabel.Foreground = _translationsActive ? accent : fg1;
+        TranslateBtn.Background = _translationsActive
+            ? ThemeHelper.Brush(ThemeHelper.TintColors(_library.Prefs.Tint, pDark).Soft)
+            : new SolidColorBrush(Colors.Transparent);
         SearchBtn.Content = YYIcons.Make("search", 14, fg2);
         TypographyBtn.Foreground = fg1;
         ListenBtn.Content = YYIcons.Make("headphones", 14.5, IsAudioPlaying ? accent : fg2);
@@ -462,7 +494,11 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
 
     public void JumpTo(uint section, int sentence, bool recordHistory = true)
     {
-        if (recordHistory) PushHistoryPoint();
+        if (recordHistory)
+        {
+            PushHistoryPoint();
+            RecordReturnOrigin();
+        }
         DismissOverlays();
         int clampedSent = Math.Max(0, sentence);
         if (section == _currentSection && _pager.IsInitialized)
@@ -474,6 +510,86 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
         _pendingJumpSentence = clampedSent;
         _pendingEndOfSection = false;
         LoadSection(section);
+    }
+
+    private void RecordReturnOrigin()
+    {
+        _returnTurnsRemaining = 3;
+        if (_returnFrom is null)
+        {
+            int curSent = CurrentReadingSentence();
+            _returnFrom = (_currentSection, curSent);
+            int estPage = EstimateBookPage(_currentSection, curSent);
+            ReturnPillText.Text = estPage > 0 ? L10n.T($"↩ 回到第 {estPage} 页") : L10n.T("↩ 回到刚才位置");
+        }
+        ReturnPillBtn.Visibility = Visibility.Visible;
+    }
+
+    private void ReturnPill_Click(object sender, RoutedEventArgs e)
+    {
+        ReturnPillBtn.Visibility = Visibility.Collapsed;
+        if (_returnFrom is var (sec, sent))
+        {
+            _returnFrom = null;
+            _returnTurnsRemaining = 0;
+            JumpTo(sec, sent, recordHistory: false);
+        }
+    }
+
+    private void TickReturnPillTurn()
+    {
+        if (_returnFrom is null) return;
+        _returnTurnsRemaining--;
+        if (_returnTurnsRemaining <= 0)
+        {
+            _returnFrom = null;
+            ReturnPillBtn.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private double CalculateBookFraction(uint section, int sentence)
+    {
+        double totalUnits = 0;
+        for (int i = 0; i < _detail.Sections.Length; i++)
+        {
+            var s = _detail.Sections[i];
+            if (s.Linear && s.Kind == SectionKind.Text)
+                totalUnits += s.Units;
+        }
+        if (totalUnits <= 0)
+            return _detail.Sections.Length > 0 ? Math.Clamp((double)section / _detail.Sections.Length, 0, 1) : 0;
+
+        double before = 0;
+        for (int i = 0; i < Math.Min((int)section, _detail.Sections.Length); i++)
+        {
+            var s = _detail.Sections[i];
+            if (s.Linear && s.Kind == SectionKind.Text)
+                before += s.Units;
+        }
+        if (section < _detail.Sections.Length)
+        {
+            var cur = _detail.Sections[section];
+            if (cur.Linear && cur.Kind == SectionKind.Text && cur.Sentences > 0)
+                before += cur.Units * Math.Clamp((double)sentence / cur.Sentences, 0, 1);
+        }
+        return Math.Clamp(before / totalUnits, 0, 1);
+    }
+
+    private int EstimateBookPage(uint section, int sentence)
+    {
+        double totalUnits = 0;
+        double before = 0;
+        for (int i = 0; i < _detail.Sections.Length; i++)
+        {
+            var s = _detail.Sections[i];
+            if (!s.Linear || s.Kind != SectionKind.Text) continue;
+            totalUnits += s.Units;
+            if (i < section) before += s.Units;
+            else if (i == section && s.Sentences > 0)
+                before += s.Units * Math.Clamp((double)sentence / s.Sentences, 0, 1);
+        }
+        if (totalUnits <= 0) return (int)section + 1;
+        return Math.Max(1, (int)Math.Ceiling(before / 450.0));
     }
 
     public void AskCompanion(string question)
@@ -786,6 +902,193 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
         MoreBtn.Flyout = menu;
     }
 
+    private void CheckInitialContextCards()
+    {
+        if (_disposed) return;
+        bool dark = CurrentPaperChrome?.IsDark ?? ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
+        var p = ThemeHelper.Palette(dark);
+        var tc = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+        var resolved = PaperAppearance.Resolve(_library, _settings);
+        var activePaper = YYPapers.FromId(PaperAppearance.PaperCssId(resolved.Preset));
+
+        // 1. TXT encoding/chapter doubt pill (ReaderReturn.swift)
+        if (_detail.Summary.Format == BookFormat.Txt && !_library.Prefs.DismissedTxtDoubtBooks.Contains(_bookId))
+        {
+            try
+            {
+                string? doubt = _library.Core.TxtDoubt(_bookId);
+                if (!string.IsNullOrWhiteSpace(doubt))
+                {
+                    DoubtPillHost.Content = ReaderRecapAndSleepHelper.BuildDoubtPill(
+                        doubt,
+                        p,
+                        onOpen: async () =>
+                        {
+                            DoubtPillHost.Visibility = Visibility.Collapsed;
+                            if (RootGrid.XamlRoot is { } xr && await BookToolsDialogs.ShowTxtLayoutDialogAsync(xr, _library, _bookId, _detail.Summary.Title))
+                            {
+                                _detail = _library.GetBookDetail(_bookId);
+                                LoadSection(_currentSection, forceReload: true);
+                            }
+                        },
+                        onDismiss: () =>
+                        {
+                            DoubtPillHost.Visibility = Visibility.Collapsed;
+                            _library.Prefs.DismissedTxtDoubtBooks.Add(_bookId);
+                            _library.SavePrefs();
+                        },
+                        paper: activePaper);
+                    DoubtPillHost.Visibility = Visibility.Visible;
+                }
+            }
+            catch { }
+        }
+
+        // 2. ElsewhereCard when another synced device moved to a newer spot (forward OR backward)
+        if (CheckElsewhereProgress(p, tc))
+            return;
+
+        // 3. SleepReturnCard ("回到昨晚" sleep-timer origin return pill)
+        var sleepInfo = ReaderRecapAndSleepHelper.TryGetSleepReturn(_library, _bookId, _detail);
+        if (sleepInfo is not null)
+        {
+            SleepReturnHost.Content = ReaderRecapAndSleepHelper.BuildSleepReturnCard(sleepInfo, p, tc, go =>
+            {
+                SleepReturnHost.Visibility = Visibility.Collapsed;
+                ReaderRecapAndSleepHelper.ClearSleepReturn(_library, _bookId);
+                if (go) JumpTo(sleepInfo.Section, sleepInfo.Sentence, recordHistory: true);
+            });
+            SleepReturnHost.Visibility = Visibility.Visible;
+        }
+
+        // 4. RecapTopPill when returning after >= 1 day away and Companion AI is configured
+        long? lastReadMs = _previousOpenedAtMs;
+        try
+        {
+            var latestProg = _library.Core.LatestProgress(_bookId);
+            if (latestProg is not null && latestProg.At > (lastReadMs ?? 0))
+                lastReadMs = latestProg.At;
+        }
+        catch { }
+
+        if (_library.Companion.IsConfigured && lastReadMs is long lms && lms > 0)
+        {
+            long nowSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            int daysAway = (int)((nowSec - lms / 1000.0) / 86400.0);
+            int curSent = CurrentReadingSentence();
+            if (daysAway >= 1 && (_currentSection > _detail.Start || curSent > 20))
+            {
+                uint snapSec = _currentSection;
+                int snapSent = curSent;
+                _pendingRecapOffer = (snapSec, snapSent, daysAway, lms);
+                _readyRecap = ReaderRecapAndSleepHelper.TryGetCachedRecap(_library, _bookId, snapSec, snapSent, daysAway);
+                RecapTopPillLabel.Text = L10n.T($"前情 · {daysAway}天前");
+                RecapTopPillBtn.Visibility = Visibility.Visible;
+                ApplyPaperAndChrome();
+
+                if (_readyRecap is null && !_library.Companion.IsCurrentProviderPaidCloud)
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        var pre = await ReaderRecapAndSleepHelper.TryLoadOrGenerateRecapAsync(
+                            _library, _bookId, _detail, lms, snapSec, snapSent, manual: false);
+                        if (pre is not null && !_disposed)
+                        {
+                            DispatcherQueue.TryEnqueue(() =>
+                            {
+                                if (!_disposed) _readyRecap = pre;
+                            });
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    private bool CheckElsewhereProgress(YYPalette p, YYTintColors tc)
+    {
+        try
+        {
+            var latest = _library.Core.LatestProgress(_bookId);
+            var here = _library.GetProgress(_bookId);
+            long mineAt = here?.At ?? 0;
+            int curSent = CurrentReadingSentence();
+            double hereFrac = here?.Fraction ?? CalculateBookFraction(_currentSection, curSent);
+            bool differentSpot = latest is not null
+                && (latest.Position.Section != _currentSection || (int)latest.Position.Sentence != curSent);
+
+            if (latest is not null
+                && !latest.ThisDevice
+                && differentSpot
+                && latest.At > mineAt
+                && Math.Abs(latest.Fraction - hereFrac) > 0.005)
+            {
+                string? chapTitle = _detail.Toc.LastOrDefault(t => t.Section <= latest.Position.Section)?.Title;
+                if (string.IsNullOrWhiteSpace(chapTitle) && latest.Position.Section < _detail.Sections.Length)
+                    chapTitle = _detail.Sections[latest.Position.Section].Title;
+
+                string? excerpt = null;
+                try
+                {
+                    var sents = _library.Core.Sentences(_bookId, latest.Position.Section);
+                    if (latest.Position.Sentence < sents.Length)
+                        excerpt = sents[latest.Position.Sentence];
+                }
+                catch { }
+
+                ElsewhereCardHost.Content = ReaderRecapAndSleepHelper.BuildElsewhereCard(
+                    latest,
+                    hereFrac,
+                    chapTitle,
+                    excerpt,
+                    p,
+                    tc,
+                    onStay: () =>
+                    {
+                        ElsewhereCardHost.Visibility = Visibility.Collapsed;
+                        SaveCurrentProgress();
+                    },
+                    onJump: () =>
+                    {
+                        ElsewhereCardHost.Visibility = Visibility.Collapsed;
+                        bool wasPlaying = _audio.IsPlaying;
+                        if (wasPlaying && latest.Position.Section != _currentSection)
+                            _autoListenOnReady = true;
+                        JumpTo(latest.Position.Section, (int)latest.Position.Sentence, recordHistory: true);
+                        if (wasPlaying && latest.Position.Section == _currentSection)
+                            StartListenFromSentence((int)latest.Position.Sentence);
+                        SaveCurrentProgress();
+                    });
+                ElsewhereCardHost.Visibility = Visibility.Visible;
+                return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    private async void RecapTopPill_Click(object sender, RoutedEventArgs e)
+    {
+        if (RootGrid.XamlRoot is not { } xr) return;
+        if (_readyRecap is { } ready)
+        {
+            await PresentRecapCardDialogAsync(xr, ready, manualOpened: false);
+            return;
+        }
+        await ShowRecapDialogAsync();
+    }
+
+    private async Task PresentRecapCardDialogAsync(XamlRoot xr, RecapDto recap, bool manualOpened)
+    {
+        bool dark = CurrentPaperChrome?.IsDark ?? ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
+        var p = ThemeHelper.Palette(dark);
+        var tc = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+        ContentDialog? dlgRef = null;
+        var card = ReaderRecapAndSleepHelper.BuildRecapCard(recap, p, tc, manualOpened, onDone: () => dlgRef?.Hide());
+        dlgRef = YYChrome.CreateFluentDialog(xr, dark, 420, card, tint: _library.Prefs.Tint);
+        await dlgRef.ShowSafeAsync(_library.Prefs.Tint);
+    }
+
     private async Task ShowRecapDialogAsync()
     {
         if (RootGrid.XamlRoot is not { } xr) return;
@@ -796,20 +1099,16 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
         }
         ShowReaderAlert("正在为你整理截至当前页的不剧透前情提要…", seconds: 8);
         int curSent = CurrentReadingSentence();
-        var recap = await ReaderRecapAndSleepHelper.TryLoadOrGenerateRecapAsync(_library, _bookId, _detail, _detail.Summary.OpenedAt, _currentSection, curSent, manual: true);
+        long? lastMs = _pendingRecapOffer?.LastReadMs ?? _previousOpenedAtMs;
+        var recap = await ReaderRecapAndSleepHelper.TryLoadOrGenerateRecapAsync(_library, _bookId, _detail, lastMs, _currentSection, curSent, manual: true);
         if (_disposed) return;
         if (recap is null)
         {
             ShowReaderAlert("暂时无法生成前情提要，请稍后重试");
             return;
         }
-        bool dark = CurrentPaperChrome?.IsDark ?? ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
-        var p = ThemeHelper.Palette(dark);
-        var tc = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
-        ContentDialog? dlgRef = null;
-        var card = ReaderRecapAndSleepHelper.BuildRecapCard(recap, p, tc, manualOpened: true, onDone: () => dlgRef?.Hide());
-        dlgRef = YYChrome.CreateFluentDialog(xr, dark, 460, card, tint: _library.Prefs.Tint);
-        await dlgRef.ShowSafeAsync(_library.Prefs.Tint);
+        _readyRecap = recap;
+        await PresentRecapCardDialogAsync(xr, recap, manualOpened: true);
     }
 
     // Complete Fluent 2 Typography & Paper Flyout
@@ -1137,6 +1436,15 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
         };
         root.Children.Add(MakeOptionRow("外文难词行间释义", glossSw));
 
+        var bubblesSw = new ToggleSwitch { IsOn = _bubblesOn };
+        bubblesSw.Toggled += (_, _) =>
+        {
+            _bubblesOn = bubblesSw.IsOn;
+            try { _library.Core.SetBookBubbles(_bookId, _bubblesOn); } catch { }
+            _ = ApplySectionBubblesAsync();
+        };
+        root.Children.Add(MakeOptionRow("对话角色气泡", bubblesSw));
+
         var perBookSw = new ToggleSwitch { IsOn = _ownSettings };
         perBookSw.Toggled += (_, _) =>
         {
@@ -1445,6 +1753,8 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
         _timeTracker.Stop();
         _alertTimer?.Stop();
         _scrollEdgeCueTimer?.Stop();
+        try { _translateCts?.Cancel(); _translateCts?.Dispose(); } catch { }
+        try { _sentenceTransCts?.Cancel(); _sentenceTransCts?.Dispose(); } catch { }
         FlushReadingTime(includePartial: true);
         SaveCurrentProgress();
         _disposed = true;

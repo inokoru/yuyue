@@ -11,38 +11,168 @@ public sealed partial class SettingsView
 {
     private void BuildCompanionPage(bool dark)
     {
-        PageBodyStack.Children.Add(MakeSectionHeader("AI 书伴模型接入（支持 18 家服务商与本地 Ollama）", dark, first: true));
+        var p = ThemeHelper.Palette(dark);
+        PageBodyStack.Children.Add(MakeSectionHeader("AI 书伴模型接入（支持 18 家服务商、自定义端点与本地 Ollama）", dark, first: true));
 
-        var provCombo = new ComboBox { Width = 220 };
-        foreach (var pr in CompanionClient.Presets) provCombo.Items.Add(pr.Name);
-        int pIdx = CompanionClient.Presets.ToList().FindIndex(x => string.Equals(x.Id, _library.Prefs.AiProvider, StringComparison.OrdinalIgnoreCase));
+        var allProviders = new List<(string Id, string Name, bool IsCustom, AiProviderPreset? Preset)>();
+        foreach (var pr in CompanionClient.Presets)
+            allProviders.Add((pr.Id, pr.Name, false, pr));
+        foreach (var kv in _library.Prefs.AiCustomProviderNames)
+        {
+            if (!allProviders.Any(x => string.Equals(x.Id, kv.Key, StringComparison.OrdinalIgnoreCase)))
+                allProviders.Add((kv.Key, string.IsNullOrWhiteSpace(kv.Value) ? kv.Key : kv.Value, true, null));
+        }
+
+        string curPid = _library.Prefs.AiProvider;
+        bool isCurCustom = allProviders.Any(x => x.IsCustom && string.Equals(x.Id, curPid, StringComparison.OrdinalIgnoreCase));
+
+        var provRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        var provCombo = new ComboBox { Width = isCurCustom ? 186 : 210 };
+        foreach (var item in allProviders) provCombo.Items.Add(item.IsCustom ? $"{item.Name} ({L10n.T("自定义")})" : item.Name);
+        int pIdx = allProviders.FindIndex(x => string.Equals(x.Id, curPid, StringComparison.OrdinalIgnoreCase));
         provCombo.SelectedIndex = Math.Max(0, pIdx);
         provCombo.SelectionChanged += (_, _) =>
         {
-            if (provCombo.SelectedIndex >= 0)
+            if (provCombo.SelectedIndex >= 0 && provCombo.SelectedIndex < allProviders.Count)
             {
-                var chosen = CompanionClient.Presets[provCombo.SelectedIndex];
+                var chosen = allProviders[provCombo.SelectedIndex];
+                if (string.Equals(chosen.Id, _library.Prefs.AiProvider, StringComparison.OrdinalIgnoreCase)) return;
                 _library.Prefs.AiProvider = chosen.Id;
-                _library.Prefs.AiBaseUrl = _library.Prefs.AiProviderUrls.GetValueOrDefault(chosen.Id, chosen.BaseUrl);
-                _library.Prefs.AiModel = _library.Prefs.AiProviderModels.GetValueOrDefault(chosen.Id, chosen.DefaultModel);
+                _library.Prefs.AiBaseUrl = _library.Prefs.AiProviderUrls.GetValueOrDefault(chosen.Id, chosen.Preset?.BaseUrl ?? "");
+                _library.Prefs.AiModel = _library.Prefs.AiProviderModels.GetValueOrDefault(chosen.Id, chosen.Preset?.DefaultModel ?? "");
                 _library.SavePrefs();
                 RenderActivePage();
             }
         };
-        PageBodyStack.Children.Add(new FluentSettingsCard("当前 AI 服务商", "API Key 使用 Windows DPAPI 本地加密保存，从不上传服务器", "sparkle", provCombo, dark: dark));
+        provRow.Children.Add(provCombo);
+
+        var addCustomBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Content = L10n.T("+ 自定义") };
+        addCustomBtn.Click += async (_, _) =>
+        {
+            if (RootGrid.XamlRoot is not { } xr) return;
+            string? name = await YYChrome.ShowPromptAsync(xr, dark, "添加自定义 AI 服务商", placeholder: "如：公司自建 vLLM / OneAPI", confirmText: "创建", tint: _library.Prefs.Tint);
+            if (_disposed || string.IsNullOrWhiteSpace(name)) return;
+            string newId = $"custom_{Guid.NewGuid():N}"[..16];
+            _library.Prefs.AiCustomProviderNames[newId] = name.Trim();
+            if (!_library.Prefs.ConfiguredAiProviders.Contains(newId, StringComparer.OrdinalIgnoreCase))
+                _library.Prefs.ConfiguredAiProviders.Insert(0, newId);
+            _library.Prefs.AiProvider = newId;
+            _library.Prefs.AiBaseUrl = "https://api.openai.com/v1";
+            _library.Prefs.AiModel = "";
+            _library.Prefs.AiProviderUrls[newId] = _library.Prefs.AiBaseUrl;
+            _library.SavePrefs();
+            RenderActivePage();
+        };
+        provRow.Children.Add(addCustomBtn);
+
+        if (isCurCustom)
+        {
+            var renameBtn = new Button { Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"], Content = L10n.T("改名") };
+            renameBtn.Click += async (_, _) =>
+            {
+                if (RootGrid.XamlRoot is not { } xr) return;
+                string curName = _library.Prefs.AiCustomProviderNames.GetValueOrDefault(curPid, curPid);
+                string? nn = await YYChrome.ShowPromptAsync(xr, dark, "重命名自定义服务商", initialText: curName, confirmText: "保存", tint: _library.Prefs.Tint);
+                if (_disposed || string.IsNullOrWhiteSpace(nn)) return;
+                _library.Prefs.AiCustomProviderNames[curPid] = nn.Trim();
+                _library.SavePrefs();
+                RenderActivePage();
+            };
+            var delCustomBtn = new Button { Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"], Content = L10n.T("删除"), Foreground = ThemeHelper.Brush(p.Danger) };
+            delCustomBtn.Click += (_, _) =>
+            {
+                _library.Prefs.AiCustomProviderNames.Remove(curPid);
+                _library.Prefs.ConfiguredAiProviders.RemoveAll(x => string.Equals(x, curPid, StringComparison.OrdinalIgnoreCase));
+                _library.Prefs.AiProviderUrls.Remove(curPid);
+                _library.Prefs.AiProviderModels.Remove(curPid);
+                _library.Prefs.AiProviderFastModels.Remove(curPid);
+                _library.Secrets.Set($"ai.key.{curPid}", "");
+                _library.Prefs.AiProvider = CompanionClient.Presets[0].Id;
+                _library.Prefs.AiBaseUrl = CompanionClient.Presets[0].BaseUrl;
+                _library.Prefs.AiModel = CompanionClient.Presets[0].DefaultModel;
+                _library.SavePrefs();
+                RenderActivePage();
+            };
+            provRow.Children.Add(renameBtn);
+            provRow.Children.Add(delCustomBtn);
+        }
+
+        PageBodyStack.Children.Add(new FluentSettingsCard("当前 AI 服务商", "API Key 使用 Windows DPAPI 本地加密保存，从不上传服务器", "sparkle", provRow, dark: dark));
+
+        // OpenRouter 1-click OAuth Sign-in card
+        if (string.Equals(curPid, "openrouter", StringComparison.OrdinalIgnoreCase))
+        {
+            var orActs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+            var orCancelBtn = new Button { Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"], Content = L10n.T("取消"), Visibility = Visibility.Collapsed };
+            orCancelBtn.Click += (_, _) => { try { _openRouterAuthCts?.Cancel(); } catch { } };
+            var orSignBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"], Content = L10n.T("浏览器一键登录 OpenRouter") };
+            orSignBtn.Click += async (_, _) =>
+            {
+                try { _openRouterAuthCts?.Cancel(); _openRouterAuthCts?.Dispose(); } catch { }
+                var cts = new CancellationTokenSource();
+                _openRouterAuthCts = cts;
+                orSignBtn.IsEnabled = false;
+                orSignBtn.Content = L10n.T("等待浏览器授权…");
+                orCancelBtn.Visibility = Visibility.Visible;
+                try
+                {
+                    string gotKey = await CompanionClient.SignInWithOpenRouterAsync(cts.Token);
+                    if (_disposed) return;
+                    _library.Secrets.Set("ai.key.openrouter", gotKey);
+                    _library.Secrets.Set("ai.apiKey", "");
+                    if (!_library.Prefs.ConfiguredAiProviders.Contains("openrouter", StringComparer.OrdinalIgnoreCase))
+                        _library.Prefs.ConfiguredAiProviders.Insert(0, "openrouter");
+                    _library.SavePrefs();
+                    _ownerWindow.ShowToast("OpenRouter 账号授权成功，已加密保存 API Key");
+                }
+                catch (OperationCanceledException)
+                {
+                    if (!_disposed) _ownerWindow.ShowToast("已取消 OpenRouter 授权");
+                }
+                catch (Exception ex)
+                {
+                    if (!_disposed) _ownerWindow.ShowToast($"OpenRouter 授权失败：{ex.Message}");
+                }
+                finally
+                {
+                    if (ReferenceEquals(_openRouterAuthCts, cts))
+                    {
+                        try { cts.Dispose(); } catch { }
+                        _openRouterAuthCts = null;
+                    }
+                    orSignBtn.IsEnabled = true;
+                    orSignBtn.Content = L10n.T("浏览器一键登录 OpenRouter");
+                    orCancelBtn.Visibility = Visibility.Collapsed;
+                    if (!_disposed && _activePage == "companion") RenderActivePage();
+                }
+            };
+            orActs.Children.Add(orCancelBtn);
+            orActs.Children.Add(orSignBtn);
+            PageBodyStack.Children.Add(new FluentSettingsCard(
+                "OpenRouter 一键登录",
+                "免手动复制密钥，通过系统浏览器授权自动获取专属 API Key",
+                "globe",
+                orActs,
+                dark: dark));
+        }
 
         var keyBox = new PasswordBox
         {
             Style = (Style)Application.Current.Resources["YYCompactPasswordBoxStyle"],
             Width = 260,
-            Password = _library.Secrets.Get($"ai.key.{_library.Prefs.AiProvider}") ?? "",
+            Password = _library.Secrets.Get($"ai.key.{curPid}") ?? "",
             PlaceholderText = "sk-…",
         };
         keyBox.PasswordChanged += (_, _) =>
         {
-            _library.Secrets.Set($"ai.key.{_library.Prefs.AiProvider}", keyBox.Password);
+            _library.Secrets.Set($"ai.key.{curPid}", keyBox.Password);
             if (!string.IsNullOrEmpty(_library.Secrets.Get("ai.apiKey")))
                 _library.Secrets.Set("ai.apiKey", "");
+            if (!string.IsNullOrWhiteSpace(keyBox.Password) && !_library.Prefs.ConfiguredAiProviders.Contains(curPid, StringComparer.OrdinalIgnoreCase))
+            {
+                _library.Prefs.ConfiguredAiProviders.Insert(0, curPid);
+                _library.SavePrefs();
+            }
         };
         PageBodyStack.Children.Add(new FluentSettingsCard("API 密钥 (Key)", "本地 Ollama / LM Studio 可留空", "lock", keyBox, dark: dark));
 
@@ -50,19 +180,72 @@ public sealed partial class SettingsView
         urlBox.TextChanged += (_, _) =>
         {
             _library.Prefs.AiBaseUrl = urlBox.Text ?? "";
-            _library.Prefs.AiProviderUrls[_library.Prefs.AiProvider] = _library.Prefs.AiBaseUrl;
+            _library.Prefs.AiProviderUrls[curPid] = _library.Prefs.AiBaseUrl;
             _library.SavePrefs();
         };
         PageBodyStack.Children.Add(new FluentSettingsCard("接口地址 (Base URL)", "兼容 OpenAI / Anthropic / Gemini 协议", "globe", urlBox, dark: dark));
 
-        var modelBox = new TextBox { Style = (Style)Application.Current.Resources["YYSingleLineTextBoxStyle"], Width = 260, Text = _library.Prefs.AiModel };
+        var modelRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        var modelBox = new TextBox { Style = (Style)Application.Current.Resources["YYSingleLineTextBoxStyle"], Width = 200, Text = _library.Prefs.AiModel };
         modelBox.TextChanged += (_, _) =>
         {
             _library.Prefs.AiModel = modelBox.Text ?? "";
-            _library.Prefs.AiProviderModels[_library.Prefs.AiProvider] = _library.Prefs.AiModel;
+            _library.Prefs.AiProviderModels[curPid] = _library.Prefs.AiModel;
             _library.SavePrefs();
         };
-        PageBodyStack.Children.Add(new FluentSettingsCard("模型名称 (Model)", "如 deepseek-chat / claude-sonnet-4-5 / qwen2.5:7b", "bubble-lines", modelBox, dark: dark));
+        var fetchModelsBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Content = L10n.T("拉取列表") };
+        fetchModelsBtn.Click += async (_, _) =>
+        {
+            fetchModelsBtn.IsEnabled = false;
+            try
+            {
+                var models = await _library.Companion.ListModelsAsync(curPid, urlBox.Text, keyBox.Password);
+                if (_disposed) return;
+                if (models.Count == 0)
+                {
+                    _ownerWindow.ShowToast("未从该接口获取到模型列表，可直接手动输入模型名");
+                    return;
+                }
+                _library.Companion.SaveCachedModels(curPid, models);
+                var mf = new MenuFlyout();
+                foreach (var m in models.Take(24))
+                {
+                    string mCap = m;
+                    var mi = new MenuFlyoutItem { Text = mCap };
+                    mi.Click += (_, _) => { modelBox.Text = mCap; };
+                    mf.Items.Add(mi);
+                }
+                mf.ShowAt(fetchModelsBtn);
+            }
+            catch (Exception ex)
+            {
+                if (!_disposed) _ownerWindow.ShowToast($"拉取模型失败：{ex.Message}");
+            }
+            finally
+            {
+                fetchModelsBtn.IsEnabled = true;
+            }
+        };
+        modelRow.Children.Add(modelBox);
+        modelRow.Children.Add(fetchModelsBtn);
+        PageBodyStack.Children.Add(new FluentSettingsCard("对话主力模型 (Model)", "如 deepseek-chat / claude-sonnet-4-5 / qwen2.5:7b", "bubble-lines", modelRow, dark: dark));
+
+        string defaultFast = CompanionClient.FindPreset(curPid)?.DefaultFastModel ?? "";
+        var fastModelBox = new TextBox
+        {
+            Style = (Style)Application.Current.Resources["YYSingleLineTextBoxStyle"],
+            Width = 260,
+            Text = _library.Prefs.AiProviderFastModels.GetValueOrDefault(curPid, ""),
+            PlaceholderText = string.IsNullOrWhiteSpace(defaultFast) ? L10n.T("留空则自动跟随主力模型") : defaultFast,
+        };
+        fastModelBox.TextChanged += (_, _) =>
+        {
+            string val = (fastModelBox.Text ?? "").Trim();
+            if (string.IsNullOrEmpty(val)) _library.Prefs.AiProviderFastModels.Remove(curPid);
+            else _library.Prefs.AiProviderFastModels[curPid] = val;
+            _library.SavePrefs();
+        };
+        PageBodyStack.Children.Add(new FluentSettingsCard("轻量快速模型 (Fast Model)", "用于前情提要、说话人批量识别与文本精校，更快更省费", "sparkle", fastModelBox, dark: dark));
 
         var testBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"], Content = L10n.T("测试连接") };
         testBtn.Click += async (_, _) =>
@@ -81,10 +264,29 @@ public sealed partial class SettingsView
         };
         PageBodyStack.Children.Add(new FluentSettingsCard("连接状态验证", "发送一次极简握手确认密钥与模型可用", "check-circle", testBtn, dark: dark));
 
-        // AI Usage statistics card
+        // Cost control & AI Usage statistics
+        PageBodyStack.Children.Add(MakeSectionHeader("省费控制与 AI 用量统计（本地记录）", dark));
+
+        var tierSw = new ToggleSwitch { IsOn = _library.Prefs.AiTierRoutingEnabled };
+        tierSw.Toggled += (_, _) => { _library.Prefs.AiTierRoutingEnabled = tierSw.IsOn; _library.SavePrefs(); };
+        PageBodyStack.Children.Add(new FluentSettingsCard("批量任务自动使用轻量模型", "认人、错字整理与提要优先路由到轻量模型并启用缓存", "sliders", tierSw, dark: dark));
+
+        var llmCapSeg = YYChrome.MakeSegmentedBar(
+            [("0", "不限"), ("200000", "20 万"), ("500000", "50 万"), ("1000000", "100 万")],
+            _library.Prefs.AiDailyLlmTokenCap.ToString(),
+            s =>
+            {
+                _library.Prefs.AiDailyLlmTokenCap = long.TryParse(s, out long v) ? v : 0;
+                _library.SavePrefs();
+                RenderActivePage();
+            },
+            dark,
+            fontSize: 11.5,
+            height: 28);
+        PageBodyStack.Children.Add(new FluentSettingsCard("每日 Token 预算上限", "达到后自动暂停后台批量任务，避免意外超额消耗", "lock", llmCapSeg, dark: dark));
+
         var today = _library.Usage.GetToday();
         var snap30 = _library.Usage.Snapshot30Days();
-        PageBodyStack.Children.Add(MakeSectionHeader("AI 用量统计（本地记录）", dark));
         PageBodyStack.Children.Add(new FluentSettingsCard(
             "近 30 天与今日用量",
             $"今日 {today.Requests} 次请求（{CompanionUsageLedger.FormatCount(today.TotalTokens)} tokens）· 近 30 天累计 {CompanionUsageLedger.FormatCount(snap30.TotalTokens)} tokens",
@@ -353,6 +555,21 @@ public sealed partial class SettingsView
                     await SnapshotAndConflictDialogs.ShowNoteConflictsSheetAsync(xr, _library, () => App.CurrentApp.NotifyShelfRefresh());
             };
             PageBodyStack.Children.Add(new FluentSettingsCard("多端笔记冲突解决", "若两台设备同时修改同一条笔记，可在此对比保留", "checklist-lines", conflictBtn, dark: dark));
+
+            // Granular Sync Parts Expander (1:1 macOS)
+            var partsExp = new FluentSettingsExpander("同步内容分项设置", "自由决定哪些书库数据参与跨设备同步", "sliders", dark: dark);
+            ToggleSwitch MakePartSw(bool init, Action<bool> set)
+            {
+                var sw = new ToggleSwitch { IsOn = init };
+                sw.Toggled += (_, _) => { set(sw.IsOn); _library.SavePrefs(); };
+                return sw;
+            }
+            partsExp.AddKeyValueRow("阅读进度与书籍状态", "含每本书读到的位置、读完状态与阅读时长", MakePartSw(_library.Prefs.SyncReading, v => _library.Prefs.SyncReading = v));
+            partsExp.AddKeyValueRow("划线、想法、书签与生词本", "含所有批注、合集分类与外文生词表", MakePartSw(_library.Prefs.SyncNotes, v => _library.Prefs.SyncNotes = v));
+            partsExp.AddKeyValueRow("排版、纸张与净化规则", "含自定义纸张、字体字号偏好与替换规则", MakePartSw(_library.Prefs.SyncSettings, v => _library.Prefs.SyncSettings = v));
+            partsExp.AddKeyValueRow("同步电子书原文件", "自动在设备间传输 EPUB / PDF / TXT 原文件", MakePartSw(_library.Prefs.SyncFiles, v => _library.Prefs.SyncFiles = v));
+            partsExp.AddKeyValueRow("同步有声书录音文件", "音频体积通常较大，仅在网盘空间充足时建议开启", MakePartSw(_library.Prefs.SyncRecordings, v => _library.Prefs.SyncRecordings = v));
+            PageBodyStack.Children.Add(partsExp);
         }
 
         // Connected devices list
@@ -546,6 +763,57 @@ public sealed partial class SettingsView
         _storageModelsCard = storageModelsCard;
         UpdateVoiceModelCards();
         PageBodyStack.Children.Add(storageModelsCard);
+
+        // Audio & temp cache cleanup card (1:1 macOS Storage)
+        long cacheBytes = ComputeAudioCacheBytes();
+        string cacheMb = $"{cacheBytes / (1024.0 * 1024.0):0.0} MB";
+        var cleanBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Content = L10n.T("清理缓存"), IsEnabled = cacheBytes > 0 };
+        cleanBtn.Click += (_, _) =>
+        {
+            ClearAudioAndTempCaches();
+            _ownerWindow.ShowToast("已清理云端语音与临时音频缓存");
+            RenderActivePage();
+        };
+        PageBodyStack.Children.Add(new FluentSettingsCard(
+            "音频与临时缓存",
+            cacheBytes > 0 ? $"当前占用 {cacheMb}（云端 TTS 缓存与广播剧临时切片，清理不影响书籍与笔记）" : "当前暂无可清理的临时音频缓存",
+            "trash",
+            cleanBtn,
+            dark: dark));
+    }
+
+    private long ComputeAudioCacheBytes()
+    {
+        long total = 0;
+        foreach (string sub in new[] { "cloud-voices", "drama-live", "tts-cache", "tmp" })
+        {
+            string dir = Path.Combine(_library.DataDir, sub);
+            if (!Directory.Exists(dir)) continue;
+            try
+            {
+                foreach (var fi in new DirectoryInfo(dir).EnumerateFiles("*", SearchOption.AllDirectories))
+                    total += fi.Length;
+            }
+            catch { }
+        }
+        return total;
+    }
+
+    private void ClearAudioAndTempCaches()
+    {
+        foreach (string sub in new[] { "cloud-voices", "drama-live", "tts-cache", "tmp" })
+        {
+            string dir = Path.Combine(_library.DataDir, sub);
+            if (!Directory.Exists(dir)) continue;
+            try
+            {
+                foreach (var fi in new DirectoryInfo(dir).EnumerateFiles("*", SearchOption.AllDirectories))
+                {
+                    try { fi.Delete(); } catch { }
+                }
+            }
+            catch { }
+        }
     }
 
     private void BuildDataPage(bool dark)
@@ -582,32 +850,29 @@ public sealed partial class SettingsView
         };
         PageBodyStack.Children.Add(new FluentSettingsCard("导出阅读统计与书单", "以标准 CSV 表格导出每本书的阅读时长与进度", "share-up", csvBtn, dark: dark));
 
-        if (_library.SettingsHistory.Entries.Count > 0)
+        var histPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        bool canUndo = _library.SettingsHistory.Entries.Any(e => !e.Undone && _library.SettingsHistory.CanActuate(e, applyUndo: true));
+        var undoBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Content = L10n.T("撤销上次改动"), IsEnabled = canUndo };
+        undoBtn.Click += (_, _) =>
         {
-            var histPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-            bool canUndo = _library.SettingsHistory.Entries.Any(e => !e.Undone && _library.SettingsHistory.CanActuate(e, applyUndo: true));
-            var undoBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Content = L10n.T("撤销上次改动"), IsEnabled = canUndo };
-            undoBtn.Click += (_, _) =>
+            if (_library.SettingsHistory.TryUndo() is not null)
             {
-                if (_library.SettingsHistory.TryUndo() is not null)
-                {
-                    BroadcastReaderSettingsWithoutSelfRefresh();
-                    App.CurrentApp.BroadcastAppearanceChanged();
-                }
-            };
-            var redoBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Content = L10n.T("重做"), IsEnabled = _library.SettingsHistory.CanRedo };
-            redoBtn.Click += (_, _) =>
+                BroadcastReaderSettingsWithoutSelfRefresh();
+                App.CurrentApp.BroadcastAppearanceChanged();
+            }
+        };
+        var redoBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Content = L10n.T("重做"), IsEnabled = _library.SettingsHistory.CanRedo };
+        redoBtn.Click += (_, _) =>
+        {
+            if (_library.SettingsHistory.TryRedo() is not null)
             {
-                if (_library.SettingsHistory.TryRedo() is not null)
-                {
-                    BroadcastReaderSettingsWithoutSelfRefresh();
-                    App.CurrentApp.BroadcastAppearanceChanged();
-                }
-            };
-            histPanel.Children.Add(undoBtn);
-            histPanel.Children.Add(redoBtn);
-            PageBodyStack.Children.Add(new FluentSettingsCard("设置变更历史", $"已记录 {_library.SettingsHistory.Entries.Count} 条近期改动", "history", histPanel, dark: dark));
-        }
+                BroadcastReaderSettingsWithoutSelfRefresh();
+                App.CurrentApp.BroadcastAppearanceChanged();
+            }
+        };
+        histPanel.Children.Add(undoBtn);
+        histPanel.Children.Add(redoBtn);
+        PageBodyStack.Children.Add(new FluentSettingsCard("设置变更历史", $"已记录 {_library.SettingsHistory.Entries.Count} 条近期改动", "history", histPanel, dark: dark));
     }
 
     private void BuildAboutPage(bool dark)

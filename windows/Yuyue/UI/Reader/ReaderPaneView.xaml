@@ -82,8 +82,29 @@
                     VerticalAlignment="Center" />
             </Grid>
 
-            <!-- 右：高频操控区（搜索 / 排版 / 听书 / 分屏 / 笔记·书伴·演播 / 更多） -->
+            <!-- 右：高频操控区（前情 / 全文翻译 / 搜索 / 排版 / 听书 / 分屏 / 笔记·书伴·演播 / 更多） -->
             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="3" VerticalAlignment="Center">
+                <Button
+                    x:Name="RecapTopPillBtn"
+                    Visibility="Collapsed"
+                    Style="{StaticResource YYToolbarIconButtonStyle}"
+                    Padding="8,0"
+                    ToolTipService.ToolTip="查看上次阅读前情提要（不剧透）"
+                    Click="RecapTopPill_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <ContentPresenter x:Name="IconRecapPill" VerticalAlignment="Center" />
+                        <TextBlock x:Name="RecapTopPillLabel" Text="前情" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Button
+                    x:Name="TranslateBtn"
+                    Visibility="Collapsed"
+                    Style="{StaticResource YYToolbarIconButtonStyle}"
+                    Padding="8,0"
+                    ToolTipService.ToolTip="开启或关闭整章双语对照翻译"
+                    Click="ToggleTranslate_Click">
+                    <TextBlock x:Name="TranslateBtnLabel" Text="译" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </Button>
                 <Button
                     x:Name="SearchBtn"
                     Style="{StaticResource YYToolbarIconButtonStyle}"
@@ -315,11 +336,11 @@
                     </StackPanel>
                 </Border>
 
-                <!-- 查词浮卡 -->
+                <!-- 查词浮卡（含完整 HTML 词典展开） -->
                 <Border
                     x:Name="WordCard"
                     Visibility="Collapsed"
-                    Width="336"
+                    Width="356"
                     HorizontalAlignment="Left"
                     VerticalAlignment="Top"
                     Padding="14,12"
@@ -342,8 +363,66 @@
                                 <Button x:Name="WordSaveBtn" Style="{StaticResource YYFluentButtonStyle}" Height="24" MinHeight="24" FontSize="11" Padding="8,0" Content="加入生词" Click="WordSave_Click" />
                             </StackPanel>
                         </Grid>
-                        <TextBlock x:Name="WordMeaningText" FontSize="12.5" Foreground="{ThemeResource YYText1Brush}" TextWrapping="Wrap" MaxLines="6" />
-                        <TextBlock x:Name="WordSourceText" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" />
+                        <TextBlock x:Name="WordMeaningText" FontSize="12.5" Foreground="{ThemeResource YYText1Brush}" TextWrapping="Wrap" MaxLines="5" />
+                        <WebView2
+                            x:Name="DictEntryWebView"
+                            Visibility="Collapsed"
+                            Height="210"
+                            DefaultBackgroundColor="Transparent" />
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="WordSourceText" Grid.Column="0" FontSize="10.5" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" MaxLines="1" TextTrimming="CharacterEllipsis" />
+                            <Button
+                                x:Name="FullDictEntryBtn"
+                                Grid.Column="1"
+                                Visibility="Collapsed"
+                                Style="{StaticResource YYTextActionButtonStyle}"
+                                FontSize="11"
+                                MinHeight="22"
+                                Padding="6,0"
+                                Foreground="{ThemeResource YYAccentBrush}"
+                                Content="更多释义"
+                                Click="ToggleFullDictEntry_Click" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- 双击句子翻译浮卡 -->
+                <Border
+                    x:Name="SentenceCard"
+                    Visibility="Collapsed"
+                    Width="360"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    Padding="14,12"
+                    CornerRadius="10"
+                    Background="{ThemeResource YYCardBrush}"
+                    BorderBrush="{ThemeResource YYLineBrush}"
+                    BorderThickness="1">
+                    <StackPanel Spacing="8">
+                        <Grid ColumnSpacing="6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="句子翻译" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource YYAccentBrush}" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                <Button x:Name="CopySentenceTransBtn" Style="{StaticResource YYTextActionButtonStyle}" FontSize="11" MinHeight="22" Padding="6,0" Content="拷贝" Click="CopySentenceTrans_Click" />
+                                <Button Style="{StaticResource YYToolbarIconButtonStyle}" Width="24" Height="24" MinWidth="24" MinHeight="24" Padding="0" Content="×" Click="CloseSentenceCard_Click" />
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock x:Name="SentenceOrigText" FontFamily="Georgia" FontSize="12" Foreground="{ThemeResource YYText2Brush}" TextWrapping="Wrap" MaxLines="4" TextTrimming="CharacterEllipsis" />
+                        <Border Height="1" Background="{ThemeResource YYLineBrush}" />
+                        <StackPanel x:Name="SentenceLoadingRow" Orientation="Horizontal" Spacing="8" Visibility="Collapsed" VerticalAlignment="Center">
+                            <ProgressRing IsActive="True" Width="14" Height="14" />
+                            <TextBlock Text="正在翻译…" FontSize="12" Foreground="{ThemeResource YYText2Brush}" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <ScrollViewer MaxHeight="200">
+                            <TextBlock x:Name="SentenceTransText" FontSize="13" LineHeight="21" Foreground="{ThemeResource YYText1Brush}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                        </ScrollViewer>
                     </StackPanel>
                 </Border>
 
@@ -360,15 +439,50 @@
                     BorderBrush="{ThemeResource YYLineBrush}"
                     BorderThickness="1">
                     <StackPanel Spacing="6">
-                        <Grid>
-                            <TextBlock x:Name="InfoPopupTitle" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource YYAccentBrush}" VerticalAlignment="Center" />
-                            <Button HorizontalAlignment="Right" Style="{StaticResource YYToolbarIconButtonStyle}" Width="24" Height="24" MinWidth="24" MinHeight="24" Padding="0" Content="×" Click="CloseInfoPopup_Click" />
+                        <Grid ColumnSpacing="6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="InfoPopupTitle" Grid.Column="0" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource YYAccentBrush}" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" Style="{StaticResource YYToolbarIconButtonStyle}" Width="24" Height="24" MinWidth="24" MinHeight="24" Padding="0" Content="×" Click="CloseInfoPopup_Click" />
                         </Grid>
                         <ScrollViewer MaxHeight="220">
-                            <TextBlock x:Name="InfoPopupBody" FontSize="13" Foreground="{ThemeResource YYText1Brush}" TextWrapping="Wrap" LineHeight="21" />
+                            <TextBlock x:Name="InfoPopupBody" FontSize="13" Foreground="{ThemeResource YYText1Brush}" TextWrapping="Wrap" LineHeight="21" IsTextSelectionEnabled="True" />
                         </ScrollViewer>
                     </StackPanel>
                 </Border>
+
+                <!-- 异地进度冲突浮卡（右上角） -->
+                <ContentPresenter
+                    x:Name="ElsewhereCardHost"
+                    Visibility="Collapsed"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Top"
+                    Margin="0,12,16,0" />
+
+                <!-- 底部情境浮条栈（睡前返回 / TXT 编码存疑 / 回到刚才位置，垂直堆叠永不重叠） -->
+                <StackPanel
+                    x:Name="BottomOverlayStack"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom"
+                    Margin="0,0,0,14"
+                    Spacing="8">
+                    <ContentPresenter x:Name="SleepReturnHost" Visibility="Collapsed" HorizontalAlignment="Center" />
+                    <ContentPresenter x:Name="DoubtPillHost" Visibility="Collapsed" HorizontalAlignment="Center" />
+                    <Button
+                        x:Name="ReturnPillBtn"
+                        Visibility="Collapsed"
+                        HorizontalAlignment="Center"
+                        Style="{StaticResource YYFluentButtonStyle}"
+                        Height="30"
+                        MinHeight="30"
+                        Padding="12,0"
+                        CornerRadius="15"
+                        Click="ReturnPill_Click">
+                        <TextBlock x:Name="ReturnPillText" Text="↩ 回到刚才位置" FontSize="11.5" FontWeight="Medium" VerticalAlignment="Center" />
+                    </Button>
+                </StackPanel>
 
                 <!-- 顶部轻提醒条 -->
                 <Border

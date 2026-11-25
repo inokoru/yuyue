@@ -687,80 +687,70 @@ public sealed partial class LibraryView
             ? ""
             : value.Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ').Trim();
 
-    // ---------- 合集墙子页 ----------
-    private void RenderCollectionsSubView(bool dark)
+    private List<BookCollection> GetOrderedCollections()
     {
-        var p = ThemeHelper.Palette(dark);
-        var tc = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+        var pinned = _library.Prefs.PinnedCollectionIds;
+        var pinnedSet = new HashSet<string>(pinned, StringComparer.OrdinalIgnoreCase);
 
-        var addBtn = new Button
+        var pinnedList = new List<BookCollection>();
+        foreach (string pid in pinned)
         {
-            Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"],
-            Content = L10n.T("+ 新建合集"),
+            var found = _collections.FirstOrDefault(c => string.Equals(c.Id, pid, StringComparison.OrdinalIgnoreCase));
+            if (found is not null) pinnedList.Add(found);
+        }
+
+        IEnumerable<BookCollection> rest = _collections.Where(c => !pinnedSet.Contains(c.Id));
+        rest = _library.Prefs.CollectionSort switch
+        {
+            "count" => rest.OrderByDescending(c => c.Count).ThenBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase),
+            "name" => rest.OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase),
+            _ => rest,
         };
-        addBtn.Click += (_, _) => _ = CreateNewCollectionDialogAsync();
-        HeaderRightExtras.Children.Add(addBtn);
 
-        StatusLeftText.Text = L10n.T($"共 {_collections.Count} 个合集");
-
-        if (_collections.Count == 0)
-        {
-            MainContentStack.Children.Add(BuildSubPageEmptyCard("还没有合集", "创建合集来按主题整理书架，支持直接拖拽封面到左侧合集名上归档。", dark));
-            return;
-        }
-
-        double availW = Math.Max(460, SubPageAvailableWidth);
-        int cols = Math.Max(2, (int)Math.Floor((availW + 16) / 252.0));
-        var gridStack = new StackPanel { Spacing = 16 };
-
-        for (int i = 0; i < _collections.Count; i += cols)
-        {
-            var row = new Grid { ColumnSpacing = 16 };
-            for (int c = 0; c < cols; c++)
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-            for (int c = 0; c < cols && (i + c) < _collections.Count; c++)
-            {
-                var col = _collections[i + c];
-                var card = BuildCollectionCard(col, dark);
-                Grid.SetColumn(card, c);
-                row.Children.Add(card);
-            }
-            gridStack.Children.Add(row);
-        }
-        MainContentStack.Children.Add(gridStack);
+        pinnedList.AddRange(rest);
+        return pinnedList;
     }
 
-    private Border BuildCollectionCard(BookCollection col, bool dark)
+    private void TogglePinCollection(string colId)
+    {
+        var pins = _library.Prefs.PinnedCollectionIds;
+        int existingIdx = pins.FindIndex(id => string.Equals(id, colId, StringComparison.OrdinalIgnoreCase));
+        if (existingIdx >= 0) pins.RemoveAt(existingIdx);
+        else pins.Insert(0, colId);
+        _library.SavePrefs();
+        RefreshBooks();
+    }
+
+    private void MoveCollectionOrder(string colId, int delta)
+    {
+        var ids = _collections.Select(x => x.Id).ToList();
+        int pos = ids.FindIndex(id => string.Equals(id, colId, StringComparison.OrdinalIgnoreCase));
+        int target = pos + delta;
+        if (pos < 0 || target < 0 || target >= ids.Count) return;
+        (ids[pos], ids[target]) = (ids[target], ids[pos]);
+        try { _library.Core.ReorderCollections(ids.ToArray()); } catch { }
+        RefreshBooks();
+    }
+
+    private MenuFlyout BuildCollectionContextMenu(BookCollection col, bool dark, int indexInList, int totalCount)
     {
         var p = ThemeHelper.Palette(dark);
-        var tone = BookVisuals.ResolveCollectionClothTone(col.Id, col.Icon, dark, _library.Prefs.GlobalEinkMode);
-        var emb = BookVisuals.ResolveExLibrisEmblem(col.Name, col.Icon);
-
-        var card = new Border
-        {
-            CornerRadius = new CornerRadius(10),
-            Background = ThemeHelper.Brush(p.Card),
-            BorderBrush = ThemeHelper.Brush(p.Line),
-            BorderThickness = new Thickness(1),
-            Padding = new Thickness(14),
-        };
+        bool isPinned = _library.Prefs.PinnedCollectionIds.Contains(col.Id, StringComparer.OrdinalIgnoreCase);
 
         var menu = new MenuFlyout();
         var openMi = new MenuFlyoutItem { Text = L10n.T("打开合集") };
         openMi.Click += (_, _) => SwitchTab($"col:{col.Id}");
+
+        var pinMi = new MenuFlyoutItem { Text = L10n.T(isPinned ? "取消置顶" : "置顶合集") };
+        pinMi.Click += (_, _) => TogglePinCollection(col.Id);
+
         var renameMi = new MenuFlyoutItem { Text = L10n.T("重命名合集…") };
         renameMi.Click += async (_, _) =>
         {
-            try
-            {
-                await RenameCollectionDialogAsync(col);
-            }
-            catch (Exception ex)
-            {
-                ShowToast($"重命名合集失败：{ex.Message}");
-            }
+            try { await RenameCollectionDialogAsync(col); }
+            catch (Exception ex) { ShowToast($"重命名合集失败：{ex.Message}"); }
         };
+
         var iconSub = new MenuFlyoutSubItem { Text = L10n.T("更换合集图标") };
         foreach (var (icId, icLbl) in new (string?, string)[]
         {
@@ -770,26 +760,113 @@ public sealed partial class LibraryView
         {
             string? capIc = icId;
             var imi = new MenuFlyoutItem { Text = L10n.T(icLbl) };
-            imi.Click += (_, _) =>
-            {
-                _library.Core.SetCollectionIcon(col.Id, capIc);
-                RefreshBooks();
-            };
+            imi.Click += (_, _) => { _library.Core.SetCollectionIcon(col.Id, capIc); RefreshBooks(); };
             iconSub.Items.Add(imi);
         }
+
+        menu.Items.Add(openMi);
+        menu.Items.Add(pinMi);
+        menu.Items.Add(renameMi);
+        menu.Items.Add(iconSub);
+
+        if (_library.Prefs.CollectionSort == "custom" && totalCount > 1)
+        {
+            menu.Items.Add(new MenuFlyoutSeparator());
+            var upMi = new MenuFlyoutItem { Text = L10n.T("往前挪"), IsEnabled = indexInList > 0 };
+            upMi.Click += (_, _) => MoveCollectionOrder(col.Id, -1);
+            var dnMi = new MenuFlyoutItem { Text = L10n.T("往后挪"), IsEnabled = indexInList + 1 < totalCount };
+            dnMi.Click += (_, _) => MoveCollectionOrder(col.Id, +1);
+            menu.Items.Add(upMi);
+            menu.Items.Add(dnMi);
+        }
+
+        menu.Items.Add(new MenuFlyoutSeparator());
         var delMi = new MenuFlyoutItem { Text = L10n.T("删除合集"), Foreground = ThemeHelper.Brush(p.Danger) };
         delMi.Click += (_, _) =>
         {
+            _library.Prefs.PinnedCollectionIds.RemoveAll(id => string.Equals(id, col.Id, StringComparison.OrdinalIgnoreCase));
+            _library.SavePrefs();
             _library.DeleteCollection(col.Id);
             RefreshBooks();
             ShowToast($"已删除合集「{col.Name}」");
         };
-        menu.Items.Add(openMi);
-        menu.Items.Add(renameMi);
-        menu.Items.Add(iconSub);
-        menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(delMi);
-        card.ContextFlyout = menu;
+        return menu;
+    }
+
+    // ---------- 合集墙子页 ----------
+    private void RenderCollectionsSubView(bool dark)
+    {
+        var sortSeg = YYChrome.MakeSegmentedBar(
+            [("custom", "自定义"), ("count", "书本最多"), ("name", "按名称")],
+            string.IsNullOrWhiteSpace(_library.Prefs.CollectionSort) ? "custom" : _library.Prefs.CollectionSort,
+            val =>
+            {
+                _library.Prefs.CollectionSort = val;
+                _library.SavePrefs();
+                RefreshBooks();
+            },
+            dark,
+            fontSize: 12,
+            height: 32);
+        HeaderLeftExtras.Children.Add(sortSeg);
+
+        var addBtn = new Button
+        {
+            Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"],
+            Content = L10n.T("+ 新建合集"),
+        };
+        addBtn.Click += (_, _) => _ = CreateNewCollectionDialogAsync();
+        HeaderRightExtras.Children.Add(addBtn);
+
+        var ordered = GetOrderedCollections();
+        StatusLeftText.Text = L10n.T($"共 {ordered.Count} 个合集");
+
+        if (ordered.Count == 0)
+        {
+            MainContentStack.Children.Add(BuildSubPageEmptyCard("还没有合集", "创建合集来按主题整理书架，支持直接拖拽封面到左侧合集名上归档。", dark));
+            return;
+        }
+
+        double availW = Math.Max(460, SubPageAvailableWidth);
+        int cols = Math.Max(2, (int)Math.Floor((availW + 16) / 252.0));
+        var gridStack = new StackPanel { Spacing = 16 };
+
+        for (int i = 0; i < ordered.Count; i += cols)
+        {
+            var row = new Grid { ColumnSpacing = 16 };
+            for (int c = 0; c < cols; c++)
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            for (int c = 0; c < cols && (i + c) < ordered.Count; c++)
+            {
+                var col = ordered[i + c];
+                var card = BuildCollectionCard(col, dark, i + c, ordered.Count);
+                Grid.SetColumn(card, c);
+                row.Children.Add(card);
+            }
+            gridStack.Children.Add(row);
+        }
+        MainContentStack.Children.Add(gridStack);
+    }
+
+    private Border BuildCollectionCard(BookCollection col, bool dark, int indexInList, int totalCount)
+    {
+        var p = ThemeHelper.Palette(dark);
+        var tc = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+        var tone = BookVisuals.ResolveCollectionClothTone(col.Id, col.Icon, dark, _library.Prefs.GlobalEinkMode);
+        var emb = BookVisuals.ResolveExLibrisEmblem(col.Name, col.Icon);
+        bool isPinned = _library.Prefs.PinnedCollectionIds.Contains(col.Id, StringComparer.OrdinalIgnoreCase);
+
+        var card = new Border
+        {
+            CornerRadius = new CornerRadius(10),
+            Background = ThemeHelper.Brush(p.Card),
+            BorderBrush = ThemeHelper.Brush(isPinned ? tc.Edge : p.Line),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(14),
+            ContextFlyout = BuildCollectionContextMenu(col, dark, indexInList, totalCount),
+        };
 
         var g = new Grid { ColumnSpacing = 14 };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(56) });
@@ -829,14 +906,32 @@ public sealed partial class LibraryView
         g.Children.Add(well);
 
         var info = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
-        info.Children.Add(L10n.Skip(new TextBlock
+        var titleRow = new Grid { ColumnSpacing = 6 };
+        titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        titleRow.Children.Add(L10n.Skip(new TextBlock
         {
             Text = col.Name,
             FontSize = 14.5,
             FontWeight = FontWeights.SemiBold,
             Foreground = ThemeHelper.Brush(p.T1),
             TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
         }));
+        if (isPinned)
+        {
+            var pinBadge = new Border
+            {
+                CornerRadius = new CornerRadius(4),
+                Background = ThemeHelper.Brush(tc.Soft),
+                Padding = new Thickness(6, 1, 6, 1),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock { Text = L10n.T("置顶"), FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(tc.Accent) },
+            };
+            Grid.SetColumn(pinBadge, 1);
+            titleRow.Children.Add(pinBadge);
+        }
+        info.Children.Add(titleRow);
         info.Children.Add(new TextBlock
         {
             Text = L10n.T($"{col.Count} 本"),

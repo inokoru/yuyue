@@ -57,8 +57,11 @@ public sealed partial class SettingsView : UserControl, ITabContent
         _disposed = true;
         _library.Kokoro.StateChanged -= OnVoiceModelStateChanged;
         _library.LiveVoice.StateChanged -= OnVoiceModelStateChanged;
+        _library.Fonts.Changed -= OnFontShelfChanged;
         try { _gdriveAuthCts?.Cancel(); _gdriveAuthCts?.Dispose(); } catch { }
         _gdriveAuthCts = null;
+        try { _openRouterAuthCts?.Cancel(); _openRouterAuthCts?.Dispose(); } catch { }
+        _openRouterAuthCts = null;
     }
 
     private MainWindow _ownerWindow;
@@ -70,6 +73,7 @@ public sealed partial class SettingsView : UserControl, ITabContent
     private bool _suppressSelfRefresh;
     private bool _disposed;
     private CancellationTokenSource? _gdriveAuthCts;
+    private CancellationTokenSource? _openRouterAuthCts;
 
     private FluentSettingsCard? _kokoroCard;
     private Button? _kokoroBtn;
@@ -104,7 +108,18 @@ public sealed partial class SettingsView : UserControl, ITabContent
         InitializeComponent();
         _library.Kokoro.StateChanged += OnVoiceModelStateChanged;
         _library.LiveVoice.StateChanged += OnVoiceModelStateChanged;
+        _library.Fonts.Changed += OnFontShelfChanged;
         ApplyAppearance();
+    }
+
+    private void OnFontShelfChanged()
+    {
+        if (_disposed) return;
+        DispatcherQueue?.TryEnqueue(() =>
+        {
+            if (_disposed || _activePage != "reading") return;
+            RenderActivePage();
+        });
     }
 
     private void BroadcastReaderSettingsWithoutSelfRefresh()
