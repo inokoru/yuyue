@@ -46146,6 +46146,86 @@
           }
         }
       }
+    },
+    "暗夜" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Night"
+          }
+        }
+      }
+    },
+    "应用图标" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App Icon"
+          }
+        }
+      }
+    },
+    "点击即可更换主屏幕图标" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to change your Home Screen icon"
+          }
+        }
+      }
+    },
+    "运行语阅时应用于程序坞；退出后恢复默认宣纸图标" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shown in the Dock while running; reverts to Rice paper after quitting"
+          }
+        }
+      }
+    },
+    "暂时无法更换图标，请稍后再试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't change the icon right now. Try again later."
+          }
+        }
+      }
+    },
+    "当前正在使用的应用图标" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Current app icon"
+          }
+        }
+      }
+    },
+    "轻点切换应用图标" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to switch app icon"
+          }
+        }
+      }
+    },
+    "正在更换图标" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Changing app icon"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

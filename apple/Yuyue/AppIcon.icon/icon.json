@@ -1,28 +1,125 @@
 {
-  "fill" : {
-    "solid" : "srgb:0.98431,0.98039,0.96863,1.00000"
-  },
+  "fill-specializations" : [
+    {
+      "value" : {
+        "linear-gradient" : [
+          "srgb:0.98824,0.98431,0.97255,1.00000",
+          "srgb:0.92941,0.90980,0.86667,1.00000"
+        ]
+      }
+    },
+    {
+      "appearance" : "dark",
+      "value" : {
+        "linear-gradient" : [
+          "srgb:0.13725,0.12941,0.11373,1.00000",
+          "srgb:0.08235,0.07843,0.06667,1.00000"
+        ]
+      }
+    }
+  ],
   "groups" : [
     {
-      "layers" : [
+      "hidden-specializations" : [
         {
-          "glass" : false,
-          "image-name" : "glyph.png",
-          "name" : "glyph"
+          "value" : false
         },
         {
-          "glass" : false,
-          "image-name" : "rule.png",
-          "name" : "rule"
+          "appearance" : "dark",
+          "value" : true
+        },
+        {
+          "appearance" : "tinted",
+          "value" : true
         }
       ],
+      "layers" : [
+        {
+          "glass" : true,
+          "image-name" : "glyph-light.png",
+          "name" : "glyph-light"
+        },
+        {
+          "glass" : true,
+          "image-name" : "rule-light.png",
+          "name" : "rule-light"
+        }
+      ],
+      "name" : "Light",
       "shadow" : {
-        "kind" : "none",
-        "opacity" : 0
+        "kind" : "neutral",
+        "opacity" : 0.22
       },
+      "specular" : true,
       "translucency" : {
         "enabled" : false,
         "value" : 0
+      }
+    },
+    {
+      "hidden-specializations" : [
+        {
+          "value" : true
+        },
+        {
+          "appearance" : "dark",
+          "value" : false
+        }
+      ],
+      "layers" : [
+        {
+          "glass" : true,
+          "image-name" : "glyph-dark.png",
+          "name" : "glyph-dark"
+        },
+        {
+          "glass" : true,
+          "image-name" : "rule-dark.png",
+          "name" : "rule-dark"
+        }
+      ],
+      "name" : "Dark",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.29999999999999999
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0
+      }
+    },
+    {
+      "hidden-specializations" : [
+        {
+          "value" : true
+        },
+        {
+          "appearance" : "tinted",
+          "value" : false
+        }
+      ],
+      "layers" : [
+        {
+          "glass" : true,
+          "image-name" : "glyph-mono.png",
+          "name" : "glyph-mono"
+        },
+        {
+          "glass" : true,
+          "image-name" : "rule-mono.png",
+          "name" : "rule-mono"
+        }
+      ],
+      "name" : "Tinted",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.25
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.25
       }
     }
   ],
