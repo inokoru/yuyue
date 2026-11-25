@@ -1,0 +1,33 @@
+<svg width="256" height="256" viewBox="0 0 27600 27600" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="edge_grad_h" gradientUnits="userSpaceOnUse" x1="6870" y1="18705" x2="24704" y2="18705">
+      <stop offset="0" stop-color="#0C59A4"/>
+      <stop offset="1" stop-color="#114A8B"/>
+    </linearGradient>
+    <linearGradient id="edge_shade_h" gradientUnits="userSpaceOnUse" x1="15800" y1="13500" x2="22500" y2="24500">
+      <stop offset="0.55" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.45"/>
+    </linearGradient>
+    <linearGradient id="edge_grad_i" gradientUnits="userSpaceOnUse" x1="16272" y1="10968" x2="5133" y2="23102">
+      <stop offset="0" stop-color="#1B9DE2"/>
+      <stop offset="0.16" stop-color="#1595DF"/>
+      <stop offset="0.67" stop-color="#0680D7"/>
+      <stop offset="1" stop-color="#0078D4"/>
+    </linearGradient>
+    <linearGradient id="edge_shade_i" gradientUnits="userSpaceOnUse" x1="13500" y1="16500" x2="4200" y2="20500">
+      <stop offset="0.6" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.4"/>
+    </linearGradient>
+    <linearGradient id="edge_grad_j" gradientUnits="userSpaceOnUse" x1="2200" y1="12800" x2="25200" y2="8200">
+      <stop offset="0" stop-color="#35C1F1"/>
+      <stop offset="0.22" stop-color="#2FC2DF"/>
+      <stop offset="0.58" stop-color="#36C752"/>
+      <stop offset="1" stop-color="#66EB6E"/>
+    </linearGradient>
+  </defs>
+  <path d="M 24105 20053 a 9345 9345 0 0 1 -1053 472 10202 10202 0 0 1 -3590 646 c -4732 0 -8855 -3255 -8855 -7432 0 -1175 680 -2193 1643 -2729 -4280 180 -5380 4640 -5380 7253 0 7387 6810 8137 8276 8137 791 0 1984 -230 2704 -456 l 130 -44 a 12834 12834 0 0 0 6660 -5282 c 220 -350 -168 -757 -535 -565 z" fill="url(#edge_grad_h)"/>
+  <path d="M 24105 20053 a 9345 9345 0 0 1 -1053 472 10202 10202 0 0 1 -3590 646 c -4732 0 -8855 -3255 -8855 -7432 0 -1175 680 -2193 1643 -2729 -4280 180 -5380 4640 -5380 7253 0 7387 6810 8137 8276 8137 791 0 1984 -230 2704 -456 l 130 -44 a 12834 12834 0 0 0 6660 -5282 c 220 -350 -168 -757 -535 -565 z" fill="url(#edge_shade_h)"/>
+  <path d="M 11571 25141 a 7913 7913 0 0 1 -2273 -2137 8145 8145 0 0 1 -1514 -4740 8093 8093 0 0 1 3093 -6395 8082 8082 0 0 1 1373 -859 c 312 -148 846 -414 1554 -404 a 3236 3236 0 0 1 2569 1297 3184 3184 0 0 1 636 1866 c 0 -21 2446 -7960 -8005 -7960 -4390 0 -8004 4166 -8004 7820 0 2319 538 4170 1212 5604 a 12833 12833 0 0 0 7684 6757 12795 12795 0 0 0 3908 610 c 1414 0 2774 -233 4045 -656 a 7575 7575 0 0 1 -6278 -803 z" fill="url(#edge_grad_i)"/>
+  <path d="M 11571 25141 a 7913 7913 0 0 1 -2273 -2137 8145 8145 0 0 1 -1514 -4740 8093 8093 0 0 1 3093 -6395 8082 8082 0 0 1 1373 -859 c 312 -148 846 -414 1554 -404 a 3236 3236 0 0 1 2569 1297 3184 3184 0 0 1 636 1866 c 0 -21 2446 -7960 -8005 -7960 -4390 0 -8004 4166 -8004 7820 0 2319 538 4170 1212 5604 a 12833 12833 0 0 0 7684 6757 12795 12795 0 0 0 3908 610 c 1414 0 2774 -233 4045 -656 a 7575 7575 0 0 1 -6278 -803 z" fill="url(#edge_shade_i)"/>
+  <path d="M 16231 15886 c -80 105 -330 250 -330 566 0 260 170 512 472 723 1438 1003 4149 868 4156 868 a 5954 5954 0 0 0 3027 -839 6147 6147 0 0 0 1133 -850 6180 6180 0 0 0 1910 -4437 c 26 -2242 -796 -3732 -1133 -4392 -2120 -4141 -6694 -6525 -11668 -6525 -7011 0 -12703 5635 -12798 12620 47 -3654 3679 -6605 7996 -6605 350 0 2346 34 4200 1007 1634 858 2490 1894 3086 2921 618 1067 728 2415 728 2952 s -271 1333 -780 1990 z" fill="url(#edge_grad_j)"/>
+</svg>

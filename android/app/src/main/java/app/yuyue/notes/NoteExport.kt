@@ -509,8 +509,13 @@ fun ExportTile(t: NoteExport.Target, size: Float = 26f) {
             NoteExport.Target.Flomo -> app.yuyue.R.drawable.brand_flomo
             NoteExport.Target.Xinzhi -> app.yuyue.R.drawable.brand_xinzhi
         }
-        androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(res), null, modifier = androidx.compose.ui.Modifier.size(YY.s(size * 0.62f)),
-            colorFilter = if (t == NoteExport.Target.Notion) androidx.compose.ui.graphics.ColorFilter.tint(YY.c.t1) else null)
+        val fullBleed = t == NoteExport.Target.Flomo || t == NoteExport.Target.Xinzhi
+        androidx.compose.foundation.Image(
+            androidx.compose.ui.res.painterResource(res),
+            null,
+            modifier = androidx.compose.ui.Modifier.size(YY.s(if (fullBleed) size else size * 0.62f)),
+            colorFilter = if (t == NoteExport.Target.Notion) androidx.compose.ui.graphics.ColorFilter.tint(YY.c.t1) else null,
+        )
     }
 }
 

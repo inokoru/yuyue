@@ -310,12 +310,7 @@ private fun SourceTile(id: String, size: Float = 26f) {
         }
         when (val p = cloud(id)) {
             null -> Icon(Icons.phone, null, tint = YY.c.t2, modifier = Modifier.size(YY.s(size * 0.58f)))
-            CloudVoice.Provider.Edge -> Box(
-                Modifier.size(YY.s(size * 0.64f)).background(Color(0xFF0078D4), RoundedCornerShape(YY.s(size * 0.16f))),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("e", style = YY.font(size * 0.38f, FontWeight.Bold), color = Color.White)
-            }
+            CloudVoice.Provider.Edge -> Image(painterResource(R.drawable.brand_edge), null, modifier = Modifier.size(YY.s(size * 0.64f)))
             CloudVoice.Provider.Free -> Box(
                 Modifier.size(YY.s(size * 0.64f)).background(Color(0xFF16A34A), RoundedCornerShape(YY.s(size * 0.16f))),
                 contentAlignment = Alignment.Center,
