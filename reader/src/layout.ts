@@ -49,6 +49,7 @@ export function reindex(): void {
     const s = fragS[i];
     if (s >= 0) bySentence[s].push(f);
   });
+  allChars = null;
 }
 
 export function mode(): Mode {
@@ -478,7 +479,7 @@ function charsOf(nodes: Text[]): Chars {
   return { nodes, starts, total };
 }
 
-// All sentence text of the section, in document order (the text never changes after boot).
+// All sentence text of the section, in document order; reset by reindex() when bubbles rebuild the DOM.
 let allChars: Chars | null = null;
 const docChars = (): Chars => allChars || (allChars = charsOf(textNodesOf(frags)));
 

@@ -38,6 +38,8 @@ struct CloneVoiceView: View {
     @State private var saving = false
     @State private var savedCard: VoiceCard?
     @State private var failure: String?
+    @State private var recordError: String?
+    @State private var recordTask: Task<Void, Never>?
 
     init(context: CastContext, forName: String?, path: Binding<[CastSheet.Route]>) {
         self.core = context.core
@@ -156,6 +158,9 @@ struct CloneVoiceView: View {
             }
         }
         .onDisappear {
+            recordTask?.cancel()
+            recordTask = nil
+            recordError = nil
             recorder.stop()
             Voices.stopPreview()
             cleanupTempWav()
@@ -190,6 +195,7 @@ struct CloneVoiceView: View {
     }
 
     private func cancel() {
+        recordError = nil
         recorder.stop()
         if pathBinding == nil, let onClose { onClose() } else { dismiss() }
     }
@@ -314,12 +320,21 @@ struct CloneVoiceView: View {
                     .font(YYUI.font(11.5))
                     .monospacedDigit()
                     .foregroundStyle(YYColor.t2)
+                if let recordError {
+                    Text(recordError)
+                        .font(YYUI.font(11.5))
+                        .foregroundStyle(YYColor.danger)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, YYUI.s(4))
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.top, YYUI.s(10))
             .padding(.bottom, YYUI.s(4))
             .animation(YYMotion.quick, value: recorder.recording)
             .animation(YYMotion.standard, value: consent)
+            .animation(YYMotion.quick, value: recordError)
 
             Rectangle().fill(YYColor.line).frame(height: 0.5)
             HStack {
@@ -327,7 +342,10 @@ struct CloneVoiceView: View {
                     .font(YYUI.font(11))
                     .foregroundStyle(YYColor.t3)
                 Spacer()
-                Button(String(localized: "导入一段录音…")) { importing = true }
+                Button(String(localized: "导入一段录音…")) {
+                    recordError = nil
+                    importing = true
+                }
                     .buttonStyle(.plain)
                     .font(YYUI.font(11, .medium))
                     .foregroundStyle(YYTint.standard.accent)
@@ -502,14 +520,20 @@ struct CloneVoiceView: View {
 
     private func startRecording() {
         guard consent else { return }
-        Task {
-            guard await SampleRecorder.allowed() else {
+        recordError = nil
+        recordTask?.cancel()
+        recordTask = Task {
+            let ok = await SampleRecorder.allowed()
+            guard !Task.isCancelled else { return }
+            guard ok else {
                 failure = String(localized: "语阅没有用麦克风的权限。在系统设置的“隐私与安全性 › 麦克风”里打开。")
                 return
             }
             castContext?.player?.pause()
             Voices.stopPreview()
-            recorder.start()
+            if !recorder.start() {
+                recordError = String(localized: "麦克风启动失败，请重试，或改用下方「导入一段录音…」")
+            }
         }
     }
 
@@ -519,6 +543,7 @@ struct CloneVoiceView: View {
     }
 
     private func evaluateRecording(_ url: URL, importedFile: Bool) {
+        recordError = nil
         imported = importedFile
         checking = true
         checkResult = nil
@@ -652,6 +677,7 @@ struct CloneVoiceView: View {
     }
 
     private func redo() {
+        recordError = nil
         Voices.stopPreview()
         ClonePreviewPlayer.shared.stop()
         cleanupTempWav()
@@ -1138,7 +1164,9 @@ private struct StyleClipRecordSheet: View {
                 faultMessages = [String(localized: "请先在系统设置里允许语阅使用麦克风")]
                 return
             }
-            recorder.start()
+            if !recorder.start() {
+                faultMessages = [String(localized: "麦克风启动失败，请重试")]
+            }
         }
     }
 
@@ -1213,13 +1241,19 @@ private struct StyleClipRecordSheet: View {
         await AVAudioApplication.requestRecordPermission()
     }
 
-    func start() {
+    func start() -> Bool {
         discard()
         hasSpoken = false
         silentSeconds = 0
         #if os(iOS)
-        try? AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
-        try? AVAudioSession.sharedInstance().setActive(true)
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+            try session.setActive(true)
+        } catch {
+            cleanupFailedStart()
+            return false
+        }
         #endif
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -1227,14 +1261,38 @@ private struct StyleClipRecordSheet: View {
             AVNumberOfChannelsKey: 1,
             AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
         ]
-        guard let r = try? AVAudioRecorder(url: url, settings: settings) else { return }
+        guard let r = try? AVAudioRecorder(url: url, settings: settings) else {
+            cleanupFailedStart()
+            return false
+        }
         r.isMeteringEnabled = true
-        guard r.record() else { return }
+        guard r.record() else {
+            r.stop()
+            cleanupFailedStart()
+            return false
+        }
         recorder = r
         recording = true
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
+        return true
+    }
+
+    private func cleanupFailedStart() {
+        timer?.invalidate()
+        timer = nil
+        recorder?.stop()
+        recorder = nil
+        recording = false
+        seconds = 0
+        levels = []
+        hasSpoken = false
+        silentSeconds = 0
+        try? FileManager.default.removeItem(at: url)
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, policy: .longFormAudio)
+        #endif
     }
 
     private func tick() {

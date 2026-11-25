@@ -243,14 +243,20 @@ nonisolated enum Transcriber {
         return ["zh-CN", "en-US", Locale.current.identifier].contains { SFSpeechRecognizer(locale: Locale(identifier: $0))?.isAvailable == true }
     }
 
+    static var availableWithoutPrompt: Bool {
+        if #available(macOS 26, iOS 26, *), SpeechTranscriber.isAvailable { return true }
+        guard SFSpeechRecognizer.authorizationStatus() == .authorized else { return false }
+        return ["zh-CN", "en-US", Locale.current.identifier].contains { SFSpeechRecognizer(locale: Locale(identifier: $0))?.isAvailable == true }
+    }
+
     /// `punctuated`: the transcriber's commas and stops kept, on the word before them (文字版);
     /// for lining up, words only.
-    static func words(url: URL, spans: [TimeSpan], lang: String, offset: Double, punctuated: Bool = false) async -> AudiobookResult {
+    static func words(url: URL, spans: [TimeSpan], lang: String, offset: Double, punctuated: Bool = false, allowPrompt: Bool = true) async -> AudiobookResult {
         do {
             if #available(macOS 26, iOS 26, *), SpeechTranscriber.isAvailable {
                 return .transcribe(words: try await run(url: url, spans: spans, lang: lang, offset: offset, punctuated: punctuated))
             }
-            return .transcribe(words: try await runLegacy(url: url, spans: spans, lang: lang, offset: offset, punctuated: punctuated))
+            return .transcribe(words: try await runLegacy(url: url, spans: spans, lang: lang, offset: offset, punctuated: punctuated, allowPrompt: allowPrompt))
         } catch is CancellationError {
             return .returned
         } catch {
@@ -258,14 +264,14 @@ nonisolated enum Transcriber {
         }
     }
 
-    @concurrent private static func runLegacy(url: URL, spans: [TimeSpan], lang: String, offset: Double, punctuated: Bool) async throws -> [HeardWord] {
-        if SFSpeechRecognizer.authorizationStatus() == .notDetermined {
-            let status = await withCheckedContinuation { cont in
+    @concurrent private static func runLegacy(url: URL, spans: [TimeSpan], lang: String, offset: Double, punctuated: Bool, allowPrompt: Bool = true) async throws -> [HeardWord] {
+        let status = SFSpeechRecognizer.authorizationStatus()
+        if status != .authorized {
+            guard allowPrompt, status == .notDetermined else { throw AudiobookError.model }
+            let granted = await withCheckedContinuation { cont in
                 SFSpeechRecognizer.requestAuthorization { cont.resume(returning: $0) }
             }
-            guard status == .authorized else { throw AudiobookError.model }
-        } else if SFSpeechRecognizer.authorizationStatus() != .authorized {
-            throw AudiobookError.model
+            guard granted == .authorized else { throw AudiobookError.model }
         }
         let want: [String] = switch lang {
         case "zh": ["zh-CN", "zh-TW"]

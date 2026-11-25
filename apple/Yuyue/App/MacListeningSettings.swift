@@ -234,7 +234,7 @@ final class ListeningFocus {
     /// The source whose voices the middle shows; nil: the list of sources.
     var source: VoiceSource?
     /// Which kind of book the voices are being chosen for.
-    var book = VoiceBook.zh
+    var book = VoiceBook.defaultForUI
     /// The voice last clicked to listen to, for the right column's card.
     var listening: String?
     /// Active sources (with a key, explicitly enabled, or auto-discovered on localhost).
@@ -247,9 +247,36 @@ final class ListeningFocus {
     /// The voices heard since the line last changed; the others keep a red dot.
     private(set) var heard: Set<String> = []
     private var probing = false
+    @ObservationIgnored private var userPickedBook = false
+    @ObservationIgnored private var syncedDefaultBook = VoiceBook.defaultForUI
     #if DEBUG
     var debugApplied = false
     #endif
+
+    private init() {
+        for name in [AppLanguage.changed, NSLocale.currentLocaleDidChangeNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.syncDefaultBookIfNeeded() }
+            }
+        }
+    }
+
+    func selectBook(_ next: VoiceBook) {
+        userPickedBook = true
+        book = next
+        listening = nil
+        Voices.stopPreview()
+    }
+
+    func syncDefaultBookIfNeeded() {
+        let target = VoiceBook.defaultForUI
+        if syncedDefaultBook != target {
+            syncedDefaultBook = target
+            userPickedBook = false
+        }
+        guard !userPickedBook else { return }
+        if book != target { book = target }
+    }
 
     func hasCustomLine(_ book: VoiceBook) -> Bool { lines[book] != nil }
     func customLine(_ book: VoiceBook) -> String? { lines[book] }
@@ -309,6 +336,7 @@ final class ListeningFocus {
 
     func open(_ s: VoiceSource) {
         Voices.stopPreview()
+        syncDefaultBookIfNeeded()
         source = s
         listening = nil
         macPanel = false
@@ -323,6 +351,7 @@ final class ListeningFocus {
     }
 
     func reload() {
+        syncDefaultBookIfNeeded()
         added = CloudVoice.Provider.allCases.filter(\.isSetUp)
         if let p = page, !p.isSetUp { page = nil }
         tick &+= 1

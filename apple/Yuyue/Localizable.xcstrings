@@ -48512,6 +48512,156 @@
           }
         }
       }
+    },
+    "麦克风启动失败，请重试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't start the microphone. Try again."
+          }
+        }
+      }
+    },
+    "麦克风启动失败，请重试，或改用下方「导入一段录音…」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't start the microphone. Try again, or use “Import an Audio Clip…” below."
+          }
+        }
+      }
+    },
+    "从当前句继续" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continuing from this sentence"
+          }
+        }
+      }
+    },
+    "关闭声音提示" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dismiss voice prompt"
+          }
+        }
+      }
+    },
+    "刚下好" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Just downloaded"
+          }
+        }
+      }
+    },
+    "暂不换声音，关闭提示" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep current voice and dismiss"
+          }
+        }
+      }
+    },
+    "暂不更换" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep current voice"
+          }
+        }
+      }
+    },
+    "点此选择声音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a voice"
+          }
+        }
+      }
+    },
+    "已切换为「%@」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switched to “%@”"
+          }
+        }
+      }
+    },
+    "暂不更换，继续用「%@」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep using “%@”"
+          }
+        }
+      }
+    },
+    "离线声音「%@」好了" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline voice “%@” is ready"
+          }
+        }
+      }
+    },
+    "离线声音「%@」已下好 · 点右侧换声音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline voice “%@” ready · use Change Voice"
+          }
+        }
+      }
+    },
+    "离线声音「%@」已下好，点此选择声音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline voice “%@” is ready. Choose a voice."
+          }
+        }
+      }
+    },
+    "离线声音「%@」已下好，点击选择声音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline voice “%@” is ready. Click to choose a voice."
+          }
+        }
+      }
+    },
+    "离线声音「%@」已下好 · 点击选声音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline voice “%@” is ready · Click to choose voice"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

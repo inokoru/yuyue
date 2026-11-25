@@ -584,6 +584,10 @@ object Voices {
                     LiveVoiceModel.register(app.library.core, app.library.dataDir)
                     app.library.core.cardFind(null, id)?.let { return CardVoice(it) }
                 }
+                ClonedVoices.find(id)?.takeIf { it.isReady }?.let { return it }
+                if (app != null) {
+                    app.library.core.cardFind(null, id)?.let { return CardVoice(it) }
+                }
                 ClonedVoices.find(id)
             }
             id.startsWith("cloud.") -> {

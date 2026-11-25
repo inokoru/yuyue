@@ -65,6 +65,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.yuyue.L10n
 import app.yuyue.R
 import app.yuyue.design.Icons
 import app.yuyue.design.YYSheetDragHandle
@@ -212,6 +213,10 @@ private enum class VoiceBook(val tag: String) {
             "Dialogue" to "\"Is it you?\" she asked. \"Of course it is,\" he said.",
             "Numbers" to "Chapter 12, page 304: the year was 1859.",
         )
+
+    companion object {
+        fun defaultForUi(): VoiceBook = if (L10n.chinese) ZH else EN
+    }
 }
 
 /** What 朗读's pages share while it's open: the line each kind of book is tried on, the voices
@@ -227,8 +232,26 @@ private object ListeningFocus {
     var listening by mutableStateOf<String?>(null)
     var failedId by mutableStateOf<String?>(null)
     var failedMessage by mutableStateOf<String?>(null)
-    var book by mutableStateOf(VoiceBook.ZH)
+    var book by mutableStateOf(VoiceBook.defaultForUi())
+        private set
+    private var syncedChinese = L10n.chinese
+    private var userPickedBook = false
     private var job: Job? = null
+
+    fun syncDefaultBook() {
+        val chinese = L10n.chinese
+        if (!userPickedBook || syncedChinese != chinese) {
+            syncedChinese = chinese
+            userPickedBook = false
+            book = VoiceBook.defaultForUi()
+        }
+    }
+
+    fun selectBook(target: VoiceBook) {
+        syncedChinese = L10n.chinese
+        userPickedBook = true
+        book = target
+    }
 
     fun hasCustomLine(b: VoiceBook) = lines.containsKey(b)
     fun line(b: VoiceBook) = lines[b] ?: b.line
@@ -352,6 +375,8 @@ private fun SourceTile(id: String, size: Float = 26f) {
 /** 朗读: 声音来源, then 语速. */
 @Composable
 fun ListeningPage(open: (String) -> Unit) {
+    val chineseUi = L10n.chinese
+    LaunchedEffect(chineseUi) { ListeningFocus.syncDefaultBook() }
     val context = LocalContext.current
     val lib = app.yuyue.YuyueApp.instance.library
     val kokoroState = app.yuyue.speech.KokoroModel.state
@@ -565,6 +590,8 @@ fun VoiceSourcePage(id: String, openSettings: () -> Unit) {
     }
     val scope = rememberCoroutineScope()
     val focus = ListeningFocus
+    val chineseUi = L10n.chinese
+    LaunchedEffect(chineseUi) { focus.syncDefaultBook() }
     val book = focus.book
     val chosenID by rememberPref(book.key, "")
     var voices by remember { mutableStateOf<List<BookVoice>?>(null) }
@@ -610,7 +637,7 @@ fun VoiceSourcePage(id: String, openSettings: () -> Unit) {
     Box(Modifier.fillMaxSize().background(YY.c.bg)) {
         Column(Modifier.fillMaxSize().padding(horizontal = YY.s(16))) {
             Row(Modifier.padding(top = YY.s(4), bottom = YY.s(8)), verticalAlignment = Alignment.CenterVertically) {
-                BookSegments(book) { focus.book = it; focus.listening = null; focus.stop() }
+                BookSegments(book) { focus.selectBook(it); focus.listening = null; focus.stop() }
                 Spacer(Modifier.weight(1f))
                 if (id == NEURAL) {
                     Text(

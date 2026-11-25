@@ -491,8 +491,8 @@ import UIKit
             let n = Int(speech.buffer.frameLength)
             let samples = speech.buffer.floatChannelData.map { Array(UnsafeBufferPointer(start: $0[0], count: n)) } ?? []
             var heard = plain
-            if Transcriber.available {
-                let r = await Transcriber.words(url: url, spans: [TimeSpan(t0: 0, t1: speech.seconds)], lang: chinese ? "zh" : "en", offset: 0)
+            if Transcriber.availableWithoutPrompt {
+                let r = await Transcriber.words(url: url, spans: [TimeSpan(t0: 0, t1: speech.seconds)], lang: chinese ? "zh" : "en", offset: 0, allowPrompt: false)
                 if case let .transcribe(words) = r { heard = words.map { $0.text }.joined(separator: chinese ? "" : " ") }
             }
             let print = await SpeakerPrint.print(core, dataDir, samples: samples, rate: Speech.format.sampleRate)

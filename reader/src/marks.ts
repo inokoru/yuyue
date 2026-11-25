@@ -241,6 +241,7 @@ function lineBoxes(r: Range): Box[] {
 /** Draws the marks again from their places, after the content was rebuilt (气泡). */
 export function redraw(): void {
   draw();
+  if (hitQuery) setHits(hitQuery, hitCurrent);
   if (source != null) setSource(source);
 }
 
@@ -271,9 +272,14 @@ export function markAt(x: number, y: number): string | null {
 
 // ---------- search hits ----------
 
+let hitQuery: string | null = null;
+let hitCurrent: { s: number; nth: number } | null | undefined = null;
+
 /** Marks every place `query` turns up in this section; `current` ({s, nth}) gets the solid
  *  colour. Returns the number of hits. */
 export function setHits(query: string | null, current?: { s: number; nth: number } | null): number {
+  hitQuery = query;
+  hitCurrent = current;
   const reg = registry();
   const q = (query || '').toLowerCase();
   if (!q) {

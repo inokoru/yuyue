@@ -647,5 +647,8 @@
   "遇到什么问题、想要什么功能，或哪本书打开不对，都可以直接写": "Describe a bug, suggest a feature, or tell us about a book that won't open properly",
   "需要回复？": "Need a reply?",
   "还没有自定义字体": "No custom fonts yet",
-  "支持导入 .ttf、.otf 字体文件，仅保存在本机。": "Import .ttf or .otf font files. They stay on this device."
+  "支持导入 .ttf、.otf 字体文件，仅保存在本机。": "Import .ttf or .otf font files. They stay on this device.",
+  "这台设备内存不足 6 GB，暂不支持离线克隆": "Offline voice cloning needs 6 GB+ memory",
+  "已存本机 · 内存不足 6 GB，暂不能朗读": "Saved on device · needs 6 GB+ memory",
+  "这台设备内存不足 6 GB，暂不支持用本机克隆声音朗读": "This device needs 6 GB+ memory to use local cloned voices"
 }

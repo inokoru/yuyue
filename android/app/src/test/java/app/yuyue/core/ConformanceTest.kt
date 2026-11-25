@@ -34,7 +34,7 @@ import kotlin.math.sign
 /**
  * Layer 2: Shared UniFFI conformance runner (Android / Kotlin side).
  *
- * Runs the exact same `fixtures/conformance/*.json` scenarios as Rust, C#, and Swift.
+ * Runs the exact same JSON scenarios under `fixtures/conformance/` as Rust, C#, and Swift.
  * Requires host `libyuyue_core.{so,dylib,dll}` on `jna.library.path` (built via
  * `cargo build -p yuyue-core --lib` in CI); skips gracefully if absent during plain local unit runs.
  */

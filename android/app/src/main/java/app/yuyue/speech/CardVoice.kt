@@ -53,6 +53,13 @@ class CardVoice(
         val cached = Engine.readSentenceCache(app.cacheDir, bookID, card.id, card.version, style, language, text)
         if (cached != null) return@withContext cached
 
+        if (LiveVoiceModel.deviceUnsupported) {
+            if (card.origin is CardOrigin.Cloned) {
+                throw IllegalStateException(t("这台设备内存不足 6 GB，暂不支持用本机克隆声音朗读"))
+            }
+            throw IllegalStateException(t("离线语音合成失败，请重试或换一个声音"))
+        }
+
         val speech = Engine.synthesizeWithGate(
             core = core,
             dataDir = dataDir,

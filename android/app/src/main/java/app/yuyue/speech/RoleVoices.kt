@@ -135,7 +135,13 @@ class ClonedVoice(val meta: JSONObject) : BookVoice {
     override fun speaks(tag: String) = true
 
     override suspend fun render(text: String, language: String): Speech? {
-        val r = remote?.takeIf { useElevenLabs } ?: throw CloudVoice.Failure(t("这个克隆的声音还不能念：要先在设置里接上 ElevenLabs"))
+        val r = remote?.takeIf { useElevenLabs } ?: throw CloudVoice.Failure(
+            if (LiveVoiceModel.deviceUnsupported && !useElevenLabs) {
+                t("这台设备内存不足 6 GB，暂不支持用本机克隆声音朗读")
+            } else {
+                t("这个克隆的声音还不能念：要先在设置里接上 ElevenLabs")
+            }
+        )
         return CloudVoice(CloudVoice.Provider.ElevenLabs, r, name, null).render(text, language)
     }
 }

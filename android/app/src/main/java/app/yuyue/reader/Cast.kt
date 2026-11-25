@@ -158,15 +158,15 @@ fun CastSheet(model: ReaderModel, dismiss: () -> Unit) {
     }
     fun sample(name: String?): String {
         if (name == null) return if (language.startsWith("zh")) "你好，这是我的声音。" else "Hello, this is how I sound."
-        val script = runCatching { core.sectionScript(model.bookID, section.toUInt()) }.getOrNull()
+        val lines = runCatching { core.sectionBubbles(model.bookID, section.toUInt()) }.getOrDefault(emptyList())
         val sentences = runCatching { core.sentences(model.bookID, section.toUInt()) }.getOrDefault(emptyList())
-        val l = script?.lines?.firstOrNull { (it.who?.let { w -> w == name || w.endsWith(name) || name.endsWith(w) } ?: false) && it.first == it.last }
+        val l = lines.firstOrNull { (it.who?.let { w -> w == name || w.endsWith(name) || name.endsWith(w) } ?: false) && it.first == it.last }
         if (l != null) {
             val cps = sentences.getOrNull(l.first.toInt())?.codePoints()?.toArray()
             if (cps != null) {
                 val a = minOf(l.start.toInt(), cps.size)
                 val b = minOf(maxOf(l.end.toInt(), a), cps.size)
-                val q = String(cps, a, b - a).trim()
+                val q = String(cps, a, b - a).trimStart { it.isWhitespace() || it == '—' || it == '―' || it == '–' || it == '-' }.trim()
                 if (q.length >= 2) return q
             }
         }
@@ -278,7 +278,7 @@ fun CastSheet(model: ReaderModel, dismiss: () -> Unit) {
                             val voice: BookVoice = if (app.yuyue.speech.LiveVoiceModel.canRun(model.library.dataDir)) {
                                 app.yuyue.speech.CardVoice(card)
                             } else {
-                                ClonedVoices.find(card.id) ?: app.yuyue.speech.CardVoice(card)
+                                ClonedVoices.find(card.id)?.takeIf { it.isReady } ?: app.yuyue.speech.CardVoice(card)
                             }
                             if (route.name != null) set(route.name, (roleOf(route.name) ?: plain).copy(voice = card.id))
                             else { model.player?.choose(voice, language); version++ }
