@@ -79,6 +79,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.yuyue.design.Icons
+import app.yuyue.design.SyncDialogSystemBars
 import app.yuyue.design.YY
 import app.yuyue.design.YYMotion
 import app.yuyue.design.pressable
@@ -664,6 +665,7 @@ fun PodcastReaderScreen(
             shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
             dragHandle = null,
         ) {
+            SyncDialogSystemBars()
             PodcastInterruptSheetCard(
                 library = library,
                 issue = issue,

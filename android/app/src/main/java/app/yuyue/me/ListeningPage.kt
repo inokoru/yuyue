@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -397,8 +398,13 @@ fun ListeningPage(open: (String) -> Unit) {
                 Row(Modifier.fillMaxWidth().clickable { open(id) }.padding(vertical = YY.s(9)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(10))) {
                     SourceTile(id, 30f)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(YY.s(1))) {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(6))) {
-                            Text(voiceSourceTitle(id), style = YY.font(11.5f, FontWeight.Medium), color = if (id == SYSTEM) YY.c.t2 else YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                        FlowRow(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(YY.s(6)),
+                            verticalArrangement = Arrangement.spacedBy(YY.s(3)),
+                            itemVerticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(voiceSourceTitle(id), style = YY.font(11.5f, FontWeight.Medium), color = if (id == SYSTEM) YY.c.t2 else YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             when {
                                 id == NEURAL -> SourceBadgePill(t("推荐"), 0)
                                 id == SYSTEM -> SourceBadgePill(t("不推荐"), 1)
@@ -672,7 +678,7 @@ fun VoiceSourcePage(id: String, openSettings: () -> Unit) {
                     item { DayLine(t("%lld 位", others.size)) }
                     items(others, key = { it.id }) { v -> VoiceMessage(v, book, scope) }
                 }
-                if (p == null) item {
+                if (id == SYSTEM) item {
                     Text(t("想要更自然的音色：点击右上角 ⚙ 下载语音数据，完成后即可使用。"), style = YY.font(10f), color = YY.c.t3, textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth().padding(vertical = YY.s(14)))
                 }
