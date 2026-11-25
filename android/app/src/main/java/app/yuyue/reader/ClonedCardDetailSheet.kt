@@ -193,6 +193,10 @@ fun ClonedCardDetailPanel(
         }
     }
 
+    if (LiveVoiceModel.deviceUnsupported && !alsoEleven) {
+        YYNote(t("这台设备内存不足 6 GB，暂不支持用本机克隆声音朗读"), YY.c.t3)
+    }
+
     // Six acting tones
     YYLabel(t("加上语气"), t("可只录几档，没录的用平常语气"))
     YYGroup {
@@ -561,6 +565,8 @@ private fun StyleClipRecorderPanel(
                             if (r.start()) {
                                 recorder = r
                                 recording = true
+                            } else {
+                                errorMsg = t("麦克风启动失败，请重试")
                             }
                         }
                     },

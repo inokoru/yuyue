@@ -395,6 +395,25 @@ enum VoiceSource: Hashable {
 /// The two kinds of book a voice is chosen for.
 enum VoiceBook: String, CaseIterable, Identifiable {
     case zh, en
+
+    /// Default tab matching the effective app UI language (respecting any `AppLanguage` override and system preference).
+    static var defaultForUI: VoiceBook {
+        switch AppLanguage.chosen {
+        case .zh:
+            return .zh
+        case .en:
+            return .en
+        case .system:
+            let effective = UserDefaults.standard.stringArray(forKey: "AppleLanguages")?.first
+                ?? Locale.preferredLanguages.first
+                ?? Bundle.main.preferredLocalizations.first
+            if let effective {
+                return effective.lowercased().hasPrefix("zh") ? .zh : .en
+            }
+            return AppLanguage.running == .zh ? .zh : .en
+        }
+    }
+
     var id: String { rawValue }
     var key: String { "player.voice." + rawValue }
     var title: String { self == .zh ? String(localized: "中文书") : String(localized: "英文书") }
@@ -651,7 +670,7 @@ struct VoiceSourcePage: View {
             }
             #endif
             HStack {
-                BookSegments(selection: book) { scrolled = false; focus.book = $0; focus.listening = nil; Voices.stopPreview() }
+                BookSegments(selection: book) { scrolled = false; focus.selectBook($0) }
                 Spacer(minLength: 8)
                 #if os(macOS)
                 Text("点语音听，指着点“选择”").font(.yy(size: 11)).foregroundStyle(YYColor.t3).lineLimit(1)

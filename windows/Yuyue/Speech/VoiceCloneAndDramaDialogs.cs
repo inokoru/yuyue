@@ -2424,6 +2424,23 @@ public static class VoiceCloneAndDramaDialogs
             {
                 try
                 {
+                    var bubbles = library.Core.SectionBubbles(bookId, sec);
+                    var sentences = library.Core.Sentences(bookId, sec);
+                    foreach (var ln in bubbles)
+                    {
+                        if (ln.First != ln.Last || ln.Who is null) continue;
+                        bool matches = ln.Who == roleName
+                                       || ln.Who.EndsWith(roleName, StringComparison.Ordinal)
+                                       || roleName.EndsWith(ln.Who, StringComparison.Ordinal);
+                        if (!matches || ln.First >= sentences.Length) continue;
+                        string quote = SliceScalarRange(sentences[ln.First], ln.Start, ln.End).TrimStart('—', '―', '–', '-').Trim();
+                        if (quote.Length >= 2) return quote;
+                    }
+                }
+                catch { }
+
+                try
+                {
                     var script = library.Core.SectionScript(bookId, sec);
                     var sentences = library.Core.Sentences(bookId, sec);
                     foreach (var ln in script.Lines)

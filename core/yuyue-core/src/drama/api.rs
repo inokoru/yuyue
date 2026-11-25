@@ -1409,7 +1409,7 @@ fn fill_gaps(model: &[ModelScene], rules: &[DramaScene], n: u32) -> Vec<ModelSce
 
 impl YuyueCore {
     /// 无引号体: the model's lines of a section, checked and stored (sentence, start, end).
-    fn unquoted_lines_of(&self, book: &str, section: u32) -> Option<Vec<(u32, u32, u32)>> {
+    pub(crate) fn unquoted_lines_of(&self, book: &str, section: u32) -> Option<Vec<(u32, u32, u32)>> {
         lock(&self.store).get(&entity(book), &format!("unquoted{section}")).ok().flatten().and_then(|v| serde_json::from_value(v).ok())
     }
 

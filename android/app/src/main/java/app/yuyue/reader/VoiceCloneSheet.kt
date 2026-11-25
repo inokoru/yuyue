@@ -248,6 +248,20 @@ fun VoiceClonePanel(
         }
     }
 
+    if (LiveVoiceModel.deviceUnsupported) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(YY.c.card, RoundedCornerShape(16.dp))
+                .border(0.5.dp, YY.c.line, RoundedCornerShape(16.dp))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(t("这台设备内存不足 6 GB，暂不支持离线克隆"), fontSize = 13.sp, color = YY.c.t2)
+        }
+        return
+    }
+
     when (val s = step) {
         CloneStep.Record -> {
             Column(
@@ -327,7 +341,7 @@ fun VoiceClonePanel(
                                         recorder = r
                                         recording = true
                                     } else {
-                                        errorMsg = t("麦克风启动失败，请重试")
+                                        errorMsg = t("麦克风启动失败，请重试，或改用下方「导入一段录音…」")
                                     }
                                 }
                             },

@@ -8,6 +8,7 @@
 // selection and taps work as before. Names and avatars are outside the fragments and never count
 // as text. setBubbles(null) puts the section back as it came.
 
+import { reindex } from './layout';
 import { sentenceText, textNodes } from './marks';
 
 export interface BubbleLine {
@@ -260,7 +261,8 @@ export function setBubbles(lines: BubbleLine[] | null): boolean {
     root.innerHTML = original;
     original = null;
     document.documentElement.removeAttribute('data-yy-bubbles');
-    if (!lines) return true;
+    if (!lines || !lines.length) return true;
+    reindex();
   }
   if (!lines || !lines.length) return false;
   original = root.innerHTML;

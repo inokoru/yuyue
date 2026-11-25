@@ -34,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -284,7 +285,7 @@ fun VoicePickerSheet(
                             val voice: BookVoice = if (LiveVoiceModel.canRun(dataDir)) {
                                 CardVoice(card)
                             } else {
-                                ClonedVoices.find(card.id) ?: CardVoice(card)
+                                ClonedVoices.find(card.id)?.takeIf { it.isReady } ?: CardVoice(card)
                             }
                             scope.launch {
                                 onSelect(voice)
@@ -630,18 +631,20 @@ fun VoiceGroupsContent(
     YYLabel(t("我的"), t("克隆与本书角色"), top = if (!hasFollowRow && !showRecommended) 4.dp else YY.s(18))
     YYGroup {
         for (card in clonedCards) {
-            val v: BookVoice = if (LiveVoiceModel.canRun(dataDir)) {
+            val eleven = ClonedVoices.find(card.id)?.takeIf { it.isReady }
+            val canLocal = LiveVoiceModel.canRun(dataDir)
+            val blockedLowRam = LiveVoiceModel.deviceUnsupported && eleven == null
+            val v: BookVoice = if (canLocal) {
                 CardVoice(card)
             } else {
-                ClonedVoices.find(card.id) ?: CardVoice(card)
+                eleven ?: CardVoice(card)
             }
             val toneCount = card.clips.size
-            val sub = if (LiveVoiceModel.canRun(dataDir)) {
-                t("本机 · 已录 %lld 档语气", toneCount.toLong())
-            } else if ((v as? ClonedVoice)?.isReady == true) {
-                "ElevenLabs"
-            } else {
-                t("已存本机 · 下载朗读声音后可念")
+            val sub = when {
+                canLocal -> t("本机 · 已录 %lld 档语气", toneCount.toLong())
+                eleven != null -> "ElevenLabs"
+                LiveVoiceModel.deviceUnsupported -> t("已存本机 · 内存不足 6 GB，暂不能朗读")
+                else -> t("已存本机 · 下载朗读声音后可念")
             }
             row {
                 VoiceChoiceRow(
@@ -653,19 +656,29 @@ fun VoiceGroupsContent(
                     selected = selectedId == card.id,
                     previewState = previewStateOf(card.id),
                     error = previewErrorOf(card.id),
-                    onPreview = if (LiveVoiceModel.canRun(dataDir) || (v as? ClonedVoice)?.isReady == true) ({ playPreview(v) }) else null,
+                    onPreview = if (canLocal || eleven != null) ({ playPreview(v) }) else null,
                     onMore = { onOpenDetail(card.id) },
-                    onClick = { onPickVoice(v) },
+                    onClick = {
+                        if (blockedLowRam) {
+                            stopLocalPreview()
+                            previewFailedKey = card.id
+                            previewError = t("这台设备内存不足 6 GB，暂不支持用本机克隆声音朗读")
+                        } else {
+                            onPickVoice(v)
+                        }
+                    },
                 )
             }
         }
         for (card in designedCards) {
+            val blockedLowRam = LiveVoiceModel.deviceUnsupported
             val v = CardVoice(card, bookID)
-            val sub = if (!bookTitle.isNullOrEmpty()) {
+            val baseSub = if (!bookTitle.isNullOrEmpty()) {
                 t("为《%@》生成", bookTitle) + " · " + cardSummaryLine(card)
             } else {
                 cardSummaryLine(card)
             }
+            val sub = if (blockedLowRam) t("已存本机 · 内存不足 6 GB，暂不能朗读") else baseSub
             row {
                 VoiceChoiceRow(
                     avatar = card.name.take(1).ifEmpty { "角" },
@@ -678,30 +691,55 @@ fun VoiceGroupsContent(
                     error = previewErrorOf(card.id),
                     onPreview = if (LiveVoiceModel.canRun(dataDir)) ({ playPreview(v) }) else null,
                     onMore = null,
-                    onClick = { onPickVoice(v) },
+                    onClick = {
+                        if (blockedLowRam) {
+                            stopLocalPreview()
+                            previewFailedKey = card.id
+                            previewError = t("这台设备内存不足 6 GB，暂不支持用本机克隆声音朗读")
+                        } else {
+                            onPickVoice(v)
+                        }
+                    },
                 )
             }
         }
+        val cloneUnsupported = LiveVoiceModel.deviceUnsupported
         row {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clickable { onOpenClone(null, null) }
+                    .alpha(if (cloneUnsupported) 0.45f else 1f)
+                    .then(if (cloneUnsupported) Modifier else Modifier.clickable { onOpenClone(null, null) })
                     .padding(vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Box(
-                    Modifier.size(28.dp).background(YY.tint.accentSoft, CircleShape),
+                    Modifier
+                        .size(28.dp)
+                        .background(if (cloneUnsupported) YY.c.inset else YY.tint.accentSoft, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("＋", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = YY.tint.accent)
+                    Text("＋", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = if (cloneUnsupported) YY.c.t3 else YY.tint.accent)
                 }
                 Column(Modifier.weight(1f)) {
-                    Text(t("克隆一个声音"), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = YY.tint.accent)
-                    Text(t("录 10 秒自己的声音 · 不联网、不花钱"), fontSize = 10.5.sp, color = YY.c.t3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        t("克隆一个声音"),
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (cloneUnsupported) YY.c.t2 else YY.tint.accent,
+                    )
+                    Text(
+                        if (cloneUnsupported) t("这台设备内存不足 6 GB，暂不支持离线克隆") else t("录 10 秒自己的声音 · 不联网、不花钱"),
+                        fontSize = 10.5.sp,
+                        color = YY.c.t3,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
-                Icon(Icons.chevronRight, null, tint = YY.c.t3, modifier = Modifier.size(12.dp))
+                if (!cloneUnsupported) {
+                    Icon(Icons.chevronRight, null, tint = YY.c.t3, modifier = Modifier.size(12.dp))
+                }
             }
         }
     }

@@ -12,6 +12,7 @@ struct ReaderBridgeContractTests {
             .deletingLastPathComponent()
     }
 
+    @MainActor
     @Test func `Apple ReaderMessage decodes all canonical bridge messages from schema`() throws {
         let root = Self.repoRoot()
         let schemaData = try Data(contentsOf: root.appending(path: "reader/schema/bridge-messages.schema.json"))

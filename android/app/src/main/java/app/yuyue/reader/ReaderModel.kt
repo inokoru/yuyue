@@ -229,17 +229,11 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         pager.ink = paperTokens.ink.toArgb()
         pager.accent = paperTokens.accent.toArgb()
         pager.chapterTitle = { sec -> detail?.let { chapterTitle(it, sec) } }
-        // A few quotes in the first chapters: a book with dialogue.
+        // Whether the book has dialogue: cached in core across all chapters.
         kotlinx.coroutines.MainScope().launch {
-            val n = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                var count = 0
-                for (sec in 0u until 12u) {
-                    count += runCatching { core.sectionScript(bookID, sec) }.getOrNull()?.lines?.size ?: 0
-                    if (count >= 6) break
-                }
-                count
+            hasDialogue = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { core.bookHasDialogue(bookID) }.getOrDefault(false)
             }
-            hasDialogue = n >= 6
         }
         Prefs.string(STYLE_KEY).let { saved -> MarkStyle.entries.firstOrNull { it.name == saved }?.let { lastStyle = it } }
         reloadNotes()
@@ -254,10 +248,15 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         }
         player?.let { p ->
             p.onSentence = { spot, duration, elapsed, playing -> reading(spot, duration, elapsed, playing); setListening(playing) }
-            p.onStop = { pager.clearInk(); setListening(false) }
+            p.onStop = { flush(); pager.clearInk(); setListening(false) }
             p.onSleep = { spot ->
                 rememberSleep(p.sleepFrom ?: spot)
-                run { core.addBookmark(bookID, spot.section.toUInt(), spot.sentence.toUInt()) }
+                try {
+                    core.addBookmark(bookID, spot.section.toUInt(), spot.sentence.toUInt())
+                } catch (e: Exception) {
+                    failure = Library.message(e)
+                }
+                reloadNotes()
                 show(Library.Toast(Library.Toast.Icon.Check, t("定时到了，停在这里"), t("加了一个书签")))
             }
         }
@@ -430,6 +429,12 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         checkFlag(spot)
         if (playing) sleepHeard()
         if (spot.section == section && sentence != spot.sentence) sentence = spot.sentence
+        val spoken = Position(spot.section.toUInt(), maxOf(0, spot.sentence).toUInt())
+        if (playing || opened) {
+            opened = true
+            save(spoken)
+            if (!playing) flush()
+        }
         showUnread()
         // A chapter the recording only follows as a whole: no ink line; the page keeps up.
         if (player?.narrator != null && player.guide?.chapterOnly(spot.section) == true) {
@@ -865,11 +870,11 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
     private fun save(p: Position) {
         if (p == saved) return
         saved = p
-        saving?.cancel()
+        if (saving != null) return
         saving = library.scope.launch {
-            delay(1000)
+            delay(300)
             saving = null
-            write(p)
+            saved?.let(::write)
         }
     }
 
@@ -1109,7 +1114,10 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         section = cur.section ?: 0
         page = cur.page
         pageCount = layout.pageCount
-        val p = pager.here() ?: return
+        val activeSpot = player?.spot?.takeIf {
+            it.section == section && ((isPlaying && following) || (player.state == app.yuyue.speech.Player.State.Paused && isOnScreen(it)))
+        }
+        val p = activeSpot?.position ?: pager.here() ?: return
         if (opened) save(p) else { opened = true; saved = p }
         sentence = p.sentence.toInt()
     }

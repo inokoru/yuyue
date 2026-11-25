@@ -300,13 +300,13 @@ const api = {
   setBubbles(lines: bubbles.BubbleLine[] | null): void {
     // The text nodes are rebuilt, so keep the place by sentence.
     const at = L.firstVisibleSentence();
+    const atTop = L.mode() === 'scrolled' && window.pageYOffset < 1;
     if (!bubbles.setBubbles(lines)) return;
     L.reindex();
     lastAnchor = null;
-    ink.rebuild();
     marks.redraw();
-    relayout(null, true);
-    if (at != null) L.scrollToSentence(at, false, 'top');
+    foreign.drawVocab();
+    relayout(!atTop && at != null ? L.sentenceAnchor(at) : null, true);
   },
   setVocab(words: string[] | null): void {
     foreign.setVocab(words);

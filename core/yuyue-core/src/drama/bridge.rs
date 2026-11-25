@@ -183,6 +183,35 @@ pub struct CastPick {
 
 #[uniffi::export]
 impl YuyueCore {
+    /// Fast check on book open: whether the book has enough dialogue (quoted, dash `——`, or
+    /// script `人物：`) to offer dialogue features. Scans at most the first 12 sections without
+    /// building a full-book cast or drama state, stopping as soon as 6 distinct utterances are found.
+    pub fn book_has_dialogue(&self, book_id: String) -> Result<bool> {
+        let n = self.manifest(&book_id)?.sections.len() as u32;
+        let mut count = 0usize;
+        for s in 0..n.min(12) {
+            let sentences = match self.sentences(book_id.clone(), s) {
+                Ok(v) => v,
+                Err(crate::error::CoreError::NotFound { .. }) => continue,
+                Err(e) => return Err(e),
+            };
+            let segs = super::spans::segments(&sentences, self.unquoted_lines_of(&book_id, s).as_deref());
+            let mut seen = std::collections::HashSet::new();
+            for seg in &segs {
+                if matches!(seg.kind, SegKind::Speech | SegKind::Thought)
+                    && let Some(u) = seg.utterance
+                    && seen.insert(u)
+                {
+                    count += 1;
+                    if count >= 6 {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
+    }
+
     /// The people to offer for a line in `sentence`: those in its scene, most lines there first;
     /// a scene that doesn't say, everyone who speaks in the section.
     pub fn drama_line_people(&self, book_id: String, section: u32, sentence: u32) -> Result<Vec<CastPick>> {
@@ -336,7 +365,150 @@ mod tests {
         assert!(b0.iter().any(|b| b.who.as_deref() == Some("阿青")), "{b0:?}");
         let b1 = core.section_bubbles(book.id.clone(), 1).unwrap();
         assert!(b1.len() >= 2, "{b1:?}");
+        assert!(core.book_has_dialogue(book.id.clone()).unwrap());
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn book_has_dialogue_fixtures_and_non_dialogue_guards() {
+        let dir = std::env::temp_dir().join(format!("yuyue-has-dlg-{}", getrandom::u64().unwrap()));
+        let core = YuyueCore::open(dir.to_string_lossy().into_owned(), "test".into(), "test".into()).unwrap();
+        let root = env!("CARGO_MANIFEST_DIR");
+
+        // Dialogue fixtures: quoted & dash/script books must all return true.
+        for fixture in ["dash-dialogue.txt", "hongloumeng.epub", "great-gatsby.epub", "pride-and-prejudice.epub"] {
+            let book = core.import_book(format!("{root}/../../fixtures/books/{fixture}")).unwrap();
+            assert!(core.book_has_dialogue(book.id.clone()).unwrap(), "{fixture} should have dialogue");
+        }
+
+        // Non-dialogue EPUB & PDF fixtures must return Ok(false) cleanly (never NotFound on PDFs).
+        for fixture in ["edge-cases.epub", "sample.pdf"] {
+            let book = core.import_book(format!("{root}/../../fixtures/books/{fixture}")).unwrap();
+            assert!(!core.book_has_dialogue(book.id.clone()).unwrap(), "{fixture} should not have dialogue");
+        }
+        let check_txt = |name: &str, body: &str| -> bool {
+            let p = dir.join(name);
+            std::fs::write(&p, body).unwrap();
+            let book = core.import_book(p.to_string_lossy().into_owned()).unwrap();
+            core.book_has_dialogue(book.id).unwrap()
+        };
+
+        // 1. Prose with mid-sentence `——` dashes in every paragraph -> false.
+        let mut mid_dash = String::new();
+        for ch in 1..=12 {
+            mid_dash.push_str(&format!("第{ch}章 散文随笔\n\n"));
+            for p in 0..8 {
+                mid_dash.push_str(&format!(
+                    "清晨的微风拂过湖面——水面泛起细碎的涟漪，远处传来钟声。行人走在青石板路上——这是第{ch}章第{p}段的记录，一切如常。\n\n"
+                ));
+            }
+        }
+        assert!(!check_txt("mid-dash.txt", &mid_dash), "mid-sentence dashes must not trigger book_has_dialogue");
+
+        // 2. Prose with 1-3 leading `——` epigraphs/attributions per chapter across 12 chapters -> false.
+        let mut epigraph_book = String::new();
+        for ch in 1..=12 {
+            epigraph_book.push_str(&format!("第{ch}章 随想\n\n"));
+            epigraph_book.push_str("世上本没有路，走的人多了，也便成了路。\n——鲁迅\n\n");
+            if ch % 2 == 0 {
+                epigraph_book.push_str("学而不思则罔，思而不学则殆。\n——《论语》\n\n");
+            }
+            if ch % 3 == 0 {
+                epigraph_book.push_str("人固有一死，或重于泰山，或轻于鸿毛。\n——摘自《史记》。\n\n");
+            }
+            for p in 0..8 {
+                epigraph_book.push_str(&format!(
+                    "山间的气候变化很快，午后常常飘来一阵细雨。第{ch}章第{p}段记载着四季更替与草木枯荣，并无人物交谈。\n\n"
+                ));
+            }
+        }
+        assert!(!check_txt("epigraphs.txt", &epigraph_book), "leading —— epigraphs must not trigger book_has_dialogue");
+
+        // 3. Prose with occasional non-dialogue colons (注意：/例如：/总结：/第一：) -> false.
+        let mut colon_prose = String::new();
+        for ch in 1..=12 {
+            colon_prose.push_str(&format!("第{ch}章 技术笔记\n\n"));
+            colon_prose.push_str("注意：操作前请先备份原始数据。\n例如：在低温环境下电池容量会下降。\n总结：以上步骤适用于大多数场景。\n第一：检查电源连接是否稳固。\n第二：确认系统日志没有异常。\n也就是说：稳定运行取决于前期准备。\n\n");
+            for p in 0..6 {
+                colon_prose.push_str(&format!("本节继续说明第{ch}章第{p}项工程规范的细节与背景。\n\n"));
+            }
+        }
+        assert!(!check_txt("colon-prose.txt", &colon_prose), "non-dialogue prose colons must not trigger book_has_dialogue");
+
+        // 4. Plain prose without dialogue -> false.
+        let mut plain = String::new();
+        for ch in 1..=12 {
+            plain.push_str(&format!("第{ch}章 风景\n\n"));
+            for p in 0..6 {
+                plain.push_str(&format!("秋日的傍晚格外安静，夕阳斜照在古老的城墙上，第{ch}章第{p}段只描写静谧的秋色。\n\n"));
+            }
+        }
+        assert!(!check_txt("plain.txt", &plain), "plain prose must not trigger book_has_dialogue");
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn book_has_dialogue_hongloumeng_speed_and_all_fixtures() {
+        let dir = std::env::temp_dir().join(format!("yuyue-bench-dlg-{}", getrandom::u64().unwrap()));
+        let core = YuyueCore::open(dir.to_string_lossy().into_owned(), "test".into(), "test".into()).unwrap();
+        let root = env!("CARGO_MANIFEST_DIR");
+
+        // Benchmark cold book_has_dialogue vs cold section_script vs cold section_bubbles on hongloumeng.epub.
+        let hlm_path = format!("{root}/../../fixtures/books/hongloumeng.epub");
+        let hlm = core.import_book(hlm_path.clone()).unwrap();
+        let t0 = std::time::Instant::now();
+        let has = core.book_has_dialogue(hlm.id.clone()).unwrap();
+        let d_has = t0.elapsed();
+        assert!(has);
+
+        // Fresh core for uncached section_script timing.
+        let dir2 = std::env::temp_dir().join(format!("yuyue-bench-sc-{}", getrandom::u64().unwrap()));
+        let core2 = YuyueCore::open(dir2.to_string_lossy().into_owned(), "test".into(), "test".into()).unwrap();
+        let hlm2 = core2.import_book(hlm_path.clone()).unwrap();
+        let t1 = std::time::Instant::now();
+        let sc = core2.section_script(hlm2.id.clone(), 2).unwrap();
+        let d_script = t1.elapsed();
+        assert!(!sc.lines.is_empty());
+
+        // Fresh core for uncached section_bubbles timing.
+        let dir3 = std::env::temp_dir().join(format!("yuyue-bench-bub-{}", getrandom::u64().unwrap()));
+        let core3 = YuyueCore::open(dir3.to_string_lossy().into_owned(), "test".into(), "test".into()).unwrap();
+        let hlm3 = core3.import_book(hlm_path).unwrap();
+        let t2 = std::time::Instant::now();
+        let bub = core3.section_bubbles(hlm3.id.clone(), 2).unwrap();
+        let d_bubbles = t2.elapsed();
+        assert!(!bub.is_empty());
+
+        println!(
+            "[BENCH hongloumeng.epub] book_has_dialogue={:?} | section_script={:?} | section_bubbles={:?}",
+            d_has, d_script, d_bubbles
+        );
+
+        // Inspect all fixtures in fixtures/books/.
+        let mut entries: Vec<_> = std::fs::read_dir(format!("{root}/../../fixtures/books"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        entries.sort_by_key(|e| e.file_name());
+        for entry in entries {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let path = entry.path().to_string_lossy().into_owned();
+            match core.import_book(path) {
+                Ok(b) => {
+                    let t = std::time::Instant::now();
+                    let res = core.book_has_dialogue(b.id);
+                    println!("[FIXTURE {name}] book_has_dialogue={res:?} ({:?})", t.elapsed());
+                }
+                Err(e) => {
+                    println!("[FIXTURE {name}] import_book error (expected for broken/empty): {e}");
+                }
+            }
+        }
+
+        std::fs::remove_dir_all(dir).ok();
+        std::fs::remove_dir_all(dir2).ok();
+        std::fs::remove_dir_all(dir3).ok();
     }
 }
 

@@ -35,6 +35,8 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         return resolved
     }
 
+    static let changed = Notification.Name("yuyue.appLanguageChanged")
+
     static func choose(_ l: AppLanguage) {
         cachedChosen = l
         switch l {
@@ -42,6 +44,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         case .zh: UserDefaults.standard.set(["zh-Hans"], forKey: key)
         case .en: UserDefaults.standard.set(["en"], forKey: key)
         }
+        NotificationCenter.default.post(name: changed, object: nil)
     }
 
     /// The language the app is showing now.

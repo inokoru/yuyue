@@ -305,9 +305,9 @@ final class ReaderModel {
             }
         }
         Task { [core, bookID, weak self] in
-            // A few quotes in the first chapters with them: a book with dialogue.
-            let n = await Self.countOpeningLines(core, bookID: bookID)
-            self?.hasDialogue = n >= 6
+            // Whether the book has enough dialogue to offer bubbles / cast / audio drama.
+            let has = await Self.loadHasDialogue(core, bookID: bookID)
+            self?.hasDialogue = has
         }
         rebuildObserver = NotificationCenter.default.addObserver(forName: .bookWillRebuild, object: nil, queue: nil) { [weak self] n in
             let id = n.object as? String
@@ -1021,14 +1021,8 @@ extension ReaderModel: ReaderPagerDelegate {
         }
     }
 
-    @concurrent nonisolated private static func countOpeningLines(_ core: YuyueCore, bookID: String) async -> Int {
-        var count = 0
-        for s in UInt32(0) ..< 12 {
-            if Task.isCancelled { break }
-            count += ((try? core.sectionScript(bookId: bookID, section: s))?.lines.count) ?? 0
-            if count >= 6 { break }
-        }
-        return count
+    @concurrent nonisolated private static func loadHasDialogue(_ core: YuyueCore, bookID: String) async -> Bool {
+        (try? core.bookHasDialogue(bookId: bookID)) ?? false
     }
 
     @concurrent nonisolated private static func loadLinePeople(_ core: YuyueCore, bookID: String, section: UInt32, sentence: UInt32) async -> [CastPick] {

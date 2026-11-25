@@ -294,14 +294,21 @@ struct CastContext {
     /// One of their own lines in this chapter, to try voices with; or a few plain words.
     func sample(_ name: String?) -> String {
         guard let name else { return Voices.sampleText(language) }
-        if let script = try? core.sectionScript(bookId: bookID, section: section),
-           let sentences = try? core.sentences(bookId: bookID, section: section),
-           let line = script.lines.first(where: { ($0.who.map { $0 == name || $0.hasSuffix(name) || name.hasSuffix($0) } ?? false) && $0.first == $0.last }),
-           sentences.indices.contains(Int(line.first)) {
-            let s = Array(sentences[Int(line.first)])
-            let a = min(Int(line.start), s.count), b = min(max(Int(line.end), a), s.count)
-            let quote = String(s[a ..< b]).trimmingCharacters(in: .whitespaces)
-            if quote.count >= 2 { return quote }
+        if let bubbles = try? core.sectionBubbles(bookId: bookID, section: section),
+           let sentences = try? core.sentences(bookId: bookID, section: section) {
+            for line in bubbles {
+                guard let who = line.who,
+                      who == name || who.hasSuffix(name) || name.hasSuffix(who),
+                      line.first == line.last,
+                      sentences.indices.contains(Int(line.first)) else { continue }
+                let s = Array(sentences[Int(line.first)])
+                let a = min(Int(line.start), s.count), b = min(max(Int(line.end), a), s.count)
+                var quote = String(s[a ..< b]).trimmingCharacters(in: .whitespacesAndNewlines)
+                while quote.hasPrefix("—") || quote.hasPrefix("―") || quote.hasPrefix("–") {
+                    quote = String(quote.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                if quote.count >= 2 { return quote }
+            }
         }
         return language.hasPrefix("zh") ? "我是\(name)。" : "I am \(name)."
     }

@@ -1083,6 +1083,7 @@ struct RecordButton: ButtonStyle {
             .font(.yy(size: big ? 14.5 : (compact ? 12 : 13), weight: main ? .semibold : .regular).monospacedDigit())
             .foregroundStyle(main ? tint.onBlack : YYColor.t1)
             .lineLimit(1)
+            .minimumScaleFactor(0.85)
             .padding(.horizontal, big ? 18 : (compact ? 10 : 12))
             .frame(height: height)
             .background(main ? tint.black : YYColor.pill, in: .rect(cornerRadius: radius))
@@ -1385,7 +1386,6 @@ struct FinishedSheet: View {
                 } label: { Text("记为读过").frame(maxWidth: .infinity) }
                     .buttonStyle(RecordButton(main: true, big: true))
                     .keyboardShortcut(.defaultAction)
-                    .layoutPriority(1)
             }
             .padding(.top, 14)
         }

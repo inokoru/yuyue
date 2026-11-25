@@ -882,6 +882,64 @@ html[data-yy-eink="1"] #yy-content .yy-bq-ch:active { transform: none; opacity: 
   #yy-content .yy-bq-av, #yy-content .yy-bq-ch, #yy-content .yy-bq-who { transition: none !important; }
   #yy-content .yy-bq-av:active, #yy-content .yy-bq-ch:active { transform: none; }
 }
+/* Dark papers (dark, kaminight, and custom dark 我的纸): restore reader-owned bubbles with WCAG-checked contrast. */
+html[data-yy-paper="dark"]:not([data-yy-eink="1"]) #yy-content p.yy-pod-line,
+html[data-yy-paper="kaminight"]:not([data-yy-eink="1"]) #yy-content p.yy-pod-line {
+  background-color: color-mix(in srgb, var(--yy-p-ink) 8%, var(--yy-p-bg)) !important;
+}
+html[data-yy-paper="dark"]:not([data-yy-eink="1"]) #yy-content p.yy-pod-line.yy-pod-h1,
+html[data-yy-paper="kaminight"]:not([data-yy-eink="1"]) #yy-content p.yy-pod-line.yy-pod-h1 {
+  background-color: color-mix(in srgb, var(--yy-p-accent) 15%, var(--yy-p-bg)) !important;
+}
+
+html[data-yy-paper="dark"]:not([data-yy-eink="1"]) #yy-content .yy-bq-nm,
+html[data-yy-paper="kaminight"]:not([data-yy-eink="1"]) #yy-content .yy-bq-nm {
+  color: var(--yy-p-ink-2) !important;
+}
+html[data-yy-paper="dark"]:not([data-yy-eink="1"]) #yy-content .yy-bq-nm b,
+html[data-yy-paper="kaminight"]:not([data-yy-eink="1"]) #yy-content .yy-bq-nm b {
+  color: color-mix(in srgb, var(--yy-c) 45%, var(--yy-p-ink)) !important;
+}
+
+html[data-yy-paper="dark"]:not([data-yy-eink="1"]) #yy-content .yy-bq-av,
+html[data-yy-paper="kaminight"]:not([data-yy-eink="1"]) #yy-content .yy-bq-av {
+  background-color: color-mix(in srgb, var(--yy-c) 28%, var(--yy-p-bg)) !important;
+  color: color-mix(in srgb, var(--yy-c) 35%, var(--yy-p-ink)) !important;
+}
+
+html[data-yy-paper="dark"]:not([data-yy-eink="1"]) #yy-content .yy-bq-bu,
+html[data-yy-paper="kaminight"]:not([data-yy-eink="1"]) #yy-content .yy-bq-bu {
+  background-color: color-mix(in srgb, var(--yy-c) 20%, var(--yy-p-bg)) !important;
+  box-shadow: inset 0 0 0 .5px color-mix(in srgb, var(--yy-c) 34%, transparent);
+}
+
+html[data-yy-paper="dark"]:not([data-yy-eink="1"]) #yy-content .yy-bq-unk .yy-bq-av,
+html[data-yy-paper="kaminight"]:not([data-yy-eink="1"]) #yy-content .yy-bq-unk .yy-bq-av {
+  background-color: color-mix(in srgb, var(--yy-p-ink) 12%, var(--yy-p-bg)) !important;
+  color: var(--yy-p-ink-2) !important;
+}
+html[data-yy-paper="dark"]:not([data-yy-eink="1"]) #yy-content .yy-bq-unk .yy-bq-nm b,
+html[data-yy-paper="kaminight"]:not([data-yy-eink="1"]) #yy-content .yy-bq-unk .yy-bq-nm b {
+  color: var(--yy-p-ink-2) !important;
+}
+html[data-yy-paper="dark"]:not([data-yy-eink="1"]) #yy-content .yy-bq-unk .yy-bq-bu,
+html[data-yy-paper="kaminight"]:not([data-yy-eink="1"]) #yy-content .yy-bq-unk .yy-bq-bu {
+  background-color: transparent !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--yy-p-ink) 26%, transparent);
+}
+
+html[data-yy-paper="dark"]:not([data-yy-eink="1"]) #yy-content .yy-bq-ch,
+html[data-yy-paper="kaminight"]:not([data-yy-eink="1"]) #yy-content .yy-bq-ch {
+  color: color-mix(in srgb, var(--yy-c, #888) 36%, var(--yy-p-ink)) !important;
+  background-color: color-mix(in srgb, var(--yy-p-accent) 18%, var(--yy-p-bg)) !important;
+}
+html[data-yy-paper="dark"]:not([data-yy-eink="1"]) #yy-content .yy-bq-ch-more,
+html[data-yy-paper="kaminight"]:not([data-yy-eink="1"]) #yy-content .yy-bq-ch-more {
+  color: var(--yy-p-ink-2) !important;
+  background-color: transparent !important;
+  box-shadow: inset 0 0 0 .5px color-mix(in srgb, var(--yy-p-ink) 30%, transparent);
+}
+
 html[data-yy-eink="1"] #yy-content .yy-bq-ch { background: none; color: #000000; box-shadow: inset 0 0 0 1px #000000; }
 html[data-yy-eink="1"] #yy-content .yy-bq-av { background: none; color: #000000; box-shadow: inset 0 0 0 1px #000000; }
 html[data-yy-eink="1"] #yy-content .yy-bq-nm b { color: #000000; }
