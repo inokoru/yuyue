@@ -185,31 +185,86 @@ enum ForeignCardShadow {
 }
 
 /// Puts a card under `rect` (above it when there is no room below), its left edge near the
-/// rect's.
+/// rect's, clamped inside the viewport so it never clips past the window edges.
 struct Beneath: ViewModifier {
+    nonisolated struct Placement: Equatable {
+        let origin: CGPoint
+        let scaleAnchor: UnitPoint
+    }
+
     let rect: CGRect
     let size: CGSize
+    let insets: EdgeInsets
     @State private var card = CGSize(width: 330, height: 150)
     @State private var shown = false
 
-    init(rect: CGRect, in size: CGSize) {
+    init(rect: CGRect, in size: CGSize, insets: EdgeInsets = .init()) {
         self.rect = rect
         self.size = size
+        self.insets = insets
+    }
+
+    nonisolated static func place(rect: CGRect, card: CGSize, in size: CGSize, insets: EdgeInsets = .init()) -> Placement {
+        let gap: CGFloat = 10
+        let margin: CGFloat = 12
+
+        let minX = insets.leading + margin
+        let maxX = size.width - insets.trailing - card.width - margin
+        let x: CGFloat
+        if maxX >= minX {
+            x = min(max(rect.minX - 30, minX), maxX)
+        } else {
+            let available = size.width - insets.leading - insets.trailing
+            let centered = insets.leading + (available - card.width) / 2
+            x = min(max(0, centered), max(0, size.width - card.width))
+        }
+
+        let minY = insets.top + margin
+        let bottomEdge = size.height - insets.bottom - margin
+        let maxY = bottomEdge - card.height
+        let belowY = rect.maxY + gap
+        let aboveY = rect.minY - card.height - gap
+
+        let y: CGFloat
+        let anchorY: CGFloat
+        if maxY < minY {
+            let available = size.height - insets.top - insets.bottom
+            let centered = insets.top + (available - card.height) / 2
+            y = min(max(0, centered), max(0, size.height - card.height))
+            anchorY = 0.5
+        } else if belowY >= minY && belowY <= maxY {
+            y = belowY
+            anchorY = 0
+        } else if aboveY >= minY && aboveY <= maxY {
+            y = aboveY
+            anchorY = 1
+        } else if belowY < minY {
+            y = minY
+            anchorY = 0.5
+        } else if aboveY > maxY {
+            y = maxY
+            anchorY = 0.5
+        } else {
+            let spaceAbove = max(0, rect.minY - minY)
+            let spaceBelow = max(0, bottomEdge - rect.maxY)
+            y = spaceBelow >= spaceAbove ? maxY : minY
+            anchorY = 0.5
+        }
+
+        let cornerInset = min(22, card.width / 2)
+        let tip = min(max(rect.midX - x, cornerInset), card.width - cornerInset)
+        let anchorX = card.width > 0 ? min(max(tip / card.width, 0), 1) : 0.5
+        return Placement(origin: CGPoint(x: x, y: y), scaleAnchor: UnitPoint(x: anchorX, y: anchorY))
     }
 
     func body(content: Content) -> some View {
-        let below = rect.maxY + 10 + card.height < size.height - 70
-        let x = min(max(rect.minX - 30, 12), max(12, size.width - card.width - 12))
-        let y = below ? rect.maxY + 10 : max(8, rect.minY - card.height - 10)
-        let tip = min(max(rect.midX - x, 22), max(22, card.width - 22))
-        let anchorX = card.width > 0 ? min(max(tip / card.width, 0), 1) : 0.5
-        let origin = UnitPoint(x: anchorX, y: below ? 0 : 1)
+        let p = Self.place(rect: rect, card: card, in: size, insets: insets)
         content
             .onGeometryChange(for: CGSize.self) { $0.size } action: { card = $0 }
-            .scaleEffect(shown || YYMotion.reduce ? 1 : 0.92, anchor: origin)
+            .scaleEffect(shown || YYMotion.reduce ? 1 : 0.92, anchor: p.scaleAnchor)
             .opacity(shown ? 1 : 0)
             .onAppear { withAnimation(YYMotion.standard) { shown = true } }
-            .offset(x: x, y: y)
+            .offset(x: p.origin.x, y: p.origin.y)
     }
 }
 #endif

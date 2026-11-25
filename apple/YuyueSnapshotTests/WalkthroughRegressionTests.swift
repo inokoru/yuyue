@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 import YuyueCore
 @testable import Yuyue
@@ -765,6 +766,85 @@ struct WalkthroughRegressionTests {
         _ = quote.current("en")
         #expect(!invalidated.withLock { $0 })
     }
+
+    @Test func `Above selection card stays inside viewport for tall cross-column and scrolled selections`() {
+        let viewport = CGSize(width: 900, height: 680)
+        let card = CGSize(width: 332, height: 120)
+
+        // Normal mid-page selection: placed above with bottom pointer.
+        let mid = Above.place(rect: CGRect(x: 100, y: 260, width: 280, height: 48), card: card, in: viewport)
+        #expect(mid.pointer == .bottom)
+        #expect(mid.origin.y == 126)
+        #expect(mid.origin.y + card.height <= viewport.height - 12)
+
+        // Short selection at the top of a column: flips below with top pointer.
+        let top = Above.place(rect: CGRect(x: 440, y: 40, width: 280, height: 56), card: card, in: viewport)
+        #expect(top.pointer == .top)
+        #expect(top.origin.y == 110)
+        #expect(top.origin.y + card.height <= viewport.height - 12)
+
+        // Cross-column / full-column selection (starts at top of right column, ends at bottom margin):
+        // neither above nor below fits, so the card must clamp inside the window instead of clipping below.
+        let tall = Above.place(rect: CGRect(x: 110, y: 40, width: 610, height: 544), card: card, in: viewport)
+        #expect(tall.pointer == .none)
+        #expect(tall.origin.x >= 12)
+        #expect(tall.origin.x + card.width <= viewport.width - 12)
+        #expect(tall.origin.y >= 12)
+        #expect(tall.origin.y + card.height <= viewport.height - 12)
+        #expect(tall.origin.y == viewport.height - card.height - 12)
+
+        // When the bottom listening capsule occupies bottom insets, the card stays clear of it too.
+        let insets = EdgeInsets(top: 0, leading: 0, bottom: 68, trailing: 0)
+        let withNote = CGSize(width: 332, height: 175)
+        let listening = Above.place(rect: CGRect(x: 110, y: 40, width: 610, height: 544), card: withNote, in: viewport, insets: insets)
+        #expect(listening.origin.y >= 12)
+        #expect(listening.origin.y + withNote.height <= viewport.height - insets.bottom - 12)
+
+        // Scrolled-mode extreme rects: spanning past both edges, completely above, completely below.
+        for rect in [
+            CGRect(x: 100, y: -400, width: 500, height: 1600),
+            CGRect(x: 100, y: -300, width: 500, height: 100),
+            CGRect(x: 100, y: 900, width: 500, height: 100),
+        ] {
+            let p = Above.place(rect: rect, card: card, in: viewport)
+            #expect(p.origin.x >= 12)
+            #expect(p.origin.x + card.width <= viewport.width - 12)
+            #expect(p.origin.y >= 12)
+            #expect(p.origin.y + card.height <= viewport.height - 12)
+        }
+
+        // iOS safe area insets keep the card clear of the notch and home indicator.
+        let phone = CGSize(width: 393, height: 852)
+        let phoneCard = CGSize(width: 340, height: 120)
+        let phoneSafe = EdgeInsets(top: 59, leading: 0, bottom: 34, trailing: 0)
+        let phoneFull = Above.place(rect: CGRect(x: 24, y: 87, width: 345, height: 691), card: phoneCard, in: phone, insets: phoneSafe)
+        #expect(phoneFull.origin.y >= phoneSafe.top + 12)
+        #expect(phoneFull.origin.y + phoneCard.height <= phone.height - phoneSafe.bottom - 12)
+
+        // Tight viewport narrower/shorter than card + margins stays centered within bounds.
+        let tiny = CGSize(width: 340, height: 130)
+        let tight = Above.place(rect: CGRect(x: 10, y: 10, width: 300, height: 110), card: card, in: tiny)
+        #expect(tight.origin.x >= 0)
+        #expect(tight.origin.x + card.width <= tiny.width)
+        #expect(tight.origin.y >= 0)
+        #expect(tight.origin.y + card.height <= tiny.height)
+    }
+
+    #if os(macOS)
+    @Test func `Beneath lookup card stays inside viewport and respects bottom insets`() {
+        let viewport = CGSize(width: 900, height: 680)
+        let card = CGSize(width: 330, height: 180)
+        let insets = EdgeInsets(top: 0, leading: 0, bottom: 68, trailing: 0)
+
+        let bottom = Beneath.place(rect: CGRect(x: 440, y: 520, width: 80, height: 24), card: card, in: viewport, insets: insets)
+        #expect(bottom.origin.y >= 12)
+        #expect(bottom.origin.y + card.height <= viewport.height - insets.bottom - 12)
+
+        let tall = Beneath.place(rect: CGRect(x: 100, y: 40, width: 600, height: 544), card: card, in: viewport, insets: insets)
+        #expect(tall.origin.y >= 12)
+        #expect(tall.origin.y + card.height <= viewport.height - insets.bottom - 12)
+    }
+    #endif
 }
 
 private struct StubPreviewVoice: Voice {

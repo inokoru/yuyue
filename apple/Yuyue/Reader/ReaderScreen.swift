@@ -417,6 +417,11 @@ private struct ReaderContent: View {
         .ignoresSafeArea()
     }
 
+    private var cardInsets: EdgeInsets {
+        let s = model.pager.safeAreaInsets
+        return EdgeInsets(top: s.top, leading: s.left, bottom: s.bottom, trailing: s.right)
+    }
+
     /// 选中文字, or a highlight tapped: the same card as on the Mac, over the words.
     @ViewBuilder private var cards: some View {
         if let selection = model.selection {
@@ -426,7 +431,7 @@ private struct ReaderContent: View {
                 }, translate: Translator.supportsSystemPresentation ? { translate(selection.text) } : nil, ask: { askCompanion(selection.text) },
                 share: { share(selection.text, note: nil, section: selection.section) })
                 .fixedSize()
-                .modifier(Above(rect: selection.rect, in: g.size))
+                .modifier(Above(rect: selection.rect, in: g.size, insets: cardInsets))
             }
             .transition(.opacity)
         } else if let open = model.openMark {
@@ -437,7 +442,7 @@ private struct ReaderContent: View {
                 }, translate: Translator.supportsSystemPresentation ? { translate(open.mark.text) } : nil, ask: { askCompanion(open.mark.text) },
                 share: { share(open.mark.text, note: open.mark.note, section: open.mark.section) })
                 .fixedSize()
-                .modifier(Above(rect: CGRect(x: open.at.x - 1, y: open.at.y - 12, width: 2, height: 24), in: g.size))
+                .modifier(Above(rect: CGRect(x: open.at.x - 1, y: open.at.y - 12, width: 2, height: 24), in: g.size, insets: cardInsets))
             }
             .transition(.opacity)
         } else if let pick = model.speakerPick {

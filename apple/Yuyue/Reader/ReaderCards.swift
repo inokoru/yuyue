@@ -1,46 +1,133 @@
 import SwiftUI
 import YuyueCore
 
-/// Puts a card centred over `rect`, above it when there is room and below otherwise.
+/// Puts a card centred over `rect`, above it when there is room, below it when there is room
+/// there, and otherwise clamped inside the viewport so it never clips past the window edges.
 struct Above: ViewModifier {
+    nonisolated enum Pointer: Equatable {
+        /// Card sits above the anchor; pointer at its bottom edge points down.
+        case bottom
+        /// Card sits below the anchor; pointer at its top edge points up.
+        case top
+        /// Card overlaps the anchor because neither above nor below had room; no pointer.
+        case none
+    }
+
+    nonisolated struct Placement: Equatable {
+        let origin: CGPoint
+        let pointer: Pointer
+        let tipX: CGFloat
+        let scaleAnchor: UnitPoint
+    }
+
     let rect: CGRect
     let size: CGSize
-    @State private var card = CGSize(width: 320, height: 120)
+    let insets: EdgeInsets
+    @State private var card = CGSize(width: 332, height: 120)
     @State private var shown = false
     @AppStorage(LiquidGlass.key) private var liquidChosen = false
     @AppStorage(EInk.key) private var eink = false
 
-    init(rect: CGRect, in size: CGSize) {
+    init(rect: CGRect, in size: CGSize, insets: EdgeInsets = .init()) {
         self.rect = rect
         self.size = size
+        self.insets = insets
+    }
+
+    nonisolated static func place(rect: CGRect, card: CGSize, in size: CGSize, insets: EdgeInsets = .init()) -> Placement {
+        let gap: CGFloat = 14
+        let margin: CGFloat = 12
+        let pointerClearance: CGFloat = 8
+
+        let minX = insets.leading + margin
+        let maxX = size.width - insets.trailing - card.width - margin
+        let x: CGFloat
+        if maxX >= minX {
+            x = min(max(rect.midX - card.width / 2, minX), maxX)
+        } else {
+            let available = size.width - insets.leading - insets.trailing
+            let centered = insets.leading + (available - card.width) / 2
+            x = min(max(0, centered), max(0, size.width - card.width))
+        }
+
+        let minY = insets.top + margin
+        let bottomEdge = size.height - insets.bottom - margin
+        let maxY = bottomEdge - card.height
+
+        let aboveY = rect.minY - card.height - gap
+        let belowY = rect.maxY + gap
+
+        let y: CGFloat
+        let pointer: Pointer
+        if maxY < minY {
+            let available = size.height - insets.top - insets.bottom
+            let centered = insets.top + (available - card.height) / 2
+            y = min(max(0, centered), max(0, size.height - card.height))
+            pointer = .none
+        } else if aboveY >= minY && aboveY <= maxY {
+            y = aboveY
+            pointer = .bottom
+        } else if belowY >= minY && belowY <= maxY {
+            y = belowY
+            pointer = .top
+        } else if belowY < minY {
+            y = minY
+            pointer = .none
+        } else if aboveY > maxY {
+            y = maxY
+            pointer = .none
+        } else {
+            // Neither side fits with the full gap (e.g. a full-column or cross-column selection):
+            // pin inside the viewport on whichever side leaves more room outside the selection.
+            let spaceAbove = max(0, rect.minY - minY)
+            let spaceBelow = max(0, bottomEdge - rect.maxY)
+            y = spaceAbove > spaceBelow ? minY : maxY
+            if y + card.height + pointerClearance <= rect.minY {
+                pointer = .bottom
+            } else if y >= rect.maxY + pointerClearance {
+                pointer = .top
+            } else {
+                pointer = .none
+            }
+        }
+
+        // The little point at the words, kept off the rounded corners.
+        let cornerInset = min(22, card.width / 2)
+        let tipX = min(max(rect.midX - x, cornerInset), card.width - cornerInset)
+        let anchorX = card.width > 0 ? min(max(tipX / card.width, 0), 1) : 0.5
+        let anchorY: CGFloat = switch pointer {
+        case .bottom: 1
+        case .top: 0
+        case .none: 0.5
+        }
+        return Placement(
+            origin: CGPoint(x: x, y: y),
+            pointer: pointer,
+            tipX: tipX,
+            scaleAnchor: UnitPoint(x: anchorX, y: anchorY)
+        )
     }
 
     func body(content: Content) -> some View {
-        let gap: CGFloat = 14
-        let above = rect.minY - card.height - gap > 8
-        let x = min(max(rect.midX - card.width / 2, 12), max(12, size.width - card.width - 12))
-        let y = above ? rect.minY - card.height - gap : rect.maxY + gap
-        // The little point at the words, kept off the rounded corners.
-        let tip = min(max(rect.midX - x, 22), max(22, card.width - 22))
-        let anchorX = card.width > 0 ? min(max(tip / card.width, 0), 1) : 0.5
-        let origin = UnitPoint(x: anchorX, y: above ? 1 : 0)
+        let p = Self.place(rect: rect, card: card, in: size, insets: insets)
         content
-            .background(alignment: above ? .bottomLeading : .topLeading) {
-                // Glass cards have no point.
-                if !(liquidChosen && LiquidGlass.supported && !eink) {
+            .background(alignment: p.pointer == .bottom ? .bottomLeading : .topLeading) {
+                // Glass cards have no point; overlapping cards drop it too.
+                if p.pointer != .none, !(liquidChosen && LiquidGlass.supported && !eink) {
+                    let down = p.pointer == .bottom
                     RoundedRectangle(cornerRadius: 2).fill(YYColor.card)
                         .frame(width: 11, height: 11)
                         .rotationEffect(.degrees(45))
                         // Behind the card, so only the part sticking out shows its edge on white paper.
-                        .shadow(color: .black.opacity(eink ? 0 : 0.12), radius: 2, y: above ? 1.5 : -1.5)
-                        .offset(x: tip - 5.5, y: above ? 5 : -5)
+                        .shadow(color: .black.opacity(eink ? 0 : 0.12), radius: 2, y: down ? 1.5 : -1.5)
+                        .offset(x: p.tipX - 5.5, y: down ? 5 : -5)
                 }
             }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { card = $0 }
-            .scaleEffect(shown || YYMotion.reduce ? 1 : 0.92, anchor: origin)
+            .scaleEffect(shown || YYMotion.reduce ? 1 : 0.92, anchor: p.scaleAnchor)
             .opacity(shown ? 1 : 0)
             .onAppear { withAnimation(YYMotion.standard) { shown = true } }
-            .offset(x: x, y: y)
+            .offset(x: p.origin.x, y: p.origin.y)
     }
 }
 

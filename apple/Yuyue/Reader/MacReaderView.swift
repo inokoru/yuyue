@@ -718,19 +718,23 @@ struct MacReaderView: View {
 
     // MARK: Cards over the text
 
+    private var cardInsets: EdgeInsets {
+        EdgeInsets(top: 0, leading: 0, bottom: barAway ? 0 : 68, trailing: 0)
+    }
+
     @ViewBuilder private var cards: some View {
         if let selection = model.selection {
             GeometryReader { g in
                 SelectionCard(model: model, current: nil, thought: { startThought() }, translate: Translator.supportsSystemPresentation ? { translate(selection.text) } : nil, ask: { ask(selection.text) })
                     .fixedSize()
-                    .modifier(Above(rect: selection.rect, in: g.size))
+                    .modifier(Above(rect: selection.rect, in: g.size, insets: cardInsets))
             }
             .transition(.opacity)
         } else if let open = model.openMark {
             GeometryReader { g in
                 SelectionCard(model: model, current: open.mark, thought: { thought = open.mark; model.dismissCards() }, translate: Translator.supportsSystemPresentation ? { translate(open.mark.text) } : nil, ask: { ask(open.mark.text) })
                     .fixedSize()
-                    .modifier(Above(rect: CGRect(x: open.at.x - 1, y: open.at.y - 12, width: 2, height: 24), in: g.size))
+                    .modifier(Above(rect: CGRect(x: open.at.x - 1, y: open.at.y - 12, width: 2, height: 24), in: g.size, insets: cardInsets))
             }
             .transition(.opacity)
         } else if let pick = model.speakerPick {
@@ -748,14 +752,14 @@ struct MacReaderView: View {
             GeometryReader { g in
                 WordCard(model: model, lookup: lookup)
                     .fixedSize()
-                    .modifier(Beneath(rect: lookup.rect, in: g.size))
+                    .modifier(Beneath(rect: lookup.rect, in: g.size, insets: cardInsets))
             }
             .transition(.opacity)
         } else if let item = model.sentenceTranslation {
             GeometryReader { g in
                 SentenceCard(model: model, item: item)
                     .fixedSize()
-                    .modifier(Beneath(rect: CGRect(x: item.at.x, y: item.at.y - 12, width: 2, height: 24), in: g.size))
+                    .modifier(Beneath(rect: CGRect(x: item.at.x, y: item.at.y - 12, width: 2, height: 24), in: g.size, insets: cardInsets))
             }
             .transition(.opacity)
         }

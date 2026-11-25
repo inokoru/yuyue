@@ -81,15 +81,19 @@ struct AtPoint: ViewModifier {
         let margin: CGFloat = 8
         let toLeft = point.x + 4 + card.width > size.width - margin
         let above = point.y + 4 + card.height > size.height - margin
-        let x = toLeft ? point.x - card.width - 4 : point.x + 4
-        let y = above ? point.y - card.height - 4 : point.y + 4
+        let rawX = toLeft ? point.x - card.width - 4 : point.x + 4
+        let rawY = above ? point.y - card.height - 4 : point.y + 4
+        let maxX = size.width - card.width - margin
+        let maxY = size.height - card.height - margin
+        let x = maxX >= margin ? min(max(rawX, margin), maxX) : max(0, (size.width - card.width) / 2)
+        let y = maxY >= margin ? min(max(rawY, margin), maxY) : max(0, (size.height - card.height) / 2)
         let origin = UnitPoint(x: toLeft ? 1 : 0, y: above ? 1 : 0)
         return content
             .onGeometryChange(for: CGSize.self) { $0.size } action: { card = $0 }
             .scaleEffect(shown || YYMotion.reduce ? 1 : 0.94, anchor: origin)
             .opacity(shown ? 1 : 0)
             .onAppear { withAnimation(YYMotion.standard) { shown = true } }
-            .offset(x: max(margin, x), y: max(margin, y))
+            .offset(x: x, y: y)
     }
 }
 
