@@ -125,6 +125,7 @@ struct NoteExportMenu<MenuLabel: View>: View {
     let name: String
     let books: () -> [NoteExport.Book]
     var book: BookSummary?
+    var fullWidth: Bool = false
     let label: MenuLabel
 
     init(
@@ -133,6 +134,7 @@ struct NoteExportMenu<MenuLabel: View>: View {
         name: String,
         books: @escaping () -> [NoteExport.Book],
         book: BookSummary? = nil,
+        fullWidth: Bool = false,
         @ViewBuilder label: () -> MenuLabel
     ) {
         self.sender = sender
@@ -140,11 +142,12 @@ struct NoteExportMenu<MenuLabel: View>: View {
         self.name = name
         self.books = books
         self.book = book
+        self.fullWidth = fullWidth
         self.label = label()
     }
 
     var body: some View {
-        Menu {
+        let menu = Menu {
             ShareLink(item: MarkdownFile(makeText: markdown, name: name), preview: SharePreview(name)) {
                 Label("Markdown", systemImage: "doc.plaintext")
             }
@@ -157,8 +160,18 @@ struct NoteExportMenu<MenuLabel: View>: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .fixedSize()
         #endif
+        Group {
+            #if os(macOS)
+            if fullWidth {
+                menu.frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                menu.fixedSize()
+            }
+            #else
+            menu
+            #endif
+        }
         .noteSender(sender)
     }
 }

@@ -533,6 +533,13 @@ nonisolated enum ParagraphTranslation {
     }
 }
 
+/// Reading translation display mode: original only, side-by-side bilingual, or translation only.
+enum TranslateMode: String, CaseIterable, Sendable {
+    case off
+    case bilingual
+    case only
+}
+
 extension ReaderModel {
     /// Read in a language other than Chinese: words can be looked up and translated.
     var isForeign: Bool {
@@ -558,12 +565,18 @@ extension ReaderModel {
         }
         // 译 left on last time comes back only when it can run as it is: a book opening (or the app
         // restoring its windows) never puts the system's download sheet up unasked.
-        if UserDefaults.standard.bool(forKey: translateKey) {
+        let savedMode: TranslateMode? = {
+            if let raw = UserDefaults.standard.string(forKey: translateModeKey), let m = TranslateMode(rawValue: raw) {
+                return m == .off ? nil : m
+            }
+            return UserDefaults.standard.bool(forKey: translateKey) ? .bilingual : nil
+        }()
+        if let savedMode {
             let aiReady = (ForeignPrefs.aiTranslate || !isForeign) && CompanionConfig.current.isReady
             if aiReady {
-                setTranslateShown(true)
+                setTranslateMode(savedMode)
             } else if isForeign {
-                Task { if await translator.installed() { setTranslateShown(true) } }
+                Task { if await translator.installed() { setTranslateMode(savedMode) } }
             }
         }
         guard isForeign else { return }
@@ -631,6 +644,7 @@ extension ReaderModel {
     }
 
     private var translateKey: String { "translate.\(bookID)" }
+    private var translateModeKey: String { "translateMode.\(bookID)" }
 
     /// 生词本 words still being learned, for the dotted line.
     func loadVocab() {
@@ -642,15 +656,22 @@ extension ReaderModel {
         if here != bookWords { bookWords = here }
     }
 
-    /// 译 in the tools.
-    func setTranslateShown(_ on: Bool) {
-        if on, !isForeign, !CompanionConfig.current.isReady {
+    /// 译: switches between 原文 (.off), 译文对照 (.bilingual), and 仅译文 (.only).
+    func setTranslateMode(_ mode: TranslateMode) {
+        if mode != .off, !isForeign, !CompanionConfig.current.isReady {
             show(Library.Toast(icon: "exclamationmark.circle", title: String(localized: "先在「设置 · 书伴」里配好模型，才能译文对照"), detail: ""))
             return
         }
-        translateShown = on
-        UserDefaults.standard.set(on, forKey: translateKey)
-        pager.setTranslating(on)
+        translateMode = mode
+        if mode != .off { lastActiveTranslateMode = mode }
+        UserDefaults.standard.set(mode != .off, forKey: translateKey)
+        UserDefaults.standard.set(mode.rawValue, forKey: translateModeKey)
+        pager.setTranslating(mode != .off, only: mode == .only)
+    }
+
+    /// 译 in the tools: toggles between 原文 and the last active translation mode.
+    func setTranslateShown(_ on: Bool) {
+        setTranslateMode(on ? (lastActiveTranslateMode == .off ? .bilingual : lastActiveTranslateMode) : .off)
     }
 
     // MARK: 点词

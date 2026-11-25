@@ -831,6 +831,8 @@ struct AppearanceSettings: View {
     @AppStorage(AppAppearance.key) private var mode = AppAppearance.system
     @AppStorage("shelf.coverSize") private var coverSize = 100.0
     @AppStorage("shelf.showProgress") private var showProgress = true
+    @AppStorage(ShelfStylePrefs.viewKey) private var viewStyleRaw = ShelfViewStyle.grid.rawValue
+    @AppStorage(ShelfStylePrefs.woodKey) private var woodLedge = false
     @AppStorage(LiquidGlass.key) private var liquid = false
 
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
@@ -897,6 +899,17 @@ struct AppearanceSettings: View {
                 }
                 SettingsRow(String(localized: "封面下显示进度"), detail: String(localized: "关闭后仅显示书名")) {
                     SettingsSwitch(isOn: $showProgress)
+                }
+                SettingsRow(String(localized: "书架样式"), stackWhenNarrow: true) {
+                    YYSegments(
+                        items: [(ShelfViewStyle.grid, String(localized: "封面")), (.spine, String(localized: "书脊"))],
+                        selection: Binding(get: { ShelfViewStyle.of(viewStyleRaw) }, set: { viewStyleRaw = $0.rawValue }),
+                        small: true
+                    )
+                    .frame(minWidth: 130).fixedSize()
+                }
+                SettingsRow(String(localized: "浅木层板"), detail: String(localized: "为书架每排加上浅木层板与柔和投影")) {
+                    SettingsSwitch(isOn: $woodLedge)
                 }
             }
             if LiquidGlass.supported {
@@ -1113,6 +1126,8 @@ private struct ReadingSettings: View {
     let library: Library
     @State private var settings = ReaderSettings.standard
     @AppStorage("reader.twoColumns") private var twoColumns = true
+    @AppStorage(PageTurnPrefs.key) private var pageTurnRaw = PageTurn.slide.rawValue
+    @AppStorage(PageTurnPrefs.soundKey) private var pageTurnSound = false
     @AppStorage(ImmersivePrefs.lineKey) private var immersiveLine = true
     @AppStorage(ImmersivePrefs.marksKey) private var immersiveMarks = false
     @AppStorage(ImmersivePrefs.hintsKey) private var immersiveHints = true
@@ -1217,6 +1232,19 @@ private struct ReadingSettings: View {
                     YYSegments(items: [(LayoutMode.paginated, String(localized: "左右翻页")), (.scrolled, String(localized: "上下滚动"))],
                                selection: Binding(get: { settings.mode }, set: { v in change { $0.mode = v } }), small: true)
                         .frame(minWidth: 160).fixedSize()
+                }
+                if settings.mode == .paginated {
+                    SettingsRow(String(localized: "翻页动画"), stackWhenNarrow: true) {
+                        YYSegments(
+                            items: [(PageTurn.slide, String(localized: "滑动")), (.cover, String(localized: "覆盖")), (.none, String(localized: "无动画"))],
+                            selection: Binding(get: { PageTurn.of(pageTurnRaw) }, set: { pageTurnRaw = $0.rawValue }),
+                            small: true
+                        )
+                        .frame(minWidth: 180).fixedSize()
+                    }
+                    SettingsRow(String(localized: "翻页音效"), detail: String(localized: "手动翻页时播放轻纸声，朗读时自动静音")) {
+                        SettingsSwitch(isOn: $pageTurnSound)
+                    }
                 }
                 SettingsRow(String(localized: "宽窗口下双栏显示"), detail: String(localized: "左右并排显示两页")) {
                     SettingsSwitch(isOn: $twoColumns)

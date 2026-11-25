@@ -5,6 +5,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import app.yuyue.design.pressable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.draw.alpha
@@ -141,6 +143,12 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
     model.pager.background = paper.bg.toArgb()
     model.pager.ink = paper.ink.toArgb()
     model.pager.accent = paper.accent.toArgb()
+    val pageTurnRaw by app.yuyue.design.rememberPref(PageTurnPrefs.KEY, PageTurn.SLIDE.key)
+    val pageTurnSound by app.yuyue.design.rememberPref(PageTurnPrefs.SOUND_KEY, false)
+    model.pager.pageTurn = PageTurn.of(pageTurnRaw)
+    model.pager.soundEnabled = pageTurnSound
+    model.pager.isReadingAloud = model.isPlaying
+    LaunchedEffect(pageTurnSound) { if (pageTurnSound) PageTurnSound.prepare(context) }
     LaunchedEffect(model, Papers.version, PaperAppearance.version) { model.papersChanged() }
     LaunchedEffect(model, bookID) { model.consumeIntent() }
     DisposableEffect(model) {
@@ -189,11 +197,44 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
         // 沉浸: the navigation bar goes too, until a swipe from the edge.
         if (model.immersive && !model.chromeShown) controller.hide(WindowInsetsCompat.Type.navigationBars()) else controller.show(WindowInsetsCompat.Type.navigationBars())
     }
+    // Independent reading brightness: restores system control automatically on leaving the reader.
+    val brightnessFollow by app.yuyue.design.rememberPref(ReaderBrightness.FOLLOW_KEY, true)
+    val readerBrightness by app.yuyue.design.rememberPref(ReaderBrightness.VALUE_KEY, 0.6f)
+    val eyeCare by app.yuyue.design.rememberPref(ReaderBrightness.EYE_CARE_KEY, false)
+    val eyeCareAlpha by animateFloatAsState(
+        targetValue = if (eyeCare && !EInk.on) (if (paper.isDark) 0.08f else 0.12f) else 0f,
+        animationSpec = tween(200),
+        label = "eyeCare",
+    )
+    LaunchedEffect(activity, brightnessFollow, readerBrightness) {
+        val window = activity?.window ?: return@LaunchedEffect
+        val lp = window.attributes
+        lp.screenBrightness = if (brightnessFollow) android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE else readerBrightness.coerceIn(0.05f, 1f)
+        window.attributes = lp
+    }
+    DisposableEffect(activity) {
+        onDispose {
+            val window = activity?.window ?: return@onDispose
+            val lp = window.attributes
+            if (lp.screenBrightness != android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE) {
+                lp.screenBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                window.attributes = lp
+            }
+        }
+    }
+
+    var thought by remember { mutableStateOf<Mark?>(null) }
+    var translating by remember { mutableStateOf<String?>(null) }
+    var readyVoicePickerShown by remember { mutableStateOf(false) }
+    var pickedReadyVoiceId by remember { mutableStateOf<String?>(null) }
+    var moreShown by remember { mutableStateOf(false) }
+    var tocInitialTab by remember { mutableIntStateOf(0) }
+
     // 读书时通知不打扰, while 沉浸阅读 is on.
     LaunchedEffect(model.immersive) { if (ImmersivePrefs.quiet) DoNotDisturb.set(context, model.immersive) }
     // 沉浸: called up by a tap, gone again by itself.
-    LaunchedEffect(model.immersive, model.chromeShown) {
-        if (model.immersive && model.chromeShown) { kotlinx.coroutines.delay(4000); if (!model.listenShown && !model.settingsShown) model.chromeShown = false }
+    LaunchedEffect(model.immersive, model.chromeShown, moreShown) {
+        if (model.immersive && model.chromeShown) { kotlinx.coroutines.delay(4000); if (!model.listenShown && !model.settingsShown && !moreShown) model.chromeShown = false }
     }
     DisposableEffect(barOverride) {
         onDispose {
@@ -207,10 +248,6 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
         }
     }
 
-    var thought by remember { mutableStateOf<Mark?>(null) }
-    var translating by remember { mutableStateOf<String?>(null) }
-    var readyVoicePickerShown by remember { mutableStateOf(false) }
-    var pickedReadyVoiceId by remember { mutableStateOf<String?>(null) }
     val haze = rememberHazeState()
     val popupOpen = model.selection != null || model.openMark != null || model.lookup != null || model.speakerPick != null
     val topBarVisible = (model.chromeShown || model.searchShown) && !popupOpen
@@ -228,6 +265,8 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
                 paper = paper,
                 haze = haze,
                 popupOpen = popupOpen,
+                openMore = { moreShown = true },
+                openToc = { tocInitialTab = 0; model.tocShown = true },
                 openReadyVoicePicker = { readyId ->
                     pickedReadyVoiceId = readyId
                     readyVoicePickerShown = true
@@ -246,9 +285,22 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
             }
             if (model.detail == null) app.yuyue.shelf.BookFailure(model.failure, close)
             else model.failure?.let { app.yuyue.shelf.FailureDialog(it) { model.failure = null } }
+            if (eyeCareAlpha > 0.001f) {
+                Box(Modifier.fillMaxSize().background(Color(0xFFF5A63B).copy(alpha = eyeCareAlpha)))
+            }
         }
 
-        if (model.tocShown) TocSheet(model) { model.tocShown = false }
+        if (moreShown) {
+            ReaderMoreSheet(
+                model = model,
+                openNotes = {
+                    tocInitialTab = 2
+                    model.tocShown = true
+                },
+                dismiss = { moreShown = false },
+            )
+        }
+        if (model.tocShown) TocSheet(model, initialTab = tocInitialTab) { model.tocShown = false }
         if (model.settingsShown) TypesetSheet(model) { model.settingsShown = false }
         if (model.listenShown) ListenSheet(model) { model.listenShown = false }
         if (model.castShown) CastSheet(model) { model.castShown = false }
@@ -364,6 +416,8 @@ private fun Chrome(
     paper: YYPaper,
     haze: HazeState,
     popupOpen: Boolean,
+    openMore: () -> Unit,
+    openToc: () -> Unit,
     openReadyVoicePicker: (String) -> Unit,
     close: () -> Unit,
 ) {
@@ -420,7 +474,7 @@ private fun Chrome(
             val edge = Brush.verticalGradient(0f to paper.bg, 0.72f to paper.bg, 1f to paper.bg.copy(alpha = 0f))
             Box(Modifier.fillMaxWidth().background(edge).padding(bottom = 20.dp), contentAlignment = Alignment.TopCenter) {
                 Box(Modifier.windowInsetsPadding(WindowInsets.statusBars).padding(horizontal = 12.dp).padding(top = 4.dp).widthIn(max = 560.dp)) {
-                    if (model.searchShown) SearchField(model, paper, haze) else TopBar(model, paper, haze, close)
+                    if (model.searchShown) SearchField(model, paper, haze) else TopBar(model, paper, haze, openMore, close)
                 }
             }
         }
@@ -503,7 +557,7 @@ private fun Chrome(
             }
             model.pager.bottomCapsuleVisible = capsule
             AnimatedVisibility(capsule, enter = YYMotion.barIn(fromTop = false, reduce), exit = YYMotion.barOut(toTop = false, reduce)) {
-                if (model.searchShown) SearchCapsule(model, paper, haze) else Capsule(model, paper, haze)
+                if (model.searchShown) SearchCapsule(model, paper, haze) else Capsule(model, paper, haze, openToc)
             }
             AnimatedVisibility(!capsule && model.immersive && !popupOpen, enter = androidx.compose.animation.fadeIn(YYMotion.standard()), exit = androidx.compose.animation.fadeOut(YYMotion.exit())) {
                 if (!ImmersivePrefs.hidesProgress) {
@@ -521,8 +575,7 @@ private fun Chrome(
 }
 
 @Composable
-private fun TopBar(model: ReaderModel, paper: YYPaper, haze: HazeState, close: () -> Unit) {
-    var more by remember { mutableStateOf(false) }
+private fun TopBar(model: ReaderModel, paper: YYPaper, haze: HazeState, openMore: () -> Unit, close: () -> Unit) {
     val line = listOfNotNull(model.chapterTitle?.takeIf { it != model.detail?.summary?.title }, model.bookPage?.let { t("第 %lld 页", it) }).joinToString(" · ")
     ReaderTopBar(
         paper, haze,
@@ -533,23 +586,7 @@ private fun TopBar(model: ReaderModel, paper: YYPaper, haze: HazeState, close: (
         onSearch = { model.chromeShown = false; model.searchShown = true },
         onBookmark = { model.toggleBookmark() },
         more = {
-            Box {
-                Glyph(Icons.more, t("更多"), paper.ink) { more = true }
-                DropdownMenu(more, { more = false }, containerColor = YY.c.card) {
-                    app.yuyue.shelf.Item(t("沉浸阅读"), Icons.viewfinder) { more = false; model.immersiveShown = true }
-                    if (model.detail?.summary?.format != uniffi.yuyue_core.BookFormat.PDF) {
-                        app.yuyue.shelf.Item(t("书伴"), Icons.sparkle) { more = false; model.chromeShown = false; model.companionShown = true }
-                        app.yuyue.shelf.Item(if (model.translateShown) t("收起译文") else t("译文对照"), Icons.translate) {
-                            more = false
-                            model.chromeShown = false
-                            model.setTranslateShown(!model.translateShown)
-                        }
-                    }
-                    app.yuyue.shelf.Item(t("书的信息"), Icons.info) { more = false; model.infoShown = true }
-                    if (model.detail?.summary?.format != uniffi.yuyue_core.BookFormat.PDF) app.yuyue.shelf.Item(t("替换规则"), Icons.swapHoriz) { more = false; model.rulesShown = true }
-                    if (model.detail?.summary?.format == uniffi.yuyue_core.BookFormat.TXT) app.yuyue.shelf.Item(t("编码和目录"), Icons.docSearch) { more = false; model.txtShown = true }
-                }
-            }
+            Glyph(Icons.more, t("更多"), paper.ink, openMore)
         },
     )
 }
@@ -595,7 +632,7 @@ private fun Glyph(icon: ImageVector, label: String, tint: Color, onClick: () -> 
 
 /** 平时只有一条胶囊: 目录, where the reader is, ‹ 朗读 ›, Aa, and how far into the chapter. */
 @Composable
-private fun Capsule(model: ReaderModel, paper: YYPaper, haze: HazeState) {
+private fun Capsule(model: ReaderModel, paper: YYPaper, haze: HazeState, openToc: () -> Unit) {
     val alert = model.capsuleAlert
     val reading = model.player?.spot != null
     val n = model.sentenceCount
@@ -608,7 +645,7 @@ private fun Capsule(model: ReaderModel, paper: YYPaper, haze: HazeState) {
         progress = model.chapterProgress.toFloat().coerceIn(0f, 1f),
         playEnabled = model.player != null,
         sentenceStep = reading,
-        onToc = { model.tocShown = true },
+        onToc = openToc,
         onCenter = { if (alert != null) alert.action() else model.listenShown = true },
         onPrevious = { model.step(false) },
         onPlay = { model.togglePlay() },

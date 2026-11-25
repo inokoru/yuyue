@@ -281,6 +281,7 @@ private struct ReaderWindowShape: NSViewRepresentable {
 
 private struct ReaderContent: View {
     @AppStorage(ImmersivePrefs.statusKey) private var hidesStatusBar = true
+    @AppStorage(PageTurnPrefs.key) private var pageTurnRaw = PageTurn.slide.rawValue
     @Bindable var model: ReaderModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -301,6 +302,9 @@ private struct ReaderContent: View {
     var body: some View {
         pages
             .preferredColorScheme(paper.isDark ? .dark : .light)
+            .onChange(of: pageTurnRaw, initial: true) { _, raw in
+                model.pager.pageTurn = PageTurn.of(raw)
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { model.flush() }
             }
@@ -379,7 +383,7 @@ private struct ReaderContent: View {
             .persistentSystemOverlays(model.immersive && !model.chromeShown ? .hidden : .automatic)
             .modifier(SpeakerOthersSheet(model: model))
             .sheet(isPresented: $model.tocShown) {
-                TocList(model: model)
+                TocList(model: model, initialTab: model.tocInitialTab)
                     .presentationDetents([.large])
             }
             .sheet(isPresented: $model.askingFinished) {
@@ -598,11 +602,21 @@ struct PagerView: NSViewRepresentable {
 private struct TocList: View {
     let model: ReaderModel
     @Environment(\.dismiss) private var dismiss
-    @State private var tab = Tab.toc
+    @State private var tab: Tab
     @State private var thought: Mark?
     private let tint = YYTint.standard
 
     private enum Tab { case toc, bookmarks, notes }
+
+    init(model: ReaderModel, initialTab: Int = 0) {
+        self.model = model
+        let initial: Tab = switch initialTab {
+        case 1: .bookmarks
+        case 2: .notes
+        default: .toc
+        }
+        _tab = State(initialValue: initial)
+    }
 
     var body: some View {
         let chapters = model.tocChapters

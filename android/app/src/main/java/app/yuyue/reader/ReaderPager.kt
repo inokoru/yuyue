@@ -75,6 +75,13 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
     var insetBottom = 0
     /** 墨水屏 and 沉浸 with still pages: pages switch at once, never slide. */
     var calm = false
+    /** Horizontal pagination transition: slide, cover (with edge shadow), or none (instant). */
+    var pageTurn: PageTurn = PageTurn.SLIDE
+    /** Plays a light synthesized paper turn sound on manual turns when not reading aloud. */
+    var soundEnabled: Boolean = false
+    var isReadingAloud: Boolean = false
+    private val instantTurn: Boolean get() = calm || pageTurn == PageTurn.NONE
+    private val useCover: Boolean get() = !calm && mode == LayoutMode.PAGINATED && pageTurn == PageTurn.COVER
     var background: Int = 0
         set(v) {
             field = v
@@ -114,6 +121,31 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
     private var animator: ValueAnimator? = null
     private var scrollAnimator: ValueAnimator? = null
     private var verticalAnimator: ValueAnimator? = null
+    private var pendingManualSound = false
+
+    // Cover transition overlay (single recycled viewport snapshot + trailing edge shadow).
+    private var coverBitmap: android.graphics.Bitmap? = null
+    private var coverActive = false
+    private var coverForward = true
+    private var coverFromPos = 0f
+    private var coverTargetPos = 0f
+    private var coverProgress = 0f
+    private var coverTargetWebView: View? = null
+    private val coverOverlay = android.widget.ImageView(context).apply {
+        scaleType = android.widget.ImageView.ScaleType.FIT_XY
+        visibility = View.GONE
+        isClickable = false
+        isFocusable = false
+    }
+    private val coverShadow = View(context).apply {
+        background = GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            intArrayOf(0x36000000, 0x16000000, 0x00000000),
+        )
+        visibility = View.GONE
+        isClickable = false
+        isFocusable = false
+    }
 
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private val minFling = ViewConfiguration.get(context).scaledMinimumFlingVelocity
@@ -165,6 +197,9 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
     }
 
     init {
+        val shadowWidth = (22f * resources.displayMetrics.density).roundToInt()
+        addView(coverOverlay, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        addView(coverShadow, LayoutParams(shadowWidth, ViewGroup.LayoutParams.MATCH_PARENT))
         addView(pullCue, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM))
         updatePullCueColors()
     }
@@ -190,6 +225,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
             return
         }
         pendingOpen = null
+        cancelCover()
         resetVerticalPull()
         val cur = current
         if (cur != null && cur.section == section && cur.isReady) {
@@ -363,7 +399,12 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
         if (target >= n && nextSlot?.isReady != true) return
         if (target < 0 && previousSlot?.isReady != true) return
         listener?.turnedByHand(this)
-        settle(target.toFloat(), animated = !calm)
+        pendingManualSound = true
+        if (useCover && beginCover(forward)) {
+            settleCover(commit = true, initialVelocity = 0f)
+            return
+        }
+        settle(target.toFloat(), animated = !instantTurn)
     }
 
     /** Goes to a page of the current section, as the voice moves on. */
@@ -371,7 +412,8 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
         val cur = current ?: return
         val n = cur.layout?.pageCount ?: return
         if (page !in 0 until n || page == cur.page) return
-        settle(page.toFloat(), animated && !calm)
+        pendingManualSound = false
+        settle(page.toFloat(), animated && !instantTurn)
     }
 
     /** The ink line under `sentence` of `section` (contract §7); off when null. */
@@ -429,6 +471,8 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
     private fun landed() {
         animator = null
         val cur = current ?: return
+        val prevSection = cur.section
+        val prevPage = cur.page
         val n = cur.layout?.pageCount ?: 1
         when {
             position >= n -> nextSlot?.let { nx ->
@@ -451,8 +495,178 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
                 position = cur.page.toFloat()
             }
         }
+        val movedPage = current?.section != prevSection || current?.page != prevPage
+        val playTurn = pendingManualSound && movedPage && soundEnabled && !isReadingAloud
+        pendingManualSound = false
         render()
+        if (playTurn) PageTurnSound.play(context)
         listener?.moved(this)
+    }
+
+    // MARK: Cover transition (top page glides with edge shadow over stationary lower page)
+
+    private fun captureCurrentPage(): android.graphics.Bitmap? {
+        val cur = current ?: return null
+        if (width <= 0 || height <= 0) return null
+        val existing = coverBitmap
+        val bmp = if (existing != null && !existing.isRecycled && existing.width == width && existing.height == height) {
+            existing
+        } else {
+            existing?.recycle()
+            runCatching { android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.RGB_565) }.getOrNull()
+        } ?: return null
+        coverBitmap = bmp
+        return runCatching {
+            val canvas = android.graphics.Canvas(bmp)
+            canvas.drawColor(background)
+            cur.webView.draw(canvas)
+            bmp
+        }.getOrNull()
+    }
+
+    private fun beginCover(forward: Boolean): Boolean {
+        if (coverActive) cancelCover()
+        val cur = current ?: return false
+        val n = cur.layout?.pageCount ?: 1
+        val target = cur.page + if (forward) 1 else -1
+        if (target >= n && nextSlot?.isReady != true) return false
+        if (target < 0 && previousSlot?.isReady != true) return false
+        val bmp = captureCurrentPage() ?: return false
+
+        coverActive = true
+        coverForward = forward
+        coverFromPos = cur.page.toFloat()
+        coverTargetPos = target.toFloat()
+        coverProgress = 0f
+        coverOverlay.setImageBitmap(bmp)
+
+        val w = width.toFloat()
+        for (s in slots) {
+            s.webView.translationX = 10f * w
+            s.webView.translationY = 0f
+        }
+
+        if (forward) {
+            val destView: View
+            if (target < n) {
+                cur.webView.scrollTo((target * pageWidthPx(cur)).roundToInt(), 0)
+                destView = cur.webView
+            } else {
+                val nx = nextSlot ?: return false
+                nx.webView.scrollTo(0, 0)
+                destView = nx.webView
+            }
+            destView.translationX = 0f
+            bringChildToFront(destView)
+            bringChildToFront(coverOverlay)
+            bringChildToFront(coverShadow)
+            bringChildToFront(pullCue)
+            coverTargetWebView = null
+        } else {
+            val incoming: View
+            if (target >= 0) {
+                cur.webView.scrollTo((target * pageWidthPx(cur)).roundToInt(), 0)
+                incoming = cur.webView
+            } else {
+                val prev = previousSlot ?: return false
+                val last = (prev.layout?.pageCount ?: 1) - 1
+                prev.webView.scrollTo((last * pageWidthPx(prev)).roundToInt(), 0)
+                incoming = prev.webView
+            }
+            bringChildToFront(coverOverlay)
+            bringChildToFront(incoming)
+            bringChildToFront(coverShadow)
+            bringChildToFront(pullCue)
+            coverTargetWebView = incoming
+        }
+
+        coverOverlay.visibility = View.VISIBLE
+        coverShadow.visibility = View.VISIBLE
+        renderCover(0f)
+        return true
+    }
+
+    private fun renderCover(progress: Float) {
+        val p = progress.coerceIn(0f, 1f)
+        coverProgress = p
+        val w = width.toFloat()
+        val edgeX: Float
+        if (coverForward) {
+            val x = -p * w
+            coverOverlay.translationX = x
+            edgeX = x + w
+        } else {
+            val x = (-1f + p) * w
+            coverOverlay.translationX = 0f
+            coverTargetWebView?.translationX = x
+            edgeX = x + w
+        }
+        coverShadow.translationX = edgeX
+        val bell = (1f - abs(p * 2f - 1f)).coerceIn(0f, 1f)
+        coverShadow.alpha = if (p <= 0.002f || p >= 0.998f) 0f else (0.35f + 0.65f * bell)
+    }
+
+    private fun settleCover(commit: Boolean, initialVelocity: Float) {
+        animator?.cancel()
+        val target = if (commit) 1f else 0f
+        val d0 = coverProgress - target
+        if (instantTurn || abs(d0) < 0.002f) {
+            finishCover(commit)
+            return
+        }
+        val v0 = if (d0 < 0f) initialVelocity.coerceIn(0f, 20f) else initialVelocity.coerceIn(-20f, 0f)
+        val omega = maxOf(18f, if (v0 * d0 < 0f) -v0 / d0 else 18f)
+        val c2 = v0 + omega * d0
+        var totalSec = 0.28f
+        for (ms in 110..340 step 10) {
+            val t = ms / 1000f
+            if (abs((d0 + c2 * t) * exp(-omega * t)) < 0.001f) {
+                totalSec = t
+                break
+            }
+        }
+        animator = ValueAnimator.ofFloat(0f, totalSec).apply {
+            duration = (totalSec * 1000f).roundToInt().toLong()
+            interpolator = LinearInterpolator()
+            addUpdateListener {
+                val t = it.animatedValue as Float
+                renderCover(target + (d0 + c2 * t) * exp(-omega * t))
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (animator === animation) finishCover(commit)
+                }
+            })
+            start()
+        }
+    }
+
+    private fun finishCover(commit: Boolean) {
+        animator = null
+        coverOverlay.visibility = View.GONE
+        coverShadow.visibility = View.GONE
+        coverActive = false
+        coverTargetWebView = null
+        if (commit) {
+            position = coverTargetPos
+            landed()
+        } else {
+            pendingManualSound = false
+            position = coverFromPos
+            render()
+        }
+    }
+
+    private fun cancelCover() {
+        if (!coverActive) return
+        animator?.cancel()
+        animator = null
+        coverOverlay.visibility = View.GONE
+        coverShadow.visibility = View.GONE
+        coverActive = false
+        coverTargetWebView = null
+        position = coverFromPos
+        render()
     }
 
     // MARK: Touch
@@ -552,7 +766,21 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
                 if (dragging) {
                     val cur = current ?: return true
                     val n = cur.layout?.pageCount ?: 1
-                    var p = startPosition - (e.x - downX) / width
+                    val dx = e.x - downX
+                    if (useCover) {
+                        if (!coverActive && abs(dx) > 2f) {
+                            val forward = dx < 0f
+                            if (beginCover(forward)) {
+                                pendingManualSound = true
+                            }
+                        }
+                        if (coverActive) {
+                            val raw = if (coverForward) (-dx / width) else (dx / width)
+                            renderCover(raw)
+                            return true
+                        }
+                    }
+                    var p = startPosition - dx / width
                     // Past the book's first or last page the strip gives asymptotically.
                     val low = if (previousSlot?.isReady == true) -1f else 0f
                     val high = if (nextSlot?.isReady == true) n.toFloat() else (n - 1).toFloat()
@@ -567,6 +795,20 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
                     dragging = false
                     velocity?.computeCurrentVelocity(1000)
                     val v = velocity?.xVelocity ?: 0f
+                    if (coverActive) {
+                        val flingCommit = if (coverForward) v < -minFling * 2.2f else v > minFling * 2.2f
+                        val flingCancel = if (coverForward) v > minFling * 2.2f else v < -minFling * 2.2f
+                        val commit = when {
+                            flingCommit -> true
+                            flingCancel -> false
+                            else -> coverProgress >= 0.35f
+                        }
+                        val v0 = if (width > 0) (if (coverForward) -v else v) / width else 0f
+                        settleCover(commit = commit, initialVelocity = v0)
+                        velocity?.recycle()
+                        velocity = null
+                        return true
+                    }
                     val cur = current
                     val n = cur?.layout?.pageCount ?: 1
                     val base = floor(startPosition + 0.0001f)
@@ -581,7 +823,8 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
                     val low = if (previousSlot?.isReady == true) -1f else 0f
                     val high = if (nextSlot?.isReady == true) n.toFloat() else (n - 1).toFloat()
                     val v0 = if (width > 0) -v / width else 0f
-                    settle(target.coerceIn(low, high), animated = !calm, initialVelocity = v0)
+                    pendingManualSound = true
+                    settle(target.coerceIn(low, high), animated = !instantTurn, initialVelocity = v0)
                 }
                 velocity?.recycle()
                 velocity = null
@@ -957,6 +1200,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
     var onTranslateFailed: ((String?) -> Unit)? = null
     var translating: Boolean = false
         private set
+    private var translationOnly: Boolean = false
     private val translated = mutableMapOf<Int, org.json.JSONArray>()
     private val translatingInFlight = mutableSetOf<Int>()
     /** 难词注释: the harder words of a section and their meanings, from the core. */
@@ -987,13 +1231,21 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
         slots.forEach(::sendLooking)
     }
 
-    /** 译 on or off. */
-    fun setTranslating(on: Boolean) {
-        if (on == translating) return
+    /** 译 on or off, and whether to hide original source paragraphs (仅译文). */
+    fun setTranslating(on: Boolean, only: Boolean = false) {
+        if (on == translating && only == translationOnly) return
+        val wasOn = translating
         translating = on
+        translationOnly = if (on) only else false
         if (on) {
-            val cur = current
-            if (cur != null && cur.section != null) translate(cur)
+            if (wasOn) {
+                for (p in slots) if (p.section != null) p.call("yy.setTranslationOnly($translationOnly)")
+                val cur = current
+                if (cur != null && cur.section != null && translated[cur.section] == null) translate(cur)
+            } else {
+                val cur = current
+                if (cur != null && cur.section != null) translate(cur)
+            }
         } else {
             for (p in slots) if (p.section != null) p.call("yy.setTranslations(null)")
         }
@@ -1006,7 +1258,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
     private fun translate(page: SectionPage) {
         val section = page.section ?: return
         translated[section]?.let { done ->
-            page.call("yy.setTranslations($done)")
+            page.call("yy.setTranslations($done, $translationOnly)")
             return
         }
         if (!translatingInFlight.add(section)) return
@@ -1036,7 +1288,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
                 }
                 translated[section] = items
                 if (translating && page.section == section) {
-                    page.call("yy.setTranslations($items)")
+                    page.call("yy.setTranslations($items, $translationOnly)")
                 }
             } finally {
                 translatingInFlight.remove(section)
@@ -1131,6 +1383,9 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
         animator?.cancel()
         scrollAnimator?.cancel()
         verticalAnimator?.cancel()
+        cancelCover()
+        coverBitmap?.recycle()
+        coverBitmap = null
         scope.cancel()
         (slots + spare).forEach { it.webView.destroy() }
         slots.clear()

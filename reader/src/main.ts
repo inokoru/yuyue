@@ -317,8 +317,12 @@ const api = {
   paragraphs(): foreign.Paragraph[] {
     return foreign.paragraphs();
   },
-  setTranslations(list: { last: number; text: string; lang?: string }[] | null): void {
-    foreign.setTranslations(list);
+  setTranslations(list: { last: number; text: string; lang?: string }[] | null, only = false): void {
+    foreign.setTranslations(list, only);
+    relayout(anchorNow(), true);
+  },
+  setTranslationOnly(only: boolean): void {
+    foreign.setTranslationOnly(only);
     relayout(anchorNow(), true);
   },
   clearSelection(): void {

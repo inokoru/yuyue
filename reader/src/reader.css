@@ -629,6 +629,23 @@ yy-tr {
   -webkit-user-select: none;
   user-select: none;
 }
+/* 仅译文: hide translated source paragraphs and promote <yy-tr> to native book typography. */
+html[data-yy-tr-mode="only"] .yy-tr-src {
+  display: none !important;
+}
+html[data-yy-tr-mode="only"] yy-tr {
+  margin: 0 0 var(--yy-ps-eff) !important;
+  padding: 0 !important;
+  border-left: none !important;
+  font-family: var(--yy-font-eff) !important;
+  font-size: var(--yy-base) !important;
+  line-height: var(--yy-lh-eff) !important;
+  text-indent: var(--yy-ind) !important;
+  text-align: var(--yy-al) !important;
+  color: var(--yy-p-ink) !important;
+  -webkit-user-select: text;
+  user-select: text;
+}
 /* A selection in the theme colour, light, not the system's blue. */
 #yy-content ::selection { background-color: var(--yy-accent-soft); }
 ::highlight(yy-hit) { background-color: var(--yy-accent-soft); }

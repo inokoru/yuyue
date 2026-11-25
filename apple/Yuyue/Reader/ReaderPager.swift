@@ -125,6 +125,32 @@ final class ReaderPager: PlatformView {
     private var arranging = false
     /// Paginated mode temporarily locks scrolling while a text selection is active.
     private var holding = false
+    /// Cover page-turn gesture & overlay state (iOS).
+    private lazy var coverPan = UIPanGestureRecognizer(target: self, action: #selector(handleCoverPan(_:)))
+    private var coverSnapshot: UIView?
+    private let coverShadow: UIView = {
+        let v = UIView()
+        v.isUserInteractionEnabled = false
+        v.isHidden = true
+        let g = CAGradientLayer()
+        g.colors = [
+            UIColor.black.withAlphaComponent(0.22).cgColor,
+            UIColor.black.withAlphaComponent(0.08).cgColor,
+            UIColor.clear.cgColor,
+        ]
+        g.startPoint = CGPoint(x: 0, y: 0.5)
+        g.endPoint = CGPoint(x: 1, y: 0.5)
+        v.layer.addSublayer(g)
+        return v
+    }()
+    private var coverActive = false
+    private var coverForward = true
+    private var coverFromPage = 0
+    private var coverFromSlot = 0
+    private var coverTargetPage = 0
+    private var coverTargetSlot = 0
+    private var coverProgress: CGFloat = 0
+    private var coverAnimating = false
     #else
     private let pullCue = MacPullCueView()
     private struct MacPullState {
@@ -169,9 +195,13 @@ final class ReaderPager: PlatformView {
         outer.decelerationRate = .fast
         outer.delegate = self
         addSubview(outer)
+        coverPan.delegate = self
+        addGestureRecognizer(coverPan)
+        addSubview(coverShadow)
         pullCue.isUserInteractionEnabled = false
         pullCue.alpha = 0
         addSubview(pullCue)
+        syncScrollMode()
         #else
         wantsLayer = true
         pullCue.alphaValue = 0
@@ -425,15 +455,48 @@ final class ReaderPager: PlatformView {
     // MARK: Turning pages
 
     /// 沉浸阅读 can turn whole pages without sliding.
-    var calm = false
+    var calm = false {
+        didSet {
+            #if os(iOS)
+            if calm != oldValue { syncScrollMode() }
+            #endif
+        }
+    }
+    /// Horizontal pagination animation: slide, cover (with edge shadow), or none (instant).
+    var pageTurn: PageTurn = PageTurnPrefs.current {
+        didSet {
+            #if os(iOS)
+            if pageTurn != oldValue {
+                cancelCover()
+                syncScrollMode()
+            }
+            #endif
+        }
+    }
+    var isReadingAloud = false
 
     var reduceMotion: Bool {
         #if os(iOS)
-        calm || UIAccessibility.isReduceMotionEnabled
+        calm || pageTurn == .none || UIAccessibility.isReduceMotionEnabled
         #else
-        calm || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        calm || pageTurn == .none || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         #endif
     }
+
+    #if os(iOS)
+    private var useCover: Bool {
+        !calm && mode == .paginated && pageTurn == .cover && !UIAccessibility.isReduceMotionEnabled
+    }
+
+    private func syncScrollMode() {
+        let enableNativeScroll = mode != .paginated || (!holding && !useCover)
+        outer.isScrollEnabled = mode == .paginated && !holding && !useCover
+        for page in slots + spare {
+            page.webView.scrollView.isScrollEnabled = enableNativeScroll
+        }
+        coverPan.isEnabled = useCover && !holding
+    }
+    #endif
 
     /// Shows `section` with `target` in view: a turn when it is a neighbour, a jump otherwise.
     func show(section: UInt32, target: SectionPage.Target, animated: Bool) {
@@ -480,9 +543,16 @@ final class ReaderPager: PlatformView {
                 return
             }
         } else {
+            if useCover {
+                if beginCover(forward: forward) {
+                    settleCover(commit: true, velocity: 0)
+                }
+                return
+            }
             let target = current.page + (forward ? 1 : -1)
             if target >= 0 && target < layout.pageCount {
                 turn(to: target, animated: animated)
+                playManualTurnSound()
                 return
             }
         }
@@ -494,16 +564,20 @@ final class ReaderPager: PlatformView {
         }
         guard slots[j].isReady else { return }
         move(toSlot: j, animated: animated, snapEdge: true)
+        if mode == .paginated { playManualTurnSound() }
         #else
         let generation = current.generation
+        let wantCover = mode == .paginated && pageTurn == .cover && !reduceMotion
         Task {
             let call = forward ? "yy.nextPage(a)" : "yy.prevPage(a)"
             // The page it turned to, or -1 at the section's edge.
-            guard let landed = await current.ask("\(call) ? yy.currentPage() : -1", ["a": animated]) as? Int,
+            guard let landed = await current.ask("\(call) ? yy.currentPage() : -1", ["a": animated && !wantCover]) as? Int,
                   current === self.current, current.generation == generation
             else { return }
             if landed >= 0 {
+                if wantCover { applyMacCoverTransition(forward: forward) }
                 current.page = min(landed, layout.pageCount - 1)
+                playManualTurnSound()
                 moved()
                 return
             }
@@ -514,10 +588,28 @@ final class ReaderPager: PlatformView {
                 return
             }
             guard slots[j].isReady else { return }
-            move(toSlot: j, animated: animated, snapEdge: true)
+            if wantCover { applyMacCoverTransition(forward: forward) }
+            move(toSlot: j, animated: animated && !wantCover, snapEdge: true)
+            if mode == .paginated { playManualTurnSound() }
         }
         #endif
     }
+
+    private func playManualTurnSound() {
+        guard !isReadingAloud else { return }
+        PageTurnSound.shared.play()
+    }
+
+    #if os(macOS)
+    private func applyMacCoverTransition(forward: Bool) {
+        let tr = CATransition()
+        tr.duration = 0.24
+        tr.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        tr.type = forward ? .reveal : .moveIn
+        tr.subtype = forward ? .fromRight : .fromLeft
+        layer?.add(tr, forKey: "yyCoverTurn")
+    }
+    #endif
 
     /// Turns to a page of the current section.
     func turn(to page: Int, animated: Bool) {
@@ -705,12 +797,10 @@ final class ReaderPager: PlatformView {
         if on {
             guard mode == .paginated else { return }
             holding = true
-            outer.isScrollEnabled = false
-            for page in slots { page.webView.scrollView.isScrollEnabled = false }
+            syncScrollMode()
         } else {
             holding = false
-            outer.isScrollEnabled = mode == .paginated
-            for page in slots + spare { page.webView.scrollView.isScrollEnabled = true }
+            syncScrollMode()
         }
     }
     #endif
@@ -729,6 +819,7 @@ final class ReaderPager: PlatformView {
     var translator: ((UInt32, [String]) async -> (texts: [String?], lang: String))?
     var onTranslateFailed: (() -> Void)?
     private(set) var translating = false
+    private(set) var translationOnly = false
     private var translated: [UInt32: [[String: Any]]] = [:]
     private var inFlight: Set<UInt32> = []
 
@@ -799,12 +890,24 @@ final class ReaderPager: PlatformView {
         page.call("yy.setFlag(a, b)", ["a": flag.first, "b": flag.last])
     }
 
-    /// 译 on or off.
-    func setTranslating(_ on: Bool) {
-        guard on != translating else { return }
+    /// 译 on or off, and whether to hide original source paragraphs (仅译文).
+    func setTranslating(_ on: Bool, only: Bool = false) {
+        if on == translating, only == translationOnly { return }
+        let wasOn = translating
         translating = on
+        translationOnly = on ? only : false
         if on {
-            if let current, current.section != nil { translate(current) }
+            if wasOn {
+                // Already translated on screen: flip CSS mode instantly without re-fetching.
+                for page in slots where page.section != nil {
+                    page.call("yy.setTranslationOnly(o)", ["o": translationOnly])
+                }
+                if let current, current.section != nil, translated[current.section!] == nil {
+                    translate(current)
+                }
+            } else if let current, current.section != nil {
+                translate(current)
+            }
         } else {
             for page in slots where page.section != nil { page.call("yy.setTranslations(null)") }
         }
@@ -832,7 +935,7 @@ final class ReaderPager: PlatformView {
 
     private func translate(_ page: SectionPage) {
         guard let section = page.section else { return }
-        if let done = translated[section] { return page.call("yy.setTranslations(t)", ["t": done]) }
+        if let done = translated[section] { return page.call("yy.setTranslations(t, o)", ["t": done, "o": translationOnly]) }
         guard !inFlight.contains(section) else { return }
         inFlight.insert(section)
         Task {
@@ -849,7 +952,7 @@ final class ReaderPager: PlatformView {
                 return
             }
             translated[section] = items
-            if translating, page.section == section { page.call("yy.setTranslations(t)", ["t": items]) }
+            if translating, page.section == section { page.call("yy.setTranslations(t, o)", ["t": items, "o": translationOnly]) }
         }
     }
 
@@ -1123,6 +1226,7 @@ final class ReaderPager: PlatformView {
         if let current, let i = slots.firstIndex(where: { $0 === current }) {
             outer.contentOffset = CGPoint(x: CGFloat(i) * w, y: 0)
         }
+        syncScrollMode()
         #endif
     }
 
@@ -1771,7 +1875,9 @@ extension ReaderPager: UIScrollViewDelegate {
             settle()
         } else if let current, scrollView === current.webView.scrollView, mode == .paginated, bounds.width > 0 {
             let page = Int((scrollView.contentOffset.x / bounds.width).rounded())
+            let changed = page != current.page
             current.page = page
+            if changed { playManualTurnSound() }
             moved()
         }
     }
@@ -1785,8 +1891,187 @@ extension ReaderPager: UIScrollViewDelegate {
         if slots[i] !== current {
             current = slots[i]
             loadNeighbours()
+            playManualTurnSound()
         }
         moved()
+    }
+
+    // MARK: Cover transition (iOS: 1:1 drag + tap with trailing edge shadow)
+
+    @objc private func handleCoverPan(_ pan: UIPanGestureRecognizer) {
+        guard useCover, !holding, !coverAnimating, bounds.width > 0 else { return }
+        let tx = pan.translation(in: self).x
+        let vx = pan.velocity(in: self).x
+        switch pan.state {
+        case .began:
+            delegate?.pagerTurnedByHand(self)
+        case .changed:
+            if !coverActive, abs(tx) > 4 {
+                _ = beginCover(forward: tx < 0)
+            }
+            if coverActive {
+                let raw = coverForward ? (-tx / bounds.width) : (tx / bounds.width)
+                renderCover(progress: raw)
+            }
+        case .ended, .cancelled, .failed:
+            guard coverActive else { return }
+            let flingCommit = coverForward ? (vx < -420) : (vx > 420)
+            let flingCancel = coverForward ? (vx > 420) : (vx < -420)
+            let commit: Bool
+            if pan.state != .ended {
+                commit = false
+            } else if flingCommit {
+                commit = true
+            } else if flingCancel {
+                commit = false
+            } else {
+                commit = coverProgress >= 0.35
+            }
+            settleCover(commit: commit, velocity: vx)
+        default:
+            break
+        }
+    }
+
+    private func beginCover(forward: Bool) -> Bool {
+        cancelCover()
+        guard let current, let layout = current.layout, let i = slots.firstIndex(where: { $0 === current }),
+              bounds.width > 0, bounds.height > 0 else { return false }
+        let nextPage = current.page + (forward ? 1 : -1)
+        let targetSlot: Int
+        let targetPage: Int
+        if nextPage >= 0 && nextPage < layout.pageCount {
+            targetSlot = i
+            targetPage = nextPage
+        } else {
+            let j = forward ? i + 1 : i - 1
+            guard slots.indices.contains(j), slots[j].isReady else { return false }
+            targetSlot = j
+            targetPage = forward ? 0 : max(0, (slots[j].layout?.pageCount ?? 1) - 1)
+        }
+        guard let snap = current.webView.snapshotView(afterScreenUpdates: false) else { return false }
+        snap.frame = bounds
+        snap.isUserInteractionEnabled = false
+
+        coverActive = true
+        coverForward = forward
+        coverFromSlot = i
+        coverFromPage = current.page
+        coverTargetSlot = targetSlot
+        coverTargetPage = targetPage
+        coverProgress = 0
+        coverSnapshot = snap
+
+        // Position the destination page inside `outer` before revealing it.
+        arranging = true
+        let dest = slots[targetSlot]
+        dest.webView.scrollView.setContentOffset(CGPoint(x: CGFloat(targetPage) * bounds.width, y: 0), animated: false)
+        outer.contentOffset = CGPoint(x: CGFloat(targetSlot) * bounds.width, y: 0)
+        arranging = false
+
+        if forward {
+            // Snapshot of outgoing page glides left over stationary destination.
+            insertSubview(snap, aboveSubview: outer)
+            outer.transform = .identity
+        } else {
+            // Snapshot of outgoing page stays stationary underneath while incoming `outer` glides in from left.
+            insertSubview(snap, belowSubview: outer)
+            outer.transform = CGAffineTransform(translationX: -bounds.width, y: 0)
+        }
+        coverShadow.frame = CGRect(x: 0, y: 0, width: 22, height: bounds.height)
+        coverShadow.layer.sublayers?.first?.frame = coverShadow.bounds
+        bringSubviewToFront(coverShadow)
+        bringSubviewToFront(pullCue)
+        coverShadow.isHidden = false
+        renderCover(progress: 0)
+        return true
+    }
+
+    private func renderCover(progress: CGFloat) {
+        let p = min(1, max(0, progress))
+        coverProgress = p
+        let w = bounds.width
+        let edgeX: CGFloat
+        if coverForward {
+            let x = -p * w
+            coverSnapshot?.transform = CGAffineTransform(translationX: x, y: 0)
+            edgeX = x + w
+        } else {
+            let x = (-1 + p) * w
+            coverSnapshot?.transform = .identity
+            outer.transform = CGAffineTransform(translationX: x, y: 0)
+            edgeX = x + w
+        }
+        coverShadow.frame = CGRect(x: edgeX, y: 0, width: 22, height: bounds.height)
+        coverShadow.layer.sublayers?.first?.frame = coverShadow.bounds
+        let bell = max(0, 1 - abs(p * 2 - 1))
+        coverShadow.alpha = (p <= 0.002 || p >= 0.998) ? 0 : (0.35 + 0.65 * bell)
+    }
+
+    private func settleCover(commit: Bool, velocity: CGFloat) {
+        guard coverActive else { return }
+        coverAnimating = true
+        let targetProgress: CGFloat = commit ? 1 : 0
+        let remaining = abs(targetProgress - coverProgress)
+        let duration = max(0.14, min(0.28, Double(remaining) * 0.28))
+        UIView.animate(
+            withDuration: duration,
+            delay: 0,
+            usingSpringWithDamping: 1.0,
+            initialSpringVelocity: min(12, abs(velocity) / max(1, bounds.width)),
+            options: [.curveEaseOut, .beginFromCurrentState]
+        ) {
+            self.renderCover(progress: targetProgress)
+        } completion: { [weak self] _ in
+            guard let self else { return }
+            self.coverAnimating = false
+            self.finishCover(commit: commit)
+        }
+    }
+
+    private func finishCover(commit: Bool) {
+        coverSnapshot?.removeFromSuperview()
+        coverSnapshot = nil
+        coverShadow.isHidden = true
+        outer.transform = .identity
+        let wasActive = coverActive
+        coverActive = false
+        guard wasActive else { return }
+        if commit {
+            if slots.indices.contains(coverTargetSlot) {
+                let target = slots[coverTargetSlot]
+                target.page = coverTargetPage
+                if target !== current {
+                    current = target
+                    loadNeighbours()
+                }
+            }
+            playManualTurnSound()
+            moved()
+        } else {
+            arranging = true
+            if slots.indices.contains(coverFromSlot) {
+                let orig = slots[coverFromSlot]
+                orig.webView.scrollView.setContentOffset(CGPoint(x: CGFloat(coverFromPage) * bounds.width, y: 0), animated: false)
+                outer.contentOffset = CGPoint(x: CGFloat(coverFromSlot) * bounds.width, y: 0)
+            }
+            arranging = false
+        }
+    }
+
+    private func cancelCover() {
+        guard coverActive else { return }
+        coverAnimating = false
+        finishCover(commit: false)
+    }
+}
+
+extension ReaderPager: UIGestureRecognizerDelegate {
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === coverPan else { return super.gestureRecognizerShouldBegin(gestureRecognizer) }
+        guard useCover, !holding else { return false }
+        let v = coverPan.velocity(in: self)
+        return abs(v.x) > abs(v.y) * 1.2
     }
 }
 #else

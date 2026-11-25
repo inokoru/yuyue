@@ -282,16 +282,31 @@ export function paragraphs(): Paragraph[] {
 }
 
 /** Puts each translation under its paragraph (keyed by the paragraph's last sentence); null
- *  takes them all away. The caller relays out afterwards. */
-export function setTranslations(list: { last: number; text: string; lang?: string }[] | null): void {
+ *  takes them all away. When `only` is true, source paragraphs with a translation are hidden
+ *  and `<yy-tr>` renders in full body typography. The caller relays out afterwards. */
+export function setTranslations(list: { last: number; text: string; lang?: string }[] | null, only = false): void {
   const old = document.querySelectorAll('yy-tr');
   for (let i = 0; i < old.length; i++) old[i].parentNode && old[i].parentNode!.removeChild(old[i]);
-  for (const item of list || []) {
+  const prevSrc = document.querySelectorAll('.yy-tr-src');
+  for (let i = 0; i < prevSrc.length; i++) prevSrc[i].classList.remove('yy-tr-src');
+  if (!list || !list.length) {
+    delete document.documentElement.dataset.yyTrMode;
+    return;
+  }
+  document.documentElement.dataset.yyTrMode = only ? 'only' : 'bilingual';
+  for (const item of list) {
     const b = blockOf(item.last);
     if (!b || !b.parentNode) continue;
+    b.classList.add('yy-tr-src');
     const el = document.createElement('yy-tr');
     el.setAttribute('lang', item.lang || 'zh-Hans');
     el.textContent = item.text;
     b.parentNode.insertBefore(el, b.nextSibling);
   }
+}
+
+/** Switches between bilingual (`only=false`) and translation-only (`only=true`) when translations are present. */
+export function setTranslationOnly(only: boolean): void {
+  if (!document.querySelector('yy-tr')) return;
+  document.documentElement.dataset.yyTrMode = only ? 'only' : 'bilingual';
 }

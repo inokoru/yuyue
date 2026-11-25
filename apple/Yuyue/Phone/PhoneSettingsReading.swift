@@ -11,6 +11,8 @@ struct PhoneAppearance: View {
     @AppStorage(AppAppearance.key) private var mode = AppAppearance.system
     @AppStorage("shelf.showProgress") private var showProgress = true
     @AppStorage("shelf.coverSize") private var coverSize = 100.0
+    @AppStorage(ShelfStylePrefs.viewKey) private var viewStyleRaw = ShelfViewStyle.grid.rawValue
+    @AppStorage(ShelfStylePrefs.woodKey) private var woodLedge = false
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
     @AppStorage(LiquidGlass.key) private var liquid = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -72,6 +74,23 @@ struct PhoneAppearance: View {
                     }
                     Spacer(minLength: YYUI.s(8))
                     YYSwitch(isOn: $showProgress, label: String(localized: "封面下显示进度"))
+                }
+                .padding(.vertical, YYUI.s(10))
+                YYRow(title: String(localized: "书架样式")) {
+                    YYSegments(
+                        items: [(ShelfViewStyle.grid, String(localized: "封面")), (.spine, String(localized: "书脊"))],
+                        selection: Binding(get: { ShelfViewStyle.of(viewStyleRaw) }, set: { viewStyleRaw = $0.rawValue }),
+                        small: true
+                    )
+                    .fixedSize()
+                }
+                HStack(spacing: YYUI.s(10)) {
+                    VStack(alignment: .leading, spacing: YYUI.s(2)) {
+                        Text("浅木层板").font(YYUI.font(11.5, .medium)).foregroundStyle(YYColor.t1)
+                        Text("为书架每排加上浅木层板与柔和投影").font(YYUI.font(10)).foregroundStyle(YYColor.t2)
+                    }
+                    Spacer(minLength: YYUI.s(8))
+                    YYSwitch(isOn: $woodLedge, label: String(localized: "浅木层板"))
                 }
                 .padding(.vertical, YYUI.s(10))
             }
@@ -356,6 +375,8 @@ struct PhoneReading: View {
     @AppStorage(ImmersivePrefs.statusKey) private var immersiveStatus = true
     @AppStorage(ImmersivePrefs.progressKey) private var immersiveProgress = true
     @AppStorage(EInk.key) private var einkOn = false
+    @AppStorage(PageTurnPrefs.key) private var pageTurnRaw = PageTurn.slide.rawValue
+    @AppStorage(PageTurnPrefs.soundKey) private var pageTurnSound = false
     @State private var editingPaper: PaperDraft?
     @State private var previewPaper: CustomPaper?
     @State private var renamingPaper: CustomPaper?
@@ -455,6 +476,25 @@ struct PhoneReading: View {
                     YYSegments(items: [(LayoutMode.paginated, String(localized: "左右翻页")), (.scrolled, String(localized: "上下滚动"))],
                                selection: Binding(get: { settings.mode }, set: { v in change { $0.mode = v } }), small: true)
                         .fixedSize()
+                }
+                if settings.mode == .paginated {
+                    YYRow(title: String(localized: "翻页动画")) {
+                        YYSegments(
+                            items: [(PageTurn.slide, String(localized: "滑动")), (.cover, String(localized: "覆盖")), (.none, String(localized: "无动画"))],
+                            selection: Binding(get: { PageTurn.of(pageTurnRaw) }, set: { pageTurnRaw = $0.rawValue }),
+                            small: true
+                        )
+                        .fixedSize()
+                    }
+                    HStack(spacing: YYUI.s(10)) {
+                        VStack(alignment: .leading, spacing: YYUI.s(1)) {
+                            Text("翻页音效").font(YYUI.font(11.5)).foregroundStyle(YYColor.t1)
+                            Text("手动翻页时播放轻纸声，朗读时自动静音").font(YYUI.font(10)).foregroundStyle(YYColor.t3)
+                        }
+                        Spacer(minLength: YYUI.s(8))
+                        YYSwitch(isOn: $pageTurnSound, label: String(localized: "翻页音效"))
+                    }
+                    .padding(.vertical, YYUI.s(8))
                 }
                 YYRow(title: String(localized: "两端对齐")) {
                     YYSwitch(isOn: Binding(get: { settings.justify ?? true }, set: { v in change { $0.justify = v } }), label: String(localized: "两端对齐"))

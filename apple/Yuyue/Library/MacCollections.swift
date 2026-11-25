@@ -130,9 +130,9 @@ struct CollectionWall: View {
                     } else {
                         let grouped = booksByCollection
                         LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: 218, maximum: 286), spacing: 16, alignment: .top)],
+                            columns: [GridItem(.adaptive(minimum: 170, maximum: 216), spacing: 14, alignment: .top)],
                             alignment: .leading,
-                            spacing: 16
+                            spacing: 14
                         ) {
                             ForEach(shown, id: \.id) { c in
                                 card(c, books: grouped[c.id] ?? [])
@@ -286,52 +286,27 @@ struct CollectionWall: View {
     // MARK: Empty States
 
     private var emptyWall: some View {
-        VStack(spacing: 0) {
-            PodcastStationeryCard(cornerRadius: 18) {
-                VStack(spacing: 0) {
-                    VStack(spacing: 14) {
-                        ExLibrisWellPreview(title: "藏", explicitSymbol: "books.vertical", tone: .sand(scheme: scheme, eink: eink), scheme: scheme, eink: eink)
-                            .frame(width: 176, height: 92)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        VStack(spacing: 5) {
-                            Text("还没有合集")
-                                .font(PodcastStyle.songti(17))
-                                .foregroundStyle(YYColor.t1)
-                            Text("按主题、心境或阅读计划建几个书匣，把书放进去慢慢读。")
-                                .font(.yy(size: 12))
-                                .foregroundStyle(YYColor.t3)
-                                .multilineTextAlignment(.center)
-                                .lineSpacing(3)
-                        }
-                    }
-                    .padding(.horizontal, 26)
-                    .padding(.top, 22)
-                    .padding(.bottom, 18)
-
-                    Rectangle().fill(YYColor.line).frame(height: 0.5)
-
-                    HStack {
-                        PodcastPaperPill(
-                            title: String(localized: "新建合集"),
-                            glyph: .plus,
-                            accent: true,
-                            height: 28,
-                            horizontalPadding: 14
-                        ) {
-                            name = ""
-                            naming = Naming(collection: nil)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(PodcastStyle.leafSurface(scheme))
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        let tone = CollectionClothTone.sand(scheme: scheme, eink: eink)
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        return VStack(spacing: 14) {
+            ExLibrisWellPreview(title: "藏", explicitSymbol: "books.vertical", tone: tone, scheme: scheme, eink: eink)
+                .frame(width: 176, height: 92)
+                .clipShape(shape)
+                .overlay { shape.strokeBorder(tone.wellBorder, lineWidth: 0.5) }
+            VStack(spacing: 6) {
+                Text("还没有合集")
+                    .font(PodcastStyle.songti(17))
+                    .foregroundStyle(YYColor.t1)
+                Text("按主题、心境或阅读计划建几个书匣，把书放进去慢慢读。")
+                    .font(.yy(size: 12))
+                    .foregroundStyle(YYColor.t3)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
             }
-            .frame(maxWidth: 360)
         }
+        .padding(.horizontal, 28)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.bottom, 40)
+        .padding(.bottom, 48)
     }
 
     private var filteredEmpty: some View {
@@ -367,8 +342,8 @@ struct CollectionWall: View {
         let explicitSymbol = c.icon ?? CollectionIcon.guess(for: c.name)
         let tone = CollectionClothTone.resolve(for: c, explicitSymbol: explicitSymbol, scheme: scheme, eink: eink)
         let matcher = NameMatcher(query)
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
-        let wellShape = RoundedRectangle(cornerRadius: 11, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        let wellShape = RoundedRectangle(cornerRadius: 9.5, style: .continuous)
 
         return Button { open(c.id) } label: {
             VStack(alignment: .leading, spacing: 0) {
@@ -401,7 +376,7 @@ struct CollectionWall: View {
                             startPoint: .top,
                             endPoint: .bottom
                         )
-                        .frame(height: 14)
+                        .frame(height: 12)
                     }
                     .allowsHitTesting(false)
 
@@ -409,9 +384,9 @@ struct CollectionWall: View {
                     HStack(alignment: .top, spacing: 6) {
                         if !books.isEmpty, let explicitSymbol {
                             Image(systemName: explicitSymbol)
-                                .font(.system(size: 10, weight: .medium))
+                                .font(.system(size: 9.5, weight: .medium))
                                 .foregroundStyle(tone.ink.opacity(0.82))
-                                .frame(width: 22, height: 22)
+                                .frame(width: 20, height: 20)
                                 .background(YYColor.card.opacity(scheme == .dark ? 0.68 : 0.78), in: .circle)
                                 .overlay { Circle().strokeBorder(tone.wellBorder, lineWidth: 0.5) }
                                 .accessibilityHidden(true)
@@ -419,34 +394,34 @@ struct CollectionWall: View {
                         Spacer(minLength: 0)
                         wellControls(c, isPinned: isPinned, hover: hover, tone: tone)
                     }
-                    .padding(8)
+                    .padding(7)
                 }
-                .frame(height: 114)
+                .frame(height: 92)
                 .clipShape(wellShape)
                 .overlay { wellShape.strokeBorder(target ? tint.edge : tone.wellBorder, lineWidth: 0.5) }
-                .padding(.top, 6)
-                .padding(.horizontal, 6)
+                .padding(.top, 5)
+                .padding(.horizontal, 5)
 
                 // Porcelain bookplate footer
                 HStack(alignment: .center, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(matcher.isEmpty ? AttributedString(c.name) : matcher.highlighted(c.name, color: tint.accent))
-                            .font(.yy(size: 14, weight: .semibold))
+                            .font(.yy(size: 13, weight: .semibold))
                             .foregroundStyle(YYColor.t1)
                             .lineLimit(1)
                         Text(subtitle(for: c))
-                            .font(.yy(size: 11).monospacedDigit())
+                            .font(.yy(size: 10.5).monospacedDigit())
                             .foregroundStyle(c.count == 0 ? YYColor.t3.opacity(0.75) : YYColor.t3)
                             .lineLimit(1)
                     }
                     Spacer(minLength: 4)
                     Image(systemName: "chevron.right")
-                        .font(.yy(size: 9.5, weight: .semibold))
+                        .font(.yy(size: 9, weight: .semibold))
                         .foregroundStyle(YYColor.t3.opacity(hover ? 0.8 : 0))
                         .offset(x: hover && !YYMotion.reduce ? 1 : -2)
                 }
-                .padding(.horizontal, 13)
-                .frame(height: 52)
+                .padding(.horizontal, 11)
+                .frame(height: 46)
             }
             .background(target ? tint.accentSoft : YYColor.card, in: shape)
             .overlay {
@@ -503,9 +478,9 @@ struct CollectionWall: View {
             HStack(spacing: 4) {
                 Button { togglePin(c.id) } label: {
                     Image(systemName: isPinned ? "pin.slash" : "pin")
-                        .font(.yy(size: 10, weight: .medium))
+                        .font(.yy(size: 9.5, weight: .medium))
                         .foregroundStyle(isPinned ? tint.accent : YYColor.t2)
-                        .frame(width: 24, height: 24)
+                        .frame(width: 22, height: 22)
                         .background(YYColor.card.opacity(scheme == .dark ? 0.88 : 0.94), in: .circle)
                         .overlay { Circle().strokeBorder(YYColor.line, lineWidth: 0.5) }
                         .contentShape(.circle)
@@ -518,9 +493,9 @@ struct CollectionWall: View {
                     collectionMenuItems(c, isPinned: isPinned)
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.yy(size: 10.5, weight: .semibold))
+                        .font(.yy(size: 10, weight: .semibold))
                         .foregroundStyle(YYColor.t2)
-                        .frame(width: 24, height: 24)
+                        .frame(width: 22, height: 22)
                         .background(YYColor.card.opacity(scheme == .dark ? 0.88 : 0.94), in: .circle)
                         .overlay { Circle().strokeBorder(YYColor.line, lineWidth: 0.5) }
                         .contentShape(.circle)
@@ -534,9 +509,9 @@ struct CollectionWall: View {
             .transition(.opacity)
         } else if isPinned {
             Image(systemName: "pin.fill")
-                .font(.yy(size: 9.5, weight: .semibold))
+                .font(.yy(size: 9, weight: .semibold))
                 .foregroundStyle(tint.accent)
-                .frame(width: 22, height: 22)
+                .frame(width: 20, height: 20)
                 .background(YYColor.card.opacity(scheme == .dark ? 0.82 : 0.9), in: .circle)
                 .overlay { Circle().strokeBorder(tone.wellBorder, lineWidth: 0.5) }
                 .accessibilityHidden(true)
@@ -720,42 +695,42 @@ private struct CollectionCoverStage: View {
         let lift: CGFloat = hover && !YYMotion.reduce && !eink ? -2 : 0
         ZStack(alignment: .bottom) {
             if books.count >= 3 {
-                HStack(alignment: .bottom, spacing: 7) {
+                HStack(alignment: .bottom, spacing: 6) {
                     BookCover(book: books[1])
-                        .frame(width: 52)
-                        .offset(y: 12)
+                        .frame(width: 43)
+                        .offset(y: 11)
                     BookCover(book: books[0])
-                        .frame(width: 58)
-                        .shadow(color: .black.opacity(eink ? 0 : 0.10), radius: 6, y: 2)
+                        .frame(width: 48)
+                        .shadow(color: .black.opacity(eink ? 0 : 0.10), radius: 5, y: 2)
                         .offset(y: 6 + lift)
                     BookCover(book: books[2])
-                        .frame(width: 52)
-                        .offset(y: 12)
-                }
-            } else if books.count == 2 {
-                HStack(alignment: .bottom, spacing: 8) {
-                    BookCover(book: books[0])
-                        .frame(width: 56)
-                        .shadow(color: .black.opacity(eink ? 0 : 0.10), radius: 6, y: 2)
-                        .offset(y: 6 + lift)
-                    BookCover(book: books[1])
-                        .frame(width: 54)
+                        .frame(width: 43)
                         .offset(y: 11)
                 }
-            } else if let only = books.first {
-                HStack(alignment: .bottom, spacing: 8) {
-                    BookCover(book: only)
-                        .frame(width: 58)
-                        .shadow(color: .black.opacity(eink ? 0 : 0.10), radius: 6, y: 2)
+            } else if books.count == 2 {
+                HStack(alignment: .bottom, spacing: 7) {
+                    BookCover(book: books[0])
+                        .frame(width: 47)
+                        .shadow(color: .black.opacity(eink ? 0 : 0.10), radius: 5, y: 2)
                         .offset(y: 6 + lift)
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    BookCover(book: books[1])
+                        .frame(width: 45)
+                        .offset(y: 10)
+                }
+            } else if let only = books.first {
+                HStack(alignment: .bottom, spacing: 7) {
+                    BookCover(book: only)
+                        .frame(width: 48)
+                        .shadow(color: .black.opacity(eink ? 0 : 0.10), radius: 5, y: 2)
+                        .offset(y: 6 + lift)
+                    RoundedRectangle(cornerRadius: 3.5, style: .continuous)
                         .fill(tone.folioBack)
                         .overlay {
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            RoundedRectangle(cornerRadius: 3.5, style: .continuous)
                                 .strokeBorder(tone.folioLine, lineWidth: 0.5)
                         }
-                        .frame(width: 52, height: 78)
-                        .offset(y: 13)
+                        .frame(width: 43, height: 64.5)
+                        .offset(y: 12)
                 }
             }
         }
@@ -785,20 +760,20 @@ private struct ExLibrisWellPreview: View {
         if trimmed.allSatisfy(\.isASCII) {
             if trimmed.allSatisfy(\.isNumber) {
                 switch trimmed.count {
-                case 1...2: return .text(trimmed, 15)
-                case 3...4: return .text(trimmed, 12)
+                case 1...2: return .text(trimmed, 13.5)
+                case 3...4: return .text(trimmed, 10.5)
                 default: return .symbol(CollectionIcon.fallback)
                 }
             }
             if trimmed.count <= 3 {
-                return .text(trimmed.uppercased(), trimmed.count == 1 ? 16 : 13.5)
+                return .text(trimmed.uppercased(), trimmed.count == 1 ? 14 : 12)
             }
             if let first = trimmed.first(where: \.isLetter) {
-                return .text(String(first).uppercased(), 16)
+                return .text(String(first).uppercased(), 14)
             }
             return .symbol(CollectionIcon.fallback)
         }
-        return .text(String(trimmed.prefix(1)), 16.5)
+        return .text(String(trimmed.prefix(1)), 14.5)
     }
 
     var body: some View {
@@ -807,58 +782,58 @@ private struct ExLibrisWellPreview: View {
             LinearGradient(colors: [tone.wellTop, tone.wellBottom], startPoint: .top, endPoint: .bottom)
 
             folioBack
-                .frame(width: 48, height: 72)
-                .offset(x: -34, y: 15)
+                .frame(width: 40, height: 60)
+                .offset(x: -28, y: 13)
             folioBack
-                .frame(width: 48, height: 72)
-                .offset(x: 34, y: 15)
+                .frame(width: 40, height: 60)
+                .offset(x: 28, y: 13)
 
             // Front Ex-Libris bookplate
             ZStack {
-                RoundedRectangle(cornerRadius: 4.5, style: .continuous)
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .fill(tone.folioFront)
-                RoundedRectangle(cornerRadius: 4.5, style: .continuous)
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .strokeBorder(tone.folioBorder, lineWidth: 0.5)
-                RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
                     .strokeBorder(tone.ink.opacity(scheme == .dark ? 0.13 : 0.09), lineWidth: 0.5)
-                    .padding(4.5)
+                    .padding(4)
 
-                VStack(spacing: 6) {
+                VStack(spacing: 5) {
                     switch emblem {
                     case .symbol(let name):
                         Image(systemName: name)
-                            .font(.system(size: 15.5, weight: .light))
+                            .font(.system(size: 13.5, weight: .light))
                             .foregroundStyle(tone.ink.opacity(0.76))
-                            .frame(height: 18)
+                            .frame(height: 16)
                     case .text(let label, let pt):
                         Text(label)
                             .font(YYFontFamily.serif.font(size: pt, weight: .medium))
                             .foregroundStyle(tone.ink.opacity(0.78))
-                            .frame(height: 18)
+                            .frame(height: 16)
                     }
-                    VStack(spacing: 2.5) {
+                    VStack(spacing: 2) {
                         Capsule()
                             .fill(tone.ink.opacity(0.22))
-                            .frame(width: 18, height: 0.8)
+                            .frame(width: 15, height: 0.8)
                         Capsule()
                             .fill(tone.ink.opacity(0.14))
-                            .frame(width: 11, height: 0.8)
+                            .frame(width: 9, height: 0.8)
                     }
                 }
-                .offset(y: -4)
+                .offset(y: -3.5)
             }
-            .frame(width: 58, height: 86)
-            .shadow(color: .black.opacity(eink || scheme == .dark ? 0 : 0.045), radius: 5, y: 2)
-            .offset(y: 8 + lift)
+            .frame(width: 48, height: 71)
+            .shadow(color: .black.opacity(eink || scheme == .dark ? 0 : 0.045), radius: 4, y: 1.5)
+            .offset(y: 7 + lift)
         }
         .accessibilityHidden(true)
     }
 
     private var folioBack: some View {
-        RoundedRectangle(cornerRadius: 4, style: .continuous)
+        RoundedRectangle(cornerRadius: 3.5, style: .continuous)
             .fill(tone.folioBack)
             .overlay {
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                RoundedRectangle(cornerRadius: 3.5, style: .continuous)
                     .strokeBorder(tone.folioLine, lineWidth: 0.5)
             }
     }

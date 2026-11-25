@@ -448,6 +448,10 @@ internal fun AppearancePage() {
     var tintID by rememberPref("appearance.tint", YYTints.Default.id)
     var coverSize by rememberPref(Shelf.COVER_SIZE, 100f)
     var showProgress by rememberPref(Shelf.SHOW_PROGRESS, true)
+    var viewStyleRaw by rememberPref(app.yuyue.shelf.ShelfStylePrefs.VIEW_KEY, app.yuyue.shelf.ShelfViewStyle.GRID.key)
+    var woodLedge by rememberPref(app.yuyue.shelf.ShelfStylePrefs.WOOD_KEY, false)
+    var liquidGlass by rememberPref(app.yuyue.design.LiquidGlass.KEY, false)
+    val eink by rememberPref(app.yuyue.reader.EInk.KEY, false)
     YYPage {
         SettingsLead(t("应用界面的外观与配色；书页纸色在「阅读」或 Aa 中设置"))
         Spacer(Modifier.height(YY.s(12)))
@@ -503,6 +507,33 @@ internal fun AppearancePage() {
                 }
             }
             row { DetailSwitch(t("封面下显示进度"), t("关闭后仅显示书名"), showProgress) { showProgress = it } }
+            row {
+                YYRow(t("书架样式"), trailing = {
+                    app.yuyue.design.YYSegments(
+                        listOf(
+                            app.yuyue.shelf.ShelfViewStyle.GRID to t("封面"),
+                            app.yuyue.shelf.ShelfViewStyle.SPINE to t("书脊"),
+                        ),
+                        app.yuyue.shelf.ShelfViewStyle.of(viewStyleRaw),
+                        { viewStyleRaw = it.key },
+                        small = true,
+                    )
+                })
+            }
+            row { DetailSwitch(t("浅木层板"), t("为书架每排加上浅木层板与柔和投影"), woodLedge) { woodLedge = it } }
+        }
+        if (app.yuyue.design.LiquidGlass.supported) {
+            Spacer(Modifier.height(YY.s(12)))
+            YYGroup {
+                row {
+                    DetailSwitch(
+                        t("液态玻璃效果"),
+                        t("底部导航栏使用液态玻璃，关闭则为毛玻璃"),
+                        liquidGlass && !eink,
+                        enabled = !eink,
+                    ) { liquidGlass = it }
+                }
+            }
         }
     }
 }

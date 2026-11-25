@@ -114,6 +114,9 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
     var sortKey by rememberPref("shelf.sort", "recent")
     val showProgress by rememberPref("shelf.showProgress", true)
     val coverSize by rememberPref("shelf.coverSize", 100f)
+    var viewStyleRaw by rememberPref(ShelfStylePrefs.VIEW_KEY, ShelfViewStyle.GRID.key)
+    var woodLedge by rememberPref(ShelfStylePrefs.WOOD_KEY, false)
+    val viewStyle = ShelfViewStyle.of(viewStyleRaw)
     var importShown by remember { mutableStateOf(false) }
     var panel by remember { mutableStateOf<PanelFrom?>(null) }
     var naming by remember { mutableStateOf(false) }
@@ -191,7 +194,9 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
     val reading = if (!selecting && (place == ShelfPlace.Books || place == ShelfPlace.Audio))
         shown.filter { it.status == ReadingStatus.READING }.let { r -> if (sort == ShelfSort.Recent) r else all.filter { it.status == ReadingStatus.READING && it in shown } } else emptyList()
 
-    Box(Modifier.fillMaxSize().background(YY.c.bg)) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(YY.c.bg)) {
+        val innerWidth = (maxWidth - 32.dp).coerceAtLeast(160.dp)
+        val gridCols = ((innerWidth.value + 18f) / ((96f * coverSize / 100f) + 18f)).toInt().coerceAtLeast(1)
         LazyVerticalGrid(
             columns = GridCells.Adaptive((96 * coverSize / 100f).dp),
             state = grid,
@@ -233,22 +238,80 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
             } else if (shown.isEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) { Empty(library, place) { picker.launch(importTypes) } }
             } else {
-                // 全部, how many, and their order — as 在读's own row above.
+                // 全部, how many, view style, and their order — as 在读's own row above.
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    AllRow(shown.size, sort) { sortKey = it.key }
-                }
-                items(shown, key = { it.id }) { book ->
-                    // Sorted, filtered, brought in or taken out, each book moves to its place.
-                    Box(Modifier.animateItem(fadeInSpec = app.yuyue.design.YYMotion.standard(), placementSpec = app.yuyue.design.YYMotion.place(), fadeOutSpec = app.yuyue.design.YYMotion.exit())) {
-                    Cell(
-                        library, book, showProgress, selecting, book.id in selected,
-                        onTap = {
-                            if (selecting) selected = if (book.id in selected) selected - book.id else selected + book.id
-                            else library.open(book)
-                        },
-                        onEdit = { editing = book },
-                        onPick = { picking = book },
+                    AllRow(
+                        shown.size, sort,
+                        onSort = { sortKey = it.key },
+                        viewStyle = viewStyle,
+                        woodLedge = woodLedge,
+                        onViewStyle = { viewStyleRaw = it.key },
+                        onWoodLedge = { woodLedge = it },
                     )
+                }
+                if (viewStyle == ShelfViewStyle.SPINE) {
+                    val spineRows = packSpineRows(shown, innerWidth, coverSize / 100f)
+                    items(spineRows.size, key = { idx -> "spine-row-$idx-${spineRows[idx].firstOrNull()?.id}" }, span = { GridItemSpan(maxLineSpan) }) { idx ->
+                        SpineShelfRow(
+                            library = library,
+                            books = spineRows[idx],
+                            scale = coverSize / 100f,
+                            showProgress = showProgress,
+                            woodLedge = woodLedge,
+                            selecting = selecting,
+                            selected = selected,
+                            onTap = { book ->
+                                if (selecting) selected = if (book.id in selected) selected - book.id else selected + book.id
+                                else library.open(book)
+                            },
+                            onEdit = { editing = it },
+                            onPick = { picking = it },
+                        ) { book, shownMenu, dismissMenu ->
+                            BookMenu(library, book, shownMenu, dismissMenu, { editing = book }, { picking = book })
+                        }
+                    }
+                } else if (woodLedge) {
+                    val coverRows = shown.chunked(gridCols)
+                    items(coverRows.size, key = { idx -> "wood-row-$idx-${coverRows[idx].firstOrNull()?.id}" }, span = { GridItemSpan(maxLineSpan) }) { idx ->
+                        val rowBooks = coverRows[idx]
+                        Column(Modifier.fillMaxWidth()) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(18.dp),
+                                verticalAlignment = Alignment.Bottom,
+                            ) {
+                                for (book in rowBooks) {
+                                    Box(Modifier.weight(1f)) {
+                                        Cell(
+                                            library, book, showProgress, selecting, book.id in selected,
+                                            onTap = {
+                                                if (selecting) selected = if (book.id in selected) selected - book.id else selected + book.id
+                                                else library.open(book)
+                                            },
+                                            onEdit = { editing = book },
+                                            onPick = { picking = book },
+                                        )
+                                    }
+                                }
+                                repeat(gridCols - rowBooks.size) { Spacer(Modifier.weight(1f)) }
+                            }
+                            ShelfWoodLedge(Modifier.padding(top = 6.dp))
+                        }
+                    }
+                } else {
+                    items(shown, key = { it.id }) { book ->
+                        // Sorted, filtered, brought in or taken out, each book moves to its place.
+                        Box(Modifier.animateItem(fadeInSpec = app.yuyue.design.YYMotion.standard(), placementSpec = app.yuyue.design.YYMotion.place(), fadeOutSpec = app.yuyue.design.YYMotion.exit())) {
+                            Cell(
+                                library, book, showProgress, selecting, book.id in selected,
+                                onTap = {
+                                    if (selecting) selected = if (book.id in selected) selected - book.id else selected + book.id
+                                    else library.open(book)
+                                },
+                                onEdit = { editing = book },
+                                onPick = { picking = book },
+                            )
+                        }
                     }
                 }
             }
@@ -391,14 +454,53 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
 
 private enum class PanelFrom { Title, Chip }
 
-/** 全部, how many, and their order. */
+/** 全部, how many, view style, and their order. */
 @Composable
-internal fun AllRow(count: Int, sort: ShelfSort, onSort: (ShelfSort) -> Unit) {
+internal fun AllRow(
+    count: Int,
+    sort: ShelfSort,
+    viewStyle: ShelfViewStyle = ShelfViewStyle.GRID,
+    woodLedge: Boolean = false,
+    onViewStyle: ((ShelfViewStyle) -> Unit)? = null,
+    onWoodLedge: ((Boolean) -> Unit)? = null,
+    onSort: (ShelfSort) -> Unit,
+) {
     var sorting by remember { mutableStateOf(false) }
+    var styling by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(t("全部"), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1)
         Text(t("%lld 本", count), fontSize = 13.sp, color = YY.c.t3, style = YY.tnum, modifier = Modifier.padding(start = 8.dp))
         Spacer(Modifier.weight(1f))
+        if (onViewStyle != null && onWoodLedge != null) {
+            Box(Modifier.padding(end = 14.dp)) {
+                Row(
+                    Modifier.clickable { styling = true },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Icon(if (viewStyle == ShelfViewStyle.SPINE) Icons.books else Icons.grid, null, tint = YY.c.t2, modifier = Modifier.size(14.dp))
+                    Text(if (viewStyle == ShelfViewStyle.SPINE) t("书脊") else t("封面"), fontSize = 13.sp, color = YY.c.t2)
+                }
+                DropdownMenu(styling, { styling = false }, containerColor = YY.c.card) {
+                    DropdownMenuItem(
+                        text = { Text(t("封面网格"), color = YY.c.t1) },
+                        trailingIcon = { if (viewStyle == ShelfViewStyle.GRID) Icon(Icons.check, null, tint = YY.tint.accent) },
+                        onClick = { onViewStyle(ShelfViewStyle.GRID); styling = false },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(t("书脊排列"), color = YY.c.t1) },
+                        trailingIcon = { if (viewStyle == ShelfViewStyle.SPINE) Icon(Icons.check, null, tint = YY.tint.accent) },
+                        onClick = { onViewStyle(ShelfViewStyle.SPINE); styling = false },
+                    )
+                    HorizontalDivider(color = YY.c.line)
+                    DropdownMenuItem(
+                        text = { Text(t("浅木层板"), color = YY.c.t1) },
+                        trailingIcon = { if (woodLedge) Icon(Icons.check, null, tint = YY.tint.accent) },
+                        onClick = { onWoodLedge(!woodLedge); styling = false },
+                    )
+                }
+            }
+        }
         Box {
             Row(Modifier.clickable { sorting = true }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(sort.title, fontSize = 13.sp, color = YY.c.t2)

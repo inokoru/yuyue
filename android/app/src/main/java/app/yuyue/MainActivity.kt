@@ -432,6 +432,12 @@ val LocalTabBarHeight = staticCompositionLocalOf { 0.dp }
 @Composable
 private fun TabBar(tab: Tab, chrome: app.yuyue.shelf.ShelfChrome, haze: HazeState, playing: @Composable () -> Unit, select: (Tab) -> Unit) {
     val eink by rememberPref("eink.on", false)
+    val liquidChosen by rememberPref(app.yuyue.design.LiquidGlass.KEY, false)
+    val useLiquid = app.yuyue.design.LiquidGlass.supported && liquidChosen && !eink
+    if (useLiquid) {
+        LiquidTabBar(tab, chrome, haze, playing, select)
+        return
+    }
     val paper = YY.c.bg
     val style = remember(paper) {
         HazeBlurStyle {
@@ -456,6 +462,126 @@ private fun TabBar(tab: Tab, chrome: app.yuyue.shelf.ShelfChrome, haze: HazeStat
             TabItem(TabIcons.notes, TabIcons.notesOn, t("笔记"), tab == Tab.Notes) { select(Tab.Notes) }
             TabItem(TabIcons.me, TabIcons.meOn, t("我的"), tab == Tab.Me, badge = app.yuyue.update.Updates.showsBadge) { select(Tab.Me) }
             TabItem(TabIcons.search, TabIcons.searchOn, t("搜索"), tab == Tab.Search) { select(Tab.Search) }
+        }
+    }
+}
+
+/**
+ * Floating Liquid Glass bottom bar (Android 13+ when `appearance.liquidGlass` is on):
+ * mirrors iOS 26's floating glass capsule (书架 · 笔记 · 我的) with a gliding translucent selection
+ * lens and 搜索 in its own circular glass orb on the right.
+ */
+@Composable
+private fun LiquidTabBar(
+    tab: Tab,
+    chrome: app.yuyue.shelf.ShelfChrome,
+    haze: HazeState,
+    playing: @Composable () -> Unit,
+    select: (Tab) -> Unit,
+) {
+    val inset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val reduce = app.yuyue.design.YYMotion.isReduceMotion()
+    val dark = YY.dark
+    val mainIndex = when (tab) {
+        Tab.Shelf -> 0
+        Tab.Notes -> 1
+        Tab.Me -> 2
+        Tab.Search -> -1
+    }
+    var lastMain by remember { mutableStateOf(0) }
+    if (mainIndex >= 0) lastMain = mainIndex
+    val pillPos by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = lastMain.toFloat(),
+        animationSpec = if (reduce) androidx.compose.animation.core.snap()
+        else androidx.compose.animation.core.spring(dampingRatio = 0.78f, stiffness = 420f),
+        label = "liquidTabPill",
+    )
+    val pillAlpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (mainIndex >= 0) 1f else 0f,
+        animationSpec = app.yuyue.design.YYMotion.quick(),
+        label = "liquidTabAlpha",
+    )
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, bottom = maxOf(12.dp, inset + 8.dp)),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        playing()
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            // Left floating capsule: 书架 · 笔记 · 我的
+            app.yuyue.design.LiquidGlassSurface(
+                haze = haze,
+                shape = CircleShape,
+                cornerRadius = 30.dp,
+                modifier = Modifier.weight(1f).height(60.dp),
+            ) {
+                androidx.compose.foundation.layout.BoxWithConstraints(
+                    Modifier.fillMaxSize().padding(4.dp),
+                ) {
+                    val slotW = maxWidth / 3f
+                    val lensFill = if (dark) Color.White.copy(alpha = 0.14f) else YY.tint.fill.copy(alpha = 0.11f)
+                    val lensBorder = if (dark) Color.White.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.72f)
+                    if (pillAlpha > 0.01f) {
+                        Box(
+                            Modifier
+                                .offset(x = slotW * pillPos)
+                                .width(slotW)
+                                .fillMaxHeight()
+                                .clip(CircleShape)
+                                .background(lensFill.copy(alpha = lensFill.alpha * pillAlpha))
+                                .border(0.75.dp, lensBorder.copy(alpha = lensBorder.alpha * pillAlpha), CircleShape),
+                        )
+                    }
+                    Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                        val placeIcon = chrome.icon
+                        TabItem(placeIcon ?: TabIcons.shelf, placeIcon?.let(app.yuyue.shelf.PlaceIcons::filled) ?: TabIcons.shelfOn, chrome.name ?: t("书架"), tab == Tab.Shelf, switch = true) { select(Tab.Shelf) }
+                        TabItem(TabIcons.notes, TabIcons.notesOn, t("笔记"), tab == Tab.Notes) { select(Tab.Notes) }
+                        TabItem(TabIcons.me, TabIcons.meOn, t("我的"), tab == Tab.Me, badge = app.yuyue.update.Updates.showsBadge) { select(Tab.Me) }
+                    }
+                }
+            }
+            // Right floating circle: 搜索 (mirrors iOS 26's prominent search orb)
+            val searchOn = tab == Tab.Search
+            val searchPress = remember { MutableInteractionSource() }
+            app.yuyue.design.LiquidGlassSurface(
+                haze = haze,
+                shape = CircleShape,
+                cornerRadius = 30.dp,
+                modifier = Modifier
+                    .size(60.dp)
+                    .selectable(
+                        selected = searchOn,
+                        interactionSource = searchPress,
+                        indication = null,
+                        role = androidx.compose.ui.semantics.Role.Tab,
+                        onClick = { select(Tab.Search) },
+                    ),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(4.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (searchOn) (if (dark) Color.White.copy(alpha = 0.15f) else YY.tint.fill.copy(alpha = 0.12f))
+                            else Color.Transparent,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        if (searchOn) TabIcons.searchOn else TabIcons.search,
+                        contentDescription = t("搜索"),
+                        tint = if (searchOn) YY.tint.fill else YY.c.t2,
+                        modifier = Modifier.size(24.dp).pressScale(searchPress, 0.9f),
+                    )
+                }
+            }
         }
     }
 }

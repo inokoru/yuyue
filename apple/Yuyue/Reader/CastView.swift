@@ -875,22 +875,43 @@ struct CastPanel: View {
     @State private var menu: (member: CastMember, at: CGPoint)?
     @State private var merging: String?
     @State private var frame: CGRect = .zero
+    @State private var hoverClose = false
     private let tint = YYTint.standard
 
     private var section: UInt32 { model.player?.spot?.section ?? model.section ?? 0 }
     private var language: String { model.player?.language ?? model.detail?.summary.language ?? "zh" }
 
+    private var closeButton: some View {
+        Button { model.panel = nil } label: {
+            Image(systemName: "xmark")
+                .font(.yy(size: 10, weight: .bold))
+                .foregroundStyle(hoverClose ? YYColor.t1 : YYColor.t2)
+                .frame(width: 24, height: 24)
+                .background(hoverClose ? YYColor.line : YYColor.inset, in: .circle)
+                .contentShape(Circle().inset(by: -4))
+        }
+        .buttonStyle(.plain)
+        .onHover { hoverClose = $0 }
+        .animation(YYMotion.quick, value: hoverClose)
+        .help(Text("关闭"))
+        .accessibilityLabel(Text("关闭"))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if unsure {
-                Button { unsure = false } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Image(systemName: "chevron.left").font(.yy(size: 12, weight: .semibold)).foregroundStyle(YYColor.t2)
-                        Text("待确认的台词").font(.yy(size: 15, weight: .bold)).foregroundStyle(YYColor.t1)
+                HStack(alignment: .center, spacing: 8) {
+                    Button { unsure = false } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Image(systemName: "chevron.left").font(.yy(size: 12, weight: .semibold)).foregroundStyle(YYColor.t2)
+                            Text("待确认的台词").font(.yy(size: 15, weight: .bold)).foregroundStyle(YYColor.t1)
+                        }
+                        .contentShape(.rect)
                     }
-                    .contentShape(.rect)
+                    .buttonStyle(.plain)
+                    Spacer(minLength: 6)
+                    closeButton
                 }
-                .buttonStyle(.plain)
                 ScrollView { UnsureView(core: model.core, bookID: model.bookID, section: section, chapter: { model.detail?.chapterTitle(for: $0)?.split(separator: " ").first.map(String.init) }) }
                     .scrollIndicators(.never)
             } else {
@@ -903,6 +924,7 @@ struct CastPanel: View {
                     if unsureCount > 0 {
                         DramaUnsurePill(count: unsureCount, tint: tint) { unsure = true }
                     }
+                    closeButton
                 }
                 ScrollView {
                     VStack(spacing: 10) {

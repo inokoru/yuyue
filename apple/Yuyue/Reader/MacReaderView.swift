@@ -15,7 +15,13 @@ struct MacReaderView: View {
         nonmutating set { model.panel = newValue }
     }
     @State private var typesetShown = false
+    @State private var translateShown = false
+    @State private var moreShown = false
+    @State private var infoShown = false
     @State private var listenShown = false
+    @AppStorage(MacReaderBrightness.followKey) private var brightnessFollow = true
+    @AppStorage(MacReaderBrightness.valueKey) private var readerBrightness = 0.72
+    @AppStorage(MacReaderBrightness.eyeCareKey) private var eyeCare = false
     @State private var readyVoicePickerShown = false
     @State private var pickedReadyVoiceID: String?
     @State private var thought: Mark?
@@ -67,6 +73,23 @@ struct MacReaderView: View {
             }
         }
         .overlay {
+            ZStack {
+                if eyeCare, !paper.isEink {
+                    Color(hex: "#F5A63B")
+                        .opacity(paper.isDark ? 0.08 : 0.12)
+                        .ignoresSafeArea()
+                        .transition(.opacity)
+                }
+                if !brightnessFollow, !paper.isEink {
+                    let dim = max(0.0, (1.0 - min(max(readerBrightness, 0.35), 1.0)) * 0.62)
+                    Color.black.opacity(dim)
+                        .ignoresSafeArea()
+                }
+            }
+            .allowsHitTesting(false)
+            .animation(.easeInOut(duration: 0.2), value: eyeCare)
+        }
+        .overlay {
             if model.quickSearchShown, let library = model.library {
                 QuickSearchPanel(library: library) { model.quickSearchShown = false } ask: { model.ask($0) }
                     .preferredColorScheme(nil)
@@ -98,6 +121,13 @@ struct MacReaderView: View {
                 model.settingsShown = true
             } : nil) {
                 model.rulesShown = false
+            }
+        }
+        .sheet(isPresented: $infoShown) {
+            if let library = model.library, let book = library.books.first(where: { $0.id == model.bookID }) {
+                EditInfoSheet(library: library, book: book)
+                    .frame(width: 380)
+                    .paperWindow()
             }
         }
         .sheet(isPresented: $model.fontBookShown) {
@@ -258,9 +288,9 @@ struct MacReaderView: View {
                 }
             }
         }
-        .onChange(of: model.rulesShown) { _, shown in if shown { typesetShown = false } }
-        .onChange(of: model.txtShown) { _, shown in if shown { typesetShown = false } }
-        .onChange(of: model.fontBookShown) { _, shown in if shown { typesetShown = false } }
+        .onChange(of: model.rulesShown) { _, shown in if shown { typesetShown = false; translateShown = false; moreShown = false } }
+        .onChange(of: model.txtShown) { _, shown in if shown { typesetShown = false; translateShown = false; moreShown = false } }
+        .onChange(of: model.fontBookShown) { _, shown in if shown { typesetShown = false; translateShown = false; moreShown = false } }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { note in
             // Leaving full screen by the green button or the menu leaves 沉浸 too.
             guard model.immersive, let window = note.object as? NSWindow, window === fullScreened else { return }
@@ -504,15 +534,30 @@ struct MacReaderView: View {
                         .presentationBackground(YYColor.card)
                 }
             if model.detail?.summary.format != .podcast {
-                tool(String(localized: "译"), "translate", help: String(localized: "每段下面跟着译文（外文译中、文言译白话）；关掉只剩原文"), on: model.translateShown) {
-                    model.setTranslateShown(!model.translateShown)
+                let translateHelp: String = switch model.translateMode {
+                case .off: String(localized: "译文：原文 / 双语对照 / 仅译文")
+                case .bilingual: String(localized: "译文：双语对照")
+                case .only: String(localized: "译文：仅译文")
+                }
+                tool(String(localized: "译"), "translate", help: translateHelp, on: model.translateShown || translateShown) {
+                    translateShown.toggle()
+                }
+                .popover(isPresented: $translateShown, arrowEdge: .bottom) {
+                    MacReaderTranslatePopover(model: model, dismiss: { translateShown = false })
+                        .presentationBackground(YYColor.card)
                 }
             }
             tool(String(localized: "书伴"), "sparkle", help: String(localized: "书伴"), on: panel == .companion) { panel = panel == .companion ? nil : .companion }
-            if model.hasDialogue {
-                tool(String(localized: "人物"), nil, asset: "cast", help: String(localized: "人物：谁说了话，各用什么声音"), on: panel == .cast) { panel = panel == .cast ? nil : .cast }
-            }
             tool(String(localized: "笔记"), nil, asset: "note-card", help: String(localized: "笔记 ⌘⌥N"), on: panel == .notes) { panel = panel == .notes ? nil : .notes }
+            tool(String(localized: "更多"), "ellipsis", help: String(localized: "更多控制"), on: moreShown) { moreShown.toggle() }
+                .popover(isPresented: $moreShown, arrowEdge: .bottom) {
+                    MacReaderMorePopover(
+                        model: model,
+                        openInfo: { infoShown = true },
+                        dismiss: { moreShown = false }
+                    )
+                    .presentationBackground(YYColor.card)
+                }
         }
         .padding(.horizontal, 3)
         .frame(height: 32)
@@ -962,6 +1007,10 @@ struct MacReaderView: View {
         }
         if event.keyCode == 53, model.immersive {
             model.immersive = false
+            return true
+        }
+        if event.keyCode == 53, model.panel == .cast {
+            model.panel = nil
             return true
         }
         if let c = event.charactersIgnoringModifiers, let n = Int(c), (1 ... 4).contains(n) {

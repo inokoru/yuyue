@@ -578,14 +578,31 @@ fun ReaderModel.loadVocab() {
 }
 
 /** 译 in the tools. */
-fun ReaderModel.setTranslateShown(on: Boolean) {
-    if (on && !isForeign && CompanionConfig.current?.isReady != true) {
+/** Reading translation display mode: original only, side-by-side bilingual, or translation only. */
+enum class TranslateMode(val key: String) {
+    OFF("off"),
+    BILINGUAL("bilingual"),
+    ONLY("only");
+
+    companion object {
+        fun of(raw: String): TranslateMode = entries.firstOrNull { it.key == raw } ?: OFF
+    }
+}
+
+fun ReaderModel.setTranslateMode(mode: TranslateMode) {
+    if (mode != TranslateMode.OFF && !isForeign && CompanionConfig.current?.isReady != true) {
         show(Library.Toast(Library.Toast.Icon.Error, t("先在「设置 · 书伴」里配好模型，才能译文对照"), ""))
         return
     }
-    translateShown = on
-    Prefs.set("translate.$bookID", on)
-    pager.setTranslating(on)
+    translateMode = mode
+    if (mode != TranslateMode.OFF) lastActiveTranslateMode = mode
+    Prefs.set("translate.$bookID", mode != TranslateMode.OFF)
+    Prefs.set("translateMode.$bookID", mode.key)
+    pager.setTranslating(mode != TranslateMode.OFF, only = mode == TranslateMode.ONLY)
+}
+
+fun ReaderModel.setTranslateShown(on: Boolean) {
+    setTranslateMode(if (on) (if (lastActiveTranslateMode == TranslateMode.OFF) TranslateMode.BILINGUAL else lastActiveTranslateMode) else TranslateMode.OFF)
 }
 
 private suspend fun ReaderModel.translateParagraphs(section: Int, texts: List<String>): Pair<List<String?>, String> {
@@ -648,9 +665,15 @@ fun ReaderModel.setUpForeign() {
         val msg = translateFailure ?: t("先在「设置 · 书伴」里配好模型，才能译文对照")
         show(Library.Toast(Library.Toast.Icon.Error, msg, ""))
     }
-    if (Prefs.bool("translate.$bookID", false)) {
+    val savedRaw = Prefs.string("translateMode.$bookID", "")
+    val savedMode = when {
+        savedRaw.isNotEmpty() -> TranslateMode.of(savedRaw).takeIf { it != TranslateMode.OFF }
+        Prefs.bool("translate.$bookID", false) -> TranslateMode.BILINGUAL
+        else -> null
+    }
+    if (savedMode != null) {
         val aiReady = (ForeignPrefs.aiTranslate || !isForeign) && CompanionConfig.current?.isReady == true
-        if (aiReady) setTranslateShown(true)
+        if (aiReady) setTranslateMode(savedMode)
     }
     if (!isForeign) return
     pager.lookup = true

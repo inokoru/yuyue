@@ -323,6 +323,18 @@ object PaperAppearance {
         pick(Resolved(paperColors(custom).preset, custom), settings, apply)
     }
 
+    /** One-tap switch between light and dark paper, remembering each polarity's choice. */
+    fun togglePolarity(settings: ReaderSettings, apply: ((ReaderSettings) -> ReaderSettings) -> Unit) {
+        ensureLoaded()
+        val current = resolveForThread(settings)
+        val wantDark = !current.isDark
+        remember(current.choiceID, current.isDark)
+        val savedID = if (wantDark) darkSlot else lightSlot
+        val target = savedID?.let { resolveID(it) }?.takeIf { it.isDark == wantDark }
+            ?: Resolved(pairedPreset(current, wantDark), null)
+        pick(target, settings, apply)
+    }
+
     private fun pick(chosen: Resolved, settings: ReaderSettings, apply: ((ReaderSettings) -> ReaderSettings) -> Unit) {
         ensureLoaded()
         val base = raw(settings)

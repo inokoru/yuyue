@@ -46,6 +46,9 @@ struct PhoneShelf: View {
     @State private var selected: Set<String> = []
     @AppStorage("shelf.showProgress") private var showProgress = true
     @AppStorage("shelf.coverSize") private var coverSize = 100.0
+    @AppStorage(ShelfStylePrefs.viewKey) private var viewStyleRaw = ShelfViewStyle.grid.rawValue
+    @AppStorage(ShelfStylePrefs.woodKey) private var woodLedge = false
+    private var viewStyle: ShelfViewStyle { ShelfViewStyle.of(viewStyleRaw) }
     /// Regular width (iPhone Duo open, iPad): a fixed even grid, 继续 above it, the welcome in two columns.
     @Environment(\.horizontalSizeClass) private var sizeClass
     /// The shelf's own width, for the grid's column count and the welcome's stacked rows.
@@ -232,11 +235,12 @@ struct PhoneShelf: View {
                         empty
                     } else {
                         Color.clear.frame(height: 18)
-                        // 全部, how many, and their order — as 在读's own row above.
-                        HStack {
+                        // 全部, how many, view style, and their order — as 在读's own row above.
+                        HStack(spacing: 12) {
                             Text("全部").font(.subheadline.weight(.semibold)).foregroundStyle(YYColor.t1)
                             Text(String(localized: "\(shown.count) 本")).font(.footnote).foregroundStyle(YYColor.t3)
                             Spacer()
+                            shelfStyleMenu
                             sortMenu
                         }
                         .padding(.horizontal, inset)
@@ -264,11 +268,37 @@ struct PhoneShelf: View {
         }
     }
 
-    /// The covers. Half folded (iPhone Duo), two grids of 2, one each side of the fold, each
-    /// with its own 32 pt sides; otherwise one grid.
+    /// The covers (or spine rows when 书脊排列 is active, with optional 浅木层板).
     @ViewBuilder private var grid: some View {
         let books = shown
-        if regular, let fold, gridSpan.width > 0, fold.minX > gridSpan.minX, fold.maxX < gridSpan.maxX {
+        if viewStyle == .spine {
+            let innerW = max(160, (width > 0 ? width : 360) - inset * 2)
+            let scale = CGFloat(coverSize / 100.0)
+            let rows = SpineMetrics.packRows(books, maxWidth: innerW, scale: scale)
+            LazyVStack(alignment: .leading, spacing: woodLedge ? 16 : 20) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    PhoneSpineShelfRow(
+                        books: row,
+                        scale: scale,
+                        showProgress: showProgress,
+                        woodLedge: woodLedge,
+                        selecting: selecting,
+                        selected: selected,
+                        tap: { book in
+                            if selecting {
+                                if selected.contains(book.id) { selected.remove(book.id) } else { selected.insert(book.id) }
+                            } else {
+                                open(book, nil)
+                            }
+                        },
+                        menu: { actions(for: $0) }
+                    )
+                }
+            }
+            .animation(YYMotion.layout, value: books.map(\.id))
+            .padding(.horizontal, inset)
+            .measuringGridSpan($gridSpan)
+        } else if regular, let fold, gridSpan.width > 0, fold.minX > gridSpan.minX, fold.maxX < gridSpan.maxX {
             let left = books.enumerated().filter { $0.offset % 4 < 2 }.map(\.element)
             let right = books.enumerated().filter { $0.offset % 4 >= 2 }.map(\.element)
             let half = [GridItem](repeating: GridItem(.flexible(), spacing: 28, alignment: .top), count: 2)
@@ -286,6 +316,35 @@ struct PhoneShelf: View {
                 .frame(width: max(0, gridSpan.maxX - fold.maxX))
             }
             .animation(YYMotion.layout, value: books.map(\.id))
+            .measuringGridSpan($gridSpan)
+        } else if woodLedge {
+            let innerW = max(160, (width > 0 ? width : 360) - inset * 2)
+            let colGap: CGFloat = regular ? 28 : 18
+            let colCount: Int = regular
+                ? (width >= 900 ? 6 : 4)
+                : max(1, Int((innerW + colGap) / (96 * CGFloat(coverSize / 100.0) + colGap)))
+            let rows = stride(from: 0, to: books.count, by: colCount).map { i in
+                Array(books[i ..< min(i + colCount, books.count)])
+            }
+            LazyVStack(alignment: .leading, spacing: 18) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .bottom, spacing: colGap) {
+                            ForEach(row) { book in
+                                cell(book).frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            if row.count < colCount {
+                                ForEach(0 ..< (colCount - row.count), id: \.self) { _ in
+                                    Color.clear.frame(maxWidth: .infinity)
+                                }
+                            }
+                        }
+                        ShelfWoodLedge()
+                    }
+                }
+            }
+            .animation(YYMotion.layout, value: books.map(\.id))
+            .padding(.horizontal, inset)
             .measuringGridSpan($gridSpan)
         } else {
             LazyVGrid(columns: columns, alignment: .leading, spacing: regular ? 32 : 22) {
@@ -476,6 +535,27 @@ struct PhoneShelf: View {
                     ForEach(ShelfSort.allCases, id: \.self) { Text($0.name).tag("\($0)") }
                 }
             } label: { sortLabel(sort.name) }
+        }
+    }
+
+    private var shelfStyleMenu: some View {
+        Menu {
+            Picker("书架样式", selection: $viewStyleRaw) {
+                Label("封面网格", systemImage: "square.grid.2x2").tag(ShelfViewStyle.grid.rawValue)
+                Label("书脊排列", systemImage: "books.vertical").tag(ShelfViewStyle.spine.rawValue)
+            }
+            Divider()
+            Toggle(isOn: $woodLedge) {
+                Label("浅木层板", systemImage: "rectangle.bottomthird.inset.filled")
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: viewStyle == .spine ? "books.vertical" : "square.grid.2x2")
+                    .font(.yy(size: 12, weight: .medium))
+                Text(viewStyle == .spine ? "书脊" : "封面")
+                    .font(.footnote)
+            }
+            .foregroundStyle(YYColor.t2)
         }
     }
 

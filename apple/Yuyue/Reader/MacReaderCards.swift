@@ -10,6 +10,8 @@ struct TypesetCard: View {
     let model: ReaderModel
     @AppStorage("reader.twoColumns") private var twoColumns = true
     @AppStorage(EInk.key) private var einkOn = false
+    @AppStorage(PageTurnPrefs.key) private var pageTurnRaw = PageTurn.slide.rawValue
+    @AppStorage(PageTurnPrefs.soundKey) private var pageTurnSound = false
     @State private var more = false
     /// 全部纸张, when 我的纸 are more than two rows.
     @State private var all = false
@@ -19,7 +21,6 @@ struct TypesetCard: View {
     /// 重命名 asked for this paper.
     @State private var renaming: CustomPaper?
     @State private var newName = ""
-    @State private var castShown = false
     #if os(macOS)
     @State private var fontRow = FontRow.ids()
     #endif
@@ -49,11 +50,6 @@ struct TypesetCard: View {
         .animation(YYMotion.layout, value: more)
         .animation(YYMotion.layout, value: all)
         .animation(YYMotion.layout, value: editing == nil)
-        .sheet(isPresented: $castShown) {
-            CastSheet(core: model.core, bookID: model.bookID, section: model.player?.spot?.section ?? model.section ?? 0, player: model.player,
-                      language: model.player?.language ?? model.detail?.summary.language ?? "zh") { castShown = false }
-                .presentationBackground(YYColor.bg)
-        }
         .yyPrompt(String(localized: "重命名"), text: $newName, prompt: String(localized: "名字"),
                   isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } }),
                   confirm: String(localized: "保存")) {
@@ -110,51 +106,10 @@ struct TypesetCard: View {
                 }
                 .disabled(model.settings.mode == .scrolled)
             }
-            if model.hasDialogue {
-                // 对话气泡: kept per book.
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("对话气泡")
-                            .font(.yy(size: 12.5, weight: .semibold))
-                            .foregroundStyle(YYColor.t1)
-                        Text("将人物台词排成聊天气泡")
-                            .font(.yy(size: 10.5))
-                            .foregroundStyle(YYColor.t3)
-                    }
-                    Spacer(minLength: 8)
-                    YYSwitch(isOn: Binding(get: { model.bubbles }, set: { model.bubbles = $0 }), label: String(localized: "对话气泡"))
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(YYColor.inset, in: .rect(cornerRadius: 12))
-            }
             VStack(spacing: 0) {
                 switchRow(String(localized: "只用于这本书"), Binding(get: { model.ownSettings }, set: { model.setOwnSettings($0) }))
                     .frame(height: 38)
                     .overlay(alignment: .top) { Rectangle().fill(YYColor.line).frame(height: 0.5) }
-                if model.hasDialogue {
-                    Button { castShown = true } label: {
-                        HStack(spacing: 8) {
-                            Image("cast")
-                                .resizable()
-                                .renderingMode(.template)
-                                .scaledToFit()
-                                .frame(width: 14, height: 14)
-                                .foregroundStyle(YYColor.t1)
-                            Text("人物").font(.yy(size: 12)).foregroundStyle(YYColor.t1)
-                            Spacer()
-                            HStack(spacing: 3) {
-                                Text("配音与气泡位置")
-                                Image(systemName: "chevron.right").font(.yy(size: 9, weight: .semibold))
-                            }
-                            .font(.yy(size: 11)).foregroundStyle(YYColor.t3)
-                        }
-                        .frame(height: 38)
-                        .overlay(alignment: .top) { Rectangle().fill(YYColor.line).frame(height: 0.5) }
-                        .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                }
                 Button { more = true } label: {
                     HStack(spacing: 8) {
                         Text("更多").font(.yy(size: 12)).foregroundStyle(YYColor.t1)
@@ -187,6 +142,17 @@ struct TypesetCard: View {
             row(String(localized: "翻页方式")) {
                 Segments(items: [(LayoutMode.paginated, String(localized: "左右翻页")), (.scrolled, String(localized: "上下滚动"))], selection: binding(\.mode)) { _, t in Text(t) }
                     .frame(width: 170)
+            }
+            if model.settings.mode == .paginated {
+                row(String(localized: "翻页动画")) {
+                    Segments(
+                        items: [(PageTurn.slide, String(localized: "滑动")), (.cover, String(localized: "覆盖")), (.none, String(localized: "无动画"))],
+                        selection: Binding(get: { PageTurn.of(pageTurnRaw) }, set: { pageTurnRaw = $0.rawValue; model.pager.pageTurn = $0 }),
+                        small: true
+                    ) { _, t in Text(t) }
+                        .frame(width: 170)
+                }
+                switchRow(String(localized: "翻页音效"), $pageTurnSound)
             }
             row(String(localized: "段距")) {
                 Segments(items: [(Double?.some(0), String(localized: "无")), (nil, String(localized: "适中")), (.some(1), String(localized: "宽"))], selection: binding(\.paragraphSpacing)) { _, t in Text(t) }

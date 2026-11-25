@@ -124,8 +124,8 @@ fun ReaderModel.within(c: TocChapter): Double {
  *  the middle in the accent, with a line for how far into it; the ones read are faded. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TocSheet(model: ReaderModel, dismiss: () -> Unit) {
-    var tab by remember { mutableStateOf(0) }
+fun TocSheet(model: ReaderModel, initialTab: Int = 0, dismiss: () -> Unit) {
+    var tab by remember(initialTab) { mutableStateOf(initialTab) }
     var editing by remember { mutableStateOf<Mark?>(null) }
     val chapters = remember(model.section) { model.tocChapters }
     val current = model.currentChapter(chapters)

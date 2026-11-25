@@ -1,6 +1,22 @@
 #if os(iOS)
 import SwiftUI
+import UIKit
 import YuyueCore
+
+/// Independent reading brightness & eye-care preference keys on phone/tablet.
+enum ReaderBrightness {
+    static let followKey = "reader.brightnessFollowSystem"
+    static let valueKey = "reader.brightness"
+    static let eyeCareKey = "reader.eyeCare"
+
+    @MainActor
+    static var activeScreen: UIScreen? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }?.screen
+            ?? UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen }.first
+    }
+}
 
 /// The phone's page: only the words and one glass capsule at the
 /// bottom — 目录, where the reader is, ‹ 朗读 ›, Aa. A tap in the middle floats 返回, the book's
@@ -15,10 +31,17 @@ struct PhoneReaderChrome: View {
     @State private var hitsShown = false
     @State private var infoShown = false
     @State private var immersiveShown = false
+    @State private var moreShown = false
+    @State private var pendingMoreAction: (() -> Void)?
     @AppStorage(ImmersivePrefs.progressKey) private var hidesProgress = true
     @State private var exported: URL?
     @FocusState private var typing: Bool
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(ReaderBrightness.followKey) private var brightnessFollow = true
+    @AppStorage(ReaderBrightness.valueKey) private var readerBrightness = 0.6
+    @AppStorage(ReaderBrightness.eyeCareKey) private var eyeCare = false
+    @State private var savedSystemBrightness: CGFloat?
 
     private var paper: YYPaper { model.paperTokens }
     /// 沉浸阅读 hides the capsule until the middle is tapped; scrolling down the page, until back up it;
@@ -32,6 +55,16 @@ struct PhoneReaderChrome: View {
         layout
         .foregroundStyle(paper.ink)
         .buttonStyle(.plain)
+        .overlay {
+            if eyeCare, !paper.isEink {
+                Color(hex: "#F5A63B")
+                    .opacity(paper.isDark ? 0.08 : 0.12)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: eyeCare)
         // The banners sit inside the animations below, so they come and go with the bars.
         .overlay(alignment: .top) {
             if model.chapterOnlyHere, !model.searchShown {
@@ -65,11 +98,57 @@ struct PhoneReaderChrome: View {
             try? await Task.sleep(for: .seconds(5))
             model.player?.dismissHead()
         }
-        .task(id: model.immersive && model.chromeShown) {
+        .task(id: model.immersive && model.chromeShown && !moreShown) {
             // 沉浸: called up by a tap, gone again by itself.
-            guard model.immersive, model.chromeShown else { return }
+            guard model.immersive, model.chromeShown, !moreShown else { return }
             try? await Task.sleep(for: .seconds(4))
-            if !Task.isCancelled, !listenShown, !model.settingsShown { model.chromeShown = false }
+            if !Task.isCancelled, !listenShown, !model.settingsShown, !moreShown { model.chromeShown = false }
+        }
+        .sheet(isPresented: $moreShown, onDismiss: {
+            if let action = pendingMoreAction {
+                pendingMoreAction = nil
+                action()
+            }
+        }) {
+            let showTurn = model.settings.mode == .paginated && !EInk.on
+            let showTranslate = model.detail?.summary.format != .pdf && model.detail?.summary.format != .podcast
+            let sheetHeight: CGFloat = EInk.on
+                ? (showTranslate ? 364 : 310)
+                : (420 + (showTranslate ? 54 : 0) + (showTurn ? 56 : 0))
+            PhoneReaderMoreSheet(
+                model: model,
+                openNotes: {
+                    pendingMoreAction = {
+                        model.tocInitialTab = 2
+                        model.tocShown = true
+                    }
+                },
+                openInfo: {
+                    pendingMoreAction = { infoShown = true }
+                },
+                openImmersiveSettings: {
+                    pendingMoreAction = { immersiveShown = true }
+                },
+                openCompanion: {
+                    pendingMoreAction = {
+                        model.chromeShown = false
+                        model.panel = .companion
+                    }
+                },
+                openRules: {
+                    pendingMoreAction = { model.rulesShown = true }
+                },
+                openTxtLayout: {
+                    pendingMoreAction = { model.txtShown = true }
+                },
+                exportMarkdown: {
+                    pendingMoreAction = { exportNotes() }
+                },
+                dismiss: { moreShown = false }
+            )
+            .presentationDetents([.height(sheetHeight), .medium])
+            .presentationDragIndicator(.visible)
+            .presentationBackgroundInteraction(.enabled)
         }
         .sheet(isPresented: $listenShown) {
             ScrollView { ListenCard(model: model) }
@@ -136,6 +215,29 @@ struct PhoneReaderChrome: View {
         .sheet(item: Binding(get: { exported.map(Shared.init) }, set: { exported = $0?.url })) { item in
             ActivitySheet(items: [item.url]).ignoresSafeArea()
         }
+        .onAppear { applyBrightness(initial: true) }
+        .onDisappear { restoreBrightness() }
+        .onChange(of: brightnessFollow) { _, _ in applyBrightness(initial: false) }
+        .onChange(of: readerBrightness) { _, _ in if !brightnessFollow { applyBrightness(initial: false) } }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { applyBrightness(initial: false) } else { restoreBrightness() }
+        }
+    }
+
+    private func applyBrightness(initial: Bool) {
+        guard let screen = ReaderBrightness.activeScreen else { return }
+        if initial && savedSystemBrightness == nil { savedSystemBrightness = screen.brightness }
+        if brightnessFollow {
+            if let saved = savedSystemBrightness { screen.brightness = saved }
+        } else {
+            if savedSystemBrightness == nil { savedSystemBrightness = screen.brightness }
+            screen.brightness = CGFloat(min(max(readerBrightness, 0.05), 1.0))
+        }
+    }
+
+    private func restoreBrightness() {
+        guard let saved = savedSystemBrightness, let screen = ReaderBrightness.activeScreen else { return }
+        screen.brightness = saved
     }
 
     // MARK: Layout
@@ -305,37 +407,13 @@ struct PhoneReaderChrome: View {
             onSearch: { startSearch() },
             onBookmark: { model.toggleBookmark() }
         ) {
-            Menu {
-                Button("沉浸阅读", systemImage: "viewfinder") { immersiveShown = true }
-                if model.detail?.summary.format != .pdf {
-                    Button("书伴", systemImage: "sparkle") {
-                        model.chromeShown = false
-                        model.panel = .companion
-                    }
-                    Button(model.translateShown ? "收起译文" : "译文对照", systemImage: "translate") {
-                        model.chromeShown = false
-                        model.setTranslateShown(!model.translateShown)
-                    }
-                }
-                Button("书的信息", systemImage: "info.circle") { infoShown = true }
-                if model.detail?.summary.format != .pdf {
-                    Button("替换规则", systemImage: "arrow.left.arrow.right") { model.rulesShown = true }
-                }
-                if model.detail?.summary.format == .txt {
-                    Button("编码和目录", systemImage: "doc.text.magnifyingglass") { model.txtShown = true }
-                }
-                Menu("导出笔记", systemImage: "square.and.arrow.up") {
-                    Button("Markdown", systemImage: "doc.plaintext") { exportNotes() }
-                    Divider()
-                    NoteSendItems(sender: model.noteSender, books: {
-                        guard let library = model.library else { return [] }
-                        return NotedBook.load(library, only: [model.bookID]).map(\.export)
-                    }, book: model.detail?.summary)
-                }
+            Button {
+                moreShown = true
             } label: {
                 readerIcon("ellipsis")
                     .background(paper.ink.opacity(0.09), in: .circle)
             }
+            .buttonStyle(YYPressStyle(scale: 0.92))
             .accessibilityLabel("更多")
         }
     }
@@ -404,7 +482,10 @@ struct PhoneReaderChrome: View {
             progress: model.chapterProgress,
             playEnabled: model.player != nil,
             sentenceStep: reading,
-            onToc: { model.tocShown = true },
+            onToc: {
+                model.tocInitialTab = 0
+                model.tocShown = true
+            },
             onCenter: { if let alert = model.capsuleAlert { alert.action() } else { listenShown = true } },
             onPrevious: { step(forward: false) },
             onPlay: { model.togglePlay() },

@@ -301,6 +301,21 @@ final class PaperAppearance {
         pick(Resolved(preset: preset, custom: custom), in: settings, apply: apply)
     }
 
+    /// One-tap switch between light and dark paper, remembering each polarity's choice.
+    func togglePolarity(in settings: ReaderSettings, apply: ((inout ReaderSettings) -> Void) -> Void) {
+        let current = resolve(settings)
+        let wantDark = !current.isDark
+        remember(current.choiceID, dark: current.isDark)
+        let savedID = wantDark ? darkID : lightID
+        let target: Resolved
+        if let savedID, let saved = resolveID(savedID), saved.isDark == wantDark {
+            target = saved
+        } else {
+            target = Resolved(preset: Self.pairedPreset(for: current, dark: wantDark), custom: nil)
+        }
+        pick(target, in: settings, apply: apply)
+    }
+
     private func pick(_ chosen: Resolved, in settings: ReaderSettings, apply: ((inout ReaderSettings) -> Void) -> Void) {
         let base = raw(settings)
         remember(chosen.choiceID, dark: chosen.isDark)

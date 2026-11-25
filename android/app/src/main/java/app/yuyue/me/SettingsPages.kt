@@ -511,6 +511,8 @@ fun ReadingPage(library: Library, push: (MePage) -> Unit) {
     var progress by rememberPref(ImmersivePrefs.PROGRESS, true)
     var quiet by rememberPref(ImmersivePrefs.QUIET, true)
     val eink by rememberPref(EInk.KEY, false)
+    var pageTurnRaw by rememberPref(app.yuyue.reader.PageTurnPrefs.KEY, app.yuyue.reader.PageTurn.SLIDE.key)
+    var pageTurnSound by rememberPref(app.yuyue.reader.PageTurnPrefs.SOUND_KEY, false)
     var editingPaper by remember { mutableStateOf<CustomPaper?>(null) }
     var previewPaper by remember { mutableStateOf<CustomPaper?>(null) }
     var renamingPaper by remember { mutableStateOf<CustomPaper?>(null) }
@@ -644,6 +646,23 @@ fun ReadingPage(library: Library, push: (MePage) -> Unit) {
                 YYRow(t("翻页方式"), trailing = {
                     YYSegments(listOf(LayoutMode.PAGINATED to t("左右翻页"), LayoutMode.SCROLLED to t("上下滚动")), s.mode, { m -> change { it.copy(mode = m) } }, small = true)
                 })
+            }
+            if (s.mode == LayoutMode.PAGINATED) {
+                row {
+                    YYRow(t("翻页动画"), trailing = {
+                        YYSegments(
+                            listOf(
+                                app.yuyue.reader.PageTurn.SLIDE to t("滑动"),
+                                app.yuyue.reader.PageTurn.COVER to t("覆盖"),
+                                app.yuyue.reader.PageTurn.NONE to t("无动画"),
+                            ),
+                            app.yuyue.reader.PageTurn.of(pageTurnRaw),
+                            { pageTurnRaw = it.key },
+                            small = true,
+                        )
+                    })
+                }
+                row { DetailSwitch(t("翻页音效"), t("手动翻页时播放轻纸声，朗读时自动静音"), pageTurnSound) { pageTurnSound = it } }
             }
             row { DetailSwitch(t("两端对齐"), null, s.justify ?: true) { v -> change { it.copy(justify = v) } } }
             row { DetailSwitch(t("首行缩进两字"), null, s.indent ?: true) { v -> change { it.copy(indent = v) } } }

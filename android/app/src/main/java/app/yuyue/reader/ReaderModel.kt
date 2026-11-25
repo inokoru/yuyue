@@ -156,8 +156,10 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         private set
     /** 外文原著: the word tapped, and its card. */
     var lookup by mutableStateOf<WordLookup?>(null)
-    /** 译: translations under every paragraph. */
-    var translateShown by mutableStateOf(false)
+    /** 译: 原文 / 译文对照 / 仅译文. */
+    var translateMode by mutableStateOf(TranslateMode.OFF)
+    var lastActiveTranslateMode = TranslateMode.BILINGUAL
+    val translateShown: Boolean get() = translateMode != TranslateMode.OFF
     var translateFailure: String? = null
     /** 双击一句只翻这一句. */
     var translatingSentence by mutableStateOf<String?>(null)
@@ -220,6 +222,8 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         pager.fontSize = s.fontSize
         pager.mode = s.mode
         pager.calm = EInk.on
+        pager.pageTurn = PageTurnPrefs.current
+        pager.soundEnabled = PageTurnPrefs.sound
         pager.bubbles = bubbles
         pager.background = paperTokens.bg.toArgb()
         pager.ink = paperTokens.ink.toArgb()

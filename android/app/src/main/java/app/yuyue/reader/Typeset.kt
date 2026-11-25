@@ -44,9 +44,18 @@ import app.yuyue.design.SyncDialogSystemBars
 import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.YY
 import app.yuyue.design.YYSegments
+import app.yuyue.design.rememberPref
 import app.yuyue.t
+import androidx.compose.ui.draw.clip
 import uniffi.yuyue_core.LayoutMode
 import kotlin.math.roundToInt
+
+/** Independent reading brightness & eye-care preference keys on Android. */
+object ReaderBrightness {
+    const val FOLLOW_KEY = "reader.brightnessFollowSystem"
+    const val VALUE_KEY = "reader.brightness"
+    const val EYE_CARE_KEY = "reader.eyeCare"
+}
 
 /** The card under Aa, as on iPhone: paper, typeface, size, line spacing, whether this book keeps
  *  its own, and the rest under 更多. The page changes as it is set. */
@@ -120,43 +129,8 @@ private fun Main(model: ReaderModel, openMore: () -> Unit, openFonts: () -> Unit
             small = true, modifier = Modifier.width(196.dp),
         )
     }
-    if (model.hasDialogue) {
-        // 对话气泡: kept per book.
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .background(YY.c.inset, RoundedCornerShape(12.dp))
-                .toggleable(model.bubbles, role = androidx.compose.ui.semantics.Role.Switch, onValueChange = { model.bubbles = it })
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(t("对话气泡"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1)
-                Text(t("将人物台词排成聊天气泡"), fontSize = 11.sp, color = YY.c.t3)
-            }
-            Switch(
-                model.bubbles,
-                null,
-                colors = SwitchDefaults.colors(
-                    checkedTrackColor = YY.tint.fill,
-                    checkedThumbColor = YY.c.card,
-                    uncheckedTrackColor = YY.c.card,
-                    uncheckedBorderColor = YY.c.line,
-                ),
-            )
-        }
-    }
     Column {
         SwitchRow(t("只用于这本书"), model.ownSettings) { model.setOwn(it) }
-        if (model.hasDialogue) {
-            Row(Modifier.fillMaxWidth().height(44.dp).clickable { model.settingsShown = false; model.castShown = true }, verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.cast, null, tint = YY.c.t1, modifier = Modifier.padding(end = 8.dp).size(17.dp))
-                Text(t("人物"), fontSize = 13.sp, color = YY.c.t1, modifier = Modifier.weight(1f))
-                Text(t("配音与气泡位置"), fontSize = 12.sp, color = YY.c.t3)
-                Icon(Icons.chevronRight, null, tint = YY.c.t3, modifier = Modifier.size(16.dp))
-            }
-        }
         Row(Modifier.fillMaxWidth().height(44.dp).clickable(onClick = openMore), verticalAlignment = Alignment.CenterVertically) {
             Text(t("更多"), fontSize = 13.sp, color = YY.c.t1, modifier = Modifier.weight(1f))
             Text(t("段距、对齐、简繁与规则"), fontSize = 12.sp, color = YY.c.t3)
@@ -168,12 +142,26 @@ private fun Main(model: ReaderModel, openMore: () -> Unit, openFonts: () -> Unit
 @Composable
 private fun More(model: ReaderModel, back: () -> Unit) {
     val s = model.settings
+    var pageTurnRaw by rememberPref(PageTurnPrefs.KEY, PageTurn.SLIDE.key)
+    var pageTurnSound by rememberPref(PageTurnPrefs.SOUND_KEY, false)
     Row(Modifier.height(40.dp).clickable(onClick = back), verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.chevronLeft, null, tint = YY.tint.accent, modifier = Modifier.size(18.dp))
         Text(t("排版"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = YY.tint.accent)
     }
     Row2(t("翻页方式")) {
         YYSegments(listOf(LayoutMode.PAGINATED to t("左右翻页"), LayoutMode.SCROLLED to t("上下滚动")), s.mode, { m -> model.update { it.copy(mode = m) } }, modifier = Modifier.widthIn(min = 160.dp))
+    }
+    if (s.mode == LayoutMode.PAGINATED) {
+        Row2(t("翻页动画")) {
+            YYSegments(
+                listOf(PageTurn.SLIDE to t("滑动"), PageTurn.COVER to t("覆盖"), PageTurn.NONE to t("无动画")),
+                PageTurn.of(pageTurnRaw),
+                { pageTurnRaw = it.key },
+                small = true,
+                modifier = Modifier.widthIn(min = 176.dp),
+            )
+        }
+        SwitchRow(t("翻页音效"), pageTurnSound) { pageTurnSound = it }
     }
     Row2(t("段距")) {
         YYSegments(listOf<Pair<Double?, String>>(0.0 to t("无"), null to t("适中"), 1.0 to t("宽")), s.paragraphSpacing, { v -> model.update { it.copy(paragraphSpacing = v) } }, modifier = Modifier.widthIn(min = 160.dp))

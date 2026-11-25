@@ -40,8 +40,11 @@ final class ReaderModel {
     var bookWords: [VocabWord] = []
     /// 双击一句只翻这一句.
     var sentenceTranslation: SentenceTranslation?
-    /// 译: translations under every paragraph.
-    var translateShown = false
+    /// 译: 原文 / 译文对照 / 仅译文.
+    var translateMode: TranslateMode = .off
+    /// Last active translation style remembered for one-tap toolbar toggle.
+    var lastActiveTranslateMode: TranslateMode = .bilingual
+    var translateShown: Bool { translateMode != .off }
     @ObservationIgnored let translator = Translator()
     @ObservationIgnored var speaker: AVSpeechSynthesizer?
     /// 只听: the text hidden while the voice reads.
@@ -89,6 +92,8 @@ final class ReaderModel {
     }
     private var chromeComesBack = false
     var tocShown = false
+    /// Initial tab when opening TOC sheet: 0 = 目录, 1 = 书签, 2 = 笔记.
+    var tocInitialTab = 0
     var settingsShown = false
     /// 替换规则, from 更多 or the menu bar.
     var rulesShown = false
@@ -247,6 +252,7 @@ final class ReaderModel {
         self.failure = failure
         companion.model = self
         pager.fontSize = settings.fontSize
+        pager.pageTurn = PageTurnPrefs.current
         pager.chapterTitle = { [weak self] section in self?.detail?.chapterTitle(for: section) }
         pager.delegate = self
         if let player {
@@ -255,10 +261,12 @@ final class ReaderModel {
             let rate = UserDefaults.standard.float(forKey: Self.rateKey)
             if rate > 0 { player.rate = rate }
             player.onSentence = { [weak self] spot, duration, elapsed, playing in
+                self?.pager.isReadingAloud = playing
                 self?.reading(spot, durationMs: duration, elapsedMs: elapsed, playing: playing)
                 self?.setListening(playing)
             }
             player.onStop = { [weak self] in
+                self?.pager.isReadingAloud = false
                 self?.lastSpokenSpot = nil
                 self?.pausedOffSpot = false
                 self?.flush()

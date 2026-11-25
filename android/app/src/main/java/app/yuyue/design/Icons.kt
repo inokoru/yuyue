@@ -463,9 +463,19 @@ object Icons {
         line("M3 12H7.25L9.5 6.5L12.75 17.5L15.25 10L16.75 12H21")
     }
 
-    /** speaker.wave.2 (生词本 · 读一遍) */
+    /** speaker.wave.2 (生词本 · 读一遍 / 翻页音效) */
     val speakerWave = sf("speaker.wave.2") {
         line("M4.25 9.75H7.5L12 6V18L7.5 14.25H4.25ZM15.25 9.25a4 4 0 0 1 0 5.5M17.75 6.75a7.5 7.5 0 0 1 0 10.5")
+    }
+
+    /** speaker.slash (静音) */
+    val speakerSlash = sf("speaker.slash") {
+        line("M4.25 9.75H7.5L12 6V18L7.5 14.25H4.25ZM15.5 9.5L20.5 14.5M20.5 9.5L15.5 14.5")
+    }
+
+    /** bubble.left.and.bubble.right (对话气泡) */
+    val bubbles = sf("bubble.left.and.bubble.right") {
+        line("M4.5 6.5h9a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H9l-3 2.5V14.5H4.5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2zM15.5 10.5h4a2 2 0 0 1 2 2v3.5a2 2 0 0 1-2 2h-1.25V20.5l-2.75-2.5H12a2 2 0 0 1-1.9-1.4")
     }
 
     /** ear (替换规则 · 只改朗读) */
