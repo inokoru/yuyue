@@ -15,6 +15,7 @@ struct ForeignSettings: View {
     @AppStorage(ForeignPrefs.glossKey) private var gloss = true
     @AppStorage(ForeignPrefs.levelKey) private var level = 3
     @AppStorage(ForeignPrefs.glossVocabKey) private var glossVocab = false
+    @AppStorage(ForeignPrefs.aiTranslateKey) private var aiTranslate = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -54,6 +55,11 @@ struct ForeignSettings: View {
             }
             .onChange(of: mark) { NotificationCenter.default.post(name: .vocabChanged, object: nil) }
             SettingsHeading(String(localized: "翻译"))
+            SettingsCard {
+                SettingsRow(String(localized: "优先用书伴模型翻译"), detail: String(localized: "已配置书伴时，用模型生成逐段译文对照（含文言译白话）并按章缓存；未配置或离线时回退系统翻译")) {
+                    SettingsSwitch(isOn: $aiTranslate)
+                }
+            }
             if #available(macOS 15.0, *) {
                 MacTranslationSettingsSection()
             } else {

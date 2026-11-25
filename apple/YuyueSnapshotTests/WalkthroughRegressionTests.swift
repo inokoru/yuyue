@@ -190,6 +190,124 @@ struct WalkthroughRegressionTests {
         #expect(chapterPrompt.contains("孔乙己"))
     }
 
+    @Test func `companion query classification distinguishes chapter, broad narrative, and focused questions`() {
+        #expect(BookCompanion.classify(question: "这一章讲了什么？") == .chapter)
+        #expect(BookCompanion.classify(question: "帮我概括本章核心内容") == .chapter)
+        #expect(BookCompanion.classify(question: "随便问问", action: .chapter) == .chapter)
+
+        #expect(BookCompanion.classify(question: "前面发生了什么？") == .broad)
+        #expect(BookCompanion.classify(question: "梳理一下人物关系") == .broad)
+        #expect(BookCompanion.classify(question: "考考我", action: .quiz) == .broad)
+
+        #expect(BookCompanion.classify(question: "这句是什么意思？") == .focused)
+        #expect(BookCompanion.classify(question: "这里为什么写橘子？") == .focused)
+    }
+
+    @Test func `companion streaming strips reasoning blocks, trailing follow-ups, and clean note citations`() {
+        let thinkingOnly = BookCompanion.streamingPreview(from: "<think>正在推理人物动机", hideNotYet: true)
+        #expect(thinkingOnly.visible.isEmpty)
+        #expect(thinkingOnly.thinking == true)
+
+        let midStream = BookCompanion.streamingPreview(
+            from: "<think>先核对原文</think>\n父亲买橘子这一幕写得很克制 [1]，但细节极重 [2",
+            hideNotYet: true
+        )
+        #expect(midStream.thinking == false)
+        #expect(midStream.visible == "父亲买橘子这一幕写得很克制 [1]，但细节极重")
+
+        let withFollowUp = BookCompanion.streamingPreview(
+            from: "<think>ok</think>这是回答正文 [1]。\n接着问：后来呢｜父亲说了什么",
+            hideNotYet: true
+        )
+        #expect(withFollowUp.visible == "这是回答正文 [1]。")
+
+        let notYetStream = BookCompanion.streamingPreview(from: "没读到", hideNotYet: true)
+        #expect(notYetStream.visible.isEmpty)
+
+        let (finalBody, asks) = BookCompanion.split("<think>reasoning</think>\n第一段分析 [1]。\n第二段补充 [3]。\n接着问：为什么买橘子？｜两次流泪有什么不同？")
+        #expect(finalBody == "第一段分析 [1]。\n第二段补充 [3]。")
+        #expect(asks == ["为什么买橘子？", "两次流泪有什么不同？"])
+        #expect(BookCompanion.noteText(from: finalBody) == "第一段分析。\n第二段补充。")
+    }
+
+    @Test func `paragraph translation detects classical Chinese vs Japanese vs English and parses numbered batches`() {
+        #expect(ParagraphTranslation.target(texts: ["北冥有鱼，其名为鲲。鲲之大，不知其几千里也。"], bookLanguage: "zh", uiChinese: true) == .zhModern)
+        #expect(ParagraphTranslation.target(texts: ["国境の長いトンネルを抜けると雪国であった。"], bookLanguage: "ja", uiChinese: true) == .zhHans)
+        #expect(ParagraphTranslation.target(texts: ["It is a truth universally acknowledged."], bookLanguage: "en", uiChinese: true) == .zhHans)
+        #expect(ParagraphTranslation.target(texts: ["北冥有鱼，其名为鲲。"], bookLanguage: "zh", uiChinese: false) == .en)
+        #expect(ParagraphTranslation.target(texts: ["It is a truth universally acknowledged."], bookLanguage: "en", uiChinese: false) == .zhHans)
+
+        let raw = """
+        <think>逐段翻译</think>
+        [1] 北海里有一条鱼，它的名字叫鲲。
+        鲲的体型非常巨大，不知道有几千里长。
+
+        【2】：它变化成为鸟，名字叫鹏。
+        """
+        let parsed = ParagraphTranslation.parseNumbered(raw, count: 3)
+        #expect(parsed[0] == "北海里有一条鱼，它的名字叫鲲。\n鲲的体型非常巨大，不知道有几千里长。")
+        #expect(parsed[1] == "它变化成为鸟，名字叫鹏。")
+        #expect(parsed[2] == nil)
+
+        #expect(ParagraphTranslation.parseNumbered("单段直接返回译文。", count: 1) == ["单段直接返回译文。"])
+    }
+
+    @Test func `custom companion prompts deduplicate, cap at eight, and wire into slash commands`() {
+        var list: [String] = []
+        list = CompanionPrompts.adding("  拆解这句语法与长难句  ", to: list)
+        list = CompanionPrompts.adding("拆解这句语法与长难句", to: list)
+        list = CompanionPrompts.adding("把这段古文译成现代白话", to: list)
+        #expect(list == ["拆解这句语法与长难句", "把这段古文译成现代白话"])
+
+        for i in 1 ... 10 {
+            list = CompanionPrompts.adding("提问 \(i)", to: list)
+        }
+        #expect(list.count == CompanionPrompts.maxCount)
+        list = CompanionPrompts.removing("把这段古文译成现代白话", from: list)
+        #expect(list.count == CompanionPrompts.maxCount - 1)
+
+        let cmds = CompanionCommand.customCommands(from: ["拆解这句长难句", "文言译白话"])
+        #expect(cmds.map(\.name) == ["p1", "p2"])
+        let matched = CompanionCommand.matching("文言", in: cmds)
+        #expect(matched.first?.action == .custom("文言译白话"))
+        let parsed = CompanionCommand.parse("/p1 重点看从句", in: cmds)
+        #expect(parsed?.command.question(argument: parsed?.argument ?? "", hasQuote: true, chapterTitle: nil) == "拆解这句长难句\n重点看从句")
+    }
+
+
+    @Test func `companion chapter excerpts cover the whole read chapter instead of only tail snippets`() async throws {
+        let repoRoot = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let epubPath = repoRoot.appending(path: "fixtures/books/hongloumeng.epub").path
+        let tempDir = FileManager.default.temporaryDirectory.appending(path: "yuyue-companion-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let core = try YuyueCore.open(dataDir: tempDir.path, deviceName: "test", platform: "macos")
+        let summary = try core.importBook(path: epubPath)
+        let detail = try core.book(id: summary.id)
+        let targetSection = detail.toc.first(where: { Int($0.section) < detail.sections.count && detail.sections[Int($0.section)].sentences > 40 })?.section ?? detail.start
+        let allSentences = try core.sentences(bookId: summary.id, section: targetSection)
+        #expect(allSentences.count > 40)
+
+        let here = Position(section: targetSection, sentence: UInt32(min(50, allSentences.count - 1)))
+        let span = BookCompanion.chapterSections(detail: detail, section: targetSection)
+        let chapterPassages = await BookCompanion.excerpts(
+            core: core,
+            book: summary.id,
+            question: "这一章讲了什么？",
+            here: here,
+            upTo: here,
+            kind: .chapter,
+            chapterSections: span,
+            bookStart: Int(detail.start)
+        )
+        #expect(!chapterPassages.isEmpty)
+        // Starts from sentence 0 of the chapter and never leaks past `here.sentence + 8`.
+        #expect(chapterPassages.first?.sentence == 0)
+        #expect(chapterPassages.allSatisfy { $0.section < here.section || $0.sentence <= here.sentence + 8 })
+        let totalChars = chapterPassages.reduce(0) { $0 + $1.text.count }
+        #expect(totalChars > 800)
+    }
+
     @Test func `paper appearance pairs day and night presets keeping typography`() {
         #expect(PaperAppearance.pairedPreset(for: .init(preset: .plain, custom: nil), dark: true) == .dark)
         #expect(PaperAppearance.pairedPreset(for: .init(preset: .kami, custom: nil), dark: true) == .kamiNight)

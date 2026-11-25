@@ -153,6 +153,11 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
     var txtShown by mutableStateOf(false)
     /** 外文原著: the word tapped, and its card. */
     var lookup by mutableStateOf<WordLookup?>(null)
+    /** 译: translations under every paragraph. */
+    var translateShown by mutableStateOf(false)
+    var translateFailure: String? = null
+    /** 双击一句只翻这一句. */
+    var translatingSentence by mutableStateOf<String?>(null)
     private var immersiveState = mutableStateOf(false)
     /** 沉浸阅读: only the words on the page. */
     var immersive: Boolean
@@ -161,8 +166,9 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
     /** 与书对话. */
     val companion = app.yuyue.companion.BookCompanion(this)
     var companionShown by mutableStateOf(false)
-    /** Words handed to the companion (问). */
+    /** Words handed to the companion (问), and where they sit on the page. */
     var companionQuote by mutableStateOf<String?>(null)
+    var companionAnchor: app.yuyue.companion.CompanionAnchor? = null
     /** After a page is turned by hand the pages stop following the voice for a while. */
     private var followFrom = 0L
 
@@ -300,9 +306,40 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
             is Library.OpenIntent.Ask -> ask(intent.question)
         }
     }
+    /** Captures the active selection or open highlight so 书伴 can save an answer back as its thought. */
+    fun captureCompanionAnchor() {
+        val open = openMark
+        val sel = selection
+        companionAnchor = when {
+            open != null -> app.yuyue.companion.CompanionAnchor(
+                markID = open.mark.id,
+                section = open.mark.section,
+                start = open.mark.start,
+                end = open.mark.end,
+                text = open.mark.text,
+            )
+            sel != null -> app.yuyue.companion.CompanionAnchor(
+                markID = null,
+                section = sel.section.toUInt(),
+                start = CoreTextPoint(sel.start.s.coerceAtLeast(0).toUInt(), sel.start.o.coerceAtLeast(0).toUInt()),
+                end = CoreTextPoint(sel.end.s.coerceAtLeast(0).toUInt(), sel.end.o.coerceAtLeast(0).toUInt()),
+                text = sel.text.trim(),
+            )
+            else -> null
+        }
+    }
+
+    fun clearCompanionQuote() {
+        companionQuote = null
+        companionAnchor = null
+    }
+
     fun ask(question: String) {
         companionShown = true
-        if (question.isNotBlank()) companion.ask(question, companionQuote)
+        if (question.isNotBlank()) {
+            companion.ask(question, companionQuote, anchor = companionAnchor)
+            clearCompanionQuote()
+        }
     }
 
     // MARK: Reading aloud
@@ -1173,11 +1210,20 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         // 双击屏幕边缘进出沉浸, as on iPhone: the outer eighth on either side, where no words are.
         val view = pager.current?.webView ?: return
         val width = view.width / view.resources.displayMetrics.density
-        val x = m.x ?: return
-        if (width > 0 && (x < width * 0.12 || x > width * 0.88)) {
+        val x = m.x
+        if (x != null && width > 0 && (x < width * 0.12 || x > width * 0.88)) {
             chromeShown = false
             immersive = !immersive
+            return
         }
+        val sentence = m.sentence ?: return
+        val section = pager.current?.section ?: return
+        if (!isForeign) return
+        dismissCards()
+        closeLookup()
+        val sentences = runCatching { core.sentences(bookID, section.toUInt()) }.getOrDefault(emptyList())
+        val text = sentences.getOrNull(sentence)?.trim().orEmpty()
+        if (text.isNotEmpty()) translatingSentence = text
     }
 
     override fun sectionReady(page: SectionPage) {

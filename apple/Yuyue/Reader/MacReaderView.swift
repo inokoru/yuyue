@@ -505,7 +505,7 @@ struct MacReaderView: View {
                     TypesetCard(model: model)
                         .presentationBackground(YYColor.card)
                 }
-            if model.isForeign {
+            if model.isForeign || model.translateShown {
                 tool(String(localized: "译"), "translate", help: String(localized: "每段下面跟着译文；关掉只剩原文，双击一句只翻这一句"), on: model.translateShown) {
                     model.setTranslateShown(!model.translateShown)
                 }
@@ -791,6 +791,7 @@ struct MacReaderView: View {
     }
 
     private func ask(_ text: String) {
+        model.captureCompanionAnchor()
         model.dismissCards()
         model.companionQuote = text
         panel = .companion
@@ -847,9 +848,16 @@ struct MacReaderView: View {
         } else {
             readItems.append(ActionMenuItem(model.isPlaying ? String(localized: "暂停朗读") : String(localized: "从这页读"), symbol: model.isPlaying ? "pause" : "headphones") { model.togglePlay() })
         }
+        var extra: [NSMenuItem] = []
+        if model.detail?.summary.format != .pdf {
+            extra.append(ActionMenuItem(model.translateShown ? String(localized: "收起译文") : String(localized: "译文对照"), symbol: "translate") {
+                model.setTranslateShown(!model.translateShown)
+            })
+        }
         return who + readItems + [
             ActionMenuItem(marked ? String(localized: "拿掉书签") : String(localized: "加书签"), symbol: marked ? "bookmark.slash" : "bookmark", key: "d", modifiers: .command) { model.toggleBookmark() },
             .separator(),
+        ] + extra + [
             ActionMenuItem(String(localized: "书内搜索"), symbol: "magnifyingglass", key: "f", modifiers: .command) { startSearch() },
             ActionMenuItem(String(localized: "目录"), symbol: "list.bullet") { panel = .toc },
             ActionMenuItem(String(localized: "笔记"), symbol: "note.text") { panel = .notes },

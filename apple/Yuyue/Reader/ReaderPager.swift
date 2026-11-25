@@ -100,7 +100,9 @@ final class ReaderPager: PlatformView {
     private var configuration: WKWebViewConfiguration!
     /// Loaded sections in reading order: the current one and its neighbours.
     private var slots: [SectionPage] = []
-    private(set) var current: SectionPage?
+    private(set) var current: SectionPage? {
+        didSet { if translating, let current, current !== oldValue, current.section != nil { translate(current) } }
+    }
     private var spare: [SectionPage] = []
     private var pendingOpen: (section: UInt32, target: SectionPage.Target)?
     private var appliedGeometry: PageGeometry?
@@ -724,7 +726,7 @@ final class ReaderPager: PlatformView {
     /// The word being looked up.
     private var looking: (section: UInt32, start: ReaderMessage.Point, end: ReaderMessage.Point)?
     /// 译: translates whole paragraphs; the answers are kept per section.
-    var translator: (([String]) async -> [String?])?
+    var translator: ((UInt32, [String]) async -> (texts: [String?], lang: String))?
     var onTranslateFailed: (() -> Void)?
     private(set) var translating = false
     private var translated: [UInt32: [[String: Any]]] = [:]
@@ -801,9 +803,15 @@ final class ReaderPager: PlatformView {
     func setTranslating(_ on: Bool) {
         guard on != translating else { return }
         translating = on
-        for page in slots where page.section != nil {
-            if on { translate(page) } else { page.call("yy.setTranslations(null)") }
+        if on {
+            if let current, current.section != nil { translate(current) }
+        } else {
+            for page in slots where page.section != nil { page.call("yy.setTranslations(null)") }
         }
+    }
+
+    func clearTranslatedCache() {
+        translated.removeAll()
     }
 
     private func sendForeign(to page: SectionPage) {
@@ -814,7 +822,7 @@ final class ReaderPager: PlatformView {
         sendLooking(to: page)
         sendFlag(to: page)
         sendUnread(to: page)
-        if translating { translate(page) }
+        if translating, page === current { translate(page) }
     }
 
     private func sendLooking(to page: SectionPage) {
@@ -831,10 +839,10 @@ final class ReaderPager: PlatformView {
             defer { inFlight.remove(section) }
             guard let translator, let list = await page.ask("yy.paragraphs()") as? [[String: Any]], !list.isEmpty else { return }
             let texts = list.map { $0["text"] as? String ?? "" }
-            let out = await translator(texts)
+            let (out, lang) = await translator(section, texts)
             var items: [[String: Any]] = []
             for (p, t) in zip(list, out) {
-                if let t, let last = p["last"] { items.append(["last": last, "text": t]) }
+                if let t, !t.isEmpty, let last = p["last"] { items.append(["last": last, "text": t, "lang": lang]) }
             }
             guard !items.isEmpty else {
                 if translating, page === current { onTranslateFailed?() }

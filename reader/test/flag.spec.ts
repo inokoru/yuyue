@@ -43,3 +43,21 @@ test('setFlag marks the paragraphs holding the sentences, and moves nothing', as
   expect(heading).toContain('2.5px');
   await page.screenshot({ path: `${SCREENS}/flag-heading.png` });
 });
+
+test('paragraphs and setTranslations support Chinese paragraphs and custom lang attribute', async ({ page }) => {
+  await open(page, 'beiying/s/0.html');
+  const paras = await page.evaluate(() => (window as any).yy.paragraphs());
+  expect(paras.length).toBeGreaterThan(0);
+  expect(paras[0].text.length).toBeGreaterThan(0);
+
+  const firstLast = paras[0].last;
+  const rendered = await page.evaluate((last: number) => {
+    (window as any).yy.setTranslations([{ last, text: 'Modern vernacular translation.', lang: 'en' }]);
+    const tr = document.querySelector('yy-tr');
+    return tr ? { text: tr.textContent, lang: tr.getAttribute('lang') } : null;
+  }, firstLast);
+  expect(rendered).toEqual({ text: 'Modern vernacular translation.', lang: 'en' });
+
+  await page.evaluate(() => (window as any).yy.setTranslations(null));
+  expect(await page.locator('yy-tr').count()).toBe(0);
+});

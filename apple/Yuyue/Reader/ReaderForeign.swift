@@ -26,6 +26,7 @@ enum ForeignPrefs {
     static let glossKey = "foreign.gloss"
     static let levelKey = "foreign.glossLevel"
     static let glossVocabKey = "foreign.glossVocab"
+    static let aiTranslateKey = "foreign.aiTranslate"
 
     /// 难词注释's levels: the easiest exam that lists a word, 四级 marking the most.
     static let levels: [(name: String, level: UInt8)] = [(String(localized: "四级"), 2), (String(localized: "六级"), 3), (String(localized: "考研"), 4), (String(localized: "雅思"), 5), ("GRE", 6)]
@@ -43,6 +44,8 @@ enum ForeignPrefs {
     static var level: UInt8 { UserDefaults.standard.object(forKey: levelKey) == nil ? 3 : UInt8(clamping: UserDefaults.standard.integer(forKey: levelKey)) }
     /// 只标生词本里的词.
     static var glossVocabOnly: Bool { UserDefaults.standard.bool(forKey: glossVocabKey) }
+    /// 优先用书伴模型翻译整页与整句.
+    static var aiTranslate: Bool { UserDefaults.standard.object(forKey: aiTranslateKey) as? Bool ?? true }
 
     /// The voice for a book in `language`: English in the accent chosen.
     static func voice(for language: String?) -> AVSpeechSynthesisVoice? {
@@ -246,6 +249,10 @@ final class Translator {
         return false
     }
 
+    func noteFailure(_ message: String?) {
+        failure = message
+    }
+
     func translate(_ texts: [String]) async -> [String?] {
         guard !texts.isEmpty else { return [] }
         if #available(macOS 15.0, iOS 18.0, *), let impl = system as? SystemTranslator {
@@ -278,19 +285,38 @@ final class Translator {
 fileprivate final class SystemTranslator {
     var configuration: TranslationSession.Configuration?
     @ObservationIgnored private var queue: [(texts: [String], done: CheckedContinuation<([String?], String?), Never>)] = []
+    @ObservationIgnored private var running = false
+    @ObservationIgnored private var activeSource: Locale.Language?
 
     func translate(_ texts: [String], source: Locale.Language) async -> ([String?], String?) {
         await withCheckedContinuation { done in
             queue.append((texts, done))
-            if configuration == nil || configuration?.source != source {
-                configuration = .init(source: source, target: Translator.target)
-            } else {
-                configuration?.invalidate()
-            }
+            guard !running else { return }
+            activeSource = source
+            configuration = .init(source: source, target: Translator.target)
         }
     }
 
     func run(_ session: TranslationSession) async {
+        guard !running else { return }
+        running = true
+        let source = activeSource ?? Locale.Language(identifier: "en")
+        defer {
+            running = false
+            configuration = nil
+        }
+        if await LanguageAvailability().status(from: source, to: Translator.target) != .installed {
+            do {
+                try await session.prepareTranslation()
+            } catch {
+                failAll(Translator.message(for: error))
+                return
+            }
+            guard await LanguageAvailability().status(from: source, to: Translator.target) == .installed else {
+                failAll(String(localized: "翻译没成功：要先在系统设置里下载这种语言"))
+                return
+            }
+        }
         while !queue.isEmpty {
             let (texts, done) = queue.removeFirst()
             do {
@@ -300,8 +326,18 @@ fileprivate final class SystemTranslator {
                 }
                 done.resume(returning: (out, nil))
             } catch {
-                done.resume(returning: ([String?](repeating: nil, count: texts.count), Translator.message(for: error)))
+                let msg = Translator.message(for: error)
+                done.resume(returning: ([String?](repeating: nil, count: texts.count), msg))
+                failAll(msg)
+                return
             }
+        }
+    }
+
+    private func failAll(_ message: String) {
+        while !queue.isEmpty {
+            let (texts, done) = queue.removeFirst()
+            done.resume(returning: ([String?](repeating: nil, count: texts.count), message))
         }
     }
 
@@ -332,6 +368,171 @@ extension View {
     }
 }
 
+/// 书伴逐段译文对照（含外文译中、文言译现代白话）与按章本地缓存.
+nonisolated enum ParagraphTranslation {
+    enum Target: Equatable, Sendable {
+        /// 文言或深奥中文 → 现代简体白话文.
+        case zhModern
+        /// 外文 → 简体中文.
+        case zhHans
+        /// 中文或外文 → 英文.
+        case en
+
+        var htmlLang: String {
+            switch self {
+            case .zhModern, .zhHans: "zh-Hans"
+            case .en: "en"
+            }
+        }
+
+        var cacheTag: String {
+            switch self {
+            case .zhModern: "zh-baihua"
+            case .zhHans: "zh-Hans"
+            case .en: "en"
+            }
+        }
+
+        var systemPrompt: String {
+            switch self {
+            case .zhModern:
+                "把下面按编号排列的原文逐段译为通顺自然的现代简体白话文（若某段已是明白晓畅的现代汉语，则简明释义或保持通顺直译）。严格保留每段开头的 [编号] 标记，每段译文对应一个编号，不要遗漏、合并或输出额外说明。"
+            case .zhHans:
+                "把下面按编号排列的原文逐段准确、自然地译为简体中文。严格保留每段开头的 [编号] 标记，每段译文对应一个编号，不要遗漏、合并或输出额外说明。"
+            case .en:
+                "Translate each numbered paragraph below naturally and accurately into English. Strictly keep the leading [number] marker for each paragraph, one translation per number, without merging, skipping, or adding extra commentary."
+            }
+        }
+
+        var sentencePrompt: String {
+            switch self {
+            case .zhModern:
+                "把下面这句原文译为通顺自然的现代简体白话文，只输出译文。"
+            case .zhHans:
+                "把下面这句原文准确、自然地译为简体中文，只输出译文。"
+            case .en:
+                "Translate the following sentence naturally and accurately into English. Output only the translation."
+            }
+        }
+    }
+
+    static func target(texts: [String], bookLanguage: String?, uiChinese: Bool) -> Target {
+        let prefix = bookLanguage?.lowercased().split(whereSeparator: { $0 == "-" || $0 == "_" }).first.map(String.init) ?? ""
+        let sample = texts.prefix(8).joined()
+        var hasKana = false
+        var hanCount = 0
+        var letterCount = 0
+        for s in sample.unicodeScalars {
+            if (0x3040 ... 0x30FF).contains(s.value) { hasKana = true }
+            if s.properties.isIdeographic { hanCount += 1 }
+            if s.properties.isAlphabetic { letterCount += 1 }
+        }
+        let isChineseSource = !hasKana && prefix != "ja" && prefix != "ko"
+            && (prefix == "zh" || (letterCount > 0 && Double(hanCount) / Double(letterCount) >= 0.45))
+        if uiChinese {
+            return isChineseSource ? .zhModern : .zhHans
+        }
+        return (!isChineseSource && prefix == "en") ? .zhHans : .en
+    }
+
+    static func parseNumbered(_ raw: String, count: Int) -> [String?] {
+        guard count > 0 else { return [] }
+        let cleaned = BookCompanion.stripThinking(raw).visible.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return [String?](repeating: nil, count: count) }
+        var out = [String?](repeating: nil, count: count)
+        var currentIndex: Int?
+        var buffer: [String] = []
+        func flush() {
+            guard let idx = currentIndex, out.indices.contains(idx) else { return }
+            let joined = buffer.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !joined.isEmpty { out[idx] = joined }
+        }
+        for line in cleaned.components(separatedBy: .newlines) {
+            if let (num, rest) = matchBracketTag(line), (1 ... count).contains(num) {
+                flush()
+                currentIndex = num - 1
+                buffer = rest.isEmpty ? [] : [rest]
+            } else if currentIndex != nil {
+                buffer.append(line)
+            }
+        }
+        flush()
+        if out.contains(where: { $0 != nil }) { return out }
+        if count == 1 {
+            let single = stripSinglePrefix(cleaned)
+            return [single.isEmpty ? nil : single]
+        }
+        return out
+    }
+
+    private static func matchBracketTag(_ line: String) -> (Int, String)? {
+        let trimmed = line.drop(while: { $0 == " " || $0 == "\t" })
+        let open: Character
+        let close: Character
+        if trimmed.first == "[" {
+            open = "["; close = "]"
+        } else if trimmed.first == "【" {
+            open = "【"; close = "】"
+        } else {
+            return nil
+        }
+        guard trimmed.first == open else { return nil }
+        let afterOpen = trimmed.dropFirst()
+        let digits = afterOpen.prefix(while: \.isWholeNumber)
+        guard !digits.isEmpty, let num = Int(digits) else { return nil }
+        let afterDigits = afterOpen.dropFirst(digits.count)
+        guard afterDigits.first == close else { return nil }
+        let rest = afterDigits.dropFirst().drop(while: { $0 == " " || $0 == "\t" || $0 == ":" || $0 == "：" })
+        return (num, String(rest))
+    }
+
+    private static func stripSinglePrefix(_ text: String) -> String {
+        if let (_, rest) = matchBracketTag(text), !rest.isEmpty {
+            return rest.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return text
+    }
+
+    static func cacheFile(dataDir: URL?, bookID: String, section: UInt32, target: Target) -> URL? {
+        dataDir?
+            .appending(path: "translations", directoryHint: .isDirectory)
+            .appending(path: bookID, directoryHint: .isDirectory)
+            .appending(path: "s\(section)-\(target.cacheTag).json")
+    }
+
+    @concurrent static func loadCache(at url: URL?) async -> [String: String] {
+        guard let url, let data = try? Data(contentsOf: url),
+              let dict = try? JSONDecoder().decode([String: String].self, from: data)
+        else { return [:] }
+        return dict
+    }
+
+    @concurrent static func saveCache(_ dict: [String: String], to url: URL?) async {
+        guard let url, !dict.isEmpty else { return }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(dict) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    static func batches(of texts: [String], maxItems: Int = 10, maxChars: Int = 2600) -> [[String]] {
+        var result: [[String]] = []
+        var current: [String] = []
+        var chars = 0
+        for t in texts where !t.isEmpty {
+            if !current.isEmpty && (current.count >= maxItems || chars + t.count > maxChars) {
+                result.append(current)
+                current = []
+                chars = 0
+            }
+            current.append(t)
+            chars += t.count
+        }
+        if !current.isEmpty { result.append(current) }
+        return result
+    }
+}
+
 extension ReaderModel {
     /// Read in a language other than Chinese: words can be looked up and translated.
     var isForeign: Bool {
@@ -340,16 +541,33 @@ extension ReaderModel {
     }
 
     func setUpForeign() {
-        guard isForeign else { return }
-        pager.lookup = true
-        if let language = detail?.summary.language { translator.source = Locale.Language(identifier: language) }
-        pager.translator = { [weak self] texts in await self?.translator.translate(texts) ?? [] }
+        guard detail?.summary.format != .pdf else { return }
+        if let language = detail?.summary.language, isForeign { translator.source = Locale.Language(identifier: language) }
+        pager.translator = { [weak self] section, texts in
+            guard let self else { return ([], "zh-Hans") }
+            return await self.translateParagraphs(section: section, texts: texts)
+        }
         pager.onTranslateFailed = { [weak self] in
             guard let self else { return }
             self.setTranslateShown(false)
-            let msg = self.translator.failure ?? String(localized: "翻译没成功：要先在系统设置里下载这种语言")
+            let fallback = self.isForeign
+                ? String(localized: "翻译没成功：要先在系统设置里下载这种语言，或在「设置 · 书伴」配好模型")
+                : String(localized: "先在「设置 · 书伴」里配好模型，才能译文对照")
+            let msg = self.translator.failure ?? fallback
             self.show(Library.Toast(icon: "exclamationmark.circle", title: msg, detail: ""))
         }
+        // 译 left on last time comes back only when it can run as it is: a book opening (or the app
+        // restoring its windows) never puts the system's download sheet up unasked.
+        if UserDefaults.standard.bool(forKey: translateKey) {
+            let aiReady = (ForeignPrefs.aiTranslate || !isForeign) && CompanionConfig.current.isReady
+            if aiReady {
+                setTranslateShown(true)
+            } else if isForeign {
+                Task { if await translator.installed() { setTranslateShown(true) } }
+            }
+        }
+        guard isForeign else { return }
+        pager.lookup = true
         let core = core, bookID = bookID
         // 难词注释 is only for English: the list is English–Chinese.
         if detail?.summary.language.lowercased().hasPrefix("en") == true {
@@ -360,11 +578,56 @@ extension ReaderModel {
             }
         }
         loadVocab()
-        // 译 left on last time comes back only when it can run as it is: a book opening (or the app
-        // restoring its windows) never puts the system's download sheet up unasked.
-        if UserDefaults.standard.bool(forKey: translateKey) {
-            Task { if await translator.installed() { setTranslateShown(true) } }
+    }
+
+    private func translateParagraphs(section: UInt32, texts: [String]) async -> (texts: [String?], lang: String) {
+        guard !texts.isEmpty else { return ([], "zh-Hans") }
+        let uiChinese = (Bundle.main.preferredLocalizations.first ?? "zh").hasPrefix("zh")
+        let target = ParagraphTranslation.target(texts: texts, bookLanguage: detail?.summary.language, uiChinese: uiChinese)
+        let config = CompanionConfig.current
+        let useAI = (ForeignPrefs.aiTranslate || !isForeign) && config.isReady
+        if useAI {
+            let cacheURL = ParagraphTranslation.cacheFile(dataDir: library?.dataDir, bookID: bookID, section: section, target: target)
+            var cache = await ParagraphTranslation.loadCache(at: cacheURL)
+            var seen = Set<String>()
+            let missing = texts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty && cache[$0] == nil && seen.insert($0).inserted }
+            var aiError: String?
+            for batch in ParagraphTranslation.batches(of: missing) {
+                if Task.isCancelled { break }
+                let prompt = batch.enumerated().map { "[\($0.offset + 1)] \($0.element)" }.joined(separator: "\n\n")
+                do {
+                    let raw = try await Companion.answer(config, system: target.systemPrompt, prompt: prompt, maxTokens: 2048, fast: true, source: .companion)
+                    let parsed = ParagraphTranslation.parseNumbered(raw, count: batch.count)
+                    var wrote = false
+                    for (src, dst) in zip(batch, parsed) {
+                        if let dst, !dst.isEmpty {
+                            cache[src] = dst
+                            wrote = true
+                        }
+                    }
+                    if wrote { await ParagraphTranslation.saveCache(cache, to: cacheURL) }
+                } catch {
+                    aiError = Companion.message(for: error)
+                    break
+                }
+            }
+            let mapped = texts.map { cache[$0.trimmingCharacters(in: .whitespacesAndNewlines)] }
+            if mapped.contains(where: { $0 != nil }) {
+                translator.noteFailure(nil)
+                return (mapped, target.htmlLang)
+            }
+            translator.noteFailure(aiError)
+            if isForeign, await translator.installed() {
+                return (await translator.translate(texts), "zh-Hans")
+            }
+            return ([String?](repeating: nil, count: texts.count), target.htmlLang)
         }
+        guard isForeign else {
+            translator.noteFailure(String(localized: "先在「设置 · 书伴」里配好模型，才能译文对照"))
+            return ([String?](repeating: nil, count: texts.count), target.htmlLang)
+        }
+        return (await translator.translate(texts), "zh-Hans")
     }
 
     private var translateKey: String { "translate.\(bookID)" }
@@ -381,6 +644,10 @@ extension ReaderModel {
 
     /// 译 in the tools.
     func setTranslateShown(_ on: Bool) {
+        if on, !isForeign, !CompanionConfig.current.isReady {
+            show(Library.Toast(icon: "exclamationmark.circle", title: String(localized: "先在「设置 · 书伴」里配好模型，才能译文对照"), detail: ""))
+            return
+        }
         translateShown = on
         UserDefaults.standard.set(on, forKey: translateKey)
         pager.setTranslating(on)
@@ -473,9 +740,29 @@ extension ReaderModel {
         let text = sentences[s].trimmingCharacters(in: .whitespacesAndNewlines)
         sentenceTranslation = SentenceTranslation(section: section, sentence: s, text: text, at: CGPoint(x: m.x ?? 0, y: m.y ?? 0))
         Task {
-            let out = await translator.translate([text]).first ?? nil
+            var out: String?
+            var errMsg: String?
+            let cfg = CompanionConfig.current
+            if ForeignPrefs.aiTranslate, cfg.isReady {
+                let uiChinese = (Bundle.main.preferredLocalizations.first ?? "zh").hasPrefix("zh")
+                let target = ParagraphTranslation.target(texts: [text], bookLanguage: detail?.summary.language, uiChinese: uiChinese)
+                do {
+                    let raw = try await Companion.answer(cfg, system: target.sentencePrompt, prompt: text, maxTokens: 512, fast: true, source: .companion)
+                    out = BookCompanion.stripThinking(raw).visible.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if out?.isEmpty == true { out = nil }
+                } catch {
+                    errMsg = Companion.message(for: error)
+                }
+            }
+            if out == nil {
+                out = await translator.translate([text]).first ?? nil
+            }
             guard sentenceTranslation?.sentence == s, sentenceTranslation?.section == section else { return }
-            if let out { sentenceTranslation?.translated = out } else { sentenceTranslation?.failed = translator.failure ?? String(localized: "翻译没成功") }
+            if let out {
+                sentenceTranslation?.translated = out
+            } else {
+                sentenceTranslation?.failed = errMsg ?? translator.failure ?? String(localized: "翻译没成功")
+            }
         }
     }
 }

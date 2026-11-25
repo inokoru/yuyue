@@ -479,6 +479,7 @@ struct PhoneForeign: View {
     @AppStorage(ForeignPrefs.glossKey) private var gloss = true
     @AppStorage(ForeignPrefs.levelKey) private var level = 3
     @AppStorage(ForeignPrefs.glossVocabKey) private var glossVocab = false
+    @AppStorage(ForeignPrefs.aiTranslateKey) private var aiTranslate = true
 
     var body: some View {
         YYPage {
@@ -547,6 +548,19 @@ struct PhoneForeign: View {
             YYNote(String(localized: "「在学」生词在所有书中以虚线标出，标为「已掌握」后不再标记。"))
                 .padding(.bottom, YYUI.s(14))
             groupLabel(String(localized: "翻译"))
+            YYGroup {
+                HStack(spacing: YYUI.s(10)) {
+                    VStack(alignment: .leading, spacing: YYUI.s(1)) {
+                        Text("优先用书伴模型翻译").font(YYUI.font(11.5)).foregroundStyle(YYColor.t1)
+                        Text("已配置书伴时，用模型生成逐段译文对照（含文言译白话）并按章缓存；未配置时回退系统翻译").font(YYUI.font(10)).foregroundStyle(YYColor.t3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    YYSwitch(isOn: $aiTranslate, label: String(localized: "优先用书伴模型翻译"))
+                }
+                .padding(.vertical, YYUI.s(8))
+            }
+            .padding(.bottom, YYUI.s(10))
             if #available(iOS 18.0, *) {
                 PhoneTranslationSettingsSection()
             } else {

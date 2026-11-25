@@ -35,6 +35,11 @@ struct ReaderCommands: Commands {
         Button("目录") { model?.togglePanel(.toc) }
             .keyboardShortcut("t", modifiers: [.command, .option])
         Button("书伴") { model?.togglePanel(.companion) }
+        Button(model?.translateShown == true ? String(localized: "收起译文") : String(localized: "译文对照")) {
+            guard let model else { return }
+            model.setTranslateShown(!model.translateShown)
+        }
+        .disabled(model?.detail?.summary.format == .pdf)
         Divider()
         Button("书内搜索") { model?.startSearch() }
             .keyboardShortcut("f")

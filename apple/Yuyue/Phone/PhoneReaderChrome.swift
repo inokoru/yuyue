@@ -280,6 +280,16 @@ struct PhoneReaderChrome: View {
         ) {
             Menu {
                 Button("沉浸阅读", systemImage: "viewfinder") { immersiveShown = true }
+                if model.detail?.summary.format != .pdf {
+                    Button("书伴", systemImage: "sparkle") {
+                        model.chromeShown = false
+                        model.panel = .companion
+                    }
+                    Button(model.translateShown ? "收起译文" : "译文对照", systemImage: "translate") {
+                        model.chromeShown = false
+                        model.setTranslateShown(!model.translateShown)
+                    }
+                }
                 Button("书的信息", systemImage: "info.circle") { infoShown = true }
                 if model.detail?.summary.format != .pdf {
                     Button("替换规则", systemImage: "arrow.left.arrow.right") { model.rulesShown = true }

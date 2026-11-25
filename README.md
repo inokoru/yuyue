@@ -33,7 +33,10 @@
   点任意一句就从那一句开始朗读，墨线跟着声音逐句推进、自动翻页；支持本机离线声音、系统声音与自接云端声音，同时内置双语播客与有声书空间。听到一半拿起来看，正好停在同一行。
 
 - **读外文原著**  
-  点词查释义、双击整句翻译，带生词本与行间难词简注。“书伴”可接入本机模型（Ollama、LM Studio）或自有 API Key，默认只在已读范围内回答，不剧透，每句回答都指回原文。
+  点词查释义、双击整句翻译，支持导入 MDict 词典，带生词本与四六级、雅思、GRE 行间难词简注。
+
+- **不剧透的 AI 书伴**  
+  可接入端侧模型（Apple 智能）、本机服务（Ollama、LM Studio）或自有大模型 API（DeepSeek、OpenRouter、Claude、OpenAI 等）。隔天打开备好前情提要；随时总结本章、梳理人物或划词追问，默认只在已读范围内流式作答，每句出处点一下就翻回原句，好回答一键存进想法。
 
 - **记下来，随时带走**  
   支持多样式划线、随手写想法、今日回顾与书摘卡片。笔记可导出为 Markdown、带划线的 EPUB、CSV，或直发 Obsidian、Notion、flomo、新枝与 Anki。
@@ -73,16 +76,24 @@
 
 ### Mac（Apple 芯片 / Intel，macOS 14 及以上）
 
-1. 下载对应芯片的 `.dmg`（Apple 芯片选 `arm64`，Intel 芯片选 `x86_64`），打开后把语阅拖进“应用程序”。
+- 直接下载最新版：
+  - Apple 芯片（M 系列）：[国内直链](https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-mac-arm64.dmg) · [GitHub](https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-mac-arm64.dmg)
+  - Intel 芯片：[国内直链](https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-mac-x86_64.dmg) · [GitHub](https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-mac-x86_64.dmg)
+
+1. 打开下载好的 `.dmg`，把语阅拖进“应用程序”。
 2. 第一次打开会被系统拦下，前往“系统设置 → 隐私与安全性”，点一次“仍要打开”。
 
 API Key 与网盘密码保存在 App 沙盒目录内的本机权限文件中（避免无开发者证书签名更新时反复弹出系统钥匙串授权），仅当前系统账号可读，不进同步、不进快照。
 
 ### Android（8.0 及以上）
 
-下载 `.apk`，允许浏览器或文件管理器安装未知来源的应用后即可安装。
+- 直接下载最新版（`.apk`）：[国内直链](https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-android.apk) · [GitHub](https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-android.apk)
+
+允许浏览器或文件管理器安装未知来源的应用后即可安装。
 
 ### iPhone、iPad（iOS 17 及以上，进阶用户）
+
+- 未签名安装包（`.ipa`）：[国内直链](https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-ios-unsigned.ipa) · [GitHub](https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-ios-unsigned.ipa)
 
 需使用 [Impactor](https://github.com/claration/Impactor) 和你自己的 Apple ID 给未签名 `.ipa` 签名安装，或使用 Xcode 从源码编译：
 

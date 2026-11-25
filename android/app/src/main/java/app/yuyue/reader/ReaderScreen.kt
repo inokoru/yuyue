@@ -235,7 +235,13 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
     var companionVersion by remember { mutableStateOf(0) }
     LaunchedEffect(companionSettings) { if (!companionSettings) companionVersion++ }
     if (model.companionShown) app.yuyue.companion.CompanionSheet(model, settings = { companionSettings = true }) { model.companionShown = false }
-    translating?.let { text -> TranslateSheet(model, text, companionVersion, openSettings = { companionSettings = true }) { translating = null } }
+    val activeTranslating = translating ?: model.translatingSentence
+    activeTranslating?.let { text ->
+        TranslateSheet(model, text, companionVersion, openSettings = { companionSettings = true }) {
+            translating = null
+            model.translatingSentence = null
+        }
+    }
     if (companionSettings) app.yuyue.companion.CompanionSettingsSheet { companionSettings = false }
     model.adjustingSentence?.let { (sec, sen) ->
         TimingAdjustSheet(model, sec, sen) { model.adjustingSentence = null }
@@ -406,7 +412,14 @@ private fun TopBar(model: ReaderModel, paper: YYPaper, haze: HazeState, close: (
                 Glyph(Icons.more, t("更多"), paper.ink) { more = true }
                 DropdownMenu(more, { more = false }, containerColor = YY.c.card) {
                     app.yuyue.shelf.Item(t("沉浸阅读"), Icons.viewfinder) { more = false; model.immersiveShown = true }
-                    app.yuyue.shelf.Item(t("书伴"), Icons.textBubble) { more = false; model.chromeShown = false; model.companionShown = true }
+                    if (model.detail?.summary?.format != uniffi.yuyue_core.BookFormat.PDF) {
+                        app.yuyue.shelf.Item(t("书伴"), Icons.sparkle) { more = false; model.chromeShown = false; model.companionShown = true }
+                        app.yuyue.shelf.Item(if (model.translateShown) t("收起译文") else t("译文对照"), Icons.translate) {
+                            more = false
+                            model.chromeShown = false
+                            model.setTranslateShown(!model.translateShown)
+                        }
+                    }
                     app.yuyue.shelf.Item(t("书的信息"), Icons.info) { more = false; model.infoShown = true }
                     if (model.detail?.summary?.format != uniffi.yuyue_core.BookFormat.PDF) app.yuyue.shelf.Item(t("替换规则"), Icons.swapHoriz) { more = false; model.rulesShown = true }
                     if (model.detail?.summary?.format == uniffi.yuyue_core.BookFormat.TXT) app.yuyue.shelf.Item(t("编码和目录"), Icons.docSearch) { more = false; model.txtShown = true }
@@ -758,6 +771,7 @@ private fun Cards(model: ReaderModel, paper: YYPaper, thought: (Mark) -> Unit, t
                         if (model.canPin) CardAction(Icons.target, t("对准"), Modifier.weight(1f)) { model.pinHere(s.section, s.start.s) }
                     }
                     CardAction(Icons.sparkle, t("问"), Modifier.weight(1f), color = YY.tint.accent) {
+                        model.captureCompanionAnchor()
                         model.companionQuote = text
                         model.dismissCards()
                         model.chromeShown = false

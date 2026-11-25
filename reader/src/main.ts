@@ -317,7 +317,7 @@ const api = {
   paragraphs(): foreign.Paragraph[] {
     return foreign.paragraphs();
   },
-  setTranslations(list: { last: number; text: string }[] | null): void {
+  setTranslations(list: { last: number; text: string; lang?: string }[] | null): void {
     foreign.setTranslations(list);
     relayout(anchorNow(), true);
   },

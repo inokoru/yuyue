@@ -25,8 +25,9 @@ final class ReaderModel {
     private(set) var ownSettings = false
     /// The Mac window's panel on the right.
     var panel: ReaderPanel?
-    /// Words handed to the companion (问).
+    /// Words handed to the companion (问), and where they sit on the page.
     var companionQuote: String?
+    var companionAnchor: CompanionAnchor?
     /// 与书对话.
     let companion = BookCompanion()
     /// 搜索 · 问 ⌘K over this window.
@@ -425,10 +426,36 @@ final class ReaderModel {
         }
     }
 
+    /// Captures the active selection or open highlight so 书伴 can save an answer back as its thought.
+    func captureCompanionAnchor() {
+        if let open = openMark {
+            companionAnchor = CompanionAnchor(markID: open.mark.id, section: open.mark.section, start: open.mark.start, end: open.mark.end, text: open.mark.text)
+        } else if let sel = selection {
+            let trimmed = sel.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            companionAnchor = CompanionAnchor(
+                markID: nil,
+                section: sel.section,
+                start: TextPoint(sentence: UInt32(max(0, sel.start.s)), offset: UInt32(max(0, sel.start.o))),
+                end: TextPoint(sentence: UInt32(max(0, sel.end.s)), offset: UInt32(max(0, sel.end.o))),
+                text: trimmed
+            )
+        } else {
+            companionAnchor = nil
+        }
+    }
+
+    func clearCompanionQuote() {
+        companionQuote = nil
+        companionAnchor = nil
+    }
+
     /// Opens 书伴 with a question.
     func ask(_ question: String) {
         panel = .companion
-        if !question.isEmpty { companion.ask(question, quote: companionQuote) }
+        if !question.isEmpty {
+            companion.ask(question, quote: companionQuote, anchor: companionAnchor)
+            clearCompanionQuote()
+        }
     }
 
     /// Writes the position, stops reading aloud. The window is going away.

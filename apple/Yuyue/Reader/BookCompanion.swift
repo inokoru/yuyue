@@ -2,6 +2,16 @@ import Foundation
 import NaturalLanguage
 import YuyueCore
 
+/// Selection or existing highlight carried along when opening 书伴 via 问, so an answer can be
+/// saved straight back onto that exact span as a thought.
+nonisolated struct CompanionAnchor: Equatable, Sendable {
+    let markID: String?
+    let section: UInt32
+    let start: TextPoint
+    let end: TextPoint
+    let text: String
+}
+
 /// 与书对话: questions about the book open in this window. By default only the
 /// part already read is handed to the model, so it can't give away what comes later; 问全书
 /// lifts that. The sentences it gets are numbered, and the answer points back at them: 出处.
@@ -14,7 +24,16 @@ final class BookCompanion {
         case whole
     }
 
-    struct Source: Codable, Equatable {
+    nonisolated enum QueryKind: Equatable, Sendable {
+        /// 总结本章: feed the current chapter's text in full reading order.
+        case chapter
+        /// 前情回顾 / 人物关系 / 梳理大纲: broader book coverage and structured length.
+        case broad
+        /// Specific question on a line, character or detail.
+        case focused
+    }
+
+    struct Source: Codable, Equatable, Sendable {
         let section: UInt32
         let sentence: UInt32
         /// 第 13 页, worked out when the answer came.
@@ -39,8 +58,13 @@ final class BookCompanion {
         let question: String
         let quote: String?
         let scope: Scope
+        let anchor: CompanionAnchor?
+        let askedAt: Position
+        var streaming: String? = nil
+        var thinking: Bool = false
         var answer: Answer?
         var failed: String?
+        var savedMarkID: String? = nil
     }
 
     var scope = Scope.read
@@ -61,12 +85,21 @@ final class BookCompanion {
     }
 
     /// Asks, in `scope` (the current one when nil). Words chosen on the page go along as `quote`.
-    func ask(_ question: String, quote: String? = nil, scope: Scope? = nil) {
+    func ask(
+        _ question: String,
+        quote: String? = nil,
+        scope: Scope? = nil,
+        anchor: CompanionAnchor? = nil,
+        action: CompanionCommand.Action? = nil
+    ) {
         let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, let model, !busy else { return }
         let scope = scope ?? self.scope
         let config = CompanionConfig.current
-        turns.append(Turn(question: q, quote: quote, scope: scope))
+        let detail = model.detail
+        let here = model.pager.position ?? (try? model.core.progress(bookId: model.bookID))?.position ?? Position(section: detail?.start ?? 0, sentence: 0)
+        let resolvedAnchor = quote != nil ? (anchor ?? model.companionAnchor) : nil
+        turns.append(Turn(question: q, quote: quote, scope: scope, anchor: resolvedAnchor, askedAt: here))
         let index = turns.count - 1
         guard config.isReady else {
             turns[index].failed = config.provider == .apple ? Companion.appleAvailability ?? CompanionError.notReady.errorDescription : CompanionError.notReady.errorDescription
@@ -74,19 +107,34 @@ final class BookCompanion {
         }
         let core = model.core
         let book = model.bookID
-        let detail = model.detail
-        let here = model.pager.position ?? (try? core.progress(bookId: book))?.position ?? Position(section: detail?.start ?? 0, sentence: 0)
+        let kind = Self.classify(question: q, action: action)
+        let structured = kind != .focused
         let earlier = turns.prefix(index).suffix(2).compactMap { t in t.answer.map { (t.question, $0.text) } }
-        let cacheKey = [scope.rawValue, scope == .read ? "\(here.section)" : "", quote ?? "", q].joined(separator: "|")
+        let placeTag = kind == .chapter ? "\(here.section):\(here.sentence / 15)" : (scope == .read ? "\(here.section)" : "")
+        let cacheKey = [scope.rawValue, placeTag, quote ?? "", q].joined(separator: "|")
         if let cached = Self.cache(model)?[cacheKey] {
             turns[index].answer = cached
             return
         }
+        let chapterSpan = Self.chapterSections(detail: detail, section: here.section)
+        let startSection = Int(detail?.start ?? 0)
         asking = Task { [weak self, weak model] in
-            let excerpts = await Self.excerpts(core: core, book: book, question: q + " " + (quote ?? ""), upTo: scope == .read ? here : nil)
+            let excerpts = await Self.excerpts(
+                core: core,
+                book: book,
+                question: q + " " + (quote ?? ""),
+                here: here,
+                upTo: scope == .read ? here : nil,
+                kind: kind,
+                chapterSections: chapterSpan,
+                bookStart: startSection
+            )
             guard let model, !Task.isCancelled else { return }
             let title = detail?.summary.title ?? ""
             let percent = Int((model.fraction(section: here.section, sentence: Int(here.sentence)) * 100).rounded())
+            let styleRule = structured
+                ? "用\(Companion.replyLanguage)，条理清晰，可用简短分段或要点梳理关键脉络，紧扣原文，不说空话。"
+                : "用\(Companion.replyLanguage)，口语，简短，一般三到五句话。"
             var system = "你是「语阅」里的书伴，陪读者读《\(title)》\(detail?.summary.author.map { "（\($0)）" } ?? "")。\n"
             switch scope {
             case .read:
@@ -94,7 +142,7 @@ final class BookCompanion {
                 读者现在读到全书的 \(percent)%。
                 规则：
                 1. 只根据下面给出的原文片段回答。不要用你知道的、这本书后面的情节，不要剧透。
-                2. 用\(Companion.replyLanguage)，口语，简短，一般三到五句话。
+                2. \(styleRule)
                 3. 说到原文里的内容时，在那句话后面写上片段编号，比如 [2]。只用给出的编号。
                 4. 如果这些片段不够回答，或者答案在读者还没读到的地方，只回答三个字：没读到
                 5. 能回答的话，最后另起一行，写"接着问："，后面是读者可能想接着问的两个短问题，用"｜"隔开。
@@ -104,7 +152,7 @@ final class BookCompanion {
                 读者想用整本书来回答，不介意提前知道后面的情节。
                 规则：
                 1. 可以用整本书的内容，也可以结合你对这本书的了解。
-                2. 用\(Companion.replyLanguage)，口语，简短，一般三到五句话。
+                2. \(styleRule)
                 3. 说到下面原文片段里的内容时，在那句话后面写上片段编号，比如 [2]。只用给出的编号。
                 4. 最后另起一行，写"接着问："，后面是读者可能想接着问的两个短问题，用"｜"隔开。
                 """
@@ -113,32 +161,61 @@ final class BookCompanion {
             if !earlier.isEmpty {
                 prompt += "之前的对话：\n" + earlier.map { "读者：\($0.0)\n书伴：\($0.1)" }.joined(separator: "\n") + "\n\n"
             }
-            prompt += "原文片段：\n"
+            prompt += kind == .chapter ? "当前章节原文片段（按阅读顺序）：\n" : "原文片段：\n"
+            var prebuiltSources: [Int: Source] = [:]
             for (n, e) in excerpts.enumerated() {
                 let chapter = detail?.chapterTitle(for: e.section).map { "（\($0)）" } ?? ""
                 prompt += "[\(n + 1)]\(chapter)\(e.text)\n"
+                let later = scope == .whole && (e.section, e.sentence) > (here.section, here.sentence + 8)
+                prebuiltSources[n + 1] = Source(
+                    section: e.section,
+                    sentence: e.sentence,
+                    page: model.estimatedPage(section: e.section, sentence: Int(e.sentence)),
+                    later: later ? true : nil
+                )
             }
             if let quote { prompt += "\n读者选中的句子：「\(quote)」\n" }
             prompt += "\n读者问：\(q)"
             do {
-                let (text, next) = Self.split(try await Companion.answer(config, system: system, prompt: prompt, source: .companion))
+                let rawReply = try await Companion.answer(
+                    config,
+                    system: system,
+                    prompt: prompt,
+                    maxTokens: structured ? 2048 : 1024,
+                    source: .companion,
+                    onStream: { [weak self] raw in
+                        let (preview, isThinking) = Self.streamingPreview(from: raw, hideNotYet: scope == .read)
+                        Task { @MainActor [weak self] in
+                            guard let self, self.turns.indices.contains(index), self.turns[index].answer == nil else { return }
+                            self.turns[index].thinking = isThinking
+                            if !preview.isEmpty {
+                                self.turns[index].streaming = preview
+                            }
+                        }
+                    }
+                )
+                let (text, next) = Self.split(rawReply)
                 guard let self, !Task.isCancelled else { return }
                 let notYet = scope == .read && text.hasPrefix("没读到")
-                var sources: [Int: Source] = [:]
-                for (n, e) in excerpts.enumerated() {
-                    let later = scope == .whole && (e.section, e.sentence) > (here.section, here.sentence + 8)
-                    sources[n + 1] = Source(section: e.section, sentence: e.sentence,
-                                            page: model.estimatedPage(section: e.section, sentence: Int(e.sentence)),
-                                            later: later ? true : nil)
-                }
                 // Only the ones it pointed at.
                 let used = Set(Self.citations(in: text))
-                let answer = Answer(text: text, sources: sources.filter { used.contains($0.key) }, label: config.label,
-                                    notYet: notYet, next: notYet || next.isEmpty ? nil : next)
-                if self.turns.indices.contains(index) { self.turns[index].answer = answer }
+                let answer = Answer(
+                    text: text,
+                    sources: prebuiltSources.filter { used.contains($0.key) },
+                    label: config.label,
+                    notYet: notYet,
+                    next: notYet || next.isEmpty ? nil : next
+                )
+                if self.turns.indices.contains(index) {
+                    self.turns[index].streaming = nil
+                    self.turns[index].thinking = false
+                    self.turns[index].answer = answer
+                }
                 Self.store(model, key: cacheKey, answer)
             } catch {
                 guard let self, !Task.isCancelled, self.turns.indices.contains(index) else { return }
+                self.turns[index].streaming = nil
+                self.turns[index].thinking = false
                 self.turns[index].failed = Companion.message(for: error)
             }
         }
@@ -151,10 +228,201 @@ final class BookCompanion {
         model?.pager.setSource(Position(section: source.section, sentence: source.sentence))
     }
 
-    /// The answer, and the 接着问 line taken off its end.
-    static func split(_ reply: String) -> (String, [String]) {
-        var lines = reply.components(separatedBy: "\n")
-        guard let i = lines.lastIndex(where: { $0.contains("接着问") }) else { return (reply, []) }
+    /// Saves a completed answer onto the anchor highlight (or the cited / current sentence) as a thought.
+    func saveThought(for turnID: UUID) {
+        guard let index = turns.firstIndex(where: { $0.id == turnID }),
+              let answer = turns[index].answer, !answer.notYet,
+              let model else { return }
+        if let savedID = turns[index].savedMarkID,
+           let existing = model.marks.first(where: { $0.id == savedID }) {
+            model.go(to: existing)
+            return
+        }
+        let clean = Self.noteText(from: answer.text)
+        guard !clean.isEmpty else { return }
+        let turn = turns[index]
+
+        // 1. Existing highlight tapped via 问: append/update its thought.
+        if let markID = turn.anchor?.markID,
+           let targetMark = model.marks.first(where: { $0.id == markID }) {
+            let previousNote = targetMark.note
+            let combined = Self.mergeNote(existing: previousNote, addition: clean)
+            do {
+                try model.core.setMarkNote(book: model.bookID, id: markID, note: combined)
+                model.reloadNotes()
+                turns[index].savedMarkID = markID
+                model.show(Library.Toast(
+                    icon: "square.and.pencil",
+                    title: String(localized: "已存进想法"),
+                    detail: "“\(targetMark.text.prefix(16))”",
+                    undo: { [weak self, weak model] in
+                        guard let model else { return }
+                        try? model.core.setMarkNote(book: model.bookID, id: markID, note: previousNote)
+                        model.reloadNotes()
+                        if let i = self?.turns.firstIndex(where: { $0.id == turnID }) {
+                            self?.turns[i].savedMarkID = nil
+                        }
+                    }
+                ))
+            } catch {
+                model.failure = Library.message(for: error)
+            }
+            return
+        }
+
+        // 2. Fresh text selection handed via 问: highlight that exact span with the thought.
+        if let anchor = turn.anchor, !anchor.text.isEmpty {
+            do {
+                let created = try model.core.addMark(
+                    book: model.bookID,
+                    section: anchor.section,
+                    start: anchor.start,
+                    end: anchor.end,
+                    text: anchor.text,
+                    style: model.lastStyle,
+                    note: clean
+                )
+                model.pager.keepShown(created.id)
+                model.reloadNotes()
+                turns[index].savedMarkID = created.id
+                model.show(Library.Toast(
+                    icon: "square.and.pencil",
+                    title: String(localized: "已存进想法"),
+                    detail: "“\(created.text.prefix(16))”",
+                    undo: { [weak self, weak model] in
+                        guard let model else { return }
+                        try? model.core.deleteMark(book: model.bookID, id: created.id)
+                        model.reloadNotes()
+                        if let i = self?.turns.firstIndex(where: { $0.id == turnID }) {
+                            self?.turns[i].savedMarkID = nil
+                        }
+                    }
+                ))
+            } catch {
+                model.failure = Library.message(for: error)
+            }
+            return
+        }
+
+        // 3. No selection quote: anchor to the first cited sentence, or the sentence where the question was asked.
+        let firstCited = answer.sources.keys.sorted().first.flatMap { answer.sources[$0] }
+        let targetSection = firstCited?.section ?? turn.askedAt.section
+        let targetSentence = Int(firstCited?.sentence ?? turn.askedAt.sentence)
+        guard let all = try? model.core.sentences(bookId: model.bookID, section: targetSection), !all.isEmpty else { return }
+        let clamped = min(max(0, targetSentence), all.count - 1)
+        let chosenIndex = (clamped ..< all.count).first { !all[$0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            ?? (0 ..< clamped).reversed().first { !all[$0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            ?? clamped
+        let raw = all[chosenIndex]
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let range = raw.range(of: trimmed) else { return }
+        let start = TextPoint(sentence: UInt32(chosenIndex), offset: UInt32(raw.utf16.distance(from: raw.startIndex, to: range.lowerBound)))
+        let end = TextPoint(sentence: UInt32(chosenIndex), offset: UInt32(raw.utf16.distance(from: raw.startIndex, to: range.upperBound)))
+
+        if let existing = model.marks.first(where: { $0.section == targetSection && $0.start == start && $0.end == end }) {
+            let previousNote = existing.note
+            let combined = Self.mergeNote(existing: previousNote, addition: clean)
+            do {
+                try model.core.setMarkNote(book: model.bookID, id: existing.id, note: combined)
+                model.reloadNotes()
+                turns[index].savedMarkID = existing.id
+                model.show(Library.Toast(
+                    icon: "square.and.pencil",
+                    title: String(localized: "已存进想法"),
+                    detail: "“\(existing.text.prefix(16))”",
+                    undo: { [weak self, weak model] in
+                        guard let model else { return }
+                        try? model.core.setMarkNote(book: model.bookID, id: existing.id, note: previousNote)
+                        model.reloadNotes()
+                        if let i = self?.turns.firstIndex(where: { $0.id == turnID }) {
+                            self?.turns[i].savedMarkID = nil
+                        }
+                    }
+                ))
+            } catch {
+                model.failure = Library.message(for: error)
+            }
+            return
+        }
+
+        do {
+            let created = try model.core.addMark(
+                book: model.bookID,
+                section: targetSection,
+                start: start,
+                end: end,
+                text: trimmed,
+                style: model.lastStyle,
+                note: clean
+            )
+            model.pager.keepShown(created.id)
+            model.reloadNotes()
+            turns[index].savedMarkID = created.id
+            model.show(Library.Toast(
+                icon: "square.and.pencil",
+                title: String(localized: "已存进想法"),
+                detail: "“\(created.text.prefix(16))”",
+                undo: { [weak self, weak model] in
+                    guard let model else { return }
+                    try? model.core.deleteMark(book: model.bookID, id: created.id)
+                    model.reloadNotes()
+                    if let i = self?.turns.firstIndex(where: { $0.id == turnID }) {
+                        self?.turns[i].savedMarkID = nil
+                    }
+                }
+            ))
+        } catch {
+            model.failure = Library.message(for: error)
+        }
+    }
+
+    nonisolated private static func mergeNote(existing: String?, addition: String) -> String {
+        guard let old = existing?.trimmingCharacters(in: .whitespacesAndNewlines), !old.isEmpty else {
+            return addition
+        }
+        if old.contains(addition) { return old }
+        return "\(old)\n\n\(addition)"
+    }
+
+    /// Strips `[n]` citation markers so an answer saved into 想法 reads cleanly in notes & exports.
+    nonisolated static func noteText(from answerText: String) -> String {
+        answerText
+            .replacingOccurrences(of: #"[ \t\u00A0]*\[\d+\]"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Removes `<think>…</think>` blocks from reasoning models, reporting whether an unclosed `<think>` is still streaming.
+    nonisolated static func stripThinking(_ raw: String) -> (visible: String, thinking: Bool) {
+        let completed = raw.replacingOccurrences(of: #"(?is)<think>.*?</think>"#, with: "", options: .regularExpression)
+        if let open = completed.range(of: "<think>", options: .caseInsensitive) {
+            let prefix = String(completed[..<open.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            return (prefix, true)
+        }
+        return (completed.trimmingCharacters(in: .whitespacesAndNewlines), false)
+    }
+
+    /// Live preview string during SSE streaming: hides `<think>`, hides the trailing `接着问` line,
+    /// and trims an incomplete `[1` bracket at the very tail.
+    nonisolated static func streamingPreview(from raw: String, hideNotYet: Bool) -> (visible: String, thinking: Bool) {
+        let (cleaned, thinking) = stripThinking(raw)
+        guard !cleaned.isEmpty else { return ("", thinking) }
+        if hideNotYet, cleaned.hasPrefix("没读到") { return ("", thinking) }
+        var lines = cleaned.components(separatedBy: "\n")
+        if let i = lines.lastIndex(where: { $0.contains("接着问") }) {
+            lines.removeSubrange(i...)
+        }
+        var body = lines.joined(separator: "\n")
+            .replacingOccurrences(of: #"\s*\[\d*$"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if hideNotYet, "没读到".hasPrefix(body) { body = "" }
+        return (body, thinking)
+    }
+
+    /// The answer (with `<think>` blocks removed), and the 接着问 line taken off its end.
+    nonisolated static func split(_ reply: String) -> (String, [String]) {
+        let cleaned = stripThinking(reply).visible
+        var lines = cleaned.components(separatedBy: "\n")
+        guard let i = lines.lastIndex(where: { $0.contains("接着问") }) else { return (cleaned, []) }
         let line = lines.remove(at: i)
         let asks = line.components(separatedBy: "接着问").last?
             .trimmingCharacters(in: CharacterSet(charactersIn: "：: *"))
@@ -164,13 +432,50 @@ final class BookCompanion {
         return (lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines), Array(asks.prefix(2)))
     }
 
-    static func citations(in text: String) -> [Int] {
+    nonisolated static func citations(in text: String) -> [Int] {
         text.matches(of: /\[(\d+)\]/).compactMap { Int($0.1) }
+    }
+
+    nonisolated static func classify(question: String, action: CompanionCommand.Action? = nil) -> QueryKind {
+        if let action {
+            switch action {
+            case .chapter: return .chapter
+            case .recap, .characters, .quote, .quiz: return .broad
+            default: break
+            }
+        }
+        let lower = question.lowercased()
+        let chapterMarkers = ["这一章", "本章", "这章", "当前章", "这回", "本回", "这一回", "这一节", "本节", "this chapter", "current chapter"]
+        if chapterMarkers.contains(where: { lower.contains($0) }) {
+            return .chapter
+        }
+        let broadMarkers = [
+            "前面发生", "前情", "目前为止", "主要人物", "人物关系", "出场人物",
+            "总结", "概括", "梳理", "大纲", "脉络", "主旨", "分析", "思考题", "考考我", "挑几句", "挑两三句",
+            "what happened", "so far", "main characters", "summarize", "summary", "outline", "analyze",
+        ]
+        if broadMarkers.contains(where: { lower.contains($0) }) {
+            return .broad
+        }
+        return .focused
+    }
+
+    nonisolated static func chapterSections(detail: BookDetail?, section: UInt32) -> Range<Int> {
+        guard let detail else { return Int(section) ..< Int(section) + 1 }
+        let total = max(1, detail.sections.count)
+        let toc = detail.toc
+        if let entry = toc.last(where: { $0.section <= section }) ?? toc.first(where: { $0.section == section }) {
+            let start = Int(entry.section)
+            let end = toc.first(where: { $0.section > entry.section }).map { Int($0.section) } ?? total
+            return start ..< max(start + 1, end)
+        }
+        let cur = min(Int(section), total - 1)
+        return cur ..< cur + 1
     }
 
     // MARK: Finding the sentences
 
-    struct Excerpt: Sendable {
+    nonisolated struct Excerpt: Sendable {
         let section: UInt32
         let sentence: UInt32
         let text: String
@@ -181,13 +486,25 @@ final class BookCompanion {
         "这个", "那个", "这些", "那些", "这里", "那里", "这本书", "本书", "这本", "这章", "这一章", "一章",
         "意思", "后来", "之后", "以后", "现在", "时候", "为何", "是否", "可以", "能不能", "一个", "一下",
         "他们", "她们", "我们", "你们", "自己", "就是", "还是", "但是", "因为", "所以", "然后", "发生",
+        "总结", "概括", "梳理", "讲了", "主要", "内容", "目前", "为止", "前面", "人物", "关系", "出场",
         "the", "and", "what", "why", "how", "who", "does", "did", "this", "that", "with", "about",
     ]
 
-    /// Up to a dozen numbered sentences (with a little around each) to answer from: the ones
-    /// sharing the most words with the question, then the last few read. With `upTo`, nothing
-    /// after that place.
-    @concurrent nonisolated static func excerpts(core: YuyueCore, book: String, question: String, upTo: Position?) async -> [Excerpt] {
+    /// Builds numbered passages `[1]…[K]` grounded in the book:
+    /// - `.chapter`: chunks the entire current chapter (within `upTo` when spoiler-free) into sequential passages
+    ///   so chapter summaries see the whole chapter rather than keyword fragments.
+    /// - `.broad`: combines keyword hits with milestone passages across read sections and recent prose.
+    /// - `.focused`: top keyword matches plus the sentences around the current reading spot.
+    @concurrent nonisolated static func excerpts(
+        core: YuyueCore,
+        book: String,
+        question: String,
+        here: Position,
+        upTo: Position?,
+        kind: QueryKind,
+        chapterSections: Range<Int>,
+        bookStart: Int
+    ) async -> [Excerpt] {
         let tokenizer = NLTokenizer(unit: .word)
         tokenizer.string = question
         var words = Set<String>()
@@ -209,6 +526,56 @@ final class BookCompanion {
             return section < upTo.section || (section == upTo.section && sentence <= upTo.sentence + 8)
         }
 
+        // 1. Chapter-level context: sequential ~480-char passages across the current chapter.
+        if kind == .chapter {
+            var chapterChunks: [Excerpt] = []
+            for sec in chapterSections where sec >= 0 {
+                let secU = UInt32(sec)
+                if let upTo, secU > upTo.section { break }
+                let all = text(secU)
+                guard !all.isEmpty else { continue }
+                let limit = (upTo != nil && secU == upTo!.section) ? min(all.count, Int(upTo!.sentence) + 9) : all.count
+                var idx = 0
+                while idx < limit {
+                    let startSent = idx
+                    var parts: [String] = []
+                    var chars = 0
+                    while idx < limit, chars < 480 || parts.isEmpty {
+                        let s = all[idx].trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " ")
+                        if !s.isEmpty {
+                            parts.append(s)
+                            chars += s.count
+                        }
+                        idx += 1
+                    }
+                    if !parts.isEmpty {
+                        chapterChunks.append(Excerpt(section: secU, sentence: UInt32(startSent), text: String(parts.joined(separator: " ").prefix(540))))
+                    }
+                }
+            }
+            if !chapterChunks.isEmpty {
+                let maxChunks = 24
+                if chapterChunks.count <= maxChunks { return chapterChunks }
+                // Extra-long chapter: keep first, last, keyword-matching chunks, chunk near `here`, and evenly strided chunks.
+                var chosen = Set<Int>([0, chapterChunks.count - 1])
+                if let nearIdx = chapterChunks.lastIndex(where: { ($0.section, $0.sentence) <= (here.section, here.sentence) }) {
+                    chosen.insert(nearIdx)
+                }
+                if !words.isEmpty {
+                    for (ci, chunk) in chapterChunks.enumerated() where chosen.count < maxChunks / 2 {
+                        let lower = chunk.text.lowercased()
+                        if words.contains(where: { lower.contains($0) }) { chosen.insert(ci) }
+                    }
+                }
+                let step = Double(chapterChunks.count - 1) / Double(maxChunks - 1)
+                for k in 0 ..< maxChunks where chosen.count < maxChunks {
+                    chosen.insert(min(chapterChunks.count - 1, Int((Double(k) * step).rounded())))
+                }
+                return chosen.sorted().prefix(maxChunks).map { chapterChunks[$0] }
+            }
+        }
+
+        // 2. Keyword search + broad/focused context.
         var score: [String: (Int, UInt32, UInt32)] = [:]
         for word in words {
             let hits = (try? core.searchBook(book: book, query: word)) ?? []
@@ -218,28 +585,56 @@ final class BookCompanion {
                 score[key] = (old + 1, h.section, h.sentence)
             }
         }
+        let keywordCap = kind == .broad ? 10 : 10
         var picked: [(UInt32, UInt32)] = []
         let ranked = score.values.sorted { a, b in a.0 != b.0 ? a.0 > b.0 : (a.1, a.2) > (b.1, b.2) }
-        for (_, section, sentence) in ranked where picked.count < 8 {
+        for (_, section, sentence) in ranked where picked.count < keywordCap {
             if picked.contains(where: { $0.0 == section && abs(Int($0.1) - Int(sentence)) <= 2 }) { continue }
             picked.append((section, sentence))
         }
-        // The page being read: what "这句" and "刚才" are about.
-        if let upTo {
-            let end = Int(upTo.sentence) + 3
-            for s in stride(from: end, through: max(0, end - 12), by: -4) where !picked.contains(where: { $0.0 == upTo.section && abs(Int($0.1) - s) <= 2 }) {
-                if s < text(upTo.section).count { picked.append((upTo.section, UInt32(s))) }
+
+        // Recent context near the reading spot.
+        let anchorPos = upTo ?? here
+        let recentSpan = kind == .broad ? 20 : 12
+        let end = Int(anchorPos.sentence) + 3
+        for s in stride(from: end, through: max(0, end - recentSpan), by: -4) where !picked.contains(where: { $0.0 == anchorPos.section && abs(Int($0.1) - s) <= 2 }) {
+            if s < text(anchorPos.section).count { picked.append((anchorPos.section, UInt32(s))) }
+        }
+
+        // For broad narrative questions (recap / characters / quotes) with sparse keyword hits,
+        // sample milestone passages across earlier read sections so the model sees the story arc.
+        if kind == .broad, picked.count < 16 {
+            let maxSec = Int(anchorPos.section)
+            let minSec = max(0, min(bookStart, maxSec))
+            if maxSec >= minSec {
+                let totalSecs = maxSec - minSec + 1
+                let strideSec = max(1, totalSecs / 8)
+                for sec in stride(from: minSec, through: maxSec, by: strideSec) where picked.count < 16 {
+                    let secU = UInt32(sec)
+                    let all = text(secU)
+                    guard !all.isEmpty else { continue }
+                    let cap = (upTo != nil && secU == anchorPos.section) ? min(all.count, Int(anchorPos.sentence) + 1) : all.count
+                    guard cap > 0 else { continue }
+                    for probe in [0, cap / 2] where probe < cap && picked.count < 16 {
+                        if !picked.contains(where: { $0.0 == secU && abs(Int($0.1) - probe) <= 3 }) {
+                            picked.append((secU, UInt32(probe)))
+                        }
+                    }
+                }
             }
         }
+
         picked.sort { ($0.0, $0.1) < ($1.0, $1.1) }
+        let charLimit = kind == .broad ? 360 : 280
+        let tailWindow = kind == .broad ? 2 : 1
         return picked.compactMap { section, sentence in
             let all = text(section)
             let i = Int(sentence)
             guard all.indices.contains(i) else { return nil }
-            let from = max(0, i - 1), to = min(all.count - 1, i + 1)
+            let from = max(0, i - 1), to = min(all.count - 1, i + tailWindow)
             // A space between sentences: English ones would run together otherwise.
             let joined = all[from ... to].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.joined(separator: " ").replacingOccurrences(of: "\n", with: " ")
-            return Excerpt(section: section, sentence: sentence, text: String(joined.prefix(240)))
+            return Excerpt(section: section, sentence: sentence, text: String(joined.prefix(charLimit)))
         }
     }
 
@@ -264,6 +659,89 @@ final class BookCompanion {
     }
 }
 
+// MARK: - Custom quick prompts
+
+/// 用户保存在「设置 · 书伴」里的常用提问，同时出现在底部建议栏和 `/` 快捷指令里.
+nonisolated enum CompanionPrompts {
+    static let key = "companion.customPrompts"
+    static let maxCount = 8
+    static let maxLength = 120
+    static let changed = Notification.Name("yuyue.companionPromptsChanged")
+
+    static var presets: [String] {
+        [
+            String(localized: "拆解这句语法与长难句"),
+            String(localized: "把这段古文译成现代白话"),
+            String(localized: "提炼核心论点与逻辑"),
+        ]
+    }
+
+    static var list: [String] {
+        normalized(UserDefaults.standard.stringArray(forKey: key) ?? [])
+    }
+
+    static func normalized(_ items: [String]) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for raw in items {
+            let trimmed = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maxLength))
+            guard !trimmed.isEmpty, seen.insert(trimmed).inserted else { continue }
+            out.append(trimmed)
+            if out.count >= maxCount { break }
+        }
+        return out
+    }
+
+    static func adding(_ prompt: String, to current: [String]) -> [String] {
+        let trimmed = String(prompt.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maxLength))
+        guard !trimmed.isEmpty else { return normalized(current) }
+        let base = normalized(current)
+        if base.contains(trimmed) || base.count >= maxCount { return base }
+        return base + [trimmed]
+    }
+
+    static func removing(_ prompt: String, from current: [String]) -> [String] {
+        normalized(current).filter { $0 != prompt }
+    }
+
+    static func add(_ prompt: String) {
+        let next = adding(prompt, to: list)
+        guard next != list else { return }
+        UserDefaults.standard.set(next, forKey: key)
+        NotificationCenter.default.post(name: changed, object: nil)
+    }
+
+    static func remove(_ prompt: String) {
+        let next = removing(prompt, from: list)
+        guard next != list else { return }
+        UserDefaults.standard.set(next, forKey: key)
+        NotificationCenter.default.post(name: changed, object: nil)
+    }
+
+    static func suggestions(
+        hasQuote: Bool,
+        followUps: [String]?,
+        quoteDefaults: [String],
+        startDefaults: [String],
+        custom: [String] = list
+    ) -> [String] {
+        let primary: [String]
+        let secondary: [String]
+        if hasQuote {
+            primary = custom
+            secondary = quoteDefaults
+        } else if let followUps, !followUps.isEmpty {
+            primary = followUps
+            secondary = custom
+        } else {
+            primary = custom
+            secondary = startDefaults
+        }
+        var seen = Set<String>()
+        return (primary + secondary).filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+}
+
 // MARK: - Slash commands
 
 /// Slash commands (`/recap`, `/clear`, …) shared by Mac and iOS 书伴 composers.
@@ -282,6 +760,7 @@ nonisolated struct CompanionCommand: Identifiable, Hashable, Sendable {
         case explain
         case quote
         case quiz
+        case custom(String)
         case scope(BookCompanion.Scope)
         case model
         case clear
@@ -376,6 +855,7 @@ nonisolated struct CompanionCommand: Identifiable, Hashable, Sendable {
                 takesArgument: true,
                 keywords: ["考考我", "测验", "提问", "思考", "test"]
             ),
+        ] + customCommands(from: CompanionPrompts.list) + [
             CompanionCommand(
                 id: "read",
                 name: "read",
@@ -434,6 +914,22 @@ nonisolated struct CompanionCommand: Identifiable, Hashable, Sendable {
         ]
     }
 
+    static func customCommands(from prompts: [String]) -> [CompanionCommand] {
+        prompts.enumerated().map { index, prompt in
+            CompanionCommand(
+                id: "custom-\(index + 1)",
+                name: "p\(index + 1)",
+                title: prompt,
+                subtitle: String(localized: "常用提问"),
+                icon: "text.bubble",
+                category: .ask,
+                action: .custom(prompt),
+                takesArgument: true,
+                keywords: ["常用", "自定义", "custom", "prompt"]
+            )
+        }
+    }
+
     /// Returns the filter text after a leading `/` (or full-width `／`) while the user is still
     /// typing the command token (before any whitespace or newline).
     static func slashQuery(in draft: String) -> String? {
@@ -444,10 +940,10 @@ nonisolated struct CompanionCommand: Identifiable, Hashable, Sendable {
     }
 
     /// Filters commands by prefix/substring across English name, localized title, keywords, and subtitle.
-    static func matching(_ query: String) -> [CompanionCommand] {
+    static func matching(_ query: String, in commands: [CompanionCommand] = all) -> [CompanionCommand] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return all }
-        let scored: [(Int, CompanionCommand)] = all.compactMap { cmd in
+        guard !q.isEmpty else { return commands }
+        let scored: [(Int, CompanionCommand)] = commands.compactMap { cmd in
             if cmd.name.hasPrefix(q) { return (0, cmd) }
             if cmd.title.lowercased().hasPrefix(q) { return (1, cmd) }
             if cmd.keywords.contains(where: { $0.lowercased().hasPrefix(q) }) { return (2, cmd) }
@@ -464,7 +960,7 @@ nonisolated struct CompanionCommand: Identifiable, Hashable, Sendable {
     }
 
     /// Parses a submitted draft starting with `/` (or `／`) into a known command + optional argument.
-    static func parse(_ draft: String) -> Parsed? {
+    static func parse(_ draft: String, in commands: [CompanionCommand] = all) -> Parsed? {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let first = trimmed.first, first == "/" || first == "／" else { return nil }
         let body = trimmed.dropFirst()
@@ -472,7 +968,7 @@ nonisolated struct CompanionCommand: Identifiable, Hashable, Sendable {
         let token = String(body[..<splitIndex]).lowercased()
         guard !token.isEmpty else { return nil }
         let arg = String(body[splitIndex...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let cmd = all.first(where: {
+        guard let cmd = commands.first(where: {
             $0.name == token || $0.title.lowercased() == token
         }) else {
             return nil
@@ -506,6 +1002,8 @@ nonisolated struct CompanionCommand: Identifiable, Hashable, Sendable {
         case .quiz:
             if !arg.isEmpty { return String(localized: "围绕「\(arg)」，根据我已读的内容出两道思考题考考我。") }
             return String(localized: "根据我目前读过的内容，出两道有意思的思考题考考我。")
+        case .custom(let prompt):
+            return arg.isEmpty ? prompt : "\(prompt)\n\(arg)"
         case .scope, .model, .clear, .settings:
             return nil
         }

@@ -65,6 +65,7 @@ struct CompanionSettings: View {
                 } action: { focus.sheet = .add }
             }
             SettingsNote(String(localized: "API Key 仅保存在这台 Mac 上，不同步、不上传；调用费用由服务商直接结算。播客文稿生成同样使用此处所选模型。"))
+            CompanionQuickPromptsSection()
             CompanionUsageAndCostSection()
             Spacer(minLength: 0)
         }
@@ -1132,7 +1133,6 @@ struct ServiceTile: View {
                         Image("brand-\(p.id)").resizable().scaledToFit()
                     } else if ServiceTile.hasImage("provider-\(p.id)") {
                         Image("provider-\(p.id)").resizable().scaledToFit().foregroundStyle(Color(yy: YYRGBA(42, 43, 46, 1)))
-
                     } else if p == .free {
                         Image(systemName: "globe.asia.australia.fill")
                             .font(.system(size: size * 0.44, weight: .medium))
@@ -1754,6 +1754,171 @@ private struct DailyCapPills: View {
         .padding(2)
         .background(YYColor.inset, in: .capsule)
         .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+/// 常用提问: user-saved quick prompts shown in 书伴 suggestion bar and `/` menu on macOS and iOS.
+struct CompanionQuickPromptsSection: View {
+    @State private var prompts = CompanionPrompts.list
+    @State private var draft = ""
+
+    private var canAdd: Bool {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && prompts.count < CompanionPrompts.maxCount && !prompts.contains(trimmed)
+    }
+
+    private var availablePresets: [String] {
+        guard prompts.count < CompanionPrompts.maxCount else { return [] }
+        return CompanionPrompts.presets.filter { !prompts.contains($0) }
+    }
+
+    var body: some View {
+        #if os(macOS)
+        SettingsHeading(String(localized: "常用提问"))
+        SettingsCard {
+            ForEach(Array(prompts.enumerated()), id: \.element) { idx, item in
+                HStack(spacing: 10) {
+                    Text("/p\(idx + 1)")
+                        .font(.yy(size: 11, weight: .medium)).monospaced()
+                        .foregroundStyle(YYColor.t3)
+                        .frame(width: 26, alignment: .leading)
+                    Text(item)
+                        .font(.yy(size: 12.5))
+                        .foregroundStyle(YYColor.t1)
+                        .lineLimit(2)
+                    Spacer(minLength: 8)
+                    Button {
+                        CompanionPrompts.remove(item)
+                        prompts = CompanionPrompts.list
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.yy(size: 13))
+                            .foregroundStyle(YYColor.t3)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text("删除"))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    TextField("添加一句常问的话，例如：拆解这句长难句", text: $draft)
+                        .textFieldStyle(.plain)
+                        .font(.yy(size: 12.5))
+                        .foregroundStyle(YYColor.t1)
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                        .background(YYColor.inset, in: .rect(cornerRadius: 7))
+                        .onSubmit { submit() }
+                    Button("添加") { submit() }
+                        .buttonStyle(YYButtonStyle(kind: .raised, size: .small))
+                        .disabled(!canAdd)
+                }
+                if !availablePresets.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(availablePresets, id: \.self) { preset in
+                                Button {
+                                    CompanionPrompts.add(preset)
+                                    prompts = CompanionPrompts.list
+                                } label: {
+                                    Text("+ " + preset)
+                                        .font(.yy(size: 11))
+                                        .foregroundStyle(YYColor.t2)
+                                        .padding(.horizontal, 9)
+                                        .frame(height: 24)
+                                        .background(YYColor.inset, in: .capsule)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 11)
+        }
+        SettingsNote(String(localized: "保存在书伴底部建议栏与 / 快捷指令中，点一下即可提问（最多 8 条）。"))
+            .onReceive(NotificationCenter.default.publisher(for: CompanionPrompts.changed)) { _ in
+                prompts = CompanionPrompts.list
+            }
+        #else
+        PhoneSettingsHeading(String(localized: "常用提问"))
+        YYGroup {
+            ForEach(Array(prompts.enumerated()), id: \.element) { idx, item in
+                HStack(spacing: 8) {
+                    Text("/p\(idx + 1)")
+                        .font(.yy(size: 10.5, weight: .medium)).monospaced()
+                        .foregroundStyle(YYColor.t3)
+                        .frame(width: 24, alignment: .leading)
+                    Text(item)
+                        .font(YYUI.font(11.5))
+                        .foregroundStyle(YYColor.t1)
+                        .lineLimit(2)
+                    Spacer(minLength: 6)
+                    Button {
+                        CompanionPrompts.remove(item)
+                        prompts = CompanionPrompts.list
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.yy(size: 14))
+                            .foregroundStyle(YYColor.t3)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text("删除"))
+                }
+                .padding(.vertical, 9)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    TextField("添加一句常问的话", text: $draft)
+                        .font(YYUI.font(11.5))
+                        .foregroundStyle(YYColor.t1)
+                        .padding(.horizontal, 10)
+                        .frame(height: 32)
+                        .background(YYColor.inset, in: .rect(cornerRadius: 8))
+                        .onSubmit { submit() }
+                    Button("添加") { submit() }
+                        .buttonStyle(YYButtonStyle(kind: .raised, size: .small))
+                        .disabled(!canAdd)
+                }
+                if !availablePresets.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(availablePresets, id: \.self) { preset in
+                                Button {
+                                    CompanionPrompts.add(preset)
+                                    prompts = CompanionPrompts.list
+                                } label: {
+                                    Text("+ " + preset)
+                                        .font(YYUI.font(10.5))
+                                        .foregroundStyle(YYColor.t2)
+                                        .padding(.horizontal, 9)
+                                        .frame(height: 26)
+                                        .background(YYColor.inset, in: .capsule)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 10)
+        }
+        YYNote(String(localized: "保存在书伴底部建议栏与 / 快捷指令中，点一下即可提问（最多 8 条）。"))
+            .onReceive(NotificationCenter.default.publisher(for: CompanionPrompts.changed)) { _ in
+                prompts = CompanionPrompts.list
+            }
+        #endif
+    }
+
+    private func submit() {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        CompanionPrompts.add(trimmed)
+        prompts = CompanionPrompts.list
+        draft = ""
     }
 }
 

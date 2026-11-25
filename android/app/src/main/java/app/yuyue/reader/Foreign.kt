@@ -93,6 +93,7 @@ object ForeignPrefs {
     const val GLOSS = "foreign.gloss"
     const val LEVEL = "foreign.glossLevel"
     const val GLOSS_VOCAB = "foreign.glossVocab"
+    const val AI_TRANSLATE = "foreign.aiTranslate"
 
     /** 点词时读出来. */
     val speaks get() = Prefs.bool(SPEAK, true)
@@ -102,8 +103,149 @@ object ForeignPrefs {
     val glosses get() = Prefs.bool(GLOSS, true)
     val level: Int get() = Prefs.int(LEVEL, 3)
     val glossVocabOnly get() = Prefs.bool(GLOSS_VOCAB, false)
+    /** 优先用书伴模型翻译整页与整句. */
+    val aiTranslate get() = Prefs.bool(AI_TRANSLATE, true)
     /** en-GB or en-US. */
     val accent get() = Prefs.string(ACCENT, "en-GB")
+}
+
+/** 书伴逐段译文对照（含外文译中、文言译现代白话）与按章本地缓存. */
+object ParagraphTranslation {
+    enum class Target(val htmlLang: String, val cacheTag: String, val systemPrompt: String) {
+        ZhModern(
+            htmlLang = "zh-Hans",
+            cacheTag = "zh-baihua",
+            systemPrompt = "把下面按编号排列的原文逐段译为通顺自然的现代简体白话文（若某段已是明白晓畅的现代汉语，则简明释义或保持通顺直译）。严格保留每段开头的 [编号] 标记，每段译文对应一个编号，不要遗漏、合并或输出额外说明。",
+        ),
+        ZhHans(
+            htmlLang = "zh-Hans",
+            cacheTag = "zh-Hans",
+            systemPrompt = "把下面按编号排列的原文逐段准确、自然地译为简体中文。严格保留每段开头的 [编号] 标记，每段译文对应一个编号，不要遗漏、合并或输出额外说明。",
+        ),
+        En(
+            htmlLang = "en",
+            cacheTag = "en",
+            systemPrompt = "Translate each numbered paragraph below naturally and accurately into English. Strictly keep the leading [number] marker for each paragraph, one translation per number, without merging, skipping, or adding extra commentary.",
+        ),
+    }
+
+    fun target(texts: List<String>, bookLanguage: String?, uiChinese: Boolean): Target {
+        val prefix = bookLanguage?.lowercase()?.substringBefore('-')?.substringBefore('_').orEmpty()
+        val sample = texts.take(8).joinToString("")
+        var hasKana = false
+        var hanCount = 0
+        var letterCount = 0
+        var i = 0
+        while (i < sample.length) {
+            val cp = sample.codePointAt(i)
+            if (cp in 0x3040..0x30FF) hasKana = true
+            if (Character.UnicodeScript.of(cp) == Character.UnicodeScript.HAN) hanCount++
+            if (Character.isLetter(cp)) letterCount++
+            i += Character.charCount(cp)
+        }
+        val isChineseSource = !hasKana && prefix != "ja" && prefix != "ko" &&
+            (prefix == "zh" || (letterCount > 0 && hanCount.toDouble() / letterCount.toDouble() >= 0.45))
+        return if (uiChinese) {
+            if (isChineseSource) Target.ZhModern else Target.ZhHans
+        } else {
+            if (!isChineseSource && prefix == "en") Target.ZhHans else Target.En
+        }
+    }
+
+    fun parseNumbered(raw: String, count: Int): List<String?> {
+        if (count <= 0) return emptyList()
+        val cleaned = app.yuyue.companion.BookCompanion.stripThinking(raw).first.trim()
+        if (cleaned.isEmpty()) return List(count) { null }
+        val out = MutableList<String?>(count) { null }
+        var currentIndex: Int? = null
+        val buffer = mutableListOf<String>()
+        fun flush() {
+            val idx = currentIndex ?: return
+            if (idx in out.indices) {
+                val joined = buffer.joinToString("\n").trim()
+                if (joined.isNotEmpty()) out[idx] = joined
+            }
+        }
+        for (line in cleaned.lines()) {
+            val hit = matchBracketTag(line)
+            if (hit != null && hit.first in 1..count) {
+                flush()
+                currentIndex = hit.first - 1
+                buffer.clear()
+                if (hit.second.isNotEmpty()) buffer += hit.second
+            } else if (currentIndex != null) {
+                buffer += line
+            }
+        }
+        flush()
+        if (out.any { it != null }) return out
+        if (count == 1) {
+            val single = matchBracketTag(cleaned)?.second?.trim()?.ifEmpty { null } ?: cleaned
+            return listOf(single.ifEmpty { null })
+        }
+        return out
+    }
+
+    private fun matchBracketTag(line: String): Pair<Int, String>? {
+        val trimmed = line.trimStart(' ', '\t')
+        val close = when (trimmed.firstOrNull()) {
+            '[' -> ']'
+            '【' -> '】'
+            else -> return null
+        }
+        val afterOpen = trimmed.drop(1)
+        val digits = afterOpen.takeWhile { it.isDigit() }
+        val num = digits.toIntOrNull() ?: return null
+        val afterDigits = afterOpen.drop(digits.length)
+        if (afterDigits.firstOrNull() != close) return null
+        val rest = afterDigits.drop(1).trimStart(' ', '\t', ':', '：')
+        return num to rest
+    }
+
+    fun batches(texts: List<String>, maxItems: Int = 10, maxChars: Int = 2600): List<List<String>> {
+        val result = mutableListOf<List<String>>()
+        var current = mutableListOf<String>()
+        var chars = 0
+        for (t in texts) {
+            if (t.isEmpty()) continue
+            if (current.isNotEmpty() && (current.size >= maxItems || chars + t.length > maxChars)) {
+                result += current
+                current = mutableListOf()
+                chars = 0
+            }
+            current += t
+            chars += t.length
+        }
+        if (current.isNotEmpty()) result += current
+        return result
+    }
+
+    suspend fun loadCache(file: java.io.File): MutableMap<String, String> = withContext(Dispatchers.IO) {
+        val out = mutableMapOf<String, String>()
+        if (!file.isFile) return@withContext out
+        runCatching {
+            val obj = org.json.JSONObject(file.readText())
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                val v = obj.optString(k, "")
+                if (v.isNotEmpty()) out[k] = v
+            }
+        }
+        out
+    }
+
+    suspend fun saveCache(file: java.io.File, map: Map<String, String>) = withContext(Dispatchers.IO) {
+        if (map.isEmpty()) return@withContext
+        runCatching {
+            file.parentFile?.mkdirs()
+            val obj = org.json.JSONObject()
+            for ((k, v) in map) obj.put(k, v)
+            val tmp = java.io.File(file.parentFile, "${file.name}.tmp")
+            tmp.writeText(obj.toString())
+            tmp.renameTo(file)
+        }
+    }
 }
 
 /** The short meaning, as the card shows it: "fortune /ˈfɔːtʃuːn/ n. 财富，大笔的钱；运气". */
@@ -435,8 +577,81 @@ fun ReaderModel.loadVocab() {
     pager.refreshGlosses()
 }
 
-/** Turns on what a foreign book has: 点词, the dotted 生词, and (for English) 难词注释. */
+/** 译 in the tools. */
+fun ReaderModel.setTranslateShown(on: Boolean) {
+    if (on && !isForeign && CompanionConfig.current?.isReady != true) {
+        show(Library.Toast(Library.Toast.Icon.Error, t("先在「设置 · 书伴」里配好模型，才能译文对照"), ""))
+        return
+    }
+    translateShown = on
+    Prefs.set("translate.$bookID", on)
+    pager.setTranslating(on)
+}
+
+private suspend fun ReaderModel.translateParagraphs(section: Int, texts: List<String>): Pair<List<String?>, String> {
+    if (texts.isEmpty()) return emptyList<String?>() to "zh-Hans"
+    val target = ParagraphTranslation.target(texts, detail?.summary?.language, app.yuyue.L10n.chinese)
+    val cfg = CompanionConfig.current
+    if ((ForeignPrefs.aiTranslate || !isForeign) && cfg != null && cfg.isReady) {
+        val cacheFile = java.io.File(library.dataDir, "translations/$bookID/s$section-${target.cacheTag}.json")
+        val cache = ParagraphTranslation.loadCache(cacheFile)
+        val missing = texts.map { it.trim() }.filter { it.isNotEmpty() && cache[it] == null }.distinct()
+        var aiError: String? = null
+        for (batch in ParagraphTranslation.batches(missing)) {
+            val prompt = batch.mapIndexed { idx, line -> "[${idx + 1}] $line" }.joinToString("\n\n")
+            try {
+                val raw = Companion.answer(cfg, target.systemPrompt, prompt, maxTokens = 2048, fast = true)
+                val parsed = ParagraphTranslation.parseNumbered(raw, batch.size)
+                var wrote = false
+                for ((src, dst) in batch.zip(parsed)) {
+                    if (!dst.isNullOrEmpty()) {
+                        cache[src] = dst
+                        wrote = true
+                    }
+                }
+                if (wrote) ParagraphTranslation.saveCache(cacheFile, cache)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                aiError = Companion.message(e)
+                break
+            }
+        }
+        val mapped = texts.map { cache[it.trim()] }
+        if (mapped.any { it != null }) {
+            translateFailure = null
+            return mapped to target.htmlLang
+        }
+        translateFailure = aiError
+    }
+    if (isForeign && android.os.Build.VERSION.SDK_INT >= 31) {
+        val local = texts.map { src ->
+            if (src.isBlank()) null else SystemTranslator.translate(context, src, detail?.summary?.language)
+        }
+        if (local.any { it != null }) {
+            translateFailure = null
+            return local to target.htmlLang
+        }
+    }
+    if (translateFailure == null) {
+        translateFailure = t("先在「设置 · 书伴」里配好模型，才能译文对照")
+    }
+    return List(texts.size) { null } to target.htmlLang
+}
+
+/** Turns on what a book's translation & foreign tools need: 译文对照, 点词, 生词, and 难词注释. */
 fun ReaderModel.setUpForeign() {
+    if (detail?.summary?.format == uniffi.yuyue_core.BookFormat.PDF) return
+    pager.translator = { section, texts -> translateParagraphs(section, texts) }
+    pager.onTranslateFailed = {
+        setTranslateShown(false)
+        val msg = translateFailure ?: t("先在「设置 · 书伴」里配好模型，才能译文对照")
+        show(Library.Toast(Library.Toast.Icon.Error, msg, ""))
+    }
+    if (Prefs.bool("translate.$bookID", false)) {
+        val aiReady = (ForeignPrefs.aiTranslate || !isForeign) && CompanionConfig.current?.isReady == true
+        if (aiReady) setTranslateShown(true)
+    }
     if (!isForeign) return
     pager.lookup = true
     if (detail?.summary?.language?.lowercase()?.startsWith("en") == true) {

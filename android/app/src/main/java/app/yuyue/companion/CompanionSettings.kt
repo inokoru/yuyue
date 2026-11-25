@@ -100,9 +100,74 @@ fun CompanionSettings(open: (String) -> Unit) {
         }
         YYNote(t("API Key 仅在本机加密保存，不同步、不上传；调用费用由服务商直接结算。播客文稿生成同样使用此处所选模型。"))
         Spacer(Modifier.height(YY.s(12)))
+        CompanionQuickPromptsSection()
+        Spacer(Modifier.height(YY.s(12)))
         CompanionCostSection(current)
     }
     if (adding) ProviderSheet { adding = false; version++ }
+}
+
+/** 常用提问: user-saved quick prompts shown in 书伴 suggestion bar and `/` menu. */
+@Composable
+private fun CompanionQuickPromptsSection() {
+    val promptVersion = CompanionPrompts.version
+    val prompts = remember(promptVersion) { CompanionPrompts.list }
+    var draft by remember { mutableStateOf("") }
+    val trimmed = draft.trim()
+    val canAdd = trimmed.isNotEmpty() && prompts.size < CompanionPrompts.MAX_COUNT && trimmed !in prompts
+    val presets = remember(prompts) {
+        if (prompts.size >= CompanionPrompts.MAX_COUNT) emptyList()
+        else CompanionPrompts.presets.filter { it !in prompts }
+    }
+
+    YYLabel(t("常用提问"))
+    YYGroup {
+        for ((idx, item) in prompts.withIndex()) {
+            row {
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = YY.s(9)),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(YY.s(8)),
+                ) {
+                    Text("/p${idx + 1}", style = YY.font(10.5f, FontWeight.Medium), color = YY.c.t3)
+                    Text(item, style = YY.font(11.5f), color = YY.c.t1, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Box(
+                        Modifier.size(YY.s(28)).clip(CircleShape).clickable(onClickLabel = t("删除")) { CompanionPrompts.remove(item) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.close, t("删除"), tint = YY.c.t3, modifier = Modifier.size(YY.s(14)))
+                    }
+                }
+            }
+        }
+        row {
+            Column(Modifier.fillMaxWidth().padding(vertical = YY.s(10)), verticalArrangement = Arrangement.spacedBy(YY.s(8))) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(8))) {
+                    Box(Modifier.weight(1f).background(YY.c.inset, RoundedCornerShape(YY.s(8))).padding(horizontal = YY.s(10), vertical = YY.s(6))) {
+                        Field(draft, t("添加一句常问的话")) { draft = it }
+                    }
+                    YYButton(t("添加"), ButtonKind.Raised, ButtonSize.Small, enabled = canAdd) {
+                        CompanionPrompts.add(trimmed)
+                        draft = ""
+                    }
+                }
+                if (presets.isNotEmpty()) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(YY.s(6))) {
+                        for (preset in presets.take(3)) {
+                            Box(
+                                Modifier.weight(1f, fill = false).background(YY.c.inset, CircleShape).clip(CircleShape)
+                                    .clickable { CompanionPrompts.add(preset) }
+                                    .padding(horizontal = YY.s(9), vertical = YY.s(5)),
+                            ) {
+                                Text("+ $preset", style = YY.font(10f), color = YY.c.t2, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    YYNote(t("保存在书伴底部建议栏与 / 快捷指令中，点一下即可提问（最多 8 条）。"))
 }
 
 /** 用量与省费: 30-day Token 用量 chart + 2-row 省费 card. */

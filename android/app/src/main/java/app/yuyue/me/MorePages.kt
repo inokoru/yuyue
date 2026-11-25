@@ -91,6 +91,7 @@ fun ForeignPage(core: uniffi.yuyue_core.YuyueCore) {
     var gloss by rememberPref(ForeignPrefs.GLOSS, true)
     var level by rememberPref(ForeignPrefs.LEVEL, 3)
     var glossVocab by rememberPref(ForeignPrefs.GLOSS_VOCAB, false)
+    var aiTranslate by rememberPref(ForeignPrefs.AI_TRANSLATE, true)
     YYPage {
         SettingsLead(t("查词、难词注释、生词与离线翻译"))
         YYLabel(t("查词"))
@@ -155,9 +156,16 @@ fun ForeignPage(core: uniffi.yuyue_core.YuyueCore) {
         YYLabel(t("翻译"))
         YYGroup {
             val companion = CompanionConfig.current?.takeIf { it.isReady }
+            row {
+                DetailSwitch(
+                    t("优先用书伴模型翻译"),
+                    t("已配置书伴时，用模型生成逐段译文对照（含文言译白话）并按章缓存；未配置时回退系统翻译"),
+                    aiTranslate,
+                ) { aiTranslate = it }
+            }
             row { YYRow(t("翻译"), value = companion?.provider?.title ?: t("书伴或翻译 App")) }
         }
-        YYNote(t("选中一句点“翻译”，用书伴模型、系统翻译或手机上的翻译 App 来翻。"))
+        YYNote(t("阅读页右上角「更多 › 译文对照」可开启逐段双语对照；选中一句点“翻译”或在外文书双击一句可单句翻译。"))
     }
 }
 

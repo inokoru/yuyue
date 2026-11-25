@@ -10,6 +10,7 @@ import { Highlight, Point, pointOf, rangeOf, registry, textNodes } from './marks
 const LETTER = 'A-Za-z\\u00C0-\\u024F\\u1E00-\\u1EFF\\u0370-\\u03FF\\u0400-\\u04FF';
 const WORDS = new RegExp('[' + LETTER + "](?:[" + LETTER + "]|['\\u2019\\-](?=[" + LETTER + ']))*', 'g');
 const IS_LETTER = new RegExp('[' + LETTER + ']');
+const HAS_WORD = /[\p{L}\p{N}]/u;
 
 let lookupOn = false;
 
@@ -257,7 +258,7 @@ export interface Paragraph {
   text: string;
 }
 
-/** The section's paragraphs that have words in another language, for translating. */
+/** The section's paragraphs that have words, for translating (foreign books or classical Chinese). */
 export function paragraphs(): Paragraph[] {
   const out: Paragraph[] = [];
   let block: Element | null = null;
@@ -277,19 +278,19 @@ export function paragraphs(): Paragraph[] {
   }
   return out
     .map((p) => ({ first: p.first, last: p.last, text: p.text.replace(/\s+/g, ' ').trim() }))
-    .filter((p) => IS_LETTER.test(p.text));
+    .filter((p) => HAS_WORD.test(p.text));
 }
 
 /** Puts each translation under its paragraph (keyed by the paragraph's last sentence); null
  *  takes them all away. The caller relays out afterwards. */
-export function setTranslations(list: { last: number; text: string }[] | null): void {
+export function setTranslations(list: { last: number; text: string; lang?: string }[] | null): void {
   const old = document.querySelectorAll('yy-tr');
   for (let i = 0; i < old.length; i++) old[i].parentNode && old[i].parentNode!.removeChild(old[i]);
   for (const item of list || []) {
     const b = blockOf(item.last);
     if (!b || !b.parentNode) continue;
     const el = document.createElement('yy-tr');
-    el.setAttribute('lang', 'zh-Hans');
+    el.setAttribute('lang', item.lang || 'zh-Hans');
     el.textContent = item.text;
     b.parentNode.insertBefore(el, b.nextSibling);
   }

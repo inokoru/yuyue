@@ -863,6 +863,7 @@ object SettingsLog {
         ForeignPrefs.GLOSS to Watched({ t("难词释义") }, MePage.Foreign, true),
         ForeignPrefs.LEVEL to Watched({ t("词汇难度") }, MePage.Foreign, 3) { v -> GLOSS_LEVELS.firstOrNull { it.first == v }?.second?.let { t(it) } ?: "$v" },
         ForeignPrefs.GLOSS_VOCAB to Watched({ t("只标生词本里的") }, MePage.Foreign, false),
+        ForeignPrefs.AI_TRANSLATE to Watched({ t("优先用书伴模型翻译") }, MePage.Foreign, true),
     )
 
     private fun voiceName(v: Any?): String {

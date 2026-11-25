@@ -604,6 +604,7 @@ struct PhoneCompanionSettings: View {
                 .buttonStyle(.plain)
             }
             YYNote(String(localized: "API Key 仅保存在本机钥匙串，不同步、不上传；调用费用由服务商直接结算。播客文稿生成同样使用此处所选模型。"))
+            CompanionQuickPromptsSection()
             CompanionUsageAndCostSection()
         }
         .navigationTitle("书伴")

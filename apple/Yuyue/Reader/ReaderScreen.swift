@@ -460,8 +460,9 @@ private struct ReaderContent: View {
 
     /// 问: the words chosen go along to 书伴.
     private func askCompanion(_ quote: String?) {
+        model.captureCompanionAnchor()
         model.dismissCards()
-        if let quote { model.companionQuote = quote }
+        if let quote { model.companionQuote = quote } else { model.companionAnchor = nil }
         model.chromeShown = false
         model.panel = .companion
     }

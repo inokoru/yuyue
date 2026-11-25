@@ -660,14 +660,15 @@ enum Companion {
         maxTokens: Int = 1024,
         cachePrefixLen: Int = 0,
         fast: Bool = false,
-        source: CompanionUsage.Source = .other
+        source: CompanionUsage.Source = .other,
+        onStream: (@Sendable (String) -> Void)? = nil
     ) async throws -> String {
         try CompanionUsage.checkLlmBudget(paid: config.provider.isPaidCloud)
         let effective = config.routed(fast: fast)
         do {
-            return try await perform(effective, system: system, prompt: prompt, maxTokens: maxTokens, cachePrefixLen: cachePrefixLen, source: source)
+            return try await perform(effective, system: system, prompt: prompt, maxTokens: maxTokens, cachePrefixLen: cachePrefixLen, source: source, onStream: onStream)
         } catch CompanionError.status(let code, _) where effective.model != config.model && (code == 400 || code == 404) {
-            return try await perform(config, system: system, prompt: prompt, maxTokens: maxTokens, cachePrefixLen: cachePrefixLen, source: source)
+            return try await perform(config, system: system, prompt: prompt, maxTokens: maxTokens, cachePrefixLen: cachePrefixLen, source: source, onStream: onStream)
         }
     }
 
@@ -677,13 +678,14 @@ enum Companion {
         prompt: String,
         maxTokens: Int,
         cachePrefixLen: Int,
-        source: CompanionUsage.Source
+        source: CompanionUsage.Source,
+        onStream: (@Sendable (String) -> Void)?
     ) async throws -> String {
         let text: String
         switch config.provider.kind {
-        case .apple: text = try await apple(system: system, prompt: prompt)
-        case .anthropic: text = try await claude(config, system: system, prompt: prompt, maxTokens: maxTokens, cachePrefixLen: cachePrefixLen, source: source)
-        case .openAI: text = try await openAI(config, system: system, prompt: prompt, maxTokens: maxTokens, cachePrefixLen: cachePrefixLen, source: source)
+        case .apple: text = try await apple(system: system, prompt: prompt, onStream: onStream)
+        case .anthropic: text = try await claude(config, system: system, prompt: prompt, maxTokens: maxTokens, cachePrefixLen: cachePrefixLen, source: source, onStream: onStream)
+        case .openAI: text = try await openAI(config, system: system, prompt: prompt, maxTokens: maxTokens, cachePrefixLen: cachePrefixLen, source: source, onStream: onStream)
         }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw CompanionError.empty }
@@ -712,11 +714,19 @@ enum Companion {
         return max(1, Int(Double(cjk) * 0.72 + Double(other) * 0.28))
     }
 
-    private static func apple(system: String, prompt: String) async throws -> String {
+    private static func apple(system: String, prompt: String, onStream: (@Sendable (String) -> Void)?) async throws -> String {
         #if canImport(FoundationModels)
         if #available(macOS 26, iOS 26, *) {
             if let why = appleAvailability { throw CompanionError.unavailable(why) }
             let session = LanguageModelSession(instructions: system)
+            if let onStream {
+                var latest = ""
+                for try await partial in session.streamResponse(to: prompt) {
+                    latest = partial.content
+                    if !latest.isEmpty { onStream(latest) }
+                }
+                if !latest.isEmpty { return latest }
+            }
             return try await session.respond(to: prompt).content
         }
         #endif
@@ -731,13 +741,13 @@ enum Companion {
         return url
     }
 
-    private static func claude(_ config: CompanionConfig, system: String, prompt: String, maxTokens: Int, cachePrefixLen: Int, source: CompanionUsage.Source) async throws -> String {
+    private static func claude(_ config: CompanionConfig, system: String, prompt: String, maxTokens: Int, cachePrefixLen: Int, source: CompanionUsage.Source, onStream: (@Sendable (String) -> Void)?) async throws -> String {
         var r = URLRequest(url: try base(config).appending(path: "messages"), timeoutInterval: maxTokens > 1024 ? 240 : 90)
         r.httpMethod = "POST"
         r.setValue("application/json", forHTTPHeaderField: "content-type")
         r.setValue(config.sentKey, forHTTPHeaderField: "x-api-key")
         r.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        let long = maxTokens > 2048
+        let long = maxTokens > 2048 || onStream != nil
         let useCache = cachePrefixLen > 0 || system.utf8.count >= 1024
         let systemPayload: Any = useCache
             ? [["type": "text", "text": system, "cache_control": ["type": "ephemeral"]]]
@@ -755,10 +765,10 @@ enum Companion {
             "model": config.model, "max_tokens": maxTokens, "system": systemPayload,
             "messages": [["role": "user", "content": userContent]], "stream": long,
         ])
-        // A long answer takes minutes; streamed, the line stays busy and isn't dropped.
+        // A long or live answer is streamed: the line stays busy and tokens appear as they arrive.
         if long {
             var inTok = 0, outTok = 0, cachedTok = 0
-            let reply = try await stream(r) { event in
+            let reply = try await stream(r, onStream: onStream) { event in
                 let kind = event["type"] as? String
                 if kind == "message_start",
                    let msg = event["message"] as? [String: Any],
@@ -792,12 +802,12 @@ enum Companion {
     }
 
     /// OpenAI, DeepSeek, Gemini (its OpenAI-shaped endpoint), Ollama and the rest.
-    private static func openAI(_ config: CompanionConfig, system: String, prompt: String, maxTokens: Int, cachePrefixLen: Int, source: CompanionUsage.Source) async throws -> String {
+    private static func openAI(_ config: CompanionConfig, system: String, prompt: String, maxTokens: Int, cachePrefixLen: Int, source: CompanionUsage.Source, onStream: (@Sendable (String) -> Void)?) async throws -> String {
         var r = URLRequest(url: try base(config).appending(path: "chat/completions"), timeoutInterval: maxTokens > 1024 ? 240 : 120)
         r.httpMethod = "POST"
         r.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if !config.sentKey.isEmpty { r.setValue("Bearer \(config.sentKey)", forHTTPHeaderField: "Authorization") }
-        let long = maxTokens > 2048
+        let long = maxTokens > 2048 || onStream != nil
         let isOpenRouterClaude = config.provider.id == "openrouter" && config.model.lowercased().hasPrefix("anthropic/")
         let messages: [[String: Any]]
         if isOpenRouterClaude, let parts = splitUTF8Prefix(prompt, byteLen: cachePrefixLen) {
@@ -821,7 +831,7 @@ enum Companion {
         r.httpBody = try JSONSerialization.data(withJSONObject: payload)
         if long {
             var inTok = 0, outTok = 0, cachedTok = 0
-            let reply = try await stream(r) { event in
+            let reply = try await stream(r, onStream: onStream) { event in
                 if let u = event["usage"] as? [String: Any] {
                     let parsed = Self.parseOpenAIUsage(u)
                     if parsed.input > 0 { inTok = parsed.input }
@@ -894,7 +904,7 @@ enum Companion {
     }
 
     /// A streamed answer (server-sent events), joined: `text` takes what each event adds.
-    private static func stream(_ request: URLRequest, text: ([String: Any]) -> String?) async throws -> String {
+    private static func stream(_ request: URLRequest, onStream: (@Sendable (String) -> Void)? = nil, text: ([String: Any]) -> String?) async throws -> String {
         var r = request
         r.timeoutInterval = 120
         let (bytes, response) = try await URLSession.shared.bytes(for: r)
@@ -907,12 +917,43 @@ enum Companion {
             throw CompanionError.status(code, nil)
         }
         var out = ""
+        var rawLines: [String] = []
+        var sawSSE = false
+        var lastEmit = ContinuousClock.now - .seconds(1)
+        var emittedLen = 0
         for try await line in bytes.lines {
-            guard line.hasPrefix("data:") else { continue }
+            guard line.hasPrefix("data:") else {
+                if !sawSSE, rawLines.count < 256 { rawLines.append(line) }
+                continue
+            }
+            sawSSE = true
             let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
             if payload == "[DONE]" { break }
             guard let event = (try? JSONSerialization.jsonObject(with: Data(payload.utf8))) as? [String: Any] else { continue }
-            if let piece = text(event) { out += piece }
+            if let piece = text(event), !piece.isEmpty {
+                out += piece
+                if let onStream {
+                    let now = ContinuousClock.now
+                    if emittedLen == 0 || now - lastEmit >= .milliseconds(35) {
+                        lastEmit = now
+                        emittedLen = out.count
+                        onStream(out)
+                    }
+                }
+            }
+        }
+        // Fallback when a gateway ignores `stream: true` and returns a single JSON body.
+        if out.isEmpty, !sawSSE, !rawLines.isEmpty,
+           let json = (try? JSONSerialization.jsonObject(with: Data(rawLines.joined(separator: "\n").utf8))) as? [String: Any] {
+            if let choices = json["choices"] as? [[String: Any]],
+               let content = (choices.first?["message"] as? [String: Any])?["content"] as? String {
+                out = content
+            } else if let blocks = json["content"] as? [[String: Any]] {
+                out = blocks.compactMap { $0["text"] as? String }.joined()
+            }
+        }
+        if let onStream, out.count > emittedLen {
+            onStream(out)
         }
         return out
     }

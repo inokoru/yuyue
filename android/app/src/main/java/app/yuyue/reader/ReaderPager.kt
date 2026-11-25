@@ -100,7 +100,11 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
     private val slots = mutableListOf<SectionPage>()
     private val spare = mutableListOf<SectionPage>()
     var current: SectionPage? = null
-        private set
+        private set(v) {
+            val old = field
+            field = v
+            if (translating && v != null && v !== old && v.section != null) translate(v)
+        }
     private var pendingOpen: Pair<Int, Target>? = null
     private var appliedGeometry: PageGeometry? = null
 
@@ -948,6 +952,13 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
     private var vocab: List<String> = emptyList()
     /** The word being looked up. */
     private var looking: Triple<Int, TextPoint, TextPoint>? = null
+    /** 译: translates whole paragraphs; the answers are kept per section. */
+    var translator: (suspend (Int, List<String>) -> Pair<List<String?>, String>)? = null
+    var onTranslateFailed: ((String?) -> Unit)? = null
+    var translating: Boolean = false
+        private set
+    private val translated = mutableMapOf<Int, org.json.JSONArray>()
+    private val translatingInFlight = mutableSetOf<Int>()
     /** 难词注释: the harder words of a section and their meanings, from the core. */
     var glosser: ((Int) -> List<Pair<String, String>>)? = null
     private val glossed = mutableMapOf<Int, List<Pair<String, String>>>()
@@ -976,6 +987,63 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
         slots.forEach(::sendLooking)
     }
 
+    /** 译 on or off. */
+    fun setTranslating(on: Boolean) {
+        if (on == translating) return
+        translating = on
+        if (on) {
+            val cur = current
+            if (cur != null && cur.section != null) translate(cur)
+        } else {
+            for (p in slots) if (p.section != null) p.call("yy.setTranslations(null)")
+        }
+    }
+
+    fun clearTranslatedCache() {
+        translated.clear()
+    }
+
+    private fun translate(page: SectionPage) {
+        val section = page.section ?: return
+        translated[section]?.let { done ->
+            page.call("yy.setTranslations($done)")
+            return
+        }
+        if (!translatingInFlight.add(section)) return
+        scope.launch {
+            try {
+                val tr = translator ?: return@launch
+                val raw = page.ask("yy.paragraphs()") as? org.json.JSONArray ?: return@launch
+                if (raw.length() == 0) return@launch
+                val paragraphs = (0 until raw.length()).mapNotNull { raw.optJSONObject(it) }
+                if (paragraphs.isEmpty()) return@launch
+                val texts = paragraphs.map { it.optString("text", "") }
+                val (out, lang) = tr(section, texts)
+                val items = org.json.JSONArray()
+                for ((p, t) in paragraphs.zip(out)) {
+                    if (!t.isNullOrEmpty() && p.has("last")) {
+                        items.put(
+                            org.json.JSONObject()
+                                .put("last", p.optInt("last"))
+                                .put("text", t)
+                                .put("lang", lang),
+                        )
+                    }
+                }
+                if (items.length() == 0) {
+                    if (translating && page === current) onTranslateFailed?.invoke(null)
+                    return@launch
+                }
+                translated[section] = items
+                if (translating && page.section == section) {
+                    page.call("yy.setTranslations($items)")
+                }
+            } finally {
+                translatingInFlight.remove(section)
+            }
+        }
+    }
+
     private fun sendForeign(page: SectionPage) {
         if (page.section == null) return
         page.call("yy.setLookup($lookup)")
@@ -984,6 +1052,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
         sendLooking(page)
         sendUnread(page)
         sendFlag(page)
+        if (translating && page === current) translate(page)
     }
 
     /** 有声书: an amber line beside the paragraphs of a stretch the recording doesn't line up with. */

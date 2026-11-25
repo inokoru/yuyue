@@ -495,15 +495,17 @@ object Companion {
         cachePrefixLen: Int = 0,
         fast: Boolean = false,
         source: CompanionUsage.Source = CompanionUsage.Source.Other,
+        onStream: ((String) -> Unit)? = null,
     ): String = withContext(Dispatchers.IO) {
         if (!config.isReady) throw CompanionError(t("书伴还没接上：在设置 · 书伴里添加一个服务商"))
         CompanionUsage.checkLlmBudget(config)
         val effective = config.routed(fast)
+        val cancelHook = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
         try {
-            perform(effective, system, prompt, maxTokens, cachePrefixLen, source)
+            perform(effective, system, prompt, maxTokens, cachePrefixLen, source, onStream, cancelHook)
         } catch (e: CompanionError) {
             if (effective.model != config.model && (e.httpCode == 400 || e.httpCode == 404)) {
-                perform(config, system, prompt, maxTokens, cachePrefixLen, source)
+                perform(config, system, prompt, maxTokens, cachePrefixLen, source, onStream, cancelHook)
             } else {
                 throw e
             }
@@ -529,11 +531,21 @@ object Companion {
         return maxOf(1, (cjk * 0.72 + other * 0.28).toInt())
     }
 
-    private fun perform(config: CompanionConfig, system: String, prompt: String, maxTokens: Int, cachePrefixLen: Int, source: CompanionUsage.Source): String {
+    private fun perform(
+        config: CompanionConfig,
+        system: String,
+        prompt: String,
+        maxTokens: Int,
+        cachePrefixLen: Int,
+        source: CompanionUsage.Source,
+        onStream: ((String) -> Unit)?,
+        job: kotlinx.coroutines.Job?,
+    ): String {
         val base = base(config)
+        val shouldStream = onStream != null || maxTokens > 2048
         val text = if (config.provider.anthropic) {
             val useCache = cachePrefixLen > 0 || system.toByteArray(Charsets.UTF_8).size >= 1024
-            val body = JSONObject().put("model", config.model).put("max_tokens", maxTokens)
+            val body = JSONObject().put("model", config.model).put("max_tokens", maxTokens).put("stream", shouldStream)
             if (useCache) {
                 body.put("system", JSONArray().put(
                     JSONObject().put("type", "text").put("text", system)
@@ -553,19 +565,46 @@ object Companion {
             body.put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", userContent)))
             val r = Request.Builder().url(base + "messages").post(body.toString().toRequestBody(json))
                 .header("x-api-key", config.sentKey).header("anthropic-version", "2023-06-01").build()
-            val out = send(r, long = maxTokens > 1024)
-            val blocks = out.optJSONArray("content") ?: JSONArray()
-            val reply = (0 until blocks.length()).joinToString("") { blocks.getJSONObject(it).optString("text") }
-            val u = out.optJSONObject("usage")
-            if (u != null) {
-                val inTok = u.optInt("input_tokens") + u.optInt("cache_creation_input_tokens")
-                val outTok = u.optInt("output_tokens")
-                val cachedTok = u.optInt("cache_read_input_tokens")
+            if (shouldStream) {
+                var inTok = 0
+                var outTok = 0
+                var cachedTok = 0
+                val reply = stream(r, long = maxTokens > 1024, onStream = onStream, job = job) { event ->
+                    val kind = event.optString("type")
+                    if (kind == "message_start") {
+                        event.optJSONObject("message")?.optJSONObject("usage")?.let { u ->
+                            inTok = u.optInt("input_tokens") + u.optInt("cache_creation_input_tokens")
+                            cachedTok = u.optInt("cache_read_input_tokens")
+                        }
+                    } else if (kind == "message_delta") {
+                        event.optJSONObject("usage")?.let { u ->
+                            val o = u.optInt("output_tokens")
+                            if (o > 0) outTok = o
+                        }
+                    }
+                    if (kind == "content_block_delta") event.optJSONObject("delta")?.optString("text")?.takeIf { it.isNotEmpty() } else null
+                }
+                if (inTok == 0 && outTok == 0) {
+                    inTok = estimateTokens(system + prompt)
+                    outTok = estimateTokens(reply)
+                }
                 CompanionUsage.recordLlm(inTok, outTok, cachedTok, config.provider.isPaidCloud, source)
+                reply
             } else {
-                CompanionUsage.recordLlm(estimateTokens(system + prompt), estimateTokens(reply), 0, config.provider.isPaidCloud, source)
+                val out = send(r, long = maxTokens > 1024)
+                val blocks = out.optJSONArray("content") ?: JSONArray()
+                val reply = (0 until blocks.length()).joinToString("") { blocks.getJSONObject(it).optString("text") }
+                val u = out.optJSONObject("usage")
+                if (u != null) {
+                    val inTok = u.optInt("input_tokens") + u.optInt("cache_creation_input_tokens")
+                    val outTok = u.optInt("output_tokens")
+                    val cachedTok = u.optInt("cache_read_input_tokens")
+                    CompanionUsage.recordLlm(inTok, outTok, cachedTok, config.provider.isPaidCloud, source)
+                } else {
+                    CompanionUsage.recordLlm(estimateTokens(system + prompt), estimateTokens(reply), 0, config.provider.isPaidCloud, source)
+                }
+                reply
             }
-            reply
         } else {
             // OpenAI, DeepSeek, Gemini (its OpenAI-shaped endpoint), Ollama and the rest.
             val isOpenRouterClaude = config.provider.id == "openrouter" && config.model.lowercase().startsWith("anthropic/")
@@ -585,23 +624,55 @@ object Companion {
                     .put(JSONObject().put("role", "user").put("content", prompt))
             }
             val body = JSONObject().put("model", config.model).put("temperature", 0.3)
-                .apply { if (maxTokens > 1024) put("max_tokens", maxTokens) }
+                .apply {
+                    if (maxTokens > 1024) put("max_tokens", maxTokens)
+                    if (shouldStream) {
+                        put("stream", true)
+                        if (config.provider.id in setOf("openai", "deepseek", "openrouter", "dashscope", "moonshot")) {
+                            put("stream_options", JSONObject().put("include_usage", true))
+                        }
+                    }
+                }
                 .put("messages", messages)
             val b = Request.Builder().url(base + "chat/completions").post(body.toString().toRequestBody(json))
             if (config.sentKey.isNotEmpty()) b.header("Authorization", "Bearer ${config.sentKey}")
-            val out = send(b.build(), long = maxTokens > 1024)
-            val reply = out.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content") ?: ""
-            val u = out.optJSONObject("usage")
-            if (u != null) {
-                val promptTok = u.optInt("prompt_tokens", u.optInt("input_tokens"))
-                val compTok = u.optInt("completion_tokens", u.optInt("output_tokens"))
-                val cachedTok = u.optJSONObject("prompt_tokens_details")?.optInt("cached_tokens")
-                    ?: u.optInt("prompt_cache_hit_tokens", u.optInt("cache_read_input_tokens"))
-                CompanionUsage.recordLlm((promptTok - cachedTok).coerceAtLeast(0), compTok, cachedTok, config.provider.isPaidCloud, source)
+            if (shouldStream) {
+                var inTok = 0
+                var outTok = 0
+                var cachedTok = 0
+                val reply = stream(b.build(), long = maxTokens > 1024, onStream = onStream, job = job) { event ->
+                    event.optJSONObject("usage")?.let { u ->
+                        val promptTok = u.optInt("prompt_tokens", u.optInt("input_tokens"))
+                        val compTok = u.optInt("completion_tokens", u.optInt("output_tokens"))
+                        val cTok = u.optJSONObject("prompt_tokens_details")?.optInt("cached_tokens")
+                            ?: u.optInt("prompt_cache_hit_tokens", u.optInt("cache_read_input_tokens"))
+                        if (promptTok > 0) inTok = (promptTok - cTok).coerceAtLeast(0)
+                        if (compTok > 0) outTok = compTok
+                        if (cTok > 0) cachedTok = cTok
+                    }
+                    event.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta")?.optString("content")?.takeIf { it.isNotEmpty() }
+                }
+                if (inTok == 0 && outTok == 0) {
+                    inTok = estimateTokens(system + prompt)
+                    outTok = estimateTokens(reply)
+                }
+                CompanionUsage.recordLlm(inTok, outTok, cachedTok, config.provider.isPaidCloud, source)
+                reply
             } else {
-                CompanionUsage.recordLlm(estimateTokens(system + prompt), estimateTokens(reply), 0, config.provider.isPaidCloud, source)
+                val out = send(b.build(), long = maxTokens > 1024)
+                val reply = out.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content") ?: ""
+                val u = out.optJSONObject("usage")
+                if (u != null) {
+                    val promptTok = u.optInt("prompt_tokens", u.optInt("input_tokens"))
+                    val compTok = u.optInt("completion_tokens", u.optInt("output_tokens"))
+                    val cachedTok = u.optJSONObject("prompt_tokens_details")?.optInt("cached_tokens")
+                        ?: u.optInt("prompt_cache_hit_tokens", u.optInt("cache_read_input_tokens"))
+                    CompanionUsage.recordLlm((promptTok - cachedTok).coerceAtLeast(0), compTok, cachedTok, config.provider.isPaidCloud, source)
+                } else {
+                    CompanionUsage.recordLlm(estimateTokens(system + prompt), estimateTokens(reply), 0, config.provider.isPaidCloud, source)
+                }
+                reply
             }
-            reply
         }
         return text.trim().ifEmpty { throw CompanionError(t("没有回答，换个问法试试")) }
     }
@@ -640,25 +711,95 @@ object Companion {
     private fun send(r: Request, long: Boolean = false): JSONObject =
         runCatching { JSONObject(sendRaw(r, long)) }.getOrDefault(JSONObject())
 
+    private fun stream(
+        r: Request,
+        long: Boolean = false,
+        onStream: ((String) -> Unit)? = null,
+        job: kotlinx.coroutines.Job? = null,
+        pieceOf: (JSONObject) -> String?,
+    ): String {
+        val call = (if (long) slow else http).newCall(r)
+        val handle = job?.invokeOnCompletion { cause -> if (cause != null) call.cancel() }
+        try {
+            call.execute().use { response ->
+                if (!response.isSuccessful) {
+                    val raw = response.body?.string() ?: ""
+                    throwHttpError(response.code, raw)
+                }
+                val out = StringBuilder()
+                val rawLines = ArrayList<String>()
+                var sawSSE = false
+                var lastEmitMs = 0L
+                var emittedLen = 0
+                response.body?.charStream()?.buffered()?.useLines { lines ->
+                    for (line in lines) {
+                        if (job?.isCancelled == true) throw kotlinx.coroutines.CancellationException()
+                        if (!line.startsWith("data:")) {
+                            if (!sawSSE && rawLines.size < 256) rawLines.add(line)
+                            continue
+                        }
+                        sawSSE = true
+                        val payload = line.substring(5).trim()
+                        if (payload == "[DONE]") break
+                        val event = runCatching { JSONObject(payload) }.getOrNull() ?: continue
+                        val piece = pieceOf(event)
+                        if (!piece.isNullOrEmpty()) {
+                            out.append(piece)
+                            if (onStream != null) {
+                                val now = android.os.SystemClock.uptimeMillis()
+                                if (emittedLen == 0 || now - lastEmitMs >= 35L) {
+                                    lastEmitMs = now
+                                    emittedLen = out.length
+                                    onStream(out.toString())
+                                }
+                            }
+                        }
+                    }
+                }
+                if (out.isEmpty() && !sawSSE && rawLines.isNotEmpty()) {
+                    runCatching { JSONObject(rawLines.joinToString("\n")) }.getOrNull()?.let { obj ->
+                        val fallback = obj.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
+                            ?.takeIf { it.isNotEmpty() }
+                            ?: obj.optJSONArray("content")?.let { arr ->
+                                (0 until arr.length()).joinToString("") { arr.optJSONObject(it)?.optString("text") ?: "" }
+                            }
+                        if (!fallback.isNullOrEmpty()) out.append(fallback)
+                    }
+                }
+                val result = out.toString()
+                if (onStream != null && result.length > emittedLen) onStream(result)
+                return result
+            }
+        } catch (e: java.io.IOException) {
+            if (job?.isCancelled == true) throw kotlinx.coroutines.CancellationException()
+            throw e
+        } finally {
+            handle?.dispose()
+        }
+    }
+
     private fun sendRaw(r: Request, long: Boolean = false): String {
         (if (long) slow else http).newCall(r).execute().use { response ->
             val raw = response.body?.string() ?: ""
             if (response.isSuccessful) return raw
-            val out = runCatching { JSONObject(raw) }.getOrDefault(JSONObject())
-            val error = out.optJSONObject("error")
-            val message = error?.optString("message")?.ifEmpty { null } ?: out.optString("message").ifEmpty { null }
-            val kind = "${error?.optString("type")} ${error?.optString("code")} $message".lowercase()
-            val code = response.code
-            throw CompanionError(when {
-                code == 401 || code == 403 -> t("Key 不对，去设置 · 书伴里重新填")
-                code == 402 -> t("账号余额不够了")
-                code == 429 && ("quota" in kind || "credit" in kind || "balance" in kind) -> t("账号余额不够了")
-                code == 429 || code == 529 -> t("问得太快了，等一会儿再问")
-                code == 400 && ("credit" in kind || "balance" in kind) -> t("账号余额不够了")
-                message != null -> t("服务器回了 %lld：%@", code, message)
-                else -> t("服务器回了 %lld", code)
-            }, httpCode = code)
+            throwHttpError(response.code, raw)
         }
+    }
+
+    private fun throwHttpError(code: Int, raw: String): Nothing {
+        val out = runCatching { JSONObject(raw) }.getOrDefault(JSONObject())
+        val error = out.optJSONObject("error")
+        val message = error?.optString("message")?.ifEmpty { null } ?: out.optString("message").ifEmpty { null }
+        val kind = "${error?.optString("type")} ${error?.optString("code")} $message".lowercase()
+        throw CompanionError(when {
+            code == 401 || code == 403 -> t("Key 不对，去设置 · 书伴里重新填")
+            code == 402 -> t("账号余额不够了")
+            code == 429 && ("quota" in kind || "credit" in kind || "balance" in kind) -> t("账号余额不够了")
+            code == 429 || code == 529 -> t("问得太快了，等一会儿再问")
+            code == 400 && ("credit" in kind || "balance" in kind) -> t("账号余额不够了")
+            message != null -> t("服务器回了 %lld：%@", code, message)
+            else -> t("服务器回了 %lld", code)
+        }, httpCode = code)
     }
 
     fun message(e: Throwable): String = when (e) {

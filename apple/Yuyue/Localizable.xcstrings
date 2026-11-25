@@ -46186,6 +46186,356 @@
           }
         }
       }
+    },
+    "介绍一下「%@」是谁，以及和其他人物的关系。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Who is “%@”, and how do they relate to the other characters?"
+          }
+        }
+      }
+    },
+    "从已读内容里挑几句和「%@」相关的精彩句子，并标出出处。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick a few memorable lines related to “%@” from what I've read, with citations."
+          }
+        }
+      }
+    },
+    "围绕「%@」，根据我已读的内容出两道思考题考考我。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Give me two thought-provoking questions about “%@” based on what I've read."
+          }
+        }
+      }
+    },
+    "存为想法" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save note"
+          }
+        }
+      }
+    },
+    "已存想法" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved"
+          }
+        }
+      }
+    },
+    "已存进想法" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved as a note"
+          }
+        }
+      }
+    },
+    "帮我回顾一下目前为止关于「%@」的情节。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can you recap what has happened so far regarding “%@”?"
+          }
+        }
+      }
+    },
+    "总结一下「%@」这一章讲了什么？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Summarize what happens in the chapter “%@”."
+          }
+        }
+      }
+    },
+    "把这段回答存进划线想法" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save this answer as a highlight note"
+          }
+        }
+      }
+    },
+    "正在思考…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thinking…"
+          }
+        }
+      }
+    },
+    "结合「%@」，总结一下这一章讲了什么？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Summarize this chapter with a focus on “%@”."
+          }
+        }
+      }
+    },
+    "解释一下「%@」在书里的意思和作用。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Explain what “%@” means and its role in the book."
+          }
+        }
+      }
+    },
+    "跳到这条想法" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jump to this note"
+          }
+        }
+      }
+    },
+    "优先用书伴模型翻译" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prefer Companion AI Translation"
+          }
+        }
+      }
+    },
+    "保存在书伴底部建议栏与 / 快捷指令中，点一下即可提问（最多 8 条）。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shown in Companion suggestion chips and the / command menu for one-tap asking (up to 8)."
+          }
+        }
+      }
+    },
+    "先在「设置 · 书伴」里配好模型，才能译文对照" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set up a model in Settings › Companion first to use bilingual translation"
+          }
+        }
+      }
+    },
+    "多" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "More"
+          }
+        }
+      }
+    },
+    "少" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Less"
+          }
+        }
+      }
+    },
+    "已配置书伴时，用模型生成逐段译文对照（含文言译白话）并按章缓存；未配置或离线时回退系统翻译" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When Companion is configured, translates paragraph by paragraph (including Classical Chinese) with per-chapter cache; falls back to system translation offline."
+          }
+        }
+      }
+    },
+    "已配置书伴时，用模型生成逐段译文对照（含文言译白话）并按章缓存；未配置时回退系统翻译" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When Companion is configured, translates paragraph by paragraph (including Classical Chinese) with per-chapter cache; falls back to system translation when unconfigured."
+          }
+        }
+      }
+    },
+    "常用提问" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quick Prompts"
+          }
+        }
+      }
+    },
+    "年度热力图" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Annual Heatmap"
+          }
+        }
+      }
+    },
+    "把这段古文译成现代白话" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Translate this classical Chinese into modern Chinese"
+          }
+        }
+      }
+    },
+    "拆解这句语法与长难句" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Break down the grammar and structure of this sentence"
+          }
+        }
+      }
+    },
+    "按周、月、年查看阅读与听书时长及年度热力图" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View reading and listening time by week, month, or year with an annual heatmap"
+          }
+        }
+      }
+    },
+    "提炼核心论点与逻辑" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extract the core argument and reasoning"
+          }
+        }
+      }
+    },
+    "收起译文" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide Translation"
+          }
+        }
+      }
+    },
+    "未阅读" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No reading"
+          }
+        }
+      }
+    },
+    "活跃 %lld 天 · 最长连续 %lld 天" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld active days · %lld-day longest streak"
+          }
+        }
+      }
+    },
+    "添加一句常问的话" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add a reusable prompt"
+          }
+        }
+      }
+    },
+    "添加一句常问的话，例如：拆解这句长难句" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add a reusable prompt, e.g. Break down this sentence"
+          }
+        }
+      }
+    },
+    "翻译没成功：要先在系统设置里下载这种语言，或在「设置 · 书伴」配好模型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Translation failed: download this language in System Settings, or configure a model in Settings › Companion"
+          }
+        }
+      }
+    },
+    "译文对照" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bilingual Translation"
+          }
+        }
+      }
+    },
+    "阅读页右上角「更多 › 译文对照」可开启逐段双语对照；选中一句点“翻译”或在外文书双击一句可单句翻译。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn on paragraph-by-paragraph translation via More › Bilingual Translation in the reader; select text or double-tap a sentence in foreign books to translate one line."
+          }
+        }
+      }
+    },
+    "/p%lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "/p%lld"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

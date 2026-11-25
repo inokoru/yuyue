@@ -1354,6 +1354,9 @@ struct CompanionPanel: View {
             .onChange(of: companion.busy) {
                 if let last = companion.turns.last { withAnimation(YYMotion.standard) { proxy.scrollTo(last.id, anchor: .bottom) } }
             }
+            .onChange(of: companion.turns.last?.streaming) {
+                if let last = companion.turns.last { proxy.scrollTo(last.id, anchor: .bottom) }
+            }
         }
     }
 
@@ -1413,7 +1416,7 @@ struct CompanionPanel: View {
                     .disabled(companion.busy)
                     .padding(.top, 3)
                 } else {
-                    Text(cited(answer))
+                    Text(cited(answer.text, sources: answer.sources))
                         .font(.yy(size: 12.5))
                         .lineSpacing(9)
                         .foregroundStyle(YYColor.t1)
@@ -1422,31 +1425,62 @@ struct CompanionPanel: View {
                             if let n = Int(url.host() ?? ""), let source = answer.sources[n] { companion.show(source) }
                             return .handled
                         })
-                    HStack(spacing: 4) {
-                        Image(systemName: turn.scope == .whole ? "book" : "sparkle").font(.yy(size: 9))
-                        Text(turn.scope == .whole ? answer.label + String(localized: " · 用了全书") : answer.label)
+                    HStack(spacing: 6) {
+                        HStack(spacing: 4) {
+                            Image(systemName: turn.scope == .whole ? "book" : "sparkle").font(.yy(size: 9))
+                            Text(turn.scope == .whole ? answer.label + String(localized: " · 用了全书") : answer.label)
+                        }
+                        .font(.yy(size: 10)).foregroundStyle(YYColor.t3)
+                        .lineLimit(1)
+                        Spacer(minLength: 4)
+                        saveThoughtButton(turn)
                     }
-                    .font(.yy(size: 10)).foregroundStyle(YYColor.t3)
                 }
             }
         } else if let failed = turn.failed {
             Label(failed, systemImage: "exclamationmark.circle")
                 .font(.yy(size: 11.5)).foregroundStyle(YYColor.danger)
+        } else if let streaming = turn.streaming, !streaming.isEmpty {
+            Text(cited(streaming, sources: [:]))
+                .font(.yy(size: 12.5))
+                .lineSpacing(9)
+                .foregroundStyle(YYColor.t1)
+                .textSelection(.enabled)
         } else {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("正在翻阅原文…").font(.yy(size: 11.5)).foregroundStyle(YYColor.t3)
+                Text(turn.thinking ? String(localized: "正在思考…") : String(localized: "正在翻阅原文…"))
+                    .font(.yy(size: 11.5)).foregroundStyle(YYColor.t3)
             }
         }
     }
 
+    private func saveThoughtButton(_ turn: BookCompanion.Turn) -> some View {
+        let saved = turn.savedMarkID != nil
+        return Button { companion.saveThought(for: turn.id) } label: {
+            HStack(spacing: 3.5) {
+                Image(systemName: saved ? "checkmark" : "square.and.pencil")
+                    .font(.yy(size: 9, weight: .semibold))
+                Text(saved ? String(localized: "已存想法") : String(localized: "存为想法"))
+                    .font(.yy(size: 10.5, weight: saved ? .semibold : .medium))
+            }
+            .foregroundStyle(saved ? tint.accent : YYColor.t2)
+            .padding(.horizontal, 8)
+            .frame(height: 22)
+            .background(saved ? tint.accentSoft : YYColor.inset, in: .capsule)
+            .contentShape(.capsule)
+        }
+        .buttonStyle(YYPressStyle(scale: 0.96))
+        .help(saved ? String(localized: "跳到这条想法") : String(localized: "把这段回答存进划线想法"))
+    }
+
     /// The answer with each [n] turned into a little 第 N 页 tag that goes there.
-    private func cited(_ answer: BookCompanion.Answer) -> AttributedString {
+    private func cited(_ text: String, sources: [Int: BookCompanion.Source]) -> AttributedString {
         var out = AttributedString()
-        var rest = Substring(answer.text)
+        var rest = Substring(text)
         while let m = rest.firstMatch(of: /\s?\[(\d+)\]/) {
             out += AttributedString(String(rest[..<m.range.lowerBound]))
-            if let n = Int(m.1), let source = answer.sources[n] {
+            if let n = Int(m.1), let source = sources[n] {
                 let place = source.page.map { String(localized: "第 \($0) 页") } ?? String(localized: "出处")
                 // Kept on one line.
                 let label = " " + place + (source.later == true ? String(localized: " · 未读") : "") + " "
@@ -1480,7 +1514,7 @@ struct CompanionPanel: View {
                 .padding(.leading, 8)
                 .overlay(alignment: .leading) { Rectangle().fill(tint.accent).frame(width: 1.5) }
             Spacer(minLength: 0)
-            Button { model.companionQuote = nil } label: {
+            Button { model.clearCompanionQuote() } label: {
                 Image(systemName: "xmark").font(.yy(size: 9, weight: .bold)).foregroundStyle(YYColor.t3)
             }
             .buttonStyle(.plain)
@@ -1490,8 +1524,13 @@ struct CompanionPanel: View {
     }
 
     private var readyQuestions: [String] {
-        model.companionQuote != nil ? [String(localized: "这句是什么意思？"), String(localized: "为什么这么写？")]
-            : companion.turns.last?.answer?.next ?? [String(localized: "前面发生了什么？"), String(localized: "这一章讲了什么？")]
+        let _ = focus.tick
+        return CompanionPrompts.suggestions(
+            hasQuote: model.companionQuote != nil,
+            followUps: companion.turns.last?.answer?.next,
+            quoteDefaults: [String(localized: "这句是什么意思？"), String(localized: "为什么这么写？")],
+            startDefaults: [String(localized: "前面发生了什么？"), String(localized: "这一章讲了什么？")]
+        )
     }
 
     private var parsedDraft: CompanionCommand.Parsed? { CompanionCommand.parse(draft) }
@@ -1647,12 +1686,12 @@ struct CompanionPanel: View {
     private func executeCommand(_ command: CompanionCommand, argument: String) {
         let arg = argument.trimmingCharacters(in: .whitespacesAndNewlines)
         switch command.action {
-        case .recap, .chapter, .characters, .explain, .quote, .quiz:
+        case .recap, .chapter, .characters, .explain, .quote, .quiz, .custom:
             guard !companion.busy else { return }
             if let q = command.question(argument: arg, hasQuote: model.companionQuote != nil, chapterTitle: model.chapterTitle) {
                 slashManualOpen = false
                 slashDismissedForDraft = nil
-                send(q)
+                send(q, action: command.action)
             }
         case .scope(let target):
             slashManualOpen = false
@@ -1660,8 +1699,8 @@ struct CompanionPanel: View {
             companion.scope = target
             draft = ""
             if !arg.isEmpty, !companion.busy {
-                companion.ask(arg, quote: model.companionQuote, scope: target)
-                model.companionQuote = nil
+                companion.ask(arg, quote: model.companionQuote, scope: target, anchor: model.companionAnchor)
+                model.clearCompanionQuote()
             }
         case .model:
             slashManualOpen = false
@@ -1681,14 +1720,14 @@ struct CompanionPanel: View {
         }
     }
 
-    private func send(_ text: String) {
+    private func send(_ text: String, action: CompanionCommand.Action? = nil) {
         let q = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !companion.busy else { return }
-        companion.ask(q, quote: model.companionQuote)
+        companion.ask(q, quote: model.companionQuote, anchor: model.companionAnchor, action: action)
         draft = ""
         slashManualOpen = false
         slashDismissedForDraft = nil
-        model.companionQuote = nil
+        model.clearCompanionQuote()
     }
 
     private func openCompanionSettings() {
