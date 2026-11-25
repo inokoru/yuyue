@@ -689,5 +689,10 @@
   "支持 Ctrl+V 粘图 · 拖入文件": "Paste screenshot (Ctrl+V) · Drag files",
   "在 CNB 打开 Issue ↗": "Open Issue on CNB ↗",
   "在 GitHub 打开 Issue ↗": "Open Issue on GitHub ↗",
-  "清空草稿": "Clear Draft"
+  "清空草稿": "Clear Draft",
+  "运行语阅时应用于任务栏；退出后恢复默认宣纸图标": "Shown in the taskbar while running; reverts to Rice paper after quitting",
+  "展开或收起资料库分组": "Toggle Library section",
+  "展开或收起笔记分组": "Toggle Notes section",
+  "展开或收起合集分组": "Toggle Collections section",
+  "关闭 (Esc)": "Close (Esc)"
 }

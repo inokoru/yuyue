@@ -6324,6 +6324,16 @@ public sealed partial class ShelfWindow : Window
         QuickSearchOverlay.Visibility = Visibility.Collapsed;
     }
 
+    private void QuickSearchClose_Click(object sender, RoutedEventArgs e) => CloseQuickSearch();
+
+    private async Task<XamlRoot?> WaitForXamlRootAsync(int timeoutMs = 4000)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (!_closed && RootGrid.XamlRoot is null && sw.ElapsedMilliseconds < timeoutMs)
+            await Task.Delay(30);
+        return RootGrid.XamlRoot;
+    }
+
     private void QuickSearchBackdrop_Pressed(object sender, PointerRoutedEventArgs e)
     {
         if (ReferenceEquals(e.OriginalSource, QuickSearchOverlay)) CloseQuickSearch();
@@ -7180,12 +7190,19 @@ public sealed partial class ShelfWindow : Window
         int errorCount = 0;
 
         var snapshotPaths = paths.Where(p => string.Equals(Path.GetExtension(p), ".yuyue", StringComparison.OrdinalIgnoreCase)).ToArray();
-        foreach (var sp in snapshotPaths)
+        if (snapshotPaths.Length > 0)
         {
-            if (await SnapshotAndConflictDialogs.ShowSnapshotImportDialogAsync(this, RootGrid.XamlRoot, _library, sp))
+            var xr = await WaitForXamlRootAsync();
+            if (xr is not null)
             {
-                RefreshBooks();
-                ShowToast("已从快照恢复书库数据", canUndo: false);
+                foreach (var sp in snapshotPaths)
+                {
+                    if (await SnapshotAndConflictDialogs.ShowSnapshotImportDialogAsync(this, xr, _library, sp))
+                    {
+                        RefreshBooks();
+                        ShowToast("已从快照恢复书库数据", canUndo: false);
+                    }
+                }
             }
         }
         if (snapshotPaths.Length == paths.Count) return;

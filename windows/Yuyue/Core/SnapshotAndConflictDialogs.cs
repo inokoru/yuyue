@@ -201,6 +201,7 @@ public static class SnapshotAndConflictDialogs
         }
 
         var importBtn = YYChrome.MakeSheetPillButton("导入", () => { confirmedImport = true; dlg?.Hide(); }, dark, library.Prefs.Tint, "dark", height: 40, stretch: true);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(importBtn, "SnapshotConfirmImportBtn");
 
         void SyncModeVisuals()
         {

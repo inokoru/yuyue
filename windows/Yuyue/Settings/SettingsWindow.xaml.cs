@@ -1240,6 +1240,8 @@ public sealed partial class SettingsWindow : Window
         PaintDot(TintDotMist, TintLabelMist, _library.Prefs.TintId == "mist");
         PaintDot(TintDotBlush, TintLabelBlush, _library.Prefs.TintId == "blush");
 
+        RenderAppIconChoices();
+
         CoverSizeSlider.Value = Math.Clamp(_library.Prefs.CoverWidth, 80, 130);
         ShowProgressToggle.IsOn = _library.Prefs.ShowProgress;
         AutomationProperties.SetName(CoverSizeSlider, L10n.T("书架封面大小"));
@@ -12111,6 +12113,120 @@ public sealed partial class SettingsWindow : Window
             undo: () => { _library.Prefs.ThemeMode = prev; _library.SavePrefs(); App.CurrentApp.BroadcastAppearanceChanged(); },
             redo: () => { _library.Prefs.ThemeMode = mode; _library.SavePrefs(); App.CurrentApp.BroadcastAppearanceChanged(); });
         App.CurrentApp.BroadcastAppearanceChanged();
+    }
+
+    private void RenderAppIconChoices()
+    {
+        if (AppIconsGridHost is null || ActiveAppIconTitleText is null) return;
+        bool dark = IsDark;
+        var p = CurrentPalette;
+        var tint = CurrentTint;
+        string activeId = ThemeHelper.NormalizeAppIconId(_library.Prefs.AppIconId);
+        ActiveAppIconTitleText.Text = L10n.T(ThemeHelper.GetAppIconTitle(activeId));
+
+        AppIconsGridHost.Children.Clear();
+        AppIconsGridHost.ColumnDefinitions.Clear();
+        for (int i = 0; i < ThemeHelper.AppIcons.Length; i++)
+            AppIconsGridHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        for (int i = 0; i < ThemeHelper.AppIcons.Length; i++)
+        {
+            var (id, title) = ThemeHelper.AppIcons[i];
+            bool on = id == activeId;
+            string pngPath = ThemeHelper.ResolveAppIconAssetPath(id, dark, ico: false);
+
+            var img = new Image
+            {
+                Width = 52,
+                Height = 52,
+                Stretch = Stretch.Uniform,
+            };
+            if (File.Exists(pngPath))
+            {
+                var bmp = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage { DecodePixelWidth = 104 };
+                bmp.UriSource = new Uri(pngPath);
+                img.Source = bmp;
+            }
+
+            var ring = new Border
+            {
+                Padding = new Thickness(3),
+                CornerRadius = new CornerRadius(16.5),
+                BorderThickness = new Thickness(on ? 1.75 : 1.0),
+                BorderBrush = on ? ThemeHelper.Brush(tint.Accent) : new SolidColorBrush(Colors.Transparent),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Child = img,
+            };
+
+            var lbl = new TextBlock
+            {
+                Text = L10n.T(title),
+                FontSize = 11.5,
+                FontWeight = on ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
+                Foreground = ThemeHelper.Brush(on ? p.T1 : p.T2),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                MaxLines = 1,
+            };
+
+            var tileStack = new StackPanel
+            {
+                Spacing = 6,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Children = { ring, lbl },
+            };
+
+            var btn = new Button
+            {
+                Tag = id,
+                Background = new SolidColorBrush(Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0, 2, 0, 2),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                UseSystemFocusVisuals = false,
+                Content = tileStack,
+            };
+            AutomationProperties.SetName(btn, $"{L10n.T("应用图标")}：{L10n.T(title)}");
+            AutomationProperties.SetAutomationId(btn, $"appearance.icon.{id}");
+            ToolTipService.SetToolTip(btn, L10n.T(on ? "当前正在使用的应用图标" : "轻点切换应用图标"));
+
+            btn.PointerEntered += (_, _) =>
+            {
+                if (ThemeHelper.NormalizeAppIconId(_library.Prefs.AppIconId) != id)
+                {
+                    ring.BorderBrush = ThemeHelper.Brush(p.Line);
+                    lbl.Foreground = ThemeHelper.Brush(p.T1);
+                }
+            };
+            btn.PointerExited += (_, _) =>
+            {
+                if (ThemeHelper.NormalizeAppIconId(_library.Prefs.AppIconId) != id)
+                {
+                    ring.BorderBrush = new SolidColorBrush(Colors.Transparent);
+                    lbl.Foreground = ThemeHelper.Brush(p.T2);
+                }
+            };
+            btn.Click += (_, _) =>
+            {
+                string prev = ThemeHelper.NormalizeAppIconId(_library.Prefs.AppIconId);
+                if (prev == id) return;
+                _library.Prefs.AppIconId = id;
+                _library.SavePrefs();
+                RecordPrefChange(
+                    nameof(DevicePrefs.AppIconId),
+                    "应用图标",
+                    ThemeHelper.GetAppIconTitle(id),
+                    ThemeHelper.GetAppIconTitle(prev),
+                    prev,
+                    id,
+                    undo: () => { _library.Prefs.AppIconId = prev; _library.SavePrefs(); App.CurrentApp.BroadcastAppearanceChanged(); },
+                    redo: () => { _library.Prefs.AppIconId = id; _library.SavePrefs(); App.CurrentApp.BroadcastAppearanceChanged(); });
+                App.CurrentApp.BroadcastAppearanceChanged();
+            };
+
+            Grid.SetColumn(btn, i);
+            AppIconsGridHost.Children.Add(btn);
+        }
     }
 
     private void TintDot_Click(object sender, RoutedEventArgs e)

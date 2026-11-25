@@ -141,6 +141,35 @@ public static class ThemeHelper
         }
     }
 
+    public static readonly (string Id, string Title)[] AppIcons =
+    [
+        ("default", "宣纸"),
+        ("night", "暗夜"),
+        ("camel", "暖纸"),
+        ("sage", "草木"),
+        ("mist", "烟雨"),
+        ("blush", "海棠"),
+    ];
+
+    public static string NormalizeAppIconId(string? id) =>
+        AppIcons.Any(x => x.Id == id) ? id! : "default";
+
+    public static string GetAppIconTitle(string? id)
+    {
+        string norm = NormalizeAppIconId(id);
+        return AppIcons.First(x => x.Id == norm).Title;
+    }
+
+    public static string ResolveAppIconAssetPath(string? iconId, bool dark, bool ico)
+    {
+        string norm = NormalizeAppIconId(iconId);
+        string variant = dark ? "dark" : "light";
+        string ext = ico ? "ico" : "png";
+        string candidate = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcons", $"{norm}-{variant}.{ext}");
+        if (File.Exists(candidate)) return candidate;
+        return Path.Combine(AppContext.BaseDirectory, "Assets", ico ? "AppIcon.ico" : "AppIcon.png");
+    }
+
     public static void ConfigureTitleBar(Window window, bool dark, Color? buttonHoverBg = null)
     {
         window.ExtendsContentIntoTitleBar = true;
@@ -149,7 +178,8 @@ public static class ThemeHelper
 
         try
         {
-            var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+            string iconId = App.CurrentApp?.Library?.Prefs.AppIconId ?? "default";
+            string iconPath = ResolveAppIconAssetPath(iconId, dark, ico: true);
             if (File.Exists(iconPath)) appWindow.SetIcon(iconPath);
         }
         catch { }

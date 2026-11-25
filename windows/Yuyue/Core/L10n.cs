@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Documents;
@@ -481,6 +482,8 @@ public static partial class L10n
     /// preserving original Chinese strings in a <see cref="ConditionalWeakTable{TKey,TValue}"/> so
     /// switching Chinese ↔ English ↔ Chinese live works cleanly without restarting windows.
     /// </summary>
+    private static int s_autoIdSeq;
+
     public static void ApplyTree(DependencyObject? root)
     {
         if (root is null) return;
@@ -514,21 +517,28 @@ public static partial class L10n
         }
         else if (node is TextBox tbox)
         {
+            if (string.IsNullOrEmpty(AutomationProperties.GetAutomationId(tbox)))
+                AutomationProperties.SetAutomationId(tbox, $"yy-tb-{Interlocked.Increment(ref s_autoIdSeq)}");
             if (!string.IsNullOrEmpty(tbox.PlaceholderText))
             {
                 string orig = GetOrStoreOriginal(tbox, "PlaceholderText", tbox.PlaceholderText);
                 string next = T(orig);
                 if (tbox.PlaceholderText != next) tbox.PlaceholderText = next;
+                if (string.IsNullOrEmpty(AutomationProperties.GetName(tbox)))
+                    AutomationProperties.SetName(tbox, next);
             }
             if (tbox.Header is string hdr)
             {
                 string orig = GetOrStoreOriginal(tbox, "Header", hdr);
                 string next = T(orig);
                 if (hdr != next) tbox.Header = next;
+                AutomationProperties.SetName(tbox, next);
             }
         }
         else if (node is PasswordBox pbox)
         {
+            if (string.IsNullOrEmpty(AutomationProperties.GetAutomationId(pbox)))
+                AutomationProperties.SetAutomationId(pbox, $"yy-pb-{Interlocked.Increment(ref s_autoIdSeq)}");
             if (!string.IsNullOrEmpty(pbox.PlaceholderText))
             {
                 string orig = GetOrStoreOriginal(pbox, "PlaceholderText", pbox.PlaceholderText);
@@ -540,6 +550,7 @@ public static partial class L10n
                 string orig = GetOrStoreOriginal(pbox, "Header", hdr);
                 string next = T(orig);
                 if (hdr != next) pbox.Header = next;
+                AutomationProperties.SetName(pbox, next);
             }
         }
         else if (node is AutoSuggestBox asb)

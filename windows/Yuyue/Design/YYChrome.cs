@@ -987,8 +987,28 @@ public static class YYChrome
                 e.Handled = true;
             }
         };
-        dlg.Opened += (_, _) => AnimateEntrance(surface, fromY: 8f, durationMs: 170);
+        dlg.Opened += (_, _) =>
+        {
+            UnclampDialogTemplateBounds(dlg, width, maxHeight);
+            AnimateEntrance(surface, fromY: 8f, durationMs: 170);
+        };
         return dlg;
+    }
+
+    private static void UnclampDialogTemplateBounds(DependencyObject root, double width, double maxHeight)
+    {
+        int count = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is FrameworkElement fe && (fe.Name == "BackgroundElement" || fe.Name == "Container"))
+            {
+                fe.MaxWidth = Math.Max(width, fe.MaxWidth);
+                fe.MaxHeight = Math.Max(maxHeight, fe.MaxHeight);
+            }
+            if (!ReferenceEquals(child, (root as ContentDialog)?.Content))
+                UnclampDialogTemplateBounds(child, width, maxHeight);
+        }
     }
 
     /// <summary>

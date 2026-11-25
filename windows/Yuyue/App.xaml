@@ -45,6 +45,8 @@
                     <SolidColorBrush x:Key="YYSettingsSideBrush" Color="#FBFAF9" />
                     <!-- 覆盖 WinUI 3 默认系统蓝与深色开关边框：完全对齐 macOS 圆润无框暖灰开关 -->
                     <Color x:Key="SystemAccentColor">#8A653F</Color>
+            <x:Double x:Key="ContentDialogMaxWidth">1200</x:Double>
+            <x:Double x:Key="ContentDialogMaxHeight">920</x:Double>
                     <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#8A653F" />
                     <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#7A5835" />
                     <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#6B4C2D" />
@@ -163,6 +165,8 @@
             <!-- 根级 WinUI 控件覆写：在 XAML 启动时注册实例，由 ThemeHelper.ApplyControlThemeResources 按浅/深色与主题色原地更新 .Color，
                  确保 100% 覆写 XamlControlsResources 而不回退系统蓝或默认深灰边框 -->
             <Color x:Key="SystemAccentColor">#8A653F</Color>
+            <x:Double x:Key="ContentDialogMaxWidth">1200</x:Double>
+            <x:Double x:Key="ContentDialogMaxHeight">920</x:Double>
             <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#8A653F" />
             <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#7A5835" />
             <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#6B4C2D" />

@@ -19,6 +19,7 @@ public sealed class DevicePrefs
 {
     public string ThemeMode { get; set; } = "system"; // light | dark | system
     public string TintId { get; set; } = YYTints.Default.Id;
+    public string AppIconId { get; set; } = "default"; // default | night | camel | sage | mist | blush
     public bool PaperFollowAppearance { get; set; } = true;
     public string PaperLightId { get; set; } = "";
     public string PaperDarkId { get; set; } = "";

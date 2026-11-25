@@ -278,6 +278,24 @@
                             </Grid>
                         </Border>
 
+                        <!-- 应用图标：宣纸 / 暗夜 / 暖纸 / 草木 / 烟雨 / 海棠（1:1 MacSettings.swift:878-968） -->
+                        <Border CornerRadius="12" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.5" Padding="16">
+                            <StackPanel Spacing="12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="应用图标" FontSize="13" FontWeight="Medium" Foreground="{ThemeResource YYText1Brush}" />
+                                        <TextBlock Text="运行语阅时应用于任务栏；退出后恢复默认宣纸图标" FontSize="11.5" Foreground="{ThemeResource YYText2Brush}" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="ActiveAppIconTitleText" Grid.Column="1" FontSize="11.5" FontWeight="Medium" Foreground="{ThemeResource YYText2Brush}" VerticalAlignment="Top" Margin="0,2,0,0" />
+                                </Grid>
+                                <Grid x:Name="AppIconsGridHost" ColumnSpacing="12" />
+                            </StackPanel>
+                        </Border>
+
                         <!-- 书架封面大小 & 封面下显示进度 -->
                         <Border CornerRadius="12" Background="{ThemeResource YYCardBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.5" Padding="16,12">
                             <StackPanel Spacing="10">

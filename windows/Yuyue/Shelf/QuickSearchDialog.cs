@@ -723,9 +723,11 @@ public static class QuickSearchDialog
         topGrid.Children.Add(YYIcons.Make("search", 15, ThemeHelper.Brush(p.T2)));
         Grid.SetColumn(searchBox, 1);
         topGrid.Children.Add(searchBox);
-        var escCap = YYChrome.MakeKeycap("esc", dark);
-        Grid.SetColumn(escCap, 2);
-        topGrid.Children.Add(escCap);
+        var rightTop = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        rightTop.Children.Add(YYChrome.MakeKeycap("esc", dark));
+        rightTop.Children.Add(YYChrome.MakeSheetCloseButton(() => dlg?.Hide(), dark, size: 24));
+        Grid.SetColumn(rightTop, 2);
+        topGrid.Children.Add(rightTop);
 
         var bottomGrid = new Grid { Height = 36, Padding = new Thickness(14, 0, 14, 0) };
         var hintsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };

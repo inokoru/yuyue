@@ -71,6 +71,7 @@
                         x:Name="GroupHeaderLibrary"
                         Style="{StaticResource YYSidebarGroupStyle}"
                         HorizontalContentAlignment="Stretch"
+                        AutomationProperties.Name="展开或收起资料库分组"
                         Tag="library"
                         Click="ToggleGroup_Click"
                         PointerEntered="GroupHeader_PointerEntered"
@@ -142,6 +143,7 @@
                         x:Name="GroupHeaderNotes"
                         Style="{StaticResource YYSidebarGroupStyle}"
                         HorizontalContentAlignment="Stretch"
+                        AutomationProperties.Name="展开或收起笔记分组"
                         Tag="notes"
                         Click="ToggleGroup_Click"
                         PointerEntered="GroupHeader_PointerEntered"
@@ -187,6 +189,7 @@
                         x:Name="GroupHeaderCollections"
                         Style="{StaticResource YYSidebarGroupStyle}"
                         HorizontalContentAlignment="Stretch"
+                        AutomationProperties.Name="展开或收起合集分组"
                         Tag="collections"
                         Click="ToggleGroup_Click"
                         PointerEntered="GroupHeader_PointerEntered"
@@ -647,9 +650,24 @@
                             Padding="4,6"
                             TextChanged="QuickSearchBox_TextChanged"
                             KeyDown="QuickSearchBox_KeyDown" />
-                        <Border Grid.Column="2" CornerRadius="5" Background="{ThemeResource YYInsetBrush}" BorderBrush="{ThemeResource YYLineBrush}" BorderThickness="0.5" Padding="7,2" VerticalAlignment="Center">
-                            <TextBlock Text="esc" FontSize="10.5" Foreground="{ThemeResource YYText2Brush}" />
-                        </Border>
+                        <Button
+                            x:Name="QuickSearchCloseBtn"
+                            Grid.Column="2"
+                            Height="24"
+                            MinHeight="24"
+                            MinWidth="34"
+                            Padding="7,0"
+                            CornerRadius="5"
+                            Background="{ThemeResource YYInsetBrush}"
+                            BorderBrush="{ThemeResource YYLineBrush}"
+                            BorderThickness="0.5"
+                            VerticalAlignment="Center"
+                            UseSystemFocusVisuals="False"
+                            AutomationProperties.Name="关闭面板"
+                            ToolTipService.ToolTip="关闭 (Esc)"
+                            Click="QuickSearchClose_Click">
+                            <TextBlock Text="esc" FontSize="10.5" Foreground="{ThemeResource YYText2Brush}" VerticalAlignment="Center" />
+                        </Button>
                     </Grid>
 
                     <Border Grid.Row="1" Background="{ThemeResource YYLineBrush}" />
