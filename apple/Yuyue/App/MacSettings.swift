@@ -926,7 +926,6 @@ struct AppearanceSettings: View {
         let hovered = !on && hoverIcon == option
         let strokeColor: Color = on ? tint.accent : (hovered ? YYColor.line : .clear)
         let strokeWidth: CGFloat = on ? 1.75 : 1
-        let rimColor = scheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08)
 
         return Button {
             guard option != activeIcon else { return }
@@ -939,14 +938,15 @@ struct AppearanceSettings: View {
                     .interpolation(.high)
                     .aspectRatio(1, contentMode: .fit)
                     .frame(width: 52, height: 52)
-                    .clipShape(.rect(cornerRadius: 11.6, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 11.6, style: .continuous)
-                            .strokeBorder(rimColor, lineWidth: 0.5)
+                    .shadow(
+                        color: scheme == .dark ? .clear : Color.black.opacity(0.14),
+                        radius: 1,
+                        x: 0,
+                        y: 0.5
                     )
                     .padding(3)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 14.6, style: .continuous)
+                        RoundedRectangle(cornerRadius: 16.5, style: .continuous)
                             .strokeBorder(strokeColor, lineWidth: strokeWidth)
                     )
                     .animation(YYMotion.quick, value: on)

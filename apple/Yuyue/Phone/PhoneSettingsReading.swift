@@ -162,8 +162,7 @@ struct PhoneAppearance: View {
         let on = activeIcon == option
         let loading = switchingTo == option
         let iconSize = YYUI.s(48)
-        let iconRadius = iconSize * 0.2237
-        let rimColor = scheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08)
+        let iconRadius = iconSize * 0.26
 
         return Button { selectIcon(option) } label: {
             VStack(spacing: YYUI.s(5)) {
@@ -173,10 +172,11 @@ struct PhoneAppearance: View {
                         .interpolation(.high)
                         .aspectRatio(1, contentMode: .fit)
                         .frame(width: iconSize, height: iconSize)
-                        .clipShape(.rect(cornerRadius: iconRadius, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: iconRadius, style: .continuous)
-                                .strokeBorder(rimColor, lineWidth: 0.5)
+                        .shadow(
+                            color: scheme == .dark ? .clear : Color.black.opacity(0.14),
+                            radius: 1,
+                            x: 0,
+                            y: 0.5
                         )
                         .overlay {
                             if loading {
