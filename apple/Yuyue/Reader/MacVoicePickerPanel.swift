@@ -22,6 +22,10 @@ struct MacVoicePickerPanel: View {
     var usedByLabel: ((String) -> String?)? = nil
     /// A character's first row: 跟旁白, reading with whatever the narrator reads.
     var follow: Follow? = nil
+    /// Newly downloaded offline voice to highlight with `刚下好`.
+    var readyVoiceID: String? = nil
+    /// Optional footer action when opened from the in-reading ready prompt (e.g. 暂不更换，继续用「…」).
+    var keepCurrentLabel: String? = nil
 
     struct Follow {
         var title: String = String(localized: "跟旁白")
@@ -480,7 +484,19 @@ struct MacVoicePickerPanel: View {
                     .lineLimit(1)
             }
             Spacer()
-            Text("指着试听 · 点一下换")
+            if let keepCurrentLabel {
+                Button(action: onClose) {
+                    Text(keepCurrentLabel)
+                        .font(.yy(size: 11, weight: .medium))
+                        .foregroundStyle(YYColor.t2)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(YYColor.inset, in: .capsule)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text("指着试听 · 点一下换")
+            }
         }
         .font(.yy(size: 11))
         .foregroundStyle(YYColor.t2)
@@ -542,13 +558,14 @@ struct MacVoicePickerPanel: View {
         if case let .ready(voices) = catalog.recommended {
             let defaultID = KokoroModel.defaultNarrator(for: language)?.id ?? VoicePack.defaultNarrator(for: language)?.id
             out[.recommended] = voices.map { v in
+                let isReady = v.id == readyVoiceID
                 let isDefault = v.id == defaultID
                 if let k = v as? KokoroVoice {
                     return Row(
                         id: k.id,
                         name: k.name,
-                        badge: isDefault ? String(localized: "默认旁白") : (k.speaker.narrator ? String(localized: "推荐旁白") : nil),
-                        narrator: isDefault,
+                        badge: isReady ? String(localized: "刚下好") : (isDefault ? String(localized: "默认旁白") : (k.speaker.narrator ? String(localized: "推荐旁白") : nil)),
+                        narrator: isReady || isDefault,
                         detail: k.summaryLine,
                         female: Self.female(k.speaker.gender),
                         voice: k,
@@ -558,15 +575,15 @@ struct MacVoicePickerPanel: View {
                     return Row(
                         id: c.id,
                         name: c.name,
-                        badge: isDefault ? String(localized: "默认旁白") : (c.card.narrator ? String(localized: "角色旁白") : nil),
-                        narrator: isDefault,
+                        badge: isReady ? String(localized: "刚下好") : (isDefault ? String(localized: "默认旁白") : (c.card.narrator ? String(localized: "角色旁白") : nil)),
+                        narrator: isReady || isDefault,
                         detail: c.summaryLine,
                         female: Self.female(c.card.gender),
                         voice: c,
                         clone: nil
                     )
                 } else {
-                    return Row(id: v.id, name: v.name, badge: v.qualityName, narrator: isDefault, detail: "", female: nil, voice: v, clone: nil)
+                    return Row(id: v.id, name: v.name, badge: isReady ? String(localized: "刚下好") : v.qualityName, narrator: isReady || isDefault, detail: "", female: nil, voice: v, clone: nil)
                 }
             }
         }

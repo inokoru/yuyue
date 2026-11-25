@@ -92,6 +92,8 @@ struct VoiceCatalogSections: View {
     var usedByLabel: ((String) -> String?)? = nil
     /// 《书名》: a role made for this book reads 为《…》生成.
     var bookTitle: String? = nil
+    /// Newly downloaded offline voice to highlight with a `刚下好` badge.
+    var readyVoiceID: String? = nil
     let onPreview: (any Voice) -> Void
     let onSelect: (any Voice) -> Void
     let onOpenClone: (_ existingID: String?, _ initialName: String) -> Void
@@ -130,6 +132,7 @@ struct VoiceCatalogSections: View {
                     if !cards.isEmpty {
                         YYGroup {
                             ForEach(Array(cards.enumerated()), id: \.element.id) { _, cardVoice in
+                                let isReady = cardVoice.id == readyVoiceID
                                 let isDefault = cardVoice.id == defaultID
                                 let isNarrator = (cardVoice as? CardVoice)?.card.narrator == true
                                     || (cardVoice as? KokoroVoice)?.speaker.narrator == true
@@ -139,8 +142,8 @@ struct VoiceCatalogSections: View {
                                     ?? ""
                                 row(
                                     voice: cardVoice,
-                                    badge: isDefault ? String(localized: "默认旁白") : (isNarrator ? String(localized: "推荐旁白") : nil),
-                                    green: isDefault,
+                                    badge: isReady ? String(localized: "刚下好") : (isDefault ? String(localized: "默认旁白") : (isNarrator ? String(localized: "推荐旁白") : nil)),
+                                    green: isReady || isDefault,
                                     detail: usedByLabel?(cardVoice.id) ?? summary
                                 )
                             }
@@ -445,9 +448,18 @@ struct VoicePickerSheet: View {
     let previewSentence: String?
     /// 《书名》 for the Mac panel's 试听 line.
     var sampleSource: String? = nil
+    /// Newly downloaded offline voice to highlight with `刚下好`.
+    var readyVoiceID: String? = nil
+    /// Optional footer action when opened from the in-reading ready voice prompt (e.g. 暂不更换，继续用「…」).
+    var keepCurrentLabel: String? = nil
     let onPreview: (any Voice) -> Void
     let onSelect: (any Voice) -> Void
     let onClose: () -> Void
+
+    static func sampleText(for tag: String) -> String {
+        if tag.lowercased().hasPrefix("zh") { return "你好，我来给你读这本书。" }
+        return "Hello, I'll read this book to you."
+    }
 
     private enum Route: Hashable {
         case clone(existingID: String?, initialName: String)
@@ -502,7 +514,9 @@ struct VoicePickerSheet: View {
             onOpenClone: { existing, initName in path.append(.clone(existingID: existing, initialName: initName)) },
             onOpenCloneDetail: { id in path.append(.detail(id)) },
             onClose: onClose,
-            title: title
+            title: title,
+            readyVoiceID: readyVoiceID,
+            keepCurrentLabel: keepCurrentLabel
         )
         .toolbar(.hidden)
         #else
@@ -523,6 +537,7 @@ struct VoicePickerSheet: View {
                     selectedID: currentID ?? selectedID,
                     sampleText: sampleText,
                     bookTitle: sampleSource,
+                    readyVoiceID: readyVoiceID,
                     onPreview: onPreview,
                     onSelect: { v in
                         currentID = v.id
@@ -535,6 +550,19 @@ struct VoicePickerSheet: View {
                         path.append(.detail(id))
                     }
                 )
+            }
+            if let keepCurrentLabel {
+                Rectangle().fill(YYColor.line).frame(height: 0.5)
+                Button(action: onClose) {
+                    Text(keepCurrentLabel)
+                        .font(YYUI.font(12.5, .medium))
+                        .foregroundStyle(YYColor.t2)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .background(YYColor.bg)
             }
         }
         .background(YYColor.bg)
@@ -572,5 +600,173 @@ struct VoicePickerSheet: View {
                         )
                     }
                 }
+    }
+}
+
+/// 阅读中离线旁白下好后的毛玻璃轻提示：
+/// 刚下好时展开 3.2 秒提示并支持一键点 × 关闭；未操作则收起为带绿点的圆形声波图标，
+/// iPhone 支持点击左上角 × 或向右轻滑关闭，Mac 静止纯净、悬停浮现 ×，点击打开「选择声音」面板。
+struct ReadyOfflineVoiceOrb: View {
+    let voiceID: String
+    let voiceName: String
+    let paper: YYPaper
+    let openPicker: () -> Void
+    let dismiss: () -> Void
+
+    @State private var expanded = true
+    @State private var hovered = false
+    @State private var dragX: CGFloat = 0
+
+    private var orbHeight: CGFloat {
+        #if os(macOS)
+        46
+        #else
+        42
+        #endif
+    }
+
+    private var badgeSize: CGFloat {
+        #if os(macOS)
+        32
+        #else
+        28
+        #endif
+    }
+
+    private var morphAnimation: Animation {
+        YYMotion.reduce ? .easeOut(duration: 0.2) : .spring(duration: 0.44, bounce: 0)
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            pillBody
+            if !expanded {
+                cornerCloseButton
+            }
+        }
+        .offset(x: dragX)
+        .opacity(max(0.2, 1.0 - Double(dragX) / 96.0))
+        #if os(iOS)
+        .gesture(
+            DragGesture(minimumDistance: 10)
+                .onChanged { value in
+                    guard !expanded else { return }
+                    let dx = value.translation.width
+                    guard dx > 0, abs(dx) > abs(value.translation.height) else { return }
+                    dragX = dx
+                }
+                .onEnded { value in
+                    guard !expanded else { return }
+                    if value.translation.width >= 34 || value.predictedEndTranslation.width >= 72 {
+                        withAnimation(YYMotion.quick) { dragX = 64 }
+                        dismiss()
+                    } else {
+                        withAnimation(morphAnimation) { dragX = 0 }
+                    }
+                }
+        )
+        #endif
+        #if os(macOS)
+        .onHover { hovered = $0 }
+        .help(expanded
+              ? String(localized: "离线声音「\(voiceName)」已下好，点击选择声音")
+              : String(localized: "离线声音「\(voiceName)」已下好 · 点击选声音"))
+        #endif
+        .task(id: voiceID) {
+            expanded = true
+            dragX = 0
+            try? await Task.sleep(for: .seconds(3.2))
+            guard !Task.isCancelled else { return }
+            withAnimation(morphAnimation) {
+                expanded = false
+            }
+        }
+        .animation(morphAnimation, value: expanded)
+        .animation(YYMotion.quick, value: hovered)
+    }
+
+    private var pillBody: some View {
+        HStack(spacing: 0) {
+            Button(action: openPicker) {
+                HStack(spacing: expanded ? 8 : 0) {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "waveform")
+                            .font(.yy(size: 13.5, weight: .semibold))
+                            .foregroundStyle(expanded ? YYColor.ok : paper.ink)
+                            .frame(width: badgeSize, height: badgeSize)
+                            .background(expanded ? YYColor.ok.opacity(0.14) : .clear, in: .circle)
+                        Circle()
+                            .fill(YYColor.ok)
+                            .frame(width: 7, height: 7)
+                            .overlay(Circle().stroke(paper.glass, lineWidth: 1.5))
+                            .offset(x: -1, y: 1)
+                    }
+                    if expanded {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("离线声音「\(voiceName)」好了")
+                                .font(.yy(size: 12, weight: .semibold))
+                                .foregroundStyle(paper.ink)
+                            Text("点此选择声音")
+                                .font(.yy(size: 10.5))
+                                .foregroundStyle(paper.ink2)
+                        }
+                        .lineLimit(1)
+                        .fixedSize()
+                        .transition(.opacity)
+                    }
+                }
+                .padding(.leading, expanded ? 7 : 0)
+                .padding(.trailing, expanded ? 6 : 0)
+                .frame(minWidth: orbHeight, minHeight: orbHeight)
+                .contentShape(.capsule)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(String(localized: "离线声音「\(voiceName)」已下好，点此选择声音"))
+            .accessibilityAction(named: Text("暂不换声音，关闭提示"), dismiss)
+
+            if expanded {
+                Button(action: dismiss) {
+                    Image(systemName: "xmark")
+                        .font(.yy(size: 9, weight: .bold))
+                        .foregroundStyle(paper.ink2)
+                        .frame(width: 24, height: 24)
+                        .background(paper.ink.opacity(0.08), in: .circle)
+                        .frame(width: 32, height: orbHeight)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 4)
+                .accessibilityLabel(String(localized: "关闭声音提示"))
+                .transition(.opacity)
+            }
+        }
+        .frame(height: orbHeight)
+        .yyGlass(Capsule(), fill: paper.glass, line: paper.line, shadow: paper.isDark ? 0.35 : 0.08, radius: 10, y: 3,
+                 liquid: !paper.isEink)
+    }
+
+    @ViewBuilder private var cornerCloseButton: some View {
+        #if os(macOS)
+        let visible = hovered
+        #else
+        let visible = true
+        #endif
+        Button(action: dismiss) {
+            Image(systemName: "xmark")
+                .font(.yy(size: 8.5, weight: .bold))
+                .foregroundStyle(paper.ink2)
+                .frame(width: 19, height: 19)
+                .background(paper.glass, in: .circle)
+                .overlay(Circle().strokeBorder(paper.line, lineWidth: 0.75))
+                .shadow(color: .black.opacity(paper.isDark ? 0.35 : 0.12), radius: 3, y: 1)
+                .frame(width: 28, height: 28)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .offset(x: -8, y: -8)
+        .opacity(visible ? 1 : 0)
+        .scaleEffect(visible ? 1 : 0.78)
+        .allowsHitTesting(visible)
+        .accessibilityLabel(String(localized: "暂不换声音，关闭提示"))
     }
 }

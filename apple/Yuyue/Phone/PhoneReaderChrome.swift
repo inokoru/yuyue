@@ -10,6 +10,8 @@ struct PhoneReaderChrome: View {
     @Bindable var model: ReaderModel
     let close: () -> Void
     @State private var listenShown = false
+    @State private var readyVoicePickerShown = false
+    @State private var pickedReadyVoiceID: String?
     @State private var hitsShown = false
     @State private var infoShown = false
     @State private var immersiveShown = false
@@ -56,6 +58,7 @@ struct PhoneReaderChrome: View {
         .animation(Self.barMotion, value: model.sleepReturn)
         .animation(Self.barMotion, value: model.chapterOnlyHere)
         .animation(YYMotion.reduce ? nil : Self.barMotion, value: model.lookup == nil)
+        .animation(Self.barMotion, value: model.player?.readyOfflineVoice?.id)
         // 跳过了片头: offered for 5 seconds.
         .task(id: model.player?.skippedHead) {
             guard model.player?.skippedHead != nil else { return }
@@ -73,6 +76,12 @@ struct PhoneReaderChrome: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(YYColor.card)
+        }
+        .sheet(isPresented: $readyVoicePickerShown, onDismiss: {
+            pickedReadyVoiceID = nil
+            model.player?.dismissReadyOfflineVoice()
+        }) {
+            readyVoicePickerSheet
         }
         .sheet(isPresented: $model.settingsShown) {
             ScrollView { TypesetCard(model: model) }
@@ -242,6 +251,24 @@ struct PhoneReaderChrome: View {
                     .padding(.bottom, 8)
                     .transition(Self.slide(.bottom))
             }
+            if let ready = model.player?.readyOfflineVoice,
+               !model.searchShown, model.lookup == nil, !model.listenOnly {
+                HStack {
+                    Spacer(minLength: 0)
+                    ReadyOfflineVoiceOrb(
+                        voiceID: ready.id,
+                        voiceName: Voices.title(ready),
+                        paper: paper,
+                        openPicker: {
+                            pickedReadyVoiceID = ready.id
+                            readyVoicePickerShown = true
+                        },
+                        dismiss: { model.player?.dismissReadyOfflineVoice() }
+                    )
+                }
+                .padding(.bottom, capsuleShown ? 10 : 12)
+                .transition(Self.slide(.bottom))
+            }
             if capsuleShown {
                 Group {
                     if model.searchShown { searchCapsule } else { capsule }
@@ -321,6 +348,48 @@ struct PhoneReaderChrome: View {
     }
 
     // MARK: The capsule
+
+    @ViewBuilder private var readyVoicePickerSheet: some View {
+        if let player = model.player {
+            let lang = player.language
+            let section = player.spot?.section ?? model.section ?? 0
+            let bookLine = CloneVoiceView.nextBookSentence(core: model.core, bookID: model.bookID, section: section, player: player, language: lang)
+            let previewText = bookLine.isEmpty ? VoicePickerSheet.sampleText(for: lang) : bookLine
+            let currentName = player.currentVoice(for: lang).map(Voices.title)
+            let keepLabel = currentName.map { String(localized: "暂不更换，继续用「\($0)」") } ?? String(localized: "暂不更换")
+            VoicePickerSheet(
+                title: String(localized: "选择声音"),
+                language: lang,
+                bookID: model.bookID,
+                selectedID: player.currentVoice(for: lang)?.id,
+                sampleText: VoicePickerSheet.sampleText(for: lang),
+                previewSentence: bookLine.isEmpty ? nil : bookLine,
+                sampleSource: player.bookTitle,
+                readyVoiceID: pickedReadyVoiceID ?? player.readyOfflineVoice?.id,
+                keepCurrentLabel: keepLabel,
+                onPreview: { v in player.preview(v, text: previewText) },
+                onSelect: { v in
+                    let prevID = player.currentVoice(for: lang)?.id
+                    player.choose(v, for: lang)
+                    readyVoicePickerShown = false
+                    if prevID != v.id {
+                        model.show(Library.Toast(
+                            icon: "checkmark.circle.fill",
+                            title: String(localized: "已切换为「\(Voices.title(v))」"),
+                            detail: String(localized: "从当前句继续")
+                        ))
+                    }
+                },
+                onClose: {
+                    readyVoicePickerShown = false
+                    player.dismissReadyOfflineVoice()
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(YYColor.bg)
+        }
+    }
 
     private var capsule: some View {
         let reading = model.player?.spot != nil

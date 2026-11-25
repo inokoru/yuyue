@@ -742,41 +742,7 @@ struct ListenCard: View {
                 }
                 voice(player)
                 if !player.narrated {
-                    if let ready = player.readyOfflineVoice {
-                        HStack(spacing: 8) {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("离线旁白「\(Voices.title(ready))」已下好")
-                                    .font(.yy(size: 11.5, weight: .semibold))
-                                    .foregroundStyle(YYColor.t1)
-                                Text("确认后从当前句切换，不自动打断")
-                                    .font(.yy(size: 10.5))
-                                    .foregroundStyle(YYColor.t2)
-                            }
-                            Spacer(minLength: 6)
-                            Button { player.dismissReadyOfflineVoice() } label: {
-                                Text("暂不")
-                                    .font(.yy(size: 11, weight: .medium))
-                                    .foregroundStyle(YYColor.t2)
-                                    .padding(.horizontal, 6)
-                                    .frame(height: 26)
-                                    .contentShape(.rect)
-                            }
-                            .buttonStyle(.plain)
-                            Button { player.acceptReadyOfflineVoice() } label: {
-                                Text("切换")
-                                    .font(.yy(size: 11, weight: .semibold))
-                                    .foregroundStyle(tint.accent)
-                                    .padding(.horizontal, 10)
-                                    .frame(height: 26)
-                                    .background(tint.accentSoft, in: .capsule)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 8)
-                        .background(YYColor.bg, in: .rect(cornerRadius: 10))
-                        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(YYColor.line, lineWidth: 0.5))
-                    } else if case .downloading = KokoroDownload.shared.phase, CardVoice.supportsLanguage(player.language) {
+                    if case .downloading = KokoroDownload.shared.phase, CardVoice.supportsLanguage(player.language) {
                         KokoroPrepBanner(language: player.language, alwaysShowIdle: false)
                     } else {
                         LiveVoicePrepBanner(language: player.language)
@@ -824,10 +790,14 @@ struct ListenCard: View {
                     sampleText: sample(lang),
                     previewSentence: bookLine,
                     sampleSource: castBook == nil ? nil : player.bookTitle,
+                    readyVoiceID: player.readyOfflineVoice?.id,
                     // 指着试听: the sentence the book stopped on, in the voice pointed at.
                     onPreview: { v in player.preview(v, text: bookLine.flatMap { $0.isEmpty ? nil : $0 } ?? sample(lang)) },
                     onSelect: { v in player.choose(v, for: lang) },
-                    onClose: { voicePickerShown = false }
+                    onClose: {
+                        voicePickerShown = false
+                        player.dismissReadyOfflineVoice()
+                    }
                 )
                 .presentationBackground(YYColor.bg)
             }
@@ -934,12 +904,17 @@ struct ListenCard: View {
                 .fixedSize()
             }
             Button { voicePickerShown = true } label: {
-                HStack(spacing: 1) {
+                HStack(spacing: 3) {
+                    if player.readyOfflineVoice != nil {
+                        Circle()
+                            .fill(YYColor.ok)
+                            .frame(width: 6, height: 6)
+                    }
                     Text("换声音")
                     Image(systemName: "chevron.right").font(.yy(size: 9, weight: .semibold))
                 }
                 .font(.yy(size: 11))
-                .foregroundStyle(YYColor.t2)
+                .foregroundStyle(player.readyOfflineVoice != nil ? YYColor.t1 : YYColor.t2)
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -953,8 +928,8 @@ struct ListenCard: View {
     /// Under the voice's name: while a better offline voice downloads and a fallback voice stands in,
     /// tell the user it will prompt when ready; otherwise 正在朗读 and where it reads from.
     private func voiceLine(_ player: Player, _ current: (any Voice)?) -> String {
-        if player.readyOfflineVoice != nil {
-            return String(localized: "离线默认旁白已下好，可在下方确认切换")
+        if let ready = player.readyOfflineVoice {
+            return String(localized: "离线声音「\(Voices.title(ready))」已下好 · 点右侧换声音")
         }
         let isOfflineDownloading: Bool = switch (KokoroDownload.shared.phase, LiveVoiceDownload.shared.phase) {
         case (.downloading, _), (_, .downloading): true

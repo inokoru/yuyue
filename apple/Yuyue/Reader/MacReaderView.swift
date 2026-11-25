@@ -16,6 +16,8 @@ struct MacReaderView: View {
     }
     @State private var typesetShown = false
     @State private var listenShown = false
+    @State private var readyVoicePickerShown = false
+    @State private var pickedReadyVoiceID: String?
     @State private var thought: Mark?
     @State private var translating: String?
     @State private var sharing: QuoteShare?
@@ -128,6 +130,12 @@ struct MacReaderView: View {
             } cancel: {
                 thought = nil
             }
+        }
+        .sheet(isPresented: $readyVoicePickerShown, onDismiss: {
+            pickedReadyVoiceID = nil
+            model.player?.dismissReadyOfflineVoice()
+        }) {
+            readyVoicePickerSheet
         }
         .yySystemTranslation(presented: $translating, translator: model.translator)
         .onAppear {
@@ -251,15 +259,6 @@ struct MacReaderView: View {
             }
         }
         .onChange(of: model.rulesShown) { _, shown in if shown { typesetShown = false } }
-        .onChange(of: model.player?.readyOfflineVoice?.id) { _, id in
-            if id != nil, let ready = model.player?.readyOfflineVoice {
-                model.show(Library.Toast(
-                    icon: "checkmark.circle.fill",
-                    title: String(localized: "离线旁白「\(Voices.title(ready))」已下好"),
-                    detail: String(localized: "打开听书面板可确认切换")
-                ))
-            }
-        }
         .onChange(of: model.txtShown) { _, shown in if shown { typesetShown = false } }
         .onChange(of: model.fontBookShown) { _, shown in if shown { typesetShown = false } }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { note in
@@ -332,12 +331,11 @@ struct MacReaderView: View {
                     DoubtPill(doubt: doubt, paper: paper, open: { model.txtShown = true }, dismiss: { model.dismissDoubt() })
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                if !barAway {
-                    capsule.transition(.move(edge: .bottom).combined(with: .opacity))
-                }
+                bottomCapsuleRow
             }
             .padding(.bottom, 18)
             .animation(YYMotion.layout, value: barAway)
+            .animation(YYMotion.standard, value: model.player?.readyOfflineVoice?.id)
             .animation(YYMotion.standard, value: model.toast?.id)
             .animation(YYMotion.standard, value: model.elsewhere == nil)
             .animation(YYMotion.standard, value: model.returnTo == nil)
@@ -505,8 +503,8 @@ struct MacReaderView: View {
                     TypesetCard(model: model)
                         .presentationBackground(YYColor.card)
                 }
-            if model.isForeign || model.translateShown {
-                tool(String(localized: "译"), "translate", help: String(localized: "每段下面跟着译文；关掉只剩原文，双击一句只翻这一句"), on: model.translateShown) {
+            if model.detail?.summary.format != .podcast {
+                tool(String(localized: "译"), "translate", help: String(localized: "每段下面跟着译文（外文译中、文言译白话）；关掉只剩原文"), on: model.translateShown) {
                     model.setTranslateShown(!model.translateShown)
                 }
             }
@@ -622,6 +620,70 @@ struct MacReaderView: View {
     }
 
     // MARK: The reading capsule
+
+    @ViewBuilder private var bottomCapsuleRow: some View {
+        let ready = model.listenOnly ? nil : model.player?.readyOfflineVoice
+        if !barAway || ready != nil {
+            HStack(spacing: 10) {
+                if !barAway {
+                    capsule.transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                if let ready {
+                    ReadyOfflineVoiceOrb(
+                        voiceID: ready.id,
+                        voiceName: Voices.title(ready),
+                        paper: paper,
+                        openPicker: {
+                            pickedReadyVoiceID = ready.id
+                            readyVoicePickerShown = true
+                        },
+                        dismiss: { model.player?.dismissReadyOfflineVoice() }
+                    )
+                    .transition(.scale(scale: 0.92).combined(with: .opacity))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var readyVoicePickerSheet: some View {
+        if let player = model.player {
+            let lang = player.language
+            let section = player.spot?.section ?? model.section ?? 0
+            let bookLine = CloneVoiceView.nextBookSentence(core: model.core, bookID: model.bookID, section: section, player: player, language: lang)
+            let previewText = bookLine.isEmpty ? VoicePickerSheet.sampleText(for: lang) : bookLine
+            let currentName = player.currentVoice(for: lang).map(Voices.title)
+            let keepLabel = currentName.map { String(localized: "暂不更换，继续用「\($0)」") } ?? String(localized: "暂不更换")
+            VoicePickerSheet(
+                title: String(localized: "选择声音"),
+                language: lang,
+                bookID: model.bookID,
+                selectedID: player.currentVoice(for: lang)?.id,
+                sampleText: VoicePickerSheet.sampleText(for: lang),
+                previewSentence: bookLine.isEmpty ? nil : bookLine,
+                sampleSource: player.bookTitle,
+                readyVoiceID: pickedReadyVoiceID ?? player.readyOfflineVoice?.id,
+                keepCurrentLabel: keepLabel,
+                onPreview: { v in player.preview(v, text: previewText) },
+                onSelect: { v in
+                    let prevID = player.currentVoice(for: lang)?.id
+                    player.choose(v, for: lang)
+                    readyVoicePickerShown = false
+                    if prevID != v.id {
+                        model.show(Library.Toast(
+                            icon: "checkmark.circle.fill",
+                            title: String(localized: "已切换为「\(Voices.title(v))」"),
+                            detail: String(localized: "从当前句继续")
+                        ))
+                    }
+                },
+                onClose: {
+                    readyVoicePickerShown = false
+                    player.dismissReadyOfflineVoice()
+                }
+            )
+            .presentationBackground(YYColor.bg)
+        }
+    }
 
     private var capsule: some View {
         HStack(spacing: 4) {

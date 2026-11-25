@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,61 +72,7 @@ fun ListenSheet(model: ReaderModel, dismiss: () -> Unit) {
     ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.card, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             VoiceRow(model, player, onCurrentChanged = { currentVoiceId = it?.id }) { pickingVoice = true }
-            val readyVoice = player.readyOfflineVoice
-            if (readyVoice != null) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(YY.c.bg, RoundedCornerShape(10.dp))
-                        .border(0.5.dp, YY.c.line, RoundedCornerShape(10.dp))
-                        .padding(horizontal = 11.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                        Text(
-                            t("离线旁白「%@」已下好", Voices.title(readyVoice)),
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = YY.c.t1,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            t("确认后从当前句切换，不自动打断"),
-                            fontSize = 10.5.sp,
-                            color = YY.c.t2,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Text(
-                        t("暂不"),
-                        fontSize = 11.sp,
-                        color = YY.c.t2,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .clickable { player.dismissReadyOfflineVoice() }
-                            .padding(horizontal = 8.dp, vertical = 5.dp),
-                    )
-                    Text(
-                        t("切换"),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = YY.tint.accent,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(YY.tint.accentSoft)
-                            .clickable {
-                                player.acceptReadyOfflineVoice()
-                                currentVoiceId = readyVoice.id
-                            }
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                    )
-                }
-            } else {
-                PrepareBetterVoiceRow(model.core, model.library.dataDir, player.language)
-            }
+            PrepareBetterVoiceRow(model.core, model.library.dataDir, player.language)
             player.thermalNotice?.let { notice ->
                 Text(notice, fontSize = 11.sp, color = YY.c.warn, modifier = Modifier.padding(horizontal = 4.dp))
             }
@@ -186,11 +133,15 @@ fun ListenSheet(model: ReaderModel, dismiss: () -> Unit) {
             language = player.language,
             selectedId = currentVoiceId,
             nextBookSentence = nextLine,
+            readyVoiceId = player.readyOfflineVoice?.id,
             onSelect = { v ->
                 player.choose(v, player.language)
                 currentVoiceId = v.id
             },
-            dismiss = { pickingVoice = false },
+            dismiss = {
+                pickingVoice = false
+                player.dismissReadyOfflineVoice()
+            },
         )
     }
 }
@@ -229,7 +180,7 @@ private fun VoiceRow(
                 }
             }
             val subText = when {
-                player.readyOfflineVoice != null -> t("离线默认旁白已下好，可在下方确认切换")
+                player.readyOfflineVoice != null -> t("离线声音「%@」已下好 · 点右侧换声音", Voices.title(player.readyOfflineVoice!!))
                 (v is SystemVoice || (v as? app.yuyue.speech.CloudVoice)?.provider == app.yuyue.speech.CloudVoice.Provider.Free) &&
                     (kokoroState is app.yuyue.speech.KokoroModel.State.Downloading || liveState is app.yuyue.speech.LiveVoiceModel.State.Downloading) ->
                     t("离线旁白下载中，下好后会提示你切换")
@@ -267,8 +218,11 @@ private fun VoiceRow(
                 }
             }.padding(horizontal = 10.dp, vertical = 5.dp))
         }
-        Row(Modifier.clickable { openPicker() }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(t("换声音"), fontSize = 11.sp, color = YY.c.t2)
+        Row(Modifier.clickable { openPicker() }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            if (player.readyOfflineVoice != null) {
+                Box(Modifier.size(6.dp).background(YY.c.ok, CircleShape))
+            }
+            Text(t("换声音"), fontSize = 11.sp, color = if (player.readyOfflineVoice != null) YY.c.t1 else YY.c.t2)
             Icon(Icons.chevronRight, null, tint = YY.c.t2, modifier = Modifier.size(14.dp))
         }
     }

@@ -295,15 +295,6 @@ private struct ReaderContent: View {
                     model.show(Library.Toast(icon: "thermometer.high", title: notice, detail: ""))
                 }
             }
-            .onChange(of: model.player?.readyOfflineVoice?.id) { _, id in
-                if id != nil, let ready = model.player?.readyOfflineVoice {
-                    model.show(Library.Toast(
-                        icon: "checkmark.circle.fill",
-                        title: String(localized: "离线旁白「\(Voices.title(ready))」已下好"),
-                        detail: String(localized: "打开听书面板可确认切换")
-                    ))
-                }
-            }
             .bookFailure($model.failure, opened: model.detail != nil)
             .yyNotice(String(localized: "朗读停下了"),
                       message: model.player?.failure ?? "",

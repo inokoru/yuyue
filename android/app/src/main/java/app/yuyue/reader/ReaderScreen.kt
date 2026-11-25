@@ -4,7 +4,12 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import app.yuyue.design.pressable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlin.math.roundToInt
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -192,6 +197,8 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
 
     var thought by remember { mutableStateOf<Mark?>(null) }
     var translating by remember { mutableStateOf<String?>(null) }
+    var readyVoicePickerShown by remember { mutableStateOf(false) }
+    var pickedReadyVoiceId by remember { mutableStateOf<String?>(null) }
     val haze = rememberHazeState()
     val popupOpen = model.selection != null || model.openMark != null || model.lookup != null || model.speakerPick != null
     val topBarVisible = (model.chromeShown || model.searchShown) && !popupOpen
@@ -203,7 +210,17 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
             AndroidView({ model.pager.also { (it.parent as? android.view.ViewGroup)?.removeView(it) } }, Modifier.fillMaxSize())
             PageTapHint(model, paper)
         }
-        Chrome(model, paper, haze, popupOpen, close)
+        Chrome(
+            model = model,
+            paper = paper,
+            haze = haze,
+            popupOpen = popupOpen,
+            openReadyVoicePicker = { readyId ->
+                pickedReadyVoiceId = readyId
+                readyVoicePickerShown = true
+            },
+            close = close,
+        )
         Cards(model, paper, thought = { thought = it }, translate = { translating = it })
         SpeakerLayer(model)
         WordCardHost(model)
@@ -253,16 +270,57 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
             model.show(Library.Toast(Library.Toast.Icon.Error, thermalNotice, ""))
         }
     }
-    val readyOfflineVoice = model.player?.readyOfflineVoice
-    LaunchedEffect(readyOfflineVoice?.id) {
-        if (readyOfflineVoice != null) {
-            model.show(
-                Library.Toast(
-                    Library.Toast.Icon.Check,
-                    t("离线旁白「%@」已下好", app.yuyue.speech.Voices.title(readyOfflineVoice)),
-                    t("打开听书面板可确认切换"),
-                )
+    if (readyVoicePickerShown) {
+        model.player?.let { player ->
+            val lang = player.language
+            val sec = player.spot?.section ?: model.section
+            val curSentence = player.spot?.sentence ?: model.sentence
+            val nextLine = remember(sec, curSentence) {
+                val all = runCatching { model.core.spokenSentences(model.bookID, sec.toUInt()) }.getOrDefault(emptyList())
+                all.drop(curSentence + 1).firstOrNull { s -> s.any { it.isLetterOrDigit() } }
+                    ?: all.getOrNull(curSentence)?.takeIf { s -> s.any { it.isLetterOrDigit() } }
+            }
+            var currentVoice by remember(lang) { mutableStateOf<app.yuyue.speech.BookVoice?>(null) }
+            LaunchedEffect(lang, player.spot?.section) {
+                currentVoice = player.currentVoice(lang)
+            }
+            val keepLabel = currentVoice?.let {
+                t("暂不更换，继续用「%@」", app.yuyue.speech.Voices.title(it))
+            } ?: t("暂不更换")
+            VoicePickerSheet(
+                core = model.core,
+                dataDir = model.library.dataDir,
+                bookID = model.bookID,
+                bookTitle = model.detail?.summary?.title,
+                language = lang,
+                selectedId = currentVoice?.id,
+                nextBookSentence = nextLine,
+                readyVoiceId = pickedReadyVoiceId ?: player.readyOfflineVoice?.id,
+                keepCurrentLabel = keepLabel,
+                onSelect = { v ->
+                    val prevId = currentVoice?.id
+                    player.choose(v, lang)
+                    readyVoicePickerShown = false
+                    pickedReadyVoiceId = null
+                    if (prevId != v.id) {
+                        model.show(
+                            Library.Toast(
+                                Library.Toast.Icon.Check,
+                                t("已切换为「%@」", app.yuyue.speech.Voices.title(v)),
+                                t("从当前句继续"),
+                            )
+                        )
+                    }
+                },
+                dismiss = {
+                    readyVoicePickerShown = false
+                    pickedReadyVoiceId = null
+                    player.dismissReadyOfflineVoice()
+                },
             )
+        } ?: run {
+            readyVoicePickerShown = false
+            pickedReadyVoiceId = null
         }
     }
     thought?.let { mark ->
@@ -287,7 +345,14 @@ private fun Modifier.glass(paper: YYPaper, @Suppress("UNUSED_PARAMETER") haze: H
 }
 
 @Composable
-private fun Chrome(model: ReaderModel, paper: YYPaper, haze: HazeState, popupOpen: Boolean, close: () -> Unit) {
+private fun Chrome(
+    model: ReaderModel,
+    paper: YYPaper,
+    haze: HazeState,
+    popupOpen: Boolean,
+    openReadyVoicePicker: (String) -> Unit,
+    close: () -> Unit,
+) {
     // 跳过了片头: offered for 5 seconds.
     val head = model.player?.skippedHead
     LaunchedEffect(head) {
@@ -376,6 +441,27 @@ private fun Chrome(model: ReaderModel, paper: YYPaper, haze: HazeState, popupOpe
             }
             // 沉浸阅读 hides the capsule until the middle is tapped; scrolling down the page, until back up it.
             val capsule = ((!model.immersive && !model.barsAway) || model.chromeShown || model.searchShown) && !popupOpen
+            val readyVoice = model.player?.readyOfflineVoice?.takeIf { !model.searchShown && !popupOpen }
+            var lastReadyVoice by remember { mutableStateOf(readyVoice) }
+            if (readyVoice != null) lastReadyVoice = readyVoice
+            AnimatedVisibility(
+                readyVoice != null,
+                modifier = Modifier.align(Alignment.End),
+                enter = YYMotion.barIn(false, reduce),
+                exit = YYMotion.barOut(false, reduce),
+            ) {
+                lastReadyVoice?.let { ready ->
+                    ReadyOfflineVoiceOrb(
+                        voiceId = ready.id,
+                        voiceName = app.yuyue.speech.Voices.title(ready),
+                        paper = paper,
+                        haze = haze,
+                        openPicker = { openReadyVoicePicker(ready.id) },
+                        dismiss = { model.player?.dismissReadyOfflineVoice() },
+                        modifier = Modifier.padding(bottom = if (capsule) 10.dp else 12.dp),
+                    )
+                }
+            }
             model.pager.bottomCapsuleVisible = capsule
             AnimatedVisibility(capsule, enter = YYMotion.barIn(fromTop = false, reduce), exit = YYMotion.barOut(toTop = false, reduce)) {
                 if (model.searchShown) SearchCapsule(model, paper, haze) else Capsule(model, paper, haze)
@@ -1097,6 +1183,146 @@ private fun TimingAdjustSheet(model: ReaderModel, initialSection: Int, initialSe
                     allOrdered.getOrNull(curIdx + 1)?.let { sec = it.section; sen = it.sentence }
                 }
                 app.yuyue.design.YYButton(t("完成"), kind = app.yuyue.design.ButtonKind.Main, wide = true, modifier = Modifier.weight(1.2f)) { stopPreview(); dismiss() }
+            }
+        }
+    }
+}
+
+/**
+ * 阅读中离线旁白下好后的毛玻璃轻提示：
+ * 刚下好时展开 3.2 秒提示并支持一键点 × 关闭；未操作则收起为带绿点的圆形声波图标，
+ * 支持点击左上角 × 或向右轻滑关闭，点击打开「选择声音」面板。
+ */
+@Composable
+private fun ReadyOfflineVoiceOrb(
+    voiceId: String,
+    voiceName: String,
+    paper: YYPaper,
+    haze: HazeState,
+    openPicker: () -> Unit,
+    dismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember(voiceId) { mutableStateOf(true) }
+    var dragX by remember(voiceId) { mutableStateOf(0f) }
+    val density = LocalDensity.current
+    val dismissThresholdPx = with(density) { 34.dp.toPx() }
+    val fadeRangePx = with(density) { 96.dp.toPx() }
+
+    LaunchedEffect(voiceId) {
+        expanded = true
+        dragX = 0f
+        kotlinx.coroutines.delay(3200)
+        expanded = false
+    }
+
+    Box(
+        modifier = modifier
+            .offset { IntOffset(dragX.roundToInt(), 0) }
+            .alpha((1f - dragX / fadeRangePx).coerceIn(0.2f, 1f))
+            .pointerInput(voiceId, expanded) {
+                if (expanded) return@pointerInput
+                detectHorizontalDragGestures(
+                    onHorizontalDrag = { _, dragAmount ->
+                        dragX = (dragX + dragAmount).coerceAtLeast(0f)
+                    },
+                    onDragEnd = {
+                        if (dragX >= dismissThresholdPx) {
+                            dismiss()
+                        } else {
+                            dragX = 0f
+                        }
+                    },
+                    onDragCancel = { dragX = 0f },
+                )
+            },
+    ) {
+        Row(
+            modifier = Modifier
+                .height(42.dp)
+                .glass(paper, haze, CircleShape)
+                .animateContentSize(YYMotion.standard())
+                .clickable(onClick = openPicker)
+                .semantics { contentDescription = t("离线声音「%@」已下好，点此选择声音", voiceName) },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .padding(start = if (expanded) 7.dp else 0.dp)
+                    .size(if (expanded) 28.dp else 42.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(if (expanded) YY.c.ok.copy(alpha = 0.14f) else Color.Transparent),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.waveform,
+                        contentDescription = null,
+                        tint = if (expanded) YY.c.ok else paper.ink,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = (-1).dp, y = 1.dp)
+                            .size(7.dp)
+                            .background(YY.c.ok, CircleShape)
+                            .border(1.5.dp, paper.glass, CircleShape),
+                    )
+                }
+            }
+            if (expanded) {
+                Column(
+                    modifier = Modifier.padding(start = 8.dp, end = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(1.dp),
+                ) {
+                    Text(
+                        t("离线声音「%@」好了", voiceName),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = paper.ink,
+                        maxLines = 1,
+                    )
+                    Text(
+                        t("点此选择声音"),
+                        fontSize = 10.5.sp,
+                        color = paper.ink2,
+                        maxLines = 1,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .padding(end = 6.dp)
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(paper.ink.copy(alpha = 0.08f))
+                        .clickable(onClick = dismiss)
+                        .semantics { contentDescription = t("关闭声音提示") },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.close, contentDescription = null, tint = paper.ink2, modifier = Modifier.size(12.dp))
+                }
+            }
+        }
+        if (!expanded) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset(x = (-5).dp, y = (-5).dp)
+                    .size(20.dp)
+                    .shadow(2.dp, CircleShape)
+                    .clip(CircleShape)
+                    .background(paper.glass.copy(alpha = 0.96f))
+                    .border(0.75.dp, if (paper.isDark) Color.White.copy(alpha = 0.12f) else paper.line, CircleShape)
+                    .clickable(onClick = dismiss)
+                    .semantics { contentDescription = t("暂不换声音，关闭提示") },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.close, contentDescription = null, tint = paper.ink2, modifier = Modifier.size(10.dp))
             }
         }
     }

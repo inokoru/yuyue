@@ -171,6 +171,8 @@ fun VoicePickerSheet(
     language: String,
     selectedId: String?,
     nextBookSentence: String?,
+    readyVoiceId: String? = null,
+    keepCurrentLabel: String? = null,
     onSelect: (BookVoice) -> Unit,
     dismiss: () -> Unit,
 ) {
@@ -233,6 +235,7 @@ fun VoicePickerSheet(
                             selectedId = selectedId,
                             sampleText = nextBookSentence ?: defaultSampleLine(language),
                             refreshKey = refreshTick,
+                            readyVoiceId = readyVoiceId,
                             onPickFollowNarrator = null,
                             onPickVoice = { v ->
                                 onSelect(v)
@@ -245,6 +248,18 @@ fun VoicePickerSheet(
                                 route = PickerSubRoute.Detail(cardId)
                             },
                         )
+                    }
+                    if (!keepCurrentLabel.isNullOrEmpty()) {
+                        Box(Modifier.fillMaxWidth().height(0.5.dp).background(YY.c.line))
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { dismiss() }
+                                .padding(vertical = 13.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(keepCurrentLabel, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, color = YY.c.t2)
+                        }
                     }
                 }
             }
@@ -332,6 +347,7 @@ fun VoiceGroupsContent(
     selectedId: String?,
     sampleText: String,
     refreshKey: Int = 0,
+    readyVoiceId: String? = null,
     followTitle: String? = null,
     followSubtitle: String? = null,
     onPickFollowNarrator: (() -> Unit)? = null,
@@ -545,8 +561,10 @@ fun VoiceGroupsContent(
                 else -> {
                     for (kv in kokoroVoices) {
                         val used = roles.filter { it.voice.voice == kv.id && it.name != roleName }.map { it.name }
+                        val isReady = kv.id == readyVoiceId
                         val isDef = kv.id == primaryNarratorId
                         val badge = when {
+                            isReady -> t("刚下好")
                             isDef -> t("默认旁白")
                             kv.speaker.narrator -> t("推荐旁白")
                             else -> null
@@ -561,7 +579,7 @@ fun VoiceGroupsContent(
                                 avatar = kv.name.take(1).ifEmpty { "语" },
                                 title = kv.name,
                                 badge = badge,
-                                badgeAccent = isDef,
+                                badgeAccent = isReady || isDef,
                                 subtitle = sub,
                                 selected = selectedId == kv.id,
                                 previewState = previewStateOf(kv.id),
@@ -575,7 +593,9 @@ fun VoiceGroupsContent(
                     for (card in recommended) {
                         val v = CardVoice(card)
                         val used = roles.filter { it.voice.voice == card.id && it.name != roleName }.map { it.name }
+                        val isReady = card.id == readyVoiceId
                         val badge = when {
+                            isReady -> t("刚下好")
                             card.id == primaryNarratorId -> t("默认旁白")
                             card.narrator -> t("角色旁白")
                             else -> null
@@ -590,7 +610,7 @@ fun VoiceGroupsContent(
                                 avatar = card.name.take(1).ifEmpty { "声" },
                                 title = card.name,
                                 badge = badge,
-                                badgeAccent = card.id == primaryNarratorId,
+                                badgeAccent = isReady || card.id == primaryNarratorId,
                                 subtitle = sub,
                                 selected = selectedId == card.id,
                                 previewState = previewStateOf(card.id),
