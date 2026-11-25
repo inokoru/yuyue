@@ -421,6 +421,7 @@ public sealed class RemoteLibraryService
                         fallbackCover: coverBytes);
                 }
 
+                _library.Analytics.TrackBookImported(imported.Format.ToString(), src.Kind, dest);
                 _library.Prefs.RemoteAcquiredBooks[item.Url] = imported.Id;
                 _library.SavePrefs();
                 return imported;
@@ -517,6 +518,7 @@ public sealed class RemoteLibraryService
         _wantedTrack.TryAdd(bookId, 1);
         StartBackgroundStreamLoop(bookId);
 
+        _library.Analytics.TrackBookImported("audio", src.Kind, null);
         _library.Prefs.RemoteAcquiredBooks[audioTracks[0].Url] = summary.Id;
         _library.SavePrefs();
         return summary;
@@ -813,8 +815,8 @@ public sealed class RemoteLibraryService
         string? currentSearchTpl = null;
         string? editingSourceId = null;
 
-        var root = new Grid { Width = 620, Height = 470, ColumnSpacing = 12 };
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(178) });
+        var root = new Grid { Height = 450, ColumnSpacing = 14 };
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(190) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         var leftList = new StackPanel { Spacing = 4 };
@@ -827,9 +829,38 @@ public sealed class RemoteLibraryService
         topBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         topBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         topBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var backBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], Content = "‹ 上级", Visibility = Visibility.Collapsed };
+        var backBtn = new Button
+        {
+            Content = L10n.T("‹ 上级"),
+            Height = 28,
+            MinHeight = 28,
+            Padding = new Thickness(10, 0, 10, 0),
+            CornerRadius = new CornerRadius(14),
+            Background = ThemeHelper.Brush(p.Card),
+            Foreground = ThemeHelper.Brush(p.T1),
+            BorderBrush = ThemeHelper.Brush(p.Line),
+            BorderThickness = new Thickness(0.5),
+            FontSize = 12,
+            UseSystemFocusVisuals = false,
+            Visibility = Visibility.Collapsed,
+        };
         var searchBox = new TextBox { PlaceholderText = "搜索 OPDS 书目（回车）…", Visibility = Visibility.Collapsed };
-        var streamAllBtn = new Button { Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"], Content = "边下边听整本", Height = 26, FontSize = 11, Visibility = Visibility.Collapsed };
+        var streamAllBtn = new Button
+        {
+            Content = L10n.T("边下边听整本"),
+            Height = 26,
+            MinHeight = 26,
+            Padding = new Thickness(12, 0, 12, 0),
+            CornerRadius = new CornerRadius(13),
+            Background = ThemeHelper.Brush(tint.Soft),
+            Foreground = ThemeHelper.Brush(tint.Accent),
+            BorderBrush = ThemeHelper.Brush(tint.Edge),
+            BorderThickness = new Thickness(0.5),
+            FontSize = 11.5,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            UseSystemFocusVisuals = false,
+            Visibility = Visibility.Collapsed,
+        };
         topBar.Children.Add(backBtn);
         Grid.SetColumn(searchBox, 1);
         topBar.Children.Add(searchBox);
@@ -847,9 +878,10 @@ public sealed class RemoteLibraryService
         rightStack.Children.Add(statusText);
 
         IReadOnlyList<RemoteEntryItem> currentAudioItems = [];
-        string currentFolderTitle = "有声书";
+        string currentFolderTitle = L10n.T("有声书");
         CancellationTokenSource? loadCts = null;
         int loadSeq = 0;
+        bool modalClosed = false;
 
         streamAllBtn.Click += async (_, _) =>
         {
@@ -857,15 +889,19 @@ public sealed class RemoteLibraryService
             streamAllBtn.IsEnabled = false;
             try
             {
-                var b = await ReserveWebDavAudiobookStreamAsync(activeSrc, currentFolderTitle, currentAudioItems, s => statusText.Text = s);
-                statusText.Text = $"✓ 已加入《{b.Title}》（边下边听，已缓存首轨）";
+                var b = await ReserveWebDavAudiobookStreamAsync(activeSrc, currentFolderTitle, currentAudioItems, s =>
+                {
+                    if (!modalClosed) statusText.Text = L10n.T(s);
+                });
+                if (modalClosed) return;
+                statusText.Text = L10n.T($"✓ 已加入《{b.Title}》（边下边听，已缓存首轨）");
                 onImported();
             }
             catch (Exception ex)
             {
-                statusText.Text = $"边下边听准备失败：{ex.Message}";
+                if (!modalClosed) statusText.Text = L10n.T($"边下边听准备失败：{ex.Message}");
             }
-            finally { streamAllBtn.IsEnabled = true; }
+            finally { if (!modalClosed) streamAllBtn.IsEnabled = true; }
         };
 
         async Task LoadUrlAsync(string? url = null, string? folderTitle = null)
@@ -885,22 +921,22 @@ public sealed class RemoteLibraryService
 
             if (activeSrc is null)
             {
-                statusText.Text = "先在左侧添加一个 Calibre-Web (OPDS) 或 WebDAV 书库源。";
+                statusText.Text = L10n.T("先在左侧添加一个 Calibre-Web (OPDS) 或 WebDAV 书库源。");
                 return;
             }
 
             var reqSrc = activeSrc;
-            statusText.Text = $"正在读取 {reqSrc.Name}…";
+            statusText.Text = L10n.T($"正在读取 {reqSrc.Name}…");
             statusText.Foreground = ThemeHelper.Brush(p.T3);
             try
             {
                 var (items, searchTpl, nextUrl) = await FetchPageAsync(reqSrc, url, myCts.Token);
-                if (mySeq != loadSeq || myCts.IsCancellationRequested) return;
+                if (modalClosed || mySeq != loadSeq || myCts.IsCancellationRequested) return;
 
                 entriesPanel.Children.Clear();
                 if (!string.IsNullOrEmpty(searchTpl)) currentSearchTpl = searchTpl;
                 searchBox.Visibility = currentSearchTpl is not null ? Visibility.Visible : Visibility.Collapsed;
-                statusText.Text = $"共 {items.Count} 项";
+                statusText.Text = L10n.T($"共 {items.Count} 项");
 
                 if (reqSrc.Kind == "webdav")
                 {
@@ -926,7 +962,16 @@ public sealed class RemoteLibraryService
                     if (!string.IsNullOrEmpty(entry.CoverUrl))
                     {
                         var thumb = new Border { Width = 24, Height = 34, CornerRadius = new CornerRadius(3), Background = ThemeHelper.Brush(p.Inset) };
-                        try { thumb.Child = new Image { Source = new BitmapImage(new Uri(entry.CoverUrl)), Stretch = Stretch.UniformToFill }; } catch { }
+                        try
+                        {
+                            var bmp = new BitmapImage
+                            {
+                                DecodePixelWidth = 48,
+                                UriSource = new Uri(entry.CoverUrl),
+                            };
+                            thumb.Child = new Image { Source = bmp, Stretch = Stretch.UniformToFill };
+                        }
+                        catch { }
                         row.Children.Add(thumb);
                     }
                     else
@@ -935,18 +980,26 @@ public sealed class RemoteLibraryService
                     }
 
                     var meta = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
-                    meta.Children.Add(new TextBlock { Text = entry.Title, FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
-                    meta.Children.Add(new TextBlock { Text = entry.Subtitle, FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis });
+                    meta.Children.Add(L10n.Skip(new TextBlock { Text = entry.Title, FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis }));
+                    meta.Children.Add(L10n.Skip(new TextBlock { Text = entry.Subtitle, FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis }));
                     Grid.SetColumn(meta, 1);
                     row.Children.Add(meta);
 
+                    bool primaryEntryAction = !entry.IsFolder && !alreadyOwned;
                     var actBtn = new Button
                     {
-                        Style = (Style)Application.Current.Resources[entry.IsFolder || alreadyOwned ? "YYPillButtonStyle" : "YYPrimaryPillButtonStyle"],
-                        Content = entry.IsFolder ? "打开 ›" : (alreadyOwned ? "✓ 已在书架" : "放入书架"),
+                        Content = L10n.T(entry.IsFolder ? "打开 ›" : (alreadyOwned ? "✓ 已在书架" : "放入书架")),
                         Height = 25,
                         MinHeight = 25,
+                        Padding = new Thickness(10, 0, 10, 0),
+                        CornerRadius = new CornerRadius(12.5),
+                        Background = ThemeHelper.Brush(primaryEntryAction ? tint.Soft : p.Inset),
+                        Foreground = ThemeHelper.Brush(primaryEntryAction ? tint.Accent : p.T2),
+                        BorderBrush = ThemeHelper.Brush(primaryEntryAction ? tint.Edge : p.Line),
+                        BorderThickness = new Thickness(0.5),
                         FontSize = 11,
+                        FontWeight = primaryEntryAction ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
+                        UseSystemFocusVisuals = false,
                         IsEnabled = !alreadyOwned,
                     };
                     actBtn.Click += async (_, _) =>
@@ -959,23 +1012,32 @@ public sealed class RemoteLibraryService
                         else
                         {
                             actBtn.IsEnabled = false;
-                            actBtn.Content = "下载中…";
+                            actBtn.Content = L10n.T("下载中…");
                             try
                             {
                                 var b = await DownloadAndImportEntryAsync(reqSrc, entry, frac =>
                                 {
-                                    actBtn.DispatcherQueue.TryEnqueue(() => actBtn.Content = $"{Math.Round(frac * 100)}%");
+                                    if (modalClosed) return;
+                                    actBtn.DispatcherQueue.TryEnqueue(() =>
+                                    {
+                                        if (modalClosed) return;
+                                        actBtn.Content = $"{Math.Round(frac * 100)}%";
+                                    });
                                 });
-                                actBtn.Content = "✓ 已在书架";
-                                actBtn.Style = (Style)Application.Current.Resources["YYPillButtonStyle"];
-                                statusText.Text = $"已导入《{b.Title}》";
+                                if (modalClosed) return;
+                                actBtn.Content = L10n.T("✓ 已在书架");
+                                actBtn.Background = ThemeHelper.Brush(p.Inset);
+                                actBtn.Foreground = ThemeHelper.Brush(p.T2);
+                                actBtn.BorderBrush = ThemeHelper.Brush(p.Line);
+                                statusText.Text = L10n.T($"已导入《{b.Title}》");
                                 onImported();
                             }
                             catch (Exception ex)
                             {
+                                if (modalClosed) return;
                                 actBtn.IsEnabled = true;
-                                actBtn.Content = "重试";
-                                statusText.Text = $"下载失败：{ex.Message}";
+                                actBtn.Content = L10n.T("重试");
+                                statusText.Text = L10n.T($"下载失败：{ex.Message}");
                             }
                         }
                     };
@@ -987,18 +1049,20 @@ public sealed class RemoteLibraryService
                         CornerRadius = new CornerRadius(8),
                         Background = ThemeHelper.Brush(p.Card),
                         BorderBrush = ThemeHelper.Brush(p.Line),
-                        BorderThickness = new Thickness(1),
+                        BorderThickness = new Thickness(0.5),
                         Child = row,
                     });
                 }
 
                 if (!string.IsNullOrEmpty(nextUrl))
                 {
-                    var moreBtn = new Button { Style = (Style)Application.Current.Resources["YYPillButtonStyle"], HorizontalAlignment = HorizontalAlignment.Center, Content = "下一页 ›" };
                     string nu = nextUrl!;
-                    moreBtn.Click += async (_, _) => { navStack.Push(url ?? reqSrc.Url); await LoadUrlAsync(nu); };
+                    var moreBtn = YYChrome.MakeSheetPillButton("下一页 ›", () => { navStack.Push(url ?? reqSrc.Url); _ = LoadUrlAsync(nu); }, dark, _library.Prefs.Tint, "secondary", height: 28, horizontalPadding: 14);
+                    moreBtn.HorizontalAlignment = HorizontalAlignment.Center;
                     entriesPanel.Children.Add(moreBtn);
                 }
+
+                L10n.ApplyTree(entriesPanel);
             }
             catch (OperationCanceledException) when (mySeq != loadSeq || myCts.IsCancellationRequested)
             {
@@ -1006,10 +1070,10 @@ public sealed class RemoteLibraryService
             }
             catch (Exception ex)
             {
-                if (mySeq != loadSeq) return;
+                if (modalClosed || mySeq != loadSeq) return;
                 // Keep discovered `currentSearchTpl` intact on transient network failure (#24)
                 searchBox.Visibility = currentSearchTpl is not null ? Visibility.Visible : Visibility.Collapsed;
-                statusText.Text = $"读取失败：{ex.Message}";
+                statusText.Text = L10n.T($"读取失败：{ex.Message}");
                 statusText.Foreground = ThemeHelper.Brush(p.Danger);
             }
         }
@@ -1035,15 +1099,15 @@ public sealed class RemoteLibraryService
                         Spacing = 1,
                         Children =
                         {
-                            new TextBlock { Text = src.Name, FontSize = 12.5, FontWeight = sel ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal, Foreground = ThemeHelper.Brush(sel ? tint.Accent : p.T1) },
-                            new TextBlock { Text = src.Kind.ToUpperInvariant(), FontSize = 10, Foreground = ThemeHelper.Brush(p.T3) },
+                            L10n.Skip(new TextBlock { Text = src.Name, FontSize = 12.5, FontWeight = sel ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal, Foreground = ThemeHelper.Brush(sel ? tint.Accent : p.T1) }),
+                            L10n.Skip(new TextBlock { Text = src.Kind.ToUpperInvariant(), FontSize = 10, Foreground = ThemeHelper.Brush(p.T3) }),
                         },
                     },
                 };
                 var ctx = new MenuFlyout();
-                var editMi = new MenuFlyoutItem { Text = "编辑此书库源" };
+                var editMi = new MenuFlyoutItem { Text = L10n.T("编辑此书库源") };
                 editMi.Click += (_, _) => { editingSourceId = src.Id; RebuildSourcesSidebar(); };
-                var delMi = new MenuFlyoutItem { Text = "移除此书库源", Foreground = ThemeHelper.Brush(p.Danger) };
+                var delMi = new MenuFlyoutItem { Text = L10n.T("移除此书库源"), Foreground = ThemeHelper.Brush(p.Danger) };
                 delMi.Click += (_, _) =>
                 {
                     RemoveSource(src.Id);
@@ -1076,17 +1140,24 @@ public sealed class RemoteLibraryService
             var userIn = new TextBox { PlaceholderText = "账号（可选）", Text = editing?.Username ?? "", FontSize = 11.5 };
             var pwdIn = new PasswordBox { PlaceholderText = "密码（可选）", Password = editing is not null ? _library.Secrets.Get($"source.{editing.Id}.password") : "", FontSize = 11.5 };
             var kindCombo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, FontSize = 11.5 };
-            kindCombo.Items.Add(new ComboBoxItem { Content = "OPDS 目录 (Calibre / Komga)", Tag = "opds" });
-            kindCombo.Items.Add(new ComboBoxItem { Content = "WebDAV 文件夹", Tag = "webdav" });
+            kindCombo.Items.Add(new ComboBoxItem { Content = L10n.T("OPDS 目录 (Calibre / Komga)"), Tag = "opds" });
+            kindCombo.Items.Add(new ComboBoxItem { Content = L10n.T("WebDAV 文件夹"), Tag = "webdav" });
             kindCombo.SelectedIndex = editing?.Kind == "webdav" ? 1 : 0;
 
             var addSrcBtn = new Button
             {
-                Style = (Style)Application.Current.Resources["YYPrimaryPillButtonStyle"],
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 Content = editing is not null ? "保存修改" : "＋ 检测并添加",
-                Height = 26,
+                Height = 28,
+                MinHeight = 28,
+                CornerRadius = new CornerRadius(14),
+                Background = ThemeHelper.Brush(tint.Soft),
+                Foreground = ThemeHelper.Brush(tint.Accent),
+                BorderBrush = ThemeHelper.Brush(tint.Edge),
+                BorderThickness = new Thickness(0.5),
                 FontSize = 11.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                UseSystemFocusVisuals = false,
             };
             addSrcBtn.Click += async (_, _) =>
             {
@@ -1097,7 +1168,7 @@ public sealed class RemoteLibraryService
                     rawUrl = "https://" + rawUrl;
                 if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out var parsedUri) || string.IsNullOrEmpty(parsedUri.Host))
                 {
-                    statusText.Text = "地址格式不正确，请输入完整的 http(s) 链接";
+                    statusText.Text = L10n.T("地址格式不正确，请输入完整的 http(s) 链接");
                     statusText.Foreground = ThemeHelper.Brush(p.Danger);
                     return;
                 }
@@ -1107,10 +1178,11 @@ public sealed class RemoteLibraryService
                 var cfg = new RemoteSourceConfig(id, nm, kind, parsedUri.ToString(), userIn.Text.Trim());
 
                 addSrcBtn.IsEnabled = false;
-                statusText.Text = $"正在探测 {nm}…";
+                statusText.Text = L10n.T($"正在探测 {nm}…");
                 statusText.Foreground = ThemeHelper.Brush(p.T3);
                 var (ok, msg) = await SaveSourceAsync(cfg, pwdIn.Password);
-                statusText.Text = msg;
+                if (modalClosed) return;
+                statusText.Text = L10n.T(msg);
                 statusText.Foreground = ThemeHelper.Brush(ok ? p.Ok : p.Danger);
                 addSrcBtn.IsEnabled = true;
                 if (!ok) return;
@@ -1132,6 +1204,7 @@ public sealed class RemoteLibraryService
                 Margin = new Thickness(0, 8, 0, 0),
                 Child = new StackPanel { Spacing = 5, Children = { kindCombo, nameIn, urlIn, userIn, pwdIn, addSrcBtn } },
             });
+            L10n.ApplyTree(leftList);
         }
 
         backBtn.Click += async (_, _) =>
@@ -1154,18 +1227,31 @@ public sealed class RemoteLibraryService
         Grid.SetColumn(rightStack, 1);
         root.Children.Add(rightStack);
 
+        ContentDialog? dlgRef = null;
+        var doneBtn = YYChrome.MakeSheetPillButton("完成", () => dlgRef?.Hide(), dark, _library.Prefs.Tint, "dark", height: 34, horizontalPadding: 20);
+        doneBtn.HorizontalAlignment = HorizontalAlignment.Right;
+
+        var sheetBody = new StackPanel
+        {
+            Spacing = 14,
+            Padding = new Thickness(22, 18, 22, 18),
+            Children =
+            {
+                YYChrome.MakeSheetHeader("OPDS 与 WebDAV 远程书库", "连接 Calibre-Web、Komga 或 WebDAV 云端书库", () => dlgRef?.Hide(), dark, titleSize: 17),
+                new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line) },
+                root,
+                doneBtn,
+            },
+        };
+
         try
         {
-            await new ContentDialog
-            {
-                XamlRoot = xamlRoot,
-                Title = "OPDS 与 WebDAV 远程书库",
-                Content = root,
-                CloseButtonText = "完成",
-            }.ShowAsync();
+            dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 668, sheetBody, maxHeight: 740, tint: _library.Prefs.Tint);
+            await dlgRef.ShowSafeAsync(_library.Prefs.Tint);
         }
         finally
         {
+            modalClosed = true;
             try { loadCts?.Cancel(); loadCts?.Dispose(); } catch { }
         }
     }

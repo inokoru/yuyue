@@ -276,6 +276,32 @@ internal fun MoreFontsContent(selected: String, back: (() -> Unit)?, modifier: M
             }
         }
         Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()).padding(bottom = if (back != null) 0.dp else YY.s(16))) {
+            if (kind == Kind.MINE && ids.isEmpty()) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = YY.s(6), bottom = YY.s(10))
+                        .clip(RoundedCornerShape(YY.s(12)))
+                        .background(YY.c.inset.copy(alpha = 0.6f))
+                        .border(0.5.dp, YY.c.line, RoundedCornerShape(YY.s(12)))
+                        .padding(horizontal = YY.s(14), vertical = YY.s(16)),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(YY.s(4)),
+                ) {
+                    Text(
+                        t("还没有自定义字体"),
+                        style = YY.font(12f, FontWeight.Medium),
+                        color = YY.c.t1,
+                        textAlign = TextAlign.Center,
+                    )
+                    Text(
+                        t("支持导入 .ttf、.otf 字体文件，仅保存在本机。"),
+                        style = YY.font(10.5f),
+                        color = YY.c.t3,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
             for (id in ids) FontLineRow(id, id == selected) { if (FontShelf.progress[id] == null) choose(id) }
             Row(
                 Modifier.fillMaxWidth().heightIn(min = YY.s(40)).clip(RoundedCornerShape(YY.s(10)))

@@ -341,9 +341,12 @@ struct ReadingSample: View {
     let settings: ReaderSettings
     var preview: CustomPaper? = nil
     var compact = false
+    @Environment(\.colorScheme) private var scheme
 
-    private static let text = ["我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。",
-                               "时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。"]
+    private static var text: [String] {
+        [String(localized: "我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。"),
+         String(localized: "时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。")]
+    }
 
     static func paper(_ s: ReaderSettings, preview: CustomPaper? = nil) -> YYPaper {
         if let preview { return YYPaper(custom: preview) }
@@ -384,8 +387,9 @@ struct ReadingSample: View {
         style.lineSpacing = font.pointSize * max(0, lineHeight - 1.25)
         style.paragraphSpacing = font.pointSize * 0.5
         style.alignment = settings.justify ?? true ? .justified : .natural
-        style.firstLineHeadIndent = settings.indent ?? true ? font.pointSize * 2 : 0
         let lines = compact ? [Self.text[0]] : Self.text
+        let hasCJK = lines.first?.unicodeScalars.contains { (0x4E00 ... 0x9FFF).contains($0.value) || (0x3400 ... 0x4DBF).contains($0.value) } ?? true
+        style.firstLineHeadIndent = (settings.indent ?? true) && hasCJK ? font.pointSize * 2 : 0
         return NSAttributedString(string: lines.joined(separator: "\n"),
                                   attributes: [.font: font, .foregroundColor: NSColor(paper.ink), .paragraphStyle: style])
     }
@@ -407,7 +411,7 @@ struct ReadingSample: View {
         .frame(height: compact ? nil : 236, alignment: .top)
         .background { paper.bg.overlay { PaperTextureView(texture: Self.texture(settings, preview: preview), dark: paper.isDark) } }
         .clipShape(.rect(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(YYColor.line, lineWidth: paper.isDark ? 0 : 0.5))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(scheme == .dark ? Color.white.opacity(0.14) : YYColor.line, lineWidth: 0.5))
         .animation(preview == nil ? .easeOut(duration: 0.2) : nil, value: settings)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("样张：\(Self.summary(settings))"))
@@ -442,6 +446,7 @@ private struct PageText: NSViewRepresentable {
 /// A line of English with the meanings written over the hard words, as the page does.
 struct ForeignSample: View {
     let paper: YYPaper
+    @Environment(\.colorScheme) private var scheme
     @AppStorage(ForeignPrefs.glossKey) private var gloss = true
     @AppStorage(ForeignPrefs.levelKey) private var level = 3
     @AppStorage(ForeignPrefs.glossVocabKey) private var vocabOnly = false
@@ -496,7 +501,7 @@ struct ForeignSample: View {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(paper.bg, in: .rect(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(YYColor.line, lineWidth: paper.isDark ? 0 : 0.5))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(scheme == .dark ? Color.white.opacity(0.14) : YYColor.line, lineWidth: 0.5))
             .animation(.snappy(duration: 0.2), value: "\(gloss)\(level)\(vocabOnly)\(mark)")
             Text(caption).font(.yy(size: 11)).foregroundStyle(YYColor.t3).fixedSize(horizontal: false, vertical: true)
         }
@@ -1045,6 +1050,7 @@ struct SettingsPaperTile: View {
     let name: String
     let selected: Bool
     let pick: () -> Void
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Button(action: pick) {
@@ -1057,7 +1063,7 @@ struct SettingsPaperTile: View {
                 .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
                 .background { paper.bg.overlay { PaperTextureView(texture: texture, dark: paper.isDark) } }
                 .clipShape(.rect(cornerRadius: 5))
-                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(.black.opacity(paper.isDark ? 0 : 0.12), lineWidth: 0.5))
+                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(scheme == .dark ? Color.white.opacity(0.14) : .black.opacity(0.12), lineWidth: 0.5))
                 Text(name)
                     .font(.yy(size: 11.5, weight: selected ? .semibold : .regular))
                     .foregroundStyle(selected ? YYColor.t1 : YYColor.t2)

@@ -103,6 +103,7 @@ struct MacSettings: View {
         // Keep the window title fixed (hidden visually; the sidebar names the page) so tab
         // switches don't trigger AppKit titlebar relayout and reset the traffic lights.
         .navigationTitle(String(localized: "设置"))
+        .airTrafficScreen(page == .update ? "About" : "Settings")
         .background(SettingsTitlebar { windowBox.window = $0 })
         // At the top of the sidebar, as in the shelf window.
         .trafficLights(CGPoint(x: 22, y: 20))
@@ -833,8 +834,12 @@ struct AppearanceSettings: View {
     @AppStorage(LiquidGlass.key) private var liquid = false
 
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
+    @AppStorage(AppIconChoice.storageKey) private var iconID = AppIconChoice.default.id
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
+    private var activeIcon: AppIconChoice { AppIconChoice(rawValue: iconID) ?? .default }
+    @Environment(\.colorScheme) private var scheme
     @State private var hoverMode: AppAppearance?
+    @State private var hoverIcon: AppIconChoice?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -862,6 +867,25 @@ struct AppearanceSettings: View {
                 .padding(16)
             }
             SettingsCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("应用图标").font(.yy(size: 13, weight: .medium)).foregroundStyle(YYColor.t1)
+                            Text("运行语阅时应用于程序坞；退出后恢复默认宣纸图标").font(.yy(size: 11.5)).foregroundStyle(YYColor.t2)
+                        }
+                        Spacer()
+                        Text(activeIcon.title).font(.yy(size: 11.5, weight: .medium)).foregroundStyle(YYColor.t2)
+                    }
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 68, maximum: 88), spacing: 12)],
+                        spacing: 12
+                    ) {
+                        ForEach(AppIconChoice.allCases) { option in iconChoice(option) }
+                    }
+                }
+                .padding(16)
+            }
+            SettingsCard {
                 SettingsRow(String(localized: "书架封面大小"), detail: String(localized: "每行本数随窗口宽度自动排布")) {
                     HStack(spacing: 10) {
                         RoundedRectangle(cornerRadius: 1.5).fill(YYColor.tint).frame(width: 8, height: 11)
@@ -885,6 +909,54 @@ struct AppearanceSettings: View {
             Spacer(minLength: 0)
         }
         .onChange(of: mode) { AppAppearance.apply() }
+        .onChange(of: iconID) { AppIconChoice.applyMacDockIcon() }
+    }
+
+    private func iconChoice(_ option: AppIconChoice) -> some View {
+        let on = activeIcon == option
+        let hovered = !on && hoverIcon == option
+        let strokeColor: Color = on ? tint.accent : (hovered ? YYColor.line : .clear)
+        let strokeWidth: CGFloat = on ? 1.75 : 1
+
+        return Button {
+            guard option != activeIcon else { return }
+            iconID = option.id
+            AppIconChoice.applyMacDockIcon(for: option)
+        } label: {
+            VStack(spacing: 6) {
+                Image(option.previewAssetName)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(1, contentMode: .fit)
+                    .frame(width: 52, height: 52)
+                    .shadow(
+                        color: scheme == .dark ? .clear : Color.black.opacity(0.14),
+                        radius: 1,
+                        x: 0,
+                        y: 0.5
+                    )
+                    .padding(3)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16.5, style: .continuous)
+                            .strokeBorder(strokeColor, lineWidth: strokeWidth)
+                    )
+                    .animation(YYMotion.quick, value: on)
+                    .animation(YYMotion.quick, value: hovered)
+                Text(option.title)
+                    .font(.yy(size: 11.5, weight: on ? .semibold : .regular))
+                    .foregroundStyle(on || hovered ? YYColor.t1 : YYColor.t2)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(.rect)
+            .animation(YYMotion.quick, value: hovered)
+        }
+        .buttonStyle(YYPressStyle(scale: 0.97))
+        .onHover { hoverIcon = $0 ? option : (hoverIcon == option ? nil : hoverIcon) }
+        .accessibilityLabel(option.title)
+        .accessibilityHint(on ? String(localized: "当前正在使用的应用图标") : String(localized: "轻点切换应用图标"))
+        .accessibilityAddTraits(on ? .isSelected : [])
+        .accessibilityIdentifier("appearance.icon.\(option.id)")
     }
 
     private func modeChoice(_ m: AppAppearance) -> some View {
@@ -1624,7 +1696,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     }
 
     #if os(macOS)
-    /// Puts every window in the chosen appearance.
+    /// Puts every window in the chosen appearance and refreshes the running Dock icon.
     static func apply() {
         switch current {
         case .light: NSApp.appearance = NSAppearance(named: .aqua)
@@ -1632,6 +1704,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         case .system: NSApp.appearance = nil
         }
         PaperAppearance.shared.refreshAppearance()
+        AppIconChoice.applyMacDockIcon()
     }
     #endif
 

@@ -5,14 +5,14 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="播客单集">
 
-    <Grid x:Name="RootGrid" Background="{ThemeResource YYBgBrush}">
+    <Grid x:Name="RootGrid" Background="{ThemeResource YYBgBrush}" PreviewKeyDown="RootGrid_PreviewKeyDown">
         <Grid.RowDefinitions>
             <RowDefinition Height="50" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <!-- 顶栏 -->
-        <Grid Grid.Row="0" Padding="14,0,148,0">
+        <Grid x:Name="TopBar" Grid.Row="0" Padding="14,0,148,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -27,6 +27,7 @@
                 BorderBrush="{ThemeResource YYLineBrush}"
                 BorderThickness="1"
                 UseSystemFocusVisuals="False"
+                AutomationProperties.Name="返回书架"
                 Click="BackToShelf_Click">
                 <StackPanel Orientation="Horizontal" Spacing="5">
                     <ContentPresenter x:Name="IconBack" VerticalAlignment="Center" />
@@ -45,8 +46,8 @@
             </Grid>
 
             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                <Button x:Name="PlayBtn" Style="{StaticResource YYPrimaryPillButtonStyle}" Height="28" Content="▶ 收听" Click="Play_Click" />
-                <Button x:Name="RateBtn" Style="{StaticResource YYPillButtonStyle}" Height="28" Content="1.0×" Click="Rate_Click" />
+                <Button x:Name="PlayBtn" Style="{StaticResource YYPrimaryPillButtonStyle}" Height="28" Content="▶ 收听" AutomationProperties.Name="播放或暂停" Click="Play_Click" />
+                <Button x:Name="RateBtn" Style="{StaticResource YYPillButtonStyle}" Height="28" Content="1.0×" AutomationProperties.Name="播放倍速" Click="Rate_Click" />
             </StackPanel>
         </Grid>
 

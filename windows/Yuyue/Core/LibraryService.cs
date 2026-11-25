@@ -5,6 +5,7 @@ using Yuyue.Audiobook;
 using Yuyue.Design;
 using Yuyue.Pdf;
 using Yuyue.Podcast;
+using Yuyue.Settings;
 using Yuyue.Speech;
 
 namespace Yuyue.Core;
@@ -18,6 +19,7 @@ public sealed class DevicePrefs
 {
     public string ThemeMode { get; set; } = "system"; // light | dark | system
     public string TintId { get; set; } = YYTints.Default.Id;
+    public string AppIconId { get; set; } = "default"; // default | night | camel | sage | mist | blush
     public bool PaperFollowAppearance { get; set; } = true;
     public string PaperLightId { get; set; } = "";
     public string PaperDarkId { get; set; } = "";
@@ -87,20 +89,26 @@ public sealed class DevicePrefs
     public bool GlobalEinkMode { get; set; } = false;
     public bool GlobalEinkGray { get; set; } = true;
     public double SettingsInspectorWidth { get; set; } = 304.0;
+    public string SettingsLastPage { get; set; } = "general";
     public double ReaderPanelWidth { get; set; } = 320.0;
     public int ReaderWindowWidth { get; set; } = 1080;
     public int ReaderWindowHeight { get; set; } = 740;
+    public int ShelfWindowWidth { get; set; } = 1040;
+    public int ShelfWindowHeight { get; set; } = 720;
+    public int SettingsWindowWidth { get; set; } = 1020;
+    public int SettingsWindowHeight { get; set; } = 640;
+    public int AudiobookWindowWidth { get; set; } = 960;
+    public int AudiobookWindowHeight { get; set; } = 640;
     public string ReaderLastPanel { get; set; } = "";
+    public string BooksSort { get; set; } = "recent";
     public string CollectionSort { get; set; } = "custom";
+    public double AudiobookRate { get; set; } = 1.0;
     public string QuoteShareLook { get; set; } = "paper";
     public string QuoteShareShape { get; set; } = "card";
     public bool QuoteShareIncludeThought { get; set; } = true;
     public HashSet<string> DismissedTxtDoubtBooks { get; set; } = new();
     public HashSet<string> FinishedPromptedBooks { get; set; } = new();
-    public string FeedbackDraftCategory { get; set; } = "bug";
-    public string FeedbackDraftTitle { get; set; } = "";
     public bool FeedbackAttachInfo { get; set; } = true;
-    public bool FeedbackAttachLogs { get; set; } = false;
     public List<string> FeedbackDraftFiles { get; set; } = [];
     public HashSet<string> RemoteAcquiredUrls { get; set; } = new();
     public Dictionary<string, string> RemoteAcquiredBooks { get; set; } = new();
@@ -144,7 +152,6 @@ public sealed class DevicePrefs
     public long? UpdateLastCheckedMs { get; set; }
     public ulong? UpdateCheckedBuild { get; set; }
     public string FeedbackDraftText { get; set; } = "";
-    public List<string> FeedbackOfflineQueue { get; set; } = [];
     public Dictionary<string, long[]> SleepReturnSpots { get; set; } = new();
     public Dictionary<string, string> AudiobookPairOverrides { get; set; } = new();
     public string RemoteSourcesJson { get; set; } = "";
@@ -187,6 +194,11 @@ public sealed class DevicePrefs
     public string AmbientSoundId { get; set; } = ""; // "" | rain | fire | stream | night | cafe | wind
     public double AmbientSoundVolume { get; set; } = 0.25;
 
+    // 匿名使用统计偏好（默认开启，可随时在「关于」关闭）
+    public bool AnalyticsEnabled { get; set; } = true;
+    public string AnalyticsDistinctId { get; set; } = "";
+    public string AnalyticsLastVersion { get; set; } = "";
+
     public ElementTheme ToElementTheme() => ThemeMode switch
     {
         "light" => ElementTheme.Light,
@@ -223,6 +235,8 @@ public sealed class LibraryService : IDisposable
     public SystemIntegrationService SystemIntegration { get; }
     public RemoteLibraryService RemoteLibraries { get; }
     public RecordingShareServer RecordingShare { get; }
+    public SettingsHistoryStore SettingsHistory { get; }
+    public AirTrafficClient Analytics { get; }
 
     private readonly string _prefsPath;
 
@@ -256,6 +270,7 @@ public sealed class LibraryService : IDisposable
             catch { }
             SavePrefs();
         }
+        Analytics = new AirTrafficClient(Prefs, SavePrefs);
         Usage = new CompanionUsageLedger(DataDir, () => Prefs.AiDailyLlmTokenCap, () => Prefs.AiDailyTtsCharCap);
         Ecdict = new BuiltInEcdict();
         Kokoro = new KokoroVoiceModel(Core, DataDir, (langKey, vid) =>
@@ -264,7 +279,7 @@ public sealed class LibraryService : IDisposable
             SavePrefs();
         });
         LiveVoice = new LiveVoiceModel(Core, DataDir);
-        AudiobookWork = new AudiobookWork(Core, DataDir);
+        AudiobookWork = new AudiobookWork(Core, DataDir, () => Analytics.TrackAudioFeatureUsed("audiobook_align"));
         CloudVoices = new CloudVoiceService(this);
         Fonts = new FontShelfService(Core.FontsDir());
         Sync = new SyncService(this);
@@ -277,6 +292,10 @@ public sealed class LibraryService : IDisposable
         RemoteLibraries = new RemoteLibraryService(this);
         RecordingShare = new RecordingShareServer(this);
         RecordingShare.Start();
+        SettingsHistory = new SettingsHistoryStore(DataDir)
+        {
+            PersistentActuator = ApplyPersistedHistoryRecord,
+        };
 
         // Register downloaded sound library if present (1:1 SoundLibrary.swift)
         try
@@ -345,6 +364,14 @@ public sealed class LibraryService : IDisposable
 
     public IReadOnlyList<BookSummary> GetKeptBooks() =>
         Core.Books().Where(b => b.Format != BookFormat.Podcast).ToArray();
+
+    public (IReadOnlyList<BookSummary> ShelfBooks, IReadOnlyList<BookSummary> KeptBooks) GetShelfAndKeptBooks()
+    {
+        var all = Core.Books();
+        var kept = all.Where(b => b.Format != BookFormat.Podcast).ToArray();
+        var shelf = kept.Where(b => !b.Record).ToArray();
+        return (shelf, kept);
+    }
 
     public IReadOnlyList<BookCollection> GetCollections() => Core.Collections();
     public Dictionary<string, uint> GetMarkCounts() => Core.MarkCounts();
@@ -487,8 +514,42 @@ public sealed class LibraryService : IDisposable
     public uint RestoreSnapshot(string path, bool replace) => Core.RestoreSnapshot(path, replace);
     public void ExportEpub(string bookId, bool includeNotes, string path) => Core.ExportEpub(bookId, includeNotes, path);
 
+    private bool ApplyPersistedHistoryRecord(SettingsHistoryRecord rec, bool applyUndo)
+    {
+        try
+        {
+            string? raw = applyUndo ? rec.OldRawJson : rec.NewRawJson;
+            if (string.IsNullOrEmpty(rec.PrefKey) || raw is null) return false;
+
+            if (rec.PrefKey == "reader:settings")
+            {
+                var restored = JsonSerializer.Deserialize<ReaderSettings>(raw);
+                if (restored is null) return false;
+                Core.SetReaderSettings(restored);
+                return true;
+            }
+
+            if (rec.PrefKey.StartsWith("prefs:", StringComparison.Ordinal))
+            {
+                string propName = rec.PrefKey["prefs:".Length..];
+                var prop = typeof(DevicePrefs).GetProperty(propName);
+                if (prop is null || !prop.CanWrite) return false;
+                object? val = JsonSerializer.Deserialize(raw, prop.PropertyType);
+                prop.SetValue(Prefs, val);
+                if (propName == nameof(DevicePrefs.AnalyticsEnabled))
+                    Analytics.SetEnabled(Prefs.AnalyticsEnabled);
+                else
+                    SavePrefs();
+                return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
     public void Dispose()
     {
+        try { Analytics.Dispose(); } catch { }
         Kokoro.CancelDownload();
         KokoroEngine.Instance.CloseSession();
         AudiobookWork.Dispose();

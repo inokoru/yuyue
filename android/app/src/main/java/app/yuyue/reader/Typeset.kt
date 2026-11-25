@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.yuyue.design.Icons
+import app.yuyue.design.SyncDialogSystemBars
 import app.yuyue.design.YYSheetDragHandle
 import app.yuyue.design.YY
 import app.yuyue.design.YYSegments
@@ -57,6 +58,7 @@ fun TypesetSheet(model: ReaderModel, dismiss: () -> Unit) {
     /** 调纸 open on this paper (a new one has no id yet). */
     var editing by remember { mutableStateOf<uniffi.yuyue_core.CustomPaper?>(null) }
     ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(), containerColor = YY.c.card, scrimColor = androidx.compose.ui.graphics.Color.Transparent, dragHandle = { YYSheetDragHandle() }) {
+        SyncDialogSystemBars()
         // 更多, 调纸 and 更多字体 come in from the right and go back to it; the sheet grows or shrinks to them.
         var lastEditing by remember { mutableStateOf(editing) }
         if (editing != null) lastEditing = editing

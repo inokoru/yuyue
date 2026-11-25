@@ -7,6 +7,11 @@ struct YuyueApp: App {
     @NSApplicationDelegateAdaptor private var delegate: AppDelegate
     #endif
 
+    init() {
+        AirTraffic.start()
+        AirCrashReports.start(apiKey: Feedback.appKey, endpoint: Feedback.crashEndpoint, teamID: Feedback.teamID)
+    }
+
     var body: some Scene {
         #if os(macOS)
         // The shelf and each book get their own windows.

@@ -150,45 +150,63 @@ public sealed class SyncService
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(System.TimeSpan.FromMinutes(3));
+        await using var stopListenerReg = timeoutCts.Token.Register(() =>
+        {
+            try { listener.Stop(); } catch { }
+        });
 
         string? code = null;
-        while (!timeoutCts.IsCancellationRequested)
+        try
         {
-            using var tcp = await listener.AcceptTcpClientAsync(timeoutCts.Token);
-            using var net = tcp.GetStream();
-            var buf = new byte[16 * 1024];
-            int n = await net.ReadAsync(buf.AsMemory(0, buf.Length), timeoutCts.Token);
-            if (n <= 0) continue;
-
-            string reqText = Encoding.UTF8.GetString(buf, 0, n);
-            string target = reqText.Split(' ').Skip(1).FirstOrDefault() ?? "";
-            if (!target.StartsWith("/oauth2redirect", StringComparison.Ordinal))
+            while (!timeoutCts.IsCancellationRequested)
             {
-                byte[] ignore = Encoding.UTF8.GetBytes("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
-                await net.WriteAsync(ignore, timeoutCts.Token);
-                continue;
+                using var tcp = await listener.AcceptTcpClientAsync(timeoutCts.Token);
+                using var net = tcp.GetStream();
+                var buf = new byte[16 * 1024];
+                int n = await net.ReadAsync(buf.AsMemory(0, buf.Length), timeoutCts.Token);
+                if (n <= 0) continue;
+
+                string reqText = Encoding.UTF8.GetString(buf, 0, n);
+                string target = reqText.Split(' ').Skip(1).FirstOrDefault() ?? "";
+                if (!target.StartsWith("/oauth2redirect", StringComparison.Ordinal))
+                {
+                    byte[] ignore = Encoding.UTF8.GetBytes("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
+                    await net.WriteAsync(ignore, timeoutCts.Token);
+                    continue;
+                }
+
+                var q = ParseQuery(target);
+                q.TryGetValue("code", out var gotCode);
+                q.TryGetValue("state", out var gotState);
+                bool ok = !string.IsNullOrEmpty(gotCode) && gotState == state && !q.ContainsKey("error");
+
+                string msg = ok ? "已经登录 Google Drive，可以回到语阅了。" : "没有登录成功，回到语阅再试一次。";
+                byte[] html = Encoding.UTF8.GetBytes(
+                    $"<!doctype html><meta charset=utf-8><body style='font:16px \"Microsoft YaHei UI\",sans-serif;padding:48px 24px;text-align:center'>{msg}</body>");
+                byte[] head = Encoding.UTF8.GetBytes(
+                    $"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {html.Length}\r\nConnection: close\r\n\r\n");
+                await net.WriteAsync(head, timeoutCts.Token);
+                await net.WriteAsync(html, timeoutCts.Token);
+                await net.FlushAsync(timeoutCts.Token);
+
+                if (!ok) throw new SyncDiagnosticException("Google 账号授权已取消或验证失败。");
+                code = gotCode;
+                break;
             }
-
-            var q = ParseQuery(target);
-            q.TryGetValue("code", out var gotCode);
-            q.TryGetValue("state", out var gotState);
-            bool ok = !string.IsNullOrEmpty(gotCode) && gotState == state && !q.ContainsKey("error");
-
-            string msg = ok ? "已经登录 Google Drive，可以回到语阅了。" : "没有登录成功，回到语阅再试一次。";
-            byte[] html = Encoding.UTF8.GetBytes(
-                $"<!doctype html><meta charset=utf-8><body style='font:16px \"Microsoft YaHei UI\",sans-serif;padding:48px 24px;text-align:center'>{msg}</body>");
-            byte[] head = Encoding.UTF8.GetBytes(
-                $"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {html.Length}\r\nConnection: close\r\n\r\n");
-            await net.WriteAsync(head, timeoutCts.Token);
-            await net.WriteAsync(html, timeoutCts.Token);
-            await net.FlushAsync(timeoutCts.Token);
-
-            if (!ok) throw new SyncDiagnosticException("Google 账号授权已取消或验证失败。");
-            code = gotCode;
-            break;
         }
-        listener.Stop();
+        catch (Exception ex) when (ex is OperationCanceledException or SocketException or ObjectDisposedException)
+        {
+            if (ct.IsCancellationRequested)
+                throw new OperationCanceledException(ct);
+            if (!timeoutCts.IsCancellationRequested)
+                throw;
+        }
+        finally
+        {
+            try { listener.Stop(); } catch { }
+        }
 
+        ct.ThrowIfCancellationRequested();
         if (string.IsNullOrEmpty(code))
             throw new SyncDiagnosticException("等待浏览器完成 Google 授权超时。");
 
@@ -214,10 +232,12 @@ public sealed class SyncService
         if (string.IsNullOrWhiteSpace(refresh))
             throw new SyncDiagnosticException("未获取到 Google 离线刷新令牌，请重试并在授权页勾选云端硬盘权限。");
 
+        ct.ThrowIfCancellationRequested();
         _library.Secrets.Set(GoogleRefreshSecretKey, refresh);
         using var gdrive = new GoogleDriveSyncFolder(clientId, clientSecret, refresh);
         await gdrive.PrepareAsync();
         await gdrive.ListAsync();
+        ct.ThrowIfCancellationRequested();
         _library.Prefs.GoogleEmail = await gdrive.TryGetEmailAsync() ?? "";
         _library.Prefs.SyncMethod = "gdrive";
         _library.SavePrefs();

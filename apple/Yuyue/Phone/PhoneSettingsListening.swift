@@ -5,6 +5,7 @@ import YuyueCore
 /// 朗读, as the Mac's: 声音来源 — this device, OpenAI, Azure, ElevenLabs — each with what it reads
 /// now; one opens its voices (or, not connected, its key); 语速 under them.
 struct PhoneListening: View {
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @AppStorage("player.rate") private var rate = 1.0
     @State private var tick = 0
     @State private var addingSheet = false
@@ -93,40 +94,67 @@ struct PhoneListening: View {
     }
 
     private func row(_ source: VoiceSource) -> some View {
-        HStack(spacing: YYUI.s(10)) {
+        let reading = VoiceBook.allCases.compactMap { b in b.current.flatMap { VoiceSource.of($0) == source ? "\(b.title) · \($0.name)" : nil } }
+        let compact = sizeClass == .compact
+        return HStack(spacing: YYUI.s(10)) {
             ServiceTile(mark: source.mark, size: YYUI.s(26)).opacity(source == .mac ? 0.65 : 1)
-            VStack(alignment: .leading, spacing: YYUI.s(1)) {
-                HStack(spacing: YYUI.s(5)) {
-                    Text(source.title)
-                        .font(YYUI.font(11.5, .medium))
-                        .foregroundStyle(source == .mac ? YYColor.t2 : YYColor.t1)
-                        .lineLimit(1)
-                    if source == .neural {
-                        SettingsPill(String(localized: "推荐"), tone: .ok)
-                    } else if source == .mac {
-                        SettingsPill(String(localized: "不推荐"), tone: .warn)
-                    } else if case .cloud(let p) = source, let badge = p.badge {
-                        SettingsPill(badge, tone: p.isFreeOnline || p == .xiaomi ? .ok : .quiet)
-                    }
-                }
+            VStack(alignment: .leading, spacing: YYUI.s(2)) {
+                sourceHeader(source)
                 Text(detail(source)).font(YYUI.font(10)).foregroundStyle(YYColor.t3).lineLimit(1)
+                if compact, source.isSetUp, !reading.isEmpty {
+                    VStack(alignment: .leading, spacing: YYUI.s(1)) {
+                        ForEach(reading, id: \.self) {
+                            Label($0, systemImage: "pin.fill").labelStyle(PinLabelStyle(size: 9))
+                                .font(YYUI.font(10)).foregroundStyle(YYColor.t2).lineLimit(1)
+                        }
+                    }
+                    .padding(.top, YYUI.s(1))
+                }
             }
+            .layoutPriority(1)
             Spacer(minLength: YYUI.s(6))
-            VStack(alignment: .trailing, spacing: YYUI.s(1)) {
-                let reading = VoiceBook.allCases.compactMap { b in b.current.flatMap { VoiceSource.of($0) == source ? "\(b.title) · \($0.name)" : nil } }
-                if !source.isSetUp {
-                    Text("未连接").font(YYUI.font(10.5)).foregroundStyle(YYColor.t2)
-                } else {
+            if !source.isSetUp {
+                Text("未连接").font(YYUI.font(10.5)).foregroundStyle(YYColor.t2).fixedSize()
+            } else if !compact, !reading.isEmpty {
+                VStack(alignment: .trailing, spacing: YYUI.s(1)) {
                     ForEach(reading, id: \.self) {
                         Label($0, systemImage: "pin.fill").labelStyle(PinLabelStyle(size: 9))
                             .font(YYUI.font(10)).foregroundStyle(YYColor.t2).lineLimit(1)
                     }
                 }
+                .frame(maxWidth: YYUI.s(150), alignment: .trailing)
             }
             Image(systemName: "chevron.right").font(YYUI.font(9, .semibold)).foregroundStyle(YYColor.t3)
         }
         .padding(.vertical, YYUI.s(8))
         .contentShape(.rect)
+    }
+
+    @ViewBuilder
+    private func sourceHeader(_ source: VoiceSource) -> some View {
+        let title = Text(source.title)
+            .font(YYUI.font(11.5, .medium))
+            .foregroundStyle(source == .mac ? YYColor.t2 : YYColor.t1)
+            .lineLimit(1)
+        let badge: (String, SettingsPill.Tone)? = switch source {
+        case .neural: (String(localized: "推荐"), .ok)
+        case .mac: (String(localized: "不推荐"), .warn)
+        case .cloud(let p): p.badge.map { ($0, p.isFreeOnline || p == .xiaomi ? .ok : .quiet) }
+        }
+        if let (label, tone) = badge {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: YYUI.s(5)) {
+                    title.fixedSize(horizontal: true, vertical: false)
+                    SettingsPill(label, tone: tone)
+                }
+                VStack(alignment: .leading, spacing: YYUI.s(2)) {
+                    title
+                    SettingsPill(label, tone: tone)
+                }
+            }
+        } else {
+            title
+        }
     }
 
     private func detail(_ source: VoiceSource) -> String {
@@ -157,25 +185,31 @@ struct PhoneListening: View {
 /// key, typed straight in.
 struct PhoneVoiceSourcePage: View {
     let source: VoiceSource
+    @State private var active: VoiceSource
     @State private var tick = 0
+
+    init(source: VoiceSource) {
+        self.source = source
+        _active = State(initialValue: source)
+    }
 
     var body: some View {
         let _ = tick
         Group {
-            if source.isSetUp {
-                VoiceSourcePage(source: source)
+            if active.isSetUp {
+                VoiceSourcePage(source: active)
                     .padding(.horizontal, 16)
                     .padding(.top, 6)
                     .padding(.bottom, 8)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            NavigationLink { PhoneSourceSettings(source: source) { tick &+= 1 } } label: {
+                            NavigationLink { PhoneSourceSettings(source: active) { tick &+= 1 } } label: {
                                 Image(systemName: "gearshape")
                             }
-                            .accessibilityLabel(Text("\(source.title) 的设置"))
+                            .accessibilityLabel(Text("\(active.title) 的设置"))
                         }
                     }
-            } else if case .cloud(let p) = source {
+            } else if case .cloud(let p) = active {
                 ScrollView {
                     PhoneCloudKey(provider: p) { tick &+= 1 }.padding(.top, YYUI.s(10))
                 }
@@ -184,12 +218,24 @@ struct PhoneVoiceSourcePage: View {
             }
         }
         // A Key that works: the voices take the key page's place, not in a blink.
-        .animation(YYMotion.standard, value: source.isSetUp)
+        .animation(YYMotion.standard, value: active.isSetUp)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(YYColor.bg)
-        .navigationTitle(source.title)
+        .navigationTitle(active.title)
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { ListeningFocus.shared.reload() }
+        .onAppear {
+            ListeningFocus.shared.source = active
+            ListeningFocus.shared.reload()
+        }
+        .onChange(of: source) { _, next in
+            active = next
+            ListeningFocus.shared.source = next
+        }
+        .onChange(of: ListeningFocus.shared.source) { _, next in
+            if let next, next != active {
+                withAnimation(YYMotion.standard) { active = next }
+            }
+        }
     }
 }
 
@@ -244,13 +290,13 @@ private struct PhoneSourceSettings: View {
                     PhoneCloudConnected(provider: p, changed: changed).padding(.horizontal, -16)
                     PanelDestructive(p.isFreeOnline ? String(localized: "隐藏 \(p.title)") : String(localized: "断开 \(p.title)")) { removing = true }
                         .confirmationDialog(p.isFreeOnline ? String(localized: "隐藏 \(p.title)？") : String(localized: "断开 \(p.title)？"), isPresented: $removing) {
-                            Button(p.isFreeOnline ? "隐藏" : "断开", role: .destructive) {
+                            Button(p.isFreeOnline ? String(localized: "隐藏") : String(localized: "断开"), role: .destructive) {
                                 p.remove()
                                 changed()
                                 dismiss()
                             }
                         } message: {
-                            Text(p.isFreeOnline ? "隐藏后可在「添加声音来源」重新开启。" : "将同时移除 API Key；使用该服务音色的书籍将切回本地音色。")
+                            Text(p.isFreeOnline ? String(localized: "隐藏后可在「添加声音来源」重新开启。") : String(localized: "将同时移除 API Key；使用该服务音色的书籍将切回本地音色。"))
                         }
                 }
             }
@@ -449,7 +495,7 @@ private struct PhoneCloudConnected: View {
                     if provider == .azure { PhoneRegionRow(region: $region) }
                 }
                 PanelButton(systemImage: "waveform.path.ecg", tint: YYColor.ok) {
-                    Text(provider.isLocal ? "刷新音色与状态" : "检查连接").foregroundStyle(YYColor.ok)
+                    Text(provider.isLocal ? String(localized: "刷新音色与状态") : String(localized: "检查连接")).foregroundStyle(YYColor.ok)
                     Spacer(minLength: 8)
                     switch check.phase {
                     case .idle: EmptyView()

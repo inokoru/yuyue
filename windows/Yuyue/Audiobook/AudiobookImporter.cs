@@ -271,10 +271,14 @@ public static class AudiobookImporter
                 : Path.GetFileNameWithoutExtension(ordered[0]);
         }
 
-        AudioMark[] marks = BuildCombinedChapterMarks(library, audioFiles);
+        var (marks, matchedEbook) = await Task.Run(() =>
+        {
+            var m = BuildCombinedChapterMarks(library, audioFiles);
+            var eb = FindMatchingShelfEbook(library, title);
+            return (m, eb);
+        });
 
         string[] authors = string.IsNullOrWhiteSpace(author) ? [] : [author];
-        var matchedEbook = FindMatchingShelfEbook(library, title);
 
         return new PendingAudiobookImport(audioFiles, names, title, authors, marks, cover, matchedEbook);
     }
@@ -302,7 +306,13 @@ public static class AudiobookImporter
             var summary = await Task.Run(() => library.Core.ImportAudiobook(import));
             if (pending.MatchedEbook is not null)
             {
-                try { library.Core.AudiobookPair(summary.Id, pending.MatchedEbook.Id); } catch { }
+                try
+                {
+                    library.Core.AudiobookPair(summary.Id, pending.MatchedEbook.Id);
+                    if (Yuyue.Speech.Aligner.IsInstalled(library.DataDir))
+                        library.AudiobookWork.Start(summary.Id, pending.MatchedEbook.Id, 0, autoDownloadModel: false);
+                }
+                catch { }
             }
             return summary;
         }
@@ -329,24 +339,71 @@ public static class AudiobookImporter
         byte[]? coverBytes = pending.Cover;
         bool pairWithEbook = pending.MatchedEbook is not null;
         bool hasEmbeddedMarks = pending.Marks.Length > 0;
+        bool confirmed = false;
+        ContentDialog? dlgRef = null;
 
-        var root = new StackPanel { Spacing = 12, Width = 420 };
+        var root = new StackPanel { Spacing = 12, Padding = new Thickness(18, 16, 18, 18) };
 
-        // Header: 64x64 cover + editable Title / Author / Length + 换封面
+        // Top bar (1:1 AudiobookImportSheet.swift:41-55): 导入有声书 | 取消 · 完成
+        var topBar = new Grid();
+        topBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        topBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        topBar.Children.Add(new TextBlock
+        {
+            Text = L10n.T("导入有声书"),
+            FontSize = 14,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush(p.T1),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+
+        var topActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, VerticalAlignment = VerticalAlignment.Center };
+        var cancelBtn = new Button
+        {
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(4, 2, 4, 2),
+            FontSize = 12,
+            Foreground = ThemeHelper.Brush(p.T2),
+            UseSystemFocusVisuals = false,
+            Content = L10n.T("取消"),
+        };
+        cancelBtn.Click += (_, _) => { confirmed = false; dlgRef?.Hide(); };
+
+        var doneBtn = new Button
+        {
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(4, 2, 4, 2),
+            FontSize = 12,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush(tint.Accent),
+            UseSystemFocusVisuals = false,
+            Content = L10n.T("完成"),
+        };
+        doneBtn.Click += (_, _) => { confirmed = true; dlgRef?.Hide(); };
+
+        topActions.Children.Add(cancelBtn);
+        topActions.Children.Add(doneBtn);
+        Grid.SetColumn(topActions, 1);
+        topBar.Children.Add(topActions);
+        root.Children.Add(topBar);
+
+        // Header: 64x64 cover + borderless Title / Author / Length + 换封面
         var headGrid = new Grid { ColumnSpacing = 12 };
-        headGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(68) });
+        headGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
         headGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         var coverImg = new Image { Stretch = Stretch.UniformToFill };
-        var coverFallback = YYIcons.Make("headphones", 22, ThemeHelper.Brush(p.T3));
+        var coverFallback = YYIcons.Make("headphones", 20, ThemeHelper.Brush(p.T3));
         var coverBox = new Border
         {
-            Width = 68,
-            Height = 68,
-            CornerRadius = new CornerRadius(9),
+            Width = 64,
+            Height = 64,
+            CornerRadius = new CornerRadius(8),
             Background = ThemeHelper.Brush(p.Inset),
             BorderBrush = ThemeHelper.Brush(p.Line),
-            BorderThickness = new Thickness(0.75),
+            BorderThickness = new Thickness(0.5),
             VerticalAlignment = VerticalAlignment.Top,
             Child = new Grid { Children = { coverFallback, coverImg } },
         };
@@ -374,48 +431,64 @@ public static class AudiobookImporter
         await RefreshCoverPreviewAsync();
         headGrid.Children.Add(coverBox);
 
-        var titleBox = new TextBox { Text = pending.Title, PlaceholderText = "书名", FontWeight = FontWeights.SemiBold, FontSize = 13 };
-        var authorBox = new TextBox { Text = string.Join("、", pending.Authors), PlaceholderText = "作者 / 演播（可选）", FontSize = 12 };
-        double totalSec = pending.Files.Sum(f => f.Seconds);
-        var metaRow = new Grid();
-        metaRow.Children.Add(new TextBlock
+        var titleBox = new TextBox
         {
-            Text = $"{pending.Files.Count} 个音频文件 · {FormatTotalLength(totalSec)}",
-            FontSize = 11,
+            Text = pending.Title,
+            PlaceholderText = L10n.T("书名"),
+            FontWeight = FontWeights.Bold,
+            FontSize = 13,
+            Foreground = ThemeHelper.Brush(p.T1),
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0, 1, 0, 1),
+            MinHeight = 22,
+        };
+        YYChrome.StripTextBoxChrome(titleBox);
+        var authorBox = new TextBox
+        {
+            Text = string.Join("、", pending.Authors),
+            PlaceholderText = L10n.T("作者"),
+            FontSize = 11.5,
+            Foreground = ThemeHelper.Brush(p.T2),
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0, 1, 0, 1),
+            MinHeight = 20,
+        };
+        YYChrome.StripTextBoxChrome(authorBox);
+        double totalSec = pending.Files.Sum(f => f.Seconds);
+        var lenTb = new TextBlock
+        {
+            Text = $"{pending.Files.Count} 个文件 · {FormatTotalLength(totalSec)}",
+            FontSize = 10.5,
             Foreground = ThemeHelper.Brush(p.T3),
-            VerticalAlignment = VerticalAlignment.Center,
-        });
+        };
         var changeCoverBtn = new Button
         {
             Background = new SolidColorBrush(Colors.Transparent),
             BorderThickness = new Thickness(0),
-            Padding = new Thickness(4, 2, 4, 2),
-            FontSize = 11,
+            Padding = new Thickness(0, 1, 4, 1),
+            MinHeight = 18,
+            FontSize = 10.5,
             FontWeight = FontWeights.SemiBold,
             Foreground = ThemeHelper.Brush(tint.Accent),
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Content = "换封面…",
+            HorizontalAlignment = HorizontalAlignment.Left,
+            UseSystemFocusVisuals = false,
+            Content = L10n.T("换封面"),
         };
         changeCoverBtn.Click += async (_, _) =>
         {
-            var picker = new FileOpenPicker { ViewMode = PickerViewMode.Thumbnail };
-            picker.FileTypeFilter.Add(".jpg");
-            picker.FileTypeFilter.Add(".jpeg");
-            picker.FileTypeFilter.Add(".png");
-            picker.FileTypeFilter.Add(".webp");
-            InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(ownerWindow));
-            var f = await picker.PickSingleFileAsync();
-            if (f is null) return;
+            string? path = await NativePickerHelper.PickSingleFileAsync(ownerWindow, [".jpg", ".jpeg", ".png", ".webp"], viewMode: PickerViewMode.Thumbnail);
+            if (string.IsNullOrEmpty(path)) return;
             try
             {
-                coverBytes = await File.ReadAllBytesAsync(f.Path);
+                coverBytes = await File.ReadAllBytesAsync(path);
                 await RefreshCoverPreviewAsync();
             }
             catch { }
         };
-        metaRow.Children.Add(changeCoverBtn);
 
-        var metaStack = new StackPanel { Spacing = 6, Children = { titleBox, authorBox, metaRow } };
+        var metaStack = new StackPanel { Spacing = 3, Children = { titleBox, authorBox, lenTb, changeCoverBtn } };
         Grid.SetColumn(metaStack, 1);
         headGrid.Children.Add(metaStack);
         root.Children.Add(headGrid);
@@ -564,19 +637,12 @@ public static class AudiobookImporter
             });
         }
 
-        var dlg = new ContentDialog
-        {
-            XamlRoot = xamlRoot,
-            Title = "导入有声书",
-            Content = root,
-            PrimaryButtonText = "完成",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary,
-        };
+        dlgRef = YYChrome.CreateMacSheet(xamlRoot, dark, 420, root, maxHeight: 680, tint: library.Prefs.Tint);
 
         try
         {
-            if (await dlg.ShowAsync() != ContentDialogResult.Primary) return null;
+            await dlgRef.ShowSafeAsync(library.Prefs.Tint);
+            if (!confirmed) return null;
 
             string finalTitle = string.IsNullOrWhiteSpace(titleBox.Text) ? pending.Title : titleBox.Text.Trim();
             string[] finalAuthors = authorBox.Text
@@ -588,9 +654,15 @@ public static class AudiobookImporter
 
             var finalImport = new AudioImport(pending.Files.ToArray(), finalTitle, finalAuthors, finalMarks, coverBytes);
             var imported = await Task.Run(() => library.Core.ImportAudiobook(finalImport));
-            if (pairWithEbook && pending.MatchedEbook is not null)
+            var matched = AudiobookImporter.FindMatchingShelfEbook(library, finalTitle) ?? pending.MatchedEbook;
+            if (pairWithEbook && matched is not null)
             {
-                try { library.Core.AudiobookPair(imported.Id, pending.MatchedEbook.Id); } catch { }
+                try
+                {
+                    library.Core.AudiobookPair(imported.Id, matched.Id);
+                    library.AudiobookWork.Start(imported.Id, matched.Id, 0, autoDownloadModel: true);
+                }
+                catch { }
             }
             return imported;
         }

@@ -128,4 +128,47 @@ public sealed class ReleaseReadinessTests : IDisposable
         Assert.Equal(("settings", "storage"), App.ParseDeepLinkUri("yuyue://settings/storage"));
         Assert.Equal(("tab", "podcasts"), App.ParseDeepLinkUri("yuyue://tab/podcasts"));
     }
+
+    [Fact]
+    public void WindowDpiMath_RoundTripsWithoutBallooningAcrossHiDpiScales()
+    {
+        // 150% DPI (144): physical 1620x1110 must convert back to 1080x740 DIPs, not stay 1620x1110!
+        Assert.Equal((1080, 740), Yuyue.Design.ThemeHelper.PhysicalSizeToDip(1620, 1110, 144));
+        // 200% DPI (192): physical 2080x1440 -> 1040x720 DIPs
+        Assert.Equal((1040, 720), Yuyue.Design.ThemeHelper.PhysicalSizeToDip(2080, 1440, 192));
+        // 100% DPI (96): unchanged
+        Assert.Equal((1020, 640), Yuyue.Design.ThemeHelper.PhysicalSizeToDip(1020, 640, 96));
+    }
+
+    [Fact]
+    public void PaperAppearance_PerBookOverride_DoesNotMutateGlobalPrefs()
+    {
+        using var lib = new LibraryService(_tempDir);
+        lib.Prefs.PaperFollowAppearance = true;
+        lib.Prefs.PaperLightId = "kami";
+        lib.Prefs.PaperDarkId = "kaminight";
+
+        var baseSettings = lib.GetReaderSettings();
+        bool changed = PaperAppearance.PickPreset(lib, Paper.Dark, baseSettings, out var updated, appDarkOverride: false, perBookOverride: true);
+
+        Assert.True(changed);
+        Assert.Equal(Paper.Dark, updated.Paper);
+        Assert.Null(updated.CustomPaper);
+        // Global appearance prefs must remain completely untouched!
+        Assert.True(lib.Prefs.PaperFollowAppearance);
+        Assert.Equal("kami", lib.Prefs.PaperLightId);
+        Assert.Equal("kaminight", lib.Prefs.PaperDarkId);
+    }
+
+    [Fact]
+    public void ShelfAndKeptBooks_PartitionsPaperRecordsFromActiveShelf()
+    {
+        using var lib = new LibraryService(_tempDir);
+        var paper = lib.Core.AddRecordBook("纸上山河", ["林徽因"], ReadingStatus.Reading);
+        Assert.True(paper.Record);
+
+        var (shelf, kept) = lib.GetShelfAndKeptBooks();
+        Assert.DoesNotContain(shelf, b => b.Id == paper.Id);
+        Assert.Contains(kept, b => b.Id == paper.Id);
+    }
 }

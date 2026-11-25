@@ -708,11 +708,14 @@ private fun Sample(s: ReaderSettings, preview: CustomPaper?, eink: Boolean, modi
     val paper = if (eink) EInk.paper else (preview?.let { customTokens(it) } ?: resolved.tokens)
     val size = (s.fontSize * 0.8).roundToInt().toFloat()
     val lineHeight = (s.lineHeight?.toFloat() ?: paper.text.lineHeight).coerceAtLeast(1.3f)
-    val indent = if (s.indent ?: true) "　　" else ""
+    val indent = if ((s.indent ?: true) && app.yuyue.L10n.chinese) "　　" else ""
     val texture = if (eink) PaperTexture.NONE else (preview?.texture ?: resolved.texture)
+    val sampleBorder = if (paper.isDark) {
+        if (YY.dark) Color.White.copy(alpha = 0.14f) else Color.Transparent
+    } else YY.c.line
     Box(
         modifier.fillMaxWidth().clip(RoundedCornerShape(YY.s(12))).background(paper.bg)
-            .border(0.5.dp, if (paper.isDark) Color.Transparent else YY.c.line, RoundedCornerShape(YY.s(12))),
+            .border(0.5.dp, sampleBorder, RoundedCornerShape(YY.s(12))),
     ) {
         TextureLayer(texture, paper.isDark, Modifier.matchParentSize())
         Column(Modifier.padding(horizontal = YY.s(14), vertical = YY.s(12)), verticalArrangement = Arrangement.spacedBy(YY.s(8))) {
@@ -746,9 +749,12 @@ private fun PaperChoice(
         modifier.settingsTile(on, YY.c.line, YY.tint.accent).then(tap).padding(start = YY.s(6), end = YY.s(6), top = YY.s(9), bottom = YY.s(7)),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(YY.s(6)),
     ) {
+        val swatchBorder = if (paper.isDark) {
+            if (YY.dark) Color.White.copy(alpha = 0.14f) else Color.Transparent
+        } else Color.Black.copy(alpha = 0.12f)
         Box(
             Modifier.fillMaxWidth().height(YY.s(30)).clip(RoundedCornerShape(5.dp)).background(paper.bg)
-                .border(0.5.dp, if (paper.isDark) Color.Transparent else Color.Black.copy(alpha = 0.12f), RoundedCornerShape(5.dp)),
+                .border(0.5.dp, swatchBorder, RoundedCornerShape(5.dp)),
         ) {
             TextureLayer(texture, paper.isDark, Modifier.matchParentSize())
             Column(Modifier.align(Alignment.CenterStart).padding(start = YY.s(9)), verticalArrangement = Arrangement.spacedBy(YY.s(4))) {

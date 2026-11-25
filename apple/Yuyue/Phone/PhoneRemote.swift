@@ -160,7 +160,7 @@ struct PhoneSourceForm: View {
             library.sources.save(made, password: password)
             dismiss()
         } catch {
-            problem = error.localizedDescription
+            problem = remoteErrorMessage(error)
         }
     }
 }
@@ -205,7 +205,7 @@ struct PhoneRemoteBrowser: View {
                     ProgressView().frame(maxWidth: .infinity, minHeight: 300)
                 }
                 if url == nil {
-                    YYNote(String(localized: "书库在“我的 › 书库来源”里添加，一次填好，以后在这里直接翻。"))
+                    YYNote(String(localized: "书库在“我的 › 通用 › 书库来源”里添加，一次填好，以后在这里直接翻。"))
                         .padding(.horizontal, YYUI.s(6))
                 }
             }
@@ -325,8 +325,9 @@ struct PhoneRemoteBrowser: View {
                         do {
                             let book = try await stream.take(files, title: entry.title, from: source, core: library.core, library: library)
                             _ = library.open(book, nil)
+                        } catch is CancellationError {
                         } catch {
-                            library.alert = String(localized: "《\(entry.title)》没拿下来：\(error.localizedDescription)")
+                            library.alert = String(localized: "《\(entry.title)》没拿下来：\(remoteErrorMessage(error))")
                         }
                     }
                 }
@@ -405,7 +406,7 @@ struct PhoneRemoteBrowser: View {
             Button {
                 Task {
                     do { try await library.sources.take(entry, from: source, into: library) } catch is CancellationError {} catch {
-                        library.alert = String(localized: "《\(entry.title)》没有下载下来：\(error.localizedDescription)")
+                        library.alert = String(localized: "《\(entry.title)》没有下载下来：\(remoteErrorMessage(error))")
                     }
                 }
             } label: {
@@ -436,7 +437,7 @@ struct PhoneRemoteBrowser: View {
                 feed = page
             }
         } catch {
-            problem = error.localizedDescription
+            problem = remoteErrorMessage(error)
         }
     }
 
@@ -449,7 +450,7 @@ struct PhoneRemoteBrowser: View {
             opened.search = opened.search ?? search
             if chip?.id == c.id { feed = opened }
         } catch {
-            problem = error.localizedDescription
+            problem = remoteErrorMessage(error)
         }
     }
 
@@ -473,9 +474,15 @@ struct PhoneRemoteBrowser: View {
             found.search = found.search ?? keep
             feed = found
         } catch {
-            problem = error.localizedDescription
+            problem = remoteErrorMessage(error)
         }
     }
+}
+
+/// Keeps `RemoteError`'s own message while translating CoreError / I/O failures through `Library.message(for:)`.
+private func remoteErrorMessage(_ error: Error) -> String {
+    if let remote = error as? RemoteError { return remote.localizedDescription }
+    return Library.message(for: error)
 }
 
 /// A search field only where the catalogue has a search.

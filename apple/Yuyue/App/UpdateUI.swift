@@ -20,7 +20,7 @@ struct YuyueMark: View {
                 .fill(Color(yy: YYRGBA(251, 250, 247)))
                 .shadow(color: Color(yy: YYRGBA(30, 28, 24, 0.14)), radius: s * 0.12, y: s * 0.08)
                 .overlay(RoundedRectangle(cornerRadius: s * 0.23, style: .continuous).strokeBorder(Color.black.opacity(0.10), lineWidth: 0.5))
-            Text("阅")
+            Text(verbatim: "阅")
                 .font(YYUI.serif(s * 0.46, .bold))
                 .foregroundStyle(Color(yy: YYRGBA(28, 29, 32)))
                 .offset(y: -s * 0.05)

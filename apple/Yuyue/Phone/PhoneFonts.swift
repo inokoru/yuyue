@@ -14,6 +14,7 @@ struct PhoneFontTiles: View {
     /// Shown inside 设置 › 阅读; false in the book's Aa card where the tiles stand on their own.
     var titled = true
     let choose: (String) -> Void
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var more = false
     @State private var confirming: YYConfirm?
     @State private var row = FontRow.ids()
@@ -31,7 +32,7 @@ struct PhoneFontTiles: View {
             if titled {
                 Text("字体").font(YYUI.font(11.5, .medium)).foregroundStyle(YYColor.t1)
             }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: YYUI.s(6)), count: 5), spacing: YYUI.s(6)) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: YYUI.s(6)), count: sizeClass == .compact ? 4 : 5), spacing: YYUI.s(6)) {
                 ForEach(ids, id: \.self) { tile($0) }
                 moreTile
             }
@@ -217,21 +218,59 @@ struct PhoneMoreFonts: View {
             .padding(.bottom, YYUI.s(8))
             ScrollView {
                 VStack(spacing: 0) {
-                    ForEach(ids, id: \.self) { row($0) }
-                    Button { importing = true } label: {
-                        HStack(spacing: YYUI.s(8)) {
-                            Image(systemName: "plus").font(YYUI.font(13, .light))
-                            Text("从文件添加…").font(YYUI.font(11.5))
-                            Spacer()
+                    if kind == .mine, ids.isEmpty {
+                        VStack(spacing: YYUI.s(6)) {
+                            Image(systemName: "textformat")
+                                .font(.system(size: YYUI.s(15), weight: .regular))
+                                .foregroundStyle(YYColor.t3)
+                                .frame(width: YYUI.s(36), height: YYUI.s(36))
+                                .background(YYColor.card, in: .rect(cornerRadius: YYUI.s(10)))
+                                .overlay(RoundedRectangle(cornerRadius: YYUI.s(10)).strokeBorder(YYColor.line, lineWidth: 0.5))
+                                .padding(.bottom, YYUI.s(2))
+                            Text("还没有自定义字体")
+                                .font(YYUI.font(12, .semibold))
+                                .foregroundStyle(YYColor.t1)
+                            Text("支持导入 .ttf、.otf 字体文件，仅保存在本机。")
+                                .font(YYUI.font(10.5))
+                                .foregroundStyle(YYColor.t3)
+                                .multilineTextAlignment(.center)
+                                .lineSpacing(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button { importing = true } label: {
+                                HStack(spacing: YYUI.s(6)) {
+                                    Image(systemName: "plus").font(YYUI.font(11.5, .medium))
+                                    Text("从文件添加…").font(YYUI.font(11.5, .medium))
+                                }
+                                .foregroundStyle(YYColor.t1)
+                                .padding(.horizontal, YYUI.s(14))
+                                .frame(height: YYUI.s(32))
+                                .background(YYColor.card, in: .capsule)
+                                .overlay(Capsule().strokeBorder(YYColor.line, lineWidth: 0.5))
+                            }
+                            .buttonStyle(YYPressStyle(scale: 0.96))
+                            .padding(.top, YYUI.s(8))
                         }
-                        .foregroundStyle(YYColor.t2)
-                        .padding(.horizontal, YYUI.s(10)).frame(minHeight: YYUI.s(40))
-                        .contentShape(.rect)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, YYUI.s(20))
+                        .padding(.vertical, YYUI.s(28))
+                    } else {
+                        ForEach(ids, id: \.self) { row($0) }
+                        Button { importing = true } label: {
+                            HStack(spacing: YYUI.s(8)) {
+                                Image(systemName: "plus").font(YYUI.font(13, .light))
+                                Text("从文件添加…").font(YYUI.font(11.5))
+                                Spacer()
+                            }
+                            .foregroundStyle(YYColor.t2)
+                            .padding(.horizontal, YYUI.s(10)).frame(minHeight: YYUI.s(40))
+                            .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                     if failed {
                         Text("这个文件不是能用的字体").font(YYUI.font(10)).foregroundStyle(YYColor.danger)
-                            .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, YYUI.s(10))
+                            .frame(maxWidth: .infinity, alignment: kind == .mine && ids.isEmpty ? .center : .leading)
+                            .padding(.horizontal, YYUI.s(10))
                     }
                 }
                 .padding(.horizontal, -YYUI.s(6))

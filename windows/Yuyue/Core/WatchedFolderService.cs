@@ -125,10 +125,10 @@ public sealed class WatchedFolderService : IDisposable
             // Ensure file isn't still locked by browser/downloader
             await using (var probe = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read)) { }
 
-            if (isAudio)
-                await AudiobookImporter.ImportFilesAsync(_library, [fullPath]);
-            else
-                await _library.ImportBookWithExtrasAsync(fullPath);
+            BookSummary imported = isAudio
+                ? await AudiobookImporter.ImportFilesAsync(_library, [fullPath])
+                : await _library.ImportBookWithExtrasAsync(fullPath);
+            _library.Analytics.TrackBookImported(imported.Format.ToString(), "other", fullPath);
 
             SaveFingerprints(_seenStorePath, _seenFingerprints);
             Imported?.Invoke();

@@ -567,15 +567,18 @@ internal fun PaperTile(tokens: YYPaper, texture: PaperTexture, name: String, on:
         modifier.width(60.dp).semantics { selected = on },
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        val tileBorder = if (tokens.isDark) {
+            if (YY.dark) Color.White.copy(alpha = 0.14f) else Color.Transparent
+        } else YY.c.line
         Box(
             Modifier.fillMaxWidth().height(height.dp)
                 .border(if (on) 1.5.dp else 0.dp, if (on) YY.c.t1 else Color.Transparent, RoundedCornerShape(12.dp)).padding(if (on) 3.dp else 0.dp)
                 .clip(RoundedCornerShape(10.dp)).background(tokens.bg)
-                .border(0.5.dp, if (tokens.isDark) Color.Transparent else YY.c.line, RoundedCornerShape(10.dp)),
+                .border(0.5.dp, tileBorder, RoundedCornerShape(10.dp)),
             contentAlignment = Alignment.Center,
         ) {
             TextureLayer(texture, tokens.isDark, Modifier.fillMaxSize())
-            Text("文", fontFamily = FontFamily.Serif, fontSize = 16.sp, color = tokens.ink)
+            Text(t("文"), fontFamily = FontFamily.Serif, fontSize = 16.sp, color = tokens.ink, maxLines = 1, softWrap = false)
         }
         // 52 wide: a longer English name (Letterpress) gets smaller, and only then …
         androidx.compose.foundation.text.BasicText(
@@ -723,7 +726,8 @@ fun PaperEditor(
                 Box(
                     Modifier.padding(start = 6.dp).size(40.dp, 30.dp)
                         .border(if (on) 1.5.dp else 0.dp, if (on) YY.c.t1 else Color.Transparent, RoundedCornerShape(9.dp)).padding(if (on) 2.5.dp else 0.dp)
-                        .clip(RoundedCornerShape(7.dp)).background(hexColor(colors.bg)).border(0.5.dp, Color.Black.copy(alpha = 0.14f), RoundedCornerShape(7.dp))
+                        .clip(RoundedCornerShape(7.dp)).background(hexColor(colors.bg))
+                        .border(0.5.dp, if (colors.dark && YY.dark) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.14f), RoundedCornerShape(7.dp))
                         .clickable { set(draft.copy(texture = tx)) }
                         .semantics { contentDescription = tx.title; selected = on },
                 ) { TextureLayer(tx, colors.dark, Modifier.fillMaxSize()) }
@@ -741,7 +745,8 @@ fun PaperEditor(
                 Box(
                     Modifier.padding(start = 6.dp).size(30.dp)
                         .border(if (on) 1.5.dp else 0.dp, if (on) YY.c.t1 else Color.Transparent, CircleShape).padding(2.5.dp)
-                        .clip(CircleShape).background(hexColor(colors.bg)).border(0.5.dp, Color.Black.copy(alpha = 0.18f), CircleShape)
+                        .clip(CircleShape).background(hexColor(colors.bg))
+                        .border(0.5.dp, if (colors.dark && YY.dark) Color.White.copy(alpha = 0.18f) else Color.Black.copy(alpha = 0.18f), CircleShape)
                         .clickable { set(draft.copy(ink = ink.color)) }
                         .semantics { contentDescription = ink.name; selected = on },
                     contentAlignment = Alignment.Center,

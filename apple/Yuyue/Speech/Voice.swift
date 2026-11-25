@@ -121,12 +121,25 @@ enum Voices {
             []
         }
         return Catalog(
-            recommended: recommended,
+            recommended: recommended.map { state in
+                if case .ready(let list) = state { return .ready(unique(list)) }
+                return state
+            },
             clones: clones,
-            bookCards: bookCards,
-            cloud: CloudVoice.all().filter { $0.speaks(tag) },
+            bookCards: unique(bookCards),
+            cloud: unique(CloudVoice.all().filter { $0.speaks(tag) }),
             system: SystemVoice.all(for: tag)
         )
+    }
+
+    static func unique(_ voices: [any Voice]) -> [any Voice] {
+        var seen = Set<String>()
+        return voices.filter { seen.insert($0.id).inserted }
+    }
+
+    static func unique<V: Voice>(_ voices: [V]) -> [V] {
+        var seen = Set<String>()
+        return voices.filter { seen.insert($0.id).inserted }
     }
 
     static func all(for tag: String) -> [any Voice] {
@@ -147,7 +160,7 @@ enum Voices {
         out += cat.bookCards.filter { $0.speaks(tag) }
         out += cat.cloud
         out += cat.system
-        return out
+        return unique(out)
     }
 
     static func find(_ id: String) -> (any Voice)? {

@@ -24,6 +24,10 @@ packages:
   SnapshotTesting:
     url: https://github.com/pointfreeco/swift-snapshot-testing
     exactVersion: 1.19.7
+  # 匿名使用统计 (AirTraffic / PostHog; pinned to 3.98.2 for /batch compatibility and Swift 6.0).
+  PostHog:
+    url: https://github.com/PostHog/posthog-ios
+    exactVersion: 3.98.2
 
 settings:
   base:
@@ -37,8 +41,9 @@ settings:
     SWIFT_APPROACHABLE_CONCURRENCY: YES
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     DEAD_CODE_STRIPPING: YES
-    # 关于 里那个"阅"字标：AppIcon 由脚本按同一套比例生成（见 docs/dev/app-icon.md）。
+    # 关于 里那个"阅"字标：主图标与 5 枚备选图标由脚本按同一套比例生成（见 docs/dev/app-icon.md）。
     ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
 
 targets:
   Yuyue:
@@ -64,6 +69,8 @@ targets:
         product: OnnxRuntimeC
       - package: Sparkle
         destinationFilters: [macOS]
+      - package: PostHog
+        product: PostHog
     scheme: {}
     info:
       path: Yuyue/Info.plist
@@ -77,6 +84,8 @@ targets:
         LSApplicationCategoryType: public.app-category.books
         # 同步 · Google Drive: the iOS OAuth client of 语阅's Google Cloud project, once registered.
         YYGoogleClientID: $(GOOGLE_CLIENT_ID)
+        # AirFeedback App Attest (iOS): 10-char Apple Team ID from DEVELOPMENT_TEAM when signed.
+        YuyueAppleTeamID: $(DEVELOPMENT_TEAM)
         # 反馈: empty until Feedback.local.xcconfig fills it in. Not committed.
         YuyueFeedbackTopic: $(YUYUE_FEEDBACK_TOPIC)
         ITSAppUsesNonExemptEncryption: false

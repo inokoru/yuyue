@@ -580,6 +580,16 @@
         }
       }
     },
+    "%@ · 推荐" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · Recommended"
+          }
+        }
+      }
+    },
     "%@ · 本书出现 %lld 次" : {
       "localizations" : {
         "en" : {
@@ -675,6 +685,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ · Notes.md"
+          }
+        }
+      }
+    },
+    "%@ · 系统语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · System Voices"
           }
         }
       }
@@ -1284,16 +1304,16 @@
     },
     "%@占用你的 %@空间；播客单集体积很小，始终同步" : {
       "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$@占用你的 %2$@空间；播客单集体积很小，始终同步"
-          }
-        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$@Uses your %2$@space; podcast episodes are tiny and always sync"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@占用你的 %2$@空间；播客单集体积很小，始终同步"
           }
         }
       }
@@ -1513,12 +1533,52 @@
         }
       }
     },
+    "%@（不推荐 · 仅断网兜底）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ (Not recommended · Offline fallback only)"
+          }
+        }
+      }
+    },
+    "%@（不推荐）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ (Not recommended)"
+          }
+        }
+      }
+    },
+    "%@（免 Key）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ (No key)"
+          }
+        }
+      }
+    },
     "%@（带笔记）.epub" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ (with notes).epub"
+          }
+        }
+      }
+    },
+    "%@（推荐）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ (Recommended)"
           }
         }
       }
@@ -1734,6 +1794,22 @@
         }
       }
     },
+    "%lld 万字 · 约 %lld 万" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld0K chars · ~%2$lld0K tokens"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld 万字 · 约 %2$lld 万"
+          }
+        }
+      }
+    },
     "%lld 个" : {
       "localizations" : {
         "en" : {
@@ -1762,6 +1838,108 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$lld · %2$lld books"
+          }
+        }
+      }
+    },
+    "%lld 个中英自然音色 · 克隆 %lld 个 · 免费免联网" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@n@ · %2$lld cloned · Free, offline"
+          },
+          "substitutions" : {
+            "n" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voice"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voices"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld 个中英自然音色 · 克隆 %2$lld 个 · 免费免联网"
+          }
+        }
+      }
+    },
+    "%lld 个中英自然音色 · 跨端轻量离线" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@n@ · Lightweight, offline"
+          },
+          "substitutions" : {
+            "n" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voice"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voices"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld 个中英音色 · 免注册开箱即听，已读缓存在本机" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@n@ · Ready to play, cached locally"
+          },
+          "substitutions" : {
+            "n" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voice"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voices"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -2087,12 +2265,6 @@
     },
     "%lld 个音色 · %@" : {
       "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$lld 个音色 · %2$@"
-          }
-        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
@@ -2119,6 +2291,12 @@
                 }
               }
             }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld 个音色 · %2$@"
           }
         }
       }
@@ -2155,12 +2333,108 @@
         }
       }
     },
+    "%lld 个音色 · 本地免费免联网" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@n@ · Free, offline"
+          },
+          "substitutions" : {
+            "n" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voice"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voices"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld 个音色 · 本地免费，无需联网" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%#@n@ · Free, offline"
+          },
+          "substitutions" : {
+            "n" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voice"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voices"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld 个音色 · 机械音明显，仅作断网兜底" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@n@ · Robotic, offline fallback only"
+          },
+          "substitutions" : {
+            "n" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voice"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg voices"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld 个音色 · 跨端轻量离线，无需联网" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@n@ · Lightweight, works offline"
           },
           "substitutions" : {
             "n" : {
@@ -2479,26 +2753,6 @@
             "value" : "%#@n@ · %#@b@"
           },
           "substitutions" : {
-            "n" : {
-              "argNum" : 1,
-              "formatSpecifier" : "lld",
-              "variations" : {
-                "plural" : {
-                  "one" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg place"
-                    }
-                  },
-                  "other" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg places"
-                    }
-                  }
-                }
-              }
-            },
             "b" : {
               "argNum" : 2,
               "formatSpecifier" : "lld",
@@ -2514,6 +2768,26 @@
                     "stringUnit" : {
                       "state" : "translated",
                       "value" : "%arg books"
+                    }
+                  }
+                }
+              }
+            },
+            "n" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg place"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg places"
                     }
                   }
                 }
@@ -3079,26 +3353,6 @@
             "value" : "%#@n@ · from %#@b@"
           },
           "substitutions" : {
-            "n" : {
-              "argNum" : 1,
-              "formatSpecifier" : "lld",
-              "variations" : {
-                "plural" : {
-                  "one" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg item"
-                    }
-                  },
-                  "other" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg items"
-                    }
-                  }
-                }
-              }
-            },
             "b" : {
               "argNum" : 2,
               "formatSpecifier" : "lld",
@@ -3114,6 +3368,26 @@
                     "stringUnit" : {
                       "state" : "translated",
                       "value" : "%arg books"
+                    }
+                  }
+                }
+              }
+            },
+            "n" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg item"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg items"
                     }
                   }
                 }
@@ -6318,6 +6592,16 @@
         }
       }
     },
+    "「%@」太大，压缩后仍超过 8 MB。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” is still over 8 MB after compression."
+          }
+        }
+      }
+    },
     "「%@」读不出来。" : {
       "localizations" : {
         "en" : {
@@ -6475,6 +6759,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Download"
+          }
+        }
+      }
+    },
+    "一键下载 Kokoro 离线语音（%lld MB）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download Kokoro Offline Voice (%lld MB)"
+          }
+        }
+      }
+    },
+    "一键下载（%lld MB）· 跨端离线自然语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download (%lld MB) · Natural offline voices"
           }
         }
       }
@@ -6867,6 +7171,16 @@
         }
       }
     },
+    "下好后将自动启用「%@」· 下载期间可先听在线自然语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Will switch to “%@” once downloaded · Listen with Free Online Voices meanwhile"
+          }
+        }
+      }
+    },
     "下好后核对签名，换掉语阅，再打开。正在听的会停一下，进度还在。" : {
       "localizations" : {
         "en" : {
@@ -6928,12 +7242,52 @@
         }
       }
     },
+    "下载 Kokoro 离线语音（%lld MB）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download Kokoro Offline Voice (%lld MB)"
+          }
+        }
+      }
+    },
+    "下载 Kokoro 跨端轻量语音 · 约 %lld MB" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download Kokoro Offline Voice · ~%lld MB"
+          }
+        }
+      }
+    },
     "下载《%@》" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Download %@"
+          }
+        }
+      }
+    },
+    "下载中 %lld%% · 下好后自动启用" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloading %lld%% · Switches when ready"
+          }
+        }
+      }
+    },
+    "下载中 %lld%% · 点此预约选用" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloading %lld%% · Tap to select when ready"
           }
         }
       }
@@ -7836,6 +8190,16 @@
         }
       }
     },
+    "主动提交的反馈和截图仅发给开发者，不会公开，也不收集邮箱；应用意外闪退时会在下次启动自动上报匿名崩溃堆栈和基础设备信息，用于排查修复，不关联个人身份。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Feedback and screenshots you submit are sent privately to the developer, never published, and no email is collected. If the app crashes unexpectedly, an anonymous crash stack trace and basic device info are automatically sent on the next launch to help diagnose and fix issues, without being linked to your identity."
+          }
+        }
+      }
+    },
     "主题色" : {
       "localizations" : {
         "en" : {
@@ -8324,6 +8688,26 @@
         }
       }
     },
+    "书库仅存本机 · 可关匿名统计" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On device · Opt-out analytics"
+          }
+        }
+      }
+    },
+    "书库仅存本机，不含身份与广告" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Library stays on device—no accounts, no ads"
+          }
+        }
+      }
+    },
     "书库回了一个错误（%lld），过一会儿再试" : {
       "localizations" : {
         "en" : {
@@ -8340,6 +8724,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Add libraries in Me › Library Sources. Set one up once, then browse it here."
+          }
+        }
+      }
+    },
+    "书库在“我的 › 通用 › 书库来源”里添加，一次填好，以后在这里直接翻。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add libraries in Me › General › Library Sources. Set one up once, then browse it here."
           }
         }
       }
@@ -9149,6 +9543,16 @@
         }
       }
     },
+    "仅发给开发者，不会公开" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sent privately to the developer, never published"
+          }
+        }
+      }
+    },
     "仅在 Wi‑Fi 下传输，占用你的网盘空间；播客单集体积很小，始终同步" : {
       "localizations" : {
         "en" : {
@@ -9235,6 +9639,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vocabulary list words only"
+          }
+        }
+      }
+    },
+    "仅记录功能使用形态，不关联身份，绝不收集书名、笔记或搜索词" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Records feature usage shapes only, with no personal identity—never book titles, notes, or search terms."
           }
         }
       }
@@ -9709,6 +10123,16 @@
         }
       }
     },
+    "从相册选图" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose from Photos"
+          }
+        }
+      }
+    },
     "从这句读" : {
       "localizations" : {
         "en" : {
@@ -9724,7 +10148,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Listen from here"
+            "value" : "Listen"
           }
         }
       }
@@ -9990,6 +10414,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Soft"
+          }
+        }
+      }
+    },
+    "余 %lld 句未写明说话人" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld line without a named speaker"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld lines without a named speaker"
+                }
+              }
+            }
           }
         }
       }
@@ -11176,6 +11622,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Free online voices send the sentence being read to the online speech service. Cloud voices you configure and note exports (Notion, flomo, Xinzhi) go online only when you enable them with your own key or webhook, sending sentences or notes directly to that service. Received audio stays on this device."
+          }
+        }
+      }
+    },
+    "免费，书库与笔记留在本地，没有账号与广告。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Free. Your library and notes stay on device—no accounts, no ads."
           }
         }
       }
@@ -13251,6 +13707,16 @@
         }
       }
     },
+    "刷新音色与状态" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh voices & status"
+          }
+        }
+      }
+    },
     "前往 GitHub 反馈" : {
       "localizations" : {
         "en" : {
@@ -13648,6 +14114,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Region"
+          }
+        }
+      }
+    },
+    "匿名使用统计" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anonymous Usage Analytics"
+          }
+        }
+      }
+    },
+    "匿名使用统计：默认开启，仅记录功能使用形态（如导入格式、界面浏览、朗读与音频功能使用），不关联个人身份，绝不收集书名、作者、文件名、笔记、划线、搜索词、网址或邮箱；随时可以在「我的 › 关于」关闭。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anonymous usage analytics: enabled by default to record usage shapes only (such as import formats, screen visits, and speech or audio feature usage) without personal identity. Book titles, authors, filenames, notes, highlights, search terms, URLs, and emails are never collected. You can turn this off anytime in Me › About."
           }
         }
       }
@@ -14356,6 +14842,16 @@
         }
       }
     },
+    "反馈内容" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Feedback message"
+          }
+        }
+      }
+    },
     "反馈服务现在太忙，过一会儿再试。" : {
       "localizations" : {
         "en" : {
@@ -14513,6 +15009,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Send ↩"
+          }
+        }
+      }
+    },
+    "发送给开发者" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send to Developer"
           }
         }
       }
@@ -14850,6 +15356,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Summarizes only what you've read · Spoiler-free"
+          }
+        }
+      }
+    },
+    "只支持图片或截图，不支持上传普通文件。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only images and screenshots are supported; general files cannot be attached."
           }
         }
       }
@@ -15309,6 +15825,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Send notes, screenshots, or logs directly — no account needed"
+          }
+        }
+      }
+    },
+    "可附截图，无需注册账号" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Attach screenshots, no account needed"
           }
         }
       }
@@ -16554,6 +17080,36 @@
         }
       }
     },
+    "图片" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Image"
+          }
+        }
+      }
+    },
+    "图片 %lld/4" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Images %lld/4"
+          }
+        }
+      }
+    },
+    "图片太大，压缩后仍超过 8 MB。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Image is still over 8 MB after compression."
+          }
+        }
+      }
+    },
     "在 %lld 本书和 %lld 条笔记里搜" : {
       "localizations" : {
         "en" : {
@@ -17009,16 +17565,16 @@
     },
     "在学 %lld · 已掌握 %lld" : {
       "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "在学 %1$lld · 已掌握 %2$lld"
-          }
-        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$lld learning · %2$lld mastered"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "在学 %1$lld · 已掌握 %2$lld"
           }
         }
       }
@@ -18231,6 +18787,16 @@
         }
       }
     },
+    "如需回复，可发邮件至 " : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Need a reply? Email "
+          }
+        }
+      }
+    },
     "字" : {
       "localizations" : {
         "en" : {
@@ -18613,9 +19179,21 @@
     "定了这句，后面 %u 句也跟着定。" : {
       "localizations" : {
         "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Settling this sentence settles the next %u too."
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Setting this also sets %u following line."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Setting this also sets %u following lines."
+                }
+              }
+            }
           }
         }
       }
@@ -19801,16 +20379,16 @@
     },
     "已保存 · %@ %@" : {
       "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "已保存 · %1$@ %2$@"
-          }
-        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Saved · %1$@ %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "已保存 · %1$@ %2$@"
           }
         }
       }
@@ -20036,12 +20614,32 @@
         }
       }
     },
+    "已发出约 %@ 字" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sent about %@ characters"
+          }
+        }
+      }
+    },
     "已发出约 %lld 万字" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "About %lld0,000 characters sent"
+          }
+        }
+      }
+    },
+    "已发给开发者，谢谢" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sent to the developer, thank you"
           }
         }
       }
@@ -20261,12 +20859,6 @@
     },
     "已完成 %u / %u 章" : {
       "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "已完成 %1$u / %2$u 章"
-          }
-        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
@@ -20294,17 +20886,17 @@
               }
             }
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "已完成 %1$u / %2$u 章"
+          }
         }
       }
     },
     "已完成 %u / %u 章 · 来自「%@」" : {
       "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "已完成 %1$u / %2$u 章 · 来自「%3$@」"
-          }
-        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
@@ -20331,6 +20923,12 @@
                 }
               }
             }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "已完成 %1$u / %2$u 章 · 来自「%3$@」"
           }
         }
       }
@@ -20806,6 +21404,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Subscribed to “%@” — latest episode added to your desk"
+          }
+        }
+      }
+    },
+    "已认出 %lld / %lld 句" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cast %1$lld / %2$lld lines"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "已认出 %1$lld / %2$lld 句"
+          }
+        }
+      }
+    },
+    "已认出 %lld / %lld 句 · 轻量模型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cast %1$lld / %2$lld lines · Lightweight model"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "已认出 %1$lld / %2$lld 句 · 轻量模型"
           }
         }
       }
@@ -21355,6 +21985,16 @@
         }
       }
     },
+    "应用图标" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App Icon"
+          }
+        }
+      }
+    },
     "应用密码" : {
       "localizations" : {
         "en" : {
@@ -21866,6 +22506,26 @@
         }
       }
     },
+    "当前正在使用的应用图标" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Current app icon"
+          }
+        }
+      }
+    },
+    "当前没有网络或服务暂时不可用，内容和图片已保存在草稿里，稍后再点发送即可。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No internet connection or service temporarily unavailable. Your text and images are saved in your draft—try sending again later."
+          }
+        }
+      }
+    },
     "当前版本" : {
       "localizations" : {
         "en" : {
@@ -22281,6 +22941,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Not Downloaded"
+          }
+        }
+      }
+    },
+    "待下载 · %lld MB" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not downloaded · %lld MB"
           }
         }
       }
@@ -22930,7 +23600,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Braving the bitter cold, I returned to my hometown over two thousand li away, after twenty years apart."
+            "value" : "Braving the bitter cold, I travelled more than seven hundred miles back to the old home I had left over twenty years before."
           }
         }
       }
@@ -23106,14 +23776,30 @@
         }
       }
     },
+    "截至当前共有 %lld 句待确认" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld line so far needs confirmation"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld lines so far need confirmation"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "截至当前共有 %lld 句待确认，逐句确认约需 %lld 分钟。" : {
       "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "截至当前共有 %1$lld 句待确认，逐句确认约需 %2$lld 分钟。"
-          }
-        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
@@ -23140,6 +23826,12 @@
                 }
               }
             }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "截至当前共有 %1$lld 句待确认，逐句确认约需 %2$lld 分钟。"
           }
         }
       }
@@ -23252,6 +23944,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Open"
+          }
+        }
+      }
+    },
+    "打开 %@ 后即可使用 · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open %1$@ to use · %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "打开 %1$@ 后即可使用 · %2$@"
           }
         }
       }
@@ -25357,6 +26065,16 @@
         }
       }
     },
+    "支持导入 .ttf、.otf 字体文件，仅保存在本机。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import .ttf or .otf font files. They stay on this device."
+          }
+        }
+      }
+    },
     "支持小宇宙、Apple Podcasts、单集网页或音频直链" : {
       "localizations" : {
         "en" : {
@@ -26570,6 +27288,16 @@
         }
       }
     },
+    "时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It was the dead of winter, and as I drew near, the weather turned bleak and overcast; a cold wind whistled through the boat's cabin. Peering out through a crack in the awning, beneath a sallow sky, I saw several desolate villages scattered near and far, without a sign of life."
+          }
+        }
+      }
+    },
     "时长" : {
       "localizations" : {
         "en" : {
@@ -27013,12 +27741,32 @@
         }
       }
     },
+    "暂时无法更换图标，请稍后再试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't change the icon right now. Try again later."
+          }
+        }
+      }
+    },
     "暖纸" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Paper"
+          }
+        }
+      }
+    },
+    "暗夜" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Night"
           }
         }
       }
@@ -27276,6 +28024,36 @@
         }
       }
     },
+    "最多 4 张图" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Up to 4 images"
+          }
+        }
+      }
+    },
+    "最多 4 张图片。也可以拖进来，或者 ⌘V 粘贴" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Up to 4 images. You can also drag and drop, or press ⌘V to paste."
+          }
+        }
+      }
+    },
+    "最多添加 4 张图片。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can attach up to 4 images."
+          }
+        }
+      }
+    },
     "最快最便宜，查词够用" : {
       "localizations" : {
         "en" : {
@@ -27348,12 +28126,6 @@
     },
     "最近删除 · %lld 本（%@）" : {
       "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "最近删除 · %1$lld 本（%2$@）"
-          }
-        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
@@ -27380,6 +28152,12 @@
                 }
               }
             }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "最近删除 · %1$lld 本（%2$@）"
           }
         }
       }
@@ -28194,16 +28972,16 @@
     },
     "本%@约剩 %lld 分钟" : {
       "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "本%1$@约剩 %2$lld 分钟"
-          }
-        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "About %2$lld min left in this %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "本%1$@约剩 %2$lld 分钟"
           }
         }
       }
@@ -28648,6 +29426,16 @@
         }
       }
     },
+    "本机自动发现" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detected locally"
+          }
+        }
+      }
+    },
     "本机若启动了 VoiceStudio 或 Voicebox 会自动出现在列表中。云端语音使用你自己的 API Key，已合成的句子缓存在本机，重听不重复计费。" : {
       "localizations" : {
         "en" : {
@@ -28678,6 +29466,26 @@
         }
       }
     },
+    "本机运行中" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Running locally"
+          }
+        }
+      }
+    },
+    "本次不附带" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not included this time"
+          }
+        }
+      }
+    },
     "本章 %lld%% · 还剩 %lld 分钟" : {
       "localizations" : {
         "en" : {
@@ -28690,6 +29498,22 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "本章 %1$lld%% · 还剩 %2$lld 分钟"
+          }
+        }
+      }
+    },
+    "本章台词 · %lld / %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chapter lines · %1$lld / %2$lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "本章台词 · %1$lld / %2$lld"
           }
         }
       }
@@ -28947,6 +29771,16 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "松手添加图片" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drop to add images"
           }
         }
       }
@@ -29715,6 +30549,16 @@
         }
       }
     },
+    "正在下载 %lld%% · 下载期间可先听在线自然语音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloading %lld%% · Listen online meanwhile"
+          }
+        }
+      }
+    },
     "正在下载 %lld%% · 约 3.2 GB" : {
       "localizations" : {
         "en" : {
@@ -29737,16 +30581,36 @@
     },
     "正在下载「%@」，暂以%@预览" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloading “%1$@”; previewing in %2$@"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "new",
             "value" : "正在下载「%1$@」，暂以%2$@预览"
           }
-        },
+        }
+      }
+    },
+    "正在下载离线语音 %lld%%" : {
+      "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Downloading “%1$@”; previewing in %2$@"
+            "value" : "Downloading offline voices %lld%%"
+          }
+        }
+      }
+    },
+    "正在下载轻量离线语音 %lld%% · 免费免联网" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloading offline voices %lld%% · Free, offline"
           }
         }
       }
@@ -29869,6 +30733,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Preparing better voices %lld%%"
+          }
+        }
+      }
+    },
+    "正在准备离线语音 %lld%%" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing offline voices %lld%%"
           }
         }
       }
@@ -30189,6 +31063,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Gathering passages and highlights across the book…"
+          }
+        }
+      }
+    },
+    "正在更换图标" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Changing app icon"
           }
         }
       }
@@ -30533,6 +31417,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Composing…"
+          }
+        }
+      }
+    },
+    "正在重连 %@…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reconnecting %@…"
           }
         }
       }
@@ -31745,6 +32639,16 @@
         }
       }
     },
+    "没有账号，也没有广告" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No accounts, no ads"
+          }
+        }
+      }
+    },
     "没有账号，没有统计" : {
       "localizations" : {
         "en" : {
@@ -32276,6 +33180,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Add Quick Prompt"
+          }
+        }
+      }
+    },
+    "添加图片" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add images"
           }
         }
       }
@@ -32822,26 +33736,6 @@
             "value" : "Tapped %#@t@, %#@s@ settled"
           },
           "substitutions" : {
-            "t" : {
-              "argNum" : 1,
-              "formatSpecifier" : "lld",
-              "variations" : {
-                "plural" : {
-                  "one" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg time"
-                    }
-                  },
-                  "other" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg times"
-                    }
-                  }
-                }
-              }
-            },
             "s" : {
               "argNum" : 2,
               "formatSpecifier" : "lld",
@@ -32857,6 +33751,26 @@
                     "stringUnit" : {
                       "state" : "translated",
                       "value" : "%arg sentences"
+                    }
+                  }
+                }
+              }
+            },
+            "t" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg time"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg times"
                     }
                   }
                 }
@@ -32908,6 +33822,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bookmark any episode or subscribe to a show — episodes not on your desk rest quietly here."
+          }
+        }
+      }
+    },
+    "点击即可更换主屏幕图标" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to change your Home Screen icon"
           }
         }
       }
@@ -36369,6 +37293,16 @@
         }
       }
     },
+    "粘贴剪贴板图片" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paste from Clipboard"
+          }
+        }
+      }
+    },
     "粘贴单集链接或 RSS（免订阅直听）" : {
       "localizations" : {
         "en" : {
@@ -36873,6 +37807,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "About %@"
+          }
+        }
+      }
+    },
+    "约 %@ token" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "~%@ tokens"
           }
         }
       }
@@ -39781,6 +40725,26 @@
         }
       }
     },
+    "语阅没有账号、没有广告，也不做跨应用追踪。你的书、进度、笔记、划线和搜索词都只留在本地设备。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yuyue has no accounts, no ads, and no cross-app tracking. Your books, progress, notes, highlights, and search terms stay strictly on this device."
+          }
+        }
+      }
+    },
+    "语阅没有账号、没有广告，也不做跨应用追踪。默认开启匿名使用统计，仅记录功能使用形态（如导入格式、界面浏览、朗读与音频功能使用），不关联身份，绝不收集书名、笔记、搜索词、网址或邮箱，可随时在「关于」页关闭。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yuyue has no accounts, no ads, and no cross-app tracking. Anonymous usage analytics are enabled by default to record usage shapes only (such as import formats, screen visits, and speech or audio feature usage) without personal identity—never book titles, notes, search terms, URLs, or emails. You can turn this off anytime in About."
+          }
+        }
+      }
+    },
     "语阅生词 Anki.txt" : {
       "localizations" : {
         "en" : {
@@ -39817,6 +40781,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Yuyue Offline Voice (Kokoro)"
+          }
+        }
+      }
+    },
+    "语阅离线语音（Kokoro） · %lld MB" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yuyue Offline Voice (Kokoro) · %lld MB"
           }
         }
       }
@@ -39867,6 +40841,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Speech Alignment Model"
+          }
+        }
+      }
+    },
+    "语音对齐模型 · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speech alignment model · %@"
           }
         }
       }
@@ -40044,16 +41028,16 @@
     },
     "读 %u 分钟 · 听 %u 分钟" : {
       "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "读 %1$u 分钟 · 听 %2$u 分钟"
-          }
-        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Read %1$u min · Listen %2$u min"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "读 %1$u 分钟 · 听 %2$u 分钟"
           }
         }
       }
@@ -40701,6 +41685,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Read aloud or silently, right where you left off.\nNo servers, no tracking —\nyour books and notes stay in your hands."
+          }
+        }
+      }
+    },
+    "读着听，听着读，进度接得上。\n没有账号与广告，\n书与笔记都留在你手里。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read and listen seamlessly, right where you left off.\nNo accounts, no ads—\nyour books and notes stay in your hands."
           }
         }
       }
@@ -41417,6 +42411,16 @@
         }
       }
     },
+    "跨端轻量中英自然人声 · 点进去一键下载（约 %lld MB）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Natural offline voices · Open to download (~%lld MB)"
+          }
+        }
+      }
+    },
     "跨端轻量离线模型 · Apache-2.0" : {
       "localizations" : {
         "en" : {
@@ -41589,6 +42593,16 @@
         }
       }
     },
+    "轻点切换应用图标" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to switch app icon"
+          }
+        }
+      }
+    },
     "轻点右侧播放键或「酿一期」，把《%@》酿成一期 8 分钟读前导读，绝不剧透后文。" : {
       "localizations" : {
         "en" : {
@@ -41725,6 +42739,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Running"
+          }
+        }
+      }
+    },
+    "运行语阅时应用于程序坞；退出后恢复默认宣纸图标" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shown in the Dock while running; reverts to Rice paper after quitting"
           }
         }
       }
@@ -42283,6 +43307,16 @@
         }
       }
     },
+    "还没有自定义字体" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No custom fonts yet"
+          }
+        }
+      }
+    },
     "还没查过" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -42709,6 +43743,28 @@
                 "stringUnit" : {
                   "state" : "translated",
                   "value" : "%lld lines of dialogue in this chapter"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "这一章 %lld 句台词已认全" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "The 1 line in this chapter is cast"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "All %lld lines in this chapter are cast"
                 }
               }
             }
@@ -43540,6 +44596,16 @@
         }
       }
     },
+    "这张图片读不出来。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't read this image."
+          }
+        }
+      }
+    },
     "这是录音转出来的文字，" : {
       "localizations" : {
         "en" : {
@@ -43796,6 +44862,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "This audiobook is gone"
+          }
+        }
+      }
+    },
+    "这条反馈仅开发者可见，不会公开。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only the developer can see this feedback; it will not be published."
           }
         }
       }
@@ -44944,6 +46020,16 @@
         }
       }
     },
+    "遇到什么问题、想要什么功能，或哪本书打开不对，都可以直接写" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report a bug, request a feature, or mention a book that won't open properly"
+          }
+        }
+      }
+    },
     "那一周" : {
       "localizations" : {
         "en" : {
@@ -45722,6 +46808,26 @@
         }
       }
     },
+    "问题反馈与崩溃诊断" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Feedback & Crash Diagnostics"
+          }
+        }
+      }
+    },
+    "问题反馈与崩溃诊断：主动提交的反馈和截图仅发给开发者，不会公开，也不收集邮箱；应用意外闪退时会在下次启动自动上报匿名崩溃堆栈和基础设备信息，用于排查修复，不关联个人身份。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Feedback & Crash Diagnostics: Feedback and screenshots you submit are sent privately to the developer, never published, and no email is collected. If the app crashes unexpectedly, an anonymous crash stack trace and basic device info are automatically sent on the next launch to help diagnose and fix issues, without being linked to your identity."
+          }
+        }
+      }
+    },
     "问题反馈：只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；不收集邮箱，你选择附带的日志或私密文件会在发送前用开发者公钥在本机加密。" : {
       "localizations" : {
         "en" : {
@@ -46103,6 +47209,26 @@
         }
       }
     },
+    "隐藏 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide %@"
+          }
+        }
+      }
+    },
+    "隐藏 %@？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide %@?"
+          }
+        }
+      }
+    },
     "隐藏书伴提示与难词注释" : {
       "localizations" : {
         "en" : {
@@ -46160,6 +47286,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hide Text"
+          }
+        }
+      }
+    },
+    "隐藏后可在「添加声音来源」重新开启。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can re-enable it in Add Voice Source."
           }
         }
       }
@@ -46372,6 +47508,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Want a reply or need to share privately?"
+          }
+        }
+      }
+    },
+    "需要回复？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Need a reply?"
           }
         }
       }

@@ -12,6 +12,11 @@ using Yuyue.Shelf;
 
 namespace Yuyue;
 
+public interface IDebugScreenshotCapable
+{
+    Task<bool> SaveCompositeScreenshotAsync(string path);
+}
+
 public partial class App : Application
 {
     public static App CurrentApp => (App)Current;
@@ -31,6 +36,7 @@ public partial class App : Application
     private Action? _pauseActiveAudio;
     private readonly ConditionalWeakTable<object, object> _claimOwners = new();
     private bool _exitingApp;
+    private bool _isHiddenInTray;
 
     /// <summary>
     /// Binds a child audio engine (such as PodcastWorkspaceBuilder's internal TTS player) to its owning surface
@@ -71,6 +77,36 @@ public partial class App : Application
         _activeAudioClaimant = normClaimant;
     }
 
+    public string? GetActiveAudioBookId()
+    {
+        if (Library?.SystemIntegration.IsAudioPlaying != true || _activeAudioClaimant is null) return null;
+        foreach (var kv in _readerWindows) if (ReferenceEquals(kv.Value, _activeAudioClaimant)) return kv.Key;
+        foreach (var kv in _audioWindows) if (ReferenceEquals(kv.Value, _activeAudioClaimant)) return kv.Key;
+        foreach (var kv in _pdfWindows) if (ReferenceEquals(kv.Value, _activeAudioClaimant)) return kv.Key;
+        return null;
+    }
+
+    public bool IsPodcastActiveAudioOwner() =>
+        Library?.SystemIntegration.IsAudioPlaying == true
+        && _shelfWindow is not null
+        && ReferenceEquals(_activeAudioClaimant, _shelfWindow);
+
+    public void ActivateActiveAudioSurface()
+    {
+        if (_activeAudioClaimant is Window win)
+        {
+            if (ReferenceEquals(win, _shelfWindow))
+            {
+                ShowShelf();
+                _shelfWindow?.SwitchTab("podcasts");
+                return;
+            }
+            try { win.Activate(); BringWindowToFront(win); } catch { }
+            return;
+        }
+        ShowShelf();
+    }
+
     /// <summary>
     /// Closes any open reader, PDF, audiobook, or podcast window for a deleted or record-only book (#26).
     /// </summary>
@@ -79,18 +115,22 @@ public partial class App : Application
         if (string.IsNullOrEmpty(bookId)) return;
         if (_readerWindows.Remove(bookId, out var rwin))
         {
+            Library?.SystemIntegration.ClearAudioSource(rwin);
             try { rwin.Close(); } catch { }
         }
         if (_pdfWindows.Remove(bookId, out var pwin))
         {
+            Library?.SystemIntegration.ClearAudioSource(pwin);
             try { pwin.Close(); } catch { }
         }
         if (_audioWindows.Remove(bookId, out var awin))
         {
+            Library?.SystemIntegration.ClearAudioSource(awin);
             try { awin.Close(); } catch { }
         }
         if (_podcastWindows.Remove(bookId, out var podWin))
         {
+            Library?.SystemIntegration.ClearAudioSource(podWin);
             try { podWin.Close(); } catch { }
         }
     }
@@ -112,6 +152,8 @@ public partial class App : Application
 
         var cliArgs = Environment.GetCommandLineArgs();
         bool startBackground = cliArgs.Any(a => a == "--background");
+        _isHiddenInTray = startBackground;
+        Library.Analytics.TrackAppLaunch(startBackground);
 
         var uiQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         _uiQueue = uiQueue;
@@ -123,7 +165,15 @@ public partial class App : Application
         }
         catch { }
         Library.SystemIntegration.ShowShelfCallback = () => uiQueue.TryEnqueue(ShowShelf);
-        Library.SystemIntegration.OpenSettingsCallback = () => uiQueue.TryEnqueue(() => OpenSettings("general"));
+        Library.SystemIntegration.OpenSettingsCallback = () => uiQueue.TryEnqueue(() =>
+        {
+            if (_isHiddenInTray)
+            {
+                _isHiddenInTray = false;
+                Library.Analytics.TrackAppReopened();
+            }
+            OpenSettings("general");
+        });
         Library.SystemIntegration.PlayPodcastIssueCallback = id => uiQueue.TryEnqueue(() => OpenPodcastIssue(id));
         Library.SystemIntegration.ExitAppCallback = () => uiQueue.TryEnqueue(() =>
         {
@@ -139,18 +189,19 @@ public partial class App : Application
         }
         catch { }
 
-        // Prewarm shared WebView2 environment in the background (TECH.md §3)
+        // Prewarm shared WebView2 environment, offline ECDICT, and system TTS voice list in the background (TECH.md §3)
         ReaderWebViewHost.PrewarmAsync(Library.DataDir);
+        Library.Ecdict.PrewarmAsync();
+        Speech.AudioPlayer.PrewarmVoicesAsync();
 
         if (startBackground)
             Library.SystemIntegration.EnsureTrayVisible(forceVisible: true);
         else
             ShowShelf();
 
-        // Background auto-sync (startup + every 5 minutes when enabled), 24h silent update check, & offline feedback flush
+        // Background auto-sync (startup + every 5 minutes when enabled) & 24h silent update check
         if (Library.Sync.IsEnabled) _ = Library.Sync.SyncNowAsync();
         _ = Library.Updates.CheckForUpdatesAsync(manual: false);
-        _ = Library.Updates.FlushOfflineFeedbackQueueAsync();
         _syncTimer = new DispatcherTimer { Interval = System.TimeSpan.FromMinutes(5) };
         _syncTimer.Tick += (_, _) => { if (Library.Sync.IsEnabled) _ = Library.Sync.SyncNowAsync(); };
         _syncTimer.Start();
@@ -202,7 +253,7 @@ public partial class App : Application
 
         if (files.Count > 0 && _shelfWindow is not null)
         {
-            _ = _shelfWindow.ImportPathsAsync(files, openFirst: true);
+            _ = _shelfWindow.ImportPathsAsync(files, openFirst: true, source: "share_in");
         }
 #if DEBUG
         else if (!string.IsNullOrEmpty(debugOpenQuery))
@@ -257,7 +308,10 @@ public partial class App : Application
 #if DEBUG
     private async Task DumpActiveWindowForDebugAsync(string path)
     {
-        await Task.Delay(1200);
+        int baseWait = _readerWindows.Count > 0 ? 5600 : 1200;
+        if (int.TryParse(Environment.GetEnvironmentVariable("YUYUE_DUMP_DELAY_MS"), out int customDelay) && customDelay >= 200)
+            baseWait = customDelay;
+        await Task.Delay(baseWait);
         if (Environment.GetEnvironmentVariable("YUYUE_DEBUG_DIALOG") is { Length: > 0 } dlgKind)
         {
             if (_settingsWindow is not null) _settingsWindow.OpenDebugSheet(dlgKind);
@@ -268,11 +322,13 @@ public partial class App : Application
         {
             await Task.Delay(600);
         }
-        UIElement? target = _settingsWindow?.Content
-            ?? _audioWindows.Values.LastOrDefault()?.Content
-            ?? _pdfWindows.Values.LastOrDefault()?.Content
-            ?? _readerWindows.Values.LastOrDefault()?.Content
-            ?? _shelfWindow?.Content;
+        Window? activeWin = (Window?)_settingsWindow
+            ?? (Window?)_audioWindows.Values.LastOrDefault()
+            ?? (Window?)_pdfWindows.Values.LastOrDefault()
+            ?? (Window?)_readerWindows.Values.LastOrDefault()
+            ?? _shelfWindow;
+        UIElement? target = activeWin?.Content;
+        bool targetIsModal = false;
         if (target?.XamlRoot is { } xr)
         {
             foreach (var pop in Microsoft.UI.Xaml.Media.VisualTreeHelper.GetOpenPopupsForXamlRoot(xr))
@@ -280,9 +336,18 @@ public partial class App : Application
                 if (pop.Child is Microsoft.UI.Xaml.Controls.ContentDialog cd && cd.Content is UIElement bodyEl)
                 {
                     target = bodyEl;
+                    targetIsModal = true;
                     break;
                 }
             }
+        }
+        if (!targetIsModal && activeWin is IDebugScreenshotCapable cap)
+        {
+            try
+            {
+                if (await cap.SaveCompositeScreenshotAsync(path)) return;
+            }
+            catch { }
         }
         if (target is not null)
         {
@@ -473,6 +538,8 @@ public partial class App : Application
                     args.Cancel = true;
                     Library.SystemIntegration.EnsureTrayVisible(forceVisible: true);
                     try { _shelfWindow?.AppWindow.Hide(); } catch { }
+                    _isHiddenInTray = true;
+                    Library.Analytics.TrackAppBackgrounded();
                     return;
                 }
 
@@ -484,9 +551,18 @@ public partial class App : Application
             };
             _shelfWindow.Closed += (_, _) =>
             {
+                var closedShelf = _shelfWindow;
                 _shelfWindow = null;
+                Library?.SystemIntegration.ClearAudioSource(closedShelf);
+                if (_readerWindows.Count == 0 && _pdfWindows.Count == 0 && _audioWindows.Count == 0 && _podcastWindows.Count == 0)
+                    Library?.SystemIntegration.ClearAudioSource((object?)null);
                 CheckExitIfAllWindowsClosed();
             };
+        }
+        if (_isHiddenInTray)
+        {
+            _isHiddenInTray = false;
+            Library.Analytics.TrackAppReopened();
         }
         try { _shelfWindow.AppWindow.Show(); } catch { }
         _shelfWindow.Activate();
@@ -497,6 +573,17 @@ public partial class App : Application
     {
         ShowShelf();
         _shelfWindow?.OpenPodcastInline(issueId);
+    }
+
+    public void TryOpenBookFromAnywhere(BookSummary book, bool autoListen = false, uint? section = null, int? sentence = null, string? askQuestion = null, string? searchQuery = null)
+    {
+        if (book.Record || !book.Available)
+        {
+            ShowShelf();
+            _shelfWindow?.TryOpenBook(book, autoListen, section, sentence, askQuestion, searchQuery);
+            return;
+        }
+        OpenBook(book.Id, autoListen, section, sentence, askQuestion, searchQuery);
     }
 
     public void OpenBook(string bookId, bool autoListen = false, uint? section = null, int? sentence = null, string? askQuestion = null, string? searchQuery = null)
@@ -584,6 +671,8 @@ public partial class App : Application
             audioWin.Closed += (_, _) =>
             {
                 _audioWindows.Remove(bookId);
+                Library?.SystemIntegration.ClearAudioSource(audioWin);
+                Library?.SystemIntegration.ClearAudioSource(knownTitle);
                 _shelfWindow?.RefreshBooks();
                 CheckExitIfAllWindowsClosed();
             };
@@ -599,6 +688,8 @@ public partial class App : Application
             pdfWin.Closed += (_, _) =>
             {
                 _pdfWindows.Remove(bookId);
+                Library?.SystemIntegration.ClearAudioSource(pdfWin);
+                Library?.SystemIntegration.ClearAudioSource(knownTitle);
                 _shelfWindow?.RefreshBooks();
                 CheckExitIfAllWindowsClosed();
             };
@@ -611,6 +702,8 @@ public partial class App : Application
         win.Closed += (_, _) =>
         {
             _readerWindows.Remove(bookId);
+            Library?.SystemIntegration.ClearAudioSource(win);
+            Library?.SystemIntegration.ClearAudioSource(knownTitle);
             _shelfWindow?.RefreshBooks();
             CheckExitIfAllWindowsClosed();
         };
@@ -798,12 +891,14 @@ public partial class App : Application
 
         _uiQueue?.TryEnqueue(() =>
         {
+            bool wasHidden = _isHiddenInTray;
             ShowShelf();
+            if (!wasHidden) Library.Analytics.TrackAppReopened();
             if (shelfTab is not null) _shelfWindow?.SwitchTab(shelfTab);
             if (settingsPage is not null) OpenSettings(settingsPage);
             if (!string.IsNullOrEmpty(deepLinkUri)) HandleDeepLink(deepLinkUri);
             if (files.Count > 0 && _shelfWindow is not null)
-                _ = _shelfWindow.ImportPathsAsync(files, openFirst: true);
+                _ = _shelfWindow.ImportPathsAsync(files, openFirst: true, source: "share_in");
         });
     }
 
@@ -835,6 +930,8 @@ public partial class App : Application
         _shelfWindow?.RefreshBooks();
         foreach (var r in _readerWindows.Values) r.ReloadAfterSnapshotRestore();
         foreach (var p in _pdfWindows.Values) p.ReloadAfterSnapshotRestore();
+        foreach (var a in _audioWindows.Values) a.ApplyAppearance();
+        foreach (var pod in _podcastWindows.Values) pod.ApplyAppearance();
         _settingsWindow?.ApplyAppearance();
     }
 

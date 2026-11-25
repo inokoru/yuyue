@@ -675,6 +675,9 @@ class PodcastHub(
             stopSpokenEngine()
             startExo(issue, safeStart)
         }
+        if (isPlaying) {
+            app.yuyue.analytics.AirTraffic.trackAudioFeatureUsed("podcast_play")
+        }
         sessionPlayer.refresh()
     }
 
@@ -790,6 +793,12 @@ class PodcastHub(
             }
             val lang = if (issue.track == PodcastTrack.DUB) "zh-Hans" else issue.language.ifBlank { "zh-Hans" }
             val (hostA, hostB) = resolveStudioVoicePair(lang)
+            (hostA ?: hostB)?.let { primary ->
+                app.yuyue.analytics.AirTraffic.trackTtsStarted(
+                    app.yuyue.analytics.AirTraffic.ttsEngineForVoice(primary),
+                    "podcast",
+                )
+            }
             val speakers = LinkedHashSet<String>()
 
             fun voiceFor(s: MagazineSentence): BookVoice? {
@@ -1205,6 +1214,12 @@ class PodcastHub(
                 SystemVoice.Engine.init(context)
                 val lang = if (L10n.chinese || answer.any { it.code > 0x3000 }) "zh-Hans" else "en"
                 val voice = Voices.best(lang)
+                if (voice != null) {
+                    app.yuyue.analytics.AirTraffic.trackTtsStarted(
+                        app.yuyue.analytics.AirTraffic.ttsEngineForVoice(voice),
+                        "podcast",
+                    )
+                }
                 val speech = voice?.render(answer, lang)
                 if (speech != null && speech.samples.isNotEmpty()) {
                     val track = buildSpeechAudioTrack(speech)
@@ -1450,13 +1465,13 @@ class PodcastHub(
         }
     }
 
-    suspend fun subscribeRSS(urlString: String, putLatestOnDesk: Boolean = true): Boolean {
+    suspend fun subscribeRSS(urlString: String, putLatestOnDesk: Boolean = true, trackAdd: Boolean = true): Boolean {
         val clean = urlString.trim()
         if (clean.isEmpty()) return false
         val normalized = if (clean.startsWith("http://") || clean.startsWith("https://")) clean else "https://$clean"
         isAddingFeed = true
         addError = null
-        return try {
+        val added = try {
             val lower = normalized.substringBefore('?').lowercase()
             if (lower.endsWith(".mp3") || lower.endsWith(".m4a") || lower.endsWith(".aac") || lower.endsWith(".ogg") || lower.endsWith(".wav")) {
                 val title = normalized.substringBefore('?').substringAfterLast('/').substringBeforeLast('.').ifBlank { t("单集音频") }
@@ -1547,6 +1562,8 @@ class PodcastHub(
         } finally {
             isAddingFeed = false
         }
+        if (added && trackAdd) app.yuyue.analytics.AirTraffic.trackAudioFeatureUsed("podcast_added")
+        return added
     }
 
     private fun ingestRssXml(feedUrl: String, xml: String, putLatestOnDesk: Boolean): Boolean {
@@ -1615,8 +1632,9 @@ class PodcastHub(
         val feeds = runCatching { parsePodcastOpml(xml) }.getOrDefault(emptyList())
         var count = 0
         for (f in feeds.take(24)) {
-            if (subscribeRSS(f.xmlUrl, putLatestOnDesk = count == 0)) count++
+            if (subscribeRSS(f.xmlUrl, putLatestOnDesk = count == 0, trackAdd = false)) count++
         }
+        if (count > 0) app.yuyue.analytics.AirTraffic.trackAudioFeatureUsed("podcast_added")
         reload()
         return count
     }
@@ -1661,6 +1679,7 @@ class PodcastHub(
             reload()
             lastNotice = t("已将《%@》放上书桌", issue.title)
         }
+        app.yuyue.analytics.AirTraffic.trackAudioFeatureUsed("podcast_added")
         issue
     }
 
@@ -1681,6 +1700,7 @@ class PodcastHub(
         }
         if (isTranscribingIssueID != null) return false
         isTranscribingIssueID = issueID
+        app.yuyue.analytics.AirTraffic.trackAudioFeatureUsed("podcast_transcribe")
         return try {
             if (!Listener.installed(library.dataDir)) {
                 lastNotice = t("正在准备本机语音识别模型（约 230 MB）…")
@@ -1802,6 +1822,7 @@ class PodcastHub(
             reload()
             ensureTranscriptLoaded(issue.id)
             lastNotice = t("《%@》已酿好", issue.title)
+            app.yuyue.analytics.AirTraffic.trackAudioFeatureUsed("podcast_added")
             issue
         } catch (e: CancellationException) {
             throw e

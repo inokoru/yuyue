@@ -31,16 +31,18 @@ public sealed class AudiobookWork : IDisposable
 {
     private readonly YuyueCore _core;
     private readonly string _dataDir;
+    private readonly Action? _onAlignStarted;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _running = new();
     private readonly ConcurrentDictionary<string, double> _focus = new();
     private readonly ConcurrentDictionary<string, AudiobookWorkStatus> _statuses = new();
 
     public event Action<AudiobookWorkStatus>? StatusChanged;
 
-    public AudiobookWork(YuyueCore core, string dataDir)
+    public AudiobookWork(YuyueCore core, string dataDir, Action? onAlignStarted = null)
     {
         _core = core;
         _dataDir = dataDir;
+        _onAlignStarted = onAlignStarted;
     }
 
     public AudiobookWorkStatus? GetStatus(string recordingId) =>
@@ -60,7 +62,7 @@ public sealed class AudiobookWork : IDisposable
     /// If <paramref name="autoDownloadModel"/> is true and <c>mms_fa.int8.onnx</c> is missing,
     /// downloads and verifies the model first with live progress reporting.
     /// </summary>
-    public void Start(string recordingId, string? ebookId = null, double? focusSec = null, bool autoDownloadModel = false)
+    public void Start(string recordingId, string? ebookId = null, double? focusSec = null, bool autoDownloadModel = false, bool trackAnalytics = true)
     {
         if (focusSec is double f) _focus[recordingId] = f;
 
@@ -83,6 +85,11 @@ public sealed class AudiobookWork : IDisposable
             return;
         }
 
+        if (trackAnalytics)
+        {
+            try { _onAlignStarted?.Invoke(); } catch { }
+        }
+
         _ = Task.Run(async () =>
         {
             try
@@ -101,6 +108,8 @@ public sealed class AudiobookWork : IDisposable
             {
                 if (_running.TryRemove(recordingId, out var doneCts))
                     doneCts.Dispose();
+                if (_running.IsEmpty)
+                    Aligner.Unload();
             }
         });
     }
@@ -112,12 +121,15 @@ public sealed class AudiobookWork : IDisposable
             try { cts.Cancel(); } catch { }
             cts.Dispose();
         }
+        if (_running.IsEmpty)
+            Aligner.Unload();
     }
 
     public void Dispose()
     {
         foreach (var kv in _running.ToArray())
             Stop(kv.Key);
+        Aligner.Unload();
     }
 
     private void Publish(AudiobookWorkStatus status)

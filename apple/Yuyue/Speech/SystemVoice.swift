@@ -105,13 +105,21 @@ nonisolated final class SystemVoice: Voice, Sendable {
             .map(SystemVoice.init)
     }
 
-    /// The system voices that can read `tag`, best first.
+    /// The system voices that can read `tag`, best first, deduplicated by `id` across overlapping language prefixes.
     static func all(for tag: String) -> [SystemVoice] {
         let voices = all()
-        return SpokenLanguage.voiceLanguages(for: tag).flatMap { language in
-            voices.filter { $0.language.lowercased().hasPrefix(language.lowercased()) }
+        var seen = Set<String>()
+        var result: [SystemVoice] = []
+        for language in SpokenLanguage.voiceLanguages(for: tag) {
+            let prefix = language.lowercased()
+            let matching = voices
+                .filter { $0.language.lowercased().hasPrefix(prefix) }
                 .sorted { $0.quality.rawValue > $1.quality.rawValue }
+            for voice in matching where seen.insert(voice.id).inserted {
+                result.append(voice)
+            }
         }
+        return result
     }
 
     /// Plays a few words straight through the system, for 试听.

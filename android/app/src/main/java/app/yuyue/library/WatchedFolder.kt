@@ -68,7 +68,7 @@ class WatchedFolder(private val context: Context) {
             }
             if (fresh.isNotEmpty()) {
                 val keysByUri = fresh.associate { it.first to it.second }
-                val job = library.importUrisJob(fresh.map { it.first }, folder = name) { uri ->
+                val job = library.importUrisJob(fresh.map { it.first }, folder = name, source = "other") { uri ->
                     if (Prefs.shared.getString(TREE, null) != treeString) return@importUrisJob
                     val key = keysByUri[uri] ?: return@importUrisJob
                     if (seen.add(key)) Prefs.set(SEEN, seen.joinToString("\n"))

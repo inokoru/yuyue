@@ -103,11 +103,19 @@ class RemoteSources {
         try {
             val client = RemoteClient(s)
             val file = client.download(e, File(context.cacheDir, "remote-${UUID.randomUUID()}")) { f -> downloading[k] = f }
+            val had = library.books.filter { it.available }.map { it.id }.toSet()
             val imported = try {
                 val needsCover = AudioImporter.isAudio(file.name) || file.extension.equals("pdf", ignoreCase = true)
                 val cover = if (needsCover) e.cover?.let { runCatching { client.data(it) }.getOrNull() } else null
                 val book = withContext(Dispatchers.IO) { library.importPath(file.path, title = e.title, author = e.author, cover = cover) }
                 library.reload()
+                if (book.id !in had) {
+                    val sourceTag = if (s.kind == RemoteSource.Kind.OPDS) "opds" else "webdav"
+                    app.yuyue.analytics.AirTraffic.trackBookImported(
+                        app.yuyue.analytics.AirTraffic.resolveBookFormat(book.format, file.name),
+                        sourceTag,
+                    )
+                }
                 book
             } finally {
                 file.parentFile?.deleteRecursively()

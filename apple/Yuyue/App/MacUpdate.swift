@@ -210,7 +210,7 @@ struct MacUpdateSettings: View {
                 .frame(width: 24, height: 1.5)
                 .padding(.top, 18)
                 .padding(.bottom, 16)
-            Text("读着听，听着读，进度接得上。\n没有服务器，不收集数据，\n书与笔记都留在你手里。")
+            Text("读着听，听着读，进度接得上。\n没有账号与广告，\n书与笔记都留在你手里。")
                 .font(isEn ? .system(size: 13, design: .serif) : YYUI.serif(13.5))
                 .lineSpacing(isEn ? 5.5 : 7.5)
                 .foregroundStyle(YYColor.t2)
@@ -250,6 +250,8 @@ struct MacUpdateSettings: View {
     }
 
     // MARK: Right Folio (牌记与操作)
+
+    @AppStorage(AirTraffic.prefKey) private var analyticsEnabled = true
 
     private var rightFolio: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -304,7 +306,7 @@ struct MacUpdateSettings: View {
 
             AboutCard {
                 AboutRow(String(localized: "问题与建议"),
-                         detail: String(localized: "可附截图或文件，无需注册账号")) {
+                         detail: String(localized: "可附截图，无需注册账号")) {
                     HStack(spacing: 10) {
                         AboutLinkButton(title: "GitHub", prominent: false) {
                             NSWorkspace.shared.open(Self.issues)
@@ -314,8 +316,18 @@ struct MacUpdateSettings: View {
                         }
                     }
                 }
+                AboutRow(String(localized: "匿名使用统计"),
+                         detail: String(localized: "仅记录功能使用形态，不关联身份，绝不收集书名、笔记或搜索词")) {
+                    SettingsSwitch(isOn: Binding(
+                        get: { analyticsEnabled },
+                        set: { newValue in
+                            analyticsEnabled = newValue
+                            AirTraffic.setEnabled(newValue)
+                        }
+                    ))
+                }
                 AboutNavRow(title: String(localized: "隐私说明"),
-                            value: String(localized: "仅存本机 · 无统计")) {
+                            value: String(localized: "书库仅存本机 · 可关匿名统计")) {
                     activeSheet = .privacy
                 }
                 AboutNavRow(title: String(localized: "开源许可与致谢"),
@@ -518,7 +530,7 @@ struct MacUpdateSettings: View {
                 .paperWindow()
         case .privacy:
             AboutPaperSheet(title: String(localized: "隐私说明"),
-                            subtitle: String(localized: "没有服务器，不收集任何数据"),
+                            subtitle: String(localized: "书库仅存本机，不含身份与广告"),
                             close: { activeSheet = nil }) {
                 PrivacySheetContent()
             }
@@ -924,8 +936,8 @@ private struct ChangelogSheetContent: View {
 private struct PrivacySheetContent: View {
     private var items: [(String, String)] {
         [
-            (String(localized: "没有账号，没有统计"),
-             String(localized: "语阅没有服务器，也不收集任何数据：没有账号、没有统计、没有广告。")),
+            (String(localized: "没有账号，也没有广告"),
+             String(localized: "语阅没有账号、没有广告，也不做跨应用追踪。默认开启匿名使用统计，仅记录功能使用形态（如导入格式、界面浏览、朗读与音频功能使用），不关联身份，绝不收集书名、笔记、搜索词、网址或邮箱，可随时在「关于」页关闭。")),
             (String(localized: "书与笔记留在本地"),
              String(localized: "书、进度、笔记和生词都存在这台设备上。打开同步时，它们只在你的设备和你自己选的网盘（iCloud 云盘、WebDAV，Google Drive 即将支持）之间传，语阅看不到。")),
             (String(localized: "你自己的服务密钥"),
@@ -934,8 +946,8 @@ private struct PrivacySheetContent: View {
              String(localized: "免费在线语音会把当前要读的句子发给在线语音服务；自行配置的云端声音和笔记导出（Notion、flomo、新枝）只在你选用并填了 Key 或链接时联网，要读的句子或要发的笔记直接发给你选的服务。读过的声音存在这台设备上。")),
             (String(localized: "离线翻译与本地语音"),
              String(localized: "外文查词与翻译使用系统离线翻译；按需从 GitHub Releases、魔搭（ModelScope）或 Hugging Face 下载的对齐模型、声音包、开源字体与本地语音模型都在设备上离线运行（字体预览样字按需从 Google Fonts 加载），原文与录音不出本机。")),
-            (String(localized: "问题反馈"),
-             String(localized: "只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；正文与附件均会公开展示，不收集邮箱。")),
+            (String(localized: "问题反馈与崩溃诊断"),
+             String(localized: "主动提交的反馈和截图仅发给开发者，不会公开，也不收集邮箱；应用意外闪退时会在下次启动自动上报匿名崩溃堆栈和基础设备信息，用于排查修复，不关联个人身份。")),
             (String(localized: "匿名检查更新与签名校验"),
              String(localized: "自动检查更新每天只从 GitHub 读取一次版本号文件，不带任何关于你和设备的信息（可在「关于」页关闭）；安装包经 Sparkle EdDSA 签名校验后才会替换。")),
         ]

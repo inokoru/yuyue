@@ -30,20 +30,84 @@ public sealed class FontShelfService
 
     private readonly string _fontsDir;
     private readonly object _gate = new();
+    private readonly object _sysFontsGate = new();
+    private readonly HashSet<string> _catalogFileSet;
     private readonly Dictionary<string, double> _downloading = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, CancellationTokenSource> _downloadCts = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (string? Family, string? Localized)> _familyCache = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string>? _installedFilesCache;
+    private IReadOnlyList<string>? _cachedCustomFiles;
+    private IReadOnlyList<SystemFontEntry>? _cachedSystemFonts;
 
     public IReadOnlyList<FontPack> Catalog { get; }
     public string FontsDir => _fontsDir;
+    public IReadOnlyList<SystemFontEntry>? CachedSystemCjkFonts => _cachedSystemFonts;
     public event Action? Changed;
 
     public FontShelfService(string fontsDir)
     {
         _fontsDir = fontsDir;
-        Directory.CreateDirectory(_fontsDir);
         Catalog = YuyueCoreMethods.FontCatalog();
-        RegisterExistingFonts();
+        _catalogFileSet = new HashSet<string>(
+            Catalog.SelectMany(c => c.Files.Select(f => f.File)),
+            StringComparer.OrdinalIgnoreCase);
+        _ = Task.Run(InitializeAndRegisterFonts);
+    }
+
+    private void InitializeAndRegisterFonts()
+    {
+        try
+        {
+            Directory.CreateDirectory(_fontsDir);
+            RegisterExistingFonts();
+        }
+        catch { }
+    }
+
+    private void InvalidateFilesCache()
+    {
+        lock (_gate)
+        {
+            _installedFilesCache = null;
+            _cachedCustomFiles = null;
+        }
+    }
+
+    private (HashSet<string> Installed, IReadOnlyList<string> Custom) EnsureFontDirSnapshot()
+    {
+        lock (_gate)
+        {
+            if (_installedFilesCache is not null && _cachedCustomFiles is not null)
+                return (_installedFilesCache, _cachedCustomFiles);
+        }
+
+        var installed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var custom = new List<string>();
+        try
+        {
+            if (Directory.Exists(_fontsDir))
+            {
+                foreach (string path in Directory.EnumerateFiles(_fontsDir))
+                {
+                    string name = Path.GetFileName(path);
+                    if (string.IsNullOrEmpty(name) || name.StartsWith('.')) continue;
+                    installed.Add(name);
+                    if (!_catalogFileSet.Contains(name) && IsSupportedCustomFontFile(name))
+                        custom.Add(name);
+                }
+            }
+        }
+        catch { }
+
+        custom.Sort(StringComparer.OrdinalIgnoreCase);
+        var customArr = custom.ToArray();
+
+        lock (_gate)
+        {
+            _installedFilesCache ??= installed;
+            _cachedCustomFiles ??= customArr;
+            return (_installedFilesCache, _cachedCustomFiles);
+        }
     }
 
     private void RegisterExistingFonts()
@@ -51,12 +115,11 @@ public sealed class FontShelfService
         try
         {
             if (!Directory.Exists(_fontsDir)) return;
-            foreach (string path in Directory.EnumerateFiles(_fontsDir))
+            var (installed, _) = EnsureFontDirSnapshot();
+            foreach (string name in installed)
             {
-                string name = Path.GetFileName(path);
-                if (name.StartsWith('.')) continue;
                 if (IsTrueTypeOrOpenTypeFile(name))
-                    TryRegisterPrivateFont(path);
+                    TryRegisterPrivateFont(Path.Combine(_fontsDir, name));
             }
         }
         catch { }
@@ -98,7 +161,8 @@ public sealed class FontShelfService
     {
         var pack = Catalog.FirstOrDefault(p => p.Id == packId);
         if (pack is null) return false;
-        return pack.Files.All(f => File.Exists(Path.Combine(_fontsDir, f.File)));
+        var (installed, _) = EnsureFontDirSnapshot();
+        return pack.Files.All(f => installed.Contains(f.File));
     }
 
     public bool IsDownloading(string packId)
@@ -128,14 +192,8 @@ public sealed class FontShelfService
 
     public IReadOnlyList<string> GetCustomFontFiles()
     {
-        if (!Directory.Exists(_fontsDir)) return Array.Empty<string>();
-        var catalogFiles = new HashSet<string>(Catalog.SelectMany(c => c.Files.Select(f => f.File)), StringComparer.OrdinalIgnoreCase);
-        return Directory.GetFiles(_fontsDir)
-            .Select(Path.GetFileName)
-            .Where(n => n is not null && !catalogFiles.Contains(n) && IsSupportedCustomFontFile(n))
-            .Cast<string>()
-            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        var (_, custom) = EnsureFontDirSnapshot();
+        return custom;
     }
 
     public string ImportFontFile(string sourcePath)
@@ -166,6 +224,7 @@ public sealed class FontShelfService
         string dst = Path.Combine(_fontsDir, name);
         File.Copy(sourcePath, dst, overwrite: false);
         lock (_gate) _familyCache.Remove(name);
+        InvalidateFilesCache();
         if (IsTrueTypeOrOpenTypeFile(name))
             TryRegisterPrivateFont(dst);
         Changed?.Invoke();
@@ -183,6 +242,7 @@ public sealed class FontShelfService
             TryUnregisterPrivateFont(path);
             File.Delete(path);
             lock (_gate) _familyCache.Remove(safe);
+            InvalidateFilesCache();
             Changed?.Invoke();
             return true;
         }
@@ -208,7 +268,11 @@ public sealed class FontShelfService
                 try { File.Delete(path); removedAny = true; } catch { }
             }
         }
-        if (removedAny) Changed?.Invoke();
+        if (removedAny)
+        {
+            InvalidateFilesCache();
+            Changed?.Invoke();
+        }
         return removedAny;
     }
 
@@ -478,7 +542,91 @@ public sealed class FontShelfService
         }
     }
 
+    public static FontKind ClassifyFontKind(string? rawNameOrFamily)
+    {
+        if (string.IsNullOrWhiteSpace(rawNameOrFamily)) return FontKind.Hei;
+        string s = rawNameOrFamily;
+        if (s.Contains("仿宋", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("仿", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("FangSong", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Fangsong", StringComparison.OrdinalIgnoreCase))
+            return FontKind.Fang;
+        if (s.Contains("楷", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Kai", StringComparison.OrdinalIgnoreCase))
+            return FontKind.Kai;
+        if (s.Contains("手", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("行", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("草", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("隶", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("LiSu", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Brush", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Script", StringComparison.OrdinalIgnoreCase))
+            return FontKind.Hand;
+        if (s.Contains("黑", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("雅黑", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("等线", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("圆", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Sans", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Gothic", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Hei", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("PingFang", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("MiSans", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("HarmonyOS", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("DengXian", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("YouYuan", StringComparison.OrdinalIgnoreCase))
+            return FontKind.Hei;
+        if (s.Contains("宋", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("明", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Serif", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Song", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("Ming", StringComparison.OrdinalIgnoreCase)
+            || s.Contains("SimSun", StringComparison.OrdinalIgnoreCase))
+            return FontKind.Song;
+        return FontKind.Hei;
+    }
+
+    public FontKind GetFontKind(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return FontKind.Hei;
+        if (id == "system") return FontKind.Hei;
+        if (id == "serif") return FontKind.Song;
+        if (id is "kai" or "wenkai") return FontKind.Kai;
+        if (Catalog.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase)) is { } pack)
+            return pack.Kind;
+        if (id.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+        {
+            string fn = id[5..];
+            return ClassifyFontKind($"{GetFontFileDisplayName(fn)} {GetFontFileFamily(fn)} {fn}");
+        }
+        if (id.StartsWith("sys:", StringComparison.OrdinalIgnoreCase))
+            return ClassifyFontKind(id[4..]);
+        if (id.StartsWith("local:", StringComparison.OrdinalIgnoreCase))
+            return ClassifyFontKind(id[6..]);
+        return ClassifyFontKind(id);
+    }
+
+    public Task<IReadOnlyList<SystemFontEntry>> LoadSystemCjkFontsAsync() =>
+        _cachedSystemFonts is { } ready
+            ? Task.FromResult(ready)
+            : Task.Run(() => DiscoverSystemCjkFonts());
+
     public IReadOnlyList<SystemFontEntry> DiscoverSystemCjkFonts()
+    {
+        if (_cachedSystemFonts is { } existing)
+            return existing;
+
+        lock (_sysFontsGate)
+        {
+            if (_cachedSystemFonts is { } lockedHit)
+                return lockedHit;
+
+            var scanned = ScanSystemCjkFontsCore();
+            _cachedSystemFonts = scanned;
+            return scanned;
+        }
+    }
+
+    private IReadOnlyList<SystemFontEntry> ScanSystemCjkFontsCore()
     {
         var results = new List<SystemFontEntry>();
         var seenFamilies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -634,6 +782,8 @@ public sealed class FontShelfService
 
                 var urls = ModelDownload.CandidateUrls(file.File, officialUrl: file.Url, mirrorPath: $"fonts/{file.File}");
                 ulong baseDone = doneOffset;
+                long lastEmitTick = 0;
+                double lastEmitProg = 0;
                 await ModelDownload.DownloadWithResumeAsync(
                     urls,
                     tmp,
@@ -643,12 +793,19 @@ public sealed class FontShelfService
                     {
                         if (totalBytes > 0)
                         {
+                            double prog = Math.Clamp((double)(baseDone + (ulong)Math.Max(0, got)) / totalBytes, 0.01, 0.99);
                             lock (_gate)
                             {
                                 if (_downloading.ContainsKey(packId))
-                                    _downloading[packId] = Math.Clamp((double)(baseDone + (ulong)Math.Max(0, got)) / totalBytes, 0.01, 0.99);
+                                    _downloading[packId] = prog;
                             }
-                            Changed?.Invoke();
+                            long nowTick = Environment.TickCount64;
+                            if (Math.Abs(prog - lastEmitProg) >= 0.015 && nowTick - lastEmitTick >= 100)
+                            {
+                                lastEmitProg = prog;
+                                lastEmitTick = nowTick;
+                                Changed?.Invoke();
+                            }
                         }
                     },
                     token);
@@ -656,6 +813,7 @@ public sealed class FontShelfService
                 if (File.Exists(dst)) File.Delete(dst);
                 File.Move(tmp, dst);
                 lock (_gate) _familyCache.Remove(file.File);
+                InvalidateFilesCache();
                 if (IsTrueTypeOrOpenTypeFile(file.File))
                     TryRegisterPrivateFont(dst);
                 doneOffset += file.Bytes;

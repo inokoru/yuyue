@@ -352,11 +352,11 @@ enum VoiceSource: Hashable {
                     out.append(v)
                 }
             }
-            return out
+            return Voices.unique(out)
         case .mac:
             return SystemVoice.all(for: tag)
         case .cloud(let p):
-            return CloudVoice.all().filter { $0.provider == p && $0.speaks(tag) }
+            return Voices.unique(CloudVoice.all().filter { $0.provider == p && $0.speaks(tag) })
         }
     }
 
@@ -501,7 +501,7 @@ private struct SourceRow: View {
                                 Circle()
                                     .fill(localOffline ? YYTint.standard.accent : YYColor.ok)
                                     .frame(width: 5.5, height: 5.5)
-                                Text(localOffline ? "服务未启动" : (p.isAutoDiscovered && !UserDefaults.standard.bool(forKey: p.enabledName) ? "本机自动发现" : "本机运行中"))
+                                Text(localOffline ? String(localized: "服务未启动") : (p.isAutoDiscovered && !UserDefaults.standard.bool(forKey: p.enabledName) ? String(localized: "本机自动发现") : String(localized: "本机运行中")))
                                     .font(.yy(size: 10, weight: .medium))
                                     .foregroundStyle(localOffline ? YYTint.standard.accent : YYColor.ok)
                             }
@@ -622,6 +622,7 @@ struct PinLabelStyle: LabelStyle {
 struct VoiceSourcePage: View {
     let source: VoiceSource
     @State private var scrolled = false
+    @State private var keyboardScrollID: String?
     @State private var linesOpen = false
     @State private var draft = ""
     @State private var showingCloneSheet = false
@@ -650,7 +651,7 @@ struct VoiceSourcePage: View {
             }
             #endif
             HStack {
-                BookSegments(selection: book) { focus.book = $0; focus.listening = nil; Voices.stopPreview() }
+                BookSegments(selection: book) { scrolled = false; focus.book = $0; focus.listening = nil; Voices.stopPreview() }
                 Spacer(minLength: 8)
                 #if os(macOS)
                 Text("点语音听，指着点“选择”").font(.yy(size: 11)).foregroundStyle(YYColor.t3).lineLimit(1)
@@ -670,20 +671,33 @@ struct VoiceSourcePage: View {
                     .padding(.bottom, 6)
                 }
             } else if source == .mac {
-                HStack(spacing: 6) {
-                    SettingsPill(String(localized: "不推荐"), tone: .warn)
-                    Text("系统合成机械感较重，仅作断网兜底")
-                        .font(.yy(size: 11)).foregroundStyle(YYColor.t3).lineLimit(1)
-                    Spacer(minLength: 4)
-                    Button {
-                        focus.open(.neural)
-                    } label: {
-                        Text("换离线语音 ›")
-                            .font(.yy(size: 11, weight: .medium))
-                            .foregroundStyle(YYTint.standard.accent)
-                            .fixedSize()
+                let switchButton = Button {
+                    focus.open(.neural)
+                } label: {
+                    Text("换离线语音 ›")
+                        .font(.yy(size: 11, weight: .medium))
+                        .foregroundStyle(YYTint.standard.accent)
+                        .fixedSize()
+                }
+                .buttonStyle(.plain)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) {
+                        SettingsPill(String(localized: "不推荐"), tone: .warn)
+                        Text("系统合成机械感较重，仅作断网兜底")
+                            .font(.yy(size: 11)).foregroundStyle(YYColor.t3).fixedSize()
+                        Spacer(minLength: 4)
+                        switchButton
                     }
-                    .buttonStyle(.plain)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            SettingsPill(String(localized: "不推荐"), tone: .warn)
+                            Spacer(minLength: 4)
+                            switchButton
+                        }
+                        Text("系统合成机械感较重，仅作断网兜底")
+                            .font(.yy(size: 11)).foregroundStyle(YYColor.t3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .padding(.horizontal, 10).padding(.bottom, 6)
             }
@@ -742,22 +756,27 @@ struct VoiceSourcePage: View {
                             }
                         }
                     }
-                    .padding(.top, 6).padding(.bottom, 6)
+                    .padding(.top, 8).padding(.bottom, 6)
                     .background(alignment: .top) { YYScrollOffsetAnchor() }
                 }
                 .yyScrollOffsetContainer()
                 .scrollIndicators(.never)
-                .id(source)
+                .id(scrollKey(book))
                 .yyOnScrollOffsetPast(2) { scrolled = $0 }
+                .onChange(of: source) { _, _ in scrolled = false }
+                .onChange(of: book) { _, _ in scrolled = false }
                 .overlay(alignment: .top) {
                     if scrolled {
                         LinearGradient(colors: [YYColor.bg, YYColor.fade0], startPoint: .top, endPoint: .bottom)
-                            .frame(height: 26)
+                            .frame(height: 8)
                             .allowsHitTesting(false)
                     }
                 }
-                .onChange(of: focus.listening) { _, id in
-                    if let id { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) } }
+                .onChange(of: keyboardScrollID) { _, id in
+                    if let id {
+                        withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) }
+                        keyboardScrollID = nil
+                    }
                 }
             }
             VoiceComposer(book: book, draft: $draft, linesOpen: $linesOpen, typing: $typing).padding(.top, 8)
@@ -900,6 +919,15 @@ struct VoiceSourcePage: View {
         typing = false
     }
 
+    private func scrollKey(_ book: VoiceBook) -> String {
+        let sourceKey = switch source {
+        case .neural: "neural"
+        case .mac: "mac"
+        case .cloud(let p): "cloud.\(p.rawValue)"
+        }
+        return "\(sourceKey)-\(book.rawValue)"
+    }
+
     /// ↑↓ the next voice and hear it, space to stop or play, return to choose it, esc to leave it.
     private func key(_ code: UInt16, book: VoiceBook, order: [any Voice]) -> Bool {
         let currentID = book.current?.id
@@ -911,6 +939,7 @@ struct VoiceSourcePage: View {
             if next.id != at || PreviewState.shared.voiceID != next.id {
                 Voices.stopPreview()
                 focus.listen(next, text: focus.line(book))
+                keyboardScrollID = next.id
             }
             return true
         case 49:
@@ -1311,9 +1340,9 @@ private struct SourceTabs: View {
                 focus.open(s)
             } label: {
                 let label: String = switch s {
-                case .neural: "\(s.title)（推荐）"
-                case .mac: "\(s.title)（不推荐）"
-                case .cloud(let p): p.isFreeOnline ? "\(p.title)（免 Key）" : p.title
+                case .neural: String(localized: "\(s.title)（推荐）")
+                case .mac: String(localized: "\(s.title)（不推荐）")
+                case .cloud(let p): p.isFreeOnline ? String(localized: "\(p.title)（免 Key）") : p.title
                 }
                 if s == selection {
                     Label(label, systemImage: "checkmark")
@@ -1339,6 +1368,7 @@ private struct VoiceGroup {
     let voices: [any Voice]
 
     static func groups(_ voices: [any Voice], source: VoiceSource = .neural) -> [VoiceGroup] {
+        let voices = Voices.unique(voices)
         if case .cloud = source {
             return voices.isEmpty ? [] : [VoiceGroup(title: String(localized: "\(voices.count) 位"), voices: voices)]
         }
@@ -1871,6 +1901,7 @@ private struct PinnedVoice: View {
                 VoiceAvatar(voice: voice, size: 28, pinned: true)
                 Text(voice.name).font(.yy(size: 12.5, weight: .semibold)).foregroundStyle(YYColor.t1).lineLimit(1)
                     .padding(.trailing, 2)
+                    .layoutPriority(1)
                 #if os(macOS)
                 VoiceBubble(voice: voice, text: focus.line(book), dark: true, height: 30)
                 #else

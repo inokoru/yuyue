@@ -139,6 +139,8 @@ public sealed class SystemIntegrationService : IDisposable
 
     private readonly LibraryService _library;
     private readonly HashSet<object> _activeAudioSources = new();
+    private readonly Dictionary<object, (string? Title, Action? Toggle)> _sourceInfo = new();
+    private object? _currentPlaybackSource;
     private readonly object _trayLock = new();
     private Microsoft.UI.Dispatching.DispatcherQueue? _uiQueue;
     private WndProcDelegate? _wndProc;
@@ -151,6 +153,7 @@ public sealed class SystemIntegrationService : IDisposable
 
     public string? ActivePlaybackTitle { get; private set; }
     public bool IsAudioPlaying { get; private set; }
+    public event Action? PlaybackStateChanged;
     public bool IsPlayingTitle(string? title) =>
         IsAudioPlaying && !string.IsNullOrWhiteSpace(title)
         && string.Equals(ActivePlaybackTitle, title, StringComparison.OrdinalIgnoreCase);
@@ -176,21 +179,134 @@ public sealed class SystemIntegrationService : IDisposable
     {
         lock (_activeAudioSources)
         {
+            _sourceInfo.TryGetValue(source, out var prev);
+            string? resolvedTitle = !string.IsNullOrWhiteSpace(title) ? title : prev.Title;
+            Action? resolvedToggle = toggleCallback ?? prev.Toggle;
+            if (resolvedTitle is not null || resolvedToggle is not null)
+                _sourceInfo[source] = (resolvedTitle, resolvedToggle);
+
             if (playing)
             {
                 _activeAudioSources.Add(source);
-                if (!string.IsNullOrWhiteSpace(title)) ActivePlaybackTitle = title;
-                if (toggleCallback is not null) TogglePlaybackCallback = toggleCallback;
+                _currentPlaybackSource = source;
+                if (!string.IsNullOrWhiteSpace(resolvedTitle)) ActivePlaybackTitle = resolvedTitle;
+                if (resolvedToggle is not null) TogglePlaybackCallback = resolvedToggle;
             }
             else
             {
                 _activeAudioSources.Remove(source);
+                if (_activeAudioSources.Count > 0 && Equals(_currentPlaybackSource, source))
+                {
+                    var next = _activeAudioSources.First();
+                    _currentPlaybackSource = next;
+                    if (_sourceInfo.TryGetValue(next, out var nextInfo))
+                    {
+                        ActivePlaybackTitle = nextInfo.Title;
+                        TogglePlaybackCallback = nextInfo.Toggle;
+                    }
+                }
             }
             IsAudioPlaying = _activeAudioSources.Count > 0;
         }
 
         ApplyPowerStayAwake();
         UpdateTrayState();
+        NotifyPlaybackStateChanged();
+    }
+
+    public void ClearAudioSource(string source) => ClearAudioSource((object?)source);
+
+    public void ClearAudioSource(object? source)
+    {
+        lock (_activeAudioSources)
+        {
+            if (source is null)
+            {
+                _activeAudioSources.Clear();
+                _sourceInfo.Clear();
+                _currentPlaybackSource = null;
+                ActivePlaybackTitle = null;
+                TogglePlaybackCallback = null;
+                IsAudioPlaying = false;
+            }
+            else
+            {
+                var toRemove = new List<object> { source };
+                string? strKey = source as string;
+                foreach (var kv in _sourceInfo)
+                {
+                    if (Equals(kv.Key, source))
+                    {
+                        toRemove.Add(kv.Key);
+                    }
+                    else if (!string.IsNullOrWhiteSpace(strKey))
+                    {
+                        if ((kv.Key is string ks && string.Equals(ks, strKey, StringComparison.OrdinalIgnoreCase))
+                            || (!string.IsNullOrEmpty(kv.Value.Title) && string.Equals(kv.Value.Title, strKey, StringComparison.OrdinalIgnoreCase))
+                            || kv.Key.GetType().Name.Contains(strKey, StringComparison.OrdinalIgnoreCase))
+                        {
+                            toRemove.Add(kv.Key);
+                        }
+                    }
+                }
+
+                bool clearedCurrent = false;
+                foreach (var k in toRemove)
+                {
+                    if (Equals(_currentPlaybackSource, k)) clearedCurrent = true;
+                    _activeAudioSources.Remove(k);
+                    _sourceInfo.Remove(k);
+                }
+
+                if (!string.IsNullOrWhiteSpace(strKey)
+                    && !string.IsNullOrEmpty(ActivePlaybackTitle)
+                    && string.Equals(ActivePlaybackTitle, strKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    clearedCurrent = true;
+                }
+
+                if (clearedCurrent || _sourceInfo.Count == 0)
+                {
+                    if (_activeAudioSources.Count > 0)
+                    {
+                        var next = _activeAudioSources.First();
+                        _currentPlaybackSource = next;
+                        if (_sourceInfo.TryGetValue(next, out var nextInfo))
+                        {
+                            ActivePlaybackTitle = nextInfo.Title;
+                            TogglePlaybackCallback = nextInfo.Toggle;
+                        }
+                        else
+                        {
+                            ActivePlaybackTitle = null;
+                            TogglePlaybackCallback = null;
+                        }
+                    }
+                    else
+                    {
+                        _currentPlaybackSource = null;
+                        ActivePlaybackTitle = null;
+                        TogglePlaybackCallback = null;
+                    }
+                }
+
+                IsAudioPlaying = _activeAudioSources.Count > 0;
+            }
+        }
+
+        ApplyPowerStayAwake();
+        UpdateTrayState();
+        NotifyPlaybackStateChanged();
+    }
+
+    private void NotifyPlaybackStateChanged()
+    {
+        var handler = PlaybackStateChanged;
+        if (handler is null) return;
+        if (_uiQueue is not null)
+            _uiQueue.TryEnqueue(() => { try { handler(); } catch { } });
+        else
+            try { handler(); } catch { }
     }
 
     public void ApplyPowerStayAwake()
@@ -474,7 +590,11 @@ public sealed class SystemIntegrationService : IDisposable
         IntPtr menu = CreatePopupMenu();
         if (menu == IntPtr.Zero) return;
 
-        var deskIssues = _library.Podcasts.GetIssues(PodcastPlacement.Desk).Take(5).ToArray();
+        var deskIssues = _library.Podcasts.GetIssues(PodcastPlacement.Desk)
+            .Where(i => string.IsNullOrWhiteSpace(ActivePlaybackTitle)
+                || !string.Equals(i.Title, ActivePlaybackTitle, StringComparison.OrdinalIgnoreCase))
+            .Take(5)
+            .ToArray();
         try
         {
             if (!string.IsNullOrEmpty(ActivePlaybackTitle))

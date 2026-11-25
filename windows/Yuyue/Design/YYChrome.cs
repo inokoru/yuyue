@@ -1,7 +1,9 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
@@ -232,15 +234,17 @@ public static class YYChrome
     public static Button MakeSettingsActionButton(string text, Action onClick, bool dark, bool destructive = false, bool enabled = true)
     {
         var palette = ThemeHelper.Palette(dark);
+        string label = L10n.T(text);
         var btn = new Button
         {
-            Content = text,
+            Content = label,
             Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
             Foreground = ThemeHelper.Brush(destructive ? palette.Danger : palette.T1),
             IsEnabled = enabled,
             Opacity = enabled ? 1.0 : 0.36,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        AutomationProperties.SetName(btn, label);
         btn.Click += (_, _) => onClick();
         return btn;
     }
@@ -765,7 +769,162 @@ public static class YYChrome
         return 3 * uFinal * uFinal * t * y1 + 3 * uFinal * t * t * y2 + t * t * t;
     }
 
-    // ---------- Frameless macOS Sheet & Motion Helpers ----------
+    // ---------- Frameless macOS Sheet, Safe Dialog Host & Motion Helpers ----------
+
+    private static readonly ConditionalWeakTable<XamlRoot, SemaphoreSlim> _dialogLocks = new();
+
+    private static SemaphoreSlim GetDialogLock(XamlRoot xamlRoot) =>
+        _dialogLocks.GetValue(xamlRoot, static _ => new SemaphoreSlim(1, 1));
+
+    /// <summary>
+    /// Returns true if a real modal dialog or flyout/menu is open on <paramref name="xamlRoot"/>,
+    /// ignoring ephemeral <see cref="ToolTip"/> popups so hover tooltips never block keyboard shortcuts.
+    /// </summary>
+    public static bool HasBlockingModalOrFlyoutOpen(XamlRoot? xamlRoot)
+    {
+        if (xamlRoot is null) return false;
+        try
+        {
+            foreach (var pop in VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot))
+            {
+                if (pop.Child is ContentDialog or FlyoutPresenter or MenuFlyoutPresenter)
+                    return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    /// <summary>
+    /// Strips WinUI 3's inner focus border and opaque focus/hover fill from a <see cref="TextBox"/>
+    /// placed inside a custom rounded capsule or card <see cref="Border"/>.
+    /// </summary>
+    public static void StripTextBoxChrome(TextBox box)
+    {
+        var transparent = new SolidColorBrush(Colors.Transparent);
+        box.BorderThickness = new Thickness(0);
+        box.Background = transparent;
+        box.UseSystemFocusVisuals = false;
+        box.Resources["TextControlBorderThemeThickness"] = new Thickness(0);
+        box.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
+        box.Resources["TextControlBackground"] = transparent;
+        box.Resources["TextControlBackgroundPointerOver"] = transparent;
+        box.Resources["TextControlBackgroundFocused"] = transparent;
+        box.Resources["TextControlBackgroundDisabled"] = transparent;
+        box.Resources["TextControlBorderBrush"] = transparent;
+        box.Resources["TextControlBorderBrushPointerOver"] = transparent;
+        box.Resources["TextControlBorderBrushFocused"] = transparent;
+        box.Resources["TextControlBorderBrushDisabled"] = transparent;
+    }
+
+    /// <summary>
+    /// Strips WinUI 3's inner focus border and opaque focus/hover fill from a <see cref="PasswordBox"/>
+    /// placed inside a custom rounded capsule or card <see cref="Border"/>.
+    /// </summary>
+    public static void StripPasswordBoxChrome(PasswordBox box)
+    {
+        var transparent = new SolidColorBrush(Colors.Transparent);
+        box.BorderThickness = new Thickness(0);
+        box.Background = transparent;
+        box.UseSystemFocusVisuals = false;
+        box.Resources["TextControlBorderThemeThickness"] = new Thickness(0);
+        box.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
+        box.Resources["TextControlBackground"] = transparent;
+        box.Resources["TextControlBackgroundPointerOver"] = transparent;
+        box.Resources["TextControlBackgroundFocused"] = transparent;
+        box.Resources["TextControlBackgroundDisabled"] = transparent;
+        box.Resources["TextControlBorderBrush"] = transparent;
+        box.Resources["TextControlBorderBrushPointerOver"] = transparent;
+        box.Resources["TextControlBorderBrushFocused"] = transparent;
+        box.Resources["TextControlBorderBrushDisabled"] = transparent;
+    }
+
+    /// <summary>
+    /// Hides any currently open <see cref="ContentDialog"/> on <paramref name="xamlRoot"/> and awaits its closure
+    /// so WinUI 3 never throws <c>COMException (0x80000019): Only a single ContentDialog can be open at any time</c>.
+    /// </summary>
+    public static async Task PrepareXamlRootForDialogAsync(XamlRoot? xamlRoot)
+    {
+        if (xamlRoot is null) return;
+        for (int pass = 0; pass < 3; pass++)
+        {
+            List<Task>? closing = null;
+            try
+            {
+                foreach (var pop in VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot))
+                {
+                    if (pop.Child is ContentDialog openDlg)
+                    {
+                        closing ??= [];
+                        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                        Windows.Foundation.TypedEventHandler<ContentDialog, ContentDialogClosedEventArgs>? handler = null;
+                        handler = (_, _) =>
+                        {
+                            try { openDlg.Closed -= handler; } catch { }
+                            tcs.TrySetResult(true);
+                        };
+                        try
+                        {
+                            openDlg.Closed += handler;
+                            openDlg.Hide();
+                        }
+                        catch
+                        {
+                            try { openDlg.Closed -= handler; } catch { }
+                            tcs.TrySetResult(true);
+                        }
+                        closing.Add(tcs.Task);
+                    }
+                }
+            }
+            catch { }
+
+            if (closing is null || closing.Count == 0)
+                break;
+
+            await Task.WhenAny(Task.WhenAll(closing), Task.Delay(260));
+            await Task.Yield();
+        }
+    }
+
+    /// <summary>
+    /// Crash-safe wrapper around <see cref="ContentDialog.ShowAsync()"/> that awaits closure of any prior open dialog
+    /// on the same <see cref="XamlRoot"/>, syncs <see cref="FrameworkElement.RequestedTheme"/> from the host window,
+    /// and applies warm control theme resources.
+    /// </summary>
+    public static async Task<ContentDialogResult> ShowSafeAsync(this ContentDialog dlg, YYTint? tint = null)
+    {
+        if (dlg.XamlRoot is null)
+            return ContentDialogResult.None;
+
+        if (dlg.RequestedTheme == ElementTheme.Default && dlg.XamlRoot.Content is FrameworkElement rootFe)
+            dlg.RequestedTheme = rootFe.ActualTheme != ElementTheme.Default ? rootFe.ActualTheme : rootFe.RequestedTheme;
+
+        bool dark = ThemeHelper.IsDark(dlg.RequestedTheme);
+        ThemeHelper.ApplyControlThemeResources(dlg.Resources, dark, tint ?? YYTints.Default);
+
+        var sem = GetDialogLock(dlg.XamlRoot);
+        await sem.WaitAsync();
+        try
+        {
+            await PrepareXamlRootForDialogAsync(dlg.XamlRoot);
+        }
+        finally
+        {
+            sem.Release();
+        }
+
+        try
+        {
+            return await dlg.ShowAsync();
+        }
+        catch (System.Runtime.InteropServices.COMException ex) when ((uint)ex.HResult == 0x80000019)
+        {
+            await Task.Delay(180);
+            await PrepareXamlRootForDialogAsync(dlg.XamlRoot);
+            try { return await dlg.ShowAsync(); } catch { return ContentDialogResult.None; }
+        }
+    }
 
     /// <summary>
     /// Creates a frameless macOS-style sheet <see cref="ContentDialog"/> with warm paper surface,
@@ -777,31 +936,38 @@ public static class YYChrome
         bool dark,
         double width,
         FrameworkElement body,
-        double maxHeight = 760)
+        double maxHeight = 760,
+        YYTint? tint = null)
     {
-        try
-        {
-            foreach (var pop in VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot))
-            {
-                if (pop.Child is ContentDialog openDlg)
-                {
-                    try { openDlg.Hide(); } catch { }
-                }
-            }
-        }
-        catch { }
-
         var p = ThemeHelper.Palette(dark);
+        Color edgeColor = dark ? Color.FromArgb(32, 255, 255, 255) : p.Line;
+
+        var surface = new Border
+        {
+            Width = width,
+            Background = ThemeHelper.Brush(p.Bg),
+            CornerRadius = new CornerRadius(18),
+            Child = body,
+        };
+        body.HorizontalAlignment = HorizontalAlignment.Stretch;
+        L10n.ApplyTree(surface);
+
         var dlg = new ContentDialog
         {
             XamlRoot = xamlRoot,
             RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light,
             Background = ThemeHelper.Brush(p.Bg),
-            BorderBrush = ThemeHelper.Brush(dark ? Color.FromArgb(28, 255, 255, 255) : p.Line),
+            Foreground = ThemeHelper.Brush(p.T1),
+            BorderBrush = ThemeHelper.Brush(edgeColor),
             BorderThickness = new Thickness(0.75),
             CornerRadius = new CornerRadius(18),
-            Content = body,
+            Content = surface,
         };
+        ThemeHelper.ApplyControlThemeResources(dlg.Resources, dark, tint ?? YYTints.Default);
+        dlg.Resources["ContentDialogBackground"] = ThemeHelper.Brush(p.Bg);
+        dlg.Resources["ContentDialogForeground"] = ThemeHelper.Brush(p.T1);
+        dlg.Resources["ContentDialogBorderBrush"] = ThemeHelper.Brush(edgeColor);
+        dlg.Resources["ContentDialogBorderWidth"] = new Thickness(0.75);
         dlg.Resources["ContentDialogPadding"] = new Thickness(0);
         dlg.Resources["ContentDialogTitleMargin"] = new Thickness(0);
         dlg.Resources["ContentDialogMinWidth"] = width;
@@ -813,7 +979,6 @@ public static class YYChrome
         dlg.Resources["ContentDialogSeparatorBorderBrush"] = new SolidColorBrush(Colors.Transparent);
         dlg.Resources["OverlayCornerRadius"] = new CornerRadius(18);
 
-        body.Width = width;
         dlg.PreviewKeyDown += (_, e) =>
         {
             if (e.Key == VirtualKey.Escape)
@@ -822,8 +987,264 @@ public static class YYChrome
                 e.Handled = true;
             }
         };
-        dlg.Opened += (_, _) => AnimateEntrance(body, fromY: 8f, durationMs: 170);
+        dlg.Opened += (_, _) =>
+        {
+            UnclampDialogTemplateBounds(dlg, width, maxHeight);
+            AnimateEntrance(surface, fromY: 8f, durationMs: 170);
+        };
         return dlg;
+    }
+
+    private static void UnclampDialogTemplateBounds(DependencyObject root, double width, double maxHeight)
+    {
+        int count = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is FrameworkElement fe && (fe.Name == "BackgroundElement" || fe.Name == "Container"))
+            {
+                fe.MaxWidth = Math.Max(width, fe.MaxWidth);
+                fe.MaxHeight = Math.Max(maxHeight, fe.MaxHeight);
+            }
+            if (!ReferenceEquals(child, (root as ContentDialog)?.Content))
+                UnclampDialogTemplateBounds(child, width, maxHeight);
+        }
+    }
+
+    /// <summary>
+    /// Frameless macOS <c>YYDialogCard</c> confirmation sheet (<c>Parts.swift:1278-1400</c>).
+    /// </summary>
+    public static async Task<bool> ShowConfirmAsync(
+        XamlRoot? xamlRoot,
+        bool dark,
+        string title,
+        string message,
+        string confirmText = "确定",
+        string cancelText = "取消",
+        bool destructive = false,
+        YYTint? tint = null)
+    {
+        if (xamlRoot is null) return false;
+        var p = ThemeHelper.Palette(dark);
+        var useTint = tint ?? YYTints.Default;
+        bool confirmed = false;
+        ContentDialog? dlgRef = null;
+
+        var stack = new StackPanel { Spacing = 14, Padding = new Thickness(22, 20, 22, 18) };
+        stack.Children.Add(new TextBlock
+        {
+            Text = L10n.T(title),
+            FontSize = 16,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush(p.T1),
+            TextWrapping = TextWrapping.Wrap,
+        });
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            stack.Children.Add(new TextBlock
+            {
+                Text = L10n.T(message),
+                FontSize = 13,
+                Foreground = ThemeHelper.Brush(p.T2),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 20,
+            });
+        }
+
+        var btnRow = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 4, 0, 0) };
+        btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var cancelBtn = MakeSheetPillButton(cancelText, () => dlgRef?.Hide(), dark, useTint, kind: "secondary", height: 34, horizontalPadding: 16);
+        Grid.SetColumn(cancelBtn, 1);
+
+        Button okBtn;
+        if (destructive)
+        {
+            Color dangerBg = dark ? Color.FromArgb(42, 232, 93, 78) : Color.FromArgb(26, 208, 66, 52);
+            Color dangerFg = p.Danger;
+            okBtn = new Button
+            {
+                Height = 34,
+                MinHeight = 34,
+                Padding = new Thickness(16, 0, 16, 0),
+                CornerRadius = new CornerRadius(17),
+                Background = ThemeHelper.Brush(dangerBg),
+                Foreground = ThemeHelper.Brush(dangerFg),
+                BorderBrush = ThemeHelper.Brush(Color.FromArgb(64, dangerFg.R, dangerFg.G, dangerFg.B)),
+                BorderThickness = new Thickness(0.75),
+                FontWeight = FontWeights.SemiBold,
+                UseSystemFocusVisuals = false,
+                Content = new TextBlock { Text = L10n.T(confirmText), FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(dangerFg) },
+            };
+            okBtn.Click += (_, _) => { confirmed = true; dlgRef?.Hide(); };
+        }
+        else
+        {
+            okBtn = MakeSheetPillButton(confirmText, () => { confirmed = true; dlgRef?.Hide(); }, dark, useTint, kind: "dark", height: 34, horizontalPadding: 18);
+        }
+        Grid.SetColumn(okBtn, 2);
+
+        btnRow.Children.Add(cancelBtn);
+        btnRow.Children.Add(okBtn);
+        stack.Children.Add(btnRow);
+
+        dlgRef = CreateMacSheet(xamlRoot, dark, 348, stack, tint: useTint);
+        dlgRef.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == VirtualKey.Enter)
+            {
+                confirmed = true;
+                dlgRef.Hide();
+                e.Handled = true;
+            }
+        };
+        await dlgRef.ShowSafeAsync(useTint);
+        return confirmed;
+    }
+
+    /// <summary>
+    /// Frameless macOS <c>yyNotice</c> single-button sheet (<c>Parts.swift:1278-1370</c>).
+    /// </summary>
+    public static async Task ShowNoticeAsync(
+        XamlRoot? xamlRoot,
+        bool dark,
+        string title,
+        string message,
+        string okText = "知道了",
+        YYTint? tint = null)
+    {
+        if (xamlRoot is null) return;
+        var p = ThemeHelper.Palette(dark);
+        var useTint = tint ?? YYTints.Default;
+        ContentDialog? dlgRef = null;
+
+        var stack = new StackPanel { Spacing = 14, Padding = new Thickness(22, 20, 22, 18) };
+        stack.Children.Add(new TextBlock
+        {
+            Text = L10n.T(title),
+            FontSize = 16,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush(p.T1),
+            TextWrapping = TextWrapping.Wrap,
+        });
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            stack.Children.Add(new TextBlock
+            {
+                Text = L10n.T(message),
+                FontSize = 13,
+                Foreground = ThemeHelper.Brush(p.T2),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 20,
+            });
+        }
+
+        var okBtn = MakeSheetPillButton(okText, () => dlgRef?.Hide(), dark, useTint, kind: "dark", height: 34, horizontalPadding: 20);
+        okBtn.HorizontalAlignment = HorizontalAlignment.Right;
+        stack.Children.Add(okBtn);
+
+        dlgRef = CreateMacSheet(xamlRoot, dark, 340, stack, tint: useTint);
+        dlgRef.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == VirtualKey.Enter)
+            {
+                dlgRef.Hide();
+                e.Handled = true;
+            }
+        };
+        await dlgRef.ShowSafeAsync(useTint);
+    }
+
+    /// <summary>
+    /// Frameless macOS <c>yyPrompt</c> single-line text input sheet (<c>Parts.swift:1405-1455</c>).
+    /// </summary>
+    public static async Task<string?> ShowPromptAsync(
+        XamlRoot? xamlRoot,
+        bool dark,
+        string title,
+        string placeholder = "",
+        string initialText = "",
+        string confirmText = "好",
+        string cancelText = "取消",
+        string? subtitle = null,
+        YYTint? tint = null)
+    {
+        if (xamlRoot is null) return null;
+        var p = ThemeHelper.Palette(dark);
+        var useTint = tint ?? YYTints.Default;
+        string? submitted = null;
+        ContentDialog? dlgRef = null;
+
+        var stack = new StackPanel { Spacing = 12, Padding = new Thickness(22, 20, 22, 18) };
+        stack.Children.Add(new TextBlock
+        {
+            Text = L10n.T(title),
+            FontSize = 16,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush(p.T1),
+        });
+        if (!string.IsNullOrWhiteSpace(subtitle))
+        {
+            stack.Children.Add(new TextBlock
+            {
+                Text = L10n.T(subtitle),
+                FontSize = 12.5,
+                Foreground = ThemeHelper.Brush(p.T3),
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, -6, 0, 0),
+            });
+        }
+
+        var box = new TextBox
+        {
+            PlaceholderText = L10n.T(placeholder),
+            Text = initialText,
+            CornerRadius = new CornerRadius(10),
+            FontSize = 13.5,
+            Background = ThemeHelper.Brush(p.Card),
+        };
+        stack.Children.Add(box);
+
+        void Submit()
+        {
+            string val = box.Text.Trim();
+            if (val.Length == 0) return;
+            submitted = val;
+            dlgRef?.Hide();
+        }
+
+        var btnRow = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 4, 0, 0) };
+        btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var cancelBtn = MakeSheetPillButton(cancelText, () => dlgRef?.Hide(), dark, useTint, kind: "secondary", height: 34, horizontalPadding: 16);
+        var okBtn = MakeSheetPillButton(confirmText, Submit, dark, useTint, kind: "dark", height: 34, horizontalPadding: 18);
+        Grid.SetColumn(cancelBtn, 1);
+        Grid.SetColumn(okBtn, 2);
+        btnRow.Children.Add(cancelBtn);
+        btnRow.Children.Add(okBtn);
+        stack.Children.Add(btnRow);
+
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key == VirtualKey.Enter)
+            {
+                Submit();
+                e.Handled = true;
+            }
+        };
+
+        dlgRef = CreateMacSheet(xamlRoot, dark, 356, stack, tint: useTint);
+        dlgRef.Opened += (_, _) =>
+        {
+            box.Focus(FocusState.Programmatic);
+            box.SelectAll();
+        };
+        await dlgRef.ShowSafeAsync(useTint);
+        return submitted;
     }
 
     /// <summary>
@@ -846,6 +1267,7 @@ public static class YYChrome
             VerticalAlignment = VerticalAlignment.Center,
             Content = YYIcons.Make("xmark", Math.Round(size * 0.39), ThemeHelper.Brush(p.T2)),
         };
+        AutomationProperties.SetName(btn, L10n.T("关闭面板"));
         btn.Click += (_, _) => onClose();
         return btn;
     }
@@ -888,7 +1310,7 @@ public static class YYChrome
         {
             left.Children.Add(new TextBlock
             {
-                Text = subtitle,
+                Text = L10n.T(subtitle),
                 FontSize = 12.5,
                 Foreground = ThemeHelper.Brush(p.T3),
                 VerticalAlignment = VerticalAlignment.Center,
@@ -921,28 +1343,42 @@ public static class YYChrome
     {
         var p = ThemeHelper.Palette(dark);
         var tc = ThemeHelper.TintColors(tint, dark);
-        Color bg, fg, edge;
+        Color bg, bgHover, bgPress, bgDisabled, fg, fgDisabled, edge;
         double borderW;
         FontWeight fw;
         switch (kind)
         {
             case "warm":
                 bg = tc.Soft;
+                bgHover = Color.FromArgb(bg.A, (byte)Math.Clamp(bg.R + (dark ? 14 : -10), 0, 255), (byte)Math.Clamp(bg.G + (dark ? 14 : -10), 0, 255), (byte)Math.Clamp(bg.B + (dark ? 14 : -10), 0, 255));
+                bgPress = Color.FromArgb(bg.A, (byte)Math.Clamp(bg.R + (dark ? 22 : -18), 0, 255), (byte)Math.Clamp(bg.G + (dark ? 22 : -18), 0, 255), (byte)Math.Clamp(bg.B + (dark ? 22 : -18), 0, 255));
+                bgDisabled = Color.FromArgb(110, bg.R, bg.G, bg.B);
                 fg = tc.Accent;
+                fgDisabled = Color.FromArgb(130, fg.R, fg.G, fg.B);
                 edge = tc.Edge;
                 borderW = 0.75;
                 fw = FontWeights.SemiBold;
                 break;
             case "dark":
                 bg = p.T1;
+                bgHover = Color.FromArgb(255, (byte)Math.Clamp(bg.R + (dark ? -18 : 22), 0, 255), (byte)Math.Clamp(bg.G + (dark ? -18 : 22), 0, 255), (byte)Math.Clamp(bg.B + (dark ? -18 : 22), 0, 255));
+                bgPress = Color.FromArgb(255, (byte)Math.Clamp(bg.R + (dark ? -32 : 38), 0, 255), (byte)Math.Clamp(bg.G + (dark ? -32 : 38), 0, 255), (byte)Math.Clamp(bg.B + (dark ? -32 : 38), 0, 255));
+                bgDisabled = Color.FromArgb(dark ? (byte)48 : (byte)96, p.T1.R, p.T1.G, p.T1.B);
                 fg = p.Card;
+                fgDisabled = dark
+                    ? Color.FromArgb(118, p.T1.R, p.T1.G, p.T1.B)
+                    : Color.FromArgb(235, p.Card.R, p.Card.G, p.Card.B);
                 edge = p.T1;
                 borderW = 0;
                 fw = FontWeights.SemiBold;
                 break;
             default:
                 bg = p.Card;
+                bgHover = p.Inset;
+                bgPress = Color.FromArgb(255, (byte)Math.Clamp(p.Inset.R + (dark ? 10 : -10), 0, 255), (byte)Math.Clamp(p.Inset.G + (dark ? 10 : -10), 0, 255), (byte)Math.Clamp(p.Inset.B + (dark ? 10 : -10), 0, 255));
+                bgDisabled = Color.FromArgb(140, p.Card.R, p.Card.G, p.Card.B);
                 fg = p.T1;
+                fgDisabled = p.T3;
                 edge = p.Line;
                 borderW = 0.75;
                 fw = FontWeights.Medium;
@@ -950,7 +1386,7 @@ public static class YYChrome
         }
 
         UIElement child = content is string s
-            ? new TextBlock { Text = L10n.T(s), FontSize = 13, FontWeight = fw, Foreground = ThemeHelper.Brush(fg), VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center }
+            ? new TextBlock { Text = L10n.T(s), FontSize = 13, FontWeight = fw, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center }
             : (UIElement)content;
 
         var btn = new Button
@@ -968,6 +1404,20 @@ public static class YYChrome
             UseSystemFocusVisuals = false,
             Content = child,
         };
+        if (content is string labelStr)
+            AutomationProperties.SetName(btn, L10n.T(labelStr));
+        btn.Resources["ButtonBackground"] = ThemeHelper.Brush(bg);
+        btn.Resources["ButtonBackgroundPointerOver"] = ThemeHelper.Brush(bgHover);
+        btn.Resources["ButtonBackgroundPressed"] = ThemeHelper.Brush(bgPress);
+        btn.Resources["ButtonBackgroundDisabled"] = ThemeHelper.Brush(bgDisabled);
+        btn.Resources["ButtonForeground"] = ThemeHelper.Brush(fg);
+        btn.Resources["ButtonForegroundPointerOver"] = ThemeHelper.Brush(fg);
+        btn.Resources["ButtonForegroundPressed"] = ThemeHelper.Brush(fg);
+        btn.Resources["ButtonForegroundDisabled"] = ThemeHelper.Brush(fgDisabled);
+        btn.Resources["ButtonBorderBrush"] = ThemeHelper.Brush(edge);
+        btn.Resources["ButtonBorderBrushPointerOver"] = ThemeHelper.Brush(edge);
+        btn.Resources["ButtonBorderBrushPressed"] = ThemeHelper.Brush(edge);
+        btn.Resources["ButtonBorderBrushDisabled"] = borderW > 0 ? ThemeHelper.Brush(Color.FromArgb(96, edge.R, edge.G, edge.B)) : new SolidColorBrush(Colors.Transparent);
         btn.Click += (_, _) => onClick();
         return btn;
     }

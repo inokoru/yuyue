@@ -120,15 +120,23 @@ public sealed class ReaderWebViewHost : IDisposable
         await core.AddScriptToExecuteOnDocumentCreatedAsync(@"
             (() => {
                 let lastWheel = 0;
-                let lastScrollMove = 0;
+                let lastWheelAt = -1000;
+                let lastScrollMove = -1000;
+                let wheelQuietSinceScroll = true;
                 let lastEdgeDir = 0;
                 let lastEdgeTime = 0;
                 let edgeAccum = 0;
                 let lastCross = 0;
-                window.addEventListener('scroll', () => {
-                    lastScrollMove = performance.now();
+                let edgeReleaseTimer = 0;
+                function clearEdgePull() {
                     edgeAccum = 0;
                     lastEdgeDir = 0;
+                    if (edgeReleaseTimer) { clearTimeout(edgeReleaseTimer); edgeReleaseTimer = 0; }
+                }
+                window.addEventListener('scroll', () => {
+                    lastScrollMove = performance.now();
+                    wheelQuietSinceScroll = false;
+                    clearEdgePull();
                 }, { passive: true });
                 window.addEventListener('wheel', (e) => {
                     if (e.ctrlKey) {
@@ -145,38 +153,60 @@ public sealed class ReaderWebViewHost : IDisposable
                         window.chrome?.webview?.postMessage({ type: 'wheel', deltaY: e.deltaY, ctrl: false });
                         return;
                     }
+                    const now = performance.now();
+                    const wheelGap = now - lastWheelAt;
+                    lastWheelAt = now;
+                    if (wheelGap > 180) wheelQuietSinceScroll = true;
+
                     const el = document.scrollingElement || document.documentElement;
                     const maxY = Math.max(0, el.scrollHeight - window.innerHeight);
                     const y = window.pageYOffset;
                     const forward = e.deltaY > 0;
                     const atEdge = forward ? (maxY <= 1 || y >= maxY - 2) : (y <= 2);
                     if (!atEdge) {
-                        edgeAccum = 0;
-                        lastEdgeDir = 0;
+                        wheelQuietSinceScroll = false;
+                        clearEdgePull();
                         return;
                     }
-                    const now = performance.now();
-                    if (now - lastScrollMove < 220) return;
+                    // Require an explicit >180ms wheel quiet gap after scrolling hits 0/maxY so touchpad inertia never false-triggers chapter cross.
+                    if (edgeAccum === 0 && (!wheelQuietSinceScroll || now - lastScrollMove < 180)) return;
                     const dir = forward ? 1 : -1;
                     if (dir !== lastEdgeDir || now - lastEdgeTime > 900) {
-                        edgeAccum = 0;
+                        clearEdgePull();
                         lastEdgeDir = dir;
                     }
                     lastEdgeTime = now;
                     const rawMag = e.deltaMode === 1 ? Math.abs(e.deltaY) * 40 : (e.deltaMode === 2 ? 200 : Math.abs(e.deltaY));
-                    edgeAccum += Math.min(rawMag, 120);
-                    if (edgeAccum >= 180 && now - lastCross > 500) {
-                        edgeAccum = 0;
-                        lastEdgeDir = 0;
+                    edgeAccum += Math.min(rawMag, 110);
+                    if (edgeReleaseTimer) { clearTimeout(edgeReleaseTimer); edgeReleaseTimer = 0; }
+                    if (edgeAccum >= 220 && now - lastCross > 500) {
+                        clearEdgePull();
                         lastCross = now;
-                        window.chrome?.webview?.postMessage({ type: 'scrollEdge', deltaY: dir, armed: true });
+                        wheelQuietSinceScroll = false;
+                        window.chrome?.webview?.postMessage({ type: 'scrollEdge', deltaY: dir, armed: true, progress: 1 });
                     } else if (now - lastCross > 500) {
-                        window.chrome?.webview?.postMessage({ type: 'scrollEdge', deltaY: dir, armed: false });
+                        const prog = Math.min(1, edgeAccum / 220);
+                        window.chrome?.webview?.postMessage({ type: 'scrollEdge', deltaY: dir, armed: false, progress: prog });
+                        if (prog >= 0.65) {
+                            edgeReleaseTimer = setTimeout(() => {
+                                edgeReleaseTimer = 0;
+                                const curNow = performance.now();
+                                if (edgeAccum >= 143 && lastEdgeDir === dir && curNow - lastCross > 500) {
+                                    clearEdgePull();
+                                    lastCross = curNow;
+                                    wheelQuietSinceScroll = false;
+                                    window.chrome?.webview?.postMessage({ type: 'scrollEdge', deltaY: dir, armed: true, progress: 1 });
+                                }
+                            }, 160);
+                        }
                     }
                 }, { passive: false });
                 window.addEventListener('contextmenu', (e) => {
+                    if (e.defaultPrevented) return;
                     e.preventDefault();
-                    window.chrome?.webview?.postMessage({ type: 'winContext', x: e.clientX, y: e.clientY });
+                    if (!window.yy) {
+                        window.chrome?.webview?.postMessage({ type: 'winContext', x: e.clientX, y: e.clientY });
+                    }
                 });
                 window.addEventListener('keydown', (e) => {
                     const tag = (document.activeElement && document.activeElement.tagName) || '';
@@ -188,11 +218,13 @@ public sealed class ReaderWebViewHost : IDisposable
                     const c = e.code || '';
                     if (ctrl && (k === 'c' || k === 'C' || k === 'a' || k === 'A')) return;
                     const isCtrlShortcut = ctrl && (
-                        ['f','F','k','K','g','G','d','D','b','B','z','Z','[',']','=','+','-','_',','].includes(k) ||
+                        ['f','F','k','K','g','G','d','D','b','B','z','Z','w','W','0','[',']','=','+','-','_',','].includes(k) ||
+                        c === 'BracketLeft' || c === 'BracketRight' || c === 'Digit0' || c === 'Numpad0' ||
                         (alt && ['t','T','n','N','ArrowUp','ArrowDown'].includes(k))
                     );
                     const isNavKey = !ctrl && !alt && (
-                        ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','PageUp','PageDown',' ','Escape','F11','1','2','3','4'].includes(k)
+                        ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','PageUp','PageDown',' ','Escape','F11','1','2','3','4','c','C','n','N','Delete','Backspace'].includes(k) ||
+                        c === 'Numpad1' || c === 'Numpad2' || c === 'Numpad3' || c === 'Numpad4'
                     );
                     if (isCtrlShortcut || isNavKey) {
                         e.preventDefault();
@@ -246,6 +278,42 @@ public sealed class ReaderWebViewHost : IDisposable
 
     public Task ScrollToPageAsync(int page, bool animated = false) =>
         CallAsync($"window.yy && window.yy.scrollToPage({page}, {(animated ? "true" : "false")});");
+
+    public Task ScrollToStartOfSectionAsync() =>
+        CallAsync(@"(() => {
+            if (document.documentElement.dataset.yyMode === 'scrolled') {
+                window.scrollTo(0, 0);
+            } else if (window.yy) {
+                window.yy.scrollToPage(0, false);
+            }
+        })();");
+
+    public Task ScrollToEndOfSectionAsync(int? pageCount = null)
+    {
+        int lastPage = Math.Max(0, (pageCount ?? 1) - 1);
+        return CallAsync($@"(() => {{
+            if (document.documentElement.dataset.yyMode === 'scrolled') {{
+                const jumpBottom = () => {{
+                    const el = document.scrollingElement || document.documentElement;
+                    window.scrollTo(0, Math.max(0, el.scrollHeight));
+                }};
+                jumpBottom();
+                requestAnimationFrame(jumpBottom);
+            }} else if (window.yy) {{
+                window.yy.scrollToPage({lastPage}, false);
+            }}
+        }})();");
+    }
+
+    public Task ClearTransientOverlaysAsync() =>
+        CallAsync(@"(() => {
+            if (!window.yy) return;
+            window.yy.setActive(null);
+            window.yy.setHits(null);
+            window.yy.clearSelection();
+            window.yy.setSource(null);
+            window.yy.setFlag(null);
+        })();");
 
     public Task ScrollToSentenceAsync(int sentence, bool animated = false, string? align = null)
     {
@@ -336,7 +404,7 @@ public sealed class ReaderWebViewHost : IDisposable
             start = new { s = m.Start.Sentence, o = m.Start.Offset },
             end = new { s = m.End.Sentence, o = m.End.Offset },
             style = m.Style.ToString().ToLowerInvariant(),
-            note = m.Note,
+            note = !string.IsNullOrWhiteSpace(m.Note),
         });
         var json = JsonSerializer.Serialize(list);
         return CallAsync($"window.yy && window.yy.setMarks({json});");

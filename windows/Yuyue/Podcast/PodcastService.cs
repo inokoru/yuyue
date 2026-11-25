@@ -34,6 +34,8 @@ public sealed class PodcastService
     private static readonly HttpClient DownloadHttp = new() { Timeout = System.TimeSpan.FromMinutes(10) };
 
     private readonly LibraryService _library;
+    private readonly object _clipThoughtsLock = new();
+    private Dictionary<string, string>? _clipThoughtsCache;
     private IReadOnlyList<PodcastSearchHitDto>? _topChartsCache;
 
     public PodcastService(LibraryService library)
@@ -46,6 +48,70 @@ public sealed class PodcastService
     }
 
     public string CacheDir => Path.Combine(_library.DataDir, "podcast-cache");
+    private string ClipThoughtsPath => Path.Combine(_library.DataDir, "podcast-clip-thoughts.json");
+
+    /// <summary>
+    /// Returns the non-destructively edited clip thought if present, falling back to <see cref="PodcastClip.Thought"/>.
+    /// Avoids destructive <c>PodcastDeleteClip</c> + <c>PodcastAddClip</c> cycles so clip IDs, timestamps, and audio slices stay intact.
+    /// </summary>
+    public string GetClipThought(PodcastClip clip)
+    {
+        lock (_clipThoughtsLock)
+        {
+            EnsureClipThoughtsLoadedLocked();
+            if (_clipThoughtsCache!.TryGetValue(clip.Id, out var note))
+                return note;
+            return clip.Thought ?? "";
+        }
+    }
+
+    public void SetClipThought(string clipId, string? thought)
+    {
+        if (string.IsNullOrWhiteSpace(clipId)) return;
+        string normalized = string.IsNullOrWhiteSpace(thought) ? "" : thought.Trim();
+        lock (_clipThoughtsLock)
+        {
+            EnsureClipThoughtsLoadedLocked();
+            if (_clipThoughtsCache!.TryGetValue(clipId, out var prev) && prev == normalized)
+                return;
+            _clipThoughtsCache[clipId] = normalized;
+            SaveClipThoughtsLocked();
+        }
+    }
+
+    private void EnsureClipThoughtsLoadedLocked()
+    {
+        if (_clipThoughtsCache is not null) return;
+        _clipThoughtsCache = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            if (File.Exists(ClipThoughtsPath))
+            {
+                string raw = File.ReadAllText(ClipThoughtsPath, Encoding.UTF8);
+                var parsed = JsonSerializer.Deserialize<Dictionary<string, string>>(raw);
+                if (parsed is not null)
+                {
+                    foreach (var kv in parsed)
+                        _clipThoughtsCache[kv.Key] = kv.Value ?? "";
+                }
+            }
+        }
+        catch { }
+    }
+
+    private void SaveClipThoughtsLocked()
+    {
+        if (_clipThoughtsCache is null) return;
+        try
+        {
+            Directory.CreateDirectory(_library.DataDir);
+            string tmp = ClipThoughtsPath + ".tmp";
+            string json = JsonSerializer.Serialize(_clipThoughtsCache);
+            File.WriteAllText(tmp, json, Encoding.UTF8);
+            File.Move(tmp, ClipThoughtsPath, overwrite: true);
+        }
+        catch { }
+    }
 
     public IReadOnlyList<PodcastChannel> GetChannels()
     {
@@ -180,7 +246,7 @@ public sealed class PodcastService
     /// <summary>
     /// Subscribes to an RSS/Atom feed, or extracts a single episode from a webpage / direct audio URL (1:1 <c>PodcastHub.subscribeRSS</c>).
     /// </summary>
-    public async Task<(PodcastChannel? Channel, PodcastIssue? SingleIssue)> AddUrlOrFeedAsync(string rawUrl, bool putLatestOnDesk = true)
+    public async Task<(PodcastChannel? Channel, PodcastIssue? SingleIssue)> AddUrlOrFeedAsync(string rawUrl, bool putLatestOnDesk = true, bool isRefresh = false)
     {
         string url = rawUrl.Trim();
         if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
@@ -196,6 +262,7 @@ public sealed class PodcastService
             if (string.IsNullOrWhiteSpace(fileName)) fileName = "外部音频单集";
             var single = await Task.Run(() => _library.Core.PodcastImportSingleIssue(
                 fileName, "单集直听", "从音频直链放入收听台", "", url, null, null, 900, "zh-CN", PodcastSourceKind.SingleImport));
+            if (!isRefresh) _library.Analytics.TrackAudioFeatureUsed("podcast_added");
             return (null, single);
         }
 
@@ -217,6 +284,7 @@ public sealed class PodcastService
                 var parsed = await Task.Run(() => YuyueCoreMethods.ParsePodcastRss(body));
                 var channel = await Task.Run(() => _library.Core.PodcastUpsertChannelFromFeed(url, parsed, putLatestOnDesk));
                 _ = PrefetchPodcast20TranscriptsAsync(channel.Id, parsed);
+                if (!isRefresh) _library.Analytics.TrackAudioFeatureUsed("podcast_added");
                 return (channel, null);
             }
             catch when (!contentType.Contains("xml"))
@@ -240,18 +308,20 @@ public sealed class PodcastService
                 webEp.DurationSec > 0 ? webEp.DurationSec : 1200u,
                 "zh-CN",
                 PodcastSourceKind.SingleImport));
+            if (!isRefresh) _library.Analytics.TrackAudioFeatureUsed("podcast_added");
             return (null, single);
         }
 
         if (!string.IsNullOrWhiteSpace(webEp.RssUrl) && !string.Equals(webEp.RssUrl, url, StringComparison.OrdinalIgnoreCase))
         {
-            return await AddUrlOrFeedAsync(webEp.RssUrl, putLatestOnDesk);
+            return await AddUrlOrFeedAsync(webEp.RssUrl, putLatestOnDesk, isRefresh);
         }
 
         // Final attempt as RSS so Rust gives a clear parse error
         var rssParsed = await Task.Run(() => YuyueCoreMethods.ParsePodcastRss(body));
         var ch = await Task.Run(() => _library.Core.PodcastUpsertChannelFromFeed(url, rssParsed, putLatestOnDesk));
         _ = PrefetchPodcast20TranscriptsAsync(ch.Id, rssParsed);
+        if (!isRefresh) _library.Analytics.TrackAudioFeatureUsed("podcast_added");
         return (ch, null);
     }
 
@@ -326,13 +396,14 @@ public sealed class PodcastService
             await gate.WaitAsync();
             try
             {
-                var (ch, _) = await AddUrlOrFeedAsync(f.XmlUrl, putLatestOnDesk: false);
+                var (ch, _) = await AddUrlOrFeedAsync(f.XmlUrl, putLatestOnDesk: false, isRefresh: true);
                 if (ch is not null) Interlocked.Increment(ref importedCount);
             }
             catch { }
             finally { gate.Release(); }
         });
         await Task.WhenAll(tasks);
+        if (importedCount > 0) _library.Analytics.TrackAudioFeatureUsed("podcast_added");
         return importedCount;
     }
 
@@ -380,8 +451,10 @@ public sealed class PodcastService
         }
         catch { }
 
-        return await Task.Run(() => _library.Core.PodcastImportSingleIssue(
+        var issue = await Task.Run(() => _library.Core.PodcastImportSingleIssue(
             title, author, "从本机音频文件直接放入收听台", "", null, storedPath, null, durSec, "zh-CN", PodcastSourceKind.LocalAudio));
+        _library.Analytics.TrackAudioFeatureUsed("podcast_added");
+        return issue;
     }
 
     /// <summary>
@@ -537,8 +610,9 @@ public sealed class PodcastService
                         if (wav is { Length: > 64 }) return wav;
                     }
                     catch (OperationCanceledException) { throw; }
-                    catch { }
+                    catch { return null; }
                 }
+                return null;
             }
             else if (CloudVoiceService.TryParseFullId(norm, out _, out _))
             {
@@ -548,11 +622,12 @@ public sealed class PodcastService
                     if (wav is { Length: > 64 }) return wav;
                 }
                 catch (OperationCanceledException) { throw; }
-                catch { }
+                catch { return null; }
+                return null;
             }
-            else if ((norm.StartsWith("card.", StringComparison.Ordinal) || norm.StartsWith("cloned.", StringComparison.Ordinal))
-                     && _library.LiveVoice.IsReady)
+            else if (norm.StartsWith("card.", StringComparison.Ordinal) || norm.StartsWith("cloned.", StringComparison.Ordinal))
             {
+                if (!_library.LiveVoice.IsReady) return null;
                 var card = _library.LiveVoice.GetClonedCards().FirstOrDefault(c => c.Id == norm)
                     ?? _library.LiveVoice.GetBuiltinCards().FirstOrDefault(c => c.Id == norm);
                 if (card is not null)
@@ -564,10 +639,14 @@ public sealed class PodcastService
                         if (wav is { Length: > 64 }) return wav;
                     }
                     catch (OperationCanceledException) { throw; }
-                    catch { }
+                    catch { return null; }
                 }
+                return null;
             }
         }
+
+        if (!string.IsNullOrWhiteSpace(norm) && !norm.StartsWith("sys:", StringComparison.Ordinal))
+            return null;
 
         try
         {
@@ -639,6 +718,8 @@ public sealed class PodcastService
 
             var sentences = GroupWordsIntoMagazineSentences(words, issue.ShowTitle, lang);
             await Task.Run(() => _library.Core.PodcastSetTranscript(issueId, sentences, PodcastFidelity.L2Magazine), ct);
+            if (sentences.Length > 0)
+                _library.Analytics.TrackAudioFeatureUsed("podcast_transcribe");
             return sentences.Length;
         }
         finally
@@ -776,6 +857,8 @@ public sealed class PodcastService
         }
         var draft = await Task.Run(() => _library.Core.FinalizeStudioScript(brief, rawReply));
         string lang = (kind == StudioKind.VocabRadio || style == "studio-duo-en") ? "en" : "zh-Hans";
-        return await Task.Run(() => _library.Core.PodcastSaveStudioIssue(kind, draft, bookIds, lang));
+        var created = await Task.Run(() => _library.Core.PodcastSaveStudioIssue(kind, draft, bookIds, lang));
+        _library.Analytics.TrackAudioFeatureUsed("podcast_added");
+        return created;
     }
 }

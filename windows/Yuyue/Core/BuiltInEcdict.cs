@@ -23,6 +23,12 @@ public sealed class BuiltInEcdict
         FilePath = Path.Combine(AppContext.BaseDirectory, "Assets", "Dict", "ecdict.tsv");
     }
 
+    public void PrewarmAsync()
+    {
+        if (_loaded) return;
+        _ = Task.Run(EnsureLoaded);
+    }
+
     private void EnsureLoaded()
     {
         if (_loaded) return;

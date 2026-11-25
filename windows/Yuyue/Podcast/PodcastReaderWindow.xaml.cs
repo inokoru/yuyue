@@ -1,11 +1,19 @@
+using Microsoft.UI;
+using Microsoft.UI.Text;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Media.Core;
 using Windows.Media.Playback;
+using Windows.System;
+using Windows.UI;
 using Yuyue.Core;
 using Yuyue.Design;
+using Yuyue.Shelf;
 using Yuyue.Speech;
+using XamlLine = Microsoft.UI.Xaml.Shapes.Line;
 
 namespace Yuyue.Podcast;
 
@@ -18,8 +26,14 @@ public sealed partial class PodcastReaderWindow : Window
 
     private readonly MediaPlayer _streamPlayer;
     private readonly AudioPlayer _ttsPlayer;
+    private bool _closed;
+    private bool _isFullScreen;
+    private int _renderIssueGen;
+    private int _renderClipsGen;
     private bool _playingStream;
     private bool _playingTts;
+    private bool _transcribing;
+    private string _transcribeStatus = "";
     private double _rate = 1.0;
 
     public PodcastReaderWindow(LibraryService library, string issueId)
@@ -31,29 +45,40 @@ public sealed partial class PodcastReaderWindow : Window
 
         InitializeComponent();
         Title = _issue.Title;
-        ThemeHelper.ResizeWindow(this, 1020, 680);
+        ThemeHelper.ResizeWindow(this, 1020, 680, minWidthDip: 760, minHeightDip: 500);
         SetTitleBar(TitleDragRegion);
 
-        _streamPlayer = new MediaPlayer { AutoPlay = false };
+        _streamPlayer = new MediaPlayer { AudioCategory = MediaPlayerAudioCategory.Speech, AutoPlay = false };
         _streamPlayer.MediaEnded += (_, _) => DispatcherQueue.TryEnqueue(() =>
         {
+            if (_closed) return;
             _playingStream = false;
+            _library.SystemIntegration.SetAudioPlaying(this, false);
             UpdatePlayButton();
         });
 
         _ttsPlayer = new AudioPlayer(_library);
+        try { App.CurrentApp.BindAudioClaimOwner(_ttsPlayer, this); } catch { }
         _ttsPlayer.SetRate(_rate);
         _ttsPlayer.SectionFinished += () => DispatcherQueue.TryEnqueue(() =>
         {
+            if (_closed) return;
             _playingTts = false;
+            _library.SystemIntegration.SetAudioPlaying(this, false);
             UpdatePlayButton();
         });
 
         Closed += OnWindowClosed;
 
         ApplyAppearance();
-        RenderIssue();
-        RenderClips();
+        _library.Analytics.TrackScreen("Podcasts");
+        Activated += (_, args) =>
+        {
+            if (args.WindowActivationState != WindowActivationState.Deactivated)
+                _library.Analytics.TrackScreen("Podcasts");
+        };
+        _ = RenderIssueAsync();
+        _ = RenderClipsAsync();
     }
 
     public void ApplyAppearance()
@@ -71,19 +96,28 @@ public sealed partial class PodcastReaderWindow : Window
         L10n.ApplyTree(RootGrid);
     }
 
-    private void RenderIssue()
+    private async Task RenderIssueAsync()
     {
-        bool dark = ThemeHelper.IsDark(RootGrid.ActualTheme);
-        var p = ThemeHelper.Palette(dark);
-
+        if (_closed) return;
+        int gen = ++_renderIssueGen;
         ShowNameTopText.Text = _issue.ShowTitle;
         IssueShowBadge.Text = _issue.Source == PodcastSourceKind.Studio ? $"✦ 书房电台 · {_issue.ShowTitle}" : _issue.ShowTitle;
         IssueTitleText.Text = _issue.Title;
         IssueSummaryText.Text = _issue.Summary;
         IssueSummaryText.Visibility = string.IsNullOrWhiteSpace(_issue.Summary) ? Visibility.Collapsed : Visibility.Visible;
 
+        var loaded = await Task.Run(() =>
+        {
+            try { return _library.Core.PodcastTranscript(_issueId); }
+            catch { return Array.Empty<MagazineSentence>(); }
+        });
+        if (_closed || gen != _renderIssueGen) return;
+
+        bool dark = ThemeHelper.IsDark(RootGrid.ActualTheme);
+        var p = ThemeHelper.Palette(dark);
+
         TranscriptStack.Children.Clear();
-        _transcript = _library.Core.PodcastTranscript(_issueId);
+        _transcript = loaded;
 
         if (_transcript.Length > 0)
         {
@@ -122,12 +156,12 @@ public sealed partial class PodcastReaderWindow : Window
                     Padding = new Thickness(7, 0, 7, 0),
                     HorizontalAlignment = HorizontalAlignment.Right,
                 };
-                clipBtn.Click += (_, _) =>
+                clipBtn.Click += async (_, _) =>
                 {
                     try
                     {
-                        _library.Core.PodcastAddClip(_issueId, sent.T0, sent.T1, sent.Speaker, sent.TextOrig, null, null);
-                        RenderClips();
+                        await Task.Run(() => _library.Core.PodcastAddClip(_issueId, sent.T0, sent.T1, sent.Speaker, sent.TextOrig, null, null));
+                        if (!_closed) await RenderClipsAsync();
                     }
                     catch { }
                 };
@@ -158,43 +192,141 @@ public sealed partial class PodcastReaderWindow : Window
                 TranscriptStack.Children.Add(card);
             }
         }
-        else if (!string.IsNullOrWhiteSpace(_issue.Shownotes))
-        {
-            TranscriptStack.Children.Add(new TextBlock
-            {
-                Text = _issue.Shownotes,
-                FontSize = 14,
-                Foreground = ThemeHelper.Brush(p.T1),
-                TextWrapping = TextWrapping.Wrap,
-                LineHeight = 24,
-            });
-        }
         else
         {
-            TranscriptStack.Children.Add(new TextBlock
+            var tint = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+            var serif = new FontFamily(YYFontFamily.Serif.WindowsFamily());
+            var bannerGrid = new Grid { ColumnSpacing = 10 };
+            bannerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            bannerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            bannerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var waveIcon = YYIcons.Make("wave", 14, ThemeHelper.Brush(tint.Accent));
+            waveIcon.VerticalAlignment = VerticalAlignment.Center;
+            bannerGrid.Children.Add(waveIcon);
+
+            var statusMeta = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+            statusMeta.Children.Add(new TextBlock
             {
-                Text = "本集暂无逐字稿，可点击右上角「▶ 收听」直接播放节目音频。",
-                FontSize = 13,
-                Foreground = ThemeHelper.Brush(p.T3),
+                Text = L10n.T("原声播放中 · 文字稿尚未就绪"),
+                FontSize = 12.5,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = ThemeHelper.Brush(p.T1),
             });
+            statusMeta.Children.Add(new TextBlock
+            {
+                Text = _transcribing && !string.IsNullOrWhiteSpace(_transcribeStatus)
+                    ? _transcribeStatus
+                    : L10n.T("随时可点击右上角收听原声，音频单集支持一键本机转文字。"),
+                FontSize = 11.5,
+                Foreground = ThemeHelper.Brush(_transcribing ? tint.Accent : p.T3),
+                TextWrapping = TextWrapping.Wrap,
+            });
+            Grid.SetColumn(statusMeta, 1);
+            bannerGrid.Children.Add(statusMeta);
+
+            bool hasAudio = !string.IsNullOrWhiteSpace(_issue.LocalAudioPath) || !string.IsNullOrWhiteSpace(_issue.AudioUrl);
+            if (hasAudio)
+            {
+                var trBtn = new Button
+                {
+                    Content = _transcribing ? L10n.T("转写中…") : L10n.T("本机转文字"),
+                    Height = 26,
+                    MinHeight = 26,
+                    Padding = new Thickness(11, 0, 11, 0),
+                    CornerRadius = new CornerRadius(13),
+                    FontSize = 11.5,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = ThemeHelper.Brush(tint.Accent),
+                    Background = ThemeHelper.Brush(tint.Soft),
+                    BorderBrush = ThemeHelper.Brush(tint.Edge),
+                    BorderThickness = new Thickness(1),
+                    UseSystemFocusVisuals = false,
+                    IsEnabled = !_transcribing,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                trBtn.Click += async (_, _) =>
+                {
+                    if (_transcribing || _closed) return;
+                    _transcribing = true;
+                    _transcribeStatus = L10n.T("正在准备单集音频…");
+                    await RenderIssueAsync();
+                    try
+                    {
+                        await _library.Podcasts.TranscribeIssueOnDeviceAsync(_issueId, msg =>
+                        {
+                            _transcribeStatus = msg;
+                            DispatcherQueue.TryEnqueue(() =>
+                            {
+                                if (_closed) return;
+                                _ = RenderIssueAsync();
+                            });
+                        });
+                        if (!_closed)
+                            _issue = await Task.Run(() => _library.Core.PodcastIssue(_issueId));
+                    }
+                    catch (Exception ex)
+                    {
+                        _transcribeStatus = ex.Message;
+                    }
+                    finally
+                    {
+                        _transcribing = false;
+                        if (!_closed) await RenderIssueAsync();
+                    }
+                };
+                Grid.SetColumn(trBtn, 2);
+                bannerGrid.Children.Add(trBtn);
+            }
+
+            TranscriptStack.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(10),
+                Background = ThemeHelper.Brush(p.Inset),
+                BorderBrush = ThemeHelper.Brush(p.Line),
+                BorderThickness = new Thickness(0.5),
+                Padding = new Thickness(14, 11, 14, 11),
+                Child = bannerGrid,
+            });
+
+            if (!string.IsNullOrWhiteSpace(_issue.Shownotes))
+            {
+                TranscriptStack.Children.Add(new TextBlock
+                {
+                    Text = _issue.Shownotes,
+                    FontFamily = serif,
+                    FontSize = 14.5,
+                    Foreground = ThemeHelper.Brush(p.T2),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 24,
+                    Margin = new Thickness(0, 4, 0, 0),
+                });
+            }
         }
     }
 
-    private void RenderClips()
+    private async Task RenderClipsAsync()
     {
+        if (_closed) return;
+        int gen = ++_renderClipsGen;
+        PodcastClip[] clips = await Task.Run(() =>
+        {
+            try { return _library.Core.PodcastClips(_issueId); }
+            catch { return Array.Empty<PodcastClip>(); }
+        });
+        if (_closed || gen != _renderClipsGen) return;
+
         ClipsStack.Children.Clear();
         bool dark = ThemeHelper.IsDark(RootGrid.ActualTheme);
         var p = ThemeHelper.Palette(dark);
-
-        PodcastClip[] clips;
-        try { clips = _library.Core.PodcastClips(_issueId); }
-        catch { clips = Array.Empty<PodcastClip>(); }
+        var serif = new FontFamily(YYFontFamily.Serif.WindowsFamily());
+        Color leafSurface = dark ? Color.FromArgb(255, 31, 30, 28) : Color.FromArgb(255, 248, 245, 239);
 
         if (clips.Length == 0)
         {
             ClipsStack.Children.Add(new TextBlock
             {
-                Text = "点击对话右上角「+ 摘录」，把打动你的段落留在这里。",
+                Text = L10n.T("点击对话右上角「+ 摘录」，把打动你的段落留在这里。"),
                 FontSize = 12,
                 Foreground = ThemeHelper.Brush(p.T3),
                 TextWrapping = TextWrapping.Wrap,
@@ -205,28 +337,75 @@ public sealed partial class PodcastReaderWindow : Window
         foreach (var clip in clips)
         {
             var cid = clip.Id;
-            var sp = new StackPanel { Spacing = 4 };
+            var sp = new StackPanel { Spacing = 6 };
             if (!string.IsNullOrWhiteSpace(clip.Speaker))
-                sp.Children.Add(new TextBlock { Text = clip.Speaker, FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = (Brush)Application.Current.Resources["YYAccentBrush"] });
-            sp.Children.Add(new TextBlock { Text = clip.QuoteText, FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), TextWrapping = TextWrapping.Wrap });
+                sp.Children.Add(new TextBlock { Text = clip.Speaker, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = (Brush)Application.Current.Resources["YYAccentBrush"] });
+            sp.Children.Add(new TextBlock { Text = $"「{clip.QuoteText}」", FontFamily = serif, FontSize = 12.5, Foreground = ThemeHelper.Brush(p.T1), TextWrapping = TextWrapping.Wrap, LineHeight = 19 });
+
+            var dashRule = new XamlLine
+            {
+                X1 = 0,
+                X2 = 220,
+                Y1 = 0,
+                Y2 = 0,
+                Stroke = ThemeHelper.Brush(p.Line),
+                StrokeThickness = 0.75,
+                StrokeDashArray = new DoubleCollection { 3, 3 },
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+            };
+            sp.SizeChanged += (_, se) => { if (se.NewSize.Width > 8) dashRule.X2 = se.NewSize.Width; };
+            sp.Children.Add(dashRule);
+
+            var noteBox = new TextBox
+            {
+                Text = _library.Podcasts.GetClipThought(clip),
+                PlaceholderText = L10n.T("添一句随想…"),
+                FontSize = 11.5,
+                Foreground = ThemeHelper.Brush(p.T2),
+                Background = new SolidColorBrush(Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0, 2, 0, 2),
+            };
+            YYChrome.StripTextBoxChrome(noteBox);
+            noteBox.LostFocus += (_, _) => _library.Podcasts.SetClipThought(cid, noteBox.Text);
+            noteBox.KeyDown += (_, ke) =>
+            {
+                if (ke.Key == VirtualKey.Enter)
+                {
+                    ke.Handled = true;
+                    _library.Podcasts.SetClipThought(cid, noteBox.Text);
+                    RootGrid.Focus(FocusState.Programmatic);
+                }
+            };
+            sp.Children.Add(noteBox);
 
             var del = new Button
             {
                 Style = (Style)Application.Current.Resources["YYIconButtonStyle"],
-                Content = "删除",
+                Content = L10n.T("删除"),
                 FontSize = 11,
                 Height = 20,
                 Padding = new Thickness(6, 0, 6, 0),
                 HorizontalAlignment = HorizontalAlignment.Right,
             };
-            del.Click += (_, _) => { try { _library.Core.PodcastDeleteClip(cid); RenderClips(); } catch { } };
+            del.Click += async (_, _) =>
+            {
+                try
+                {
+                    await Task.Run(() => _library.Core.PodcastDeleteClip(cid));
+                    if (!_closed) await RenderClipsAsync();
+                }
+                catch { }
+            };
             sp.Children.Add(del);
 
             ClipsStack.Children.Add(new Border
             {
-                CornerRadius = new CornerRadius(10),
-                Background = ThemeHelper.Brush(p.Inset),
-                Padding = new Thickness(10, 8, 10, 6),
+                CornerRadius = new CornerRadius(11),
+                Background = ThemeHelper.Brush(leafSurface),
+                BorderBrush = ThemeHelper.Brush(p.Line),
+                BorderThickness = new Thickness(0.5),
+                Padding = new Thickness(11, 9, 11, 8),
                 Child = sp,
             });
         }
@@ -234,12 +413,33 @@ public sealed partial class PodcastReaderWindow : Window
 
     private void BackToShelf_Click(object sender, RoutedEventArgs e) => App.CurrentApp.ShowShelf();
 
+    private void PauseFromAudioClaim()
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_closed) return;
+            if (_playingStream)
+            {
+                try { _streamPlayer.Pause(); } catch { }
+                _playingStream = false;
+            }
+            if (_playingTts)
+            {
+                _ttsPlayer.Stop();
+                _playingTts = false;
+            }
+            _library.SystemIntegration.SetAudioPlaying(this, false);
+            UpdatePlayButton();
+        });
+    }
+
     private void Play_Click(object sender, RoutedEventArgs e)
     {
         if (_playingStream)
         {
             _streamPlayer.Pause();
             _playingStream = false;
+            _library.SystemIntegration.SetAudioPlaying(this, false);
             UpdatePlayButton();
             return;
         }
@@ -247,9 +447,12 @@ public sealed partial class PodcastReaderWindow : Window
         {
             _ttsPlayer.Stop();
             _playingTts = false;
+            _library.SystemIntegration.SetAudioPlaying(this, false);
             UpdatePlayButton();
             return;
         }
+
+        App.CurrentApp.ClaimAudioPlayback(this, PauseFromAudioClaim);
 
         // 1. Prefer real audio stream when available
         string? audioSrc = !string.IsNullOrWhiteSpace(_issue.LocalAudioPath) && File.Exists(_issue.LocalAudioPath)
@@ -264,11 +467,13 @@ public sealed partial class PodcastReaderWindow : Window
                 _streamPlayer.PlaybackSession.Position = System.TimeSpan.FromSeconds(_issue.PositionSec);
             _streamPlayer.Play();
             _playingStream = true;
+            _library.Analytics.TrackAudioFeatureUsed("podcast_play");
+            _library.SystemIntegration.SetAudioPlaying(this, true, _issue.Title, PauseFromAudioClaim);
             UpdatePlayButton();
             return;
         }
 
-        // 2. Otherwise read the Studio dialogue script aloud via AudioPlayer (neural ZipVoice or system TTS)
+        // 2. Otherwise read the Studio dialogue script aloud via AudioPlayer
         if (_transcript.Length > 0)
         {
             var lines = _transcript
@@ -281,6 +486,9 @@ public sealed partial class PodcastReaderWindow : Window
                 _ttsPlayer.SetRate(_rate);
                 _ttsPlayer.Start(lines, 0);
                 _playingTts = true;
+                _library.Analytics.TrackAudioFeatureUsed("podcast_play");
+                _library.Analytics.TrackTtsStarted(_ttsPlayer.ActiveTtsEngineKey, "podcast");
+                _library.SystemIntegration.SetAudioPlaying(this, true, _issue.Title, PauseFromAudioClaim);
                 UpdatePlayButton();
             }
         }
@@ -298,11 +506,80 @@ public sealed partial class PodcastReaderWindow : Window
 
     private void UpdatePlayButton()
     {
+        if (_closed) return;
         PlayBtn.Content = (_playingStream || _playingTts) ? L10n.Tr("⏸ 暂停", "⏸ Pause") : L10n.Tr("▶ 收听", "▶ Listen");
+    }
+
+    private void ToggleFullScreen()
+    {
+        _isFullScreen = !_isFullScreen;
+        try
+        {
+            AppWindow?.SetPresenter(_isFullScreen ? AppWindowPresenterKind.FullScreen : AppWindowPresenterKind.Default);
+        }
+        catch { }
+        TopBar.Visibility = _isFullScreen ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void RootGrid_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (_closed || YYChrome.HasBlockingModalOrFlyoutOpen(RootGrid.XamlRoot)) return;
+
+        bool ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+        bool alt = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+
+        if (ctrl && !alt)
+        {
+            if (e.Key == VirtualKey.W)
+            {
+                e.Handled = true;
+                Close();
+                return;
+            }
+            if (e.Key == (VirtualKey)188)
+            {
+                e.Handled = true;
+                App.CurrentApp.OpenSettings();
+                return;
+            }
+            if (e.Key == VirtualKey.K)
+            {
+                e.Handled = true;
+                string linkedBookId = _transcript.FirstOrDefault(s => !string.IsNullOrEmpty(s.BookId))?.BookId ?? "";
+                _ = QuickSearchDialog.ShowAsync(RootGrid.XamlRoot, _library, linkedBookId);
+                return;
+            }
+        }
+
+        if (e.Key == VirtualKey.F11)
+        {
+            e.Handled = true;
+            ToggleFullScreen();
+            return;
+        }
+
+        if (FocusManager.GetFocusedElement(RootGrid.XamlRoot) is TextBox)
+            return;
+
+        if (e.Key == VirtualKey.Space && !ctrl && !alt)
+        {
+            e.Handled = true;
+            Play_Click(sender, e);
+            return;
+        }
+        if (e.Key == VirtualKey.Escape && _isFullScreen)
+        {
+            e.Handled = true;
+            ToggleFullScreen();
+        }
     }
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
+        _closed = true;
+        _library.SystemIntegration.SetAudioPlaying(this, false);
         if (_playingStream)
         {
             try
@@ -312,7 +589,14 @@ public sealed partial class PodcastReaderWindow : Window
             }
             catch { }
         }
-        try { _streamPlayer.Pause(); _streamPlayer.Dispose(); } catch { }
+        try
+        {
+            _streamPlayer.Pause();
+            _streamPlayer.Source = null;
+            _streamPlayer.Dispose();
+        }
+        catch { }
+        try { _ttsPlayer.Stop(); } catch { }
         _ttsPlayer.Dispose();
     }
 }

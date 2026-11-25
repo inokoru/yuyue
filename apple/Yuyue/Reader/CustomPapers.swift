@@ -220,6 +220,7 @@ final class PaperAppearance {
     func refreshAppearance() {
         ensureMacObserver()
         setIsDark(Self.currentEffectiveDark())
+        AppIconChoice.applyMacDockIcon()
     }
     #else
     func syncFromRoot(scheme: ColorScheme, mode: AppAppearance) {
@@ -470,6 +471,7 @@ extension Color {
 struct PaperEditor: View {
     private let backTitle: String
     private let onPreview: (CustomPaper?) -> Void
+    @Environment(\.colorScheme) private var scheme
     @State var draft: CustomPaper
     /// Done (saved, the page on it) or cancelled (nil).
     let finish: (CustomPaper?) -> Void
@@ -579,7 +581,7 @@ struct PaperEditor: View {
                                     .overlay { PaperTextureView(texture: t, dark: colors.dark) }
                                     .frame(width: 34, height: 26)
                                     .clipShape(.rect(cornerRadius: 7))
-                                    .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.black.opacity(0.14), lineWidth: 0.5))
+                                    .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(scheme == .dark ? Color.white.opacity(0.14) : .black.opacity(0.14), lineWidth: 0.5))
                                     .padding(2)
                                     .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(on ? YYColor.t1 : .clear, lineWidth: 1.5))
                             }
@@ -609,7 +611,7 @@ struct PaperEditor: View {
                                     .foregroundStyle(Color(hex: ink.color))
                                     .frame(width: 22, height: 22)
                                     .background(Color(hex: colors.bg), in: .circle)
-                                    .overlay(Circle().strokeBorder(.black.opacity(0.18), lineWidth: 0.5))
+                                    .overlay(Circle().strokeBorder(scheme == .dark ? Color.white.opacity(0.18) : .black.opacity(0.18), lineWidth: 0.5))
                                     .padding(1.5)
                                     .overlay(Circle().strokeBorder(on ? YYColor.t1 : .clear, lineWidth: 1.5))
                             }
@@ -736,6 +738,7 @@ struct PaperTile: View {
     let selected: Bool
     var small = false
     let pick: () -> Void
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Button(action: pick) {
@@ -748,7 +751,7 @@ struct PaperTile: View {
                     .frame(maxWidth: small ? .infinity : nil)
                     .background { paper.bg.overlay { PaperTextureView(texture: texture, dark: paper.isDark) } }
                     .clipShape(.rect(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(YYColor.line, lineWidth: paper.isDark ? 0 : 0.5))
+                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(scheme == .dark ? Color.white.opacity(0.14) : YYColor.line, lineWidth: 0.5))
                     .padding(2)
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? YYColor.t1 : .clear, lineWidth: 1.5))
                 Text(name)

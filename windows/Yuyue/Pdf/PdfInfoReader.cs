@@ -80,6 +80,201 @@ public static class PdfInfoReader
 
     private static readonly ConcurrentDictionary<string, double[]> PageAspectsCache = new(StringComparer.OrdinalIgnoreCase);
 
+    private const int MaxCachedOpenPdfs = 4;
+    private static readonly object OpenPdfCacheGate = new();
+    private static readonly Dictionary<string, CachedPdfEntry> OpenPdfCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private sealed class CachedPdfEntry(string fullPath, long lastWriteTicks, long fileLength, UglyToad.PdfPig.PdfDocument document)
+    {
+        public string FullPath { get; } = fullPath;
+        public long LastWriteTicks { get; } = lastWriteTicks;
+        public long FileLength { get; } = fileLength;
+        public UglyToad.PdfPig.PdfDocument Document { get; } = document;
+        public object SyncRoot { get; } = new();
+        public long LastAccessTicks { get; set; } = Environment.TickCount64;
+        public int RefCount { get; set; }
+        public bool PendingDispose { get; set; }
+    }
+
+    private static CachedPdfEntry AcquireCachedDocument(string filePath)
+    {
+        string fullPath = Path.GetFullPath(filePath);
+        var fi = new FileInfo(fullPath);
+        long writeTicks = fi.Exists ? fi.LastWriteTimeUtc.Ticks : 0;
+        long length = fi.Exists ? fi.Length : 0;
+
+        CachedPdfEntry? staleToDispose = null;
+        lock (OpenPdfCacheGate)
+        {
+            if (OpenPdfCache.TryGetValue(fullPath, out var existing))
+            {
+                if (!existing.PendingDispose && existing.LastWriteTicks == writeTicks && existing.FileLength == length)
+                {
+                    existing.RefCount++;
+                    existing.LastAccessTicks = Environment.TickCount64;
+                    return existing;
+                }
+
+                existing.PendingDispose = true;
+                OpenPdfCache.Remove(fullPath);
+                if (existing.RefCount == 0)
+                    staleToDispose = existing;
+            }
+        }
+
+        if (staleToDispose is not null)
+            SafeDisposeEntry(staleToDispose);
+
+        var opened = UglyToad.PdfPig.PdfDocument.Open(fullPath);
+        var fresh = new CachedPdfEntry(fullPath, writeTicks, length, opened) { RefCount = 1 };
+        List<CachedPdfEntry>? evicted = null;
+        CachedPdfEntry? winner = null;
+
+        lock (OpenPdfCacheGate)
+        {
+            if (OpenPdfCache.TryGetValue(fullPath, out var raceEntry) &&
+                !raceEntry.PendingDispose &&
+                raceEntry.LastWriteTicks == writeTicks &&
+                raceEntry.FileLength == length)
+            {
+                raceEntry.RefCount++;
+                raceEntry.LastAccessTicks = Environment.TickCount64;
+                winner = raceEntry;
+            }
+            else
+            {
+                if (raceEntry is not null)
+                {
+                    raceEntry.PendingDispose = true;
+                    OpenPdfCache.Remove(fullPath);
+                    if (raceEntry.RefCount == 0)
+                    {
+                        evicted ??= [];
+                        evicted.Add(raceEntry);
+                    }
+                }
+
+                OpenPdfCache[fullPath] = fresh;
+                while (OpenPdfCache.Count > MaxCachedOpenPdfs)
+                {
+                    var idleVictim = OpenPdfCache.Values
+                        .Where(e => !ReferenceEquals(e, fresh) && e.RefCount == 0)
+                        .OrderBy(e => e.LastAccessTicks)
+                        .FirstOrDefault();
+                    if (idleVictim is null) break;
+                    idleVictim.PendingDispose = true;
+                    OpenPdfCache.Remove(idleVictim.FullPath);
+                    evicted ??= [];
+                    evicted.Add(idleVictim);
+                }
+            }
+        }
+
+        if (winner is not null)
+        {
+            SafeDisposeEntry(fresh);
+            return winner;
+        }
+
+        if (evicted is not null)
+        {
+            foreach (var item in evicted)
+                SafeDisposeEntry(item);
+        }
+
+        return fresh;
+    }
+
+    private static void ReleaseCachedDocument(CachedPdfEntry entry)
+    {
+        bool shouldDispose = false;
+        lock (OpenPdfCacheGate)
+        {
+            entry.RefCount = Math.Max(0, entry.RefCount - 1);
+            entry.LastAccessTicks = Environment.TickCount64;
+            if (entry.PendingDispose && entry.RefCount == 0)
+                shouldDispose = true;
+        }
+
+        if (shouldDispose)
+            SafeDisposeEntry(entry);
+    }
+
+    private static void SafeDisposeEntry(CachedPdfEntry entry)
+    {
+        try
+        {
+            lock (entry.SyncRoot)
+            {
+                entry.Document.Dispose();
+            }
+        }
+        catch { }
+    }
+
+    private static T WithCachedPdf<T>(string filePath, Func<UglyToad.PdfPig.PdfDocument, T> action)
+    {
+        var entry = AcquireCachedDocument(filePath);
+        try
+        {
+            lock (entry.SyncRoot)
+            {
+                return action(entry.Document);
+            }
+        }
+        finally
+        {
+            ReleaseCachedDocument(entry);
+        }
+    }
+
+    /// <summary>
+    /// Releases cached open <see cref="UglyToad.PdfPig.PdfDocument"/> instance(s) when a reader window closes
+    /// (or all cached documents when <paramref name="filePath"/> is null).
+    /// </summary>
+    public static void CloseCachedDocument(string? filePath = null)
+    {
+        List<CachedPdfEntry>? toDispose = null;
+        lock (OpenPdfCacheGate)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+            {
+                foreach (var entry in OpenPdfCache.Values)
+                {
+                    entry.PendingDispose = true;
+                    if (entry.RefCount == 0)
+                    {
+                        toDispose ??= [];
+                        toDispose.Add(entry);
+                    }
+                }
+                OpenPdfCache.Clear();
+            }
+            else
+            {
+                string fullPath;
+                try { fullPath = Path.GetFullPath(filePath); }
+                catch { fullPath = filePath; }
+
+                if (OpenPdfCache.Remove(fullPath, out var entry))
+                {
+                    entry.PendingDispose = true;
+                    if (entry.RefCount == 0)
+                    {
+                        toDispose ??= [];
+                        toDispose.Add(entry);
+                    }
+                }
+            }
+        }
+
+        if (toDispose is not null)
+        {
+            foreach (var entry in toDispose)
+                SafeDisposeEntry(entry);
+        }
+    }
+
     private static bool IsCjkOrFullWidth(char ch) =>
         (ch >= '\u2E80' && ch <= '\u9FFF') ||
         (ch >= '\uF900' && ch <= '\uFAFF') ||
@@ -130,18 +325,20 @@ public static class PdfInfoReader
         if (PageAspectsCache.TryGetValue(filePath, out var cached)) return cached;
         try
         {
-            using var pig = UglyToad.PdfPig.PdfDocument.Open(filePath);
-            int n = pig.NumberOfPages;
-            var ratios = new double[n];
-            for (int i = 1; i <= n; i++)
+            return WithCachedPdf(filePath, pig =>
             {
-                var p = pig.GetPage(i);
-                ratios[i - 1] = p.Width > 0 && p.Height > 0
-                    ? Math.Clamp(p.Height / p.Width, 0.25, 4.0)
-                    : 1.414;
-            }
-            PageAspectsCache[filePath] = ratios;
-            return ratios;
+                int n = pig.NumberOfPages;
+                var ratios = new double[n];
+                for (int i = 1; i <= n; i++)
+                {
+                    var p = pig.GetPage(i);
+                    ratios[i - 1] = p.Width > 0 && p.Height > 0
+                        ? Math.Clamp(p.Height / p.Width, 0.25, 4.0)
+                        : 1.414;
+                }
+                PageAspectsCache[filePath] = ratios;
+                return ratios;
+            });
         }
         catch
         {
@@ -178,21 +375,24 @@ public static class PdfInfoReader
         {
             await Task.Run(() =>
             {
-                using var pig = UglyToad.PdfPig.PdfDocument.Open(filePath);
-                title = SanitizePdfTitle(pig.Information.Title);
-                if (SanitizePdfAuthor(pig.Information.Author) is string cleanAuthor)
-                    authors = [cleanAuthor];
-
-                int sample = Math.Min(pig.NumberOfPages, 100);
-                long chars = 0;
-                for (int i = 1; i <= sample; i++)
+                WithCachedPdf(filePath, pig =>
                 {
-                    string pageText = ContentOrderTextExtractor.GetText(pig.GetPage(i));
-                    int nonWs = pageText.Count(c => !char.IsWhiteSpace(c));
-                    if (i == 1 && nonWs > 400) wordyFirstPage = true;
-                    chars += nonWs;
-                }
-                totalChars = sample > 0 ? (ulong)(chars * pig.NumberOfPages / sample) : 0UL;
+                    title = SanitizePdfTitle(pig.Information.Title);
+                    if (SanitizePdfAuthor(pig.Information.Author) is string cleanAuthor)
+                        authors = [cleanAuthor];
+
+                    int sample = Math.Min(pig.NumberOfPages, 100);
+                    long chars = 0;
+                    for (int i = 1; i <= sample; i++)
+                    {
+                        string pageText = ContentOrderTextExtractor.GetText(pig.GetPage(i));
+                        int nonWs = pageText.Count(c => !char.IsWhiteSpace(c));
+                        if (i == 1 && nonWs > 400) wordyFirstPage = true;
+                        chars += nonWs;
+                    }
+                    totalChars = sample > 0 ? (ulong)(chars * pig.NumberOfPages / sample) : 0UL;
+                    return 0;
+                });
             });
         }
         catch { /* fallback to estimated characters if PdfPig cannot parse encrypted/exotic PDF */ }
@@ -247,12 +447,14 @@ public static class PdfInfoReader
     {
         try
         {
-            using var pig = UglyToad.PdfPig.PdfDocument.Open(filePath);
-            int p = pageIndexZeroBased + 1;
-            if (p < 1 || p > pig.NumberOfPages)
-                return new PdfPageLayout(pageIndexZeroBased, "", []);
+            return WithCachedPdf(filePath, pig =>
+            {
+                int p = pageIndexZeroBased + 1;
+                if (p < 1 || p > pig.NumberOfPages)
+                    return new PdfPageLayout(pageIndexZeroBased, "", []);
 
-            return ExtractPageLayoutCore(pig.GetPage(p), pageIndexZeroBased, includeGlyphs: true);
+                return ExtractPageLayoutCore(pig.GetPage(p), pageIndexZeroBased, includeGlyphs: true);
+            });
         }
         catch
         {
@@ -432,20 +634,23 @@ public static class PdfInfoReader
         var list = new List<(string, int, int)>();
         try
         {
-            using var pig = UglyToad.PdfPig.PdfDocument.Open(filePath);
-            if (pig.TryGetBookmarks(out var bookmarks))
+            WithCachedPdf(filePath, pig =>
             {
-                void Walk(IEnumerable<UglyToad.PdfPig.Outline.BookmarkNode> nodes, int depth)
+                if (pig.TryGetBookmarks(out var bookmarks))
                 {
-                    foreach (var node in nodes)
+                    void Walk(IEnumerable<UglyToad.PdfPig.Outline.BookmarkNode> nodes, int depth)
                     {
-                        if (node is UglyToad.PdfPig.Outline.DocumentBookmarkNode docNode && docNode.PageNumber >= 1)
-                            list.Add((docNode.Title, docNode.PageNumber - 1, depth));
-                        Walk(node.Children, depth + 1);
+                        foreach (var node in nodes)
+                        {
+                            if (node is UglyToad.PdfPig.Outline.DocumentBookmarkNode docNode && docNode.PageNumber >= 1)
+                                list.Add((docNode.Title, docNode.PageNumber - 1, depth));
+                            Walk(node.Children, depth + 1);
+                        }
                     }
+                    Walk(bookmarks.Roots, 0);
                 }
-                Walk(bookmarks.Roots, 0);
-            }
+                return 0;
+            });
         }
         catch { }
         return list;
@@ -536,20 +741,37 @@ public static class PdfInfoReader
         string q = query.Trim();
         try
         {
-            using var pig = UglyToad.PdfPig.PdfDocument.Open(filePath);
-            for (int i = 1; i <= pig.NumberOfPages && hits.Count < 350; i++)
+            var entry = AcquireCachedDocument(filePath);
+            try
             {
-                string text = ExtractPageLayoutCore(pig.GetPage(i), i - 1, includeGlyphs: false).Text;
-                if (string.IsNullOrEmpty(text)) continue;
-                var matches = FindNormalizedMatches(text, q);
-                foreach (var (origStart, origLen) in matches)
+                int numPages;
+                lock (entry.SyncRoot)
                 {
-                    if (hits.Count >= 350) break;
-                    int start = Math.Max(0, origStart - 24);
-                    int end = Math.Min(text.Length, origStart + origLen + 32);
-                    string snippet = text[start..end].Replace('\r', ' ').Replace('\n', ' ').Trim();
-                    hits.Add((i - 1, origStart, origLen, snippet));
+                    numPages = entry.Document.NumberOfPages;
                 }
+
+                for (int i = 1; i <= numPages && hits.Count < 350; i++)
+                {
+                    string text;
+                    lock (entry.SyncRoot)
+                    {
+                        text = ExtractPageLayoutCore(entry.Document.GetPage(i), i - 1, includeGlyphs: false).Text;
+                    }
+                    if (string.IsNullOrEmpty(text)) continue;
+                    var matches = FindNormalizedMatches(text, q);
+                    foreach (var (origStart, origLen) in matches)
+                    {
+                        if (hits.Count >= 350) break;
+                        int start = Math.Max(0, origStart - 24);
+                        int end = Math.Min(text.Length, origStart + origLen + 32);
+                        string snippet = text[start..end].Replace('\r', ' ').Replace('\n', ' ').Trim();
+                        hits.Add((i - 1, origStart, origLen, snippet));
+                    }
+                }
+            }
+            finally
+            {
+                ReleaseCachedDocument(entry);
             }
         }
         catch { }

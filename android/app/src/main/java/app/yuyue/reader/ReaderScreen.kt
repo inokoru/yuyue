@@ -49,6 +49,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -86,12 +87,15 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import app.yuyue.design.Icons
+import app.yuyue.design.LocalStatusBarDark
+import app.yuyue.design.LocalSystemBarOverride
 import app.yuyue.design.LocalTint
 import app.yuyue.design.Prefs
 import app.yuyue.design.YY
 import app.yuyue.design.YYMotion
 import app.yuyue.design.YYPaper
 import app.yuyue.design.YYPapers
+import app.yuyue.design.findActivity
 import app.yuyue.library.Library
 import app.yuyue.shelf.UndoToast
 import app.yuyue.t
@@ -165,8 +169,14 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
     }
 
     // The status bar only with the controls, as on iPhone; its icons follow the paper.
-    val activity = context as? android.app.Activity
+    val activity = context.findActivity()
     val latestAppDark by rememberUpdatedState(YY.dark)
+    val barOverride = LocalSystemBarOverride.current
+    val barOwner = remember { Any() }
+    DisposableEffect(barOverride, paper.isDark) {
+        barOverride?.set(barOwner, paper.isDark, paper.isDark)
+        onDispose { }
+    }
     LaunchedEffect(model.chromeShown, model.searchShown, model.immersive, paper, latestAppDark) {
         val window = activity?.window ?: return@LaunchedEffect
         val controller = WindowCompat.getInsetsController(window, window.decorView)
@@ -185,8 +195,10 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
     LaunchedEffect(model.immersive, model.chromeShown) {
         if (model.immersive && model.chromeShown) { kotlinx.coroutines.delay(4000); if (!model.listenShown && !model.settingsShown) model.chromeShown = false }
     }
-    DisposableEffect(Unit) {
+    DisposableEffect(barOverride) {
         onDispose {
+            val cleared = barOverride?.clear(barOwner) ?: true
+            if (!cleared) return@onDispose
             val window = activity?.window ?: return@onDispose
             val controller = WindowCompat.getInsetsController(window, window.decorView)
             controller.isAppearanceLightStatusBars = !latestAppDark
@@ -203,130 +215,132 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
     val popupOpen = model.selection != null || model.openMark != null || model.lookup != null || model.speakerPick != null
     val topBarVisible = (model.chromeShown || model.searchShown) && !popupOpen
 
-    Box(Modifier.fillMaxSize().background(paper.bg)) {
-        // AndroidView(WebView) inside hazeSource triggers a continuous 60fps functor invalidation
-        // loop between Chromium's hardware layer and Haze's GraphicsLayer recording.
-        Box(Modifier.fillMaxSize()) {
-            AndroidView({ model.pager.also { (it.parent as? android.view.ViewGroup)?.removeView(it) } }, Modifier.fillMaxSize())
-            PageTapHint(model, paper)
-        }
-        Chrome(
-            model = model,
-            paper = paper,
-            haze = haze,
-            popupOpen = popupOpen,
-            openReadyVoicePicker = { readyId ->
-                pickedReadyVoiceId = readyId
-                readyVoicePickerShown = true
-            },
-            close = close,
-        )
-        Cards(model, paper, thought = { thought = it }, translate = { translating = it })
-        SpeakerLayer(model)
-        WordCardHost(model)
-        model.toast?.let {
-            UndoToast(
-                it, undo = { model.undoToast() },
-                modifier = Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(start = 16.dp, end = 16.dp, top = if (topBarVisible) 52.dp else 6.dp, bottom = 6.dp),
+    CompositionLocalProvider(LocalStatusBarDark provides paper.isDark) {
+        Box(Modifier.fillMaxSize().background(paper.bg)) {
+            // AndroidView(WebView) inside hazeSource triggers a continuous 60fps functor invalidation
+            // loop between Chromium's hardware layer and Haze's GraphicsLayer recording.
+            Box(Modifier.fillMaxSize()) {
+                AndroidView({ model.pager.also { (it.parent as? android.view.ViewGroup)?.removeView(it) } }, Modifier.fillMaxSize())
+                PageTapHint(model, paper)
+            }
+            Chrome(
+                model = model,
+                paper = paper,
+                haze = haze,
+                popupOpen = popupOpen,
+                openReadyVoicePicker = { readyId ->
+                    pickedReadyVoiceId = readyId
+                    readyVoicePickerShown = true
+                },
+                close = close,
             )
+            Cards(model, paper, thought = { thought = it }, translate = { translating = it })
+            SpeakerLayer(model)
+            WordCardHost(model)
+            model.toast?.let {
+                UndoToast(
+                    it, undo = { model.undoToast() },
+                    modifier = Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.statusBars)
+                        .padding(start = 16.dp, end = 16.dp, top = if (topBarVisible) 52.dp else 6.dp, bottom = 6.dp),
+                )
+            }
+            if (model.detail == null) app.yuyue.shelf.BookFailure(model.failure, close)
+            else model.failure?.let { app.yuyue.shelf.FailureDialog(it) { model.failure = null } }
         }
-        if (model.detail == null) app.yuyue.shelf.BookFailure(model.failure, close)
-        else model.failure?.let { app.yuyue.shelf.FailureDialog(it) { model.failure = null } }
-    }
 
-    if (model.tocShown) TocSheet(model) { model.tocShown = false }
-    if (model.settingsShown) TypesetSheet(model) { model.settingsShown = false }
-    if (model.listenShown) ListenSheet(model) { model.listenShown = false }
-    if (model.castShown) CastSheet(model) { model.castShown = false }
-    if (model.immersiveShown) ImmersiveSheet(model) { model.immersiveShown = false }
-    if (model.rulesShown) ReplaceRulesSheet(library.core, bookID, changed = { model.player?.textsChanged(); model.pager.reload() }) { model.rulesShown = false }
-    if (model.txtShown) TxtLayoutSheet(library, bookID, model.detail?.summary?.title ?: "", rebuilt = {
-        // The book was built again: closed and opened afresh, at the place the core carried over.
-        model.txtShown = false
-        close()
-        library.scope.launch { kotlinx.coroutines.delay(150); library.presented = bookID }
-    }) { model.txtShown = false }
-    if (model.infoShown) library.books.firstOrNull { it.id == bookID }?.let { app.yuyue.shelf.BookInfoSheet(library, it) { model.infoShown = false } }
-    var companionSettings by remember { mutableStateOf(false) }
-    var companionVersion by remember { mutableStateOf(0) }
-    LaunchedEffect(companionSettings) { if (!companionSettings) companionVersion++ }
-    if (model.companionShown) app.yuyue.companion.CompanionSheet(model, settings = { companionSettings = true }) { model.companionShown = false }
-    val activeTranslating = translating ?: model.translatingSentence
-    activeTranslating?.let { text ->
-        TranslateSheet(model, text, companionVersion, openSettings = { companionSettings = true }) {
-            translating = null
-            model.translatingSentence = null
-        }
-    }
-    if (companionSettings) app.yuyue.companion.CompanionSettingsSheet { companionSettings = false }
-    model.adjustingSentence?.let { (sec, sen) ->
-        TimingAdjustSheet(model, sec, sen) { model.adjustingSentence = null }
-    }
-    model.player?.let { PlayerFailure(it) }
-    val thermalNotice = model.player?.thermalNotice
-    LaunchedEffect(thermalNotice) {
-        if (!thermalNotice.isNullOrEmpty()) {
-            model.show(Library.Toast(Library.Toast.Icon.Error, thermalNotice, ""))
-        }
-    }
-    if (readyVoicePickerShown) {
-        model.player?.let { player ->
-            val lang = player.language
-            val sec = player.spot?.section ?: model.section
-            val curSentence = player.spot?.sentence ?: model.sentence
-            val nextLine = remember(sec, curSentence) {
-                val all = runCatching { model.core.spokenSentences(model.bookID, sec.toUInt()) }.getOrDefault(emptyList())
-                all.drop(curSentence + 1).firstOrNull { s -> s.any { it.isLetterOrDigit() } }
-                    ?: all.getOrNull(curSentence)?.takeIf { s -> s.any { it.isLetterOrDigit() } }
+        if (model.tocShown) TocSheet(model) { model.tocShown = false }
+        if (model.settingsShown) TypesetSheet(model) { model.settingsShown = false }
+        if (model.listenShown) ListenSheet(model) { model.listenShown = false }
+        if (model.castShown) CastSheet(model) { model.castShown = false }
+        if (model.immersiveShown) ImmersiveSheet(model) { model.immersiveShown = false }
+        if (model.rulesShown) ReplaceRulesSheet(library.core, bookID, changed = { model.player?.textsChanged(); model.pager.reload() }) { model.rulesShown = false }
+        if (model.txtShown) TxtLayoutSheet(library, bookID, model.detail?.summary?.title ?: "", rebuilt = {
+            // The book was built again: closed and opened afresh, at the place the core carried over.
+            model.txtShown = false
+            close()
+            library.scope.launch { kotlinx.coroutines.delay(150); library.presented = bookID }
+        }) { model.txtShown = false }
+        if (model.infoShown) library.books.firstOrNull { it.id == bookID }?.let { app.yuyue.shelf.BookInfoSheet(library, it) { model.infoShown = false } }
+        var companionSettings by remember { mutableStateOf(false) }
+        var companionVersion by remember { mutableStateOf(0) }
+        LaunchedEffect(companionSettings) { if (!companionSettings) companionVersion++ }
+        if (model.companionShown) app.yuyue.companion.CompanionSheet(model, settings = { companionSettings = true }) { model.companionShown = false }
+        val activeTranslating = translating ?: model.translatingSentence
+        activeTranslating?.let { text ->
+            TranslateSheet(model, text, companionVersion, openSettings = { companionSettings = true }) {
+                translating = null
+                model.translatingSentence = null
             }
-            var currentVoice by remember(lang) { mutableStateOf<app.yuyue.speech.BookVoice?>(null) }
-            LaunchedEffect(lang, player.spot?.section) {
-                currentVoice = player.currentVoice(lang)
+        }
+        if (companionSettings) app.yuyue.companion.CompanionSettingsSheet { companionSettings = false }
+        model.adjustingSentence?.let { (sec, sen) ->
+            TimingAdjustSheet(model, sec, sen) { model.adjustingSentence = null }
+        }
+        model.player?.let { PlayerFailure(it) }
+        val thermalNotice = model.player?.thermalNotice
+        LaunchedEffect(thermalNotice) {
+            if (!thermalNotice.isNullOrEmpty()) {
+                model.show(Library.Toast(Library.Toast.Icon.Error, thermalNotice, ""))
             }
-            val keepLabel = currentVoice?.let {
-                t("暂不更换，继续用「%@」", app.yuyue.speech.Voices.title(it))
-            } ?: t("暂不更换")
-            VoicePickerSheet(
-                core = model.core,
-                dataDir = model.library.dataDir,
-                bookID = model.bookID,
-                bookTitle = model.detail?.summary?.title,
-                language = lang,
-                selectedId = currentVoice?.id,
-                nextBookSentence = nextLine,
-                readyVoiceId = pickedReadyVoiceId ?: player.readyOfflineVoice?.id,
-                keepCurrentLabel = keepLabel,
-                onSelect = { v ->
-                    val prevId = currentVoice?.id
-                    player.choose(v, lang)
-                    readyVoicePickerShown = false
-                    pickedReadyVoiceId = null
-                    if (prevId != v.id) {
-                        model.show(
-                            Library.Toast(
-                                Library.Toast.Icon.Check,
-                                t("已切换为「%@」", app.yuyue.speech.Voices.title(v)),
-                                t("从当前句继续"),
+        }
+        if (readyVoicePickerShown) {
+            model.player?.let { player ->
+                val lang = player.language
+                val sec = player.spot?.section ?: model.section
+                val curSentence = player.spot?.sentence ?: model.sentence
+                val nextLine = remember(sec, curSentence) {
+                    val all = runCatching { model.core.spokenSentences(model.bookID, sec.toUInt()) }.getOrDefault(emptyList())
+                    all.drop(curSentence + 1).firstOrNull { s -> s.any { it.isLetterOrDigit() } }
+                        ?: all.getOrNull(curSentence)?.takeIf { s -> s.any { it.isLetterOrDigit() } }
+                }
+                var currentVoice by remember(lang) { mutableStateOf<app.yuyue.speech.BookVoice?>(null) }
+                LaunchedEffect(lang, player.spot?.section) {
+                    currentVoice = player.currentVoice(lang)
+                }
+                val keepLabel = currentVoice?.let {
+                    t("暂不更换，继续用「%@」", app.yuyue.speech.Voices.title(it))
+                } ?: t("暂不更换")
+                VoicePickerSheet(
+                    core = model.core,
+                    dataDir = model.library.dataDir,
+                    bookID = model.bookID,
+                    bookTitle = model.detail?.summary?.title,
+                    language = lang,
+                    selectedId = currentVoice?.id,
+                    nextBookSentence = nextLine,
+                    readyVoiceId = pickedReadyVoiceId ?: player.readyOfflineVoice?.id,
+                    keepCurrentLabel = keepLabel,
+                    onSelect = { v ->
+                        val prevId = currentVoice?.id
+                        player.choose(v, lang)
+                        readyVoicePickerShown = false
+                        pickedReadyVoiceId = null
+                        if (prevId != v.id) {
+                            model.show(
+                                Library.Toast(
+                                    Library.Toast.Icon.Check,
+                                    t("已切换为「%@」", app.yuyue.speech.Voices.title(v)),
+                                    t("从当前句继续"),
+                                )
                             )
-                        )
-                    }
-                },
-                dismiss = {
-                    readyVoicePickerShown = false
-                    pickedReadyVoiceId = null
-                    player.dismissReadyOfflineVoice()
-                },
-            )
-        } ?: run {
-            readyVoicePickerShown = false
-            pickedReadyVoiceId = null
+                        }
+                    },
+                    dismiss = {
+                        readyVoicePickerShown = false
+                        pickedReadyVoiceId = null
+                        player.dismissReadyOfflineVoice()
+                    },
+                )
+            } ?: run {
+                readyVoicePickerShown = false
+                pickedReadyVoiceId = null
+            }
         }
-    }
-    thought?.let { mark ->
-        ThoughtDialog(mark.note ?: "", mark.text) { text ->
-            if (text != null) model.setNote(text, mark)
-            thought = null
+        thought?.let { mark ->
+            ThoughtDialog(mark.note ?: "", mark.text) { text ->
+                if (text != null) model.setNote(text, mark)
+                thought = null
+            }
         }
     }
 }

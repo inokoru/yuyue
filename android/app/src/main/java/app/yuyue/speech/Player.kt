@@ -10,6 +10,7 @@ import android.media.PlaybackParams
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import app.yuyue.design.Prefs
@@ -19,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import uniffi.yuyue_core.BookDetail
 import uniffi.yuyue_core.Position
@@ -86,6 +88,9 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     var failure by mutableStateOf<String?>(null)
     /** 离线默认旁白在播放/暂停期间下好后提供给用户确认切换的候选音色（不自动静默切声）。 */
     var readyOfflineVoice by mutableStateOf<BookVoice?>(null)
+        private set
+    /** Incremented whenever the active narrator voice changes, so UI refreshes immediately. */
+    var voiceVersion by mutableIntStateOf(0)
         private set
     /** The failure is that no voice reads this language, named as people say it (中文): the
      *  system's voice data can be downloaded. */
@@ -195,6 +200,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     private var chapterLiveAllMade: Pair<Int, Boolean>? = null
     private var lastRenderedSection: Int? = null
     private var lastUsingCardVoice = false
+    private var ttsTrackedForSession = false
 
     /** Starts reading at `position`, or at the first sentence after it with something to read.
      *  `word`: in the narrator's voice, the first sentence starts at this moment of the
@@ -306,6 +312,8 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         thermalFallbackSection = null
         readyOfflineVoice = null
         voices.clear()
+        voiceVersion++
+        ttsTrackedForSession = false
         pausedForFocus = false
         stopFade(restoreVolume = false)
         reset()
@@ -356,11 +364,13 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
 
     /** Reads `language` with another voice from now on, starting the sentence again in it. */
     fun choose(voice: BookVoice, language: String) {
-        saveVoicePreference(language, voice.id)
+        saveVoicePreference(language, voice.id, notify = false)
         readyOfflineVoice = null
         val cacheKey = canonicalLanguage(language).ifEmpty { language }
         voices[cacheKey] = voice
         voices[language] = voice
+        voiceVersion++
+        ttsTrackedForSession = false
         restartHere()
     }
 
@@ -403,6 +413,8 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
             val cacheKey = canonicalLanguage(langTag).ifEmpty { langTag }
             voices[cacheKey] = sys
             voices[langTag] = sys
+            voiceVersion++
+            ttsTrackedForSession = false
             if (resumeAt != null) play(resumeAt.position) else restartHere()
         }
     }
@@ -605,6 +617,11 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                     }
                     if (generation != g || renderToken != token) return@launch
                     if (played != null) {
+                        if (!ttsTrackedForSession) {
+                            ttsTrackedForSession = true
+                            val engine = if (lastUsingCardVoice) "other" else app.yuyue.analytics.AirTraffic.ttsEngineForVoiceId(chosenNarrator)
+                            app.yuyue.analytics.AirTraffic.trackTtsStarted(engine, "reader")
+                        }
                         nextToRender = after(s)
                         schedule(Line(s, played))
                         continue
@@ -626,7 +643,16 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                     }
                     if (generation != g || renderToken != token) return@launch
                     nextToRender = after(s)
-                    if (speech != null) schedule(Line(s, speech))
+                    if (speech != null) {
+                        if (!ttsTrackedForSession) {
+                            ttsTrackedForSession = true
+                            app.yuyue.analytics.AirTraffic.trackTtsStarted(
+                                app.yuyue.analytics.AirTraffic.ttsEngineForVoice(segPlan.firstOrNull()?.first),
+                                "reader",
+                            )
+                        }
+                        schedule(Line(s, speech))
+                    }
                     continue
                 }
                 var voice = if (forceSystemForHeat) Voices.systemBest(language) ?: voice(language) else voice(language)
@@ -651,7 +677,16 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                 if (generation != g || renderToken != token) return@launch
                 nextToRender = after(s)
                 // A sentence with nothing to say (a lone dash, say) is skipped.
-                if (speech != null) schedule(Line(s, speech))
+                if (speech != null) {
+                    if (!ttsTrackedForSession) {
+                        ttsTrackedForSession = true
+                        app.yuyue.analytics.AirTraffic.trackTtsStarted(
+                            app.yuyue.analytics.AirTraffic.ttsEngineForVoice(voice),
+                            "reader",
+                        )
+                    }
+                    schedule(Line(s, speech))
+                }
             }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -1058,6 +1093,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         private const val NODE_AHEAD = 2
         internal const val THERMAL_SEVERE = 3
         internal const val THERMAL_CRITICAL = 4
+        private val voicePrefChanged = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
         internal fun shouldSleepAt(done: Spot, next: Spot?, sleep: Sleep, nowMs: Long): Boolean = when (sleep) {
             Sleep.Off -> false
@@ -1150,6 +1186,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         internal fun saveVoicePreference(
             language: String,
             voiceId: String,
+            notify: Boolean = true,
             write: (String, String?) -> Unit = { k, v -> Prefs.set(k, v) },
         ) {
             val canon = canonicalLanguage(language)
@@ -1172,12 +1209,22 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                     write("player.voice.$canon", voiceId)
                 }
             }
+            if (notify) voicePrefChanged.tryEmit(Unit)
         }
     }
 
     init {
         SystemVoice.Engine.init(context)
         ClonedVoices.init(context)
+        scope.launch {
+            voicePrefChanged.collect {
+                if (state == State.Stopped) {
+                    readyOfflineVoice = null
+                    voices.clear()
+                    voiceVersion++
+                }
+            }
+        }
         scope.launch {
             KokoroModel.readyEvents.collect {
                 onOfflineVoiceReady()
@@ -1201,6 +1248,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         if (state == State.Stopped) {
             readyOfflineVoice = null
             voices.clear()
+            voiceVersion++
             return
         }
         if (narrator != null) return

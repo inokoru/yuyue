@@ -353,6 +353,7 @@ fun YYTag(text: String, icon: ImageVector? = null) {
 /** Compact drag pill for modal sheets (Material 3's default DragHandle adds 48dp of vertical padding). */
 @Composable
 fun YYSheetDragHandle(top: Dp = 10.dp, bottom: Dp = 8.dp) {
+    SyncDialogSystemBars()
     Box(
         Modifier.fillMaxWidth().padding(top = top, bottom = bottom),
         contentAlignment = Alignment.Center,

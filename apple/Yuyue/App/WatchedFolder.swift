@@ -50,7 +50,7 @@ final class WatchedFolder {
         UserDefaults.standard.set(Array(result.updatedSeen), forKey: Self.seenKey)
         let scoped = result.folder.startAccessingSecurityScopedResource()
         defer { if scoped { result.folder.stopAccessingSecurityScopedResource() } }
-        await library.importFiles(result.fresh, from: result.folder.lastPathComponent)
+        await library.importFiles(result.fresh, from: result.folder.lastPathComponent, source: "other")
     }
 
     private nonisolated struct ScanResult: Sendable {

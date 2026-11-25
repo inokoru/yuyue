@@ -630,8 +630,10 @@ struct PhoneStorage: View {
 
 // MARK: - 关于
 
-/// 关于: free, no server, nothing collected; the licences, privacy, and links.
+/// 关于: free, local library and notes, opt-out anonymous analytics; licences, privacy, and links.
 struct PhoneAbout: View {
+    @AppStorage(AirTraffic.prefKey) private var analyticsEnabled = true
+
     private var version: String {
         let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         let b = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
@@ -642,7 +644,7 @@ struct PhoneAbout: View {
         YYPage {
             VStack(spacing: 0) {
                 // 阅 on paper, the blue rule under it.
-                Text("阅")
+                Text(verbatim: "阅")
                     .font(YYUI.font(30, .bold, design: .serif))
                     .foregroundStyle(Color(yy: YYRGBA(28, 29, 32)))
                     .padding(.bottom, YYUI.s(6))
@@ -656,7 +658,7 @@ struct PhoneAbout: View {
                     .shadow(color: Color(yy: YYRGBA(30, 28, 24, 0.14)), radius: YYUI.s(10), y: YYUI.s(8))
                 Text("语阅").font(YYUI.font(17, .bold)).foregroundStyle(YYColor.t1).padding(.top, YYUI.s(10))
                 Text("版本 \(version)").font(YYUI.font(10).monospacedDigit()).foregroundStyle(YYColor.t3).padding(.top, 2)
-                Text("免费，没有服务器，不收集任何数据。")
+                Text("免费，书库与笔记留在本地，没有账号与广告。")
                     .font(YYUI.font(12.5, .semibold)).foregroundStyle(YYColor.t1)
                     .padding(.top, YYUI.s(22)).padding(.bottom, YYUI.s(26))
             }
@@ -679,10 +681,36 @@ struct PhoneAbout: View {
                 }
                 .buttonStyle(.plain)
                 NavigationLink { PhoneTextPage(title: String(localized: "隐私说明"), text: Self.privacy) } label: {
-                    YYRow(String(localized: "隐私说明"), icon: "checkmark.shield", chevron: true)
+                    YYRow(String(localized: "隐私说明"), icon: "checkmark.shield", value: String(localized: "书库仅存本机 · 可关匿名统计"), chevron: true)
                 }
                 .buttonStyle(.plain)
             }
+            YYGroup {
+                HStack(spacing: YYUI.s(10)) {
+                    VStack(alignment: .leading, spacing: YYUI.s(2)) {
+                        Text("匿名使用统计")
+                            .font(YYUI.font(11.5))
+                            .foregroundStyle(YYColor.t1)
+                        Text("仅记录功能使用形态，不关联身份，绝不收集书名、笔记或搜索词")
+                            .font(YYUI.font(10))
+                            .foregroundStyle(YYColor.t3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    YYSwitch(
+                        isOn: Binding(
+                            get: { analyticsEnabled },
+                            set: { newValue in
+                                analyticsEnabled = newValue
+                                AirTraffic.setEnabled(newValue)
+                            }
+                        ),
+                        label: String(localized: "匿名使用统计")
+                    )
+                }
+                .padding(.vertical, YYUI.s(8))
+            }
+            .padding(.top, YYUI.s(12))
             YYGroup {
                 Link(destination: URL(string: "https://github.com/nowtin")!) {
                     YYRow(String(localized: "作者"), icon: "person", value: "nowtin", chevron: true)
@@ -705,6 +733,7 @@ struct PhoneAbout: View {
         }
         .navigationTitle("关于")
         .navigationBarTitleDisplayMode(.inline)
+        .airTrafficScreen("About")
     }
 
     static var licences: String {
@@ -714,12 +743,13 @@ struct PhoneAbout: View {
     }
 
     static var privacy: String {
-        [String(localized: "语阅没有服务器，也不收集任何数据：没有账号、没有统计、没有广告。"),
+        [String(localized: "语阅没有账号、没有广告，也不做跨应用追踪。你的书、进度、笔记、划线和搜索词都只留在本地设备。"),
+         String(localized: "匿名使用统计：默认开启，仅记录功能使用形态（如导入格式、界面浏览、朗读与音频功能使用），不关联个人身份，绝不收集书名、作者、文件名、笔记、划线、搜索词、网址或邮箱；随时可以在「我的 › 关于」关闭。"),
          String(localized: "书、进度、笔记和生词都存在这台设备上。打开同步时，它们只在你的设备和你自己选的网盘（iCloud 云盘、WebDAV，Google Drive 即将支持）之间传，语阅看不到。"),
          String(localized: "书伴默认用设备自带的模型，不联网。你填了自己的 Key 时，提问和书里相关的几段原文会直接发给你选的服务商，费用和隐私条款按你和它的约定；Key 只存在这台设备的钥匙串里。"),
          String(localized: "免费在线语音会把当前要读的句子发给在线语音服务；自行配置的云端声音和笔记导出（Notion、flomo、新枝）只在你选用并填了 Key 或链接时联网，要读的句子或要发的笔记直接发给你选的服务。读过的声音存在这台设备上。"),
          String(localized: "离线翻译与本地模型：翻译用系统的离线翻译；按需从 GitHub Releases、魔搭（ModelScope）或 Hugging Face 下载的对齐模型、声音包、开源字体与离线语音模型都在本机运行（字体预览样字按需从 Google Fonts 加载），原文与录音不出这台设备。"),
-         String(localized: "问题反馈：只有在你主动提交反馈时才会联网，通过 ntfy.sh 中转为公开的 GitHub Issue；正文与附件均会公开展示，不收集邮箱。"),
+         String(localized: "问题反馈与崩溃诊断：主动提交的反馈和截图仅发给开发者，不会公开，也不收集邮箱；应用意外闪退时会在下次启动自动上报匿名崩溃堆栈和基础设备信息，用于排查修复，不关联个人身份。"),
          String(localized: "检查更新：从 GitHub 下载安装的版本每天从 GitHub 取一个小文件，看有没有新版本，不带任何关于你和设备的信息；在我的 › 关于 › 检查更新里能关掉。App Store 和 Google Play 的版本不查，由商店更新。")].joined(separator: "\n\n")
     }
 }
