@@ -141,4 +141,29 @@ class CompanionCommandTest {
         assertEquals("拆解这句长难句\n注意倒装", parsed?.command?.question(parsed.argument, hasQuote = true, chapterTitle = null))
     }
 
+    @Test
+    fun readingHeatmapAlignsMondayAndComputesStreaks() {
+        val jan1 = java.time.LocalDate.of(2026, 1, 1) // Thursday -> 3 leading pads
+        val yearDays = (0L until 365L).map { jan1.plusDays(it) }
+        val today = java.time.LocalDate.of(2026, 6, 1)
+        val times = listOf(
+            uniffi.yuyue_core.DayTime("2026-01-02", "b1", 600u, 0u),
+            uniffi.yuyue_core.DayTime("2026-01-03", "b1", 1200u, 700u),
+            uniffi.yuyue_core.DayTime("2026-01-04", "b2", 3600u, 0u),
+            uniffi.yuyue_core.DayTime("2026-02-10", "b1", 300u, 0u),
+        )
+        val map = app.yuyue.me.ReadingHeatmap.build(yearDays, times, today)
+        assertEquals(53, map.weeks.size)
+        assertTrue(map.weeks.all { it.size == 7 })
+        assertNull(map.weeks[0][0].date)
+        assertNull(map.weeks[0][2].date)
+        assertEquals("2026-01-01", map.weeks[0][3].dayKey)
+        assertEquals(4, map.activeDays)
+        assertEquals(3, map.longestStreak)
+        assertEquals(0, app.yuyue.me.ReadingHeatmap.levelFor(0))
+        assertEquals(1, app.yuyue.me.ReadingHeatmap.levelFor(600))
+        assertEquals(2, app.yuyue.me.ReadingHeatmap.levelFor(1500))
+        assertEquals(3, app.yuyue.me.ReadingHeatmap.levelFor(2400))
+        assertEquals(4, app.yuyue.me.ReadingHeatmap.levelFor(4000))
+    }
 }

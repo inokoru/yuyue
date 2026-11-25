@@ -1410,3 +1410,272 @@ struct FinishedSheet: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
+
+// MARK: - 年度阅读热力图
+
+/// Pure Monday-aligned annual reading heatmap model shared by iOS and macOS Reading Stats.
+nonisolated struct ReadingHeatmap: Equatable, Sendable {
+    struct Cell: Equatable, Sendable {
+        let dayKey: String
+        let date: Date?
+        let readSeconds: Int
+        let listenSeconds: Int
+        let isToday: Bool
+        let isFuture: Bool
+
+        var totalSeconds: Int { readSeconds + listenSeconds }
+        var level: Int { ReadingHeatmap.level(for: totalSeconds) }
+    }
+
+    struct MonthMarker: Equatable, Sendable {
+        let weekIndex: Int
+        let month: Int
+    }
+
+    let weeks: [[Cell]]
+    let monthMarkers: [MonthMarker]
+    let activeDays: Int
+    let longestStreak: Int
+
+    static func level(for totalSeconds: Int) -> Int {
+        switch totalSeconds {
+        case ..<1: 0
+        case ..<900: 1
+        case ..<1800: 2
+        case ..<3600: 3
+        default: 4
+        }
+    }
+
+    init(yearDays: [Date], times: [DayTime], now: Date = Date(), calendar: Calendar = .current) {
+        guard let first = yearDays.first else {
+            self.weeks = []
+            self.monthMarkers = []
+            self.activeDays = 0
+            self.longestStreak = 0
+            return
+        }
+        var byDay: [String: (read: Int, listen: Int)] = [:]
+        for t in times {
+            var cur = byDay[t.day] ?? (0, 0)
+            cur.read += Int(t.readSeconds)
+            cur.listen += Int(t.listenSeconds)
+            byDay[t.day] = cur
+        }
+
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        let weekday = calendar.component(.weekday, from: first) // 1 = Sun ... 7 = Sat
+        let mondayOffset = (weekday + 5) % 7
+        var flat: [Cell] = (0 ..< mondayOffset).map { idx in
+            Cell(dayKey: "pad-lead-\(idx)", date: nil, readSeconds: 0, listenSeconds: 0, isToday: false, isFuture: false)
+        }
+
+        var active = 0
+        var bestStreak = 0
+        var run = 0
+        var markers: [MonthMarker] = []
+        var lastMarkerWeek = -10
+
+        for d in yearDays {
+            let key = formatter.string(from: d)
+            let sums = byDay[key] ?? (0, 0)
+            let isToday = calendar.isDate(d, inSameDayAs: now)
+            let isFuture = !isToday && d > now
+            let cell = Cell(dayKey: key, date: d, readSeconds: sums.read, listenSeconds: sums.listen, isToday: isToday, isFuture: isFuture)
+            let weekIdx = flat.count / 7
+            if calendar.component(.day, from: d) == 1 {
+                let m = calendar.component(.month, from: d)
+                if weekIdx - lastMarkerWeek >= 2 {
+                    markers.append(MonthMarker(weekIndex: weekIdx, month: m))
+                    lastMarkerWeek = weekIdx
+                }
+            }
+            flat.append(cell)
+            if !isFuture {
+                if cell.totalSeconds > 0 {
+                    active += 1
+                    run += 1
+                    if run > bestStreak { bestStreak = run }
+                } else {
+                    run = 0
+                }
+            }
+        }
+
+        let rem = flat.count % 7
+        if rem != 0 {
+            for idx in 0 ..< (7 - rem) {
+                flat.append(Cell(dayKey: "pad-tail-\(idx)", date: nil, readSeconds: 0, listenSeconds: 0, isToday: false, isFuture: false))
+            }
+        }
+
+        var cols: [[Cell]] = []
+        cols.reserveCapacity(flat.count / 7)
+        var i = 0
+        while i < flat.count {
+            cols.append(Array(flat[i ..< min(i + 7, flat.count)]))
+            i += 7
+        }
+        self.weeks = cols
+        self.monthMarkers = markers
+        self.activeDays = active
+        self.longestStreak = bestStreak
+    }
+}
+
+/// Interactive GitHub-style annual reading heatmap for iOS and macOS Reading Stats.
+struct ReadingHeatmapView: View {
+    let heatmap: ReadingHeatmap
+    let tint: YYTint
+    var cellSize: CGFloat = 8.5
+    var spacing: CGFloat = 2.5
+    @State private var selectedKey: String?
+
+    private var selectedCell: ReadingHeatmap.Cell? {
+        guard let selectedKey else { return nil }
+        for week in heatmap.weeks {
+            if let hit = week.first(where: { $0.dayKey == selectedKey && $0.date != nil }) {
+                return hit
+            }
+        }
+        return nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("年度热力图")
+                    .font(.yy(size: 11.5, weight: .semibold))
+                    .foregroundStyle(YYColor.t1)
+                Text("活跃 \(heatmap.activeDays) 天 · 最长连续 \(heatmap.longestStreak) 天")
+                    .font(.yy(size: 10.5).monospacedDigit())
+                    .foregroundStyle(YYColor.t3)
+                Spacer(minLength: 6)
+                legend
+            }
+
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        monthHeader
+                        HStack(alignment: .top, spacing: spacing) {
+                            ForEach(Array(heatmap.weeks.enumerated()), id: \.offset) { wIdx, week in
+                                VStack(spacing: spacing) {
+                                    ForEach(week, id: \.dayKey) { cell in
+                                        daySquare(cell)
+                                    }
+                                }
+                                .id(wIdx)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 1)
+                }
+                .onAppear {
+                    if let todayWeek = heatmap.weeks.firstIndex(where: { $0.contains(where: \.isToday) }), todayWeek > 26 {
+                        proxy.scrollTo(todayWeek, anchor: .trailing)
+                    }
+                }
+            }
+
+            if let cell = selectedCell, let date = cell.date {
+                Text(detailLine(for: cell, date: date))
+                    .font(.yy(size: 10.5).monospacedDigit())
+                    .foregroundStyle(YYColor.t2)
+            }
+        }
+    }
+
+    private var monthHeader: some View {
+        let step = cellSize + spacing
+        let totalWidth = CGFloat(max(1, heatmap.weeks.count)) * step - spacing
+        return ZStack(alignment: .leading) {
+            Color.clear.frame(width: totalWidth, height: 12)
+            ForEach(heatmap.monthMarkers, id: \.weekIndex) { marker in
+                Text(monthLabel(marker.month))
+                    .font(.yy(size: 9.5).monospacedDigit())
+                    .foregroundStyle(YYColor.t3)
+                    .fixedSize()
+                    .offset(x: CGFloat(marker.weekIndex) * step)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func daySquare(_ cell: ReadingHeatmap.Cell) -> some View {
+        if cell.date == nil {
+            Color.clear.frame(width: cellSize, height: cellSize)
+        } else {
+            let isSelected = selectedKey == cell.dayKey
+            RoundedRectangle(cornerRadius: 2)
+                .fill(fillColor(level: cell.level, future: cell.isFuture))
+                .frame(width: cellSize, height: cellSize)
+                .overlay {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 2).strokeBorder(YYColor.t1, lineWidth: 1)
+                    } else if cell.isToday {
+                        RoundedRectangle(cornerRadius: 2).strokeBorder(tint.accent.opacity(0.65), lineWidth: 0.8)
+                    }
+                }
+                .contentShape(.rect)
+                .onTapGesture {
+                    if !cell.isFuture {
+                        selectedKey = isSelected ? nil : cell.dayKey
+                    }
+                }
+        }
+    }
+
+    private var legend: some View {
+        HStack(spacing: 3) {
+            Text("少").font(.yy(size: 9.5)).foregroundStyle(YYColor.t3)
+            ForEach(0 ..< 5, id: \.self) { lv in
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(fillColor(level: lv, future: false))
+                    .frame(width: 7, height: 7)
+            }
+            Text("多").font(.yy(size: 9.5)).foregroundStyle(YYColor.t3)
+        }
+    }
+
+    private func fillColor(level: Int, future: Bool) -> Color {
+        if future { return YYColor.inset.opacity(0.45) }
+        return switch level {
+        case 0: YYColor.inset
+        case 1: tint.fill.opacity(0.26)
+        case 2: tint.fill.opacity(0.48)
+        case 3: tint.fill.opacity(0.72)
+        default: tint.fill
+        }
+    }
+
+    private func monthLabel(_ month: Int) -> String {
+        if (Bundle.main.preferredLocalizations.first ?? "zh").hasPrefix("zh") {
+            return String(localized: "\(month) 月")
+        }
+        let symbols = Calendar.current.shortMonthSymbols
+        return symbols.indices.contains(month - 1) ? symbols[month - 1] : "\(month)"
+    }
+
+    private func detailLine(for cell: ReadingHeatmap.Cell, date: Date) -> String {
+        let dayText = Notes.monthDay(date)
+        guard cell.totalSeconds > 0 else {
+            return "\(dayText) · " + String(localized: "未阅读")
+        }
+        var parts: [String] = [dayText]
+        if cell.readSeconds > 0 { parts.append(String(localized: "读 ") + Self.duration(cell.readSeconds)) }
+        if cell.listenSeconds > 0 { parts.append(String(localized: "听 ") + Self.duration(cell.listenSeconds)) }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func duration(_ seconds: Int) -> String {
+        let m = max(1, seconds / 60)
+        if m < 60 { return String(localized: "\(m) 分") }
+        return m % 60 == 0 ? String(localized: "\(m / 60) 小时") : String(localized: "\(m / 60) 小时 \(m % 60) 分")
+    }
+}

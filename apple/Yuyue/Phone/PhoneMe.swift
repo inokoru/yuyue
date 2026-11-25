@@ -562,6 +562,17 @@ struct PhoneStats: View {
             .padding(.top, YYUI.s(6))
             columns.frame(height: YYUI.s(50)).padding(.top, YYUI.s(12))
             axis.padding(.top, YYUI.s(5))
+            if period == .year {
+                Rectangle().fill(YYColor.line).frame(height: 0.5)
+                    .padding(.top, YYUI.s(12))
+                ReadingHeatmapView(
+                    heatmap: ReadingHeatmap(yearDays: days, times: times),
+                    tint: tint,
+                    cellSize: YYUI.s(9),
+                    spacing: YYUI.s(2.5)
+                )
+                .padding(.top, YYUI.s(10))
+            }
             if finished.isEmpty {
                 Color.clear.frame(height: YYUI.s(12))
             } else {

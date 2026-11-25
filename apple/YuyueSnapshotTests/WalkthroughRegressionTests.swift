@@ -274,6 +274,35 @@ struct WalkthroughRegressionTests {
         #expect(parsed?.command.question(argument: parsed?.argument ?? "", hasQuote: true, chapterTitle: nil) == "拆解这句长难句\n重点看从句")
     }
 
+    @Test func `annual reading heatmap aligns weeks to Monday and computes active days and longest streak`() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        cal.firstWeekday = 2
+        let jan1 = cal.date(from: DateComponents(year: 2026, month: 1, day: 1))! // Thursday -> 3 leading pads (Mon, Tue, Wed)
+        let yearDays = (0 ..< 365).compactMap { cal.date(byAdding: .day, value: $0, to: jan1) }
+        let now = cal.date(from: DateComponents(year: 2026, month: 6, day: 1))!
+
+        let times: [DayTime] = [
+            DayTime(day: "2026-01-02", book: "b1", readSeconds: 600, listenSeconds: 0),
+            DayTime(day: "2026-01-03", book: "b1", readSeconds: 1200, listenSeconds: 700),
+            DayTime(day: "2026-01-04", book: "b2", readSeconds: 3600, listenSeconds: 0),
+            DayTime(day: "2026-02-10", book: "b1", readSeconds: 300, listenSeconds: 0),
+        ]
+        let map = ReadingHeatmap(yearDays: yearDays, times: times, now: now, calendar: cal)
+        #expect(map.weeks.count == 53)
+        #expect(map.weeks.allSatisfy { $0.count == 7 })
+        #expect(map.weeks[0][0].date == nil)
+        #expect(map.weeks[0][1].date == nil)
+        #expect(map.weeks[0][2].date == nil)
+        #expect(map.weeks[0][3].dayKey == "2026-01-01")
+        #expect(map.activeDays == 4)
+        #expect(map.longestStreak == 3)
+        #expect(ReadingHeatmap.level(for: 0) == 0)
+        #expect(ReadingHeatmap.level(for: 600) == 1)
+        #expect(ReadingHeatmap.level(for: 1500) == 2)
+        #expect(ReadingHeatmap.level(for: 2400) == 3)
+        #expect(ReadingHeatmap.level(for: 4000) == 4)
+    }
 
     @Test func `companion chapter excerpts cover the whole read chapter instead of only tail snippets`() async throws {
         let repoRoot = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

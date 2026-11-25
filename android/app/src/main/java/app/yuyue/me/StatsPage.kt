@@ -3,6 +3,7 @@ package app.yuyue.me
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,15 +12,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -92,6 +96,11 @@ fun StatsPage(library: Library) {
             Row(Modifier.padding(top = YY.s(5), end = YY.s(6)).fillMaxWidth()) {
                 val n = if (period == Period.Year) 12 else days.size
                 for (i in 0 until n) Text(axis(period, days, i), style = YY.font(10f, tnum = true), color = YY.c.t3, maxLines = 1, softWrap = false, modifier = Modifier.weight(1f).wrapContentWidth(Alignment.CenterHorizontally, unbounded = true))
+            }
+            if (period == Period.Year) {
+                Box(Modifier.padding(top = YY.s(12), end = YY.s(6)).fillMaxWidth().height(0.5.dp).background(YY.c.line))
+                val heatmap = remember(days, times, today) { ReadingHeatmap.build(days, times, today) }
+                ReadingHeatmapSection(heatmap, Modifier.padding(top = YY.s(10), end = YY.s(6)).fillMaxWidth())
             }
             if (finished.isEmpty()) Spacer(Modifier.height(YY.s(12)))
             else {
@@ -270,6 +279,193 @@ private fun How(modifier: Modifier) {
                 Box(Modifier.padding(top = YY.s(6)).size(3.dp).background(YY.c.t3, CircleShape))
                 Text(line, style = YY.font(10.5f), color = YY.c.t2)
             }
+        }
+    }
+}
+
+/** Pure Monday-aligned annual reading heatmap model, matching Apple's `ReadingHeatmap`. */
+internal class ReadingHeatmap(
+    val weeks: List<List<Cell>>,
+    val monthMarkers: List<MonthMarker>,
+    val activeDays: Int,
+    val longestStreak: Int,
+) {
+    data class Cell(
+        val dayKey: String,
+        val date: LocalDate?,
+        val readSeconds: Int,
+        val listenSeconds: Int,
+        val isToday: Boolean,
+        val isFuture: Boolean,
+    ) {
+        val totalSeconds: Int get() = readSeconds + listenSeconds
+        val level: Int get() = levelFor(totalSeconds)
+    }
+
+    data class MonthMarker(val weekIndex: Int, val month: Int)
+
+    companion object {
+        fun levelFor(totalSeconds: Int): Int = when {
+            totalSeconds <= 0 -> 0
+            totalSeconds < 900 -> 1
+            totalSeconds < 1800 -> 2
+            totalSeconds < 3600 -> 3
+            else -> 4
+        }
+
+        fun build(yearDays: List<LocalDate>, times: List<DayTime>, today: LocalDate): ReadingHeatmap {
+            val first = yearDays.firstOrNull() ?: return ReadingHeatmap(emptyList(), emptyList(), 0, 0)
+            val byDay = HashMap<String, Pair<Int, Int>>()
+            for (t in times) {
+                val cur = byDay[t.day] ?: (0 to 0)
+                byDay[t.day] = (cur.first + t.readSeconds.toInt()) to (cur.second + t.listenSeconds.toInt())
+            }
+            val mondayOffset = first.dayOfWeek.value - 1 // MONDAY=1 -> 0 ... SUNDAY=7 -> 6
+            val flat = ArrayList<Cell>(yearDays.size + 14)
+            repeat(mondayOffset) { idx ->
+                flat += Cell("pad-lead-$idx", null, 0, 0, isToday = false, isFuture = false)
+            }
+            var active = 0
+            var bestStreak = 0
+            var run = 0
+            val markers = ArrayList<MonthMarker>(12)
+            var lastMarkerWeek = -10
+
+            for (d in yearDays) {
+                val key = d.toString()
+                val sums = byDay[key] ?: (0 to 0)
+                val isToday = d == today
+                val isFuture = d > today
+                val cell = Cell(key, d, sums.first, sums.second, isToday = isToday, isFuture = isFuture)
+                val weekIdx = flat.size / 7
+                if (d.dayOfMonth == 1 && weekIdx - lastMarkerWeek >= 2) {
+                    markers += MonthMarker(weekIdx, d.monthValue)
+                    lastMarkerWeek = weekIdx
+                }
+                flat += cell
+                if (!isFuture) {
+                    if (cell.totalSeconds > 0) {
+                        active++
+                        run++
+                        if (run > bestStreak) bestStreak = run
+                    } else {
+                        run = 0
+                    }
+                }
+            }
+            val rem = flat.size % 7
+            if (rem != 0) {
+                repeat(7 - rem) { idx ->
+                    flat += Cell("pad-tail-$idx", null, 0, 0, isToday = false, isFuture = false)
+                }
+            }
+            return ReadingHeatmap(flat.chunked(7), markers, active, bestStreak)
+        }
+    }
+}
+
+@Composable
+private fun ReadingHeatmapSection(heatmap: ReadingHeatmap, modifier: Modifier = Modifier) {
+    var selectedKey by remember(heatmap) { mutableStateOf<String?>(null) }
+    val selectedCell = remember(heatmap, selectedKey) {
+        selectedKey?.let { key -> heatmap.weeks.asSequence().flatten().firstOrNull { it.dayKey == key && it.date != null } }
+    }
+    val cellDp = YY.s(9f)
+    val gapDp = YY.s(2.5f)
+    val scroll = rememberScrollState()
+    LaunchedEffect(heatmap) {
+        val todayWeek = heatmap.weeks.indexOfFirst { wk -> wk.any { it.isToday } }
+        if (todayWeek > 26) scroll.scrollTo(scroll.maxValue)
+    }
+
+    val insetColor = YY.c.inset
+    val fillColor = YY.tint.fill
+    fun cellColor(level: Int, future: Boolean): androidx.compose.ui.graphics.Color {
+        if (future) return insetColor.copy(alpha = 0.45f)
+        return when (level) {
+            0 -> insetColor
+            1 -> fillColor.copy(alpha = 0.26f)
+            2 -> fillColor.copy(alpha = 0.48f)
+            3 -> fillColor.copy(alpha = 0.72f)
+            else -> fillColor
+        }
+    }
+
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(YY.s(8))) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YY.s(6))) {
+            Text(t("年度热力图"), style = YY.font(11.5f, FontWeight.SemiBold), color = YY.c.t1)
+            Text(
+                t("活跃 %lld 天 · 最长连续 %lld 天", heatmap.activeDays, heatmap.longestStreak),
+                style = YY.font(10f, tnum = true),
+                color = YY.c.t3,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(t("少"), style = YY.font(9.5f), color = YY.c.t3)
+                for (lv in 0..4) {
+                    Box(Modifier.size(7.dp).background(cellColor(lv, false), RoundedCornerShape(1.5.dp)))
+                }
+                Text(t("多"), style = YY.font(9.5f), color = YY.c.t3)
+            }
+        }
+
+        Row(Modifier.fillMaxWidth().horizontalScroll(scroll)) {
+            val stepDp = cellDp + gapDp
+            val totalWidth = stepDp * maxOf(1, heatmap.weeks.size) - gapDp
+            Column(verticalArrangement = Arrangement.spacedBy(YY.s(4))) {
+                Box(Modifier.width(totalWidth).height(YY.s(12))) {
+                    for (m in heatmap.monthMarkers) {
+                        val label = if (app.yuyue.L10n.chinese) t("%lld 月", m.month)
+                        else LocalDate.of(2026, m.month, 1).month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
+                        Text(label, style = YY.font(9.5f, tnum = true), color = YY.c.t3, maxLines = 1, softWrap = false, modifier = Modifier.offset(x = stepDp * m.weekIndex))
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(gapDp)) {
+                    for (week in heatmap.weeks) {
+                        Column(verticalArrangement = Arrangement.spacedBy(gapDp)) {
+                            for (cell in week) {
+                                if (cell.date == null) {
+                                    Spacer(Modifier.size(cellDp))
+                                } else {
+                                    val isSelected = selectedKey == cell.dayKey
+                                    val shape = RoundedCornerShape(2.dp)
+                                    Box(
+                                        Modifier.size(cellDp)
+                                            .clip(shape)
+                                            .background(cellColor(cell.level, cell.isFuture), shape)
+                                            .then(
+                                                when {
+                                                    isSelected -> Modifier.border(1.dp, YY.c.t1, shape)
+                                                    cell.isToday -> Modifier.border(0.8.dp, YY.tint.accent.copy(alpha = 0.65f), shape)
+                                                    else -> Modifier
+                                                },
+                                            )
+                                            .clickable(enabled = !cell.isFuture) {
+                                                selectedKey = if (isSelected) null else cell.dayKey
+                                            },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        selectedCell?.date?.let { d ->
+            val dayStr = monthDay(d)
+            val detail = if (selectedCell.totalSeconds <= 0) {
+                "$dayStr · ${t("未阅读")}"
+            } else {
+                listOfNotNull(
+                    dayStr,
+                    if (selectedCell.readSeconds > 0) t("读 ") + duration(maxOf(60, selectedCell.readSeconds)) else null,
+                    if (selectedCell.listenSeconds > 0) t("听 ") + duration(maxOf(60, selectedCell.listenSeconds)) else null,
+                ).joinToString(" · ")
+            }
+            Text(detail, style = YY.font(10.5f, tnum = true), color = YY.c.t2)
         }
     }
 }
