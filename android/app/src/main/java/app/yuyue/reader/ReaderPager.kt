@@ -513,13 +513,18 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
             existing
         } else {
             existing?.recycle()
-            runCatching { android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.RGB_565) }.getOrNull()
+            runCatching { android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888) }.getOrNull()
         } ?: return null
         coverBitmap = bmp
         return runCatching {
             val canvas = android.graphics.Canvas(bmp)
             canvas.drawColor(background)
+            val sx = cur.webView.scrollX
+            val sy = cur.webView.scrollY
+            canvas.save()
+            canvas.translate(-sx.toFloat(), -sy.toFloat())
             cur.webView.draw(canvas)
+            canvas.restore()
             bmp
         }.getOrNull()
     }
