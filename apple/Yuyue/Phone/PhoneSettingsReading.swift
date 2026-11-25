@@ -346,6 +346,7 @@ struct PhoneAppearance: View {
 /// 沉浸阅读 and 墨水屏 sit here too, as the Mac keeps them under 阅读.
 struct PhoneReading: View {
     let library: Library
+    @Environment(\.colorScheme) private var scheme
     @State private var settings = ReaderSettings.standard
     @AppStorage(ImmersivePrefs.alwaysKey) private var immersiveAlways = false
     @AppStorage(ImmersivePrefs.lineKey) private var immersiveLine = true
@@ -570,12 +571,13 @@ struct PhoneReading: View {
         let size = (settings.fontSize * 0.8).rounded()
         let id = FontShelf.id(of: settings)
         let name = FontShelf.shared.family(id)
-        let line = "我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。"
+        let line = String(localized: "我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。")
         // A face still coming down: the few characters of the sample from it, until it's here.
         let preview = FontShelf.shared.isReady(id) ? nil : FontPreview.shared.font(id, text: line, size: size)
         let face: SwiftUI.Font = preview ?? name.map { .custom($0, fixedSize: size) } ?? .system(size: size)
         let lineHeight = settings.lineHeight ?? paper.text.lineHeight
-        let indent = settings.indent ?? true ? "\u{3000}\u{3000}" : ""
+        let hasCJK = line.unicodeScalars.contains { (0x4E00 ... 0x9FFF).contains($0.value) || (0x3400 ... 0x4DBF).contains($0.value) }
+        let indent = (settings.indent ?? true) && hasCJK ? "\u{3000}\u{3000}" : ""
         return VStack(alignment: .leading, spacing: YYUI.s(8)) {
             HStack {
                 Text("故乡")
@@ -594,7 +596,7 @@ struct PhoneReading: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background { paper.bg.overlay { PaperTextureView(texture: texture, dark: paper.isDark) } }
         .clipShape(.rect(cornerRadius: YYUI.s(12)))
-        .overlay(RoundedRectangle(cornerRadius: YYUI.s(12)).strokeBorder(YYColor.line, lineWidth: paper.isDark ? 0 : 0.5))
+        .overlay(RoundedRectangle(cornerRadius: YYUI.s(12)).strokeBorder(scheme == .dark ? Color.white.opacity(0.14) : YYColor.line, lineWidth: 0.5))
         .onAppear { if !FontShelf.shared.isReady(id) { FontPreview.shared.load(id, text: line) } }
         .onChange(of: id) { if !FontShelf.shared.isReady(id) { FontPreview.shared.load(id, text: line) } }
         .animation(previewPaper == nil ? YYMotion.standard : nil, value: PaperAppearance.shared.resolve(settings).choiceID)
