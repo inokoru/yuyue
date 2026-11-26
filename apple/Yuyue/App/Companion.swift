@@ -162,13 +162,29 @@ struct CompanionConfig: Equatable {
     static var current: CompanionConfig {
         get {
             let id = UserDefaults.standard.string(forKey: "companion.provider") ?? ""
-            let p = CompanionProvider.added.first { $0.id == id } ?? .apple
-            return saved(p)
+            if let p = CompanionProvider.added.first(where: { $0.id == id }) {
+                return saved(p)
+            }
+            if !Companion.isAppleSupported {
+                if let ready = CompanionProvider.added.first(where: { saved($0).isReady }) {
+                    return saved(ready)
+                }
+                if let first = CompanionProvider.added.first {
+                    return saved(first)
+                }
+            }
+            return saved(.apple)
         }
         set {
+            if newValue.provider.kind == .apple && !Companion.isAppleSupported { return }
             newValue.save()
             UserDefaults.standard.set(newValue.provider.id, forKey: "companion.provider")
         }
+    }
+
+    /// True when no third-party provider is configured and this device does not support Apple Intelligence.
+    var isUnconfiguredFallback: Bool {
+        provider.kind == .apple && !Companion.isAppleSupported
     }
 
     /// What was filled in for a provider before, or its defaults.
@@ -640,6 +656,12 @@ enum Companion {
 
     /// Why the model on this device can't answer, or nil when it can.
     static var appleAvailability: String? { appleState.reason }
+
+    /// Whether this device & OS can run Apple Intelligence at all (false for `.unsupported`).
+    static var isAppleSupported: Bool {
+        if case .unsupported = appleState { return false }
+        return true
+    }
 
     /// One answer: `system` says how to behave, `prompt` carries the excerpts and the question.
     /// The language the companion answers in: the interface's. The prompts stay Chinese, and so

@@ -1438,20 +1438,20 @@ struct CompanionPanel: View {
     @ViewBuilder private var welcome: some View {
         let _ = focus.tick
         let config = CompanionConfig.current
-        VStack(alignment: .leading, spacing: 8) {
-            Text("读到哪儿问到哪儿").font(.yy(size: 13, weight: .semibold)).foregroundStyle(YYColor.t1)
-            Text("可以问人物关系、这句是什么意思、前面发生了什么。回答标着出处，点一下就翻到那句；也可点回答下方的「存为想法」收进笔记。")
-                .font(.yy(size: 12)).foregroundStyle(YYColor.t2).lineSpacing(3)
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("读到哪儿问到哪儿").font(.yy(size: 13, weight: .semibold)).foregroundStyle(YYColor.t1)
+                Text("可以问人物关系、这句是什么意思、前面发生了什么。回答标着出处，点一下就翻到那句；也可点回答下方的「存为想法」收进笔记。")
+                    .font(.yy(size: 12)).foregroundStyle(YYColor.t2).lineSpacing(3)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(YYColor.inset, in: .rect(cornerRadius: 14))
+
             if !config.isReady {
-                Text(config.provider == .apple ? Companion.appleAvailability ?? "" : String(localized: "还没填好 \(config.provider.title) 的 Key"))
-                    .font(.yy(size: 11.5)).foregroundStyle(YYColor.t3).lineSpacing(3)
-                Button("去设置 · 书伴") { openCompanionSettings() }
-                    .buttonStyle(YYButtonStyle(kind: .main, size: .small)).padding(.top, 2)
+                CompanionSetupCard(config: config, tint: tint, action: openCompanionSettings)
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(YYColor.inset, in: .rect(cornerRadius: 14))
     }
 
     @ViewBuilder
@@ -1552,8 +1552,23 @@ struct CompanionPanel: View {
                 }
             }
         } else if let failed = turn.failed {
-            Label(failed, systemImage: "exclamationmark.circle")
-                .font(.yy(size: 11.5)).foregroundStyle(YYColor.danger)
+            VStack(alignment: .leading, spacing: 8) {
+                Label(failed, systemImage: "exclamationmark.circle")
+                    .font(.yy(size: 11.5)).foregroundStyle(YYColor.danger)
+                if turn.id == companion.turns.last?.id, !CompanionConfig.current.isReady {
+                    Button(action: openCompanionSettings) {
+                        HStack(spacing: 5) {
+                            Text("去配置模型")
+                            Image(systemName: "chevron.right").font(.yy(size: 9.5, weight: .semibold))
+                        }
+                        .font(.yy(size: 11.5, weight: .medium)).foregroundStyle(YYColor.t1)
+                        .padding(.horizontal, 11).frame(height: 27)
+                        .background(YYColor.card, in: .capsule)
+                        .overlay(Capsule().strokeBorder(YYColor.line, lineWidth: 0.5))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         } else if let streaming = turn.streaming, !streaming.isEmpty {
             Text(cited(streaming, sources: [:], streaming: true))
                 .font(.yy(size: 12.5))
@@ -1901,7 +1916,11 @@ struct CompanionPanel: View {
             slashManualOpen = false
             slashDismissedForDraft = nil
             draft = ""
-            modelPickerOpen = true
+            if CompanionConfig.current.isUnconfiguredFallback {
+                openCompanionSettings()
+            } else {
+                modelPickerOpen = true
+            }
         case .clear:
             slashManualOpen = false
             slashDismissedForDraft = nil
@@ -1928,6 +1947,86 @@ struct CompanionPanel: View {
     private func openCompanionSettings() {
         UserDefaults.standard.set(SettingsPage.companion.rawValue, forKey: "settings.page")
         openSettings()
+    }
+}
+
+/// Clean elevated setup call-to-action card shown below the intro block when no AI model is ready.
+private struct CompanionSetupCard: View {
+    let config: CompanionConfig
+    let tint: YYTint
+    let action: () -> Void
+    @Environment(\.colorScheme) private var scheme
+    @State private var hover = false
+
+    private var title: String {
+        if config.isUnconfiguredFallback {
+            String(localized: "添加 AI 服务商即可开始")
+        } else if config.provider == .apple {
+            String(localized: "开启或添加 AI 服务商")
+        } else {
+            String(localized: "完成 \(config.provider.title) 配置")
+        }
+    }
+
+    private var subtitle: String {
+        if config.isUnconfiguredFallback {
+            String(localized: "支持 DeepSeek、通义千问、Claude、OpenAI、Ollama 等")
+        } else if config.provider == .apple {
+            Companion.appleAvailability ?? String(localized: "开启 Apple 智能，或添加其他服务商")
+        } else {
+            String(localized: "填入 API Key 后即可开始问答")
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 11) {
+                if config.provider == .apple {
+                    Image(systemName: "sparkles")
+                        .font(.yy(size: 13, weight: .semibold))
+                        .foregroundStyle(tint.accent)
+                        .frame(width: 30, height: 30)
+                        .background(tint.accentSoft, in: .rect(cornerRadius: 9))
+                } else {
+                    ServiceTile(mark: .provider(config.provider), size: 30)
+                }
+
+                VStack(alignment: .leading, spacing: 2.5) {
+                    Text(title)
+                        .font(.yy(size: 12.5, weight: .semibold))
+                        .foregroundStyle(YYColor.t1)
+                        .lineLimit(1)
+                    Text(subtitle)
+                        .font(.yy(size: 11))
+                        .foregroundStyle(YYColor.t3)
+                        .lineSpacing(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 3) {
+                    Text("去配置")
+                        .font(.yy(size: 11.5, weight: .semibold))
+                    Image(systemName: "chevron.right")
+                        .font(.yy(size: 9.5, weight: .semibold))
+                }
+                .foregroundStyle(tint.accent)
+                .fixedSize()
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 12)
+            .background(hover ? YYColor.inset : YYColor.card, in: .rect(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(hover ? tint.accent.opacity(0.32) : YYColor.line, lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(scheme == .dark ? 0.18 : 0.04), radius: 4, y: 1.5)
+            .contentShape(.rect(cornerRadius: 14))
+        }
+        .buttonStyle(YYPressStyle(scale: 0.985))
+        .onHover { hover = $0 }
+        .animation(YYMotion.quick, value: hover)
     }
 }
 

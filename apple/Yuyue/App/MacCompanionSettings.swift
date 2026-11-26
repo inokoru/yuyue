@@ -20,24 +20,26 @@ struct CompanionSettings: View {
         VStack(alignment: .leading, spacing: 12) {
             SettingsHeading(String(localized: "模型服务"))
             SettingsCard {
-                let apple = Companion.appleAvailability == nil
-                ServiceRow(selected: focus.page == .service(CompanionProvider.apple.id) || focus.page == nil && choice.current.provider.kind == .apple,
-                           dim: !apple) {
-                    ServiceTile(mark: .thisMac)
-                } title: {
-                    Text("这台 Mac")
-                    SettingsPill(String(localized: "不推荐"), tone: .warn)
-                    if apple && choice.current.provider.kind == .apple { InUsePill() }
-                } detail: {
-                    Text("Apple 智能 · 上下文短、中文文学理解弱，仅作离线简单兜底")
-                } trailing: {
-                    switch Companion.appleState {
-                    case .available: EmptyView()
-                    case .notEnabled: SettingsPill(String(localized: "未开启"), tone: .warn)
-                    case .downloading: SettingsPill(String(localized: "准备中"), tone: .warn)
-                    case .unsupported: SettingsPill(String(localized: "当前系统不支持"), tone: .warn)
-                    }
-                } action: { focus.page = .service(CompanionProvider.apple.id) }
+                if Companion.isAppleSupported {
+                    let apple = Companion.appleAvailability == nil
+                    ServiceRow(selected: focus.page == .service(CompanionProvider.apple.id) || focus.page == nil && choice.current.provider.kind == .apple,
+                               dim: !apple) {
+                        ServiceTile(mark: .thisMac)
+                    } title: {
+                        Text("这台 Mac")
+                        SettingsPill(String(localized: "不推荐"), tone: .warn)
+                        if apple && choice.current.provider.kind == .apple { InUsePill() }
+                    } detail: {
+                        Text("Apple 智能 · 上下文短、中文文学理解弱，仅作离线简单兜底")
+                    } trailing: {
+                        switch Companion.appleState {
+                        case .available: EmptyView()
+                        case .notEnabled: SettingsPill(String(localized: "未开启"), tone: .warn)
+                        case .downloading: SettingsPill(String(localized: "准备中"), tone: .warn)
+                        case .unsupported: SettingsPill(String(localized: "当前系统不支持"), tone: .warn)
+                        }
+                    } action: { focus.page = .service(CompanionProvider.apple.id) }
+                }
 
                 ForEach(choice.added) { p in
                     let config = CompanionConfig.saved(p)
@@ -166,8 +168,8 @@ struct ServicePanel: View {
     var body: some View {
         let _ = focus.tick
         let config = CompanionConfig.saved(provider)
-        let inUse = focus.choice.current.provider == provider
         let apple = provider.kind == .apple
+        let inUse = focus.choice.current.provider == provider && (!apple || Companion.appleState == .available)
         VStack(alignment: .leading, spacing: 10) {
             PanelHeader(title: apple ? SettingsDevice.name : provider.title,
                         detail: inUse ? String(localized: "当前使用") : (apple ? String(localized: "Apple 智能") : provider.account)) {
@@ -2311,8 +2313,11 @@ struct CompanionModelPill: View {
         let _ = focus.tick
         let _ = activeProviderID
         let config = CompanionConfig.current
+        let unconfigured = config.isUnconfiguredFallback
         let isApple = config.provider.kind == .apple
-        let title: String = if isApple {
+        let title: String = if unconfigured {
+            String(localized: "配置模型")
+        } else if isApple {
             String(localized: "Apple 智能")
         } else if config.model.isEmpty {
             String(localized: "选择模型…")
@@ -2320,15 +2325,27 @@ struct CompanionModelPill: View {
             ModelNames.name(config.model)
         }
 
-        Button { open.toggle() } label: {
+        Button {
+            if unconfigured {
+                openSettings()
+            } else {
+                open.toggle()
+            }
+        } label: {
             HStack(spacing: 5) {
-                ServiceTile(mark: isApple ? .thisMac : .provider(config.provider), size: 16)
+                if unconfigured {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.yy(size: 12, weight: .medium))
+                        .foregroundStyle(YYTint.standard.accent)
+                } else {
+                    ServiceTile(mark: isApple ? .thisMac : .provider(config.provider), size: 16)
+                }
                 Text(title)
                     .font(.yy(size: 11, weight: .semibold))
                     .foregroundStyle(config.isReady ? YYColor.t1 : YYColor.t2)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                if !isApple {
+                if !isApple && !unconfigured {
                     Text(config.provider.title)
                         .font(.yy(size: 9.5, weight: .medium))
                         .foregroundStyle(YYColor.t2)
@@ -2338,11 +2355,11 @@ struct CompanionModelPill: View {
                         .background(YYColor.inset, in: .rect(cornerRadius: 4))
                         .fixedSize(horizontal: true, vertical: false)
                 }
-                Image(systemName: "chevron.up.chevron.down")
+                Image(systemName: unconfigured ? "chevron.right" : "chevron.up.chevron.down")
                     .font(.yy(size: 8.5, weight: .semibold))
                     .foregroundStyle(YYColor.t3)
             }
-            .padding(.leading, 5)
+            .padding(.leading, unconfigured ? 7 : 5)
             .padding(.trailing, 7)
             .frame(height: 26)
             .background(hover || open ? YYColor.inset : YYColor.card, in: .capsule)
@@ -2352,8 +2369,8 @@ struct CompanionModelPill: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
-        .help(config.isReady ? config.label : String(localized: "切换服务商与模型"))
-        .accessibilityLabel(Text("选择模型"))
+        .help(unconfigured ? String(localized: "添加 AI 服务商以使用书伴") : (config.isReady ? config.label : String(localized: "切换服务商与模型")))
+        .accessibilityLabel(Text(unconfigured ? "配置模型" : "选择模型"))
         .popover(isPresented: $open, arrowEdge: .bottom) {
             CompanionModelPicker(
                 openSettings: {
@@ -2393,8 +2410,8 @@ private struct CompanionModelPicker: View {
     private var focus: CompanionFocus { .shared }
 
     private var allProviders: [CompanionProvider] {
-        var out: [CompanionProvider] = [.apple]
-        var seen: Set<String> = [CompanionProvider.apple.id]
+        var out: [CompanionProvider] = Companion.isAppleSupported ? [.apple] : []
+        var seen: Set<String> = Set(out.map(\.id))
         for p in CompanionProvider.added where seen.insert(p.id).inserted {
             out.append(p)
         }
@@ -2431,8 +2448,12 @@ private struct CompanionModelPicker: View {
             let initialStarred = ModelNames.starredEntries(among: readyProviders)
             if !initialStarred.isEmpty && current.isReady {
                 nav = .starred
-            } else {
+            } else if allProviders.contains(where: { $0.id == current.provider.id }) {
                 nav = .provider(current.provider.id)
+            } else if let first = allProviders.first {
+                nav = .provider(first.id)
+            } else {
+                nav = .starred
             }
             searchFocused = true
             Task { await warmPools() }
@@ -2515,7 +2536,11 @@ private struct CompanionModelPicker: View {
                 ForEach(allProviders) { p in
                     let cfg = CompanionConfig.saved(p)
                     let countText: String = if p.kind == .apple {
-                        cfg.isConnected ? "1" : String(localized: "未开启")
+                        switch Companion.appleState {
+                        case .available: "1"
+                        case .downloading: String(localized: "准备中")
+                        case .notEnabled, .unsupported: String(localized: "未开启")
+                        }
                     } else if !cfg.isConnected {
                         String(localized: "未填")
                     } else {
@@ -2581,7 +2606,38 @@ private struct CompanionModelPicker: View {
         starred: [ModelNames.Entry],
         recents: [ModelNames.Entry]
     ) -> some View {
-        if trimmedQuery.isEmpty, case .provider(let pid) = nav,
+        if allProviders.isEmpty {
+            VStack(spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.yy(size: 20, weight: .medium))
+                    .foregroundStyle(tint.accent)
+                    .frame(width: 38, height: 38)
+                    .background(tint.accentSoft, in: .rect(cornerRadius: 11))
+                Text("还没添加 AI 服务商")
+                    .font(.yy(size: 12.5, weight: .semibold))
+                    .foregroundStyle(YYColor.t1)
+                Text("支持 DeepSeek、通义千问、Claude、OpenAI、Ollama 等")
+                    .font(.yy(size: 11))
+                    .foregroundStyle(YYColor.t3)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                Button(action: openSettings) {
+                    HStack(spacing: 4) {
+                        Text("去配置模型")
+                        Image(systemName: "chevron.right").font(.yy(size: 9.5, weight: .semibold))
+                    }
+                    .font(.yy(size: 11.5, weight: .semibold))
+                    .foregroundStyle(YYColor.t1)
+                    .padding(.horizontal, 12)
+                    .frame(height: 28)
+                    .background(YYColor.bg, in: .capsule)
+                    .overlay(Capsule().strokeBorder(YYColor.line, lineWidth: 0.5))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if trimmedQuery.isEmpty, case .provider(let pid) = nav,
            let p = allProviders.first(where: { $0.id == pid }),
            !CompanionConfig.saved(p).isConnected {
             unconfiguredState(for: p)

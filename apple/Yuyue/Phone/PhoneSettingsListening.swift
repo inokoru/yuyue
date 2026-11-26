@@ -606,23 +606,25 @@ struct PhoneCompanionSettings: View {
             PhoneSettingsLead(String(localized: "阅读问答与播客撰稿所用的大模型"))
             PhoneSettingsHeading(String(localized: "模型服务"))
             YYGroup {
-                NavigationLink { PhoneCompanionService(provider: .apple) } label: {
-                    row(.thisMac, dim: !apple) {
-                        Text(SettingsDevice.name)
-                        SettingsPill(String(localized: "不推荐"), tone: .warn)
-                        if apple && choice.current.provider.kind == .apple { SettingsPill(String(localized: "当前使用"), tone: .ok) }
-                    } detail: {
-                        Text("Apple 智能 · 能力与上下文受限，仅本地兜底")
-                    } trailing: {
-                        switch Companion.appleState {
-                        case .available: EmptyView()
-                        case .notEnabled: SettingsPill(String(localized: "未开启"), tone: .warn)
-                        case .downloading: SettingsPill(String(localized: "准备中"), tone: .warn)
-                        case .unsupported: SettingsPill(String(localized: "当前系统不支持"), tone: .warn)
+                if Companion.isAppleSupported {
+                    NavigationLink { PhoneCompanionService(provider: .apple) } label: {
+                        row(.thisMac, dim: !apple) {
+                            Text(SettingsDevice.name)
+                            SettingsPill(String(localized: "不推荐"), tone: .warn)
+                            if apple && choice.current.provider.kind == .apple { SettingsPill(String(localized: "当前使用"), tone: .ok) }
+                        } detail: {
+                            Text("Apple 智能 · 能力与上下文受限，仅本地兜底")
+                        } trailing: {
+                            switch Companion.appleState {
+                            case .available: EmptyView()
+                            case .notEnabled: SettingsPill(String(localized: "未开启"), tone: .warn)
+                            case .downloading: SettingsPill(String(localized: "准备中"), tone: .warn)
+                            case .unsupported: SettingsPill(String(localized: "当前系统不支持"), tone: .warn)
+                            }
                         }
                     }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
                 ForEach(choice.added) { p in
                     let config = CompanionConfig.saved(p)
                     NavigationLink { PhoneCompanionService(provider: p) } label: {

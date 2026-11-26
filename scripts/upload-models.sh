@@ -117,7 +117,7 @@ if [ "$ONLY_MS" -eq 0 ]; then
   gh release upload models-1 -R "$REPO" --clobber $FILES
 
   echo "=== 验证 GitHub Releases ($REPO / models-1) ==="
-  for f in MMSAligner.mlmodelc.zip mms_fa.int8.onnx SpeakerPrint.mlmodelc.zip speaker_print.onnx sense_voice.int8.onnx sense_voice_tokens.txt live-zipvoice-1.zip voices-1.zip; do
+  for f in MMSAligner.mlmodelc.zip mms_fa.int8.onnx SpeakerPrint.mlmodelc.zip speaker_print.onnx sense_voice.int8.onnx sense_voice_tokens.txt live-zipvoice-1.zip voices-1.zip kokoro-v1_1-1.zip; do
     code=$(curl -sIL -o /dev/null -w '%{http_code}' "https://github.com/$REPO/releases/download/models-1/$f")
     echo "GitHub: $f → $code"
   done

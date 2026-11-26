@@ -170,7 +170,14 @@ struct PhoneMe: View {
 
     private var syncGroup: some View {
         group(String(localized: "连接")) {
-            link(String(localized: "书伴"), "text.bubble", CompanionConfig.current.provider.kind == .apple ? SettingsDevice.name : CompanionConfig.current.provider.title) { PhoneCompanionSettings() }
+            let companionDetail: String = if CompanionConfig.current.isUnconfiguredFallback {
+                String(localized: "未配置")
+            } else if CompanionConfig.current.provider.kind == .apple {
+                SettingsDevice.name
+            } else {
+                CompanionConfig.current.provider.title
+            }
+            link(String(localized: "书伴"), "text.bubble", companionDetail) { PhoneCompanionSettings() }
             link(String(localized: "同步"), "icloud", syncDetail) { PhoneSync(library: library) }
             link(String(localized: "笔记导出"), "square.and.arrow.up", exportDetail) { PhoneNoteExport() }
         }

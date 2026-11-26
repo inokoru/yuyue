@@ -102,7 +102,13 @@ final class BookCompanion {
         turns.append(Turn(question: q, quote: quote, scope: scope, anchor: resolvedAnchor, askedAt: here))
         let index = turns.count - 1
         guard config.isReady else {
-            turns[index].failed = config.provider == .apple ? Companion.appleAvailability ?? CompanionError.notReady.errorDescription : CompanionError.notReady.errorDescription
+            turns[index].failed = if config.isUnconfiguredFallback {
+                String(localized: "还没配置 AI 模型，请先去设置 · 书伴添加服务商")
+            } else if config.provider == .apple {
+                Companion.appleAvailability ?? CompanionError.notReady.errorDescription
+            } else {
+                CompanionError.notReady.errorDescription
+            }
             return
         }
         let core = model.core

@@ -340,20 +340,77 @@ struct PhoneCompanion: View {
         let _ = focus.tick
         let _ = activeProviderID
         let config = CompanionConfig.current
-        VStack(alignment: .leading, spacing: 8) {
-            Text("读到哪儿问到哪儿").font(.yy(size: 15, weight: .semibold)).foregroundStyle(YYColor.t1)
-            Text("可以问人物关系、这句是什么意思、前面发生了什么。回答标着出处，点一下就翻到那句；也可点回答下方的「存为想法」收进笔记。")
-                .font(.yy(size: 14)).foregroundStyle(YYColor.t2).lineSpacing(3)
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("读到哪儿问到哪儿").font(.yy(size: 15, weight: .semibold)).foregroundStyle(YYColor.t1)
+                Text("可以问人物关系、这句是什么意思、前面发生了什么。回答标着出处，点一下就翻到那句；也可点回答下方的「存为想法」收进笔记。")
+                    .font(.yy(size: 14)).foregroundStyle(YYColor.t2).lineSpacing(3)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(YYColor.inset, in: .rect(cornerRadius: 16))
+
             if !config.isReady {
-                Text(config.provider == .apple ? Companion.appleAvailability ?? "" : String(localized: "还没填好 \(config.provider.title) 的 Key"))
-                    .font(.yy(size: 13)).foregroundStyle(YYColor.t3).lineSpacing(3)
-                Button("去设置 · 书伴") { settings = true }
-                    .buttonStyle(YYButtonStyle(kind: .main, size: .small)).padding(.top, 2)
+                phoneSetupCard(config)
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(YYColor.inset, in: .rect(cornerRadius: 16))
+    }
+
+    private func phoneSetupCard(_ config: CompanionConfig) -> some View {
+        let title: String = if config.isUnconfiguredFallback {
+            String(localized: "添加 AI 服务商即可开始")
+        } else if config.provider == .apple {
+            String(localized: "开启或添加 AI 服务商")
+        } else {
+            String(localized: "完成 \(config.provider.title) 配置")
+        }
+        let subtitle: String = if config.isUnconfiguredFallback {
+            String(localized: "支持 DeepSeek、通义千问、Claude、OpenAI、Ollama 等")
+        } else if config.provider == .apple {
+            Companion.appleAvailability ?? String(localized: "开启 Apple 智能，或添加其他服务商")
+        } else {
+            String(localized: "填入 API Key 后即可开始问答")
+        }
+        return Button { settings = true } label: {
+            HStack(spacing: 12) {
+                if config.provider == .apple {
+                    Image(systemName: "sparkles")
+                        .font(.yy(size: 15, weight: .semibold))
+                        .foregroundStyle(tint.accent)
+                        .frame(width: 34, height: 34)
+                        .background(tint.accentSoft, in: .rect(cornerRadius: 10))
+                } else {
+                    ServiceTile(mark: .provider(config.provider), size: 34)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.yy(size: 14.5, weight: .semibold))
+                        .foregroundStyle(YYColor.t1)
+                        .lineLimit(1)
+                    Text(subtitle)
+                        .font(.yy(size: 12.5))
+                        .foregroundStyle(YYColor.t3)
+                        .lineSpacing(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 3) {
+                    Text("去配置")
+                        .font(.yy(size: 13, weight: .semibold))
+                    Image(systemName: "chevron.right")
+                        .font(.yy(size: 10.5, weight: .semibold))
+                }
+                .foregroundStyle(tint.accent)
+                .fixedSize()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+            .background(YYColor.card, in: .rect(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(YYColor.line, lineWidth: 0.5))
+            .contentShape(.rect(cornerRadius: 16))
+        }
+        .buttonStyle(YYPressStyle(scale: 0.985))
     }
 
     @ViewBuilder
@@ -809,8 +866,11 @@ struct PhoneCompanion: View {
         let _ = focus.tick
         let _ = activeProviderID
         let config = CompanionConfig.current
+        let unconfigured = config.isUnconfiguredFallback
         let isApple = config.provider.kind == .apple
-        let modelTitle: String = if isApple {
+        let modelTitle: String = if unconfigured {
+            String(localized: "配置模型")
+        } else if isApple {
             String(localized: "Apple 智能")
         } else if config.model.isEmpty {
             String(localized: "选择模型…")
@@ -863,20 +923,30 @@ struct PhoneCompanion: View {
                     typing = false
                     linesOpen = false
                     dismissSlashMenu()
-                    modelPickerOpen = true
+                    if unconfigured {
+                        settings = true
+                    } else {
+                        modelPickerOpen = true
+                    }
                 } label: {
                     HStack(spacing: 5) {
-                        ServiceTile(mark: isApple ? .thisMac : .provider(config.provider), size: 17)
+                        if unconfigured {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.yy(size: 13.5, weight: .medium))
+                                .foregroundStyle(tint.accent)
+                        } else {
+                            ServiceTile(mark: isApple ? .thisMac : .provider(config.provider), size: 17)
+                        }
                         Text(modelTitle)
                             .font(.yy(size: 12, weight: .semibold))
                             .foregroundStyle(config.isReady ? YYColor.t1 : YYColor.t2)
                             .lineLimit(1)
                             .truncationMode(.tail)
-                        Image(systemName: "chevron.up.chevron.down")
+                        Image(systemName: unconfigured ? "chevron.right" : "chevron.up.chevron.down")
                             .font(.yy(size: 9, weight: .semibold))
                             .foregroundStyle(YYColor.t3)
                     }
-                    .padding(.leading, 6)
+                    .padding(.leading, unconfigured ? 8 : 6)
                     .padding(.trailing, 9)
                     .frame(height: 30)
                     .background(YYColor.bg, in: .capsule)
@@ -885,7 +955,7 @@ struct PhoneCompanion: View {
                 }
                 .buttonStyle(YYPressStyle(scale: 0.97))
                 .layoutPriority(1)
-                .accessibilityLabel(Text("选择模型"))
+                .accessibilityLabel(Text(unconfigured ? "配置模型" : "选择模型"))
 
                 Spacer(minLength: 4)
 
@@ -964,7 +1034,11 @@ struct PhoneCompanion: View {
             slashDismissedForDraft = nil
             draft = ""
             typing = false
-            modelPickerOpen = true
+            if CompanionConfig.current.isUnconfiguredFallback {
+                settings = true
+            } else {
+                modelPickerOpen = true
+            }
         case .settings:
             slashManualOpen = false
             slashDismissedForDraft = nil
@@ -1014,8 +1088,8 @@ private struct PhoneCompanionModelPicker: View {
     private var focus: CompanionFocus { .shared }
 
     private var allProviders: [CompanionProvider] {
-        var out: [CompanionProvider] = [.apple]
-        var seen: Set<String> = [CompanionProvider.apple.id]
+        var out: [CompanionProvider] = Companion.isAppleSupported ? [.apple] : []
+        var seen: Set<String> = Set(out.map(\.id))
         for p in CompanionProvider.added where seen.insert(p.id).inserted {
             out.append(p)
         }
@@ -1072,8 +1146,12 @@ private struct PhoneCompanionModelPicker: View {
             let initialStarred = ModelNames.starredEntries(among: readyProviders)
             if !initialStarred.isEmpty && current.isReady {
                 nav = .starred
-            } else {
+            } else if allProviders.contains(where: { $0.id == current.provider.id }) {
                 nav = .provider(current.provider.id)
+            } else if let first = allProviders.first {
+                nav = .provider(first.id)
+            } else {
+                nav = .starred
             }
             Task { await warmPools() }
         }
@@ -1181,7 +1259,38 @@ private struct PhoneCompanionModelPicker: View {
         starred: [ModelNames.Entry],
         recents: [ModelNames.Entry]
     ) -> some View {
-        if trimmedQuery.isEmpty, case .provider(let pid) = nav,
+        if allProviders.isEmpty {
+            VStack(spacing: 12) {
+                Image(systemName: "sparkles")
+                    .font(.yy(size: 22, weight: .medium))
+                    .foregroundStyle(tint.accent)
+                    .frame(width: 44, height: 44)
+                    .background(tint.accentSoft, in: .rect(cornerRadius: 12))
+                Text("还没添加 AI 服务商")
+                    .font(.yy(size: 15, weight: .semibold))
+                    .foregroundStyle(YYColor.t1)
+                Text("支持 DeepSeek、通义千问、Claude、OpenAI、Ollama 等")
+                    .font(.yy(size: 13))
+                    .foregroundStyle(YYColor.t3)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 28)
+                Button(action: openSettings) {
+                    HStack(spacing: 5) {
+                        Text("去配置模型")
+                        Image(systemName: "chevron.right").font(.yy(size: 10.5, weight: .semibold))
+                    }
+                    .font(.yy(size: 13.5, weight: .semibold))
+                    .foregroundStyle(YYColor.t1)
+                    .padding(.horizontal, 16)
+                    .frame(height: 36)
+                    .background(YYColor.card, in: .capsule)
+                    .overlay(Capsule().strokeBorder(YYColor.line, lineWidth: 0.5))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if trimmedQuery.isEmpty, case .provider(let pid) = nav,
            let p = allProviders.first(where: { $0.id == pid }),
            !CompanionConfig.saved(p).isConnected {
             VStack(spacing: 12) {
