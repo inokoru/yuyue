@@ -121,6 +121,19 @@ fun ClonedCardDetailPanel(
     var deleting by remember { mutableStateOf(false) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var tick by remember { mutableIntStateOf(0) }
+    var previewingStyle by remember { mutableStateOf<CardStyle?>(null) }
+    var previewLoading by remember { mutableStateOf(false) }
+    var previewJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+    fun stopStylePreview() {
+        previewJob?.cancel()
+        previewJob = null
+        previewingStyle = null
+        previewLoading = false
+        SystemVoice.Engine.stopPreview()
+    }
+
+    DisposableEffect(Unit) { onDispose { stopStylePreview() } }
 
     LaunchedEffect(Unit) {
         if (!LiveVoiceModel.canRun(dataDir) && !LiveVoiceModel.deviceUnsupported) {
@@ -159,24 +172,60 @@ fun ClonedCardDetailPanel(
     }
 
     fun playStyle(style: CardStyle) {
-        SystemVoice.Engine.stopPreview()
+        if (previewingStyle == style) {
+            stopStylePreview()
+            return
+        }
+        stopStylePreview()
+        app.yuyue.speech.Session.pauseActivePlayback()
         errorMsg = null
-        scope.launch {
+        previewingStyle = style
+        previewLoading = true
+        val previewText = previewSampleLine(sampleLine, language)
+        previewJob = scope.launch {
             try {
                 val sp = withContext(Dispatchers.IO) {
                     if (LiveVoiceModel.canRun(dataDir)) {
-                        CardVoice(currentCard).render(sampleLine, language, style)
+                        CardVoice(currentCard).render(previewText, language, style)
                     } else {
                         core.cardClipPath(null, currentCard.id, style)?.let { SystemVoice.Engine.wav(File(it)) }
                     }
                 }
-                if (sp != null) SystemVoice.Engine.preview(sp)
+                if (previewingStyle != style) return@launch
+                if (sp != null) {
+                    previewLoading = false
+                    val started = SystemVoice.Engine.preview(sp) {
+                        if (previewingStyle == style) {
+                            previewingStyle = null
+                            previewLoading = false
+                        }
+                    }
+                    if (!started && previewingStyle == style) {
+                        previewingStyle = null
+                        previewLoading = false
+                        errorMsg = t("试听播放失败，请重试")
+                    }
+                } else if (previewingStyle == style) {
+                    previewingStyle = null
+                    previewLoading = false
+                    errorMsg = t("试听失败，请重试")
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                errorMsg = e.message ?: e.toString()
+                if (previewingStyle == style) {
+                    previewingStyle = null
+                    previewLoading = false
+                    errorMsg = e.message?.ifBlank { null } ?: t("试听失败，请重试")
+                }
             }
         }
+    }
+
+    fun previewLabel(style: CardStyle): String = when {
+        previewingStyle == style && previewLoading -> t("合成中…")
+        previewingStyle == style -> "■ " + t("停止")
+        else -> "▶ " + t("试听")
     }
 
     // Header
@@ -202,9 +251,13 @@ fun ClonedCardDetailPanel(
                 .padding(horizontal = 5.dp, vertical = 1.dp),
         )
         Spacer(Modifier.weight(1f))
-        YYButton("▶ " + t("试听"), size = ButtonSize.Small) {
+        YYButton(previewLabel(CardStyle.NEUTRAL), size = ButtonSize.Small) {
             playStyle(CardStyle.NEUTRAL)
         }
+    }
+
+    errorMsg?.let {
+        YYNote(it, YY.c.danger)
     }
 
     if (LiveVoiceModel.deviceUnsupported && !alsoEleven) {
@@ -233,7 +286,7 @@ fun ClonedCardDetailPanel(
                             style = YY.tnum,
                             modifier = Modifier.weight(1f),
                         )
-                        YYButton("▶ " + t("试听"), size = ButtonSize.Small) {
+                        YYButton(previewLabel(style), size = ButtonSize.Small) {
                             playStyle(style)
                         }
                         Text(
@@ -334,9 +387,7 @@ fun ClonedCardDetailPanel(
         }
     }
 
-    errorMsg?.let {
-        YYNote(it, YY.c.danger)
-    }
+    // Delete & rename actions below; errorMsg is shown right under the header for visibility.
 
     // Rename & Delete
     Row(

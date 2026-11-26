@@ -24,7 +24,11 @@ import app.yuyue.design.Prefs
 import app.yuyue.speech.ModelDownload
 import app.yuyue.t
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -134,6 +138,10 @@ object Updates {
     private var apk: File? = null
     private val installing = AtomicBoolean(false)
     private val pendingConfirmRef = AtomicReference<Intent?>(null)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var checkJob: Job? = null
+    private var checkSeq = 0L
+    private var beforeCheck: UpdatePhase = UpdatePhase.Idle
 
     var pendingConfirmIntent: Intent?
         get() = pendingConfirmRef.get()
@@ -154,6 +162,13 @@ object Updates {
         }
 
     private val http by lazy { OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build() }
+    private val metaHttp by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(12, TimeUnit.SECONDS)
+            .callTimeout(15, TimeUnit.SECONDS)
+            .build()
+    }
 
     /** Ordered candidate release folders: China mirror (CNB) first on mainland locales, with GitHub fallback. */
     private fun candidateBases(): List<String> {
@@ -195,7 +210,7 @@ object Updates {
             .url("https://cnb.cool/inokoru/yuyue/-/releases?page=1&page_size=20")
             .header("Accept", "application/vnd.cnb.web+json")
             .build()
-        val body = http.newCall(req).execute().use { r ->
+        val body = metaHttp.newCall(req).execute().use { r ->
             if (!r.isSuccessful) return null
             r.body?.string() ?: return null
         }
@@ -212,53 +227,90 @@ object Updates {
         return null
     }
 
-    /** On opening: once a day at most, when 自动检查 is on; `byHand` from 检查更新, always. */
-    suspend fun checkNow(context: Context, byHand: Boolean = false) {
-        if (!enabled) return
+    /** On opening: once a day at most, when 自动检查 is on; `byHand` from 检查更新, always.
+     *  Runs on `Updates`'s process-wide scope so `AnimatedContent` swaps or leaving the screen
+     *  never cancel an in-flight check and leave `phase` wedged at `Checking`. */
+    fun startCheck(context: Context, byHand: Boolean = false, force: Boolean = false): Job? {
+        if (!enabled) return null
         if (!byHand) {
-            if (!autoOn) return
+            if (!autoOn) return null
             val last = Prefs.long(CHECKED_KEY) ?: 0L
             val staleOffer = lastSuccess != null && !lastWasCurrent
             if (!staleOffer && System.currentTimeMillis() - last < DAY) {
                 if (phase == UpdatePhase.Idle && lastSuccess != null) phase = UpdatePhase.Current
-                return
+                return null
             }
         }
-        if (phase is UpdatePhase.Downloading || phase == UpdatePhase.Checking) return
-        val before = phase
+        if (phase is UpdatePhase.Downloading) return null
+        val running = checkJob?.takeIf { it.isActive }
+        if (running != null && !force && (!byHand || phase == UpdatePhase.Checking)) return running
+        val appContext = context.applicationContext
+        if (phase != UpdatePhase.Checking) beforeCheck = phase
+        val before = beforeCheck
+        val seq = ++checkSeq
+        running?.cancel()
         if (byHand) phase = UpdatePhase.Checking
         Prefs.set(CHECKED_KEY, System.currentTimeMillis())
-        try {
-            val found = withContext(Dispatchers.IO) { fetch(context) }
-            offer = found?.first
-            apk = found?.second
-            val now = System.currentTimeMillis()
-            lastSuccess = now
-            lastSuccessAuto = !byHand
-            lastWasCurrent = found == null
-            Prefs.set(CHECKED_BUILD_KEY, BuildConfig.VERSION_CODE.toLong())
-            Prefs.set(LAST_SUCCESS_KEY, now)
-            Prefs.set(LAST_AUTO_KEY, !byHand)
-            Prefs.set(LAST_CURRENT_KEY, found == null)
-            reconcile(context)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            phase = if (byHand) UpdatePhase.CheckFailed else before
+        val job = scope.launch {
+            var settled = false
+            try {
+                val found = withContext(Dispatchers.IO) { fetch(appContext) }
+                if (checkSeq != seq) return@launch
+                offer = found?.first
+                apk = found?.second
+                val now = System.currentTimeMillis()
+                lastSuccess = now
+                lastSuccessAuto = !byHand
+                lastWasCurrent = found == null
+                Prefs.set(CHECKED_BUILD_KEY, BuildConfig.VERSION_CODE.toLong())
+                Prefs.set(LAST_SUCCESS_KEY, now)
+                Prefs.set(LAST_AUTO_KEY, !byHand)
+                Prefs.set(LAST_CURRENT_KEY, found == null)
+                reconcile(appContext)
+                settled = true
+            } catch (e: CancellationException) {
+                if (checkSeq == seq && phase == UpdatePhase.Checking) phase = before
+                throw e
+            } catch (e: Throwable) {
+                if (checkSeq == seq) {
+                    phase = if (byHand) UpdatePhase.CheckFailed else before
+                    settled = true
+                }
+            } finally {
+                if (checkSeq == seq && !settled && phase == UpdatePhase.Checking) {
+                    phase = if (byHand) UpdatePhase.CheckFailed else before
+                }
+            }
         }
+        checkJob = job
+        return job
     }
 
-    fun setAuto(context: Context, on: Boolean, launch: (suspend () -> Unit) -> Unit) {
+    suspend fun checkNow(context: Context, byHand: Boolean = false) {
+        startCheck(context, byHand)?.join()
+    }
+
+    fun startDownload(context: Context): Job {
+        val appContext = context.applicationContext
+        return scope.launch { download(appContext) }
+    }
+
+    fun startInstall(context: Context): Job {
+        val appContext = context.applicationContext
+        return scope.launch { install(appContext) }
+    }
+
+    fun setAuto(context: Context, on: Boolean) {
         autoOn = on
         Prefs.set(AUTO_KEY, on)
-        if (on) launch { checkNow(context) }
+        if (on) startCheck(context)
     }
 
-    fun setChannel(context: Context, to: UpdateChannel, launch: (suspend () -> Unit) -> Unit) {
+    fun setChannel(context: Context, to: UpdateChannel) {
         if (to == channel) return
         channel = to
         Prefs.set(CHANNEL_KEY, to.key)
-        launch { checkNow(context, byHand = true) }
+        startCheck(context, byHand = true, force = true)
     }
 
     private fun reconcile(context: Context) {
@@ -276,7 +328,7 @@ object Updates {
         getOrNull(url) ?: error("HTTP 404")
 
     private fun getOrNull(url: String): String? =
-        http.newCall(Request.Builder().url(url).build()).execute().use { r ->
+        metaHttp.newCall(Request.Builder().url(url).build()).execute().use { r ->
             if (r.code == 404) return null
             if (!r.isSuccessful) error("HTTP ${r.code}")
             r.body!!.string()
@@ -284,33 +336,34 @@ object Updates {
 
     /** A newer version, and its APK when an earlier visit downloaded it already. */
     private fun fetch(context: Context): Pair<UpdateOffer, File?>? {
-        var json: String? = null
+        var info: UpdateInfo? = null
         var anyReachable = false
         var lastErr: Exception? = null
         for (base in candidateBases()) {
             try {
                 val got = getOrNull(base + "update.json")
-                anyReachable = true
-                if (got != null) {
-                    json = got
-                    break
+                if (got == null) {
+                    anyReachable = true
+                    continue
                 }
+                info = uniffi.yuyue_core.parseUpdate(got)
+                anyReachable = true
+                break
             } catch (e: Exception) {
                 lastErr = e
             }
         }
         if (!anyReachable && lastErr != null) throw lastErr
-        if (json == null) return null
-        val info = uniffi.yuyue_core.parseUpdate(json)
-        if (info.code.toLong() <= BuildConfig.VERSION_CODE.toLong()) return null
-        val log = runCatching { if (info.changelog.isNotEmpty()) get(info.changelog) else "" }.getOrDefault("")
+        val parsed = info ?: return null
+        if (parsed.code.toLong() <= BuildConfig.VERSION_CODE.toLong()) return null
+        val log = runCatching { if (parsed.changelog.isNotEmpty()) get(parsed.changelog) else "" }.getOrDefault("")
         val all = if (log.isNotEmpty()) uniffi.yuyue_core.parseChangelog(log) else emptyList()
         val between = uniffi.yuyue_core.releasesAfter(log, BuildConfig.VERSION_NAME)
-        val releases = if (between.any { it.version == info.version }) between else listOf(uniffi.yuyue_core.updateRelease(info)) + between
-        val edition = UpdateVerifier.editionOf(info.version, all.map { it.version }) { a, b -> uniffi.yuyue_core.compareVersions(a, b) }
-        val file = apkFile(context, info)
-        val ready = UpdateVerifier.validateCachedApk(file, info.size.toLong(), info.sha256) { sameSigner(context, it) }
-        return UpdateOffer(info, releases, edition) to file.takeIf { ready }
+        val releases = if (between.any { it.version == parsed.version }) between else listOf(uniffi.yuyue_core.updateRelease(parsed)) + between
+        val edition = UpdateVerifier.editionOf(parsed.version, all.map { it.version }) { a, b -> uniffi.yuyue_core.compareVersions(a, b) }
+        val file = apkFile(context, parsed)
+        val ready = UpdateVerifier.validateCachedApk(file, parsed.size.toLong(), parsed.sha256) { sameSigner(context, it) }
+        return UpdateOffer(parsed, releases, edition) to file.takeIf { ready }
     }
 
     fun skip() {
@@ -447,7 +500,7 @@ object Updates {
     /** Back from the system's settings or background: launch pending confirm or install if allowed now. */
     suspend fun onResume(context: Context) {
         if (launchPendingConfirmIfAny(context)) return
-        if (phase == UpdatePhase.NeedPermission && mayInstall(context)) install(context)
+        if (phase == UpdatePhase.NeedPermission && mayInstall(context)) startInstall(context).join()
     }
 
     fun launchPendingConfirmIfAny(context: Context): Boolean {

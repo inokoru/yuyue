@@ -47,26 +47,42 @@ fn kokoro_state() -> &'static Mutex<FlatLexicon> {
     K.get_or_init(|| Mutex::new(FlatLexicon::default()))
 }
 
-/// Curated 16 standout narrators from `Kokoro-82M-v1.1-zh` (12 Mandarin + 4 English),
-/// ordered with default narrators first.
+/// Curated 32 acoustically distinct voices from `Kokoro-82M-v1.1-zh` (28 Mandarin: 14F + 14M,
+/// plus 4 English), selected via farthest-point sampling on `voices.bin` style vectors so radio
+/// drama casting separates dozens of characters with zero extra bundle size. Default narrators first.
 pub fn builtin_speakers() -> Vec<KokoroSpeaker> {
     let raw: &[(&str, u32, &str, &str, CharacterGender, bool, &str)] = &[
-        // Mandarin Chinese — Female
+        // Mandarin Chinese — Female (6 primary narrators + 8 distinct drama voices)
         ("zf_001", 3, "清禾", "zh", CharacterGender::F, true, "温润清朗 · 默认中文女声"),
         ("zf_002", 4, "知夏", "zh", CharacterGender::F, false, "柔和舒缓 · 适合散文与小说"),
         ("zf_004", 6, "云舒", "zh", CharacterGender::F, false, "沉静端庄 · 适合历史与社科"),
         ("zf_006", 8, "茗烟", "zh", CharacterGender::F, false, "轻快自然 · 适合随笔与故事"),
         ("zf_018", 12, "晚晴", "zh", CharacterGender::F, false, "柔和细腻 · 适合夜读"),
         ("zf_028", 20, "素心", "zh", CharacterGender::F, false, "干净利落 · 适合非虚构长文"),
-        // Mandarin Chinese — Male
+        ("zf_079", 46, "凌霜", "zh", CharacterGender::F, false, "清冷干练 · 适合独立女主"),
+        ("zf_074", 41, "映月", "zh", CharacterGender::F, false, "婉转清澈 · 适合古典与言情"),
+        ("zf_090", 53, "疏桐", "zh", CharacterGender::F, false, "沉着知性 · 适合熟龄女角"),
+        ("zf_094", 56, "晴川", "zh", CharacterGender::F, false, "明朗清脆 · 适合少女角色"),
+        ("zf_024", 17, "念安", "zh", CharacterGender::F, false, "温婉平和 · 适合日常对话"),
+        ("zf_027", 19, "语微", "zh", CharacterGender::F, false, "轻柔低语 · 适合细腻内心戏"),
+        ("zf_019", 13, "含烟", "zh", CharacterGender::F, false, "灵动俏皮 · 适合活泼角色"),
+        ("zf_076", 43, "听兰", "zh", CharacterGender::F, false, "雅致从容 · 适合长辈与配角"),
+        // Mandarin Chinese — Male (6 primary narrators + 8 distinct drama voices)
         ("zm_010", 59, "沉舟", "zh", CharacterGender::M, true, "醇厚稳重 · 推荐中文男声"),
         ("zm_009", 58, "松风", "zh", CharacterGender::M, false, "清朗平和 · 适合纪实与传记"),
         ("zm_012", 61, "远山", "zh", CharacterGender::M, false, "低沉内敛 · 适合经典文学"),
         ("zm_025", 67, "怀瑾", "zh", CharacterGender::M, false, "青年明快 · 适合科幻与通识"),
         ("zm_035", 73, "竹轩", "zh", CharacterGender::M, false, "温厚从容 · 适合长篇慢听"),
         ("zm_052", 78, "景行", "zh", CharacterGender::M, false, "清晰有力 · 适合论著与技术"),
-        // English — Female & Male (`kokoro-multi-lang-v1_1` ships `af_maple`, `af_sol`, `bf_vale`,
-        // plus bilingual voices capable of fluent English reading)
+        ("zm_098", 101, "沧澜", "zh", CharacterGender::M, false, "苍劲浑厚 · 适合长者与反派"),
+        ("zm_056", 82, "拂晓", "zh", CharacterGender::M, false, "爽朗少年 · 适合年轻男角"),
+        ("zm_041", 75, "临渊", "zh", CharacterGender::M, false, "冷静深沉 · 适合悬疑与谋士"),
+        ("zm_082", 95, "昭明", "zh", CharacterGender::M, false, "端正大气 · 适合正派主角"),
+        ("zm_033", 71, "墨白", "zh", CharacterGender::M, false, "温润书生 · 适合文人角色"),
+        ("zm_095", 98, "听涛", "zh", CharacterGender::M, false, "豪迈粗犷 · 适合侠客配角"),
+        ("zm_080", 93, "敬之", "zh", CharacterGender::M, false, "沉稳温和 · 适合中年男角"),
+        ("zm_096", 99, "扶摇", "zh", CharacterGender::M, false, "轻快松弛 · 适合幽默角色"),
+        // English — Female & Male
         ("af_maple", 0, "Maple", "en", CharacterGender::F, true, "Warm American narrator · Default"),
         ("bf_vale", 2, "Vale", "en", CharacterGender::F, true, "Crisp British RP narrator"),
         ("af_sol", 1, "Sol", "en", CharacterGender::F, false, "Bright conversational American"),
@@ -593,6 +609,11 @@ mod tests {
         assert!(list.iter().any(|s| s.lang == "zh" && s.narrator && s.gender == CharacterGender::M));
         assert!(list.iter().any(|s| s.lang == "en" && s.narrator));
         assert!(list.iter().all(|s| s.sid < 103 && s.id.starts_with("kokoro.")));
+        let zh_f = list.iter().filter(|s| s.lang == "zh" && s.gender == CharacterGender::F).count();
+        let zh_m = list.iter().filter(|s| s.lang == "zh" && s.gender == CharacterGender::M).count();
+        assert!(zh_f >= 14 && zh_m >= 14, "expected expanded zh casting pool, got F={zh_f}, M={zh_m}");
+        let unique_ids: std::collections::HashSet<&str> = list.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(unique_ids.len(), list.len(), "duplicate kokoro speaker ids");
     }
 
     #[test]
@@ -697,4 +718,3 @@ mod tests {
         assert!(peak <= 0.015, "quiet floor over-amplified: peak={peak}");
     }
 }
-

@@ -1290,6 +1290,7 @@ public sealed class AudioPlayer : IDisposable
             _library.Prefs.SetVoiceForLanguage(_language, $"sys:{sys.Id}");
             _library.SavePrefs();
         }
+        if (!string.IsNullOrEmpty(_bookId)) DramaSynthService.InvalidateCast(_bookId);
         if (sys is not null && _synthLock.Wait(0))
         {
             try { _synth.Voice = sys; }

@@ -10,6 +10,7 @@ import android.net.NetworkCapabilities
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import android.os.Process
 import app.yuyue.YuyueApp
 import app.yuyue.t
 import kotlinx.coroutines.CancellationException
@@ -17,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
@@ -32,6 +34,7 @@ import java.nio.FloatBuffer
 import java.nio.LongBuffer
 import java.nio.channels.FileChannel
 import java.security.MessageDigest
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.coroutineContext
 
@@ -167,15 +170,55 @@ object KokoroModel {
         return all.filter { it.speaks(tag) }
     }
 
-    fun defaultNarrator(tag: String): KokoroVoice? {
+    fun defaultNarrator(core: YuyueCore, dataDir: File, tag: String): KokoroVoice? {
         if (!CardVoice.speaksLanguage(tag)) return null
-        val app = runCatching { YuyueApp.instance }.getOrNull() ?: return null
-        val dataDir = app.library.dataDir
-        val core = app.library.core
         val list = voices(core, dataDir, tag)
         if (list.isEmpty()) return null
         val primary = if (tag.lowercase().startsWith("en")) "kokoro.af_maple" else "kokoro.zf_001"
         return list.firstOrNull { it.id == primary } ?: list.firstOrNull { it.speaker.narrator } ?: list.first()
+    }
+
+    fun defaultNarrator(tag: String): KokoroVoice? {
+        if (!CardVoice.speaksLanguage(tag)) return null
+        val app = runCatching { YuyueApp.instance }.getOrNull() ?: return null
+        return defaultNarrator(app.library.core, app.library.dataDir, tag)
+    }
+
+    /**
+     * Extracts an L2-normalized 256-dim timbre vector directly from `voices.bin` (`[103, 510, 256]` f32)
+     * so `casting.rs` maximizes acoustic separation between characters sharing scenes at zero extra cost.
+     */
+    fun styleEmbedding(sid: UInt, dataDir: File): List<Float> {
+        if (sid >= 103u) return emptyList()
+        val file = File(folder(dataDir), "voices.bin")
+        if (!file.isFile) return emptyList()
+        val buckets = longArrayOf(10L, 20L, 40L, 80L)
+        val dim = 256
+        val bytesPerVec = dim * 4
+        val acc = FloatArray(dim)
+        val buf = ByteArray(bytesPerVec)
+        val ok = runCatching {
+            RandomAccessFile(file, "r").use { raf ->
+                val totalLen = raf.length()
+                for (b in buckets) {
+                    val offset = (sid.toLong() * 510L + b) * bytesPerVec.toLong()
+                    if (offset + bytesPerVec > totalLen) return@runCatching false
+                    raf.seek(offset)
+                    raf.readFully(buf)
+                    val bb = java.nio.ByteBuffer.wrap(buf).order(ByteOrder.LITTLE_ENDIAN)
+                    for (i in 0 until dim) {
+                        acc[i] += bb.getFloat(i * 4)
+                    }
+                }
+                true
+            }
+        }.getOrDefault(false)
+        if (!ok) return emptyList()
+        var sumSq = 0.0
+        for (v in acc) sumSq += (v * v).toDouble()
+        val norm = kotlin.math.sqrt(sumSq).toFloat()
+        if (norm <= 1e-6f) return emptyList()
+        return List(dim) { i -> acc[i] / norm }
     }
 
     fun onFirstListen(context: Context, core: YuyueCore, dataDir: File) {
@@ -316,7 +359,7 @@ class KokoroVoice(val speaker: KokoroSpeaker) : BookVoice {
 
     override fun speaks(tag: String): Boolean = Voices.cardMatchesTag(speaker.lang, tag)
 
-    override suspend fun render(text: String, language: String): Speech? = withContext(Dispatchers.Default) {
+    override suspend fun render(text: String, language: String): Speech? = withContext(Engine.dispatcher) {
         val plain = CardVoice.plainSpokenText(text)
         if (plain.none { it.isLetterOrDigit() }) return@withContext null
         val app = runCatching { YuyueApp.instance }.getOrNull() ?: return@withContext null
@@ -351,6 +394,13 @@ class KokoroVoice(val speaker: KokoroSpeaker) : BookVoice {
             }
         }
 
+        internal val dispatcher = Executors.newSingleThreadExecutor { r ->
+            Thread({
+                runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND) }
+                r.run()
+            }, "yuyue-kokoro").apply { isDaemon = true }
+        }.asCoroutineDispatcher()
+
         private val lock = Mutex()
         private var loaded: Loaded? = null
         private var writes = 0
@@ -371,7 +421,7 @@ class KokoroVoice(val speaker: KokoroSpeaker) : BookVoice {
             loaded = null
             return runCatching {
                 val env = OrtEnvironment.getEnvironment()
-                val threads = minOf(4, maxOf(2, Runtime.getRuntime().availableProcessors() - 1))
+                val threads = minOf(2, maxOf(1, Runtime.getRuntime().availableProcessors() / 2))
                 val session = OrtSession.SessionOptions().apply {
                     setCPUArenaAllocator(false)
                     setMemoryPatternOptimization(false)

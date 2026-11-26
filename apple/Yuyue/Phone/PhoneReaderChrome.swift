@@ -34,6 +34,7 @@ struct PhoneReaderChrome: View {
     @State private var immersiveShown = false
     @State private var moreShown = false
     @State private var pendingMoreAction: (() -> Void)?
+    @State private var chromeActivity = 0
     @AppStorage(ImmersivePrefs.progressKey) private var hidesProgress = true
     @State private var exported: URL?
     @FocusState private var typing: Bool
@@ -47,28 +48,45 @@ struct PhoneReaderChrome: View {
     private var paper: YYPaper { model.paperTokens }
 
     private enum BottomBarMode: Equatable {
-        case search, fullCapsule, miniListen, miniOrb, footer, none
+        case search, morphCapsule, fullCapsule, miniListen, miniOrb, footer, none
     }
 
     /// Mutually exclusive bottom chrome state:
     /// - 书内搜索 → searchCapsule
+    /// - 灵动胶囊展开（改读音 / 记下这句 / 智能回退） → morphCapsule
     /// - 点中央唤出 / 有重要录音提示 → fullCapsule (float over bottom margin without reflow)
-    /// - 听书中且收起顶栏 → slim miniListen (or corner miniOrb when tucked / scrolling down)
+    /// - 听书中（或只听模式）且收起顶栏 → slim miniListen (or corner miniOrb when tucked / scrolling down)
     /// - 纯看书（非沉浸、非双页） → quiet single-line footer clear of the text
     private var bottomMode: BottomBarMode {
         if model.searchShown { return .search }
+        if model.capsuleMode != .idle { return .morphCapsule }
         guard model.lookup == nil else { return .none }
         if model.chromeShown || (model.capsuleAlert != nil && !model.immersive && !model.barsAway) {
             return .fullCapsule
         }
-        if !model.immersive && model.isPlaying {
-            return (model.playerTucked || model.barsAway) ? .miniOrb : .miniListen
+        if !model.immersive && (model.isPlaying || model.listenOnly) {
+            return (!model.listenOnly && (model.playerTucked || model.barsAway)) ? .miniOrb : .miniListen
         }
         if !model.immersive && !model.barsAway && !InnerDisplay.isOn(sizeClass) {
             return .footer
         }
         return .none
     }
+    private struct ChromeAutoHideKey: Equatable {
+        let shown: Bool
+        let busy: Bool
+        let immersive: Bool
+        let activity: Int
+    }
+
+    /// True while any sheet, popover, panel, search bar, or morphed capsule is open so auto-hide pauses.
+    private var chromeBusy: Bool {
+        listenShown || readyVoicePickerShown || hitsShown || infoShown || immersiveShown || moreShown
+            || model.settingsShown || model.tocShown || model.rulesShown || model.txtShown
+            || model.panel != nil || model.askingFinished || model.searchShown
+            || model.capsuleMode != .idle || exported != nil
+    }
+
     /// The bars and cards: quick, no overshoot; with 减弱动态效果 they only fade.
     private static var barMotion: Animation { YYMotion.reduce ? .easeOut(duration: 0.15) : .spring(duration: 0.22, bounce: 0) }
     private static func slide(_ edge: Edge) -> AnyTransition { YYMotion.reduce ? .opacity : .move(edge: edge).combined(with: .opacity) }
@@ -106,6 +124,7 @@ struct PhoneReaderChrome: View {
         .animation(Self.barMotion, value: model.immersive)
         .animation(Self.barMotion, value: model.barsAway)
         .animation(Self.barMotion, value: bottomMode)
+        .animation(YYMotion.reduce ? .easeOut(duration: 0.16) : .spring(duration: 0.36, bounce: 0.12), value: model.capsuleMode)
         .animation(Self.barMotion, value: model.returnTo == nil)
         .animation(Self.barMotion, value: model.txtDoubt)
         .animation(Self.barMotion, value: model.recap)
@@ -121,11 +140,17 @@ struct PhoneReaderChrome: View {
             try? await Task.sleep(for: .seconds(5))
             model.player?.dismissHead()
         }
-        .task(id: model.immersive && model.chromeShown && !moreShown) {
-            // 沉浸: called up by a tap, gone again by itself.
-            guard model.immersive, model.chromeShown, !moreShown else { return }
-            try? await Task.sleep(for: .seconds(4))
-            if !Task.isCancelled, !listenShown, !model.settingsShown, !moreShown { model.chromeShown = false }
+        .task(id: ChromeAutoHideKey(shown: model.chromeShown, busy: chromeBusy, immersive: model.immersive, activity: chromeActivity)) {
+            // Auto-hide summoned chrome after idle (4 s in Focus Reading, 5 s in normal reading)
+            // so the full top & bottom bars never stay stuck over the page text.
+            guard model.chromeShown, !chromeBusy else { return }
+            #if DEBUG
+            if UserDefaults.standard.string(forKey: "debugSheet") == "chrome" { return }
+            #endif
+            try? await Task.sleep(for: .seconds(model.immersive ? 4 : 5))
+            if !Task.isCancelled, model.chromeShown, !chromeBusy {
+                model.chromeShown = false
+            }
         }
         .sheet(isPresented: $moreShown, onDismiss: {
             if let action = pendingMoreAction {
@@ -392,6 +417,9 @@ struct PhoneReaderChrome: View {
             case .search:
                 searchCapsule
                     .transition(Self.slide(.bottom))
+            case .morphCapsule:
+                morphCapsule
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
             case .fullCapsule:
                 capsule
                     .transition(Self.slide(.bottom))
@@ -437,6 +465,38 @@ struct PhoneReaderChrome: View {
         .accessibilityHidden(true)
     }
 
+    @ViewBuilder private var morphCapsule: some View {
+        let isPron: Bool = if case .pronunciation = model.capsuleMode { true } else { false }
+        let shape = RoundedRectangle(cornerRadius: isPron ? 24 : 23, style: .continuous)
+        Group {
+            switch model.capsuleMode {
+            case .pronunciation(let find, let sentence):
+                CapsulePronunciationPanel(
+                    initialFind: find,
+                    sentence: sentence,
+                    paper: paper,
+                    isPlaying: model.isPlaying,
+                    compact: true,
+                    onTogglePlay: { model.togglePlay() },
+                    onSave: { f, r, all in model.applyPronunciationFix(find: f, replace: r, wholeLibrary: all) },
+                    onClose: { model.dismissCapsuleMode() }
+                )
+            case .pronunciationDone, .marked, .rewound:
+                CapsuleFeedbackStrip(
+                    mode: model.capsuleMode,
+                    paper: paper,
+                    compact: true,
+                    onUndoMark: { model.undoMarkedInCapsule(id: $0) },
+                    onDismiss: { model.dismissCapsuleMode() }
+                )
+            case .idle:
+                EmptyView()
+            }
+        }
+        .frame(maxWidth: 420)
+        .glass(paper, in: shape)
+    }
+
     private var miniListenPill: some View {
         let n = model.sentenceCount
         let label = n > 0
@@ -449,8 +509,11 @@ struct PhoneReaderChrome: View {
             paper: paper,
             label: label,
             rateBadge: rateBadge,
+            isPlaying: model.isPlaying,
             progress: model.chapterProgress,
             onOpenListen: { listenShown = true },
+            onMarkHeard: { model.markCurrentHeard() },
+            onFixPronunciation: { model.promptPronunciation() },
             onPrevious: { model.stepSentence(forward: false) },
             onPause: { model.togglePlay() },
             onNext: { model.stepSentence(forward: true) },
@@ -483,7 +546,10 @@ struct PhoneReaderChrome: View {
             bookmarked: model.bookmarkHere != nil,
             onClose: close,
             onSearch: { startSearch() },
-            onBookmark: { model.toggleBookmark() }
+            onBookmark: {
+                chromeActivity &+= 1
+                model.toggleBookmark()
+            }
         ) {
             Button {
                 moreShown = true
@@ -565,9 +631,24 @@ struct PhoneReaderChrome: View {
                 model.tocShown = true
             },
             onCenter: { if let alert = model.capsuleAlert { alert.action() } else { listenShown = true } },
-            onPrevious: { step(forward: false) },
-            onPlay: { model.togglePlay() },
-            onNext: { step(forward: true) },
+            onPrevious: {
+                chromeActivity &+= 1
+                step(forward: false)
+            },
+            onPlay: {
+                let starting = !model.isPlaying
+                model.togglePlay()
+                if starting {
+                    // Collapse full chrome immediately into the slim mini listening pill.
+                    model.chromeShown = false
+                } else {
+                    chromeActivity &+= 1
+                }
+            },
+            onNext: {
+                chromeActivity &+= 1
+                step(forward: true)
+            },
             onTypeset: { model.settingsShown = true }
         )
     }
@@ -907,27 +988,63 @@ struct PhoneReaderCapsule: View {
     var onTypeset: () -> Void
 
     var body: some View {
+        let accentColor = paper.isEink ? paper.ink : YYTint.standard.accent
+        let pillBg: Color = noteAccent
+            ? (paper.isEink ? paper.bg : YYTint.standard.accentSoft)
+            : (paper.isEink ? paper.bg : paper.ink.opacity(paper.isDark ? 0.09 : 0.055))
+        let pillBorder: Color = noteAccent
+            ? (paper.isEink ? paper.ink : YYTint.standard.accent.opacity(0.32))
+            : (paper.isEink ? paper.line : paper.ink.opacity(paper.isDark ? 0.11 : 0.065))
         HStack(spacing: 2) {
-            Button(action: onToc) { capButton("list.bullet") }
+            Button(action: onToc) { capButton("list.bullet", width: 36) }
                 .buttonStyle(YYPressStyle(scale: 0.92))
                 .accessibilityLabel("目录、书签和笔记")
             Button(action: onCenter) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title).font(.yy(size: 12, weight: .semibold))
-                    Text(note)
-                        .font(.yy(size: 10.5, weight: noteAccent ? .semibold : .regular))
-                        .foregroundStyle(noteAccent ? YYTint.standard.accent : paper.ink2)
+                HStack(spacing: 4) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: 4) {
+                            if noteAccent {
+                                Image(systemName: "exclamationmark.circle.fill")
+                                    .font(.yy(size: 10, weight: .semibold))
+                                    .foregroundStyle(accentColor)
+                            } else if playing || sentenceStep {
+                                SpeakingBars(paused: !playing)
+                                    .frame(width: 11, height: 10)
+                            } else {
+                                Image(systemName: "headphones")
+                                    .font(.yy(size: 10, weight: .semibold))
+                                    .foregroundStyle(paper.ink2)
+                            }
+                            Text(title)
+                                .font(.yy(size: 12, weight: .semibold))
+                                .foregroundStyle(paper.ink)
+                        }
+                        Text(note)
+                            .font(.yy(size: 10.5, weight: noteAccent ? .semibold : .regular))
+                            .foregroundStyle(noteAccent ? accentColor : paper.ink2)
+                    }
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Image(systemName: noteAccent ? "chevron.right" : "chevron.up")
+                        .font(.yy(size: 9.5, weight: .semibold))
+                        .foregroundStyle(noteAccent ? accentColor : paper.ink2.opacity(0.85))
                 }
-                .monospacedDigit()
-                .lineLimit(1)
-                .padding(.leading, 2)
-                .padding(.vertical, 2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 9)
+                .padding(.trailing, 7)
+                .frame(maxWidth: .infinity)
                 .frame(minHeight: 40)
-                .contentShape(.rect)
+                .background(pillBg, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(pillBorder, lineWidth: 0.5)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
+            .buttonStyle(YYPressStyle(scale: 0.96))
             .accessibilityHint(centerHint)
-            Button(action: onPrevious) { capButton("chevron.left") }
+            Button(action: onPrevious) { capButton("chevron.left", width: 30) }
                 .buttonStyle(YYPressStyle(scale: 0.92))
                 .accessibilityLabel(sentenceStep ? String(localized: "上一句") : String(localized: "上一页"))
             Button(action: onPlay) {
@@ -945,11 +1062,11 @@ struct PhoneReaderCapsule: View {
             .buttonStyle(YYPressStyle(scale: 0.92))
             .accessibilityLabel(playing ? String(localized: "暂停") : String(localized: "朗读"))
             .disabled(!playEnabled)
-            Button(action: onNext) { capButton("chevron.right") }
+            Button(action: onNext) { capButton("chevron.right", width: 30) }
                 .buttonStyle(YYPressStyle(scale: 0.92))
                 .accessibilityLabel(sentenceStep ? String(localized: "下一句") : String(localized: "下一页"))
             Button(action: onTypeset) {
-                Text("Aa").font(.yy(size: 14, weight: .semibold)).frame(minWidth: 40, minHeight: 44).contentShape(.rect)
+                Text("Aa").font(.yy(size: 14, weight: .semibold)).frame(minWidth: 36, minHeight: 44).contentShape(Rectangle().inset(by: -4))
             }
             .buttonStyle(YYPressStyle(scale: 0.92))
             .accessibilityLabel("排版")
@@ -969,8 +1086,11 @@ struct PhoneReaderCapsule: View {
         }
     }
 
-    private func capButton(_ name: String) -> some View {
-        Image(systemName: name).font(.yy(size: 14, weight: .semibold)).frame(minWidth: 38, minHeight: 44).contentShape(.rect)
+    private func capButton(_ name: String, width: CGFloat = 38) -> some View {
+        Image(systemName: name)
+            .font(.yy(size: 14, weight: .semibold))
+            .frame(minWidth: width, minHeight: 44)
+            .contentShape(Rectangle().inset(by: -4))
     }
 }
 
@@ -981,8 +1101,11 @@ struct PhoneMiniListenPill: View {
     var paper: YYPaper
     var label: String
     var rateBadge: String?
+    var isPlaying: Bool = true
     var progress: Double
     var onOpenListen: () -> Void
+    var onMarkHeard: () -> Void
+    var onFixPronunciation: () -> Void
     var onPrevious: () -> Void
     var onPause: () -> Void
     var onNext: () -> Void
@@ -999,9 +1122,8 @@ struct PhoneMiniListenPill: View {
         HStack(spacing: 2) {
             Button(action: onOpenListen) {
                 HStack(spacing: 5) {
-                    Image(systemName: "waveform")
-                        .font(.yy(size: 11.5, weight: .semibold))
-                        .foregroundStyle(accentColor)
+                    SpeakingBars(paused: !isPlaying)
+                        .frame(width: 13, height: 12)
                     Text(label)
                         .font(.yy(size: 11.5, weight: .medium))
                         .foregroundStyle(paper.ink)
@@ -1014,60 +1136,90 @@ struct PhoneMiniListenPill: View {
                             .monospacedDigit()
                             .lineLimit(1)
                     }
+                    Image(systemName: "chevron.up")
+                        .font(.yy(size: 8.5, weight: .semibold))
+                        .foregroundStyle(paper.ink2.opacity(0.75))
                 }
                 .padding(.leading, 10)
                 .padding(.trailing, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: 34)
+                .frame(height: 36)
                 .contentShape(Rectangle().inset(by: -5))
             }
+            .buttonStyle(YYPressStyle(scale: 0.97))
             .accessibilityLabel(label)
             .accessibilityHint(String(localized: "听书：声音、速度、睡眠定时"))
 
+            Button(action: onMarkHeard) {
+                Image(systemName: "bookmark")
+                    .font(.yy(size: 11.5, weight: .medium))
+                    .foregroundStyle(paper.ink2)
+                    .frame(width: 28, height: 34)
+                    .contentShape(Rectangle().inset(by: -4))
+            }
+            .buttonStyle(YYPressStyle(scale: 0.9))
+            .accessibilityLabel("记下这句")
+
+            Button(action: onFixPronunciation) {
+                Image(systemName: "waveform")
+                    .font(.yy(size: 11.5, weight: .semibold))
+                    .foregroundStyle(accentColor)
+                    .frame(width: 26, height: 26)
+                    .background(accentColor.opacity(paper.isDark ? 0.18 : 0.10), in: .circle)
+                    .contentShape(Circle().inset(by: -6))
+            }
+            .buttonStyle(YYPressStyle(scale: 0.9))
+            .accessibilityLabel("纠正读音")
+
+            Rectangle()
+                .fill(paper.line)
+                .frame(width: 0.5, height: 14)
+                .padding(.horizontal, 2)
+
             Button(action: onPrevious) {
                 Image(systemName: "chevron.left")
-                    .font(.yy(size: 12, weight: .semibold))
+                    .font(.yy(size: 11.5, weight: .semibold))
                     .foregroundStyle(paper.ink)
-                    .frame(width: 28, height: 34)
-                    .contentShape(Rectangle().inset(by: -5))
+                    .frame(width: 24, height: 34)
+                    .contentShape(Rectangle().inset(by: -4))
             }
             .buttonStyle(YYPressStyle(scale: 0.9))
             .accessibilityLabel("上一句")
 
             Button(action: onPause) {
-                Image(systemName: "pause.fill")
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .font(.yy(size: 11, weight: .semibold))
                     .foregroundStyle(paper.onMain)
-                    .frame(width: 26, height: 26)
+                    .frame(width: 28, height: 28)
                     .background(YYTint.standard.play(on: paper), in: .circle)
-                    .contentShape(Circle().inset(by: -9))
+                    .contentShape(Circle().inset(by: -8))
             }
             .buttonStyle(YYPressStyle(scale: 0.9))
-            .accessibilityLabel("暂停")
+            .accessibilityLabel(isPlaying ? "暂停" : "播放")
 
             Button(action: onNext) {
                 Image(systemName: "chevron.right")
-                    .font(.yy(size: 12, weight: .semibold))
+                    .font(.yy(size: 11.5, weight: .semibold))
                     .foregroundStyle(paper.ink)
-                    .frame(width: 28, height: 34)
-                    .contentShape(Rectangle().inset(by: -5))
+                    .frame(width: 24, height: 34)
+                    .contentShape(Rectangle().inset(by: -4))
             }
             .buttonStyle(YYPressStyle(scale: 0.9))
             .accessibilityLabel("下一句")
 
             Button(action: onTuck) {
                 Image(systemName: "chevron.down")
-                    .font(.yy(size: 11, weight: .semibold))
+                    .font(.yy(size: 10.5, weight: .semibold))
                     .foregroundStyle(paper.ink2)
-                    .frame(width: 26, height: 34)
-                    .contentShape(Rectangle().inset(by: -5))
+                    .frame(width: 24, height: 34)
+                    .contentShape(Rectangle().inset(by: -4))
             }
             .buttonStyle(YYPressStyle(scale: 0.9))
             .accessibilityLabel("收起播放条")
         }
         .padding(.trailing, 4)
-        .frame(height: 34)
-        .frame(maxWidth: 340)
+        .frame(height: 38)
+        .frame(maxWidth: 360)
         .glass(paper, in: Capsule())
         .overlay(alignment: .bottom) {
             GeometryReader { g in

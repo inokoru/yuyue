@@ -949,7 +949,7 @@ public sealed class BookRecordPageBuilder
         tabDefs.Add(("notes", "highlighter", "笔记", marks.Count));
         tabDefs.Add(("log", "clock", "记录", null));
         if (podcastMentions.Length > 0)
-            tabDefs.Add(("podcast", "headphones", "播客", podcastMentions.Length));
+            tabDefs.Add(("podcast", "radio", "播客", podcastMentions.Length));
 
         foreach (var (key, icon, lbl, cnt) in tabDefs)
         {

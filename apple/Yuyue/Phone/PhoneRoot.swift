@@ -2,12 +2,14 @@
 import SwiftUI
 import YuyueCore
 
-/// The phone: 书架 · 笔记 · 我的, and 搜索 in its own circle (iOS 26 and later draw them as a floating
-/// glass bar). A book opens over all of them, full screen; while one is read aloud with its
-/// pages closed, a 播放条 sits above the tabs.
+/// The phone: customizable bottom tabs (default 书架 · 笔记 · 我的 · 搜索, iOS 26+ draws them as
+/// a floating glass bar). A book opens over all of them, full screen; while one is read aloud with
+/// its pages closed, a 播放条 sits above the tabs.
 struct PhoneRoot: View {
     @Bindable var library: Library
-    @State private var tab = PhoneTab.shelf
+    @AppStorage(BottomNavPrefs.key) private var rawTabs = BottomNavPrefs.defaultRaw
+    @AppStorage(BottomNavPrefs.shelfHiddenKey) private var rawHiddenShelfSubs = BottomNavPrefs.defaultHiddenShelfRaw
+    @State private var tab: PhoneTab
     @State private var chrome = PhoneChrome()
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
     @AppStorage("phone.lastBook") private var lastBook = ""
@@ -19,13 +21,24 @@ struct PhoneRoot: View {
     @Environment(\.scenePhase) private var phase
     @Environment(\.colorScheme) private var scheme
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
+    private var navConfig: BottomNavConfig { BottomNavPrefs.config(tabsRaw: rawTabs, hiddenShelfRaw: rawHiddenShelfSubs) }
+    private var navTabs: [PhoneTab] { navConfig.tabs }
 
-    enum PhoneTab: Hashable { case shelf, notes, me, search }
+    init(library: Library) {
+        self.library = library
+        let initialTabs = BottomNavPrefs.parse(UserDefaults.standard.string(forKey: BottomNavPrefs.key))
+        let initial = initialTabs.contains(.shelf) ? PhoneTab.shelf : (initialTabs.first ?? .me)
+        _tab = State(initialValue: initial)
+    }
 
     var body: some View {
-        // 书架 tapped while already there: the shelf's places stand up over it.
+        let cfg = navConfig
+        let tabs = cfg.tabs
+        let detachedSearch = BottomNavPrefs.usesDetachedSearchOrb(tabs)
+        let regularTabs = detachedSearch ? Array(tabs.dropLast()) : tabs
+        // 书架 tapped while already there: the shelf's folded places stand up over it (only when switcher is active).
         let tabSelection = Binding<PhoneTab>(get: { tab }, set: { new in
-            if new == .shelf, tab == .shelf {
+            if new == .shelf, tab == .shelf, chrome.shelfHasSwitcher {
                 let closing = chrome.switching
                 withAnimation(closing ? PhoneChrome.dismissMotion : PhoneChrome.motion) { chrome.switching = !closing }
             } else {
@@ -38,38 +51,68 @@ struct PhoneRoot: View {
         Group {
             if #available(iOS 18.0, *) {
                 TabView(selection: tabSelection) {
-                    Tab(value: .shelf) {
-                        PhoneShelf(library: library).nowPlayingBar(library, allowPodcast: false)
-                    } label: { shelfLabel }
-                    Tab(value: .notes) {
-                        PhoneNotes(library: library).airTrafficScreen("Notes").nowPlayingBar(library, allowPodcast: true)
-                    } label: { tabLabel("笔记", .notes, line: "tab-notes", fill: "tab-notes-fill") }
-                    Tab(value: .me) {
-                        PhoneMe(library: library).nowPlayingBar(library, allowPodcast: true)
-                    } label: { meTab }
-                    // 搜索 in its own circle on the right, only the icon. iOS 27 no longer sets the search
-                    // tab apart by itself; the tab that stands apart is the `.prominent` one.
-                    Tab(value: .search, role: Self.searchRole) {
-                        PhoneSearch(library: library).nowPlayingBar(library, allowPodcast: true)
-                    } label: { searchLabel }
+                    ForEach(regularTabs) { item in
+                        Tab(value: item) {
+                            tabContent(item)
+                        } label: {
+                            tabViewLabel(item, detachedSearch: false)
+                        }
+                    }
+                    // 搜索 in its own circle on the right when placed last with 3+ tabs.
+                    if detachedSearch {
+                        Tab(value: PhoneTab.search, role: Self.searchRole) {
+                            tabContent(.search)
+                        } label: {
+                            tabViewLabel(.search, detachedSearch: true)
+                        }
+                    }
                 }
             } else {
                 TabView(selection: tabSelection) {
-                    PhoneShelf(library: library).nowPlayingBar(library, allowPodcast: false)
-                        .tabItem { shelfLabel }.tag(PhoneTab.shelf)
-                    PhoneNotes(library: library).airTrafficScreen("Notes").nowPlayingBar(library, allowPodcast: true)
-                        .tabItem { tabLabel("笔记", .notes, line: "tab-notes", fill: "tab-notes-fill") }.tag(PhoneTab.notes)
-                    PhoneMe(library: library).nowPlayingBar(library, allowPodcast: true)
-                        .tabItem { meTab }.tag(PhoneTab.me)
-                    PhoneSearch(library: library).nowPlayingBar(library, allowPodcast: true)
-                        .tabItem { searchLabel }.tag(PhoneTab.search)
+                    ForEach(tabs) { item in
+                        tabContent(item)
+                            .tabItem { tabViewLabel(item, detachedSearch: false) }
+                            .tag(item)
+                    }
                 }
             }
         }
         .environment(chrome)
+        .onChange(of: cfg, initial: true) { _, currentCfg in
+            let current = currentCfg.tabs
+            let switcherNow = BottomNavPrefs.shelfHasSwitcher(currentCfg, hasCollections: !library.collections.isEmpty)
+            chrome.shelfHasSwitcher = switcherNow
+            if !current.contains(tab), let fallback = current.first {
+                tab = fallback
+            }
+            let detached = BottomNavPrefs.usesDetachedSearchOrb(current)
+            let main = detached ? Array(current.dropLast()) : current
+            if let shelfIdx = main.firstIndex(of: .shelf), switcherNow {
+                chrome.shelfStackAlignment = if shelfIdx == 0 {
+                    .bottomLeading
+                } else if shelfIdx == main.count - 1 && !detached {
+                    .bottomTrailing
+                } else {
+                    .bottom
+                }
+            } else {
+                chrome.switching = false
+            }
+            if !switcherNow {
+                chrome.shelfName = nil
+                chrome.shelfSymbol = nil
+            }
+        }
+        .onChange(of: library.collections.count, initial: true) { _, count in
+            let switcherNow = BottomNavPrefs.shelfHasSwitcher(navConfig, hasCollections: count > 0)
+            chrome.shelfHasSwitcher = switcherNow
+            if !switcherNow { chrome.switching = false }
+        }
         .onChange(of: tab) { _, new in
             switch new {
-            case .shelf: AirTraffic.screen(chrome.onPodcasts ? "Podcasts" : "Shelf")
+            case .shelf: AirTraffic.screen(chrome.onPodcasts ? "Podcasts" : (chrome.onNotes ? "Notes" : "Shelf"))
+            case .podcasts: AirTraffic.screen("Podcasts")
+            case .audio, .progress: AirTraffic.screen("Shelf")
             case .notes: AirTraffic.screen("Notes")
             case .me: AirTraffic.screen("Me")
             case .search: break
@@ -188,16 +231,54 @@ struct PhoneRoot: View {
 
     private struct Presented: Identifiable { let id: String }
 
+    @ViewBuilder private func tabContent(_ item: PhoneTab) -> some View {
+        switch item {
+        case .shelf:
+            PhoneShelf(library: library).nowPlayingBar(library, allowPodcast: false)
+        case .notes:
+            PhoneNotes(library: library).airTrafficScreen("Notes").nowPlayingBar(library, allowPodcast: true)
+        case .podcasts:
+            PhoneShelf(library: library, fixedPlace: .podcasts).nowPlayingBar(library, allowPodcast: false)
+        case .audio:
+            PhoneShelf(library: library, fixedPlace: .audio).nowPlayingBar(library, allowPodcast: true)
+        case .progress:
+            PhoneShelf(library: library, fixedPlace: .progress).nowPlayingBar(library, allowPodcast: true)
+        case .me:
+            PhoneMe(library: library).nowPlayingBar(library, allowPodcast: true)
+        case .search:
+            PhoneSearch(library: library).nowPlayingBar(library, allowPodcast: true)
+        }
+    }
+
+    @ViewBuilder private func tabViewLabel(_ item: PhoneTab, detachedSearch: Bool) -> some View {
+        switch item {
+        case .shelf:
+            shelfLabel
+        case .notes:
+            tabLabel("笔记", .notes, line: "tab-notes", fill: "tab-notes-fill")
+        case .podcasts:
+            tabLabel("播客", .podcasts, line: "radio", fill: "radio-fill")
+        case .audio:
+            Label("有声", systemImage: "headphones")
+        case .progress:
+            Label("进度", systemImage: tab == .progress ? "bookmark.fill" : "bookmark")
+        case .me:
+            meTab
+        case .search:
+            searchLabel(detached: detachedSearch)
+        }
+    }
+
     /// Our own line icons: outlined, and the `-f` filled one on the chosen tab. 书架's filled one
     /// carries a small ⌃⌄: tap it again and the shelf's places stand up over it.
     private func tabLabel(_ title: LocalizedStringKey, _ value: PhoneTab, line: String, fill: String) -> some View {
         Label(title, image: tab == value ? fill : line)
     }
 
-    /// 搜索 stands in its own circle, where the system puts no pad under the chosen tab: chosen,
-    /// the icon brings its own, as soft as the others'.
-    @ViewBuilder private var searchLabel: some View {
-        if #available(iOS 27.0, *), tab == .search {
+    /// 搜索 stands in its own circle when detached on the right, where the system puts no pad
+    /// under the chosen tab: chosen, the icon brings its own, as soft as the others'.
+    @ViewBuilder private func searchLabel(detached: Bool) -> some View {
+        if detached, #available(iOS 27.0, *), tab == .search {
             Label { Text("搜索") } icon: { Self.padded("tab-search-fill", ink: tint.accent, dark: scheme == .dark) }
         } else {
             tabLabel("搜索", .search, line: "tab-search", fill: "tab-search-fill")
@@ -221,28 +302,47 @@ struct PhoneRoot: View {
     }
 
     /// 书架, or where the shelf is now (进度, 有声, 播客, a 合集) with its symbol. Chosen, the
-    /// icon carries a small ⌃⌄: tap it again and the places stand up over it.
+    /// icon carries a small ⌃⌄ when any folded places or collections exist; otherwise stays clean.
     @ViewBuilder private var shelfLabel: some View {
         let on = tab == .shelf
-        if let symbol = chrome.shelfSymbol, let name = chrome.shelfName {
+        let switcher = chrome.shelfHasSwitcher
+        if switcher, let symbol = chrome.shelfSymbol, let name = chrome.shelfName {
             Label {
                 Text(name)
             } icon: {
-                if on { Self.switchIcon(symbol) } else { Image(systemName: symbol) }
+                if on {
+                    Self.switchIcon(symbol)
+                } else if symbol.hasPrefix("asset.") {
+                    Image(String(symbol.dropFirst(6)))
+                } else {
+                    Image(systemName: symbol)
+                }
             }
-        } else {
+        } else if switcher {
             Label("书架", image: on ? "tab-shelf-switch" : "tab-shelf-line")
+        } else {
+            Label("书架", image: on ? "tab-shelf" : "tab-shelf-line")
         }
     }
 
-    /// An SF symbol with the small ⌃⌄ beside it, drawn once into a template image for the tab bar.
+    /// An SF symbol or asset icon with the small ⌃⌄ beside it, drawn once into a template image for the tab bar.
     private static func switchIcon(_ symbol: String) -> Image {
         if let made = switchIcons[symbol] { return made }
         let renderer = ImageRenderer(content:
             // The ⌃⌄ hangs to the right; as much nothing on the left keeps the symbol over its name.
             HStack(spacing: 2.5) {
                 Color.clear.frame(width: 6)
-                Image(systemName: UIImage(systemName: symbol + ".fill") != nil ? symbol + ".fill" : symbol).font(.system(size: 19, weight: .medium))
+                if symbol.hasPrefix("asset.") {
+                    let base = String(symbol.dropFirst(6))
+                    let fillName = base + "-fill"
+                    Image(UIImage(named: fillName) != nil ? fillName : base)
+                        .resizable()
+                        .renderingMode(.template)
+                        .scaledToFit()
+                        .frame(width: 22, height: 22)
+                } else {
+                    Image(systemName: UIImage(systemName: symbol + ".fill") != nil ? symbol + ".fill" : symbol).font(.system(size: 19, weight: .medium))
+                }
                 Image(systemName: "chevron.up.chevron.down").font(.system(size: 7.5, weight: .bold))
                     .frame(width: 6)
             }
@@ -250,7 +350,8 @@ struct PhoneRoot: View {
             .frame(height: 24)
         )
         renderer.scale = 3
-        let image = renderer.uiImage.map { Image(uiImage: $0.withRenderingMode(.alwaysTemplate)) } ?? Image(systemName: symbol)
+        let fallback = symbol.hasPrefix("asset.") ? Image(String(symbol.dropFirst(6))) : Image(systemName: symbol)
+        let image = renderer.uiImage.map { Image(uiImage: $0.withRenderingMode(.alwaysTemplate)) } ?? fallback
         switchIcons[symbol] = image
         return image
     }

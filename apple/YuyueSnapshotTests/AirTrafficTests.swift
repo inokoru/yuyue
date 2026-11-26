@@ -1,3 +1,5 @@
+import Foundation
+import Testing
 import XCTest
 import YuyueCore
 @testable import Yuyue
@@ -276,5 +278,62 @@ final class AirTrafficTests: XCTestCase {
         }
         XCTAssertEqual(sink.screens.map(\.name), ["Notes"])
         XCTAssertEqual(Set(sink.screens[0].properties.keys), ["platform"])
+    }
+}
+
+@MainActor
+struct DramaNarratorTests {
+    @Test func `canonical voice preference clears stale regional variants across settings and reader`() throws {
+        let suite = "app.yuyue.tests.voice-pref-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        #expect(Player.canonicalLanguage("zh-Hans") == "zh")
+        #expect(Player.canonicalLanguage("zh_CN") == "zh")
+        #expect(Player.canonicalLanguage("zh-Hant") == "zh")
+        #expect(Player.canonicalLanguage("zh-HK") == "yue")
+        #expect(Player.canonicalLanguage("en-US") == "en")
+        #expect(Player.canonicalLanguage("en-GB") == "en")
+        #expect(Player.canonicalLanguage("ja-JP") == "ja")
+
+        // Simulate legacy Reader write (`player.voice.zh-Hans`) followed by Settings write (`player.voice.zh`).
+        defaults.set("system.com.apple.voice.compact.zh-CN.Tingting", forKey: "player.voice.zh-Hans")
+        Player.saveVoicePreference("kokoro.zm_010", for: "zh", notify: false, defaults: defaults)
+
+        #expect(defaults.string(forKey: "player.voice.zh-Hans") == nil)
+        #expect(Player.savedVoiceID(for: "zh-Hans", defaults: defaults) == "kokoro.zm_010")
+        #expect(Player.savedVoiceID(for: "zh-CN", defaults: defaults) == "kokoro.zm_010")
+        #expect(Player.savedVoiceID(for: "zh", defaults: defaults) == "kokoro.zm_010")
+        #expect(Player.savedVoiceID(for: "zh-HK", defaults: defaults) == nil)
+
+        // Saving via a regional tag writes canonically and clears other stale regional variants.
+        defaults.set("stale.voice", forKey: "player.voice.zh-CN")
+        Player.saveVoicePreference("cloud.edge.zh-CN-XiaoxiaoNeural", for: "zh-Hans", notify: false, defaults: defaults)
+        #expect(defaults.string(forKey: "player.voice.zh-CN") == nil)
+        #expect(Player.savedVoiceID(for: "zh", defaults: defaults) == "cloud.edge.zh-CN-XiaoxiaoNeural")
+
+        // Clearing removes canonical and regional keys alike.
+        Player.saveVoicePreference(nil, for: "zh-Hans", notify: false, defaults: defaults)
+        #expect(Player.savedVoiceID(for: "zh-Hans", defaults: defaults) == nil)
+        #expect(Player.savedVoiceID(for: "zh", defaults: defaults) == nil)
+    }
+
+    @Test func `effectiveNarrator preserves explicit chosen narrator verbatim`() {
+        for explicit in [
+            "kokoro.zf_001",
+            "cloud.edge.zh-CN-XiaoxiaoNeural",
+            "cloud.free.zh_baidu",
+            "cloned.custom01",
+            "system.com.apple.voice.compact.zh-CN.Tingting",
+        ] {
+            #expect(DramaSynth.effectiveNarrator(for: "zh-Hans", chosen: explicit) == explicit)
+        }
+    }
+
+    @Test func `cloud narrator voice pool is not polluted with system voices`() {
+        let edgeNarrator = "cloud.edge.zh-CN-XiaoxiaoNeural"
+        let pool = DramaSynth.voices(for: "zh-Hans", narrator: edgeNarrator, book: nil)
+        #expect(pool.contains { $0.id == edgeNarrator })
+        #expect(!pool.contains { $0.id.hasPrefix("system.") })
     }
 }

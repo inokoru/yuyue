@@ -108,7 +108,6 @@ final class ReaderModel {
         playerTucked = false
         barsAway = false
     }
-    private var chromeComesBack = false
     var tocShown = false
     /// Initial tab when opening TOC sheet: 0 = 目录, 1 = 书签, 2 = 笔记.
     var tocInitialTab = 0
@@ -117,6 +116,18 @@ final class ReaderModel {
     var rulesShown = false
     /// 替换规则 was opened from 排版, so its ‹ goes back there. From the menu it has no ‹.
     var rulesFromSettings = false
+    /// Morphing states for the bottom listening capsule ("Dynamic Island for Books").
+    enum ListenCapsuleMode: Equatable {
+        case idle
+        case pronunciation(find: String, sentence: String)
+        case pronunciationDone(from: String, to: String)
+        case marked(excerpt: String, undoID: String?)
+        case rewound(sentenceNumber: Int)
+    }
+    var capsuleMode: ListenCapsuleMode = .idle
+    /// Incremented when marking a sentence during listening so ListenOnlyCover plays a subtle ink ripple.
+    var listenRippleToken: Int = 0
+    @ObservationIgnored private var capsuleResetTask: Task<Void, Never>?
     /// 字样册 (更多字体), opened from the Mac Aa card onto the reader window so it isn't clipped to the popover.
     var fontBookShown = false
     /// 气泡模式: the dialogue as bubbles, kept per book.
@@ -293,6 +304,11 @@ final class ReaderModel {
             }
             player.onSleep = { [weak self] spot in self?.fellAsleep(at: spot) }
             player.onMarkHeard = { [weak self] spot in self?.markHeard(spot) }
+            player.onSmartRewind = { [weak self] in
+                guard let self else { return }
+                let num = max(1, (self.player?.spot?.sentence ?? self.sentence) + 1)
+                self.setCapsuleMode(.rewound(sentenceNumber: num), autoDismissAfter: 2.4)
+            }
             player.onSkip = { [weak self] in
                 self?.followFrom = .distantPast
                 self?.pausedOffSpot = false
@@ -326,6 +342,9 @@ final class ReaderModel {
             // Whether the book has enough dialogue to offer bubbles / cast / audio drama.
             let has = await Self.loadHasDialogue(core, bookID: bookID)
             self?.hasDialogue = has
+            if !has, self?.bubbles == true {
+                self?.bubbles = false
+            }
         }
         rebuildObserver = NotificationCenter.default.addObserver(forName: .bookWillRebuild, object: nil, queue: nil) { [weak self] n in
             let id = n.object as? String
@@ -563,6 +582,9 @@ final class ReaderModel {
     func go(to item: TocItem) {
         leaving()
         turnedByHand()
+        #if os(iOS)
+        if chromeShown { chromeShown = false }
+        #endif
         pager.show(section: item.section, target: item.anchor.map { .anchor($0) } ?? .start, animated: false)
     }
 
@@ -1041,6 +1063,85 @@ extension ReaderModel: ReaderPagerDelegate {
         }
     }
 
+    /// Smoothly transitions the bottom listening capsule mode, optionally auto-collapsing back to `.idle`.
+    func setCapsuleMode(_ mode: ListenCapsuleMode, autoDismissAfter seconds: Double? = nil) {
+        capsuleResetTask?.cancel()
+        capsuleResetTask = nil
+        capsuleMode = mode
+        if let seconds {
+            capsuleResetTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(seconds))
+                guard !Task.isCancelled, let self, self.capsuleMode == mode else { return }
+                self.capsuleMode = .idle
+            }
+        }
+    }
+
+    func dismissCapsuleMode() {
+        setCapsuleMode(.idle)
+    }
+
+    /// Morphs the bottom capsule into the inline pronunciation bar prefilled with `word` (or current selection / sentence).
+    func promptPronunciation(word: String? = nil) {
+        let raw = word ?? selection?.text ?? ""
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let currentLine = player?.line ?? currentSectionSentence(at: sentence) ?? ""
+        dismissCards()
+        setCapsuleMode(.pronunciation(find: trimmed, sentence: currentLine))
+    }
+
+    /// Saves a speech-only pronunciation rule, replays the active sentence immediately, and morphs capsule confirmation.
+    @discardableResult
+    func applyPronunciationFix(find: String, replace: String, wholeLibrary: Bool) -> Bool {
+        let f = find.trimmingCharacters(in: .whitespacesAndNewlines)
+        let r = replace.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !f.isEmpty, !r.isEmpty else { return false }
+        let targetBook = wholeLibrary ? nil : bookID
+        let rule = ReplaceRule(id: "", book: targetBook, find: f, replace: r, regex: false, speechOnly: true, enabled: true, order: 0)
+        do {
+            _ = try core.saveReplaceRule(rule: rule)
+            NotificationCenter.default.post(name: .replaceRulesChanged, object: targetBook)
+            player?.replayCurrent()
+            setCapsuleMode(.pronunciationDone(from: f, to: r), autoDismissAfter: 2.4)
+            return true
+        } catch {
+            failure = Library.message(for: error)
+            return false
+        }
+    }
+
+    /// Highlights the sentence currently being listened to (or read) with one tap + undo toast.
+    func markCurrentHeard() {
+        if player?.spot != nil {
+            player?.markHeard()
+        } else if let sec = section {
+            markHeard(Player.Spot(section: sec, sentence: sentence))
+        }
+    }
+
+    /// Previous / current / next sentences around the active playback or reading position.
+    func focusListeningLines() -> (prev: String?, current: String?, next: String?) {
+        if let player, player.spot != nil {
+            return player.contextLines()
+        }
+        guard let sec = section, let all = try? core.sentences(bookId: bookID, section: sec), !all.isEmpty else {
+            return (nil, nil, nil)
+        }
+        let idx = min(max(0, sentence), all.count - 1)
+        let prev = idx > 0 ? all[idx - 1].trimmingCharacters(in: .whitespacesAndNewlines) : nil
+        let cur = all[idx].trimmingCharacters(in: .whitespacesAndNewlines)
+        let next = idx + 1 < all.count ? all[idx + 1].trimmingCharacters(in: .whitespacesAndNewlines) : nil
+        return (prev?.isEmpty == true ? nil : prev, cur.isEmpty ? nil : cur, next?.isEmpty == true ? nil : next)
+    }
+
+    private func currentSectionSentence(at idx: Int) -> String? {
+        guard let sec = section, let all = try? core.sentences(bookId: bookID, section: sec), all.indices.contains(idx) else {
+            return nil
+        }
+        let s = all[idx].trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? nil : s
+    }
+
     @concurrent nonisolated private static func loadHasDialogue(_ core: YuyueCore, bookID: String) async -> Bool {
         (try? core.bookHasDialogue(bookId: bookID)) ?? false
     }
@@ -1136,13 +1237,10 @@ extension ReaderModel: ReaderPagerDelegate {
     func pager(_ pager: ReaderPager, barsAway away: Bool) {
         guard !searchShown, away != barsAway else { return }
         if away {
-            chromeComesBack = chromeShown && !immersive
             chromeShown = false
             barsAway = true
         } else {
             barsAway = false
-            if chromeComesBack { chromeShown = true }
-            chromeComesBack = false
         }
     }
     #endif

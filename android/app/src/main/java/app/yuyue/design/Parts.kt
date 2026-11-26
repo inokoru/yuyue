@@ -64,6 +64,7 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 private val LocalFieldLabelWidth = compositionLocalOf<MutableIntState?> { null }
+private val LocalInYYGroup = compositionLocalOf { false }
 
 /** A page of these pieces on its grey ground. */
 @Composable
@@ -107,7 +108,10 @@ fun YYNote(text: String, color: Color = YY.c.t3) {
 @Composable
 fun YYGroup(modifier: Modifier = Modifier, rows: List<@Composable () -> Unit>) {
     val labelWidthPx = remember(L10n.chinese, rows.size) { mutableIntStateOf(0) }
-    CompositionLocalProvider(LocalFieldLabelWidth provides labelWidthPx) {
+    CompositionLocalProvider(
+        LocalFieldLabelWidth provides labelWidthPx,
+        LocalInYYGroup provides true,
+    ) {
         Column(
             modifier
                 .fillMaxWidth()
@@ -165,11 +169,47 @@ fun YYRow(
     trailing: @Composable RowScope.() -> Unit = {},
     onClick: (() -> Unit)? = null,
 ) {
+    val inGroup = LocalInYYGroup.current
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val pressBg by androidx.compose.animation.animateColorAsState(
+        targetValue = if (onClick != null && pressed) YY.c.inset else Color.Transparent,
+        animationSpec = YYMotion.quick(),
+        label = "yyRowPress",
+    )
+    val bleed = YY.s(12)
+    val standaloneRadius = YY.s(10)
     Row(
         Modifier
             .fillMaxWidth()
             .heightIn(min = YY.s(38))
-            .then(if (onClick != null) Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick) else Modifier),
+            .drawBehind {
+                if (pressBg.alpha > 0.005f) {
+                    if (inGroup) {
+                        val bleedPx = bleed.toPx()
+                        drawRect(
+                            color = pressBg,
+                            topLeft = androidx.compose.ui.geometry.Offset(-bleedPx, 0f),
+                            size = Size(size.width + bleedPx * 2f, size.height),
+                        )
+                    } else {
+                        val r = standaloneRadius.toPx()
+                        drawRoundRect(color = pressBg, cornerRadius = CornerRadius(r, r))
+                    }
+                }
+            }
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(
+                        interactionSource = press,
+                        indication = null,
+                        role = androidx.compose.ui.semantics.Role.Button,
+                        onClick = onClick,
+                    )
+                } else {
+                    Modifier
+                },
+            ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(YY.s(10)),
     ) {

@@ -30,7 +30,14 @@ struct MacUpdateDialog: View {
         switch center.dialog {
         case .current: current
         case .offline: offline
-        case .flow: center.phase == .checking ? AnyView(checking) : AnyView(release)
+        case .flow:
+            if center.phase == .checking {
+                AnyView(checking)
+            } else if center.offer != nil {
+                AnyView(release)
+            } else {
+                AnyView(current)
+            }
         case .none: EmptyView()
         }
     }
@@ -120,6 +127,8 @@ extension View {
 /// the cards' foot; the right folio holds version & updates, changelog, feedback, privacy, and
 /// open-source credits, flexing smoothly across narrow and wide windows.
 struct MacUpdateSettings: View {
+    var reveal: SettingsReveal? = nil
+
     fileprivate enum SheetKind: String, Identifiable {
         case changelog, feedback, privacy, licences
         var id: String { rawValue }
@@ -154,21 +163,31 @@ struct MacUpdateSettings: View {
     var body: some View {
         GeometryReader { proxy in
             let metrics = AboutSpreadMetrics(viewportWidth: proxy.size.width)
-            ScrollView {
-                OpticalCenterLayout(viewportHeight: proxy.size.height) {
-                    BookplateSpreadLayout(
-                        leftWidth: metrics.leftWidth,
-                        rightWidth: metrics.rightWidth,
-                        spacing: metrics.gutter
-                    ) {
-                        leftFolio
-                        rightFolio
+            ScrollViewReader { scrollProxy in
+                ScrollView {
+                    OpticalCenterLayout(viewportHeight: proxy.size.height) {
+                        BookplateSpreadLayout(
+                            leftWidth: metrics.leftWidth,
+                            rightWidth: metrics.rightWidth,
+                            spacing: metrics.gutter
+                        ) {
+                            leftFolio
+                            rightFolio
+                        }
+                        .padding(.horizontal, metrics.horizontalMargin)
                     }
-                    .padding(.horizontal, metrics.horizontalMargin)
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: .infinity)
+                .scrollBounceBehavior(.basedOnSize)
+                .task(id: reveal?.id) {
+                    guard let reveal, reveal.anchor.page == .update else { return }
+                    try? await Task.sleep(for: .milliseconds(60))
+                    guard !Task.isCancelled else { return }
+                    withAnimation(YYMotion.standard) {
+                        scrollProxy.scrollTo(reveal.anchor, anchor: .center)
+                    }
+                }
             }
-            .scrollBounceBehavior(.basedOnSize)
         }
         .onAppear { center.boot() }
         .sheet(item: $activeSheet) { kind in
@@ -275,13 +294,16 @@ struct MacUpdateSettings: View {
 
             AboutCard {
                 versionHeaderRow
+                    .settingsAnchor(.aboutVersion)
                 AboutNavRow(title: String(localized: "更新日志"), value: changelogSummary) {
                     activeSheet = .changelog
                 }
+                .settingsAnchor(.aboutChangelog)
                 AboutRow(String(localized: "自动检查更新"),
                          detail: String(localized: "每天启动时检查一次，仅读取版本号，不上传本地数据")) {
                     SettingsSwitch(isOn: Binding(get: { center.autoOn }, set: { center.autoOn = $0 }))
                 }
+                .settingsAnchor(.aboutAutoUpdate)
                 AboutRow(String(localized: "更新渠道"),
                          detail: String(localized: "测试版先拿到新功能；换回正式版后随下个正式版恢复")) {
                     Menu {
@@ -302,6 +324,7 @@ struct MacUpdateSettings: View {
                     .fixedSize()
                 }
                 .help(UpdateChannel.detail)
+                .settingsAnchor(.aboutChannel)
             }
 
             AboutCard {
@@ -316,6 +339,7 @@ struct MacUpdateSettings: View {
                         }
                     }
                 }
+                .settingsAnchor(.aboutFeedback)
                 AboutRow(String(localized: "匿名使用统计"),
                          detail: String(localized: "仅记录功能使用形态，不关联身份，绝不收集书名、笔记或搜索词")) {
                     SettingsSwitch(isOn: Binding(
@@ -326,14 +350,17 @@ struct MacUpdateSettings: View {
                         }
                     ))
                 }
+                .settingsAnchor(.aboutAnalytics)
                 AboutNavRow(title: String(localized: "隐私说明"),
                             value: String(localized: "书库仅存本机 · 可关匿名统计")) {
                     activeSheet = .privacy
                 }
+                .settingsAnchor(.aboutPrivacy)
                 AboutNavRow(title: String(localized: "开源许可与致谢"),
                             value: String(localized: "GPL-3.0 与组件清单")) {
                     activeSheet = .licences
                 }
+                .settingsAnchor(.aboutLicences)
                 HStack(alignment: .center, spacing: 12) {
                     Text("源代码")
                         .font(.yy(size: 12.5, weight: .medium))

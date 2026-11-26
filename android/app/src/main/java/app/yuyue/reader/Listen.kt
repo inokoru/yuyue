@@ -195,33 +195,55 @@ private fun VoiceRow(
             Text(subText, fontSize = 10.5.sp, color = YY.c.t2, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         current?.let { v ->
-            Text(t("试听"), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1, modifier = Modifier.clip(RoundedCornerShape(50)).background(YY.c.card).clickable {
-                if (model.isPlaying) player.pause()
-                if (previewing) {
+            var previewJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+            androidx.compose.runtime.DisposableEffect(Unit) {
+                onDispose {
+                    previewJob?.cancel()
                     SystemVoice.Engine.stopPreview()
-                    previewing = false
-                    return@clickable
                 }
-                if (v is SystemVoice) {
-                    if (!v.preview(sample(language), language)) {
-                        player.failure = t("系统朗读还没准备好，请稍后再试或检查文字转语音设置")
+            }
+            Text(
+                if (previewing) t("合成中…") else t("试听"),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = YY.c.t1,
+                modifier = Modifier.clip(RoundedCornerShape(50)).background(YY.c.card).clickable {
+                    if (model.isPlaying) player.pause()
+                    if (previewing) {
+                        previewJob?.cancel()
+                        previewJob = null
+                        SystemVoice.Engine.stopPreview()
+                        previewing = false
+                        return@clickable
                     }
-                } else {
-                    previewing = true
-                    scope.launch {
-                        try {
-                            val speech = withContext(Dispatchers.IO) { v.render(sample(language), language) }
-                            if (speech != null) SystemVoice.Engine.preview(speech)
-                        } catch (e: kotlinx.coroutines.CancellationException) {
-                            throw e
-                        } catch (e: Throwable) {
-                            player.failure = t("试听失败（%@）", e.message ?: e.toString())
-                        } finally {
-                            previewing = false
+                    if (v is SystemVoice) {
+                        if (!v.preview(sample(language), language)) {
+                            player.failure = t("系统朗读还没准备好，请稍后再试或检查文字转语音设置")
+                        }
+                    } else {
+                        previewing = true
+                        previewJob?.cancel()
+                        previewJob = scope.launch {
+                            try {
+                                val speech = withContext(Dispatchers.IO) { v.render(sample(language), language) }
+                                if (speech != null) {
+                                    if (!SystemVoice.Engine.preview(speech)) {
+                                        player.failure = t("试听播放失败，请重试")
+                                    }
+                                } else {
+                                    player.failure = t("试听失败，请重试")
+                                }
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: Throwable) {
+                                player.failure = t("试听失败（%@）", e.message ?: e.toString())
+                            } finally {
+                                previewing = false
+                            }
                         }
                     }
-                }
-            }.padding(horizontal = 10.dp, vertical = 5.dp))
+                }.padding(horizontal = 10.dp, vertical = 5.dp),
+            )
         }
         Row(Modifier.clickable { openPicker() }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
             if (player.readyOfflineVoice != null) {

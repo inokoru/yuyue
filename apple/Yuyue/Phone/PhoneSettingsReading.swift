@@ -8,6 +8,7 @@ import YuyueCore
 
 /// 外观: light, dark or the system's; 墨蓝 or 墨黑; app icon; and a look at both.
 struct PhoneAppearance: View {
+    var collectionCount: Int = 0
     @AppStorage(AppAppearance.key) private var mode = AppAppearance.system
     @AppStorage("shelf.showProgress") private var showProgress = true
     @AppStorage("shelf.coverSize") private var coverSize = 100.0
@@ -15,6 +16,7 @@ struct PhoneAppearance: View {
     @AppStorage(ShelfStylePrefs.woodKey) private var woodLedge = false
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
     @AppStorage(LiquidGlass.key) private var liquid = false
+    @AppStorage(BottomNavPrefs.key) private var bottomTabsRaw = BottomNavPrefs.defaultRaw
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var scenePhase
@@ -95,8 +97,12 @@ struct PhoneAppearance: View {
                 .padding(.vertical, YYUI.s(10))
             }
             .padding(.top, YYUI.s(12))
-            if LiquidGlass.supported {
-                YYGroup {
+            YYGroup {
+                NavigationLink { PhoneBottomNavSettings(collectionCount: collectionCount) } label: {
+                    YYRow(String(localized: "底部导航"), icon: "dock.rectangle", value: BottomNavPrefs.summary(bottomTabsRaw), chevron: true)
+                }
+                .buttonStyle(.plain)
+                if LiquidGlass.supported {
                     HStack(spacing: YYUI.s(10)) {
                         VStack(alignment: .leading, spacing: YYUI.s(2)) {
                             Text("液态玻璃效果").font(YYUI.font(11.5, .medium)).foregroundStyle(YYColor.t1)
@@ -108,8 +114,8 @@ struct PhoneAppearance: View {
                     }
                     .padding(.vertical, YYUI.s(10))
                 }
-                .padding(.top, YYUI.s(12))
             }
+            .padding(.top, YYUI.s(12))
         }
         .navigationTitle("外观")
         .navigationBarTitleDisplayMode(.inline)

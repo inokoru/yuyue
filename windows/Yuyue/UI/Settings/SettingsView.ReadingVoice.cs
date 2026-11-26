@@ -612,10 +612,10 @@ public sealed partial class SettingsView
         var zhVoices = new List<(string Id, string Label)>
         {
             ("", "自动推荐（Kokoro / Edge）"),
-            ("edge.zh-CN-XiaoxiaoNeural", "Edge · 晓晓（温暖自然）"),
-            ("edge.zh-CN-YunxiNeural", "Edge · 云希（清朗男声）"),
-            ("edge.zh-CN-YunjianNeural", "Edge · 云健（沉稳说书）"),
-            ("edge.zh-CN-XiaoyiNeural", "Edge · 晓伊（柔和叙事）"),
+            ("cloud.edge.zh-CN-XiaoxiaoNeural", "Edge · 晓晓（温暖自然）"),
+            ("cloud.edge.zh-CN-YunxiNeural", "Edge · 云希（清朗男声）"),
+            ("cloud.edge.zh-CN-YunjianNeural", "Edge · 云健（沉稳说书）"),
+            ("cloud.edge.zh-CN-XiaoyiNeural", "Edge · 晓伊（柔和叙事）"),
         };
         foreach (var sp in _library.Kokoro.GetSpeakers("zh-Hans"))
             zhVoices.Add((sp.Id, $"Kokoro 离线 · {sp.Name}"));
@@ -623,7 +623,8 @@ public sealed partial class SettingsView
         var zhRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
         var zhCombo = new ComboBox { Width = 236 };
         foreach (var (_, lbl) in zhVoices) zhCombo.Items.Add(lbl);
-        int zhIdx = zhVoices.FindIndex(v => v.Id == _library.Prefs.VoiceId);
+        string normZhPref = DramaSynthService.NormalizeVoiceId(_library.Prefs.VoiceId) ?? "";
+        int zhIdx = zhVoices.FindIndex(v => v.Id == normZhPref);
         zhCombo.SelectedIndex = Math.Max(0, zhIdx);
         zhCombo.SelectionChanged += (_, _) =>
         {
@@ -653,10 +654,10 @@ public sealed partial class SettingsView
         var enVoices = new List<(string Id, string Label)>
         {
             ("", "自动推荐（Kokoro / Edge）"),
-            ("edge.en-US-JennyNeural", "Edge · Jenny (US Natural)"),
-            ("edge.en-US-AriaNeural", "Edge · Aria (US Expressive)"),
-            ("edge.en-US-GuyNeural", "Edge · Guy (US Male)"),
-            ("edge.en-GB-SoniaNeural", "Edge · Sonia (UK Female)"),
+            ("cloud.edge.en-US-JennyNeural", "Edge · Jenny (US Natural)"),
+            ("cloud.edge.en-US-AriaNeural", "Edge · Aria (US Expressive)"),
+            ("cloud.edge.en-US-GuyNeural", "Edge · Guy (US Male)"),
+            ("cloud.edge.en-GB-SoniaNeural", "Edge · Sonia (UK Female)"),
         };
         foreach (var sp in _library.Kokoro.GetSpeakers("en"))
             enVoices.Add((sp.Id, $"Kokoro 离线 · {sp.Name}"));
@@ -664,7 +665,8 @@ public sealed partial class SettingsView
         var enRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
         var enCombo = new ComboBox { Width = 236 };
         foreach (var (_, lbl) in enVoices) enCombo.Items.Add(lbl);
-        int enIdx = enVoices.FindIndex(v => v.Id == _library.Prefs.VoiceIdEn);
+        string normEnPref = DramaSynthService.NormalizeVoiceId(_library.Prefs.VoiceIdEn) ?? "";
+        int enIdx = enVoices.FindIndex(v => v.Id == normEnPref);
         enCombo.SelectedIndex = Math.Max(0, enIdx);
         enCombo.SelectionChanged += (_, _) =>
         {

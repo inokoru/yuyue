@@ -142,14 +142,18 @@ struct SyncSettings: View {
             // The banner only takes room when there's something to choose.
             VStack(spacing: 0) {
                 status
+                    .settingsAnchor(.syncStatus, card: true)
                 ConflictsBanner(library: library, above: 12)
             }
             SettingsHeading(String(localized: "同步方式"))
             HStack(spacing: 10) {
                 methodCard(.icloud, symbol: "cloud", title: "iCloud", detail: icloudDetail)
+                    .settingsAnchor(.syncICloud, card: true)
                 methodCard(.webdav, symbol: "externaldrive.connected.to.line.below", title: "WebDAV", detail: webdavDetail)
+                    .settingsAnchor(.syncWebDAV, card: true)
                 methodCard(.googleDrive, symbol: "globe", title: "Google Drive",
                            detail: GoogleAuth.clientID == nil ? String(localized: "适合跨 Android · 即将支持") : (sync.googleEmail ?? String(localized: "用你自己的 Google 账号")))
+                    .settingsAnchor(.syncGoogleDrive, card: true)
             }
             .fixedSize(horizontal: false, vertical: true)
             SettingsHeading(String(localized: "同步内容"))
@@ -164,6 +168,7 @@ struct SyncSettings: View {
                     SettingsSwitch(isOn: Binding(get: { sync.syncsRecordings }, set: { sync.syncRecordings($0) }))
                 }
             }
+            .settingsAnchor(.syncContent, card: true)
             Label("无需注册账号，数据仅在你的设备与个人网盘之间传输", systemImage: "lock")
                 .font(.yy(size: 11)).foregroundStyle(YYColor.t3)
                 .padding(.leading, 16)

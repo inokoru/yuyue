@@ -125,7 +125,7 @@ struct CompanionProviderSheet: View {
         .padding(.bottom, YYUI.s(16))
         .padding(.top, YYUI.sheetGrabberTop)
         #if os(macOS)
-        .frame(width: 480, height: 468)
+        .frame(width: 480, height: picked == nil && adding ? 540 : 468)
         #else
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .presentationDetents([.large])
@@ -168,19 +168,23 @@ struct CompanionProviderSheet: View {
                     .plainEntry()
                     .onSubmit { if let first = matches.first { open(first) } }
             }
-            .padding(.horizontal, YYUI.s(9))
-            .frame(height: YYUI.s(30))
-            .background(YYColor.inset, in: .rect(cornerRadius: YYUI.s(8)))
+            .padding(.horizontal, YYUI.s(10))
+            #if os(macOS)
+            .frame(height: YYUI.s(32))
+            #else
+            .frame(height: YYUI.s(34))
+            #endif
+            .background(YYColor.inset, in: .rect(cornerRadius: YYUI.s(10)))
             .padding(.top, YYUI.s(10))
             ScrollView {
-                VStack(alignment: .leading, spacing: YYUI.s(10)) {
+                VStack(alignment: .leading, spacing: YYUI.s(12)) {
                     ForEach(CompanionProvider.Group.allCases, id: \.self) { group in
                         let list = matches.filter { $0.group == group }
                         if !list.isEmpty {
-                            VStack(alignment: .leading, spacing: YYUI.s(2)) {
+                            VStack(alignment: .leading, spacing: YYUI.s(5)) {
                                 Text(group.title).font(YYUI.font(10, .semibold)).foregroundStyle(YYColor.t3)
-                                    .padding(.leading, YYUI.s(8)).padding(.bottom, YYUI.s(2))
-                                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: YYUI.s(2)), count: Self.columns), spacing: YYUI.s(2)) {
+                                    .padding(.leading, YYUI.s(4))
+                                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: YYUI.s(6)), count: Self.columns), spacing: YYUI.s(6)) {
                                     ForEach(list) { tile($0) }
                                 }
                             }
@@ -195,18 +199,20 @@ struct CompanionProviderSheet: View {
                 .padding(.vertical, YYUI.s(12))
             }
             .scrollBounceBehavior(.basedOnSize)
-            Rectangle().fill(YYColor.line).frame(height: 0.5).padding(.horizontal, -YYUI.s(16))
             Button { open(.custom("")) } label: {
-                HStack(spacing: YYUI.s(8)) {
-                    Image(systemName: "plus").font(YYUI.font(10.5, .semibold)).foregroundStyle(YYColor.t2)
-                        .frame(width: YYUI.s(16), height: YYUI.s(16))
-                    Text("自己添加").font(YYUI.font(11.5)).foregroundStyle(YYColor.t1)
-                    Text("任何 OpenAI 兼容接口").font(YYUI.font(10.5)).foregroundStyle(YYColor.t3)
+                HStack(spacing: YYUI.s(10)) {
+                    Image(systemName: "plus").font(YYUI.font(12, .medium)).foregroundStyle(YYColor.t2)
+                        .frame(width: YYUI.s(22), height: YYUI.s(22))
+                    VStack(alignment: .leading, spacing: YYUI.s(1)) {
+                        Text("自己添加").font(YYUI.font(11.5)).foregroundStyle(YYColor.t1)
+                        Text("任何 OpenAI 兼容接口").font(YYUI.font(10)).foregroundStyle(YYColor.t3).lineLimit(1)
+                    }
                     Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(YYUI.font(9.5, .semibold)).foregroundStyle(YYColor.t3)
                 }
             }
-            .buttonStyle(PickRow())
-            .padding(.top, YYUI.s(8))
+            .buttonStyle(PickFooterCard())
+            .padding(.top, YYUI.s(4))
         }
     }
 
@@ -223,7 +229,7 @@ struct CompanionProviderSheet: View {
                 Spacer(minLength: 0)
             }
         }
-        .buttonStyle(PickRow())
+        .buttonStyle(PickCard())
         .help(p.blurb.map(Text.init) ?? Text(p.title))
     }
 
@@ -264,6 +270,74 @@ struct CompanionProviderSheet: View {
                 Button { adding = true } label: { Label("添加服务商", systemImage: "plus") }
                     .buttonStyle(YYButtonStyle(kind: .raised))
             }
+        }
+    }
+}
+
+/// A compact white card tile to pick: card fill with a hairline border, inset on hover and press.
+struct PickCard: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { Card(configuration: configuration) }
+
+    private struct Card: View {
+        let configuration: Configuration
+        @State private var hovering = false
+        @Environment(\.colorScheme) private var scheme
+
+        var body: some View {
+            #if os(macOS)
+            let h = YYUI.s(36)
+            #else
+            let h = YYUI.s(38)
+            #endif
+            let radius = YYUI.s(10)
+            let border = scheme == .dark ? Color.white.opacity(0.06) : YYColor.line
+            configuration.label
+                .padding(.horizontal, YYUI.s(10))
+                .frame(maxWidth: .infinity, minHeight: h, maxHeight: h)
+                .background(
+                    hovering || configuration.isPressed ? YYColor.inset : YYColor.card,
+                    in: .rect(cornerRadius: radius)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: radius)
+                        .strokeBorder(hovering ? YYColor.t3.opacity(0.35) : border, lineWidth: 0.5)
+                )
+                .scaleEffect(configuration.isPressed ? 0.985 : 1.0)
+                .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+                .contentShape(.rect)
+                .onHover { hovering = $0 }
+        }
+    }
+}
+
+/// Full-width white card at the foot of provider pickers (matches mobile's 自己添加 / 自定义语音接口 card).
+struct PickFooterCard: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { Card(configuration: configuration) }
+
+    private struct Card: View {
+        let configuration: Configuration
+        @State private var hovering = false
+        @Environment(\.colorScheme) private var scheme
+
+        var body: some View {
+            let radius = YYUI.s(12)
+            let border = scheme == .dark ? Color.white.opacity(0.06) : YYColor.line
+            configuration.label
+                .padding(.horizontal, YYUI.s(12))
+                .padding(.vertical, YYUI.s(9))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    hovering || configuration.isPressed ? YYColor.inset : YYColor.card,
+                    in: .rect(cornerRadius: radius)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: radius)
+                        .strokeBorder(hovering ? YYColor.t3.opacity(0.35) : border, lineWidth: 0.5)
+                )
+                .scaleEffect(configuration.isPressed ? 0.99 : 1.0)
+                .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+                .contentShape(.rect)
+                .onHover { hovering = $0 }
         }
     }
 }

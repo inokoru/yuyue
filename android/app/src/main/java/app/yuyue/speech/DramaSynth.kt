@@ -73,22 +73,40 @@ class DramaSynth(private val context: android.content.Context, private val libra
 
     fun liveClipsFolder(book: String) = File(library.dataDir, "drama/$book/live-clips")
 
+    /** 旁白回退升级：与普通朗读 `Voices.best(language)` 保持一致（手选 > Kokoro > LiveVoice > 免 Key 在线 > 系统自带）。 */
+    suspend fun effectiveNarrator(language: String, chosen: String?): String? {
+        val explicit = chosen?.takeIf { it.isNotEmpty() } ?: Player.savedVoiceId(language).takeIf { it.isNotEmpty() }
+        if (explicit != null) return explicit
+        if (KokoroModel.canRun(library.dataDir) && CardVoice.speaksLanguage(language)) {
+            KokoroModel.defaultNarrator(library.core, library.dataDir, language)?.let { return it.id }
+        }
+        if (LiveVoiceModel.canRun(library.dataDir) && CardVoice.speaksLanguage(language)) {
+            LiveVoiceModel.register(library.core, library.dataDir)
+            Voices.pickDefaultNarrator(library.core.cardsBuiltin(), language)?.let { return it.id }
+        }
+        if (CloudVoice.Provider.Free.isSetUp) {
+            val freeList = CloudVoice.all().filter { it.provider == CloudVoice.Provider.Free && it.speaks(language) }
+            if (freeList.isNotEmpty()) {
+                val preferred = if (language.lowercase().startsWith("en")) "cloud.free.en_us" else "cloud.free.zh_baidu"
+                return (freeList.firstOrNull { it.id == preferred } ?: freeList.first()).id
+            }
+        }
+        return Voices.systemBest(language)?.id
+    }
+
     /** Ensures `drama/{book}/plan` is cast and cached in memory for Live playback & CastSheet UI. */
     suspend fun ensurePlan(book: String, language: String, narrator: String?): uniffi.yuyue_core.CastingPlan? {
-        synchronized(planCacheLock) { cachedPlans[book] }?.let { return it }
         return withContext(Dispatchers.Default) {
             SystemVoice.Engine.init(context)
             LiveVoiceModel.register(library.core, library.dataDir)
-            val chosenNarrator = narrator ?: Player.savedVoiceId(language).ifEmpty { null }
-            val voices = voices(language, chosenNarrator, book)
-            if (voices.isEmpty()) return@withContext null
-            val liveReady = LiveVoiceModel.canRun(library.dataDir) && CardVoice.speaksLanguage(language)
-            // Respect the user's chosen narrator voice verbatim (never silently replace cloud/system narrators).
-            val narratorID = when {
-                chosenNarrator != null -> chosenNarrator
-                liveReady -> Voices.defaultNarrator(language)?.id ?: voices.first().id
-                else -> voices.first().id
+            val resolvedNarrator = effectiveNarrator(language, narrator)
+            synchronized(planCacheLock) { cachedPlans[book] }?.let { cached ->
+                if (resolvedNarrator == null || cached.narrator == resolvedNarrator) return@withContext cached
             }
+            val voices = voices(language, resolvedNarrator, book)
+            if (voices.isEmpty()) return@withContext null
+            // Respect the user's chosen narrator voice verbatim (never silently replace cloud/system/cloned/kokoro narrators).
+            val narratorID = resolvedNarrator ?: voices.first().id
             val castVoices = SpeakerPrint.printVoices(library.core, library.dataDir, voices, language)
             val plan = runCatching { library.core.dramaCastVoices(book, castVoices, narratorID) }.getOrNull() ?: return@withContext null
             synchronized(planCacheLock) { cachedPlans[book] = plan }
@@ -131,35 +149,67 @@ class DramaSynth(private val context: android.content.Context, private val libra
         return status == android.os.BatteryManager.BATTERY_STATUS_CHARGING || status == android.os.BatteryManager.BATTERY_STATUS_FULL
     }
 
-    /** The voices the core casts `language` with: when the live voice bundle is ready,
-     *  this language's built-in cards plus any cards designed for `book` (`acts = true`, no system
-     *  voices, no cloned cards); otherwise system voices; plus cloud voices when narrator is cloud. */
+    /** The voices the core casts `language` with:
+     *  - LiveVoice cards (+ book-designed + chosen cloned narrator) when LiveVoice is ready.
+     *  - Kokoro speakers when Kokoro is ready and either LiveVoice isn't installed or Kokoro is the narrator.
+     *  - Cloud voices of the chosen cloud provider when narrator is cloud.
+     *  - System voices ONLY when none of the above exist (never pollutes a cloud or Kokoro cast). */
     suspend fun voices(language: String, narrator: String?, book: String? = null): List<VoiceInfo> {
-        LiveVoiceModel.register(library.core, library.dataDir)
-        val liveReady = LiveVoiceModel.canRun(library.dataDir) && CardVoice.speaksLanguage(language)
-        val own: List<VoiceInfo> = if (liveReady) {
+        val out = mutableListOf<VoiceInfo>()
+        if (LiveVoiceModel.canRun(library.dataDir) && CardVoice.speaksLanguage(language)) {
+            LiveVoiceModel.register(library.core, library.dataDir)
             val builtin = Voices.recommendedCards(library.core, library.dataDir, language)
             val designed = if (book != null) {
                 runCatching { library.core.cardsOfBook(book) }.getOrDefault(emptyList())
                     .filter { Voices.cardMatchesTag(it.lang, language) }
             } else emptyList()
-            val cards = builtin + designed
-            if (cards.isNotEmpty()) {
-                cards.map { card -> library.core.cardVoiceInfo(card, emptyList(), true) }
-            } else {
-                systemVoiceInfos(language)
+            val clonedNarrator = if (narrator?.startsWith("cloned.") == true) {
+                listOfNotNull(runCatching { library.core.cardFind(null, narrator) }.getOrNull())
+            } else emptyList()
+            for (card in builtin + designed + clonedNarrator) {
+                out += library.core.cardVoiceInfo(card, card.embedding, true)
             }
-        } else {
-            systemVoiceInfos(language)
         }
-        if (narrator?.startsWith("cloud.") != true) return own
-        val provider = narrator.split('.').getOrNull(1)
-        val cloud = CloudVoice.all().filter { it.provider.key == provider && it.speaks(language) }.map { v ->
-            val gender = when (v.gender) { "male" -> CharacterGender.M; "female" -> CharacterGender.F; else -> CharacterGender.UNKNOWN }
-            val age = when (v.age) { "young" -> CharacterAge.YOUNG; "middle_aged", "middle aged" -> CharacterAge.MIDDLE; "old" -> CharacterAge.OLD; else -> CharacterAge.UNKNOWN }
-            VoiceInfo(v.id, listOf(v.language ?: language), gender, age, emptyList(), emptyList(), true, true, -20f)
+        if (KokoroModel.canRun(library.dataDir) && CardVoice.speaksLanguage(language) &&
+            (out.isEmpty() || narrator?.startsWith("kokoro.") == true)) {
+            out += kokoroVoiceInfos(language)
         }
-        return own + cloud
+        if (narrator?.startsWith("cloud.") == true) {
+            val provider = narrator.split('.').getOrNull(1)
+            out += CloudVoice.all().filter { it.provider.key == provider && it.speaks(language) }.map { v ->
+                val gender = when (v.gender) { "male" -> CharacterGender.M; "female" -> CharacterGender.F; else -> CharacterGender.UNKNOWN }
+                val age = when (v.age) { "young" -> CharacterAge.YOUNG; "middle_aged", "middle aged" -> CharacterAge.MIDDLE; "old" -> CharacterAge.OLD; else -> CharacterAge.UNKNOWN }
+                VoiceInfo(v.id, listOf(v.language ?: language), gender, age, emptyList(), emptyList(), true, true, -20f)
+            }
+        }
+        if (out.isEmpty()) {
+            out += systemVoiceInfos(language)
+        }
+        return out
+    }
+
+    private fun kokoroVoiceInfos(language: String): List<VoiceInfo> {
+        return KokoroModel.voices(library.core, library.dataDir, language).map { v ->
+            val s = v.speaker
+            val age = when (s.voiceId) {
+                "zm_025", "zm_056", "zm_033", "zm_096", "zf_006", "zf_094", "zf_019" -> CharacterAge.YOUNG
+                "zm_010", "zm_012", "zm_035", "zm_041", "zm_080", "zm_095", "zf_004", "zf_079", "zf_090" -> CharacterAge.MIDDLE
+                "zm_098", "zf_076" -> CharacterAge.OLD
+                else -> CharacterAge.UNKNOWN
+            }
+            val emb = KokoroModel.styleEmbedding(s.sid, library.dataDir)
+            VoiceInfo(
+                id = s.id,
+                langs = listOf(s.lang),
+                gender = s.gender,
+                age = age,
+                tags = emptyList(),
+                embedding = emb,
+                acts = false,
+                narratorOk = s.narrator,
+                loudnessLufs = -20f,
+            )
+        }
     }
 
     private suspend fun systemVoiceInfos(language: String): List<VoiceInfo> {
@@ -182,13 +232,16 @@ class DramaSynth(private val context: android.content.Context, private val libra
         // The system's voices, ready even when nothing has played yet.
         SystemVoice.Engine.init(context)
         LiveVoiceModel.register(library.core, library.dataDir)
-        val chosenNarrator = narrator ?: Player.savedVoiceId(language).ifEmpty { null }
+        val chosenNarrator = narrator?.takeIf { it.isNotEmpty() } ?: Player.savedVoiceId(language).ifEmpty { null }
         app.yuyue.reader.DramaWork.synthesizing = true
         app.yuyue.reader.DramaWork.cloudCast = chosenNarrator?.startsWith("cloud.") == true
         app.yuyue.reader.DramaWork.tellCore(library.core)
         val core = library.core
         loops[book] = library.scope.launch(Dispatchers.Default) {
-            val voices = voices(language, chosenNarrator, book)
+            val resolvedNarrator = effectiveNarrator(language, chosenNarrator)
+            app.yuyue.reader.DramaWork.cloudCast = resolvedNarrator?.startsWith("cloud.") == true
+            app.yuyue.reader.DramaWork.tellCore(core)
+            val voices = voices(language, resolvedNarrator, book)
             if (app.yuyue.BuildConfig.DEBUG) android.util.Log.d("DramaSynth", "${voices.size} voices for $language")
             if (voices.isEmpty()) {
                 loops.remove(book)
@@ -196,13 +249,8 @@ class DramaSynth(private val context: android.content.Context, private val libra
                 app.yuyue.reader.DramaWork.synthesizing = on
                 return@launch
             }
-            val liveReady = LiveVoiceModel.canRun(library.dataDir) && CardVoice.speaksLanguage(language)
-            // Respect the user's chosen narrator voice verbatim (never silently replace cloud/system narrators).
-            val narratorID = when {
-                chosenNarrator != null -> chosenNarrator
-                liveReady -> Voices.defaultNarrator(language)?.id ?: voices.first().id
-                else -> voices.first().id
-            }
+            // Respect the user's chosen narrator voice verbatim (never silently replace cloud/system/cloned/kokoro narrators).
+            val narratorID = resolvedNarrator ?: voices.first().id
             // Core reads `roles/book/{id}` directly as single source of truth.
             // 声纹: each voice's print, once, so the voices in one scene are kept apart.
             SpeakerPrint.ensure(library.dataDir)
@@ -443,8 +491,34 @@ class DramaSynth(private val context: android.content.Context, private val libra
         language: String,
         narratorFallback: String?,
     ): Speech? = withContext(Dispatchers.Default) {
+        SystemVoice.Engine.init(context)
+        val resolvedNarrator = effectiveNarrator(language, narratorFallback)
+        val borrowed = runCatching { library.core.dramaBorrowedFrom(book) }.getOrNull() != null
+        val borrowedMatchesNarrator = if (!borrowed) {
+            false
+        } else if (resolvedNarrator == null) {
+            true
+        } else {
+            val ds = runCatching { library.core.dramaSection(book, section.toUInt()) }.getOrNull()
+            val curAsks = runCatching { library.core.dramaLiveSentenceAsks(book, section.toUInt(), sentence.toUInt()) }.getOrNull()
+            if (ds == null || curAsks == null) {
+                true
+            } else {
+                val narrStarts = ds.segments
+                    .filter { it.sentence == sentence.toUInt() && it.kind == uniffi.yuyue_core.SegKind.NARRATION }
+                    .map { it.start }
+                    .toSet()
+                val narrAsks = curAsks.filter { it.start in narrStarts }
+                narrAsks.isEmpty() || narrAsks.all { it.voice == resolvedNarrator }
+            }
+        }
+        if (!borrowedMatchesNarrator) {
+            ensurePlan(book, language, resolvedNarrator) ?: return@withContext null
+        }
         withContext(Dispatchers.IO) { sentence(book, section, sentence) }?.let { return@withContext it }
-        val plan = ensurePlan(book, language, narratorFallback) ?: return@withContext null
+        if (borrowedMatchesNarrator) {
+            ensurePlan(book, language, resolvedNarrator) ?: return@withContext null
+        }
         SoundLibrary.register(library.core, library.dataDir)
         val asks = runCatching {
             library.core.dramaLiveSentenceAsks(book, section.toUInt(), sentence.toUInt())

@@ -1,7 +1,7 @@
-// 气泡模式: a book's dialogue as a chat. Narration
-// stays a paragraph; each quote becomes a bubble with whoever says it. Short narration that only
-// says who speaks (“宝钗因笑道：”) goes into the line above the bubble instead of a paragraph of
-// its own. A line nobody is sure of is a grey bubble with “?”.
+// 气泡模式: a book's dialogue as a chat. Narration stays a paragraph; each quote with a confirmed
+// speaker becomes a bubble with whoever says it. Lines whose speaker isn't confirmed stay as clean
+// normal prose (never rendered as `? 谁说的？` prompts). Short narration that only says who speaks
+// (“宝钗因笑道：”) goes into the line above the bubble instead of a paragraph of its own.
 //
 // Only the boxes change: every sentence keeps its `.s[data-s]` fragments, split where a quote
 // starts or ends (the contract allows a sentence in several fragments), so the ink line, marks,
@@ -138,59 +138,79 @@ function el(tag: string, cls: string): HTMLElement {
   return e;
 }
 
-const uiEn = (): boolean => document.documentElement.getAttribute('data-yy-ui') === 'en';
+/** Visually hide redundant outer quote marks or trailing tag colons while keeping textContent intact. */
+function hideChar(t: Text, index: number): void {
+  if (index < 0 || index >= t.data.length) return;
+  const r = document.createRange();
+  r.setStart(t, index);
+  r.setEnd(t, index + 1);
+  const span = document.createElement('span');
+  span.className = 'yy-bq-q';
+  r.surroundContents(span);
+}
 
-/** 谁说的？ 黛玉 · 宝钗 · 别人…: the likeliest two, a tap each, and the rest behind 别人…. */
-function choices(l: BubbleLine, nm: HTMLElement): void {
-  const list = l.choices || [];
-  if (l.who || !list.length) return;
-  for (const name of list) {
-    const c = el('button', 'yy-bq-ch') as HTMLButtonElement;
-    c.type = 'button';
-    c.setAttribute('data-yy-who', name);
-    c.textContent = name;
-    nm.appendChild(c);
+function hideOuterQuotes(f: DocumentFragment): void {
+  const nodes: Text[] = [];
+  const w = document.createTreeWalker(f, NodeFilter.SHOW_TEXT, null);
+  for (let t = w.nextNode() as Text | null; t; t = w.nextNode() as Text | null) {
+    if (t.data.length) nodes.push(t);
   }
-  const more = el('button', 'yy-bq-ch yy-bq-ch-more') as HTMLButtonElement;
-  more.type = 'button';
-  more.setAttribute('data-yy-who', '');
-  more.textContent = uiEn() ? 'Others…' : '别人…';
-  nm.appendChild(more);
+  if (!nodes.length) return;
+  const first = nodes.find((t) => t.data.trim().length > 0);
+  const last = [...nodes].reverse().find((t) => t.data.trim().length > 0);
+  if (!first || !last) return;
+  const openIdx = first.data.search(/\S/);
+  const closeMatch = last.data.match(/(\S)\s*$/);
+  const closeIdx = closeMatch ? last.data.lastIndexOf(closeMatch[1]) : -1;
+  const hasOpen = openIdx >= 0 && OPEN.includes(first.data.charAt(openIdx));
+  const hasClose = closeIdx >= 0 && CLOSE.includes(last.data.charAt(closeIdx));
+  // Hide closing quote first so offsets in the same Text node remain valid for opening quote.
+  if (hasClose && !(first === last && closeIdx === openIdx)) hideChar(last, closeIdx);
+  if (hasOpen) hideChar(first, openIdx);
+}
+
+function hideTagDelimiter(f: DocumentFragment): void {
+  const nodes: Text[] = [];
+  const w = document.createTreeWalker(f, NodeFilter.SHOW_TEXT, null);
+  for (let t = w.nextNode() as Text | null; t; t = w.nextNode() as Text | null) {
+    if (t.data.trim().length) nodes.push(t);
+  }
+  const last = nodes[nodes.length - 1];
+  if (!last) return;
+  const m = last.data.match(/([：:，,])\s*$/);
+  if (!m) return;
+  const idx = last.data.lastIndexOf(m[1]);
+  if (idx >= 0) hideChar(last, idx);
 }
 
 function bubble(l: BubbleLine, index: number, quote: DocumentFragment, tag: DocumentFragment | null, cont: boolean): HTMLElement {
-  const q = el('div', 'yy-bq' + (l.right ? ' yy-bq-r' : '') + (l.who ? '' : ' yy-bq-unk') + (cont ? ' yy-bq-cont' : ''));
+  const who = l.who!;
+  const q = el('div', 'yy-bq' + (l.right ? ' yy-bq-r' : '') + (cont ? ' yy-bq-cont' : ''));
   q.setAttribute('data-yy-line', String(index));
   q.style.setProperty('--yy-c', l.color);
   if (!cont || tag) {
     const nm = el('div', 'yy-bq-nm');
     if (tag) {
-      if (!(l.who && boldName(tag, l.who)) && l.who) {
+      hideTagDelimiter(tag);
+      if (!boldName(tag, who)) {
         const b = el('b', 'yy-bq-who');
-        b.textContent = l.who;
+        b.textContent = who;
         nm.appendChild(b);
       }
       nm.appendChild(tag);
     } else {
       const b = el('b', 'yy-bq-who');
-      b.textContent = l.who || (uiEn() ? 'Who said this?' : '谁说的？');
+      b.textContent = who;
       nm.appendChild(b);
     }
-    choices(l, nm);
-    q.appendChild(nm);
-  } else if (!l.who && (l.choices || []).length) {
-    const nm = el('div', 'yy-bq-nm');
-    const b = el('b', 'yy-bq-who');
-    b.textContent = uiEn() ? 'Who said this?' : '谁说的？';
-    nm.appendChild(b);
-    choices(l, nm);
     q.appendChild(nm);
   }
   const av = el('span', 'yy-bq-av');
   av.setAttribute('aria-hidden', 'true');
-  av.textContent = l.who ? l.avatar : '?';
+  av.textContent = l.avatar;
   const bx = el('div', 'yy-bq-bx');
   const bu = el('div', 'yy-bq-bu');
+  hideOuterQuotes(quote);
   bu.appendChild(quote);
   bx.appendChild(bu);
   q.appendChild(av);
@@ -265,18 +285,28 @@ export function setBubbles(lines: BubbleLine[] | null): boolean {
     reindex();
   }
   if (!lines || !lines.length) return false;
+  // Keep original array indices for passive avatar taps, but only turn confirmed speakers into
+  // bubbles; unattributed quotes stay as clean normal prose.
+  const attributed = lines
+    .map((l, i) => ({ l, i }))
+    .filter(({ l }) => Boolean(l.who && l.who.trim()));
+  if (!attributed.length) return false;
   original = root.innerHTML;
   document.documentElement.setAttribute('data-yy-bubbles', '1');
   // Lines by the paragraph they're in; a quote running out of its paragraph stays as text.
   const byBlock = new Map<HTMLElement, { l: BubbleLine; i: number }[]>();
-  const indexed = lines.map((l, i) => ({ l, i }));
-  for (const { l, i } of indexed.sort((x, y) => x.l.first - y.l.first || x.l.start - y.l.start)) {
+  for (const { l, i } of attributed.sort((x, y) => x.l.first - y.l.first || x.l.start - y.l.start)) {
     const q = quoteRange(l);
     if (!q) continue;
     const b = blockOf(q.a.node);
     if (!b || b !== blockOf(q.b.node)) continue;
     if (!byBlock.has(b)) byBlock.set(b, []);
     byBlock.get(b)!.push({ l, i });
+  }
+  if (!byBlock.size) {
+    original = null;
+    document.documentElement.removeAttribute('data-yy-bubbles');
+    return false;
   }
   // Every range is worked out before any paragraph is replaced: replacing one leaves the
   // others' text nodes where they were.

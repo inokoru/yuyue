@@ -2,10 +2,10 @@
 import SwiftUI
 import YuyueCore
 
-/// Where the phone's 书架 is: 书 · 进度 · 播客 · 有声, or one of your 合集. The title names it;
+/// Where the phone's 书架 is: 书 · 进度 · 播客 · 有声 · 笔记, or one of your 合集. The title names it;
 /// a tap on the title (or, scrolled, on the chip at the top left) opens the panel to go to another.
 enum ShelfPlace: Hashable {
-    case books, progress, podcasts, audio
+    case books, progress, podcasts, audio, notes
     case collection(String)
 
     /// The shelf's four, in the panel's order (matching Mac's 书 · 进度 · 播客 · 有声).
@@ -111,11 +111,16 @@ final class PhoneChrome {
     /// Incremented when tapping an already-selected tab to pop its stack back to root.
     var notesPop = 0
     var mePop = 0
-    /// Where the shelf is, for the first tab to wear: its name, and its symbol (nil: 书架's own).
+    /// Where the shelf is, for the 书架 tab to wear: its name, and its symbol (nil: 书架's own).
     var shelfName: String?
     var shelfSymbol: String?
-    /// Whether the shelf tab is currently showing 播客 (for semantic `$screen` tracking).
+    /// Horizontal alignment of the pop-up PlaceStack above the 书架 tab wherever the user placed it.
+    var shelfStackAlignment: SwiftUI.Alignment = .bottomLeading
+    /// Whether 书架 currently has any folded sub-places or collections to switch between.
+    var shelfHasSwitcher = true
+    /// Whether the shelf tab is currently showing 播客 / 笔记 (for semantic `$screen` tracking).
     var onPodcasts = false
+    var onNotes = false
 
     static var motion: Animation? { YYMotion.reduce ? nil : .spring(duration: 0.26, bounce: 0) }
     static var dismissMotion: Animation? { YYMotion.reduce ? nil : YYMotion.exit }
@@ -139,8 +144,7 @@ struct PlaceMark: View {
 
     private var line: some View {
         VStack(spacing: size * 0.08) {
-            Image(systemName: symbol)
-                .font(.system(size: size * 0.5, weight: .light))
+            glyph(sfSize: size * 0.5, assetSize: size * 0.62)
             Capsule().frame(width: size * 0.78, height: 1)
         }
         .foregroundStyle(Self.ink)
@@ -154,8 +158,7 @@ struct PlaceMark: View {
             shape.fill(Self.paper)
             shape.strokeBorder(Self.ink.opacity(0.07), lineWidth: 0.5)
             VStack(spacing: size * 0.055) {
-                Image(systemName: symbol)
-                    .font(.system(size: size * 0.34, weight: .light))
+                glyph(sfSize: size * 0.34, assetSize: size * 0.42)
                 VStack(spacing: size * 0.05) {
                     Capsule().frame(width: size * 0.6, height: max(0.7, size * 0.015))
                     Capsule().frame(width: size * 0.38, height: max(0.7, size * 0.015)).opacity(0.75)
@@ -166,6 +169,19 @@ struct PlaceMark: View {
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
+    }
+
+    @ViewBuilder private func glyph(sfSize: CGFloat, assetSize: CGFloat) -> some View {
+        if symbol.hasPrefix("asset.") {
+            Image(String(symbol.dropFirst(6)))
+                .resizable()
+                .renderingMode(.template)
+                .scaledToFit()
+                .frame(width: assetSize, height: assetSize)
+        } else {
+            Image(systemName: symbol)
+                .font(.system(size: sfSize, weight: .light))
+        }
     }
 }
 

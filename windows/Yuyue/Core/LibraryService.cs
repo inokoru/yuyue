@@ -297,6 +297,7 @@ public sealed class LibraryService : IDisposable
         {
             Prefs.SetVoiceForLanguage(langKey, vid);
             SavePrefs();
+            Yuyue.Speech.DramaSynthService.InvalidateAllCasts();
         });
         LiveVoice = new LiveVoiceModel(Core, DataDir);
         AudiobookWork = new AudiobookWork(Core, DataDir, () => Analytics.TrackAudioFeatureUsed("audiobook_align"));

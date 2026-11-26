@@ -815,14 +815,42 @@ html:not([data-yy-raw]) body #yy-content .yy-bq-nm * { font-family: inherit !imp
 #yy-content .yy-bq-nm ~ .yy-bq-bx { grid-row: 2; }
 #yy-content .yy-bq-bu {
   font-family: var(--yy-font-eff) !important;
-  padding: .4em .8em;
-  border-radius: .2em 1em 1em 1em;
-  background: color-mix(in srgb, var(--yy-c) 13%, var(--yy-p-bg));
+  padding: .46em .86em;
+  border-radius: .24em .96em .96em .96em;
+  background: color-mix(in srgb, var(--yy-c) 12%, var(--yy-p-bg));
+  box-shadow: inset 0 0 0 .5px color-mix(in srgb, var(--yy-c) 20%, transparent);
   line-height: 1.75;
   text-align: left;
+  transition: background-color .2s ease, box-shadow .2s ease;
 }
 #yy-content .yy-bq-bu:lang(en) { font-family: var(--yy-font-en, var(--yy-lt-font)) !important; }
-#yy-content .yy-bq-r .yy-bq-bu { border-radius: 1em .2em 1em 1em; }
+#yy-content .yy-bq-r .yy-bq-bu { border-radius: .96em .24em .96em .96em; }
+/* Visually fold redundant outer quote marks & tag colons inside bubbles while keeping DOM text exact. */
+#yy-content .yy-bq .yy-bq-q {
+  font-size: 0 !important;
+  line-height: 0 !important;
+  opacity: 0;
+  display: inline-block;
+  width: 0;
+  overflow: hidden;
+  vertical-align: baseline;
+}
+/* Active speaking bubble glow synced with the reader's ink line. */
+#yy-content .yy-bq:has(.s.yy-ink) .yy-bq-bu {
+  background: color-mix(in srgb, var(--yy-c) 19%, var(--yy-p-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--yy-c) 46%, transparent),
+              0 2px 10px color-mix(in srgb, var(--yy-c) 12%, transparent);
+}
+#yy-content .yy-bq:has(.s.yy-ink) .yy-bq-av {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--yy-c) 42%, transparent);
+}
+html[data-yy-eink="1"] #yy-content .yy-bq:has(.s.yy-ink) .yy-bq-bu {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px #000000;
+}
+html[data-yy-eink="1"] #yy-content .yy-bq:has(.s.yy-ink) .yy-bq-av {
+  box-shadow: 0 0 0 1.5px #000000;
+}
 #yy-content .yy-bq-unk .yy-bq-av { background: color-mix(in srgb, var(--yy-p-ink) 7%, var(--yy-p-bg)); color: var(--yy-p-ink-2); }
 #yy-content .yy-bq-unk .yy-bq-nm b { color: var(--yy-p-ink-2); font-weight: 500; margin-right: 0; }
 #yy-content .yy-bq-unk .yy-bq-bu { background: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--yy-p-ink) 22%, transparent); }

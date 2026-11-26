@@ -69,7 +69,7 @@ import java.time.temporal.TemporalAdjusters
 
 /** A page under 我的: the Mac's settings pages, then what only the phone has. */
 enum class MePage {
-    General, Appearance, Reading, Foreign, Listening, VoiceSource, VoiceSourceSettings, Companion, CompanionService, CompanionModels,
+    General, Appearance, BottomNav, Reading, Foreign, Listening, VoiceSource, VoiceSourceSettings, Companion, CompanionService, CompanionModels,
     Sync, NoteExport, NoteTarget, Storage, Snapshot, History,
     Feedback, Update, EInk, Sources, Stats, About, Privacy, Licences, Wifi,
 }
@@ -111,10 +111,11 @@ fun MeScreen(library: Library, pop: Int = 0, isForeground: Boolean = true) {
     when (route?.page) {
         null -> Main(library, push)
         MePage.Sources -> app.yuyue.shelf.SourcesHome(library, back)
-        else -> SubPage(route.title, back, action = gear(route) { open(MePage.VoiceSourceSettings, route.arg ?: "") }) {
+        else -> SubPage(route.title, back, action = subPageAction(route) { open(MePage.VoiceSourceSettings, route.arg ?: "") }) {
             when (route.page) {
                 MePage.General -> GeneralPage(library, push)
-                MePage.Appearance -> AppearancePage()
+                MePage.Appearance -> AppearancePage(push)
+                MePage.BottomNav -> app.yuyue.design.BottomNavPage(collectionCount = library.collections.size)
                 MePage.Reading -> ReadingPage(library, push)
                 MePage.Foreign -> ForeignPage(library.core)
                 MePage.Listening -> ListeningPage { open(MePage.VoiceSource, it) }
@@ -144,14 +145,41 @@ fun MeScreen(library: Library, pop: Int = 0, isForeground: Boolean = true) {
     }
 }
 
-/** ⚙ on a voice source's page that is connected: its key and connection, or this phone's voices. */
-private fun gear(route: MeRoute, open: () -> Unit): (@Composable () -> Unit)? {
+/** Top-right action on sub-pages: ⚙ on connected voice sources, or 恢复默认 on 底部导航. */
+private fun subPageAction(route: MeRoute, openVoiceSettings: () -> Unit): (@Composable () -> Unit)? {
+    if (route.page == MePage.BottomNav) {
+        return {
+            var rawTabs by rememberPref(app.yuyue.design.BottomNav.KEY, app.yuyue.design.BottomNav.DEFAULT_RAW)
+            var rawHidden by rememberPref(app.yuyue.design.BottomNav.SHELF_HIDDEN_KEY, app.yuyue.design.BottomNav.DEFAULT_HIDDEN_SHELF_RAW)
+            val isDefault = remember(rawTabs, rawHidden) {
+                app.yuyue.design.BottomNav.isDefault(app.yuyue.design.BottomNav.config(rawTabs, rawHidden))
+            }
+            Text(
+                t("恢复默认"),
+                style = YY.font(11.5f, FontWeight.Medium),
+                color = YY.tint.accent.copy(alpha = if (isDefault) 0.28f else 1f),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .then(
+                        if (!isDefault) {
+                            Modifier.clickable {
+                                rawTabs = app.yuyue.design.BottomNav.DEFAULT_RAW
+                                rawHidden = app.yuyue.design.BottomNav.DEFAULT_HIDDEN_SHELF_RAW
+                            }
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+            )
+        }
+    }
     if (route.page != MePage.VoiceSource) return null
     val p = app.yuyue.speech.CloudVoice.Provider.entries.firstOrNull { it.key == route.arg }
     if (p != null && !p.isSetUp) return null
     return {
         val label = t("%@ 的设置", voiceSourceTitle(route.arg ?: ""))
-        Box(Modifier.size(44.dp).clip(CircleShape).clickable(onClickLabel = label, onClick = open), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(44.dp).clip(CircleShape).clickable(onClickLabel = label, onClick = openVoiceSettings), contentAlignment = Alignment.Center) {
             Icon(Icons.settings, label, tint = YY.c.t2, modifier = Modifier.size(22.dp))
         }
     }
@@ -171,6 +199,7 @@ internal val MePage.title: String
     get() = when (this) {
         MePage.General -> t("通用")
         MePage.Appearance -> t("外观")
+        MePage.BottomNav -> t("底部导航")
         MePage.Reading -> t("阅读")
         MePage.Foreign -> t("外文")
         MePage.Listening, MePage.VoiceSource, MePage.VoiceSourceSettings -> t("朗读")
@@ -196,6 +225,7 @@ internal val MePage.icon: ImageVector
     get() = when (this) {
         MePage.General -> Icons.general
         MePage.Appearance -> Icons.appearance
+        MePage.BottomNav -> Icons.bottomNav
         MePage.Reading -> Icons.book
         MePage.EInk -> Icons.eink
         MePage.Foreign -> Icons.globe
@@ -443,7 +473,7 @@ private fun Bars(days: List<DaySums>, modifier: Modifier) {
 // MARK: 外观
 
 @Composable
-internal fun AppearancePage() {
+internal fun AppearancePage(push: (MePage) -> Unit = {}) {
     var mode by rememberPref(Appearance.KEY, Appearance.SYSTEM)
     var tintID by rememberPref("appearance.tint", YYTints.Default.id)
     var coverSize by rememberPref(Shelf.COVER_SIZE, 100f)
@@ -451,6 +481,7 @@ internal fun AppearancePage() {
     var viewStyleRaw by rememberPref(app.yuyue.shelf.ShelfStylePrefs.VIEW_KEY, app.yuyue.shelf.ShelfViewStyle.GRID.key)
     var woodLedge by rememberPref(app.yuyue.shelf.ShelfStylePrefs.WOOD_KEY, false)
     var liquidGlass by rememberPref(app.yuyue.design.LiquidGlass.KEY, false)
+    val bottomTabsRaw by rememberPref(app.yuyue.design.BottomNav.KEY, app.yuyue.design.BottomNav.DEFAULT_RAW)
     val eink by rememberPref(app.yuyue.reader.EInk.KEY, false)
     YYPage {
         SettingsLead(t("应用界面的外观与配色；书页纸色在「阅读」或 Aa 中设置"))
@@ -522,9 +553,17 @@ internal fun AppearancePage() {
             }
             row { DetailSwitch(t("浅木层板"), t("为书架每排加上浅木层板与柔和投影"), woodLedge) { woodLedge = it } }
         }
-        if (app.yuyue.design.LiquidGlass.supported) {
-            Spacer(Modifier.height(YY.s(12)))
-            YYGroup {
+        Spacer(Modifier.height(YY.s(12)))
+        YYGroup {
+            row {
+                YYRow(
+                    title = t("底部导航"),
+                    icon = Icons.bottomNav,
+                    value = app.yuyue.design.BottomNav.summary(bottomTabsRaw),
+                    chevron = true,
+                ) { push(MePage.BottomNav) }
+            }
+            if (app.yuyue.design.LiquidGlass.supported) {
                 row {
                     DetailSwitch(
                         t("液态玻璃效果"),
@@ -652,5 +691,5 @@ private val PRIVACY: String
 
 private val LICENCES: String
     get() = t("语阅用到了这些开源项目，感谢它们的作者：") + "\n\n" +
-        "UniFFI (MPL-2.0) · rusqlite / SQLite (MIT / Public Domain) · serde, serde_json, regex, encoding_rs, chardetng, zip, html5ever, roxmltree, ICU4X, blake3, percent-encoding, thiserror, aho-corasick, base64, flate2, getrandom, lewton, markup5ever_rcdom, ripemd (MIT / Apache-2.0) · rars, rust-lzo1x (MIT) · foliate-js (MIT) · zhconv (GPL-2.0-or-later) · OpenCC dictionaries (Apache-2.0) · ECDICT (MIT) · pinyin, pypinyin (MIT) · ONNX Runtime (MIT) · OkHttp, JNA (Apache-2.0) · AndroidX, Jetpack Compose, Media3, kotlinx.coroutines, Haze (Apache-2.0) · Sparkle (MIT) · PdfPig (Apache-2.0) · Simple Icons (CC0 1.0) · Kokoro-82M-v1.1-zh (Apache-2.0) · ZipVoice weights (CC-BY-NC 4.0) · Vocos (MIT) · voices-1, sounds-1 (CC0 1.0) · Meta MMS (CC-BY-NC 4.0) · 3D-Speaker CAM++ (Apache-2.0) · SenseVoice (FunASR Model License)" + "\n\n" +
+        "UniFFI (MPL-2.0) · rusqlite / SQLite (MIT / Public Domain) · serde, serde_json, regex, encoding_rs, chardetng, zip, html5ever, roxmltree, ICU4X, blake3, percent-encoding, thiserror, aho-corasick, base64, flate2, getrandom, lewton, markup5ever_rcdom, ripemd (MIT / Apache-2.0) · rars, rust-lzo1x (MIT) · foliate-js (MIT) · zhconv (GPL-2.0-or-later) · OpenCC dictionaries (Apache-2.0) · ECDICT (MIT) · pinyin, pypinyin (MIT) · ONNX Runtime (MIT) · OkHttp, JNA (Apache-2.0) · AndroidX, Jetpack Compose, Media3, kotlinx.coroutines, Haze, AndroidLiquidGlass / Backdrop (Apache-2.0) · Sparkle (MIT) · PdfPig (Apache-2.0) · Simple Icons (CC0 1.0) · Kokoro-82M-v1.1-zh (Apache-2.0) · ZipVoice weights (CC-BY-NC 4.0) · Vocos (MIT) · voices-1, sounds-1 (CC0 1.0) · Meta MMS (CC-BY-NC 4.0) · 3D-Speaker CAM++ (Apache-2.0) · SenseVoice (FunASR Model License)" + "\n\n" +
         t("完整的许可文本随源代码一起发布。")

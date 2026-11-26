@@ -227,6 +227,7 @@ class SystemVoice private constructor(
         private var previewOnDone: (() -> Unit)? = null
         private var pendingTtsPreview: PendingPreview? = null
         private var previewTrack: AudioTrack? = null
+        private var previewWriter: Thread? = null
         private var previewEndWatch: Runnable? = null
         private val lock = Mutex()
         private lateinit var cache: File
@@ -539,6 +540,8 @@ class SystemVoice private constructor(
 
         private fun finishPreview(token: Long) {
             val done: (() -> Unit)?
+            val trackToRelease: AudioTrack?
+            val writerToStop: Thread?
             synchronized(previewLock) {
                 if (previewToken != token) return
                 previewToken++
@@ -547,12 +550,17 @@ class SystemVoice private constructor(
                 previewEndWatch = null
                 done = previewOnDone
                 previewOnDone = null
-                previewTrack?.runCatching {
-                    setPlaybackPositionUpdateListener(null)
-                    stop()
-                    release()
-                }
+                writerToStop = previewWriter
+                previewWriter = null
+                trackToRelease = previewTrack
                 previewTrack = null
+            }
+            writerToStop?.interrupt()
+            trackToRelease?.runCatching {
+                pause()
+                flush()
+                stop()
+                release()
             }
             done?.let { cb ->
                 if (Looper.myLooper() == Looper.getMainLooper()) cb()
@@ -563,6 +571,8 @@ class SystemVoice private constructor(
         /** Stops what 试听 is saying without touching the synthesis TTS engine used by playback. */
         fun stopPreview() {
             val done: (() -> Unit)?
+            val trackToRelease: AudioTrack?
+            val writerToStop: Thread?
             synchronized(previewLock) {
                 previewToken++
                 pendingTtsPreview = null
@@ -571,12 +581,17 @@ class SystemVoice private constructor(
                 done = previewOnDone
                 previewOnDone = null
                 runCatching { previewTts?.stop() }
-                previewTrack?.runCatching {
-                    setPlaybackPositionUpdateListener(null)
-                    stop()
-                    release()
-                }
+                writerToStop = previewWriter
+                previewWriter = null
+                trackToRelease = previewTrack
                 previewTrack = null
+            }
+            writerToStop?.interrupt()
+            trackToRelease?.runCatching {
+                pause()
+                flush()
+                stop()
+                release()
             }
             done?.let { cb ->
                 if (Looper.myLooper() == Looper.getMainLooper()) cb()
@@ -584,56 +599,71 @@ class SystemVoice private constructor(
             }
         }
 
-        /** Plays a cloud or rendered clip once for 试听. */
+        /** Plays a cloud or rendered clip once for 试听 via `MODE_STREAM` (avoids OEM `MODE_STATIC` buffer failures). */
         fun preview(s: Speech, onComplete: (() -> Unit)? = null): Boolean {
             stopPreview()
             if (s.samples.isEmpty() || s.rate <= 0) return false
-            val bytes = s.samples.size * 2
+            val minBuf = AudioTrack.getMinBufferSize(s.rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+            if (minBuf <= 0) return false
+            val halfSecEven = (s.rate + 1) and 1.inv() // 16-bit mono = 2 bytes/frame; frame-aligned
             val track = runCatching {
                 AudioTrack.Builder()
                     .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
                     .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(s.rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-                    .setTransferMode(AudioTrack.MODE_STATIC)
-                    .setBufferSizeInBytes(maxOf(2, bytes))
+                    .setTransferMode(AudioTrack.MODE_STREAM)
+                    .setBufferSizeInBytes(maxOf(minBuf, halfSecEven))
                     .build()
             }.getOrNull() ?: return false
+            if (track.state != AudioTrack.STATE_INITIALIZED) {
+                runCatching { track.release() }
+                return false
+            }
+            val durationMs = maxOf(150L, (s.samples.size.toLong() * 1000L) / s.rate)
             val token: Long
             synchronized(previewLock) {
                 token = previewToken
+                val endWatch = Runnable { finishPreview(token) }
                 previewOnDone = onComplete
                 previewTrack = track
+                previewEndWatch = endWatch
+                previewMain.postDelayed(endWatch, durationMs + 1_500L)
             }
-            val durationMs = maxOf(100L, (s.samples.size.toLong() * 1000L) / s.rate)
-            val endWatch = Runnable { finishPreview(token) }
             val started = runCatching {
-                track.write(s.samples, 0, s.samples.size)
-                track.setNotificationMarkerPosition(s.samples.size)
-                track.setPlaybackPositionUpdateListener(
-                    object : AudioTrack.OnPlaybackPositionUpdateListener {
-                        override fun onMarkerReached(t: AudioTrack?) = finishPreview(token)
-                        override fun onPeriodicNotification(t: AudioTrack?) {}
-                    },
-                    previewMain,
-                )
+                track.play()
+                val writer = Thread({
+                    try {
+                        val samples = s.samples
+                        var off = 0
+                        while (off < samples.size && !Thread.currentThread().isInterrupted) {
+                            val chunk = minOf(4096, samples.size - off)
+                            val n = track.write(samples, off, chunk)
+                            if (n < 0) break
+                            off += n
+                        }
+                        if (!Thread.currentThread().isInterrupted) {
+                            val deadline = System.currentTimeMillis() + durationMs + 400L
+                            while (!Thread.currentThread().isInterrupted && System.currentTimeMillis() < deadline) {
+                                val head = runCatching { track.playbackHeadPosition.toLong() and 0xffffffffL }.getOrDefault(samples.size.toLong())
+                                if (head >= samples.size) break
+                                Thread.sleep(25)
+                            }
+                        }
+                    } catch (_: InterruptedException) {
+                    } catch (_: Throwable) {
+                    } finally {
+                        finishPreview(token)
+                    }
+                }, "yuyue-preview-audio").apply { isDaemon = true }
                 synchronized(previewLock) {
                     if (previewToken == token) {
-                        previewEndWatch = endWatch
-                        previewMain.postDelayed(endWatch, durationMs + 350L)
+                        previewWriter = writer
+                        writer.start()
                     }
                 }
-                track.play()
                 true
             }.getOrDefault(false)
             if (!started) {
-                synchronized(previewLock) {
-                    if (previewToken == token) {
-                        previewEndWatch?.let { previewMain.removeCallbacks(it) }
-                        previewEndWatch = null
-                        previewTrack = null
-                        previewOnDone = null
-                    }
-                }
-                runCatching { track.setPlaybackPositionUpdateListener(null); track.release() }
+                finishPreview(token)
                 return false
             }
             return true
@@ -711,10 +741,16 @@ class SystemVoice private constructor(
                             val req = pending ?: return@TextToSpeech
                             if (ok && engineToUse != null) {
                                 if (!speakPreview(engineToUse, req.token, req.voice, req.language, req.text)) {
-                                    finishPreview(req.token)
+                                    val fallback = if (readyOk == true) tts else null
+                                    if (fallback == null || !speakPreview(fallback, req.token, req.voice, req.language, req.text)) {
+                                        finishPreview(req.token)
+                                    }
                                 }
                             } else {
-                                finishPreview(req.token)
+                                val fallback = if (readyOk == true) tts else null
+                                if (fallback == null || !speakPreview(fallback, req.token, req.voice, req.language, req.text)) {
+                                    finishPreview(req.token)
+                                }
                             }
                         }
                         previewTts = created

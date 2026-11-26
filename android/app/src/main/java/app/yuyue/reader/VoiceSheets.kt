@@ -60,6 +60,7 @@ import app.yuyue.speech.CloudVoice
 import app.yuyue.speech.KokoroModel
 import app.yuyue.speech.KokoroVoice
 import app.yuyue.speech.LiveVoiceModel
+import app.yuyue.speech.Player
 import app.yuyue.speech.SystemVoice
 import app.yuyue.speech.Voices
 import app.yuyue.t
@@ -310,7 +311,7 @@ fun VoicePickerSheet(
                             narratorVoice = null,
                             roles = emptyList(),
                             selectedId = selectedId,
-                            sampleText = nextBookSentence ?: defaultSampleLine(language),
+                            sampleText = previewSampleLine(nextBookSentence, language),
                             refreshKey = refreshTick,
                             readyVoiceId = readyVoiceId,
                             onPickFollowNarrator = null,
@@ -383,7 +384,7 @@ fun VoicePickerSheet(
                         dataDir = dataDir,
                         cardId = r.cardId,
                         language = language,
-                        sampleLine = nextBookSentence ?: defaultSampleLine(language),
+                        sampleLine = previewSampleLine(nextBookSentence, language),
                         onBack = {
                             refreshTick++
                             route = PickerSubRoute.List
@@ -391,7 +392,7 @@ fun VoicePickerSheet(
                         onDeleted = { deletedId ->
                             for (lang in listOf("zh", "zh-Hans", "zh-Hant", "zh-CN", "zh-TW", "en", "en-US", "en-GB", language)) {
                                 if (Prefs.string("player.voice.$lang") == deletedId) {
-                                    Prefs.set("player.voice.$lang", "")
+                                    Player.saveVoicePreference(lang, "")
                                 }
                             }
                             refreshTick++
@@ -460,7 +461,7 @@ fun VoiceGroupsContent(
 
     DisposableEffect(Unit) { onDispose { stopLocalPreview() } }
 
-    LaunchedEffect(language, bookID, refreshKey, kokoroState, liveState) {
+    LaunchedEffect(language, bookID, refreshKey, kokoroState::class, liveState::class) {
         SystemVoice.Engine.init(context)
         ClonedVoices.init(context)
         withContext(Dispatchers.IO) {
@@ -492,6 +493,7 @@ fun VoiceGroupsContent(
             return
         }
         stopLocalPreview()
+        app.yuyue.speech.Session.pauseActivePlayback()
         previewingId = key
         if (v is SystemVoice) {
             previewLoading = false
@@ -1041,8 +1043,22 @@ private fun cardSummaryLine(card: VoiceCard): String {
 
 private fun defaultSampleLine(language: String): String =
     if (language.lowercase().startsWith("en")) {
-        "It was a quiet morning, and the sunlight fell softly across the page."
+        "It was a quiet morning, and sunlight fell softly across the page."
     } else {
-        "“我买几个橘子去。你就在此地，不要走动。”"
+        "你好，我来给你读这本书。"
     }
+
+/** Keeps preview text to a crisp single clause so on-device voice previews start quickly. */
+internal fun previewSampleLine(raw: String?, language: String): String {
+    val cleaned = raw?.trim().orEmpty()
+    if (cleaned.isEmpty()) return defaultSampleLine(language)
+    val isEn = language.lowercase().startsWith("en")
+    val maxLen = if (isEn) 72 else 24
+    if (cleaned.length <= maxLen) return cleaned
+    val minCut = if (isEn) 24 else 8
+    val breaks = charArrayOf('。', '！', '？', '；', '，', '.', '!', '?', ';', ',')
+    val cut = cleaned.indexOfAny(breaks, startIndex = minCut)
+    if (cut in minCut..maxLen) return cleaned.substring(0, cut + 1)
+    return cleaned.take(maxLen)
+}
 

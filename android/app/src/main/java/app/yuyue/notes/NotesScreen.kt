@@ -147,7 +147,11 @@ private val NotesIcon get() = app.yuyue.design.TabIcons.notes
  * A tap goes back to the page; a long press offers the rest; 选择 takes several at once.
  */
 @Composable
-fun NotesScreen(library: Library, pop: Int = 0) {
+fun NotesScreen(
+    library: Library,
+    pop: Int = 0,
+    titleContent: (@Composable () -> Unit)? = null,
+) {
     var kind by rememberPref("phone.notes.kind", "all")
     var byBook by rememberPref("notes.byBook", false)
     var opened by remember { mutableStateOf<String?>(null) }
@@ -194,7 +198,11 @@ fun NotesScreen(library: Library, pop: Int = 0) {
         } else Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
             // The title is the page's own, as on the shelf: the mark and 笔记 in 宋体, 导出 and 选择 beside it.
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                app.yuyue.shelf.PageTitle(NotesIcon, t("笔记"), Modifier.weight(1f))
+                if (titleContent != null && !selecting) {
+                    Box(Modifier.weight(1f)) { titleContent() }
+                } else {
+                    app.yuyue.shelf.PageTitle(NotesIcon, t("笔记"), Modifier.weight(1f))
+                }
                 when {
                     // Picking: 完成 where the buttons were.
                     selecting -> Box(

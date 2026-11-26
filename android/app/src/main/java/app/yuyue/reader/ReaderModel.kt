@@ -63,7 +63,6 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         playerTucked = false
         barsAway = false
     }
-    private var chromeComesBack = false
     var tocShown by mutableStateOf(false)
     var settingsShown by mutableStateOf(false)
     var section by mutableIntStateOf(0)
@@ -1186,11 +1185,7 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         if (searchShown || away == barsAway) return
         barsAway = away
         if (away) {
-            chromeComesBack = chromeShown && !immersive
             chromeShown = false
-        } else {
-            if (chromeComesBack) chromeShown = true
-            chromeComesBack = false
         }
     }
 

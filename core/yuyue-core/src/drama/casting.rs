@@ -134,7 +134,11 @@ pub fn cast(chars: &[DramaCharacter], voices: &[VoiceInfo], together: &Together,
     // zh-Hans are all zh).
     let main = |t: &str| t.split(['-', '_']).next().unwrap_or("").to_lowercase();
     let usable: Vec<VoiceInfo> = voices.iter().filter(|v| v.langs.iter().any(|l| l == "*" || main(l) == main(lang))).cloned().collect();
-    let narr = usable.iter().find(|v| v.id == narrator).or_else(|| usable.iter().find(|v| v.narrator_ok)).or(usable.first()).map(|v| v.id.clone()).unwrap_or_else(|| narrator.to_string());
+    let narr = if !narrator.trim().is_empty() {
+        narrator.to_string()
+    } else {
+        usable.iter().find(|v| v.narrator_ok).or(usable.first()).map(|v| v.id.clone()).unwrap_or_default()
+    };
     // 对话: an unmarked voice, not the narrator's, not anyone's.
     let mut speaking: Vec<&DramaCharacter> = chars.iter().filter(|c| c.lines > 0 && !c.narrator).collect();
     speaking.sort_by(|a, b| b.lines.cmp(&a.lines).then(a.id.cmp(&b.id)));
@@ -403,5 +407,20 @@ mod tests {
         let of = |c: u32| plan.voices.iter().find(|x| x.character == c).map(|x| x.voice.clone());
         assert_eq!(of(1).as_deref(), Some("a"), "{plan:?}");
         assert_eq!(of(2).as_deref(), Some("b"), "{plan:?}");
+    }
+
+    #[test]
+    fn explicit_narrator_outside_pool_is_preserved() {
+        let v = |id: &str, g: CharacterGender| VoiceInfo { id: id.into(), langs: vec!["zh".into()], gender: g, age: CharacterAge::Unknown, tags: vec![], embedding: vec![], acts: true, narrator_ok: true, loudness_lufs: -20.0 };
+        let mut narr_char = DramaCharacter::named(1, "我", true);
+        narr_char.lines = 40;
+        let chars = vec![narr_char, ch(2, CharacterGender::M, 30), ch(3, CharacterGender::F, 20)];
+        let voices = vec![v("card.b.01", CharacterGender::M), v("card.b.02", CharacterGender::F)];
+        let plan = cast(&chars, &voices, &Together::new(), &HashMap::new(), "cloned.user_m", "zh");
+        assert_eq!(plan.narrator, "cloned.user_m");
+        let of = |c: u32| plan.voices.iter().find(|x| x.character == c).map(|x| x.voice.clone());
+        assert_eq!(of(1).as_deref(), Some("cloned.user_m"));
+        assert_eq!(of(2).as_deref(), Some("card.b.01"));
+        assert_eq!(of(3).as_deref(), Some("card.b.02"));
     }
 }

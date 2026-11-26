@@ -55,10 +55,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -68,6 +70,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.IntentCompat
 import app.yuyue.design.pressScale
 import app.yuyue.design.pressable
+import app.yuyue.design.BottomNav
+import app.yuyue.design.BottomTab
 import app.yuyue.design.Icons
 import app.yuyue.design.TabIcons
 import app.yuyue.design.YY
@@ -77,6 +81,9 @@ import app.yuyue.design.rememberPref
 import app.yuyue.library.Library
 import app.yuyue.reader.ReaderScreen
 import app.yuyue.shelf.ShelfScreen
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import dev.chrisbanes.haze.HazeInput
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.blur.HazeBlurStyle
@@ -221,9 +228,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** The tabs: 书架 · 笔记 · 我的, and 搜索. */
-enum class Tab { Shelf, Notes, Me, Search }
-
 /** A page pushed over a tab. */
 sealed interface Page {
     data object Wifi : Page
@@ -233,16 +237,56 @@ sealed interface Page {
     data class Record(val book: String) : Page
 }
 
-/** The phone, as on iPhone: four tabs along the bottom (on Android flush with the bottom edge),
+/** The phone, as on iPhone: customizable tabs along the bottom (2–5 entries, 我的 always kept),
  *  and a book over all of them, full screen. */
 @Composable
 fun Root(library: Library) {
-    var tab by rememberSaveable { mutableStateOf(Tab.Shelf) }
+    val bottomTabsRaw by rememberPref(BottomNav.KEY, BottomNav.DEFAULT_RAW)
+    val shelfHiddenRaw by rememberPref(BottomNav.SHELF_HIDDEN_KEY, BottomNav.DEFAULT_HIDDEN_SHELF_RAW)
+    val navConfig = remember(bottomTabsRaw, shelfHiddenRaw) { BottomNav.config(bottomTabsRaw, shelfHiddenRaw) }
+    val navTabs = navConfig.tabs
+    var tab by rememberSaveable { mutableStateOf(if (BottomTab.Shelf in navTabs) BottomTab.Shelf else navTabs.first()) }
+    LaunchedEffect(navTabs) {
+        if (tab !in navTabs) tab = navTabs.first()
+    }
     var notesPop by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var mePop by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val pages = remember { mutableStateListOf<Page>() }
-    // 书架 tapped again, and where the shelf is, for the first tab to wear.
+    // 书架 tapped again, and where the shelf is, for its tab to wear.
     val chrome = remember { app.yuyue.shelf.ShelfChrome() }
+    val eink by rememberPref("eink.on", false)
+    val liquidChosen by rememberPref(app.yuyue.design.LiquidGlass.KEY, false)
+    val useLiquid = app.yuyue.design.LiquidGlass.supported && liquidChosen && !eink
+    val shelfHasSwitcher = remember(navConfig, library.collections.size) {
+        BottomNav.shelfHasSwitcher(navConfig, hasCollections = library.collections.isNotEmpty())
+    }
+    LaunchedEffect(navConfig, shelfHasSwitcher, useLiquid) {
+        chrome.hasSwitcher = shelfHasSwitcher
+        val detached = useLiquid && BottomNav.usesDetachedSearchOrb(navTabs)
+        val mainTabs = if (detached) navTabs.dropLast(1) else navTabs
+        val shelfIdx = mainTabs.indexOf(BottomTab.Shelf)
+        chrome.stackAlignment = when {
+            shelfIdx <= 0 -> Alignment.BottomStart
+            shelfIdx == mainTabs.lastIndex && !detached -> Alignment.BottomEnd
+            else -> Alignment.BottomCenter
+        }
+        if (shelfIdx < 0 || !shelfHasSwitcher) chrome.switching = false
+        // If the active shelf sub-place was promoted to its own tab or hidden while in Settings, reset tab label immediately.
+        val folded = BottomNav.foldedInShelf(navConfig)
+        val stillFolded = when (chrome.place) {
+            app.yuyue.shelf.ShelfPlace.Books -> true
+            app.yuyue.shelf.ShelfPlace.Progress -> BottomTab.Progress in folded
+            app.yuyue.shelf.ShelfPlace.Podcasts -> BottomTab.Podcasts in folded
+            app.yuyue.shelf.ShelfPlace.Audio -> BottomTab.Audio in folded
+            app.yuyue.shelf.ShelfPlace.Notes -> BottomTab.Notes in folded
+            is app.yuyue.shelf.ShelfPlace.Collection -> true
+        }
+        if (!stillFolded) {
+            chrome.place = app.yuyue.shelf.ShelfPlace.Books
+            chrome.name = null
+            chrome.icon = null
+        }
+    }
     var lastBook by rememberPref("phone.lastBook", "")
     var reopened by rememberSaveable { mutableStateOf(false) }
 
@@ -256,8 +300,12 @@ fun Root(library: Library) {
             if (Prefs.bool(app.yuyue.me.General.REOPEN_LAST, false) && lastBook.isNotEmpty() && library.books.any { it.id == lastBook && it.available }) library.presented = lastBook
         }
     }
-
     val haze = rememberHazeState()
+    val paperBg by rememberUpdatedState(YY.c.bg)
+    val pageBackdrop = rememberLayerBackdrop {
+        drawRect(paperBg)
+        drawContent()
+    }
     val density = LocalDensity.current
     var barHeight by remember { mutableStateOf(0.dp) }
     val presentedBook = library.presented?.let { id -> library.books.firstOrNull { it.id == id } }
@@ -267,10 +315,16 @@ fun Root(library: Library) {
         presentedBook != null -> "Reader"
         pages.lastOrNull() == Page.Feedback -> "Feedback"
         pages.isEmpty() -> when (tab) {
-            Tab.Shelf -> if (chrome.place == app.yuyue.shelf.ShelfPlace.Podcasts) "Podcasts" else "Shelf"
-            Tab.Notes -> "Notes"
-            Tab.Me -> null // Tracked inside MeScreen based on its route stack.
-            Tab.Search -> null
+            BottomTab.Shelf -> when (chrome.place) {
+                app.yuyue.shelf.ShelfPlace.Podcasts -> "Podcasts"
+                app.yuyue.shelf.ShelfPlace.Notes -> "Notes"
+                else -> "Shelf"
+            }
+            BottomTab.Podcasts -> "Podcasts"
+            BottomTab.Audio, BottomTab.Progress -> "Shelf"
+            BottomTab.Notes -> "Notes"
+            BottomTab.Me -> null // Tracked inside MeScreen based on its route stack.
+            BottomTab.Search -> null
         }
         else -> null
     }
@@ -278,9 +332,14 @@ fun Root(library: Library) {
         activeScreen?.let { app.yuyue.analytics.AirTraffic.screen(it) }
     }
     Box(Modifier.fillMaxSize().background(YY.c.bg)) {
-        // The page runs under the tab bar (and 播放条), which blurs what scrolls beneath it.
+        // The page runs under the tab bar (and 播放条), which blurs/refracts what scrolls beneath it.
+        val backdropCaptureMod = when {
+            useLiquid -> Modifier.layerBackdrop(pageBackdrop)
+            !eink -> Modifier.hazeSource(haze)
+            else -> Modifier
+        }
         CompositionLocalProvider(LocalTabBarHeight provides barHeight) {
-            Box(Modifier.fillMaxSize().hazeSource(haze)) {
+            Box(Modifier.fillMaxSize().then(backdropCaptureMod)) {
                 // A page going deeper comes a short way from the right; back, from the left. Switching
                 // tabs snaps immediately with zero transition even when clearing pushed sub-pages.
                 val reducePages = app.yuyue.design.YYMotion.isReduceMotion()
@@ -298,14 +357,17 @@ fun Root(library: Library) {
                 when (page) {
                     // Instant switch on core high-frequency bottom navigation.
                     null -> when (currentTab) {
-                        Tab.Shelf -> ShelfScreen(library, chrome, openWifi = { pages += Page.Wifi }, openRemote = { pages += Page.Remote }, openWatched = { pages += Page.Watched }, openFeedback = { pages += Page.Feedback }, openRecord = { pages += Page.Record(it) })
-                        Tab.Notes -> app.yuyue.notes.NotesScreen(library, notesPop)
-                        Tab.Me -> app.yuyue.me.MeScreen(
+                        BottomTab.Shelf -> ShelfScreen(library, chrome, openWifi = { pages += Page.Wifi }, openRemote = { pages += Page.Remote }, openWatched = { pages += Page.Watched }, openFeedback = { pages += Page.Feedback }, openRecord = { pages += Page.Record(it) })
+                        BottomTab.Podcasts -> ShelfScreen(library, chrome, openWifi = { pages += Page.Wifi }, openRemote = { pages += Page.Remote }, openWatched = { pages += Page.Watched }, openFeedback = { pages += Page.Feedback }, openRecord = { pages += Page.Record(it) }, fixedPlace = app.yuyue.shelf.ShelfPlace.Podcasts)
+                        BottomTab.Audio -> ShelfScreen(library, chrome, openWifi = { pages += Page.Wifi }, openRemote = { pages += Page.Remote }, openWatched = { pages += Page.Watched }, openFeedback = { pages += Page.Feedback }, openRecord = { pages += Page.Record(it) }, fixedPlace = app.yuyue.shelf.ShelfPlace.Audio)
+                        BottomTab.Progress -> ShelfScreen(library, chrome, openWifi = { pages += Page.Wifi }, openRemote = { pages += Page.Remote }, openWatched = { pages += Page.Watched }, openFeedback = { pages += Page.Feedback }, openRecord = { pages += Page.Record(it) }, fixedPlace = app.yuyue.shelf.ShelfPlace.Progress)
+                        BottomTab.Notes -> app.yuyue.notes.NotesScreen(library, notesPop)
+                        BottomTab.Me -> app.yuyue.me.MeScreen(
                             library = library,
                             pop = mePop,
-                            isForeground = tab == Tab.Me && pages.isEmpty() && presentedBook == null && openPodcastID == null,
+                            isForeground = tab == BottomTab.Me && pages.isEmpty() && presentedBook == null && openPodcastID == null,
                         )
-                        Tab.Search -> app.yuyue.search.SearchScreen(library)
+                        BottomTab.Search -> app.yuyue.search.SearchScreen(library)
                     }
                     Page.Wifi -> app.yuyue.me.SubPage(t("Wi‑Fi 传书"), { pages.removeAt(pages.lastIndex) }) { app.yuyue.shelf.WifiPage(library) }
                     Page.Remote -> app.yuyue.shelf.RemotePage(library) { pages.removeAt(pages.lastIndex) }
@@ -316,13 +378,13 @@ fun Root(library: Library) {
                 }
             }
         }
-        val onPodcastShelf = tab == Tab.Shelf && pages.isEmpty() && chrome.place == app.yuyue.shelf.ShelfPlace.Podcasts
+        val onPodcastShelf = pages.isEmpty() && ((tab == BottomTab.Shelf && chrome.place == app.yuyue.shelf.ShelfPlace.Podcasts) || tab == BottomTab.Podcasts)
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().onSizeChanged { barHeight = with(density) { it.height.toDp() } }) {
-            TabBar(tab, chrome, haze, { NowPlayingBar(library, onPodcastShelf) }) {
-                // 书架 tapped while already there: the shelf's places stand up over it.
-                chrome.switching = it == Tab.Shelf && tab == Tab.Shelf && pages.isEmpty() && !chrome.switching
-                if (it == Tab.Notes && tab == Tab.Notes && pages.isEmpty()) notesPop++
-                if (it == Tab.Me && tab == Tab.Me && pages.isEmpty()) mePop++
+            TabBar(navTabs, tab, chrome, haze, pageBackdrop, useLiquid, eink, { NowPlayingBar(library, onPodcastShelf) }) {
+                // 书架 tapped while already there: the shelf's folded places stand up over it (only when switcher is active).
+                chrome.switching = it == BottomTab.Shelf && tab == BottomTab.Shelf && pages.isEmpty() && chrome.hasSwitcher && !chrome.switching
+                if (it == BottomTab.Notes && tab == BottomTab.Notes && pages.isEmpty()) notesPop++
+                if (it == BottomTab.Me && tab == BottomTab.Me && pages.isEmpty()) mePop++
                 tab = it; pages.clear()
             }
         }
@@ -430,12 +492,19 @@ val LocalTabBarHeight = staticCompositionLocalOf { 0.dp }
  *  is on filled and in the theme's fill colour (墨蓝 by default, ink under 墨黑). While a book is read aloud the 播放条 sits inside it, on
  *  the same blurred paper, above the tabs. */
 @Composable
-private fun TabBar(tab: Tab, chrome: app.yuyue.shelf.ShelfChrome, haze: HazeState, playing: @Composable () -> Unit, select: (Tab) -> Unit) {
-    val eink by rememberPref("eink.on", false)
-    val liquidChosen by rememberPref(app.yuyue.design.LiquidGlass.KEY, false)
-    val useLiquid = app.yuyue.design.LiquidGlass.supported && liquidChosen && !eink
+private fun TabBar(
+    navTabs: List<BottomTab>,
+    tab: BottomTab,
+    chrome: app.yuyue.shelf.ShelfChrome,
+    haze: HazeState,
+    backdrop: Backdrop,
+    useLiquid: Boolean,
+    eink: Boolean,
+    playing: @Composable () -> Unit,
+    select: (BottomTab) -> Unit,
+) {
     if (useLiquid) {
-        LiquidTabBar(tab, chrome, haze, playing, select)
+        LiquidTabBar(navTabs, tab, chrome, backdrop, playing, select)
         return
     }
     val paper = YY.c.bg
@@ -456,51 +525,50 @@ private fun TabBar(tab: Tab, chrome: app.yuyue.shelf.ShelfChrome, haze: HazeStat
             Modifier.fillMaxWidth().padding(start = YY.s(4), end = YY.s(4), top = YY.s(5), bottom = maxOf(YY.s(35), inset + 7.dp)),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 书架, or where the shelf is now (进度, 有声, a 合集) with its mark; chosen, a small ⌃⌄ beside it.
             val placeIcon = chrome.icon
-            TabItem(placeIcon ?: TabIcons.shelf, placeIcon?.let(app.yuyue.shelf.PlaceIcons::filled) ?: TabIcons.shelfOn, chrome.name ?: t("书架"), tab == Tab.Shelf, switch = true) { select(Tab.Shelf) }
-            TabItem(TabIcons.notes, TabIcons.notesOn, t("笔记"), tab == Tab.Notes) { select(Tab.Notes) }
-            TabItem(TabIcons.me, TabIcons.meOn, t("我的"), tab == Tab.Me, badge = app.yuyue.update.Updates.showsBadge) { select(Tab.Me) }
-            TabItem(TabIcons.search, TabIcons.searchOn, t("搜索"), tab == Tab.Search) { select(Tab.Search) }
+            val showMeBadge = app.yuyue.update.Updates.showsBadge
+            for (item in navTabs) {
+                val icon = if (item == BottomTab.Shelf) (placeIcon ?: TabIcons.shelf) else item.icon
+                val iconOn = if (item == BottomTab.Shelf) (placeIcon?.let(app.yuyue.shelf.PlaceIcons::filled) ?: TabIcons.shelfOn) else item.iconOn
+                val label = if (item == BottomTab.Shelf) (chrome.name ?: item.title) else item.title
+                TabItem(
+                    icon = icon,
+                    iconOn = iconOn,
+                    title = label,
+                    on = tab == item,
+                    switch = item == BottomTab.Shelf && chrome.hasSwitcher,
+                    badge = item == BottomTab.Me && showMeBadge,
+                ) { select(item) }
+            }
         }
     }
 }
 
 /**
  * Floating Liquid Glass bottom bar (Android 13+ when `appearance.liquidGlass` is on):
- * mirrors iOS 26's floating glass capsule (书架 · 笔记 · 我的) with a gliding translucent selection
- * lens and 搜索 in its own circular glass orb on the right.
+ * renders the user's customized tabs with a draggable refractive glass selection lens powered
+ * by Kyant0 Backdrop; when 搜索 sits last (and 3+ tabs are enabled), 搜索 stands in its own
+ * detached circular glass orb on the right matching iOS 26.
  */
 @Composable
 private fun LiquidTabBar(
-    tab: Tab,
+    navTabs: List<BottomTab>,
+    tab: BottomTab,
     chrome: app.yuyue.shelf.ShelfChrome,
-    haze: HazeState,
+    backdrop: Backdrop,
     playing: @Composable () -> Unit,
-    select: (Tab) -> Unit,
+    select: (BottomTab) -> Unit,
 ) {
     val inset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val reduce = app.yuyue.design.YYMotion.isReduceMotion()
-    val dark = YY.dark
-    val mainIndex = when (tab) {
-        Tab.Shelf -> 0
-        Tab.Notes -> 1
-        Tab.Me -> 2
-        Tab.Search -> -1
-    }
-    var lastMain by remember { mutableStateOf(0) }
-    if (mainIndex >= 0) lastMain = mainIndex
-    val pillPos by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = lastMain.toFloat(),
-        animationSpec = if (reduce) androidx.compose.animation.core.snap()
-        else androidx.compose.animation.core.spring(dampingRatio = 0.78f, stiffness = 420f),
-        label = "liquidTabPill",
-    )
-    val pillAlpha by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (mainIndex >= 0) 1f else 0f,
-        animationSpec = app.yuyue.design.YYMotion.quick(),
-        label = "liquidTabAlpha",
-    )
+    val detachedSearch = BottomNav.usesDetachedSearchOrb(navTabs)
+    val mainTabs = if (detachedSearch) navTabs.dropLast(1) else navTabs
+    val mainIndex = mainTabs.indexOf(tab)
+    val placeIcon = chrome.icon
+    val shelfIcon = placeIcon ?: TabIcons.shelf
+    val shelfIconOn = placeIcon?.let(app.yuyue.shelf.PlaceIcons::filled) ?: TabIcons.shelfOn
+    val shelfTitle = chrome.name ?: BottomTab.Shelf.title
+    val showMeBadge = app.yuyue.update.Updates.showsBadge
+    val labels = mainTabs.map { if (it == BottomTab.Shelf) shelfTitle else it.title }
 
     Column(
         Modifier
@@ -510,79 +578,83 @@ private fun LiquidTabBar(
     ) {
         playing()
         Row(
-            Modifier.fillMaxWidth(),
+            Modifier.fillMaxWidth().zIndex(1f),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // Left floating capsule: 书架 · 笔记 · 我的
-            app.yuyue.design.LiquidGlassSurface(
-                haze = haze,
-                shape = CircleShape,
-                cornerRadius = 30.dp,
-                modifier = Modifier.weight(1f).height(60.dp),
-            ) {
-                androidx.compose.foundation.layout.BoxWithConstraints(
-                    Modifier.fillMaxSize().padding(4.dp),
-                ) {
-                    val slotW = maxWidth / 3f
-                    val lensFill = if (dark) Color.White.copy(alpha = 0.14f) else YY.tint.fill.copy(alpha = 0.11f)
-                    val lensBorder = if (dark) Color.White.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.72f)
-                    if (pillAlpha > 0.01f) {
-                        Box(
-                            Modifier
-                                .offset(x = slotW * pillPos)
-                                .width(slotW)
-                                .fillMaxHeight()
-                                .clip(CircleShape)
-                                .background(lensFill.copy(alpha = lensFill.alpha * pillAlpha))
-                                .border(0.75.dp, lensBorder.copy(alpha = lensBorder.alpha * pillAlpha), CircleShape),
-                        )
-                    }
-                    Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-                        val placeIcon = chrome.icon
-                        TabItem(placeIcon ?: TabIcons.shelf, placeIcon?.let(app.yuyue.shelf.PlaceIcons::filled) ?: TabIcons.shelfOn, chrome.name ?: t("书架"), tab == Tab.Shelf, switch = true) { select(Tab.Shelf) }
-                        TabItem(TabIcons.notes, TabIcons.notesOn, t("笔记"), tab == Tab.Notes) { select(Tab.Notes) }
-                        TabItem(TabIcons.me, TabIcons.meOn, t("我的"), tab == Tab.Me, badge = app.yuyue.update.Updates.showsBadge) { select(Tab.Me) }
-                    }
-                }
+            // Left (or full) floating capsule with draggable refractive glass lens.
+            app.yuyue.design.LiquidBottomTabBar(
+                backdrop = backdrop,
+                selectedIndex = mainIndex,
+                tabCount = mainTabs.size,
+                tabLabels = labels,
+                onSelect = { idx -> mainTabs.getOrNull(idx)?.let(select) },
+                modifier = Modifier.weight(1f).height(62.dp),
+            ) { index, active ->
+                val item = mainTabs.getOrNull(index) ?: return@LiquidBottomTabBar
+                val icon = if (item == BottomTab.Shelf) shelfIcon else item.icon
+                val iconOn = if (item == BottomTab.Shelf) shelfIconOn else item.iconOn
+                val title = if (item == BottomTab.Shelf) shelfTitle else item.title
+                LiquidTabSlot(
+                    icon = icon,
+                    iconOn = iconOn,
+                    title = title,
+                    active = active,
+                    switch = item == BottomTab.Shelf && chrome.hasSwitcher,
+                    badge = item == BottomTab.Me && showMeBadge,
+                )
             }
-            // Right floating circle: 搜索 (mirrors iOS 26's prominent search orb)
-            val searchOn = tab == Tab.Search
-            val searchPress = remember { MutableInteractionSource() }
-            app.yuyue.design.LiquidGlassSurface(
-                haze = haze,
-                shape = CircleShape,
-                cornerRadius = 30.dp,
-                modifier = Modifier
-                    .size(60.dp)
-                    .selectable(
-                        selected = searchOn,
-                        interactionSource = searchPress,
-                        indication = null,
-                        role = androidx.compose.ui.semantics.Role.Tab,
-                        onClick = { select(Tab.Search) },
-                    ),
-            ) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(4.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (searchOn) (if (dark) Color.White.copy(alpha = 0.15f) else YY.tint.fill.copy(alpha = 0.12f))
-                            else Color.Transparent,
-                        ),
-                    contentAlignment = Alignment.Center,
+            // Right floating circle: 搜索 (when 搜索 is placed last and 3+ tabs are shown).
+            if (detachedSearch) {
+                val searchOn = tab == BottomTab.Search
+                app.yuyue.design.LiquidGlassOrb(
+                    backdrop = backdrop,
+                    selected = searchOn,
+                    onClick = { select(BottomTab.Search) },
+                    modifier = Modifier.size(62.dp),
                 ) {
                     Icon(
                         if (searchOn) TabIcons.searchOn else TabIcons.search,
                         contentDescription = t("搜索"),
-                        tint = if (searchOn) YY.tint.fill else YY.c.t2,
-                        modifier = Modifier.size(24.dp).pressScale(searchPress, 0.9f),
+                        tint = if (searchOn) YY.tint.fill else YY.c.t1.copy(alpha = 0.78f),
+                        modifier = Modifier.size(24.dp),
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun RowScope.LiquidTabSlot(
+    icon: ImageVector,
+    iconOn: ImageVector,
+    title: String,
+    active: Boolean,
+    switch: Boolean = false,
+    badge: Boolean = false,
+) {
+    val color = if (active) YY.tint.fill else YY.c.t1.copy(alpha = 0.78f)
+    Column(
+        Modifier.weight(1f).fillMaxHeight().padding(vertical = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(YY.s(0.4f), Alignment.CenterVertically),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (switch) androidx.compose.foundation.layout.Spacer(Modifier.width(7.dp))
+            Box {
+                Icon(if (active) iconOn else icon, null, tint = color, modifier = Modifier.size(24.dp))
+                if (badge) Box(Modifier.align(Alignment.TopEnd).size(7.dp).offset(2.dp, (-2).dp).clip(CircleShape).background(YY.c.danger))
+            }
+            if (switch) Icon(TabIcons.switchChevron, null, tint = color.copy(alpha = if (active) 1f else 0f), modifier = Modifier.size(width = 7.dp, height = 24.dp))
+        }
+        Text(
+            title,
+            style = YY.font(10f, if (active) FontWeight.SemiBold else FontWeight.Medium).copy(lineHeight = YY.sp(12f)),
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

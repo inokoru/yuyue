@@ -65,7 +65,9 @@ struct CompanionSettings: View {
                 } trailing: {
                     EmptyView()
                 } action: { focus.sheet = .add }
+                .settingsAnchor(.companionAddProvider)
             }
+            .settingsAnchor(.companionProviders, card: true)
             SettingsNote(String(localized: "API Key 仅保存在这台 Mac 上，不同步、不上传；调用费用由服务商直接结算。播客文稿生成同样使用此处所选模型。"))
             CompanionQuickPromptsSection()
             CompanionUsageAndCostSection()
@@ -1812,6 +1814,7 @@ struct CompanionQuickPromptsSection: View {
                 }
             }
         }
+        .settingsAnchor(.companionQuickPrompts, card: true)
         SettingsNote(String(localized: "点选右侧可修改 / 指令名与提问内容；同时出现在书伴底部建议栏与 / 快捷指令菜单中。"))
             .onReceive(NotificationCenter.default.publisher(for: CompanionPrompts.changed)) { _ in
                 items = CompanionPrompts.items
@@ -2218,15 +2221,18 @@ struct CompanionUsageAndCostSection: View {
                 .padding(.vertical, 12)
             }
         }
+        .settingsAnchor(.companionUsage, card: true)
 
         SettingsHeading(String(localized: "省费"))
         SettingsCard {
             SettingsRow(String(localized: "批量任务自动用轻量模型"), detail: tierHint(for: current)) {
                 SettingsSwitch(isOn: $tierRouting)
             }
+            .settingsAnchor(.companionTierRouting)
             SettingsRow(String(localized: "每日用量上限"), detail: String(localized: "达到后自动暂停后台批量任务"), stackWhenNarrow: true) {
                 DailyCapPills(limit: $dailyTokenLimit)
             }
+            .settingsAnchor(.companionDailyLimit)
         }
         SettingsNote(String(localized: "统计为本机估算值，以服务商实际账单为准。书伴问答与前情提要的纯文本缓存会随同步在你的设备间复用。"))
             .onChange(of: tierRouting) { CompanionUsage.tierRoutingEnabled = tierRouting }

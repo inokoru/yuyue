@@ -50,13 +50,14 @@ import app.yuyue.design.pressable
 import app.yuyue.t
 import uniffi.yuyue_core.BookCollection
 
-/** Where 书架 is: 书 · 进度 · 播客 · 有声, or one of your 合集. The title names it; a tap on the title
+/** Where 书架 is: 书 · 进度 · 播客 · 有声 · 笔记, or one of your 合集. The title names it; a tap on the title
  *  (or, scrolled, on the chip at the top left) opens the panel to go to another. */
 sealed interface ShelfPlace {
     data object Books : ShelfPlace
     data object Progress : ShelfPlace
     data object Podcasts : ShelfPlace
     data object Audio : ShelfPlace
+    data object Notes : ShelfPlace
     data class Collection(val id: String) : ShelfPlace
 
     companion object {
@@ -82,27 +83,34 @@ data class PlaceInfo(
 object PlaceIcons {
     val books = Icons.book
     val progress = Icons.bookmarkOutline
-    val podcasts = Icons.microphone
+    val podcasts = Icons.radio
     val audio = Icons.headphones
+    val notes = app.yuyue.design.TabIcons.notes
     val switch = Icons.chevronUpDown
 
     fun filled(icon: ImageVector): ImageVector = when (icon) {
         Icons.book -> Icons.bookFill
         Icons.bookmarkOutline -> Icons.bookmark
+        Icons.radio -> Icons.radioFill
         Icons.microphone -> Icons.microphoneFill
+        app.yuyue.design.TabIcons.notes -> app.yuyue.design.TabIcons.notesOn
         Icons.checkCircle -> Icons.checkCircleFill
         else -> icon
     }
 }
 
 /** Between the root and the shelf: 书架 tapped again while you're on it, and where the shelf is,
- *  for the first tab to wear. */
+ *  for its tab to wear. */
 @Stable
 class ShelfChrome {
     var switching by mutableStateOf(false)
     var place by mutableStateOf<ShelfPlace>(ShelfPlace.Books)
     var name by mutableStateOf<String?>(null)
     var icon by mutableStateOf<ImageVector?>(null)
+    /** Horizontal alignment of the pop-up PlaceStack above the 书架 tab wherever the user placed it. */
+    var stackAlignment by mutableStateOf(Alignment.BottomStart)
+    /** Whether 书架 currently has any folded sub-places or collections to switch between. */
+    var hasSwitcher by mutableStateOf(true)
 }
 
 private val paper @Composable get() = if (YY.dark) Color(0xFF2B2925) else Color(0xFFF3F0E8)
@@ -159,12 +167,17 @@ fun PageTitle(icon: ImageVector, title: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** The shelf's title: the place's mark, and beside it its name in 宋体 with ⌄. */
+/** The shelf's title: the place's mark, and beside it its name in 宋体 with ⌄ (when switchable). */
 @Composable
-fun PlaceTitle(info: PlaceInfo, modifier: Modifier = Modifier, open: () -> Unit) {
+fun PlaceTitle(info: PlaceInfo, modifier: Modifier = Modifier, interactive: Boolean = true, open: () -> Unit) {
     val press = remember { MutableInteractionSource() }
+    val tapMod = if (interactive) {
+        Modifier.pressScale(press, 0.98f).clickable(press, null, onClickLabel = t("%@，换一处看", info.name), onClick = open)
+    } else {
+        Modifier
+    }
     Row(
-        modifier.height(40.dp).pressScale(press, 0.98f).clickable(press, null, onClickLabel = t("%@，换一处看", info.name), onClick = open),
+        modifier.height(40.dp).then(tapMod),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
@@ -176,7 +189,9 @@ fun PlaceTitle(info: PlaceInfo, modifier: Modifier = Modifier, open: () -> Unit)
             else -> 30.sp
         }
         Text(info.name, fontFamily = YY.serif, fontWeight = FontWeight.Medium, fontSize = titleSize, letterSpacing = if (info.name.any { it.code < 128 } || info.name.length > 4) 0.sp else 1.sp, color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Icon(Icons.chevronDown, null, tint = YY.c.t3, modifier = Modifier.padding(top = 3.dp).size(20.dp))
+        if (interactive) {
+            Icon(Icons.chevronDown, null, tint = YY.c.t3, modifier = Modifier.padding(top = 3.dp).size(20.dp))
+        }
     }
 }
 

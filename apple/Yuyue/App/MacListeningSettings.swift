@@ -587,8 +587,9 @@ extension CloudVoice.Provider {
         if self == .local { d.removeObject(forKey: "tts.local.title") }
         if self == .azure { d.removeObject(forKey: Self.regionName) }
         if self == .volcengine { d.removeObject(forKey: Self.volcAppIDName) }
-        for tag in ["zh", "en"] where d.string(forKey: "player.voice.\(tag)")?.hasPrefix("cloud.\(rawValue).") == true {
-            d.removeObject(forKey: "player.voice.\(tag)")
+        for tag in ["zh", "zh-Hans", "zh-Hant", "zh-CN", "zh-TW", "zh-SG", "cmn", "en", "en-US", "en-GB", "en-AU", "en-CA"]
+        where d.string(forKey: "player.voice.\(tag)")?.hasPrefix("cloud.\(rawValue).") == true {
+            Player.saveVoicePreference(nil, for: tag)
         }
     }
 
@@ -737,7 +738,7 @@ struct VoiceProviderSheet: View {
         .padding(.horizontal, YYUI.s(16))
         .padding(.bottom, YYUI.s(16))
         .padding(.top, YYUI.sheetGrabberTop)
-        .frame(width: 480, height: 468)
+        .frame(width: 480, height: picked == nil ? 540 : 468)
         .background(YYColor.bg)
         #else
         picker
@@ -767,25 +768,28 @@ struct VoiceProviderSheet: View {
                     #endif
                     .onSubmit { if let first = matches.first { choose(first) } }
             }
-            .padding(.horizontal, YYUI.s(9))
-            .frame(height: YYUI.s(30))
-            .background(YYColor.inset, in: .rect(cornerRadius: YYUI.s(8)))
+            .padding(.horizontal, YYUI.s(10))
+            #if os(macOS)
+            .frame(height: YYUI.s(32))
+            #else
+            .frame(height: YYUI.s(34))
+            #endif
+            .background(YYColor.inset, in: .rect(cornerRadius: YYUI.s(10)))
             .padding(.top, YYUI.s(10))
 
             ScrollView {
-                VStack(alignment: .leading, spacing: YYUI.s(10)) {
+                VStack(alignment: .leading, spacing: YYUI.s(12)) {
                     ForEach(CloudVoice.Group.allCases, id: \.self) { group in
                         let list = matches.filter { $0.group == group }
                         if !list.isEmpty {
-                            VStack(alignment: .leading, spacing: YYUI.s(2)) {
+                            VStack(alignment: .leading, spacing: YYUI.s(5)) {
                                 Text(group.title)
                                     .font(YYUI.font(10, .semibold))
                                     .foregroundStyle(YYColor.t3)
-                                    .padding(.leading, YYUI.s(8))
-                                    .padding(.bottom, YYUI.s(2))
+                                    .padding(.leading, YYUI.s(4))
                                 LazyVGrid(
-                                    columns: Array(repeating: GridItem(.flexible(), spacing: YYUI.s(2)), count: Self.columns),
-                                    spacing: YYUI.s(2)
+                                    columns: Array(repeating: GridItem(.flexible(), spacing: YYUI.s(6)), count: Self.columns),
+                                    spacing: YYUI.s(6)
                                 ) {
                                     ForEach(list) { p in providerTile(p) }
                                 }
@@ -802,18 +806,19 @@ struct VoiceProviderSheet: View {
             }
             .scrollBounceBehavior(.basedOnSize)
 
-            Rectangle().fill(YYColor.line).frame(height: 0.5).padding(.horizontal, -YYUI.s(16))
             Button { choose(.local) } label: {
-                HStack(spacing: YYUI.s(8)) {
-                    Image(systemName: "plus").font(YYUI.font(10.5, .semibold)).foregroundStyle(YYColor.t2)
-                        .frame(width: YYUI.s(16), height: YYUI.s(16))
-                    Text("自定义语音接口").font(YYUI.font(11.5)).foregroundStyle(YYColor.t1).fixedSize()
-                    Text("GPT-SoVITS、Kokoro、unspeech 或局域网 /v1/audio/speech").font(YYUI.font(10.5)).foregroundStyle(YYColor.t3).lineLimit(1)
+                HStack(spacing: YYUI.s(10)) {
+                    ServiceTile(mark: .cloud(.local), size: YYUI.s(26))
+                    VStack(alignment: .leading, spacing: YYUI.s(1)) {
+                        Text("自定义语音接口").font(YYUI.font(11.5, .medium)).foregroundStyle(YYColor.t1)
+                        Text("GPT-SoVITS、Kokoro、unspeech 或局域网 /v1/audio/speech").font(YYUI.font(10)).foregroundStyle(YYColor.t3).lineLimit(1)
+                    }
                     Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(YYUI.font(9.5, .semibold)).foregroundStyle(YYColor.t3)
                 }
             }
-            .buttonStyle(PickRow())
-            .padding(.top, YYUI.s(8))
+            .buttonStyle(PickFooterCard())
+            .padding(.top, YYUI.s(4))
         }
     }
 
@@ -848,7 +853,7 @@ struct VoiceProviderSheet: View {
                 Spacer(minLength: 0)
             }
         }
-        .buttonStyle(PickRow())
+        .buttonStyle(PickCard())
         .help(Text("\(p.title) · \(p.blurb)"))
     }
 }

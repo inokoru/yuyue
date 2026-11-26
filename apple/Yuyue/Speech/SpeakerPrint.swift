@@ -126,8 +126,11 @@ nonisolated enum SpeakerPrint {
         for v in voices where !v.embedding.isEmpty {
             core.speakerSetPrint(voice: v.id, embedding: v.embedding)
         }
-        // Cloud voices cost money to read: they go without.
-        let ids = core.speakerUnprinted(voices: voices.map(\.id).filter { !$0.hasPrefix("cloud.") })
+        // Cloud voices cost money to read; built-in/cloned voice cards & Kokoro carry manifest
+        // metadata and must never trigger multi-voice ONNX synthesis on the playback startup path.
+        let ids = core.speakerUnprinted(voices: voices.map(\.id).filter {
+            !$0.hasPrefix("cloud.") && !$0.hasPrefix("card.") && !$0.hasPrefix("cloned.") && !$0.hasPrefix("kokoro.")
+        })
         let text = core.speakerSampleText(language: language)
         for id in ids {
             guard !Task.isCancelled else { return }

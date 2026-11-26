@@ -106,6 +106,10 @@ enum NoteFilter: Hashable {
 /// swipe left to share, edit or delete; 选择 to take several at once.
 struct PhoneNotes: View {
     let library: Library
+    /// Non-nil when embedded inside 书架 ⌃⌄: tapping the top 笔记 ⌄ title opens the shelf place panel.
+    var onOpenPlace: (() -> Void)? = nil
+    var placeTitleHidden: Bool = false
+    var onPlaceTitleFrame: ((CGRect) -> Void)? = nil
 
     enum Kind: String { case all, thoughts, words }
 
@@ -257,7 +261,19 @@ struct PhoneNotes: View {
                 VStack(spacing: 6) {
                     if !split {
                         HStack {
-                            PageTitle(symbol: "note.text", title: "笔记")
+                            if let onOpenPlace {
+                                Button(action: onOpenPlace) {
+                                    ShelfPlaceTitle(symbol: "note.text", name: String(localized: "笔记"))
+                                        .contentShape(.rect)
+                                }
+                                .buttonStyle(YYPressStyle(scale: 0.98))
+                                .opacity(placeTitleHidden ? 0 : 1)
+                                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { onPlaceTitleFrame?($0) }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .accessibilityLabel(String(localized: "\(String(localized: "笔记"))，换一处看"))
+                            } else {
+                                PageTitle(symbol: "note.text", title: "笔记")
+                            }
                             if kind != .words, !shown.isEmpty {
                                 TopButtons {
                                     NoteExportMenu(sender: library.noteSender,

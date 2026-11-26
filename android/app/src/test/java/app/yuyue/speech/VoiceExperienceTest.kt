@@ -144,10 +144,18 @@ class VoiceExperienceTest {
 
     @Test
     fun playerThermalBudgetScalesDownGracefully() {
-        assertEquals(60.0, Player.targetAheadSeconds(0), 0.001)
-        assertEquals(60.0, Player.targetAheadSeconds(2), 0.001)
-        assertEquals(15.0, Player.targetAheadSeconds(Player.THERMAL_SEVERE), 0.001)
+        assertEquals(15.0, Player.targetAheadSeconds(0), 0.001)
+        assertEquals(15.0, Player.targetAheadSeconds(2), 0.001)
+        assertEquals(8.0, Player.targetAheadSeconds(Player.THERMAL_SEVERE), 0.001)
         assertEquals(0.0, Player.targetAheadSeconds(Player.THERMAL_CRITICAL), 0.001)
+    }
+
+    @Test
+    fun previewSampleLineKeepsLongBookSentenceShort() {
+        val longZh = "河见的心意，苍子自然很高兴，不过河见每次都买圆圆的一整个回来，而他自己是决不吃甜食的。"
+        val sample = app.yuyue.reader.previewSampleLine(longZh, "zh-Hans")
+        assertTrue(sample.length <= 24)
+        assertEquals("河见的心意，苍子自然很高兴，", sample)
     }
 
     @Test
@@ -230,6 +238,38 @@ class VoiceExperienceTest {
 
             modelDir.resolve("lexicon-us-en.txt").writeBytes(byteArrayOf(1))
             assertTrue(KokoroModel.installed(dir))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun kokoroStyleEmbeddingExtractsNormalizedVectorAndHandlesMissingOrInvalidSid() {
+        val dir = Files.createTempDirectory("yuyue-kokoro-emb").toFile()
+        try {
+            assertTrue(KokoroModel.styleEmbedding(0u, dir).isEmpty())
+            assertTrue(KokoroModel.styleEmbedding(103u, dir).isEmpty())
+
+            val modelDir = KokoroModel.folder(dir).apply { mkdirs() }
+            val dim = 256
+            val bytesPerVec = dim * 4
+            // Allocate space covering sid = 1 through bucket 80
+            val totalFloats = (1 * 510 + 81) * dim
+            val buf = java.nio.ByteBuffer.allocate(totalFloats * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            for (b in intArrayOf(10, 20, 40, 80)) {
+                val base = (1 * 510 + b) * dim
+                buf.putFloat(base * 4, 3f)
+                buf.putFloat((base + 1) * 4, 4f)
+            }
+            modelDir.resolve("voices.bin").writeBytes(buf.array())
+
+            val emb = KokoroModel.styleEmbedding(1u, dir)
+            assertEquals(256, emb.size)
+            assertEquals(0.6f, emb[0], 1e-4f)
+            assertEquals(0.8f, emb[1], 1e-4f)
+            assertEquals(0f, emb[2], 1e-4f)
+            // sid 2 exceeds file length -> returns empty safely
+            assertTrue(KokoroModel.styleEmbedding(2u, dir).isEmpty())
         } finally {
             dir.deleteRecursively()
         }
@@ -346,4 +386,3 @@ class VoiceExperienceTest {
         }
     }
 }
-

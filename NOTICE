@@ -27,7 +27,8 @@ Third-party components keep their own licences:
   ECDICT                                      MIT
   OkHttp, JNA                                 Apache-2.0
   AndroidX, Jetpack Compose, Media3,
-  kotlinx.coroutines, Haze                    Apache-2.0
+  kotlinx.coroutines, Haze,
+  AndroidLiquidGlass (Backdrop)               Apache-2.0
   Sparkle                                     MIT
   pinyin, pypinyin word lists                 MIT
   ONNX Runtime                                MIT

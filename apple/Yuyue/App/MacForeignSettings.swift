@@ -25,26 +25,33 @@ struct ForeignSettings: View {
                     Button("打开词典") { openDictionary() }
                         .lineLimit(1).fixedSize()
                 }
+                .settingsAnchor(.foreignSystemDict)
                 SettingsRow(String(localized: "查词时自动发音")) { SettingsSwitch(isOn: $speak) }
+                    .settingsAnchor(.foreignAutoSpeak)
                 SettingsRow(String(localized: "英文发音"), stackWhenNarrow: true) {
                     YYSegments(items: [(ForeignPrefs.Accent.british, String(localized: "英音")), (.american, String(localized: "美音"))], selection: $accent, small: true)
                         .frame(width: 120)
                 }
+                .settingsAnchor(.foreignAccent)
             }
             SettingsHeading(String(localized: "MDict 词典"))
             MDictList(core: library.core)
+                .settingsAnchor(.foreignMDict, card: true)
             SettingsHeading(String(localized: "难词注释"))
             SettingsCard {
                 SettingsRow(String(localized: "难词行间释义"), detail: String(localized: "阅读英文书时，在较难词汇上方标注简短中文词义")) {
                     SettingsSwitch(isOn: $gloss)
                 }
+                .settingsAnchor(.foreignGloss)
                 SettingsRow(String(localized: "词汇难度"), detail: String(localized: "等级越高，仅标注更生僻的词"), stackWhenNarrow: true) {
                     YYSegments(items: ForeignPrefs.levels.map { (Int($0.level), $0.name) }, selection: $level, small: true)
                         .frame(minWidth: 230, idealWidth: 250, maxWidth: 260)
                 }
                 .disabled(!gloss || glossVocab)
+                .settingsAnchor(.foreignLevel)
                 SettingsRow(String(localized: "仅标注生词本中的词")) { SettingsSwitch(isOn: $glossVocab) }
                     .disabled(!gloss)
+                    .settingsAnchor(.foreignGlossVocabOnly)
             }
             .onChange(of: "\(gloss)\(level)\(glossVocab)") { NotificationCenter.default.post(name: .vocabChanged, object: nil) }
             SettingsHeading(String(localized: "生词"))
@@ -52,6 +59,7 @@ struct ForeignSettings: View {
                 SettingsRow(String(localized: "在书中标记生词"), detail: String(localized: "「在学」生词在所有书中以虚线标出，标为「已掌握」后不再标记")) {
                     SettingsSwitch(isOn: $mark)
                 }
+                .settingsAnchor(.foreignMarkVocab)
             }
             .onChange(of: mark) { NotificationCenter.default.post(name: .vocabChanged, object: nil) }
             SettingsHeading(String(localized: "翻译"))
@@ -59,6 +67,7 @@ struct ForeignSettings: View {
                 SettingsRow(String(localized: "优先用书伴模型翻译"), detail: String(localized: "已配置书伴时，用模型生成逐段译文对照（含文言译白话）并按章缓存；未配置或离线时回退系统翻译")) {
                     SettingsSwitch(isOn: $aiTranslate)
                 }
+                .settingsAnchor(.foreignAITranslate)
             }
             if #available(macOS 15.0, *) {
                 MacTranslationSettingsSection()
@@ -68,6 +77,7 @@ struct ForeignSettings: View {
                         Text("当前系统不支持").font(.yy(size: 12)).foregroundStyle(YYColor.t3)
                             .lineLimit(1).fixedSize()
                     }
+                    .settingsAnchor(.foreignSystemTranslate)
                 }
             }
             Spacer(minLength: 0)
@@ -92,6 +102,7 @@ private struct MacTranslationSettingsSection: View {
             SettingsRow(String(localized: "系统离线翻译"), detail: String(localized: "本地离线运行，原文不上传；供整页译文与双击整句翻译使用")) {
                 translationState
             }
+            .settingsAnchor(.foreignSystemTranslate)
         }
         .task { await check() }
         .translationTask(download) { session in

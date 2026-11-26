@@ -1440,6 +1440,7 @@ public sealed partial class ReaderPaneView
                 _dramaModeOn = on;
                 try { _library.Core.DramaSetEnabled(_bookId, on); } catch { }
                 DramaSynthService.SetDramaMode(_library, _bookId, on);
+                _audio.SetSectionContext(_currentSection, dramaMode: _dramaModeOn);
                 RefreshCastAndAudio();
             }));
 

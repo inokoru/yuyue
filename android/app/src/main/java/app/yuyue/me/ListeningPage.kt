@@ -265,6 +265,7 @@ private object ListeningFocus {
     fun listen(v: BookVoice, scope: kotlinx.coroutines.CoroutineScope) {
         if (playing == v.id) { stop(); return }
         stop()
+        app.yuyue.speech.Session.pauseActivePlayback()
         listening = v.id
         failedId = null
         failedMessage = null
@@ -388,7 +389,7 @@ fun ListeningPage(open: (String) -> Unit) {
     var neuralCount by remember { mutableIntStateOf(0) }
     var systemCount by remember { mutableIntStateOf(0) }
     var reading by remember { mutableStateOf<Map<VoiceBook, BookVoice>>(emptyMap()) }
-    LaunchedEffect(zh, en, kokoroState, liveState) {
+    LaunchedEffect(zh, en, kokoroState::class, liveState::class) {
         SystemVoice.Engine.init(context)
         val system = SystemVoice.Engine.voices()
         val kokoro = app.yuyue.speech.KokoroModel.voices(lib.core, lib.dataDir)
@@ -517,16 +518,20 @@ private fun VoiceProviderSheet(close: () -> Unit, pick: (CloudVoice.Provider) ->
             for (group in CloudVoice.Group.entries) {
                 val list = matches.filter { it.group == group }
                 if (list.isEmpty()) continue
-                Text(group.title, style = YY.font(10f, FontWeight.SemiBold), color = YY.c.t3, modifier = Modifier.padding(start = YY.s(8), top = YY.s(12), bottom = YY.s(2)))
-                Column(verticalArrangement = Arrangement.spacedBy(YY.s(2))) {
+                Text(group.title, style = YY.font(10f, FontWeight.SemiBold), color = YY.c.t3, modifier = Modifier.padding(start = YY.s(4), top = YY.s(12), bottom = YY.s(5)))
+                val tileShape = RoundedCornerShape(YY.s(10))
+                val tileBorder = if (YY.dark) Color.White.copy(alpha = 0.06f) else YY.c.line
+                Column(verticalArrangement = Arrangement.spacedBy(YY.s(6))) {
                     for (pair in list.chunked(2)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(YY.s(2))) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(YY.s(6))) {
                             for (p in pair) {
                                 Row(
-                                    Modifier.weight(1f).height(YY.s(36))
-                                        .clip(RoundedCornerShape(YY.s(8)))
+                                    Modifier.weight(1f).height(YY.s(38))
+                                        .clip(tileShape)
+                                        .background(YY.c.card)
+                                        .border(0.5.dp, tileBorder, tileShape)
                                         .clickable { pick(p) }
-                                        .padding(horizontal = YY.s(8)),
+                                        .padding(horizontal = YY.s(10)),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(YY.s(8)),
                                 ) {
@@ -599,7 +604,7 @@ fun VoiceSourcePage(id: String, openSettings: () -> Unit) {
     var draft by remember { mutableStateOf("") }
     var linesOpen by remember { mutableStateOf(false) }
     var pickerOpen by remember { mutableStateOf(false) }
-    LaunchedEffect(book, chosenID, version, kokoroState, liveState) {
+    LaunchedEffect(book, chosenID, version, kokoroState::class, liveState::class) {
         SystemVoice.Engine.init(context)
         val all = Voices.all(book.tag)
         voices = all.filter { sourceOf(it) == id }
@@ -1208,7 +1213,9 @@ fun VoiceSourceSettings(id: String, back: () -> Unit) {
                         if (p == CloudVoice.Provider.Volcengine) Prefs.set(CloudVoice.Provider.VOLC_APP_ID, null)
                         if (p == CloudVoice.Provider.Local) Prefs.set("tts.local.title", null)
                         for (lang in listOf("zh", "zh-Hans", "zh-Hant", "zh-CN", "zh-TW", "en", "en-US", "en-GB")) {
-                            if (Prefs.string("player.voice.$lang").startsWith("cloud.${p.key}.")) Prefs.set("player.voice.$lang", "")
+                            if (Prefs.string("player.voice.$lang").startsWith("cloud.${p.key}.")) {
+                                Player.saveVoicePreference(lang, "")
+                            }
                         }
                         removing = false
                         back()

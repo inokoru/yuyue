@@ -106,6 +106,9 @@ object SpeakerPrint {
             if (v.id in unprinted && v.embedding.isNotEmpty()) {
                 core.speakerSetPrint(v.id, v.embedding)
             }
+            // Built-in/cloned voice cards and Kokoro voices carry manifest metadata and must never
+            // trigger multi-card ONNX synthesis on the playback startup path.
+            if (v.id.startsWith("card.") || v.id.startsWith("cloned.") || v.id.startsWith("kokoro.")) continue
             val needGender = v.gender == uniffi.yuyue_core.CharacterGender.UNKNOWN
             val needPrint = v.id in unprinted && v.embedding.isEmpty()
             if (!needGender && !needPrint) continue

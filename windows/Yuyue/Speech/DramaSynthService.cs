@@ -62,8 +62,9 @@ public static class DramaSynthService
     }
 
     /// <summary>
-    /// Normalizes legacy Windows <c>"card:card.b.01"</c> / <c>"card:cloned.xxx"</c> IDs to macOS/Rust core canonical
-    /// bare IDs (<c>"card.b.01"</c>, <c>"cloned.xxx"</c>) so cross-device role sync &amp; core lookups match 1:1.
+    /// Normalizes legacy Windows <c>"card:card.b.01"</c> / <c>"card:cloned.xxx"</c> / <c>"edge.xxx"</c> IDs to
+    /// canonical IDs (<c>"card.b.01"</c>, <c>"cloned.xxx"</c>, <c>"cloud.edge.xxx"</c>) so cross-device role sync
+    /// &amp; core lookups match 1:1.
     /// </summary>
     public static string? NormalizeVoiceId(string? raw)
     {
@@ -71,6 +72,8 @@ public static class DramaSynthService
         string s = raw.Trim();
         if (s.StartsWith("card:", StringComparison.Ordinal))
             return s[5..];
+        if (s.StartsWith("edge.", StringComparison.Ordinal))
+            return "cloud." + s;
         return s;
     }
 
@@ -97,17 +100,13 @@ public static class DramaSynthService
         File.Exists(ClipPath(dataDir, bookId, key));
 
     /// <summary>
-    /// Resolves the effective narrator voice ID for <paramref name="language"/>, upgrading system defaults to the
-    /// built-in ZipVoice narrator (<c>card.b.01</c> zh / <c>card.b.33</c> en) when the live model is ready.
+    /// Resolves the effective narrator voice ID for <paramref name="language"/>, matching <see cref="AudioPlayer.SetVoice"/>
+    /// 1:1 (explicit choice > Kokoro > LiveVoice > keyless Free online > system voice).
     /// </summary>
     public static string? EffectiveNarrator(LibraryService library, string language, string? chosen = null)
     {
-        string? raw = NormalizeVoiceId(chosen ?? library.Prefs.GetVoiceForLanguage(language));
-        if (!string.IsNullOrEmpty(raw) &&
-            (raw.StartsWith("kokoro.", StringComparison.Ordinal) ||
-             raw.StartsWith("card.", StringComparison.Ordinal) ||
-             raw.StartsWith("cloned.", StringComparison.Ordinal) ||
-             raw.StartsWith("cloud.", StringComparison.Ordinal)))
+        string? raw = NormalizeVoiceId(!string.IsNullOrWhiteSpace(chosen) ? chosen : library.Prefs.GetVoiceForLanguage(language));
+        if (!string.IsNullOrEmpty(raw))
         {
             return raw;
         }
@@ -124,7 +123,14 @@ public static class DramaSynthService
             if (def is not null) return def.Id;
         }
 
-        if (!string.IsNullOrEmpty(raw)) return raw;
+        if (library.CloudVoices.IsConfigured(CloudTtsProvider.Free))
+        {
+            bool isEn = language.StartsWith("en", StringComparison.OrdinalIgnoreCase);
+            bool preferUk = isEn && (language.StartsWith("en-GB", StringComparison.OrdinalIgnoreCase) || library.Prefs.ForeignAccent == "uk");
+            string freeId = isEn ? (preferUk ? "en_uk" : "en_us") : "zh_baidu";
+            return $"cloud.free.{freeId}";
+        }
+
         var sys = AudioPlayer.BestSystemVoice(language);
         return sys is not null ? $"sys:{sys.Id}" : null;
     }
@@ -228,6 +234,7 @@ public static class DramaSynthService
     {
         var outList = new List<VoiceInfo>();
         string langPrefix = language.StartsWith("en", StringComparison.OrdinalIgnoreCase) ? "en" : "zh";
+        string? normNarr = NormalizeVoiceId(narrator);
 
         if (library.LiveVoice.IsReady && CardVoiceEngine.SpeaksLanguage(language))
         {
@@ -243,7 +250,16 @@ public static class DramaSynthService
                 catch { }
             }
 
-            foreach (var card in builtin.Concat(designed))
+            VoiceCard? clonedNarrator = null;
+            if (normNarr is not null && normNarr.StartsWith("cloned.", StringComparison.Ordinal))
+            {
+                clonedNarrator = library.LiveVoice.GetClonedCards().FirstOrDefault(c => c.Id == normNarr);
+            }
+
+            var cards = builtin.Concat(designed);
+            if (clonedNarrator is not null) cards = cards.Append(clonedNarrator);
+
+            foreach (var card in cards)
             {
                 try
                 {
@@ -253,30 +269,32 @@ public static class DramaSynthService
             }
         }
 
-        if (outList.Count == 0)
+        if (library.Kokoro.IsInstalled && CardVoiceEngine.SpeaksLanguage(language) &&
+            (outList.Count == 0 || normNarr?.StartsWith("kokoro.", StringComparison.Ordinal) == true))
         {
-            foreach (var v in AudioPlayer.GetSystemVoicesForLanguage(language))
+            foreach (var s in library.Kokoro.GetSpeakers(language))
             {
-                var gender = v.Gender switch
+                var age = s.VoiceId switch
                 {
-                    Windows.Media.SpeechSynthesis.VoiceGender.Male => CharacterGender.M,
-                    Windows.Media.SpeechSynthesis.VoiceGender.Female => CharacterGender.F,
-                    _ => CharacterGender.Unknown,
+                    "zm_025" or "zm_056" or "zm_033" or "zm_096" or "zf_006" or "zf_094" or "zf_019" => CharacterAge.Young,
+                    "zm_010" or "zm_012" or "zm_035" or "zm_041" or "zm_080" or "zm_095" or "zf_004" or "zf_079" or "zf_090" => CharacterAge.Middle,
+                    "zm_098" or "zf_076" => CharacterAge.Old,
+                    _ => CharacterAge.Unknown,
                 };
+                float[] emb = library.Kokoro.ExtractStyleEmbedding(s.Sid);
                 outList.Add(new VoiceInfo(
-                    Id: $"sys:{v.Id}",
-                    Langs: [v.Language],
-                    Gender: gender,
-                    Age: CharacterAge.Unknown,
+                    Id: s.Id,
+                    Langs: [s.Lang],
+                    Gender: s.Gender,
+                    Age: age,
                     Tags: [],
-                    Embedding: [],
+                    Embedding: emb,
                     Acts: false,
-                    NarratorOk: true,
+                    NarratorOk: s.Narrator,
                     LoudnessLufs: -20f));
             }
         }
 
-        string? normNarr = NormalizeVoiceId(narrator);
         if (normNarr is not null && normNarr.StartsWith("cloud.", StringComparison.Ordinal) &&
             CloudVoiceService.TryParseFullId(normNarr, out var prov, out _))
         {
@@ -309,6 +327,29 @@ public static class DramaSynthService
             }
         }
 
+        if (outList.Count == 0)
+        {
+            foreach (var v in AudioPlayer.GetSystemVoicesForLanguage(language))
+            {
+                var gender = v.Gender switch
+                {
+                    Windows.Media.SpeechSynthesis.VoiceGender.Male => CharacterGender.M,
+                    Windows.Media.SpeechSynthesis.VoiceGender.Female => CharacterGender.F,
+                    _ => CharacterGender.Unknown,
+                };
+                outList.Add(new VoiceInfo(
+                    Id: $"sys:{v.Id}",
+                    Langs: [v.Language],
+                    Gender: gender,
+                    Age: CharacterAge.Unknown,
+                    Tags: [],
+                    Embedding: [],
+                    Acts: false,
+                    NarratorOk: true,
+                    LoudnessLufs: -20f));
+            }
+        }
+
         return outList.ToArray();
     }
 
@@ -318,31 +359,30 @@ public static class DramaSynthService
     /// </summary>
     public static CastingPlan? EnsureCastPlan(LibraryService library, string bookId, string language, string? narrator = null)
     {
-        if (CastPlans.TryGetValue(bookId, out var cached))
-            return cached;
-
         string? effNarrator = EffectiveNarrator(library, language, narrator);
+        if (CastPlans.TryGetValue(bookId, out var cached) &&
+            (string.IsNullOrEmpty(effNarrator) || string.Equals(cached.Narrator, effNarrator, StringComparison.Ordinal)))
+        {
+            return cached;
+        }
+
         var voices = BuildCastingVoices(library, language, effNarrator, bookId);
         if (voices.Length == 0) return null;
 
         string resolvedNarrator = effNarrator ?? voices[0].Id;
-        if (!voices.Any(v => v.Id == resolvedNarrator))
+        if (!voices.Any(v => v.Id == resolvedNarrator) &&
+            resolvedNarrator.StartsWith("cloned.", StringComparison.Ordinal))
         {
-            // Include user's chosen cloned/custom voice in pool if it isn't in built-ins
-            if (resolvedNarrator.StartsWith("cloned.", StringComparison.Ordinal))
+            // Include user's chosen cloned/custom voice in pool if it isn't already present
+            var cloned = library.LiveVoice.GetClonedCards().FirstOrDefault(c => c.Id == resolvedNarrator);
+            if (cloned is not null)
             {
-                var cloned = library.LiveVoice.GetClonedCards().FirstOrDefault(c => c.Id == resolvedNarrator);
-                if (cloned is not null)
+                try
                 {
-                    try
-                    {
-                        voices = [.. voices, library.Core.CardVoiceInfo(cloned, cloned.Embedding, acts: true)];
-                    }
-                    catch { }
+                    voices = [.. voices, library.Core.CardVoiceInfo(cloned, cloned.Embedding, acts: true)];
                 }
+                catch { }
             }
-            if (!voices.Any(v => v.Id == resolvedNarrator))
-                resolvedNarrator = voices[0].Id;
         }
 
         try
@@ -414,12 +454,48 @@ public static class DramaSynthService
         string? narrator,
         CancellationToken ct)
     {
+        string? effNarrator = EffectiveNarrator(library, language, narrator);
+        bool borrowed = !string.IsNullOrEmpty(GetBorrowedFrom(library, bookId));
+        bool borrowedMatchesNarrator = false;
+        if (borrowed)
+        {
+            if (string.IsNullOrEmpty(effNarrator))
+            {
+                borrowedMatchesNarrator = true;
+            }
+            else
+            {
+                try
+                {
+                    var ds = library.Core.DramaSection(bookId, section);
+                    var curAsks = library.Core.DramaLiveSentenceAsks(bookId, section, sentence);
+                    var narrStarts = new HashSet<uint>(
+                        ds.Segments.Where(seg => seg.Sentence == sentence && seg.Kind == SegKind.Narration).Select(seg => seg.Start));
+                    var narrAsks = curAsks.Where(a => narrStarts.Contains(a.Start)).ToArray();
+                    borrowedMatchesNarrator = narrAsks.Length == 0 || narrAsks.All(a => string.Equals(a.Voice, effNarrator, StringComparison.Ordinal));
+                }
+                catch
+                {
+                    borrowedMatchesNarrator = true;
+                }
+            }
+        }
+
+        CastingPlan? plan = null;
+        if (!borrowedMatchesNarrator)
+        {
+            // Sync casting plan with the current narrator before checking pre-rendered clips,
+            // so switching narrator invalidates stale locally pre-rendered clips.
+            plan = EnsureCastPlan(library, bookId, language, effNarrator);
+            if (plan is null) return null;
+        }
+
         // 1. Prefer Studio pre-rendered clips when all clips for this sentence exist on disk
         byte[]? studioHit = TryRenderStudioSentenceWav(library, bookId, section, sentence);
         if (studioHit is not null) return studioHit;
 
         // 2. Ensure casting plan exists in Rust core so DramaLiveSentenceAsks returns clips!
-        var plan = EnsureCastPlan(library, bookId, language, narrator);
+        plan ??= EnsureCastPlan(library, bookId, language, effNarrator);
         if (plan is null) return null;
 
         SoundLibraryService.Register(library.Core, library.DataDir);

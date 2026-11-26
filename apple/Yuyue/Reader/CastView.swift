@@ -177,11 +177,6 @@ struct CastSheet: View {
             ToolbarItem(placement: .cancellationAction) {
                 Button(String(localized: "完成"), action: close)
             }
-            if unsureCount > 0 {
-                ToolbarItem(placement: .topBarTrailing) {
-                    DramaUnsurePill(count: unsureCount, tint: .standard) { path.append(.unsure) }
-                }
-            }
         }
         #endif
     }
@@ -928,9 +923,6 @@ struct CastPanel: View {
                         Text("读到这里 · \(cast.count) 人").font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
                     }
                     Spacer(minLength: 6)
-                    if unsureCount > 0 {
-                        DramaUnsurePill(count: unsureCount, tint: tint) { unsure = true }
-                    }
                     closeButton
                 }
                 ScrollView {

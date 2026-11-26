@@ -533,7 +533,7 @@ struct BookRecordPage: View {
             RecordTab(symbol: "square.and.pencil", title: String(localized: "笔记"), count: marks.count + (book.comment == nil ? 0 : 1), on: tab == .notes) { tab = .notes }
             RecordTab(symbol: "clock", title: String(localized: "记录"), count: log(book).count, on: tab == .log) { tab = .log }
             if !podcastMentions.isEmpty {
-                RecordTab(symbol: "headphones", title: String(localized: "播客"), count: podcastMentions.count, on: tab == .podcast) { tab = .podcast }
+                RecordTab(symbol: "asset.radio", title: String(localized: "播客"), count: podcastMentions.count, on: tab == .podcast) { tab = .podcast }
             }
             Spacer(minLength: 8)
             if tab != .podcast {

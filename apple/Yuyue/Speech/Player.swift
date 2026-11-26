@@ -136,6 +136,8 @@ final class Player {
     @ObservationIgnored var onSleep: ((Spot) -> Void)?
     /// 双击耳机 (下一曲 to the headphones): the sentence just heard, to highlight.
     @ObservationIgnored var onMarkHeard: ((Spot) -> Void)?
+    /// Smart Rewind fired after a long pause (≥ 90s): gentle feedback to the UI.
+    @ObservationIgnored var onSmartRewind: (() -> Void)?
     /// The listener explicitly jumped to another sentence (skip / skipExtra).
     @ObservationIgnored var onSkip: (() -> Void)?
 
@@ -169,6 +171,12 @@ final class Player {
     /// Seconds of the playing sentence's audio heard before the last resume.
     @ObservationIgnored private var heard: Double = 0
     @ObservationIgnored private var resumedAt: Date?
+    /// Timestamp when playback was paused, used for Smart Rewind on resume after a long break.
+    @ObservationIgnored private var pausedAt: Date?
+    /// Offline/Kokoro pre-render window: deeper than cloud to keep multi-character dialogue gapless.
+    private static let offlineAhead = 5
+    /// Pause duration (seconds) after which Smart Rewind gently replays/backs up one sentence.
+    private static let smartRewindThreshold: TimeInterval = 90
     @ObservationIgnored private var texts: [UInt32: [String]] = [:]
     @ObservationIgnored private var voices: [String: (any Voice)?] = [:]
     /// 上一次因朗读出错而停下时的位置，供「重试」或「换成系统声音」后从原地续播。
@@ -243,6 +251,16 @@ final class Player {
         observers.append(center.addObserver(forName: KokoroModel.ready, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.liveVoiceBecameReady() }
         })
+        observers.append(center.addObserver(forName: Player.voicePreferenceChanged, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.readyOfflineVoice = nil
+                self.voices.removeAll()
+                self.sectionLayers.removeAll()
+                LiveCastCache.shared.invalidate(book: self.detail.summary.id)
+                if self.state != .stopped { self.restartHere() }
+            }
+        })
         #if os(iOS)
         observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
             let type = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
@@ -289,6 +307,7 @@ final class Player {
         #endif
         failure = nil
         failedSpot = nil
+        pausedAt = nil
         if case .until(let date, _) = sleep, date <= Date() { sleep = .off }
         reset()
         ttsTrackedForRun = false
@@ -336,6 +355,7 @@ final class Player {
         RecordingFetch.shared.stopReadingDrama(bookID: detail.summary.id)
         heard = heardNow()
         resumedAt = nil
+        pausedAt = Date()
         node.pause()
         state = .paused
         clearFadeIfNeeded()
@@ -348,6 +368,20 @@ final class Player {
         resumeAfterInterruption = false
         #endif
         guard state == .paused else { return }
+        let lastPause = pausedAt
+        pausedAt = nil
+        // Smart Rewind: after pausing ≥ 90s, gently replay the current sentence (or step back one
+        // sentence if barely into it) so the listener seamlessly reconnects with the narrative.
+        let smartRewindEnabled = UserDefaults.standard.object(forKey: "listen.smartRewind") as? Bool ?? true
+        if smartRewindEnabled,
+           let lastPause,
+           Date().timeIntervalSince(lastPause) >= Self.smartRewindThreshold,
+           let current = spot {
+            let target = (started && heard >= 2.0) ? current : (before(current) ?? current)
+            onSmartRewind?()
+            play(from: target.position, paused: false)
+            return
+        }
         clearFadeIfNeeded()
         claimRemote()
         if !narrated, let current = spot, DramaSynth.isDramaActive(core, detail.summary.id) {
@@ -385,6 +419,7 @@ final class Player {
         readyOfflineVoice = nil
         thermalNotice = nil
         state = .stopped
+        pausedAt = nil
         clearFadeIfNeeded()
         spot = nil
         engine.stop()
@@ -400,6 +435,22 @@ final class Player {
         guard let spot else { return nil }
         let all = sentences(spot.section)
         return all.indices.contains(spot.sentence) ? all[spot.sentence] : nil
+    }
+
+    /// Previous, current, and next sentences around the active spot (for Focus Listening View).
+    func contextLines() -> (prev: String?, current: String?, next: String?) {
+        guard let spot else { return (nil, nil, nil) }
+        let cur = text(at: spot).trimmingCharacters(in: .whitespacesAndNewlines)
+        let prev = before(spot).map { text(at: $0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        let next = after(spot).map { text(at: $0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        return (prev?.isEmpty == true ? nil : prev, cur.isEmpty ? nil : cur, next?.isEmpty == true ? nil : next)
+    }
+
+    /// Re-renders and replays the current sentence immediately (e.g. after a pronunciation rule fix).
+    func replayCurrent() {
+        textsChanged()
+        guard let current = spot else { return }
+        play(from: current.position, paused: state == .paused)
     }
 
     /// How far into its section the voice is, 0–1.
@@ -521,14 +572,18 @@ final class Player {
         }
         let lang = language(of: spot.section)
         let usesLiveModel: Bool
+        let usesLocalOffline: Bool
         if DramaSynth.isDramaActive(core, detail.summary.id) {
             usesLiveModel = dramaLayer(for: spot.section) == .live && LiveVoiceModel.isInstalled
+            usesLocalOffline = KokoroModel.isInstalled || LiveVoiceModel.isInstalled
         } else {
             let v = voice(for: lang, section: spot.section)
             usesLiveModel = v is CardVoice
+            usesLocalOffline = v is KokoroVoice || v is SystemVoice
         }
         guard usesLiveModel else {
-            return buffered <= Self.ahead
+            let limit = usesLocalOffline ? Self.offlineAhead : Self.ahead
+            return buffered <= limit
         }
         let target = thermalState == .serious ? Self.liveAheadSeriousSeconds : Self.liveAheadNormalSeconds
         return queuedAheadSeconds() < target
@@ -636,9 +691,7 @@ final class Player {
                         RecordingFetch.shared.readingDrama(bookID: self.detail.summary.id, section: spot.section, core: self.core)
                     }
                     let layer = self.dramaLayer(for: spot.section)
-                    let key = Self.cacheKey(for: language)
-                    let chosenNarrator = UserDefaults.standard.string(forKey: Self.voiceKey(language))
-                        ?? UserDefaults.standard.string(forKey: Self.voiceKey(key))
+                    let chosenNarrator = Self.savedVoiceID(for: language)
                     let hasSpoken = self.text(at: spot).unicodeScalars.contains { CharacterSet.alphanumerics.contains($0) }
                     do {
                         switch layer {
@@ -1118,19 +1171,71 @@ final class Player {
 
     // MARK: Voices
 
-    private static func voiceKey(_ language: String) -> String { "player.voice." + language }
+    nonisolated static let voicePreferenceChanged = Notification.Name("yuyue.voicePreferenceChanged")
+
+    nonisolated static func voiceKey(_ language: String) -> String { "player.voice." + language }
 
     /// The language of the section being read, or of the book.
     var language: String {
         (spot ?? failedSpot).map { language(of: $0.section) } ?? detail.summary.language
     }
 
+    nonisolated static func canonicalLanguage(_ language: String) -> String {
+        let t = language.replacingOccurrences(of: "_", with: "-").trimmingCharacters(in: .whitespaces).lowercased()
+        if t == "yue" || t.hasPrefix("zh-hk") || t.hasPrefix("zh-mo") { return "yue" }
+        if t == "zh" || t.hasPrefix("zh-") || t == "cmn" || t.hasPrefix("cmn-") { return "zh" }
+        if t == "en" || t.hasPrefix("en-") { return "en" }
+        let base = t.split(separator: "-").first.map(String.init) ?? t
+        return base.isEmpty ? language : base
+    }
+
+    nonisolated static func savedVoiceID(for language: String, defaults: UserDefaults = .standard) -> String? {
+        if let exact = defaults.string(forKey: voiceKey(language)), !exact.isEmpty { return exact }
+        let key = canonicalLanguage(language)
+        if key != language, let canon = defaults.string(forKey: voiceKey(key)), !canon.isEmpty { return canon }
+        return nil
+    }
+
+    /// Saves or clears the narrator voice preference canonically (clearing stale regional keys such as
+    /// `player.voice.zh-Hans` when saving `zh`) so Settings and Reader never diverge.
+    nonisolated static func saveVoicePreference(
+        _ voiceID: String?,
+        for language: String,
+        notify: Bool = true,
+        defaults: UserDefaults = .standard
+    ) {
+        let canon = canonicalLanguage(language)
+        let trimmed = voiceID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = (trimmed?.isEmpty == false) ? trimmed : nil
+        let write: (String, String?) -> Void = { key, v in
+            if let v { defaults.set(v, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        if canon == "zh" || canon == "en" {
+            write(voiceKey(canon), value)
+            let variants = canon == "zh"
+                ? ["zh-Hans", "zh-Hant", "zh-CN", "zh-TW", "zh-SG", "cmn"]
+                : ["en-US", "en-GB", "en-AU", "en-CA"]
+            for v in variants where v != canon {
+                defaults.removeObject(forKey: voiceKey(v))
+            }
+            if language != canon, !variants.contains(language) {
+                defaults.removeObject(forKey: voiceKey(language))
+            }
+        } else {
+            write(voiceKey(language), value)
+            if !canon.isEmpty, canon != language {
+                write(voiceKey(canon), value)
+            }
+        }
+        if notify {
+            LiveCastCache.shared.invalidateAll()
+            NotificationCenter.default.post(name: voicePreferenceChanged, object: nil)
+        }
+    }
+
     /// Whether the user has explicitly saved a voice override for `language`.
     func hasSavedVoice(for language: String) -> Bool {
-        let key = Self.cacheKey(for: language)
-        if let v = UserDefaults.standard.string(forKey: Self.voiceKey(language)), !v.isEmpty { return true }
-        if let v = UserDefaults.standard.string(forKey: Self.voiceKey(key)), !v.isEmpty { return true }
-        return false
+        Self.savedVoiceID(for: language) != nil
     }
 
     /// The voice reading `language` now.
@@ -1139,12 +1244,7 @@ final class Player {
     }
 
     private static func cacheKey(for language: String) -> String {
-        let t = language.replacingOccurrences(of: "_", with: "-").trimmingCharacters(in: .whitespaces).lowercased()
-        if t == "yue" || t.hasPrefix("zh-hk") || t.hasPrefix("zh-mo") { return "yue" }
-        if t == "zh" || t.hasPrefix("zh-") || t == "cmn" || t.hasPrefix("cmn-") { return "zh" }
-        if t == "en" || t.hasPrefix("en-") { return "en" }
-        let base = t.split(separator: "-").first.map(String.init) ?? t
-        return base.isEmpty ? language : base
+        canonicalLanguage(language)
     }
 
     private enum SavedVoiceError: LocalizedError {
@@ -1158,12 +1258,11 @@ final class Player {
     /// Reads `language` with another voice from now on, starting the sentence again in it.
     func choose(_ voice: any Voice, for language: String) {
         let key = Self.cacheKey(for: language)
-        UserDefaults.standard.set(voice.id, forKey: Self.voiceKey(language))
-        if key != language {
-            UserDefaults.standard.set(voice.id, forKey: Self.voiceKey(key))
-        }
+        Self.saveVoicePreference(voice.id, for: language, notify: false)
         readyOfflineVoice = nil
         voices[key] = voice
+        sectionLayers.removeAll()
+        LiveCastCache.shared.invalidate(book: detail.summary.id)
         restartHere()
     }
 
@@ -1174,11 +1273,10 @@ final class Player {
         let resumeAt = failedSpot ?? spot
         failure = nil
         if let sys = SystemVoice.best(for: lang) {
-            UserDefaults.standard.set(sys.id, forKey: Self.voiceKey(lang))
-            if key != lang {
-                UserDefaults.standard.set(sys.id, forKey: Self.voiceKey(key))
-            }
+            Self.saveVoicePreference(sys.id, for: lang, notify: false)
             voices[key] = sys
+            sectionLayers.removeAll()
+            LiveCastCache.shared.invalidate(book: detail.summary.id)
             if let resumeAt {
                 play(from: resumeAt.position)
             } else {
@@ -1208,9 +1306,7 @@ final class Player {
     private func resolveVoiceForPlayback(for language: String) throws -> (any Voice)? {
         let key = Self.cacheKey(for: language)
         if let known = voices[key] { return known }
-        let savedID = UserDefaults.standard.string(forKey: Self.voiceKey(language))
-            ?? UserDefaults.standard.string(forKey: Self.voiceKey(key))
-        if let savedID, !savedID.isEmpty {
+        if let savedID = Self.savedVoiceID(for: language) {
             guard let chosen = Voices.find(savedID, bookID: detail.summary.id), chosen.speaks(language) else {
                 throw SavedVoiceError.unavailable
             }
@@ -1223,9 +1319,7 @@ final class Player {
     private func voice(for language: String, section: UInt32? = nil) -> (any Voice)? {
         let key = Self.cacheKey(for: language)
         if let known = voices[key] { return known }
-        let savedID = UserDefaults.standard.string(forKey: Self.voiceKey(language))
-            ?? UserDefaults.standard.string(forKey: Self.voiceKey(key))
-        if let savedID, !savedID.isEmpty, let chosen = Voices.find(savedID, bookID: detail.summary.id) {
+        if let savedID = Self.savedVoiceID(for: language), let chosen = Voices.find(savedID, bookID: detail.summary.id) {
             voices[key] = chosen
             return chosen
         }

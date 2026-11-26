@@ -439,7 +439,28 @@ object Icons {
         )
     }
 
-    /** microphone (播客 · 录声音) */
+    /** radio (播客, matching macOS asset.radio) */
+    val radio = sf("radio") {
+        line(
+            "M6 9H18A3 3 0 0 1 21 12V17.25A3 3 0 0 1 18 20.25H6A3 3 0 0 1 3 17.25V12A3 3 0 0 1 6 9Z" +
+                "M7.5 9L17.25 3.75" +
+                "M15.75 12.15A2.4 2.4 0 1 1 15.75 16.95A2.4 2.4 0 1 1 15.75 12.15Z" +
+                "M6.75 14.55H9.75",
+            width = 1.75f,
+        )
+    }
+
+    /** radio.fill (播客 active tab, matching iOS radio-fill) */
+    val radioFill = sf("radio.fill") {
+        line("M7.5 9L17.25 3.75", width = 1.75f)
+        fill(
+            "M6 8.2H18A3.8 3.8 0 0 1 21.8 12V17.25A3.8 3.8 0 0 1 18 21.05H6A3.8 3.8 0 0 1 2.2 17.25V12A3.8 3.8 0 0 1 6 8.2Z" +
+                "M15.75 12.15A2.4 2.4 0 1 0 15.75 16.95A2.4 2.4 0 1 0 15.75 12.15Z" +
+                "M6.75 13.7H9.75A0.85 0.85 0 0 1 9.75 15.4H6.75A0.85 0.85 0 0 1 6.75 13.7Z"
+        )
+    }
+
+    /** microphone (录声音) */
     val microphone = sf("microphone") {
         line(
             "M12 3.25A2.75 2.75 0 0 1 14.75 6V11.25A2.75 2.75 0 0 1 9.25 11.25V6A2.75 2.75 0 0 1 12 3.25Z" +
@@ -861,6 +882,35 @@ object Icons {
         line(
             "M9 4.75H15A1 1 0 0 1 16 5.75V6.75H8V5.75A1 1 0 0 1 9 4.75ZM10.5 3.25H13.5" +
                 "M8 5.5H6.5A1.75 1.75 0 0 0 4.75 7.25V18.75A1.75 1.75 0 0 0 6.5 20.5H17.5A1.75 1.75 0 0 0 19.25 18.75V7.25A1.75 1.75 0 0 0 17.5 5.5H16"
+        )
+    }
+
+    /** line.3.horizontal (拖拽排序手柄) */
+    val dragHandle = sf("line.3.horizontal") {
+        line("M4.75 7.25H19.25M4.75 12H19.25M4.75 16.75H19.25", width = 1.75f)
+    }
+
+    /** plus.circle.fill (添加底部入口) */
+    val plusCircleFill = sf("plus.circle.fill") {
+        fill(
+            "M12 2.75A9.25 9.25 0 1 0 12 21.25A9.25 9.25 0 1 0 12 2.75Z" +
+                "M11.2 7.5H12.8V11.2H16.5V12.8H12.8V16.5H11.2V12.8H7.5V11.2H11.2V7.5Z"
+        )
+    }
+
+    /** minus.circle.fill (隐藏底部入口) */
+    val minusCircleFill = sf("minus.circle.fill") {
+        fill(
+            "M12 2.75A9.25 9.25 0 1 0 12 21.25A9.25 9.25 0 1 0 12 2.75Z" +
+                "M7.5 11.2H16.5V12.8H7.5V11.2Z"
+        )
+    }
+
+    /** dock.rectangle (底部导航设置) */
+    val bottomNav = sf("dock.rectangle") {
+        line(
+            "M4.75 4.75H19.25A1.75 1.75 0 0 1 21 6.5V17.5A1.75 1.75 0 0 1 19.25 19.25H4.75A1.75 1.75 0 0 1 3 17.5V6.5A1.75 1.75 0 0 1 4.75 4.75Z" +
+                "M3.5 14.75H20.5"
         )
     }
 

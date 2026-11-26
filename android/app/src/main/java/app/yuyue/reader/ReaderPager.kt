@@ -727,12 +727,11 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
                 dragging = false
                 velocity?.recycle()
                 velocity = VelocityTracker.obtain().apply { addMovement(e) }
-                // A page still settling is caught by the finger, as a scroll view would.
+                // Finish an in-flight turn immediately so rapid taps register as the next page turn
+                // instead of being intercepted and swallowed as a zero-distance drag.
                 if (animator != null) {
-                    animator?.cancel()
+                    animator?.end()
                     animator = null
-                    startDrag()
-                    return true
                 }
             }
             MotionEvent.ACTION_MOVE -> {

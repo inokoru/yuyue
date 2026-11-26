@@ -676,6 +676,7 @@
   "%lld 个音色 · 免下载，直接调用手机系统 TTS": "%lld voices · No download, uses your phone's system TTS",
   "免下载 · 跟随手机系统 TTS": "No download · Uses your phone's system TTS",
   "可在系统「文字转语音」设置切换或下载更多语音引擎，返回后自动生效。": "Switch or download TTS engines in Android Text-to-Speech settings; changes apply automatically when you return.",
+  "合成中…": "Rendering…",
   "当前引擎": "Current engine",
   "打开系统文字转语音设置": "Open system text-to-speech settings",
   "推荐下载「语阅离线语音（Kokoro）」断网畅听，也可直接使用手机「系统语音」或免 Key 的「在线自然语音」。": "Download Yuyue Offline Voices (Kokoro) for offline listening, or use your phone's System Speech or keyless Online Natural Voices directly.",
@@ -686,5 +687,7 @@
   "系统自带 · 免下载离线朗读": "Built-in · Offline with no downloads",
   "系统设置": "System settings",
   "系统默认": "System default",
-  "系统默认语音": "System Default Voice"
+  "系统默认语音": "System Default Voice",
+  "试听失败，请重试": "Preview failed. Please try again.",
+  "试听播放失败，请重试": "Couldn't play preview. Please try again."
 }

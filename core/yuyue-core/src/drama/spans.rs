@@ -142,11 +142,33 @@ fn pairs(chars: &[At]) -> Vec<(usize, usize)> {
 
 /// Words before writing on something: what follows is read, not said.
 const WRITTEN: &[&str] = &["写着", "寫著", "题着", "題著", "刻着", "刻著", "上书", "上書", "题曰", "題曰", "书曰", "書曰", "印着", "印著", "信上说", "信上說", "信中写道", "信中寫道"];
+/// Non-fiction / essay citation and naming cues right before a quote: quoted text, not live dialogue.
+const CITED: &[&str] = &[
+    "指出", "认为", "認為", "强调", "強調", "提出", "写道", "寫道", "引用", "论述", "論述",
+    "论证", "論證", "主张", "主張", "断言", "斷言", "阐释", "闡釋", "阐述", "闡述", "概括为",
+    "概括為", "定义为", "定義為", "名曰", "叫做", "称为", "稱為", "称作", "稱作", "称之为", "稱之為",
+    "创立的", "創立的",
+];
+const CITED_EN: &[&str] = &["wrote", "writes", "argued", "argues", "noted", "cited", "defined as", "termed", "coined"];
 const THINK: &[&str] = &["心想", "暗想", "暗道", "寻思", "尋思", "自忖", "暗忖", "想道", "心道", "心里想", "心裏想", "心中想", "心內想", "心内想", "思忖", "忖道", "心下想", "暗暗想"];
 const THINK_EN: &[&str] = &["thought", "wondered", "mused", "reflected"];
-/// The words after a quote that say it was spoken: a short quote with these is a line, not stress.
+/// The words before/after a quote that say it was spoken: a short quote with these is a line, not stress.
+const SAY_BEFORE: &[&str] = &["道", "说", "說", "问", "問", "答", "笑", "喊", "叫", "嚷", "喝", "叹", "嘆", "骂", "罵", "回", "劝", "勸", "唤", "喚"];
+const SAY_BEFORE_EN: &[&str] = &["said", "asked", "replied", "answered", "cried", "whispered", "shouted", "muttered", "murmured", "exclaimed", "laughed", "sighed", "called", "yelled", "says"];
+const NON_SAY_BEFORE: &[&str] = &["也就是说", "也就是說", "换句话说", "換句話說", "来说", "來說", "比如说", "比如說", "例如说", "例如說", "俗话说", "俗話說", "据说", "據說", "传说", "傳說", "报道", "報道", "知道", "写道", "寫道"];
 const SAY_AFTER: &[&str] = &["道", "说", "說", "问", "問", "笑", "叫", "喊", "答", "said", "asked", "cried", "replied", "says", "whispered", "answered"];
 const ENDS: &[char] = &['。', '！', '？', '…', '，', '!', '?', '.', ',', '；', ';', '—', '～', '~'];
+
+fn ends_with_english_word(text: &str, words: &[&str]) -> bool {
+    let lower = text.trim_end().to_lowercase();
+    words.iter().any(|w| {
+        if let Some(prefix) = lower.strip_suffix(w) {
+            prefix.is_empty() || !prefix.chars().last().is_some_and(|c| c.is_ascii_alphabetic())
+        } else {
+            false
+        }
+    })
+}
 
 fn text(chars: &[At], from: usize, to: usize) -> String {
     chars[from.min(chars.len())..to.min(chars.len())].iter().map(|a| a.c).collect()
@@ -155,25 +177,39 @@ fn text(chars: &[At], from: usize, to: usize) -> String {
 /// What a quote is, from the words around it.
 fn kind_of(chars: &[At], open: usize, close: usize) -> SegKind {
     let inner = text(chars, open + 1, close);
-    let before: String = text(chars, open.saturating_sub(8), open);
-    let before = before.trim_end_matches([' ', '：', ':', '，', ',']);
+    let before_raw: String = text(chars, open.saturating_sub(14), open);
+    let before = before_raw.trim_end_matches([' ', '：', ':', '，', ',']);
     let after: String = text(chars, close + 1, close + 10);
     let near6: String = before.chars().rev().take(6).collect::<Vec<_>>().into_iter().rev().collect();
     if WRITTEN.iter().any(|w| near6.contains(w)) {
         return SegKind::Quoted;
     }
-    if THINK.iter().any(|w| before.ends_with(w)) || THINK_EN.iter().any(|w| before.to_lowercase().ends_with(w)) {
+    if THINK.iter().any(|w| before.ends_with(w)) || ends_with_english_word(before, THINK_EN) {
         return SegKind::Thought;
     }
     let after_lower = after.to_lowercase();
-    let short = inner.chars().filter(|c| !c.is_whitespace()).count() <= 4;
+    let trimmed_inner = inner.trim();
+    let non_ws_count = trimmed_inner.chars().filter(|c| !c.is_whitespace()).count();
+    let cjk_count = trimmed_inner.chars().filter(|c| ('\u{4e00}'..='\u{9fff}').contains(c)).count();
+    let word_count = trimmed_inner.split_whitespace().count();
     let has_end = inner.chars().any(|c| ENDS.contains(&c));
     let colon_before = text(chars, open.saturating_sub(2), open).trim_end().ends_with(['：', ':']);
+    let not_discourse = !NON_SAY_BEFORE.iter().any(|p| before.ends_with(p));
+    let say_before = not_discourse
+        && (SAY_BEFORE.iter().any(|w| before.ends_with(w)) || ends_with_english_word(before, SAY_BEFORE_EN));
     // 借“通灵”之说, “无题”的说法: the word after names a saying, nobody saying it.
     let names_a_saying = after.starts_with(['之', '的']);
     let say_after = !names_a_saying && SAY_AFTER.iter().any(|w| after_lower.trim_start_matches([' ', '，', ',']).chars().take(6).collect::<String>().contains(w));
-    if short && !has_end && !colon_before && !say_after {
+    let is_inline_term = !has_end
+        && !colon_before
+        && !say_after
+        && !say_before
+        && (non_ws_count <= 4 || (cjk_count > 0 && non_ws_count <= 10) || (cjk_count == 0 && word_count <= 3));
+    if is_inline_term {
         return SegKind::Narration;
+    }
+    if CITED.iter().any(|w| near6.contains(w)) || ends_with_english_word(before, CITED_EN) {
+        return SegKind::Quoted;
     }
     SegKind::Speech
 }
@@ -503,6 +539,26 @@ mod tests {
     fn a_word_in_quotes_named_as_a_saying_is_not_a_line() {
         let segs = split(&["故將真事隱去，而借“通靈”之說，撰此《石頭記》一書也．".to_string()]);
         assert!(segs.iter().all(|s| s.kind == SegKind::Narration), "{segs:?}");
+    }
+
+    #[test]
+    fn nonfiction_terms_and_citations_are_not_speech() {
+        // 5-char inline terminology without punctuation: Narration, never Speech.
+        let term = kinds(&["这恐怕与霍尼及其创立的“新精神分析”理论密不可分。"]);
+        assert!(term.iter().all(|x| x.2 == SegKind::Narration), "{term:?}");
+
+        // English inline concept: Narration.
+        let en_term = kinds(&["She called this pattern \"basic anxiety\" in her later work."]);
+        assert!(en_term.iter().all(|x| x.2 == SegKind::Narration), "{en_term:?}");
+
+        // Academic citation introduced by 指出 / 认为 / 写道: Quoted, never Speech.
+        let cited = kinds(&["霍尼开篇就指出，“并非神经症患者内心才有冲突……我们的内心冲突也是生活中不可或缺的一部分。”"]);
+        assert!(cited.iter().all(|x| x.2 != SegKind::Speech), "{cited:?}");
+        assert!(cited.iter().any(|x| x.2 == SegKind::Quoted), "{cited:?}");
+
+        let wrote = kinds(&["她在书中写道：“有意识地体验冲突，尽管比较痛苦，但它也是一种无价的资产。”"]);
+        assert!(wrote.iter().all(|x| x.2 != SegKind::Speech), "{wrote:?}");
+        assert!(wrote.iter().any(|x| x.2 == SegKind::Quoted), "{wrote:?}");
     }
 
     fn unquoted_book() -> Vec<String> {

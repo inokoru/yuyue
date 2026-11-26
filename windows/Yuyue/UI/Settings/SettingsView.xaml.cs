@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Yuyue.Core;
 using Yuyue.Design;
+using Yuyue.Speech;
 using Yuyue.UI.Controls;
 using Yuyue.UI.Shell;
 
@@ -131,6 +132,7 @@ public sealed partial class SettingsView : UserControl, ITabContent
 
     private void BroadcastVoiceWithoutSelfRefresh()
     {
+        DramaSynthService.InvalidateAllCasts();
         _suppressSelfRefresh = true;
         try { App.CurrentApp.BroadcastVoiceChanged(); }
         finally { _suppressSelfRefresh = false; }

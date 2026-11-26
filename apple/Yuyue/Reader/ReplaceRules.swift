@@ -614,3 +614,559 @@ struct ReplaceRuleEditor: View {
         }
     }
 }
+
+// MARK: - 灵动听书胶囊 · 纠音与反馈视图（Mac & iPhone 共用）
+
+/// Built-in phonetic quick-picks for frequently mispronounced Chinese polyphones.
+private enum PolyphoneHints {
+    struct Option: Hashable {
+        let text: String
+        let pinyin: String
+    }
+
+    private static let table: [String: [Option]] = [
+        "贾赦": [Option(text: "贾社", pinyin: "shè"), Option(text: "贾舍", pinyin: "shě")],
+        "单于": [Option(text: "蝉于", pinyin: "chán yú")],
+        "赦": [Option(text: "社", pinyin: "shè"), Option(text: "舍", pinyin: "shě")],
+        "行": [Option(text: "杭", pinyin: "háng"), Option(text: "形", pinyin: "xíng")],
+        "重": [Option(text: "仲", pinyin: "zhòng"), Option(text: "虫", pinyin: "chóng")],
+        "长": [Option(text: "掌", pinyin: "zhǎng"), Option(text: "常", pinyin: "cháng")],
+        "乐": [Option(text: "月", pinyin: "yuè"), Option(text: "勒", pinyin: "lè")],
+        "朝": [Option(text: "招", pinyin: "zhāo"), Option(text: "潮", pinyin: "cháo")],
+        "差": [Option(text: "拆", pinyin: "chāi"), Option(text: "岔", pinyin: "chà")],
+        "解": [Option(text: "谢", pinyin: "xiè"), Option(text: "姐", pinyin: "jiě")],
+        "角": [Option(text: "绝", pinyin: "jué"), Option(text: "脚", pinyin: "jiǎo")],
+        "数": [Option(text: "树", pinyin: "shù"), Option(text: "暑", pinyin: "shǔ")],
+        "率": [Option(text: "虑", pinyin: "lǜ"), Option(text: "帅", pinyin: "shuài")],
+        "给": [Option(text: "己", pinyin: "jǐ"), Option(text: "轨", pinyin: "gěi")],
+        "还": [Option(text: "环", pinyin: "huán"), Option(text: "孩", pinyin: "hái")],
+        "藏": [Option(text: "脏", pinyin: "zàng"), Option(text: "仓", pinyin: "cáng")],
+        "传": [Option(text: "赚", pinyin: "zhuàn"), Option(text: "船", pinyin: "chuán")],
+        "调": [Option(text: "吊", pinyin: "diào"), Option(text: "条", pinyin: "tiáo")],
+        "盛": [Option(text: "胜", pinyin: "shèng"), Option(text: "成", pinyin: "chéng")],
+        "省": [Option(text: "醒", pinyin: "xǐng"), Option(text: "审", pinyin: "shěng")],
+        "泊": [Option(text: "博", pinyin: "bó"), Option(text: "坡", pinyin: "pō")],
+        "露": [Option(text: "路", pinyin: "lù"), Option(text: "漏", pinyin: "lòu")],
+        "降": [Option(text: "酱", pinyin: "jiàng"), Option(text: "祥", pinyin: "xiáng")],
+        "校": [Option(text: "叫", pinyin: "jiào"), Option(text: "笑", pinyin: "xiào")],
+        "血": [Option(text: "谢", pinyin: "xuè"), Option(text: "写", pinyin: "xiě")],
+        "载": [Option(text: "在", pinyin: "zài"), Option(text: "宰", pinyin: "zǎi")],
+        "折": [Option(text: "蛇", pinyin: "shé"), Option(text: "哲", pinyin: "zhé")],
+        "着": [Option(text: "招", pinyin: "zhāo"), Option(text: "浊", pinyin: "zhuó")],
+        "拗": [Option(text: "傲", pinyin: "ào"), Option(text: "扭", pinyin: "niù")],
+        "殷": [Option(text: "烟", pinyin: "yān"), Option(text: "音", pinyin: "yīn")],
+        "阿": [Option(text: "啊", pinyin: "ā"), Option(text: "鹅", pinyin: "ē")],
+        "禅": [Option(text: "蝉", pinyin: "chán"), Option(text: "善", pinyin: "shàn")],
+        "尉": [Option(text: "玉", pinyin: "yù"), Option(text: "卫", pinyin: "wèi")],
+        "区": [Option(text: "欧", pinyin: "ōu"), Option(text: "驱", pinyin: "qū")],
+        "仇": [Option(text: "求", pinyin: "qiú"), Option(text: "筹", pinyin: "chóu")],
+        "朴": [Option(text: "瓢", pinyin: "piáo"), Option(text: "普", pinyin: "pǔ")],
+        "查": [Option(text: "渣", pinyin: "zhā"), Option(text: "茶", pinyin: "chá")],
+        "盖": [Option(text: "哥", pinyin: "gě"), Option(text: "钙", pinyin: "gài")],
+        "任": [Option(text: "人", pinyin: "rén"), Option(text: "认", pinyin: "rèn")],
+        "华": [Option(text: "化", pinyin: "huà"), Option(text: "划", pinyin: "huá")]
+    ]
+
+    static func suggestions(for word: String) -> [Option] {
+        let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        if let exact = table[trimmed] { return exact }
+        let chars = Array(trimmed)
+        guard chars.count <= 4 else { return [] }
+        // Check individual characters inside a short compound word (e.g. 贾赦 / 行家).
+        for (idx, ch) in chars.enumerated() {
+            if let opts = table[String(ch)] {
+                return opts.map { opt in
+                    var copy = chars
+                    copy[idx] = Character(opt.text)
+                    return Option(text: String(copy), pinyin: opt.pinyin)
+                }
+            }
+        }
+        return []
+    }
+
+    /// Finds the first likely polyphone range inside `chars` as a gentle initial selection if none was provided.
+    static func firstPolyphoneRange(in chars: [Character]) -> ClosedRange<Int>? {
+        for (i, ch) in chars.enumerated() where table[String(ch)] != nil {
+            // Expand to 2-char word if preceded by a CJK character (often a surname/prefix like 贾赦).
+            if i > 0, isCJK(chars[i - 1]) {
+                return (i - 1)...i
+            }
+            return i...i
+        }
+        return nil
+    }
+
+    private static func isCJK(_ c: Character) -> Bool {
+        guard let v = c.unicodeScalars.first?.value else { return false }
+        return (0x4E00...0x9FFF).contains(v)
+    }
+}
+
+private struct CharFramesKey: PreferenceKey {
+    static let defaultValue: [Int: CGRect] = [:]
+    static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+/// Flows individual character views seamlessly like natural book prose with zero horizontal gap.
+private struct FlowCharLayout: Layout {
+    var lineSpacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxW = proposal.width ?? 420
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowH: CGFloat = 0
+        for sub in subviews {
+            let s = sub.sizeThatFits(.unspecified)
+            if x > 0, x + s.width > maxW {
+                x = 0
+                y += rowH + lineSpacing
+                rowH = 0
+            }
+            x += s.width
+            rowH = max(rowH, s.height)
+        }
+        return CGSize(width: maxW, height: y + rowH)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let maxW = bounds.width
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowH: CGFloat = 0
+        for sub in subviews {
+            let s = sub.sizeThatFits(.unspecified)
+            if x > 0, x + s.width > maxW {
+                x = 0
+                y += rowH + lineSpacing
+                rowH = 0
+            }
+            sub.place(at: CGPoint(x: bounds.minX + x, y: bounds.minY + y), anchor: .topLeading, proposal: .unspecified)
+            x += s.width
+            rowH = max(rowH, s.height)
+        }
+    }
+}
+
+/// Real unbroken serif sentence supporting fluid 1:1 mouse/finger drag selection of any 1–8 characters.
+private struct DragSelectSentenceView: View {
+    let chars: [Character]
+    @Binding var selection: ClosedRange<Int>?
+    let paper: YYPaper
+    let accent: Color
+    let fontSize: CGFloat
+    let onCommitRange: (ClosedRange<Int>) -> Void
+
+    @State private var frames: [Int: CGRect] = [:]
+    @State private var anchor: Int?
+
+    var body: some View {
+        FlowCharLayout(lineSpacing: 6) {
+            ForEach(Array(chars.enumerated()), id: \.offset) { index, ch in
+                let selected = selection?.contains(index) ?? false
+                Text(String(ch))
+                    .font(YYUI.serif(fontSize, selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? accent : paper.ink)
+                    .padding(.vertical, 1)
+                    .background(selected ? accent.opacity(paper.isDark ? 0.28 : 0.16) : .clear, in: .rect(cornerRadius: 2))
+                    .overlay(alignment: .bottom) {
+                        if selected {
+                            Rectangle().fill(accent).frame(height: 1.5)
+                        }
+                    }
+                    .background(
+                        GeometryReader { g in
+                            Color.clear.preference(key: CharFramesKey.self, value: [index: g.frame(in: .named("charFlow"))])
+                        }
+                    )
+            }
+        }
+        .coordinateSpace(name: "charFlow")
+        .onPreferenceChange(CharFramesKey.self) { frames = $0 }
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .named("charFlow"))
+                .onChanged { value in
+                    guard let hit = hitIndex(at: value.location) else { return }
+                    if anchor == nil {
+                        anchor = hit
+                        selection = hit...hit
+                    } else if let a = anchor {
+                        let clamped = max(a - 7, min(a + 7, hit))
+                        selection = min(a, clamped)...max(a, clamped)
+                    }
+                }
+                .onEnded { _ in
+                    anchor = nil
+                    if let sel = selection {
+                        onCommitRange(sel)
+                    }
+                }
+        )
+    }
+
+    private func hitIndex(at point: CGPoint) -> Int? {
+        if let exact = frames.first(where: { $0.value.insetBy(dx: -1, dy: -3).contains(point) }) {
+            return exact.key
+        }
+        var bestIdx: Int?
+        var bestDist = CGFloat.greatestFiniteMagnitude
+        for (idx, rect) in frames {
+            let dx = max(rect.minX - point.x, 0, point.x - rect.maxX)
+            let dy = max(rect.minY - point.y, 0, point.y - rect.maxY)
+            let dist = hypot(dx, dy)
+            if dist < bestDist {
+                bestDist = dist
+                bestIdx = idx
+            }
+        }
+        return bestDist <= 28 ? bestIdx : nil
+    }
+}
+
+/// Morphing Glass Capsule pronunciation editor: unbroken drag-selectable sentence + live playback +
+/// single concentric Spotlight-style unified input trough. Zero modal sheets, zero ugly word chips.
+struct CapsulePronunciationPanel: View {
+    let initialFind: String
+    let sentence: String
+    let paper: YYPaper
+    let isPlaying: Bool
+    var compact: Bool = false
+    let onTogglePlay: () -> Void
+    let onSave: (String, String, Bool) -> Bool
+    let onClose: () -> Void
+
+    @State private var chars: [Character]
+    @State private var selRange: ClosedRange<Int>?
+    @State private var manualFind: String
+    @State private var replace: String = ""
+    @State private var wholeLibrary = false
+    @FocusState private var inputFocused: Bool
+
+    private var accent: Color {
+        paper.isEink ? paper.ink : YYTint.standard.accent
+    }
+
+    init(
+        initialFind: String,
+        sentence: String,
+        paper: YYPaper,
+        isPlaying: Bool,
+        compact: Bool = false,
+        onTogglePlay: @escaping () -> Void,
+        onSave: @escaping (String, String, Bool) -> Bool,
+        onClose: @escaping () -> Void
+    ) {
+        self.initialFind = initialFind
+        self.sentence = sentence
+        self.paper = paper
+        self.isPlaying = isPlaying
+        self.compact = compact
+        self.onTogglePlay = onTogglePlay
+        self.onSave = onSave
+        self.onClose = onClose
+
+        let trimmedSentence = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cappedChars = Array(trimmedSentence.prefix(200))
+        _chars = State(initialValue: cappedChars)
+        _manualFind = State(initialValue: initialFind)
+
+        var initialRange: ClosedRange<Int>? = nil
+        if !initialFind.isEmpty, let r = trimmedSentence.range(of: initialFind) {
+            let start = trimmedSentence.distance(from: trimmedSentence.startIndex, to: r.lowerBound)
+            let len = initialFind.count
+            if start >= 0, start + len - 1 < cappedChars.count {
+                initialRange = start...(start + len - 1)
+            }
+        } else if !cappedChars.isEmpty {
+            initialRange = PolyphoneHints.firstPolyphoneRange(in: cappedChars)
+        }
+        _selRange = State(initialValue: initialRange)
+
+        let effectiveFind: String
+        if let r = initialRange {
+            effectiveFind = String(cappedChars[r])
+        } else {
+            effectiveFind = initialFind
+        }
+        if let first = PolyphoneHints.suggestions(for: effectiveFind).first {
+            _replace = State(initialValue: first.text)
+        }
+    }
+
+    private var activeFind: String {
+        if let r = selRange, r.lowerBound >= 0, r.upperBound < chars.count {
+            return String(chars[r])
+        }
+        return manualFind.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canSubmit: Bool {
+        !activeFind.isEmpty && !replace.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var hints: [PolyphoneHints.Option] {
+        PolyphoneHints.suggestions(for: activeFind)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 10 : 11) {
+            // Top micro header: live acoustic wave + prompt + quick polyphone hints + continuous play/pause + close
+            HStack(spacing: 8) {
+                SpeakingBars(paused: !isPlaying)
+                    .frame(width: 15, height: 14)
+                Text(chars.isEmpty ? String(localized: "纠正读音") : String(localized: "划选读错的字"))
+                    .font(.yy(size: 11.5, weight: .medium))
+                    .foregroundStyle(paper.ink2)
+                    .lineLimit(1)
+
+                if !compact, !hints.isEmpty {
+                    quickHintsRow
+                }
+
+                Spacer(minLength: 4)
+
+                Button(action: onTogglePlay) {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.yy(size: 10.5, weight: .semibold))
+                        .foregroundStyle(paper.ink2)
+                        .frame(width: 24, height: 24)
+                        .contentShape(.circle)
+                }
+                .buttonStyle(YYPressStyle(scale: 0.9))
+                .accessibilityLabel(isPlaying ? Text("暂停朗读") : Text("继续朗读"))
+
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.yy(size: 10.5, weight: .semibold))
+                        .foregroundStyle(paper.ink2)
+                        .frame(width: 24, height: 24)
+                        .contentShape(.circle)
+                }
+                .buttonStyle(YYPressStyle(scale: 0.9))
+                .accessibilityLabel(Text("收起"))
+            }
+
+            // Real unbroken book sentence (drag or tap any 1-8 characters; scrollable for long sentences)
+            if !chars.isEmpty {
+                ScrollView(.vertical, showsIndicators: false) {
+                    DragSelectSentenceView(
+                        chars: chars,
+                        selection: $selRange,
+                        paper: paper,
+                        accent: accent,
+                        fontSize: compact ? 14.5 : 15.5
+                    ) { range in
+                        let picked = String(chars[range])
+                        manualFind = picked
+                        if let first = PolyphoneHints.suggestions(for: picked).first {
+                            replace = first.text
+                        } else {
+                            replace = ""
+                        }
+                        inputFocused = true
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: compact ? 64 : 68)
+            }
+
+            if compact, !hints.isEmpty {
+                quickHintsRow
+            }
+
+            // Single sculptural concentric Spotlight-style input trough
+            HStack(spacing: 8) {
+                if chars.isEmpty {
+                    TextField(String(localized: "错词"), text: $manualFind)
+                        .textFieldStyle(.plain)
+                        .font(YYUI.serif(13, .semibold))
+                        .foregroundStyle(paper.ink)
+                        .frame(width: 68)
+                } else {
+                    Text(activeFind.isEmpty ? String(localized: "选字") : activeFind)
+                        .font(YYUI.serif(13, .semibold))
+                        .foregroundStyle(activeFind.isEmpty ? paper.ink2.opacity(0.6) : paper.ink)
+                        .lineLimit(1)
+                        .frame(maxWidth: 82, alignment: .leading)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+
+                Image(systemName: "arrow.right")
+                    .font(.yy(size: 10.5, weight: .medium))
+                    .foregroundStyle(paper.ink2.opacity(0.65))
+
+                TextField(String(localized: "输入同音字…"), text: $replace)
+                    .textFieldStyle(.plain)
+                    .font(.yy(size: 13))
+                    .foregroundStyle(paper.ink)
+                    .focused($inputFocused)
+                    .onSubmit { submit() }
+
+                Button {
+                    wholeLibrary.toggle()
+                } label: {
+                    Text(wholeLibrary ? String(localized: "全部书") : String(localized: "仅本书"))
+                        .font(.yy(size: 11, weight: .medium))
+                        .foregroundStyle(paper.ink2)
+                        .padding(.horizontal, 6)
+                        .frame(height: 26)
+                        .contentShape(.capsule)
+                }
+                .buttonStyle(YYPressStyle(scale: 0.95))
+                .fixedSize()
+                .help("点击切换生效范围：仅这本书 / 全部书")
+
+                Button(action: submit) {
+                    Image(systemName: "return")
+                        .font(.yy(size: 11.5, weight: .semibold))
+                        .foregroundStyle(paper.onMain)
+                        .frame(width: 30, height: 30)
+                        .background(canSubmit ? YYTint.standard.play(on: paper) : paper.ink.opacity(0.18), in: .circle)
+                }
+                .buttonStyle(YYPressStyle(scale: 0.92))
+                .disabled(!canSubmit)
+                .help("保存并立即重念这句")
+                .accessibilityLabel(Text("保存并重念"))
+            }
+            .padding(.leading, 14)
+            .padding(.trailing, 4)
+            .padding(.vertical, 4)
+            .background(
+                (inputFocused ? YYColor.card : paper.ink.opacity(paper.isDark ? 0.08 : 0.05)),
+                in: .capsule
+            )
+            .overlay(
+                Capsule().strokeBorder(
+                    inputFocused ? accent.opacity(0.42) : paper.line,
+                    lineWidth: inputFocused ? 1 : 0.5
+                )
+            )
+        }
+        .padding(.horizontal, compact ? 14 : 16)
+        .padding(.vertical, compact ? 13 : 14)
+        .onAppear {
+            if !activeFind.isEmpty {
+                inputFocused = true
+            }
+        }
+    }
+
+    private var quickHintsRow: some View {
+        HStack(spacing: 6) {
+            ForEach(hints, id: \.self) { opt in
+                Button {
+                    replace = opt.text
+                    _ = onSave(activeFind, opt.text, wholeLibrary)
+                } label: {
+                    HStack(spacing: 3) {
+                        Text(opt.text).font(YYUI.serif(11.5, .medium))
+                        Text(opt.pinyin).font(.yy(size: 10)).opacity(0.72)
+                    }
+                    .foregroundStyle(accent)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(accent.opacity(paper.isDark ? 0.18 : 0.10), in: .capsule)
+                }
+                .buttonStyle(YYPressStyle(scale: 0.94))
+            }
+        }
+    }
+
+    private func submit() {
+        guard canSubmit else { return }
+        _ = onSave(activeFind, replace, wholeLibrary)
+    }
+}
+
+/// Compact 1-line morphing feedback inside the bottom listening capsule (replaces jarring top toasts).
+struct CapsuleFeedbackStrip: View {
+    let mode: ReaderModel.ListenCapsuleMode
+    let paper: YYPaper
+    var compact: Bool = false
+    let onUndoMark: (String) -> Void
+    let onDismiss: () -> Void
+
+    private var accent: Color {
+        paper.isEink ? paper.ink : YYTint.standard.accent
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            switch mode {
+            case .pronunciationDone(let from, let to):
+                SpeakingBars(paused: false)
+                    .frame(width: 15, height: 14)
+                HStack(spacing: 5) {
+                    Text("「\(from)」→「\(to)」")
+                        .font(.yy(size: 12, weight: .semibold))
+                        .foregroundStyle(paper.ink)
+                    Text("正在重念…")
+                        .font(.yy(size: 11.5))
+                        .foregroundStyle(paper.ink2)
+                }
+                .lineLimit(1)
+                Spacer(minLength: 4)
+                Button("完成", action: onDismiss)
+                    .font(.yy(size: 11, weight: .medium))
+                    .foregroundStyle(paper.ink2)
+                    .buttonStyle(.plain)
+
+            case .marked(let excerpt, let undoID):
+                Image(systemName: "checkmark")
+                    .font(.yy(size: 10, weight: .bold))
+                    .foregroundStyle(accent)
+                    .frame(width: 22, height: 22)
+                    .background(accent.opacity(paper.isDark ? 0.20 : 0.12), in: .circle)
+                HStack(spacing: 5) {
+                    Text("已记下这句")
+                        .font(.yy(size: 12, weight: .semibold))
+                        .foregroundStyle(paper.ink)
+                    if !excerpt.isEmpty {
+                        Text("“\(excerpt)”")
+                            .font(YYUI.serif(11.5))
+                            .foregroundStyle(paper.ink2)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 4)
+                if let undoID {
+                    Button("撤销") { onUndoMark(undoID) }
+                        .font(.yy(size: 11, weight: .medium))
+                        .foregroundStyle(paper.ink)
+                        .padding(.horizontal, 10)
+                        .frame(height: 24)
+                        .background(paper.ink.opacity(paper.isDark ? 0.12 : 0.07), in: .capsule)
+                        .buttonStyle(YYPressStyle(scale: 0.94))
+                }
+
+            case .rewound(let sentenceNumber):
+                Image(systemName: "gobackward")
+                    .font(.yy(size: 12.5, weight: .semibold))
+                    .foregroundStyle(accent)
+                HStack(spacing: 5) {
+                    Text("已为你回退一句")
+                        .font(.yy(size: 12, weight: .semibold))
+                        .foregroundStyle(paper.ink)
+                    Text("接上暂停前的语境")
+                        .font(.yy(size: 11.5))
+                        .foregroundStyle(paper.ink2)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                Text("第 \(sentenceNumber) 句")
+                    .font(.yy(size: 10.5).monospacedDigit())
+                    .foregroundStyle(paper.ink2)
+
+            case .idle, .pronunciation:
+                EmptyView()
+            }
+        }
+        .padding(.horizontal, compact ? 14 : 16)
+        .frame(height: compact ? 46 : 48)
+    }
+}

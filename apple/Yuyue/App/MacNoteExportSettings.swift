@@ -22,6 +22,7 @@ struct NoteExportSettings: View {
             SettingsCard {
                 ForEach(NoteExport.Target.allCases) { t in
                     ExportRow(target: t, selected: focus.target == t)
+                        .settingsAnchor(anchor(for: t))
                 }
             }
             SettingsNote(String(localized: "开启的项目会显示在笔记页「导出」菜单中。令牌与目录仅保存在本机，不同步、不上传。"))
@@ -29,6 +30,15 @@ struct NoteExportSettings: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
             focus.tick &+= 1
+        }
+    }
+
+    private func anchor(for target: NoteExport.Target) -> SettingsAnchor {
+        switch target {
+        case .obsidian: .notesObsidian
+        case .notion: .notesNotion
+        case .flomo: .notesFlomo
+        case .xinzhi: .notesXinzhi
         }
     }
 }

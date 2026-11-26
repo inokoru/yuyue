@@ -191,10 +191,19 @@ struct RecordTab: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Image(systemName: symbol)
-                    .font(.yy(size: 12))
-                    .frame(width: 14, height: 14)
-                    .foregroundStyle(on ? YYColor.t1 : YYColor.t2)
+                Group {
+                    if symbol.hasPrefix("asset.") {
+                        Image(String(symbol.dropFirst(6)))
+                            .resizable()
+                            .renderingMode(.template)
+                            .scaledToFit()
+                    } else {
+                        Image(systemName: symbol)
+                            .font(.yy(size: 12))
+                    }
+                }
+                .frame(width: 14, height: 14)
+                .foregroundStyle(on ? YYColor.t1 : YYColor.t2)
                 Text(title)
                     .font(.yy(size: 12, weight: on ? .semibold : .regular))
                     .foregroundStyle(YYColor.t1)

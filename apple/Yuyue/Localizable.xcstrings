@@ -538,6 +538,16 @@
         }
       }
     },
+    "%@ · 常驻底栏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · Pinned"
+          }
+        }
+      }
+    },
     "%@ · 开源（%@） · %@" : {
       "localizations" : {
         "en" : {
@@ -3479,6 +3489,16 @@
         }
       }
     },
+    "%lld 条生效" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld active"
+          }
+        }
+      }
+    },
     "%lld 条笔记" : {
       "localizations" : {
         "en" : {
@@ -4694,6 +4714,16 @@
         }
       }
     },
+    "6 种内置音效与自定义导入/实录，支持音量微调" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "6 built-in presets, custom import or recording, and volume control"
+          }
+        }
+      }
+    },
     "60 分钟" : {
       "localizations" : {
         "en" : {
@@ -4736,6 +4766,16 @@
       }
     },
     "A" : {},
+    "AI 书伴" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Companion"
+          }
+        }
+      }
+    },
     "API Key 仅保存在本机钥匙串，不同步、不上传；调用费用由服务商直接结算。播客文稿生成同样使用此处所选模型。" : {
       "localizations" : {
         "en" : {
@@ -5210,6 +5250,16 @@
         }
       }
     },
+    "GPL-3.0、组件清单与源代码仓库" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GPL-3.0, component list, and source repository"
+          }
+        }
+      }
+    },
     "GPT-SoVITS、Kokoro、unspeech 或局域网" : {
       "localizations" : {
         "en" : {
@@ -5241,6 +5291,16 @@
       }
     },
     "GitHub" : {},
+    "Google Drive 同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Google Drive Sync"
+          }
+        }
+      }
+    },
     "Google 没让登录，再试一次" : {
       "localizations" : {
         "en" : {
@@ -5467,6 +5527,16 @@
         }
       }
     },
+    "MD · 分享" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MD · Share"
+          }
+        }
+      }
+    },
     "MDict 词典" : {
       "localizations" : {
         "en" : {
@@ -5628,6 +5698,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "WebDAV · Connected"
+          }
+        }
+      }
+    },
+    "WebDAV 同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WebDAV Sync"
           }
         }
       }
@@ -5833,6 +5913,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The folder you chose in iCloud Drive"
+          }
+        }
+      }
+    },
+    "iCloud 同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud Sync"
           }
         }
       }
@@ -6186,6 +6276,16 @@
       }
     },
     "↩" : {},
+    "↩ 前往" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "↩ Go"
+          }
+        }
+      }
+    },
     "↩ 打开" : {
       "localizations" : {
         "en" : {
@@ -6602,6 +6702,36 @@
         }
       }
     },
+    "「%@」已收起进书架 ⌃⌄" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Folded \"%@\" into Shelf ⌃⌄"
+          }
+        }
+      }
+    },
+    "「%@」已放到底栏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Added \"%@\" to Tab Bar"
+          }
+        }
+      }
+    },
+    "「%@」已放到底栏（自动移出书架收起）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Added \"%@\" to Tab Bar (removed from Shelf menu)"
+          }
+        }
+      }
+    },
     "「%@」读不出来。" : {
       "localizations" : {
         "en" : {
@@ -6622,6 +6752,16 @@
         }
       }
     },
+    "「书架」当前已隐藏，点下方恢复即可折叠收纳" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "\"Shelf\" is hidden. Restore it below to fold sub-sections inside."
+          }
+        }
+      }
+    },
     "「在学」生词在所有书中以虚线标出，标为「已掌握」后不再标记" : {
       "localizations" : {
         "en" : {
@@ -6638,6 +6778,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Learning words are underlined with a dotted line in every book; once marked “Mastered”, they are no longer highlighted."
+          }
+        }
+      }
+    },
+    "「我的」固定在第 %lld 格" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "\"Me\" placed at slot %lld"
+          }
+        }
+      }
+    },
+    "「我的」常驻底栏，可左右拖动调整位置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "\"Me\" stays in the tab bar — drag left or right to reorder"
+          }
+        }
+      }
+    },
+    "「我的」常驻底栏，请移到其他槽位替换" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "\"Me\" is pinned — drop onto another slot to replace"
           }
         }
       }
@@ -7788,6 +7958,16 @@
         }
       }
     },
+    "与已有入口互换位置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Swap position with"
+          }
+        }
+      }
+    },
     "与阅读页听书面板同步" : {
       "localizations" : {
         "en" : {
@@ -8070,6 +8250,16 @@
         }
       }
     },
+    "中文段落首行空两格" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Indent the first line of Chinese paragraphs by two characters"
+          }
+        }
+      }
+    },
     "中文自然流畅" : {
       "localizations" : {
         "en" : {
@@ -8166,6 +8356,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Made for “%@”"
+          }
+        }
+      }
+    },
+    "为书架每排加上浅木层板与柔和投影" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adds a light wood ledge and soft shadow under each shelf row"
           }
         }
       }
@@ -8284,6 +8484,16 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "书 %1$@ → %2$@ 本"
+          }
+        }
+      }
+    },
+    "书、进度、播客、有声与合集" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Books, progress, podcasts, audio & collections"
           }
         }
       }
@@ -8523,6 +8733,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Companion Answer Cache · %@"
+          }
+        }
+      }
+    },
+    "书伴问答缓存与离线模型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Companion Q&A cache and offline models"
           }
         }
       }
@@ -8993,6 +9213,26 @@
         }
       }
     },
+    "书架内仍可通过顶部标题切换书、进度、播客、有声与合集。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can still switch between Books, Progress, Podcasts, Audio, and collections from the Shelf title."
+          }
+        }
+      }
+    },
+    "书架内收起" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Folded in Shelf"
+          }
+        }
+      }
+    },
     "书架封面大小" : {
       "localizations" : {
         "en" : {
@@ -9029,6 +9269,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Your library is empty. Drag EPUB, PDF, MOBI or TXT files into the window to start reading"
+          }
+        }
+      }
+    },
+    "书架样式" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shelf style"
           }
         }
       }
@@ -9135,6 +9385,26 @@
         }
       }
     },
+    "书脊" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spines"
+          }
+        }
+      }
+    },
+    "书脊排列" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Book spines"
+          }
+        }
+      }
+    },
     "书里不再标它" : {
       "localizations" : {
         "en" : {
@@ -9216,6 +9486,16 @@
         }
       }
     },
+    "书页沙沙" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paper Rustle"
+          }
+        }
+      }
+    },
     "书页的颜色在阅读页的 Aa 里换。书页上只有播放键跟着主题色，字、划线和纸色都不动。" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -9223,6 +9503,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Change page colors under Aa while reading. On the page, only the play button takes the accent color; text, highlights and paper stay as they are."
+          }
+        }
+      }
+    },
+    "乱码 · 章节" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "UTF-8 · TOC"
           }
         }
       }
@@ -9452,6 +9742,16 @@
         }
       }
     },
+    "互换位置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Swap"
+          }
+        }
+      }
+    },
     "五" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -9473,6 +9773,26 @@
         }
       }
     },
+    "亮度" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Brightness"
+          }
+        }
+      }
+    },
+    "亮度跟随系统" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Match system brightness"
+          }
+        }
+      }
+    },
     "人声清楚一点" : {
       "localizations" : {
         "en" : {
@@ -9489,6 +9809,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Characters"
+          }
+        }
+      }
+    },
+    "人物 · 配音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cast · Voices"
           }
         }
       }
@@ -9649,6 +9979,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Records feature usage shapes only, with no personal identity—never book titles, notes, or search terms."
+          }
+        }
+      }
+    },
+    "仅译文" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Translated"
           }
         }
       }
@@ -10043,12 +10383,52 @@
         }
       }
     },
+    "从底栏隐藏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide from Bar"
+          }
+        }
+      }
+    },
+    "从当前句继续" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continuing from this sentence"
+          }
+        }
+      }
+    },
     "从文件导入" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Import from Files"
+          }
+        }
+      }
+    },
+    "从文件导入…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import File…"
+          }
+        }
+      }
+    },
+    "从文件导入音频" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import audio file"
           }
         }
       }
@@ -10632,6 +11012,16 @@
         }
       }
     },
+    "使用 iCloud 云盘中的文件夹自动同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sync automatically using a folder in iCloud Drive"
+          }
+        }
+      }
+    },
     "使用 iCloud 云盘同步" : {
       "localizations" : {
         "en" : {
@@ -10682,6 +11072,16 @@
         }
       }
     },
+    "保存并使用" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save & use"
+          }
+        }
+      }
+    },
     "保存并重连" : {
       "localizations" : {
         "en" : {
@@ -10702,6 +11102,16 @@
         }
       }
     },
+    "保存自定义音效失败，请重试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't save custom sound. Please try again."
+          }
+        }
+      }
+    },
     "保留" : {
       "localizations" : {
         "en" : {
@@ -10718,6 +11128,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kept for 30 days for recovery, then removed automatically"
+          }
+        }
+      }
+    },
+    "保留 30 天以便恢复，可立即清空释放空间" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kept for 30 days for recovery; empty now to free space"
           }
         }
       }
@@ -11058,6 +11478,16 @@
         }
       }
     },
+    "停止录音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop recording"
+          }
+        }
+      }
+    },
     "停止时自动添加书签" : {
       "localizations" : {
         "en" : {
@@ -11278,6 +11708,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Open a book first"
+          }
+        }
+      }
+    },
+    "先收起进书架 ⌃⌄" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fold into Shelf ⌃⌄"
           }
         }
       }
@@ -11757,6 +12197,16 @@
         }
       }
     },
+    "全屏隐藏界面，指针移至底部唤出控制栏（⌃⌘F 或 Esc）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide chrome in full screen; move pointer to bottom for controls (⌃⌘F or Esc)"
+          }
+        }
+      }
+    },
     "全文" : {
       "localizations" : {
         "en" : {
@@ -12163,6 +12613,16 @@
         }
       }
     },
+    "共 %lld 项设置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld settings"
+          }
+        }
+      }
+    },
     "共 %u 页" : {
       "localizations" : {
         "en" : {
@@ -12342,6 +12802,16 @@
         }
       }
     },
+    "关闭声音提示" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dismiss voice prompt"
+          }
+        }
+      }
+    },
     "关闭定时" : {
       "localizations" : {
         "en" : {
@@ -12358,6 +12828,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Close Screenshot Bar"
+          }
+        }
+      }
+    },
+    "关闭搜索" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Close search"
           }
         }
       }
@@ -12529,6 +13009,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tap again to go to Progress, Audio or Podcasts"
+          }
+        }
+      }
+    },
+    "再翻一页试试节奏，满意就可以直接保存使用。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flip once more to feel the rhythm, then save whenever it feels right."
           }
         }
       }
@@ -12905,6 +13395,36 @@
         }
       }
     },
+    "切换夜间纸张" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switch to dark paper"
+          }
+        }
+      }
+    },
+    "切换封面或书脊排列样式" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switch between book cover grid and spine shelf styles"
+          }
+        }
+      }
+    },
+    "切换日间纸张" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switch to light paper"
+          }
+        }
+      }
+    },
     "切换服务商与模型" : {
       "localizations" : {
         "en" : {
@@ -12925,6 +13445,16 @@
         }
       }
     },
+    "切换正式版或测试版更新渠道" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switch between stable and beta update channels"
+          }
+        }
+      }
+    },
     "切换界面语言会重新启动语阅，并自动回到当前设置页。" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12932,6 +13462,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Switching the interface language restarts Yuyue and automatically returns to this settings page."
+          }
+        }
+      }
+    },
+    "切换英音或美音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switch between British and American accents"
           }
         }
       }
@@ -13059,6 +13599,26 @@
         }
       }
     },
+    "划线、想法、回顾与生词" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Highlights, notes, review & vocabulary"
+          }
+        }
+      }
+    },
+    "划线与想法" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Highlights"
+          }
+        }
+      }
+    },
     "划线后点“写想法”，想到的就记在这里" : {
       "localizations" : {
         "en" : {
@@ -13145,6 +13705,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "A new model not in the list; asked for by this name"
+          }
+        }
+      }
+    },
+    "刚下好" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Just downloaded"
           }
         }
       }
@@ -13717,6 +14287,16 @@
         }
       }
     },
+    "前往" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Go"
+          }
+        }
+      }
+    },
     "前往 GitHub 反馈" : {
       "localizations" : {
         "en" : {
@@ -13924,6 +14504,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Add Bookmark"
+          }
+        }
+      }
+    },
+    "加书签 ⌘D" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Bookmark ⌘D"
           }
         }
       }
@@ -14580,6 +15170,16 @@
         }
       }
     },
+    "原文" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Original"
+          }
+        }
+      }
+    },
     "原文不出这台设备。" : {
       "localizations" : {
         "en" : {
@@ -14647,6 +15247,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Import"
+          }
+        }
+      }
+    },
+    "去广告 · 读音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clean · TTS"
           }
         }
       }
@@ -14798,6 +15408,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bilingual Coach"
+          }
+        }
+      }
+    },
+    "双语对照" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bilingual"
+          }
+        }
+      }
+    },
+    "双语已展开" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Showing"
           }
         }
       }
@@ -15131,6 +15761,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Strictly up to the page you've reached — never spoils what lies ahead."
+          }
+        }
+      }
+    },
+    "只保存在本地，不上传" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stored on device only"
           }
         }
       }
@@ -15809,6 +16449,16 @@
         }
       }
     },
+    "可附截图写反馈，无需注册账号，或前往 GitHub" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send feedback with screenshots, no account needed, or visit GitHub"
+          }
+        }
+      }
+    },
     "可附截图或文件，无需注册账号" : {
       "localizations" : {
         "en" : {
@@ -15835,6 +16485,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Attach screenshots, no account needed"
+          }
+        }
+      }
+    },
+    "右移" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move Right"
           }
         }
       }
@@ -16061,6 +16721,16 @@
         }
       }
     },
+    "合集 (%lld)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Collections (%lld)"
+          }
+        }
+      }
+    },
     "合集的名字" : {
       "localizations" : {
         "en" : {
@@ -16182,6 +16852,16 @@
         }
       }
     },
+    "同步状态与设备" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sync Status & Devices"
+          }
+        }
+      }
+    },
     "同步这些" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -16294,6 +16974,36 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "向右移一格" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move Right"
+          }
+        }
+      }
+    },
+    "向左拖入胶囊调顺序 · 向下拖出隐藏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drag left into bar to reorder · drag down to hide"
+          }
+        }
+      }
+    },
+    "向左移一格" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move Left"
           }
         }
       }
@@ -17110,6 +17820,16 @@
         }
       }
     },
+    "在 %@ 使用 ID：" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use ID on %@: "
+          }
+        }
+      }
+    },
     "在 %lld 本书和 %lld 条笔记里搜" : {
       "localizations" : {
         "en" : {
@@ -17872,6 +18592,16 @@
         }
       }
     },
+    "在读、想读与读过记录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reading, want to read & finished"
+          }
+        }
+      }
+    },
     "在读书架" : {
       "localizations" : {
         "en" : {
@@ -18063,6 +18793,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nutstore"
+          }
+        }
+      }
+    },
+    "坚果云、群晖 NAS、Nextcloud、Alist 等个人网盘" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jianguoyun, Synology NAS, Nextcloud, Alist, and other WebDAV servers"
           }
         }
       }
@@ -18348,6 +19088,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Too loud; some of it is clipped"
+          }
+        }
+      }
+    },
+    "声音太短了，换一段试试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clip is too short. Try another sound."
           }
         }
       }
@@ -19238,6 +19988,16 @@
         }
       }
     },
+    "实时预览" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live Preview"
+          }
+        }
+      }
+    },
     "宣纸" : {
       "localizations" : {
         "en" : {
@@ -19405,6 +20165,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lined up"
+          }
+        }
+      }
+    },
+    "对照" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bilingual"
           }
         }
       }
@@ -19696,6 +20466,26 @@
         }
       }
     },
+    "导入或实录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import or record"
+          }
+        }
+      }
+    },
+    "导入或手边实录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import audio or record nearby"
+          }
+        }
+      }
+    },
     "导入有声书" : {
       "localizations" : {
         "en" : {
@@ -19753,6 +20543,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Import This"
+          }
+        }
+      }
+    },
+    "导入音频" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Imported Audio"
           }
         }
       }
@@ -19816,6 +20616,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Export…"
+          }
+        }
+      }
+    },
+    "导出到 Notion" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export to Notion"
+          }
+        }
+      }
+    },
+    "导出到 Obsidian" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export to Obsidian"
+          }
+        }
+      }
+    },
+    "导出到 flomo" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export to flomo"
+          }
+        }
+      }
+    },
+    "导出到新枝" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export to Xinzhi"
           }
         }
       }
@@ -19921,6 +20761,16 @@
         }
       }
     },
+    "封面" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Covers"
+          }
+        }
+      }
+    },
     "封面下写进度" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -19969,6 +20819,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Cover Size"
+          }
+        }
+      }
+    },
+    "封面网格" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cover grid"
           }
         }
       }
@@ -20204,6 +21064,16 @@
         }
       }
     },
+    "屏幕亮度" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Brightness"
+          }
+        }
+      }
+    },
     "屏幕最底下一条几乎看不见的线" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -20329,12 +21199,42 @@
         }
       }
     },
+    "左右拖动排序 · 向下拖出移走 · 轻点槽位替换" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drag to reorder · pull down to remove · tap to swap"
+          }
+        }
+      }
+    },
     "左右翻页" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Page turn"
+          }
+        }
+      }
+    },
+    "左右翻页或上下滚动" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paginated pages or vertical scrolling"
+          }
+        }
+      }
+    },
+    "左移" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move Left"
           }
         }
       }
@@ -20387,6 +21287,16 @@
         }
       }
     },
+    "已互换「%@」与「%@」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Swapped \"%1$@\" and \"%2$@\""
+          }
+        }
+      }
+    },
     "已从生词本移出" : {
       "localizations" : {
         "en" : {
@@ -20423,12 +21333,42 @@
         }
       }
     },
+    "已保存的自定义音效" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved custom sounds"
+          }
+        }
+      }
+    },
     "已全部掌握。新查的词加入生词本后会显示在这里" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "All caught up. Newly saved words appear here"
+          }
+        }
+      }
+    },
+    "已全部移到底栏或隐藏，书架自动省去折叠箭头" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing left folded — Shelf hides its switcher automatically"
+          }
+        }
+      }
+    },
+    "已关闭" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off"
           }
         }
       }
@@ -20449,6 +21389,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Turned off — troubleshooting may be harder"
+          }
+        }
+      }
+    },
+    "已切换「%@」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switched to \"%@\""
+          }
+        }
+      }
+    },
+    "已切换为「%@」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switched to “%@”"
           }
         }
       }
@@ -20775,6 +21735,16 @@
         }
       }
     },
+    "已处理完成" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ready to use"
+          }
+        }
+      }
+    },
     "已复制" : {
       "localizations" : {
         "en" : {
@@ -21055,6 +22025,16 @@
         }
       }
     },
+    "已将「%@」替换为「%@」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replaced \"%1$@\" with \"%2$@\""
+          }
+        }
+      }
+    },
     "已就绪" : {
       "localizations" : {
         "en" : {
@@ -21081,6 +22061,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Expanded"
+          }
+        }
+      }
+    },
+    "已开启" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Active"
           }
         }
       }
@@ -21254,6 +22244,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Added"
+          }
+        }
+      }
+    },
+    "已满，点选可替换" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Full — tap to replace"
           }
         }
       }
@@ -21744,6 +22744,16 @@
         }
       }
     },
+    "已配置书伴时，用模型生成逐段译文对照（含文言译白话）并按章缓存" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use Companion model for paragraph translation (including classical Chinese) cached per chapter"
+          }
+        }
+      }
+    },
     "已配置书伴时，用模型生成逐段译文对照（含文言译白话）并按章缓存；未配置或离线时回退系统翻译" : {
       "localizations" : {
         "en" : {
@@ -21770,6 +22780,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anchored to this passage and saved to side notes. Connect a Companion model in Settings to answer “%@” from context and your reading notes."
+          }
+        }
+      }
+    },
+    "已隐藏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hidden"
+          }
+        }
+      }
+    },
+    "已隐藏「%@」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hidden \"%@\""
           }
         }
       }
@@ -21855,12 +22885,32 @@
         }
       }
     },
+    "常用设置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Common Settings"
+          }
+        }
+      }
+    },
     "常规输入" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Input"
+          }
+        }
+      }
+    },
+    "常驻" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pinned"
           }
         }
       }
@@ -22055,6 +23105,46 @@
         }
       }
     },
+    "底栏已满 · 松手替换「%@」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bar full — release to replace \"%@\""
+          }
+        }
+      }
+    },
+    "底栏已满，用「%@」替换…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bar full — replace a tab with \"%@\"…"
+          }
+        }
+      }
+    },
+    "底栏至少保留 2 个入口" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep at least 2 tabs in the bar"
+          }
+        }
+      }
+    },
+    "底栏至少保留 2 个入口，可直接拖新入口覆盖替换" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep at least 2 tabs — drag a new item over a slot to replace"
+          }
+        }
+      }
+    },
     "底色" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -22082,6 +23172,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Keep thin progress bar at bottom"
+          }
+        }
+      }
+    },
+    "底部导航" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bottom Bar"
+          }
+        }
+      }
+    },
+    "底部导航栏使用液态玻璃，关闭则为毛玻璃" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use Liquid Glass for the bottom bar; turn off for frosted glass"
           }
         }
       }
@@ -22721,6 +23831,16 @@
         }
       }
     },
+    "录一段翻书声" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Record a page-turn sound"
+          }
+        }
+      }
+    },
     "录了 %@ 秒 · 15 秒以内就够" : {
       "localizations" : {
         "en" : {
@@ -22747,6 +23867,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ready · Previewing the next sentence"
+          }
+        }
+      }
+    },
+    "录完稍停自动截取 · 自动去静音并调平音量" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-stops after sound settles · trims & levels automatically"
           }
         }
       }
@@ -23257,6 +24387,16 @@
         }
       }
     },
+    "念 8 秒录制专属音色，声音不出本机" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read for 8 seconds to clone your voice locally on this Mac"
+          }
+        }
+      }
+    },
     "念一句 8 秒的话，声音不出这台设备" : {
       "localizations" : {
         "en" : {
@@ -23373,6 +24513,16 @@
         }
       }
     },
+    "总结 · 追问" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recap · Ask"
+          }
+        }
+      }
+    },
     "总结一下「%@」这一章讲了什么？" : {
       "localizations" : {
         "en" : {
@@ -23403,6 +24553,16 @@
         }
       }
     },
+    "恢复自动截取" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reset auto-trim"
+          }
+        }
+      }
+    },
     "恢复自动选角" : {
       "localizations" : {
         "en" : {
@@ -23419,6 +24579,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Reset Defaults"
+          }
+        }
+      }
+    },
+    "恢复默认底栏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reset to Default"
           }
         }
       }
@@ -23725,6 +24895,16 @@
         }
       }
     },
+    "我的翻书声" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "My page turn"
+          }
+        }
+      }
+    },
     "或者粘贴一个已有的 Key" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -23886,6 +25066,36 @@
         }
       }
     },
+    "手动翻页时播放轻纸声，朗读时自动静音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plays a soft paper sound on manual turns, muted during playback"
+          }
+        }
+      }
+    },
+    "手动翻页时播放，朗读时自动静音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plays on manual page turns; mutes while reading aloud"
+          }
+        }
+      }
+    },
+    "手动翻页时轻触震动，静音也可用" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subtle haptic tap on manual page turns, even when muted"
+          }
+        }
+      }
+    },
     "手机存不下了" : {
       "localizations" : {
         "en" : {
@@ -23928,6 +25138,16 @@
         }
       }
     },
+    "手边实录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recorded clip"
+          }
+        }
+      }
+    },
     "打不开书库" : {
       "localizations" : {
         "en" : {
@@ -23954,6 +25174,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rate"
+          }
+        }
+      }
+    },
+    "打包备份或恢复进度、书签、笔记、生词、设置与书文件（.yuyue）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Back up or restore progress, bookmarks, notes, vocab, settings, and books (.yuyue)"
           }
         }
       }
@@ -24113,6 +25343,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Enter automatically when opening a book"
+          }
+        }
+      }
+    },
+    "打开书籍时自动进入沉浸阅读" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatically enter immersive reading when opening a book"
           }
         }
       }
@@ -24468,6 +25708,16 @@
         }
       }
     },
+    "找到 %lld 项设置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld matching settings"
+          }
+        }
+      }
+    },
     "找到那一页：%@" : {
       "localizations" : {
         "en" : {
@@ -24514,6 +25764,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Drop M4B, MP3 or M4A files into the window, or pair audio with an e-book on your shelf."
+          }
+        }
+      }
+    },
+    "把不看的入口向下拖到这里隐藏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drag unused items down here to hide"
           }
         }
       }
@@ -24650,6 +25910,26 @@
         }
       }
     },
+    "护眼" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sage"
+          }
+        }
+      }
+    },
+    "护眼柔光" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eye-Care Warmth"
+          }
+        }
+      }
+    },
     "拆解这句语法与长难句" : {
       "localizations" : {
         "en" : {
@@ -24666,6 +25946,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Drop into Library to import"
+          }
+        }
+      }
+    },
+    "拖动两端微调 · 轻点波形试听" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drag handles to trim · Tap wave to preview"
+          }
+        }
+      }
+    },
+    "拖动微调阅读窗口柔光亮度" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drag to adjust reading window brightness"
+          }
+        }
+      }
+    },
+    "拖动排序" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drag to reorder"
           }
         }
       }
@@ -24752,6 +26062,16 @@
         }
       }
     },
+    "拿掉书签 ⌘D" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove Bookmark ⌘D"
+          }
+        }
+      }
+    },
     "拿掉这一页的书签" : {
       "localizations" : {
         "en" : {
@@ -24768,6 +26088,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Prompts"
+          }
+        }
+      }
+    },
+    "指尖木案" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Warm wood tap"
           }
         }
       }
@@ -25115,6 +26445,16 @@
         }
       }
     },
+    "换 " : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Swap "
+          }
+        }
+      }
+    },
     "换一个 Key" : {
       "localizations" : {
         "en" : {
@@ -25385,6 +26725,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Connect"
+          }
+        }
+      }
+    },
+    "接入新的大模型 API 或本机 Ollama 服务" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect a new AI model API or local Ollama server"
           }
         }
       }
@@ -25693,6 +27043,16 @@
         }
       }
     },
+    "搜书、正文、笔记与问书伴" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Books, text, notes & ask companion"
+          }
+        }
+      }
+    },
     "搜书名、作者" : {
       "localizations" : {
         "en" : {
@@ -25759,6 +27119,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "More"
+          }
+        }
+      }
+    },
+    "搜模型名、ID 或缩写（如 co46 / dsr1）…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search model name, ID, or alias (e.g. co46 / dsr1)…"
           }
         }
       }
@@ -25850,6 +27220,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Search Results"
+          }
+        }
+      }
+    },
+    "搜索设置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search Settings"
+          }
+        }
+      }
+    },
+    "搜索设置项、功能名或拼音…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search settings, features, or keywords…"
+          }
+        }
+      }
+    },
+    "搜索设置（⌘F）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search Settings (⌘F)"
           }
         }
       }
@@ -26055,6 +27455,16 @@
         }
       }
     },
+    "支持 EPUB、PDF、MOBI、AZW3、TXT，文件会复制到书库" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Supports EPUB, PDF, MOBI, AZW3, and TXT; files are copied to your library"
+          }
+        }
+      }
+    },
     "支持 GPT-SoVITS、Kokoro-FastAPI、LocalAI、unspeech 等任何兼容 OpenAI /v1/audio/speech 的本机或局域网服务。" : {
       "localizations" : {
         "en" : {
@@ -26207,6 +27617,16 @@
         }
       }
     },
+    "收藏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Favorites"
+          }
+        }
+      }
+    },
     "收起" : {
       "localizations" : {
         "en" : {
@@ -26265,6 +27685,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hide Translation"
+          }
+        }
+      }
+    },
+    "收起进书架 ⌃⌄" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fold into Shelf ⌃⌄"
           }
         }
       }
@@ -26849,22 +28279,22 @@
         }
       }
     },
-    "文言 / 古文译白话" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Classical to Modern Chinese"
-          }
-        }
-      }
-    },
     "文稿和音频会移到已删除，30 天内可以在存储里撤销。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "The script and audio move to Deleted; you can restore them in Storage within 30 days."
+          }
+        }
+      }
+    },
+    "文言 / 古文译白话" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Classical to Modern Chinese"
           }
         }
       }
@@ -27155,6 +28585,16 @@
         }
       }
     },
+    "无动画" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "None"
+          }
+        }
+      }
+    },
     "无可改回项" : {
       "localizations" : {
         "en" : {
@@ -27165,12 +28605,32 @@
         }
       }
     },
+    "无打扰模式" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide bars"
+          }
+        }
+      }
+    },
     "无标题" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Untitled"
+          }
+        }
+      }
+    },
+    "无法启动录音，请重试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't start recording. Please try again."
           }
         }
       }
@@ -27262,6 +28722,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Japan East"
+          }
+        }
+      }
+    },
+    "日间" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Day"
           }
         }
       }
@@ -27571,6 +29041,16 @@
         }
       }
     },
+    "显示在底栏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shown in Bar"
+          }
+        }
+      }
+    },
     "显示密码" : {
       "localizations" : {
         "en" : {
@@ -27657,6 +29137,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Not now"
+          }
+        }
+      }
+    },
+    "暂不换声音，关闭提示" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep current voice and dismiss"
+          }
+        }
+      }
+    },
+    "暂不更换" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep current voice"
+          }
+        }
+      }
+    },
+    "暂不更换，继续用「%@」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep using “%@”"
           }
         }
       }
@@ -27811,6 +29321,16 @@
         }
       }
     },
+    "暖色滤蓝光" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Warm blue-light filter"
+          }
+        }
+      }
+    },
     "暗夜" : {
       "localizations" : {
         "en" : {
@@ -27861,12 +29381,32 @@
         }
       }
     },
+    "更多入口" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "More Tabs"
+          }
+        }
+      }
+    },
     "更多字体" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "More Fonts"
+          }
+        }
+      }
+    },
+    "更多控制" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "More Controls"
           }
         }
       }
@@ -28003,12 +29543,72 @@
         }
       }
     },
+    "替换" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replace"
+          }
+        }
+      }
+    },
+    "替换 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replace %@"
+          }
+        }
+      }
+    },
+    "替换%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replace %@"
+          }
+        }
+      }
+    },
+    "替换…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replace…"
+          }
+        }
+      }
+    },
+    "替换「%@」为" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replace \"%@\" with"
+          }
+        }
+      }
+    },
     "替换为" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Replace with"
+          }
+        }
+      }
+    },
+    "替换搜索" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replace Search"
           }
         }
       }
@@ -28174,6 +29774,26 @@
         }
       }
     },
+    "最近" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recent"
+          }
+        }
+      }
+    },
+    "最近删除" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recently Deleted"
+          }
+        }
+      }
+    },
     "最近删除 · %lld 本（%@）" : {
       "localizations" : {
         "en" : {
@@ -28228,6 +29848,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Recently Changed (⌘Z undoes the latest)"
+          }
+        }
+      }
+    },
+    "最近查找" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recent"
           }
         }
       }
@@ -28511,6 +30141,16 @@
         }
       }
     },
+    "有声书与听读同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Audiobooks & read-along sync"
+          }
+        }
+      }
+    },
     "有声书合成" : {
       "localizations" : {
         "en" : {
@@ -28558,6 +30198,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "With thoughts"
+          }
+        }
+      }
+    },
+    "有效时长 %@ · 点左侧试听" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trimmed to %@ · Tap play to preview"
           }
         }
       }
@@ -29000,6 +30650,16 @@
         }
       }
     },
+    "未配" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unset"
+          }
+        }
+      }
+    },
     "未阅读" : {
       "localizations" : {
         "en" : {
@@ -29042,6 +30702,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "End of %@"
+          }
+        }
+      }
+    },
+    "本书笔记" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notes"
           }
         }
       }
@@ -29781,12 +31451,62 @@
         }
       }
     },
+    "松手与「%@」互换位置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Release to swap with \"%@\""
+          }
+        }
+      }
+    },
+    "松手保持「搜索」独立圆球" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Release to keep Search detached"
+          }
+        }
+      }
+    },
     "松手回到" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Release"
+          }
+        }
+      }
+    },
+    "松手固定在第 %lld 格 · 向下拖出移走" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Release for slot %lld · drag down to remove"
+          }
+        }
+      }
+    },
+    "松手将「%@」放回原位" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Release to keep \"%@\" in place"
+          }
+        }
+      }
+    },
+    "松手将「%@」移到第 %lld 格" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Release to move \"%1$@\" to slot %2$lld"
           }
         }
       }
@@ -29825,6 +31545,26 @@
         }
       }
     },
+    "松手插入第 %lld 格（轻点已有槽位可直接替换）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Release to insert at slot %lld (tap a slot to replace)"
+          }
+        }
+      }
+    },
+    "松手收起「%@」到书架 ⌃⌄" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Release to fold \"%@\" into Shelf ⌃⌄"
+          }
+        }
+      }
+    },
     "松手添加图片" : {
       "localizations" : {
         "en" : {
@@ -29845,12 +31585,42 @@
         }
       }
     },
+    "松手用「%@」替换「%@」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Release to replace \"%2$@\" with \"%1$@\""
+          }
+        }
+      }
+    },
     "松手进入" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Release"
+          }
+        }
+      }
+    },
+    "松手隐藏「%@」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Release to hide \"%@\""
+          }
+        }
+      }
+    },
+    "极简" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Minimal"
           }
         }
       }
@@ -29985,6 +31755,16 @@
         }
       }
     },
+    "柔和薄页" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gentle thin paper"
+          }
+        }
+      }
+    },
     "查一查" : {
       "localizations" : {
         "en" : {
@@ -30025,12 +31805,42 @@
         }
       }
     },
+    "查看书库文件夹位置以及书文件、有声书、模型与字体占用" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View library folder location and space used by books, audiobooks, models, and fonts"
+          }
+        }
+      }
+    },
     "查看全部" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "See All"
+          }
+        }
+      }
+    },
+    "查看多端同步状态、已连接设备或立即同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View sync status, connected devices, or sync now"
+          }
+        }
+      }
+    },
+    "查看当前版本号并手动检查新版本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View current version and check for updates"
           }
         }
       }
@@ -30051,6 +31861,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "View Release"
+          }
+        }
+      }
+    },
+    "查看每一版改了什么" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "See what changed in each release"
+          }
+        }
+      }
+    },
+    "查看近 30 天大模型 Token 消耗与云端朗读字数估算" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View 30-day AI token usage and cloud TTS character estimates"
           }
         }
       }
@@ -30151,6 +31981,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Shaded text is where the two differ."
+          }
+        }
+      }
+    },
+    "标准" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standard"
           }
         }
       }
@@ -30383,6 +32223,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Check for Updates…"
+          }
+        }
+      }
+    },
+    "检查更新与版本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Updates & Version"
           }
         }
       }
@@ -30945,6 +32795,16 @@
         }
       }
     },
+    "正在录音 · %@ / 2.5 秒" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recording · %@ / 2.5 s"
+          }
+        }
+      }
+    },
     "正在思考…" : {
       "localizations" : {
         "en" : {
@@ -31031,6 +32891,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Playing"
+          }
+        }
+      }
+    },
+    "正在收音 · %@ 秒" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Listening · %@ s"
           }
         }
       }
@@ -31310,6 +33180,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Loading models…"
+          }
+        }
+      }
+    },
+    "正在裁剪与调平音量…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trimming & leveling…"
           }
         }
       }
@@ -31614,6 +33494,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Your message will be posted publicly on"
+          }
+        }
+      }
+    },
+    "正文段落左右对齐排版" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Align body text evenly along both edges"
+          }
+        }
+      }
+    },
+    "段落译文" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Translate"
           }
         }
       }
@@ -32063,6 +33963,16 @@
         }
       }
     },
+    "水墨落砚" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drop into inkstone"
+          }
+        }
+      }
+    },
     "永" : {
       "localizations" : {
         "en" : {
@@ -32130,6 +34040,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Focus Reading"
+          }
+        }
+      }
+    },
+    "沉浸阅读时在页面底部显示极细进度条" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show a subtle progress hairline along the bottom in immersive mode"
+          }
+        }
+      }
+    },
+    "沉浸阅读时隐藏书伴提示与行间释义" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide Companion hints and inline glosses in immersive mode"
+          }
+        }
+      }
+    },
+    "沉浸阅读进入与退出" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter & Exit Immersive Mode"
+          }
+        }
+      }
+    },
+    "沉稳厚页" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Heavy bound stock"
           }
         }
       }
@@ -32569,6 +34519,16 @@
         }
       }
     },
+    "没有找到与“%@”相关的设置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No settings matching “%@”"
+          }
+        }
+      }
+    },
     "没有搁置的书" : {
       "localizations" : {
         "en" : {
@@ -32605,6 +34565,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No permission to read this file. Drag it in from Finder or choose it once with Import"
+          }
+        }
+      }
+    },
+    "没有检测到明显声音，再试一次" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No clear sound detected. Try again."
           }
         }
       }
@@ -32959,6 +34929,16 @@
         }
       }
     },
+    "浅木层板" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Light wood ledge"
+          }
+        }
+      }
+    },
     "浅灰" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -32976,6 +34956,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Light"
+          }
+        }
+      }
+    },
+    "浅色、深色或跟随系统外观" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Light, dark, or match system appearance"
           }
         }
       }
@@ -33180,6 +35170,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Add"
+          }
+        }
+      }
+    },
+    "添加%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add %@"
           }
         }
       }
@@ -33391,12 +35391,32 @@
         }
       }
     },
+    "清爽新书" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Crisp new book"
+          }
+        }
+      }
+    },
     "清理" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Clear"
+          }
+        }
+      }
+    },
+    "清理书伴问答缓存，或移除已下载的朗读与对齐模型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear Companion Q&A cache or remove downloaded voice and alignment models"
           }
         }
       }
@@ -33514,6 +35534,16 @@
         }
       }
     },
+    "清脆一响" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Crisp Tap"
+          }
+        }
+      }
+    },
     "清除" : {
       "localizations" : {
         "en" : {
@@ -33564,6 +35594,36 @@
         }
       }
     },
+    "滑动" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slide"
+          }
+        }
+      }
+    },
+    "滑动、覆盖或无动画" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slide, cover, or no animation"
+          }
+        }
+      }
+    },
+    "滴墨" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ink Drop"
+          }
+        }
+      }
+    },
     "火山引擎" : {
       "localizations" : {
         "en" : {
@@ -33610,6 +35670,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Volcengine Doubao"
+          }
+        }
+      }
+    },
+    "火山豆包、Fish Audio、小米 MiMo、硅基流动、本机 VoiceStudio 等" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Volcengine Doubao, Fish Audio, Xiaomi MiMo, SiliconFlow, local VoiceStudio, and more"
           }
         }
       }
@@ -33778,6 +35848,16 @@
         }
       }
     },
+    "点书架切换" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap Shelf"
+          }
+        }
+      }
+    },
     "点了 %lld 下，带走 %lld 句" : {
       "localizations" : {
         "en" : {
@@ -33936,6 +36016,16 @@
         }
       }
     },
+    "点按试听" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to preview"
+          }
+        }
+      }
+    },
     "点播放从这一页读起" : {
       "localizations" : {
         "en" : {
@@ -33962,6 +36052,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tap to download · Natural offline reading across devices"
+          }
+        }
+      }
+    },
+    "点此试翻" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to flip"
+          }
+        }
+      }
+    },
+    "点此选择声音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a voice"
           }
         }
       }
@@ -34026,6 +36136,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Speak tapped words"
+          }
+        }
+      }
+    },
+    "点词查询时自动朗读单词发音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatically pronounce words when looking them up"
           }
         }
       }
@@ -34434,6 +36554,16 @@
         }
       }
     },
+    "生成快照与导入快照" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create & Import Snapshots"
+          }
+        }
+      }
+    },
     "生气" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -34675,6 +36805,16 @@
         }
       }
     },
+    "用「%@」替换…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replace with “%@”…"
+          }
+        }
+      }
+    },
     "用一个词回答：天空通常是什么颜色？" : {
       "localizations" : {
         "en" : {
@@ -34792,6 +36932,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uses your own Google account"
+          }
+        }
+      }
+    },
+    "用你自己的 Google 账号跨平台同步" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sync across platforms with your own Google account"
           }
         }
       }
@@ -35744,6 +37894,16 @@
         }
       }
     },
+    "真纸翻书" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Real Paper"
+          }
+        }
+      }
+    },
     "睡前" : {
       "localizations" : {
         "en" : {
@@ -35873,6 +38033,66 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Offline"
+          }
+        }
+      }
+    },
+    "离线 Kokoro、免 Key 在线语音、云端与系统音色" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline Kokoro, keyless online voices, cloud TTS, and system voices"
+          }
+        }
+      }
+    },
+    "离线声音「%@」好了" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline voice “%@” is ready"
+          }
+        }
+      }
+    },
+    "离线声音「%@」已下好 · 点击选声音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline voice “%@” is ready · Click to choose voice"
+          }
+        }
+      }
+    },
+    "离线声音「%@」已下好 · 点右侧换声音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline voice “%@” ready · use Change Voice"
+          }
+        }
+      }
+    },
+    "离线声音「%@」已下好，点击选择声音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline voice “%@” is ready. Click to choose a voice."
+          }
+        }
+      }
+    },
+    "离线声音「%@」已下好，点此选择声音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline voice “%@” is ready. Choose a voice."
           }
         }
       }
@@ -36065,6 +38285,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Remove from Later"
+          }
+        }
+      }
+    },
+    "移到此处" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move here"
           }
         }
       }
@@ -36812,6 +39042,16 @@
         }
       }
     },
+    "第 %lld 格" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slot %lld"
+          }
+        }
+      }
+    },
     "第 %lld 版" : {
       "localizations" : {
         "en" : {
@@ -37271,6 +39511,16 @@
         }
       }
     },
+    "简体中文、English 或跟随系统" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chinese, English, or follow system language"
+          }
+        }
+      }
+    },
     "简体中文界面" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37343,6 +39593,16 @@
         }
       }
     },
+    "粘贴 flomo API 链接，每条划线一条笔记" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paste your flomo API URL to send each highlight as a memo"
+          }
+        }
+      }
+    },
     "粘贴剪贴板图片" : {
       "localizations" : {
         "en" : {
@@ -37393,6 +39653,16 @@
         }
       }
     },
+    "粘贴新枝 CLI AccessToken 发送划线与想法" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paste your Xinzhi CLI AccessToken to export highlights and thoughts"
+          }
+        }
+      }
+    },
     "粘贴网址：博客、新闻站、RSS" : {
       "localizations" : {
         "en" : {
@@ -37439,6 +39709,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Studio Voices"
+          }
+        }
+      }
+    },
+    "精装" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hardcover"
           }
         }
       }
@@ -37779,12 +40059,32 @@
         }
       }
     },
+    "素白、暗黑、纸本、芦苇、铅纸、自定义纸与跟随外观" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plain, Dark, Kami, Sage, E-Ink, custom papers, and match appearance"
+          }
+        }
+      }
+    },
     "紧" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tight"
+          }
+        }
+      }
+    },
+    "紧、适中或松的行间距" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tight, comfortable, or loose line spacing"
           }
         }
       }
@@ -38050,6 +40350,16 @@
         }
       }
     },
+    "纸页轻轻掠过指尖，声音恰到好处，不惊扰夜读。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A soft brush of paper beneath your fingers—gentle enough for late-night reading."
+          }
+        }
+      }
+    },
     "纹理" : {
       "localizations" : {
         "en" : {
@@ -38201,6 +40511,16 @@
         }
       }
     },
+    "给音效起个名字" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name this sound"
+          }
+        }
+      }
+    },
     "统计为本机估算值，以服务商实际账单为准。书伴问答与前情提要的纯文本缓存会随同步在你的设备间复用。" : {
       "localizations" : {
         "en" : {
@@ -38301,6 +40621,16 @@
         }
       }
     },
+    "绵厚柔润" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plush cotton paper"
+          }
+        }
+      }
+    },
     "综合推理强" : {
       "localizations" : {
         "en" : {
@@ -38367,6 +40697,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Encoding and Contents…"
+          }
+        }
+      }
+    },
+    "编码目录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Encoding"
           }
         }
       }
@@ -38591,6 +40931,16 @@
         }
       }
     },
+    "翻一页真书，或轻敲桌面" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flip a real page, or tap your desk"
+          }
+        }
+      }
+    },
     "翻到书页" : {
       "localizations" : {
         "en" : {
@@ -38607,6 +40957,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Open in Book ›"
+          }
+        }
+      }
+    },
+    "翻完停顿片刻自动完成，或轻点停止" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pause briefly to finish automatically, or tap to stop"
           }
         }
       }
@@ -38692,12 +41052,42 @@
         }
       }
     },
+    "翻页动画" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Page turn animation"
+          }
+        }
+      }
+    },
     "翻页方式" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Page turns"
+          }
+        }
+      }
+    },
+    "翻页轻震" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Page-turn haptics"
+          }
+        }
+      }
+    },
+    "翻页音效" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Page turn sound"
           }
         }
       }
@@ -38748,6 +41138,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Listening…"
+          }
+        }
+      }
+    },
+    "聊天气泡" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chat bubbles"
           }
         }
       }
@@ -38857,6 +41257,16 @@
         }
       }
     },
+    "脆页" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Crisp Page"
+          }
+        }
+      }
+    },
     "腾出点空间再试。" : {
       "localizations" : {
         "en" : {
@@ -38883,6 +41293,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Auto · Narrator"
+          }
+        }
+      }
+    },
+    "自动去除前后静音、截取前 0.65 秒并统一音量" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-trims silence, caps at 0.65 s, and balances loudness"
           }
         }
       }
@@ -39007,6 +41427,16 @@
         }
       }
     },
+    "自定义书伴 / 快捷指令与提问模板" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Customize Companion / slash commands and quick prompt templates"
+          }
+        }
+      }
+    },
     "自定义模型 ID · 直接按此名称请求接口" : {
       "localizations" : {
         "en" : {
@@ -39017,12 +41447,32 @@
         }
       }
     },
+    "自定义翻页音效" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom page-turn sound"
+          }
+        }
+      }
+    },
     "自定义语音接口" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Custom Speech Endpoint"
+          }
+        }
+      }
+    },
+    "自定义音效" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom sound"
           }
         }
       }
@@ -39144,6 +41594,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Highly natural voices, ideal for English"
+          }
+        }
+      }
+    },
+    "自由开关、替换或拖动调整底部导航入口顺序；「我的」始终保留以便随时进入设置。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show, hide, swap, or drag to reorder bottom bar tabs. Me stays pinned so Settings is always reachable."
           }
         }
       }
@@ -39965,12 +42425,32 @@
         }
       }
     },
+    "订阅频道与单集收听" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subscribed shows & episodes"
+          }
+        }
+      }
+    },
     "认不出是什么语言" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Couldn't tell the language"
+          }
+        }
+      }
+    },
+    "认人、错字整理、提要优先用同厂轻量模型并自动启用提示词缓存" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use faster models for batch tasks and enable prompt caching automatically"
           }
         }
       }
@@ -40350,12 +42830,52 @@
         }
       }
     },
+    "译文" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Translate"
+          }
+        }
+      }
+    },
     "译文对照" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bilingual Translation"
+          }
+        }
+      }
+    },
+    "译文：仅译文" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Translation: Translation Only"
+          }
+        }
+      }
+    },
+    "译文：原文 / 双语对照 / 仅译文" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Translation: Original / Bilingual / Translation Only"
+          }
+        }
+      }
+    },
+    "译文：双语对照" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Translation: Bilingual"
           }
         }
       }
@@ -40480,6 +43000,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Preview: Sample Line"
+          }
+        }
+      }
+    },
+    "试试换个关键词，例如：纸色、字体、音色、书伴、同步、快照" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try another keyword, e.g. paper, font, voice, companion, sync, or snapshot"
           }
         }
       }
@@ -41022,6 +43552,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Enter an endpoint URL first"
+          }
+        }
+      }
+    },
+    "请在系统设置中允许语阅使用麦克风，或直接从文件导入音频" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow microphone access in System Settings, or import an audio file instead."
           }
         }
       }
@@ -41926,6 +44466,26 @@
         }
       }
     },
+    "调整新书默认正文字号大小" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set the default body font size for new books"
+          }
+        }
+      }
+    },
+    "调整朗读与听书播放倍速（0.8× – 2.0×）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adjust reading and listening playback speed (0.8× – 2.0×)"
+          }
+        }
+      }
+    },
     "调整过的设置会记在这里，\n每一项都能随时改回去。" : {
       "localizations" : {
         "en" : {
@@ -42643,12 +45203,52 @@
         }
       }
     },
+    "轻叩" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Soft Wood"
+          }
+        }
+      }
+    },
+    "轻敲桌面" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desk Tap"
+          }
+        }
+      }
+    },
+    "轻点入口可替换" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap a tab to replace"
+          }
+        }
+      }
+    },
     "轻点切换应用图标" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tap to switch app icon"
+          }
+        }
+      }
+    },
+    "轻点加回底栏 · 拖入任意区" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to add · drag anywhere"
           }
         }
       }
@@ -42663,12 +45263,72 @@
         }
       }
     },
+    "轻点录下翻书或轻敲桌面" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to record a page turn or desk tap"
+          }
+        }
+      }
+    },
+    "轻点或轻扫这一页，听听你刚录下的翻书声。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap or swipe this page to hear the page-turn sound you just captured."
+          }
+        }
+      }
+    },
+    "轻点放到底栏 · 拖入可插位" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to pin · drag to place"
+          }
+        }
+      }
+    },
+    "轻点添加" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to add"
+          }
+        }
+      }
+    },
     "轻点进入访谈书页，查看逐字稿与原声摘录。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tap to open the episode page for transcript and audio clips."
+          }
+        }
+      }
+    },
+    "轻纸" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Soft Paper"
+          }
+        }
+      }
+    },
+    "轻纸、脆页、宣纸、精装、轻叩与滴墨，朗读时自动静音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Soft paper, crisp page, rice paper, hardcover, soft wood & ink drop; mutes while reading aloud"
           }
         }
       }
@@ -44967,6 +47627,16 @@
         }
       }
     },
+    "这段音频读不出来，换一个试试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't read this audio file. Try another one."
+          }
+        }
+      }
+    },
     "这种文件打不开" : {
       "localizations" : {
         "en" : {
@@ -45065,6 +47735,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Progress and bookmarks"
+          }
+        }
+      }
+    },
+    "进度和书签、笔记和生词、设置和替换规则、书文件、有声书录音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Progress & bookmarks, notes & vocab, settings & rules, books, and recordings"
           }
         }
       }
@@ -45867,12 +48547,32 @@
         }
       }
     },
+    "选择正文默认字体，或在字样册下载更多字体" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose the default reading font or download more from Font Book"
+          }
+        }
+      }
+    },
     "选择笔记库中的文件夹" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Pick a folder inside your vault"
+          }
+        }
+      }
+    },
+    "选择笔记库文件夹，每本书写入一篇 Markdown" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a vault folder to export one Markdown file per book"
           }
         }
       }
@@ -46320,6 +49020,26 @@
         }
       }
     },
+    "配置 Notion 集成令牌与放书的页" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set up a Notion integration token and destination page"
+          }
+        }
+      }
+    },
+    "配置与切换 Claude、OpenAI、DeepSeek、Gemini、Kimi、通义、Ollama 等" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Configure Claude, OpenAI, DeepSeek, Gemini, Kimi, Qwen, Ollama, and more"
+          }
+        }
+      }
+    },
     "配置中" : {
       "localizations" : {
         "en" : {
@@ -46588,6 +49308,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Reread"
+          }
+        }
+      }
+    },
+    "重选" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retake"
           }
         }
       }
@@ -47009,6 +49739,16 @@
         }
       }
     },
+    "阅读统计与全部设置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reading stats & all settings"
+          }
+        }
+      }
+    },
     "阅读英文书时，在较难词汇上方标注简短中文词义" : {
       "localizations" : {
         "en" : {
@@ -47279,6 +50019,26 @@
         }
       }
     },
+    "隐藏%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide %@"
+          }
+        }
+      }
+    },
+    "隐藏「%@」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide \"%@\""
+          }
+        }
+      }
+    },
     "隐藏书伴提示与难词注释" : {
       "localizations" : {
         "en" : {
@@ -47471,6 +50231,16 @@
         }
       }
     },
+    "难词行间释义仅显示已加入生词本的词" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only show inline glosses for words in your vocabulary list"
+          }
+        }
+      }
+    },
     "难词释义" : {
       "localizations" : {
         "en" : {
@@ -47528,6 +50298,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Offline voice pack required · Tap to download"
+          }
+        }
+      }
+    },
+    "需先开启书架" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable Shelf first"
           }
         }
       }
@@ -47639,6 +50419,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sound Effects"
+          }
+        }
+      }
+    },
+    "音效名" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name"
+          }
+        }
+      }
+    },
+    "音效音量" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sound volume"
           }
         }
       }
@@ -47814,6 +50614,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lu Xun · Call to Arms"
+          }
+        }
+      }
+    },
+    "麦克风启动失败，请重试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't start the microphone. Try again."
+          }
+        }
+      }
+    },
+    "麦克风启动失败，请重试，或改用下方「导入一段录音…」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't start the microphone. Try again, or use “Import an Audio Clip…” below."
           }
         }
       }
@@ -48069,1166 +50889,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "; for Synology or Nextcloud, enter your own server's address—one reachable from outside your home if you'll be away."
-          }
-        }
-      }
-    },
-    "为书架每排加上浅木层板与柔和投影" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Adds a light wood ledge and soft shadow under each shelf row"
-          }
-        }
-      }
-    },
-    "书架样式" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Shelf style"
-          }
-        }
-      }
-    },
-    "书脊" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Spines"
-          }
-        }
-      }
-    },
-    "书脊排列" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Book spines"
-          }
-        }
-      }
-    },
-    "亮度" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Brightness"
-          }
-        }
-      }
-    },
-    "亮度跟随系统" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Match system brightness"
-          }
-        }
-      }
-    },
-    "切换夜间纸张" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Switch to dark paper"
-          }
-        }
-      }
-    },
-    "切换日间纸张" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Switch to light paper"
-          }
-        }
-      }
-    },
-    "封面" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Covers"
-          }
-        }
-      }
-    },
-    "封面网格" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cover grid"
-          }
-        }
-      }
-    },
-    "底部导航栏使用液态玻璃，关闭则为毛玻璃" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Use Liquid Glass for the bottom bar; turn off for frosted glass"
-          }
-        }
-      }
-    },
-    "手动翻页时播放轻纸声，朗读时自动静音" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Plays a soft paper sound on manual turns, muted during playback"
-          }
-        }
-      }
-    },
-    "无动画" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "None"
-          }
-        }
-      }
-    },
-    "浅木层板" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Light wood ledge"
-          }
-        }
-      }
-    },
-    "滑动" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Slide"
-          }
-        }
-      }
-    },
-    "翻页动画" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Page turn animation"
-          }
-        }
-      }
-    },
-    "翻页音效" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Page turn sound"
-          }
-        }
-      }
-    },
-    "%lld 条生效" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld active"
-          }
-        }
-      }
-    },
-    "AI 书伴" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Companion"
-          }
-        }
-      }
-    },
-    "MD · 分享" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "MD · Share"
-          }
-        }
-      }
-    },
-    "乱码 · 章节" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "UTF-8 · TOC"
-          }
-        }
-      }
-    },
-    "划线与想法" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Highlights"
-          }
-        }
-      }
-    },
-    "去广告 · 读音" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Clean · TTS"
-          }
-        }
-      }
-    },
-    "双语已展开" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Showing"
-          }
-        }
-      }
-    },
-    "屏幕亮度" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Brightness"
-          }
-        }
-      }
-    },
-    "已开启" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Active"
-          }
-        }
-      }
-    },
-    "总结 · 追问" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Recap · Ask"
-          }
-        }
-      }
-    },
-    "护眼" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sage"
-          }
-        }
-      }
-    },
-    "无打扰模式" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hide bars"
-          }
-        }
-      }
-    },
-    "本书笔记" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Notes"
-          }
-        }
-      }
-    },
-    "段落译文" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Translate"
-          }
-        }
-      }
-    },
-    "编码目录" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Encoding"
-          }
-        }
-      }
-    },
-    "加书签 ⌘D" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Add Bookmark ⌘D"
-          }
-        }
-      }
-    },
-    "拿掉书签 ⌘D" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Remove Bookmark ⌘D"
-          }
-        }
-      }
-    },
-    "更多控制" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "More Controls"
-          }
-        }
-      }
-    },
-    "拖动微调阅读窗口柔光亮度" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Drag to adjust reading window brightness"
-          }
-        }
-      }
-    },
-    "原文" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Original"
-          }
-        }
-      }
-    },
-    "对照" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Bilingual"
-          }
-        }
-      }
-    },
-    "仅译文" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Translated"
-          }
-        }
-      }
-    },
-    "译文" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Translate"
-          }
-        }
-      }
-    },
-    "聊天气泡" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Chat bubbles"
-          }
-        }
-      }
-    },
-    "双语对照" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Bilingual"
-          }
-        }
-      }
-    },
-    "译文：原文 / 双语对照 / 仅译文" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Translation: Original / Bilingual / Translation Only"
-          }
-        }
-      }
-    },
-    "译文：双语对照" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Translation: Bilingual"
-          }
-        }
-      }
-    },
-    "译文：仅译文" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Translation: Translation Only"
-          }
-        }
-      }
-    },
-    "人物 · 配音" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cast · Voices"
-          }
-        }
-      }
-    },
-    "日间" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Day"
-          }
-        }
-      }
-    },
-    "护眼柔光" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Eye-Care Warmth"
-          }
-        }
-      }
-    },
-    "暖色滤蓝光" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Warm blue-light filter"
-          }
-        }
-      }
-    },
-    "麦克风启动失败，请重试" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't start the microphone. Try again."
-          }
-        }
-      }
-    },
-    "麦克风启动失败，请重试，或改用下方「导入一段录音…」" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't start the microphone. Try again, or use “Import an Audio Clip…” below."
-          }
-        }
-      }
-    },
-    "从当前句继续" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Continuing from this sentence"
-          }
-        }
-      }
-    },
-    "关闭声音提示" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Dismiss voice prompt"
-          }
-        }
-      }
-    },
-    "刚下好" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Just downloaded"
-          }
-        }
-      }
-    },
-    "暂不换声音，关闭提示" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Keep current voice and dismiss"
-          }
-        }
-      }
-    },
-    "暂不更换" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Keep current voice"
-          }
-        }
-      }
-    },
-    "点此选择声音" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Choose a voice"
-          }
-        }
-      }
-    },
-    "已切换为「%@」" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Switched to “%@”"
-          }
-        }
-      }
-    },
-    "暂不更换，继续用「%@」" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Keep using “%@”"
-          }
-        }
-      }
-    },
-    "离线声音「%@」好了" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Offline voice “%@” is ready"
-          }
-        }
-      }
-    },
-    "离线声音「%@」已下好 · 点右侧换声音" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Offline voice “%@” ready · use Change Voice"
-          }
-        }
-      }
-    },
-    "离线声音「%@」已下好，点此选择声音" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Offline voice “%@” is ready. Choose a voice."
-          }
-        }
-      }
-    },
-    "离线声音「%@」已下好，点击选择声音" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Offline voice “%@” is ready. Click to choose a voice."
-          }
-        }
-      }
-    },
-    "离线声音「%@」已下好 · 点击选声音" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Offline voice “%@” is ready · Click to choose voice"
-          }
-        }
-      }
-    },
-    "在 %@ 使用 ID：" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Use ID on %@: "
-          }
-        }
-      }
-    },
-    "搜模型名、ID 或缩写（如 co46 / dsr1）…" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Search model name, ID, or alias (e.g. co46 / dsr1)…"
-          }
-        }
-      }
-    },
-    "收藏" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Favorites"
-          }
-        }
-      }
-    },
-    "最近" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Recent"
-          }
-        }
-      }
-    },
-    "未配" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unset"
-          }
-        }
-      }
-    },
-    "轻纸" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Soft Paper"
-          }
-        }
-      }
-    },
-    "脆页" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Crisp Page"
-          }
-        }
-      }
-    },
-    "精装" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hardcover"
-          }
-        }
-      }
-    },
-    "轻叩" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Soft Wood"
-          }
-        }
-      }
-    },
-    "滴墨" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ink Drop"
-          }
-        }
-      }
-    },
-    "柔和薄页" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Gentle thin paper"
-          }
-        }
-      }
-    },
-    "清爽新书" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Crisp new book"
-          }
-        }
-      }
-    },
-    "绵厚柔润" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Plush cotton paper"
-          }
-        }
-      }
-    },
-    "沉稳厚页" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Heavy bound stock"
-          }
-        }
-      }
-    },
-    "指尖木案" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Warm wood tap"
-          }
-        }
-      }
-    },
-    "水墨落砚" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Drop into inkstone"
-          }
-        }
-      }
-    },
-    "点按试听" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Tap to preview"
-          }
-        }
-      }
-    },
-    "手动翻页时播放，朗读时自动静音" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Plays on manual page turns; mutes while reading aloud"
-          }
-        }
-      }
-    },
-    "已关闭" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Off"
-          }
-        }
-      }
-    },
-    "从文件导入音频" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Import audio file"
-          }
-        }
-      }
-    },
-    "保存自定义音效失败，请重试" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't save custom sound. Please try again."
-          }
-        }
-      }
-    },
-    "停止录音" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Stop recording"
-          }
-        }
-      }
-    },
-    "声音太短了，换一段试试" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Clip is too short. Try another sound."
-          }
-        }
-      }
-    },
-    "导入或实录" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Import or record"
-          }
-        }
-      }
-    },
-    "已保存的自定义音效" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Saved custom sounds"
-          }
-        }
-      }
-    },
-    "录一段翻书声" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Record a page-turn sound"
-          }
-        }
-      }
-    },
-    "手动翻页时轻触震动，静音也可用" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Subtle haptic tap on manual page turns, even when muted"
-          }
-        }
-      }
-    },
-    "手边实录" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Recorded clip"
-          }
-        }
-      }
-    },
-    "无法启动录音，请重试" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't start recording. Please try again."
-          }
-        }
-      }
-    },
-    "没有检测到明显声音，再试一次" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No clear sound detected. Try again."
-          }
-        }
-      }
-    },
-    "翻页轻震" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Page-turn haptics"
-          }
-        }
-      }
-    },
-    "自定义翻页音效" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Custom page-turn sound"
-          }
-        }
-      }
-    },
-    "自定义音效" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Custom sound"
-          }
-        }
-      }
-    },
-    "请在系统设置中允许语阅使用麦克风，或直接从文件导入音频" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Allow microphone access in System Settings, or import an audio file instead."
-          }
-        }
-      }
-    },
-    "这段音频读不出来，换一个试试" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't read this audio file. Try another one."
-          }
-        }
-      }
-    },
-    "重选" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Retake"
-          }
-        }
-      }
-    },
-    "音效音量" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sound volume"
-          }
-        }
-      }
-    },
-    "从文件导入…" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Import File…"
-          }
-        }
-      }
-    },
-    "只保存在本地，不上传" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Stored on device only"
-          }
-        }
-      }
-    },
-    "导入音频" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Imported Audio"
-          }
-        }
-      }
-    },
-    "录完稍停自动截取 · 自动去静音并调平音量" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Auto-stops after sound settles · trims & levels automatically"
-          }
-        }
-      }
-    },
-    "正在收音 · %@ 秒" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Listening · %@ s"
-          }
-        }
-      }
-    },
-    "正在裁剪与调平音量…" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Trimming & leveling…"
-          }
-        }
-      }
-    },
-    "给音效起个名字" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Name this sound"
-          }
-        }
-      }
-    },
-    "翻一页真书，或轻敲桌面" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Flip a real page, or tap your desk"
-          }
-        }
-      }
-    },
-    "翻完停顿片刻自动完成，或轻点停止" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Pause briefly to finish automatically, or tap to stop"
-          }
-        }
-      }
-    },
-    "轻敲桌面" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Desk Tap"
-          }
-        }
-      }
-    },
-    "再翻一页试试节奏，满意就可以直接保存使用。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Flip once more to feel the rhythm, then save whenever it feels right."
-          }
-        }
-      }
-    },
-    "点此试翻" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Tap to flip"
-          }
-        }
-      }
-    },
-    "纸页轻轻掠过指尖，声音恰到好处，不惊扰夜读。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "A soft brush of paper beneath your fingers—gentle enough for late-night reading."
-          }
-        }
-      }
-    },
-    "轻点或轻扫这一页，听听你刚录下的翻书声。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Tap or swipe this page to hear the page-turn sound you just captured."
-          }
-        }
-      }
-    },
-    "音效名" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Name"
           }
         }
       }

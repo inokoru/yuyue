@@ -9,6 +9,9 @@ import YuyueCore
 struct PhoneShelf: View {
     @State private var confirming: YYConfirm?
     @Bindable var library: Library
+    /// When non-nil, locks this view to a dedicated standalone bottom tab (播客, 有声, or 进度)
+    /// without the shelf place switcher or mutating `chrome`'s 书架 tab title/icon.
+    let fixedPlace: ShelfPlace?
     @Environment(PhoneChrome.self) private var chrome
     @State private var filter = ShelfFilter.all
     @AppStorage("shelf.sort") private var sortName = "recent"
@@ -58,7 +61,26 @@ struct PhoneShelf: View {
     @State private var gridSpan = HorizontalSpan.zero
     @Environment(\.colorScheme) private var scheme
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
+    @AppStorage(BottomNavPrefs.key) private var rawTabs = BottomNavPrefs.defaultRaw
+    @AppStorage(BottomNavPrefs.shelfHiddenKey) private var rawHiddenShelfSubs = BottomNavPrefs.defaultHiddenShelfRaw
+    @State private var noteCounts: (marks: Int, books: Int) = (0, 0)
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
+    private var navConfig: BottomNavConfig { BottomNavPrefs.config(tabsRaw: rawTabs, hiddenShelfRaw: rawHiddenShelfSubs) }
+    private var foldedKinds: [ShelfPlace] { BottomNavPrefs.foldedShelfPlaces(navConfig) }
+    private var hasSwitcher: Bool { fixedPlace == nil && (foldedKinds.count > 1 || !library.collections.isEmpty) }
+
+    init(library: Library, fixedPlace: ShelfPlace? = nil) {
+        self.library = library
+        self.fixedPlace = fixedPlace
+        let initialKind: Kind = switch fixedPlace {
+        case .progress: .books
+        case .podcasts: .podcasts
+        case .audio: .audio
+        case .notes: .notes
+        default: .all
+        }
+        _kind = State(initialValue: initialKind)
+    }
 
     private var regular: Bool { sizeClass == .regular }
     private var inset: CGFloat { regular ? 32 : 20 }
@@ -68,87 +90,126 @@ struct PhoneShelf: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if regular, library.shelfBooks.isEmpty, place == .books {
-                    welcomeSplit
-                        .safeAreaInset(edge: .top, spacing: 0) {
-                            placeHeader
-                                .padding(.horizontal, inset)
-                                .padding(.top, 14)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                } else {
-                    shelf
-                }
-            }
-            .background(YYColor.bg)
-            .background {
-                GeometryReader { g in
-                    let f = InnerDisplay.isOn(sizeClass) ? InnerDisplay.fold(in: g, layoutDirectionBehavior: .fixed) : nil
-                    let global = f.map { $0.offsetBy(dx: g.frame(in: .global).minX, dy: 0) }
-                    Color.clear
-                        .onAppear { fold = global }
-                        .onChange(of: global) { _, v in fold = v }
-                }
-                .ignoresSafeArea()
-            }
-            .toolbar { toolbar }
-            // The title is the shelf's own, at the very top; the bar only while picking books.
-            .toolbar(selecting ? .visible : .hidden, for: .navigationBar)
-            .toolbar(selecting ? .hidden : .automatic, for: .tabBar)
-            // The first tab wears the place: 进度, 播客, 有声 or the 合集, with its symbol.
-            .onChange(of: info(place).name, initial: true) { _, _ in
-                let now = info(place)
-                chrome.shelfName = place == .books ? nil : now.name
-                chrome.shelfSymbol = place == .books ? nil : now.symbol
-            }
-            #if DEBUG
-            .onAppear {
-                switch UserDefaults.standard.string(forKey: "debugPlace") {
-                case "podcasts", "podcast": kind = .podcasts
-                case "progress", "books": kind = .books
-                case "audio": kind = .audio
-                default: break
-                }
-                if UserDefaults.standard.bool(forKey: "debugPlacePanel") {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                        openPanel(.title)
-                    }
-                }
-            }
-            #endif
-            .safeAreaInset(edge: .bottom) {
-                if selecting {
-                    selectionBar
-                } else if ((kind == .podcasts && podcastScrolled) || (kind != .podcasts && library.podcastHub.isPlaying && library.nowPlaying == nil)),
-                          let activeEp = library.podcastHub.activeIssue ?? library.podcastHub.deskIssues.first ?? library.podcastHub.allIssues.first {
-                    PhonePodcastMiniPlayerBar(library: library, issue: activeEp) {
-                        if kind == .podcasts {
-                            openedPodcastIssueID = activeEp.id
+        Group {
+            if kind == .notes {
+                PhoneNotes(
+                    library: library,
+                    onOpenPlace: hasSwitcher ? { openPanel(.title) } : nil,
+                    placeTitleHidden: panelFrom == .title,
+                    onPlaceTitleFrame: { titleFrameBox.frame = $0 }
+                )
+            } else {
+                NavigationStack {
+                    Group {
+                        if regular, library.shelfBooks.isEmpty, place == .books {
+                            welcomeSplit
+                                .safeAreaInset(edge: .top, spacing: 0) {
+                                    placeHeader
+                                        .padding(.horizontal, inset)
+                                        .padding(.top, 14)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
                         } else {
-                            library.podcastHub.requestedOpenIssueID = activeEp.id
+                            shelf
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
-                    .transition(YYMotion.reduce ? .opacity : .move(edge: .bottom).combined(with: .scale(scale: 0.97)).combined(with: .opacity))
+                    .background(YYColor.bg)
+                    .background {
+                        GeometryReader { g in
+                            let f = InnerDisplay.isOn(sizeClass) ? InnerDisplay.fold(in: g, layoutDirectionBehavior: .fixed) : nil
+                            let global = f.map { $0.offsetBy(dx: g.frame(in: .global).minX, dy: 0) }
+                            Color.clear
+                                .onAppear { fold = global }
+                                .onChange(of: global) { _, v in fold = v }
+                        }
+                        .ignoresSafeArea()
+                    }
+                    .toolbar { toolbar }
+                    // The title is the shelf's own, at the very top; the bar only while picking books.
+                    .toolbar(selecting ? .visible : .hidden, for: .navigationBar)
+                    .toolbar(selecting ? .hidden : .automatic, for: .tabBar)
+                    #if DEBUG
+                    .onAppear {
+                        switch UserDefaults.standard.string(forKey: "debugPlace") {
+                        case "podcasts", "podcast": kind = .podcasts
+                        case "progress", "books": kind = .books
+                        case "audio": kind = .audio
+                        case "notes": kind = .notes
+                        default: break
+                        }
+                        if UserDefaults.standard.bool(forKey: "debugPlacePanel") {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                openPanel(.title)
+                            }
+                        }
+                    }
+                    #endif
+                    .safeAreaInset(edge: .bottom) {
+                        if selecting {
+                            selectionBar
+                        } else if ((kind == .podcasts && podcastScrolled) || (kind != .podcasts && library.podcastHub.isPlaying && library.nowPlaying == nil)),
+                                  let activeEp = library.podcastHub.activeIssue ?? library.podcastHub.deskIssues.first ?? library.podcastHub.allIssues.first {
+                            PhonePodcastMiniPlayerBar(library: library, issue: activeEp) {
+                                if kind == .podcasts {
+                                    openedPodcastIssueID = activeEp.id
+                                } else {
+                                    library.podcastHub.requestedOpenIssueID = activeEp.id
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 8)
+                            .transition(YYMotion.reduce ? .opacity : .move(edge: .bottom).combined(with: .scale(scale: 0.97)).combined(with: .opacity))
+                        }
+                    }
+
+                    .navigationDestination(isPresented: $wifiShown) { PhoneWifi(library: library) }
+                    .navigationDestination(isPresented: $remoteShown) { PhoneRemoteStart(library: library) }
+                    .navigationDestination(isPresented: $watchShown) { PhoneWatchedFolder(library: library) }
+                    .navigationDestination(item: $showing) { id in
+                        BookRecordPage(library: library, bookID: id) { book, intent in open(book, intent) } pickCollection: { picking = $0 }
+                            .toolbar(.hidden, for: .tabBar)
+                    }
+                    .sheet(isPresented: $addingBook) {
+                        PhoneAddBook(library: library, status: bookStatus) { addingBook = false }
+                            .presentationDetents([.height(200)])
+                            .presentationBackground(YYColor.bg)
+                    }
+                    .deletingRecord($deletingRecord, library: library)
                 }
             }
-
-            .navigationDestination(isPresented: $wifiShown) { PhoneWifi(library: library) }
-            .navigationDestination(isPresented: $remoteShown) { PhoneRemoteStart(library: library) }
-            .navigationDestination(isPresented: $watchShown) { PhoneWatchedFolder(library: library) }
-            .navigationDestination(item: $showing) { id in
-                BookRecordPage(library: library, bookID: id) { book, intent in open(book, intent) } pickCollection: { picking = $0 }
-                    .toolbar(.hidden, for: .tabBar)
+        }
+        // The 书架 tab wears its active place: 进度, 播客, 有声, 笔记 or the 合集, with its symbol.
+        .onChange(of: info(place).name, initial: true) { _, _ in
+            guard fixedPlace == nil else { return }
+            let now = info(place)
+            chrome.shelfName = place == .books ? nil : now.name
+            chrome.shelfSymbol = place == .books ? nil : now.symbol
+        }
+        // If a shelf sub-place is promoted to bottom bar or hidden in Settings, cleanly return to 书.
+        .onChange(of: foldedKinds, initial: true) { _, allowed in
+            guard fixedPlace == nil else { return }
+            chrome.shelfHasSwitcher = hasSwitcher
+            if !hasSwitcher {
+                chrome.switching = false
+                panelFrom = nil
             }
-            .sheet(isPresented: $addingBook) {
-                PhoneAddBook(library: library, status: bookStatus) { addingBook = false }
-                    .presentationDetents([.height(200)])
-                    .presentationBackground(YYColor.bg)
+            if case .collection = place { return }
+            if !allowed.contains(place) {
+                filter = .all
+                kind = .all
             }
-            .deletingRecord($deletingRecord, library: library)
+        }
+        .task(id: foldedKinds.contains(.notes) ? library.books.map(\.id) : []) {
+            guard foldedKinds.contains(.notes) else { return }
+            let raw = await NotedBook.loadRaw(core: library.core, books: library.books)
+            noteCounts = (raw.reduce(0) { $0 + $1.2.count }, raw.count)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .notesChanged)) { _ in
+            guard foldedKinds.contains(.notes) else { return }
+            Task {
+                let raw = await NotedBook.loadRaw(core: library.core, books: library.books)
+                noteCounts = (raw.reduce(0) { $0 + $1.2.count }, raw.count)
+            }
         }
         .sheet(isPresented: $feedbackShown) {
             FeedbackForm { feedbackShown = false }
@@ -199,9 +260,11 @@ struct PhoneShelf: View {
                 .presentationBackground(YYColor.bg)
         }
         .yyConfirm($confirming)
-        .airTrafficScreen(kind == .podcasts ? "Podcasts" : "Shelf")
+        .airTrafficScreen(kind == .podcasts ? "Podcasts" : (kind == .notes ? "Notes" : "Shelf"))
         .onChange(of: kind, initial: true) { _, new in
+            guard fixedPlace == nil else { return }
             chrome.onPodcasts = (new == .podcasts)
+            chrome.onNotes = (new == .notes)
         }
     }
 
@@ -376,15 +439,16 @@ struct PhoneShelf: View {
         if case .collection(let id) = filter { id } else { nil }
     }
 
-    /// 书 · 进度 · 播客 · 有声, within what the title picked.
-    @State private var kind = Kind.all
-    private enum Kind: CaseIterable { case all, books, podcasts, audio
+    /// 书 · 进度 · 播客 · 有声 · 笔记, within what the title picked.
+    @State private var kind: Kind
+    private enum Kind: CaseIterable { case all, books, podcasts, audio, notes
         var name: String {
             switch self {
             case .all: String(localized: "书")
             case .books: String(localized: "进度")
             case .podcasts: String(localized: "播客")
             case .audio: String(localized: "有声")
+            case .notes: String(localized: "笔记")
             }
         }
     }
@@ -400,7 +464,7 @@ struct PhoneShelf: View {
         case .all: break
         case .books: break
         case .audio: books = books.filter(library.hasAudio)
-        case .podcasts: return []
+        case .podcasts, .notes: return []
         }
         return sort.sorted(books)
     }
@@ -413,14 +477,14 @@ struct PhoneShelf: View {
             case .all: true
             case .books: true
             case .audio: library.hasAudio(b)
-            case .podcasts: false
+            case .podcasts, .notes: false
             }
         }
     }
 
     /// 继续 (regular width only): the book last opened that has been begun and isn't finished.
     private var continuing: BookSummary? {
-        guard regular, filter == .all, !selecting, kind != .podcasts else { return nil }
+        guard regular, filter == .all, !selecting, kind != .podcasts, kind != .notes else { return nil }
         return library.shelfBooks
             .filter { b in
                 guard b.available, b.status != .finished, b.progress > 0 || b.openedAt != nil else { return false }
@@ -449,6 +513,7 @@ struct PhoneShelf: View {
         case .books: .progress
         case .audio: .audio
         case .podcasts: .podcasts
+        case .notes: .notes
         }
     }
 
@@ -459,6 +524,7 @@ struct PhoneShelf: View {
             case .progress: filter = .all; kind = .books
             case .audio: filter = .all; kind = .audio
             case .podcasts: filter = .all; kind = .podcasts
+            case .notes: filter = .all; kind = .notes
             case .collection(let id): filter = .collection(id); kind = .all
             }
         }
@@ -489,10 +555,14 @@ struct PhoneShelf: View {
         case .podcasts:
             let fresh = library.podcastHub.deskIssues.count
             let channels = library.podcastHub.channels.count
-            return PlaceInfo(place: p, name: String(localized: "播客"), symbol: "microphone",
+            return PlaceInfo(place: p, name: String(localized: "播客"), symbol: "asset.radio",
                              short: fresh > 0 ? String(localized: "\(fresh) 期新") : String(localized: "\(channels) 档"),
                              meta: [String(localized: "\(channels) 档频道"), String(localized: "\(fresh) 期未听")],
                              fresh: fresh > 0)
+        case .notes:
+            return PlaceInfo(place: p, name: String(localized: "笔记"), symbol: "note.text",
+                             short: String(localized: "\(noteCounts.marks) 条"),
+                             meta: [String(localized: "\(noteCounts.marks) 条划线"), String(localized: "\(noteCounts.books) 本书")])
         case .collection(let id):
             let c = library.collections.first { $0.id == id }
             let count = Int(c?.count ?? 0)
@@ -503,22 +573,35 @@ struct PhoneShelf: View {
         }
     }
 
-    /// The title: the place's mark, its name in 宋体 and ⌄; under it what's in it, and the order.
-    /// The title: the place's mark, and beside it its name in 宋体 with ⌄ over what's in it — one
-    /// block, its words on one edge. The buttons and the order sit at the right of the same row.
-    private var placeHeader: some View {
+    /// The title: the place's mark, and beside it its name in 宋体 with ⌄ (or static PageTitle when standalone or nothing folded).
+    @ViewBuilder private var placeHeader: some View {
         let now = info(place)
-        return Button { openPanel(.title) } label: {
-            ShelfPlaceTitle(symbol: now.symbol, name: now.name)
-                .contentShape(.rect)
+        if fixedPlace != nil || !hasSwitcher {
+            HStack(spacing: 11) {
+                PlaceMark(symbol: now.symbol, size: 40, bare: true)
+                Text(verbatim: now.name)
+                    .font(YYUI.serif(30, .medium))
+                    .tracking(now.name.contains { $0.isASCII } || now.name.count > 4 ? 0 : 1)
+                    .foregroundStyle(YYColor.t1)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, 150)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+        } else {
+            Button { openPanel(.title) } label: {
+                ShelfPlaceTitle(symbol: now.symbol, name: now.name)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(YYPressStyle(scale: 0.98))
+            .opacity(panelFrom == .title ? 0 : 1)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { titleFrameBox.frame = $0 }
+            .accessibilityLabel("\(now.name)，\(now.meta.joined(separator: "，"))，换一处看")
+            // Room for the buttons at the right of this row.
+            .padding(.trailing, 150)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(YYPressStyle(scale: 0.98))
-        .opacity(panelFrom == .title ? 0 : 1)
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { titleFrameBox.frame = $0 }
-        .accessibilityLabel("\(now.name)，\(now.meta.joined(separator: "，"))，换一处看")
-        // Room for the buttons at the right of this row.
-        .padding(.trailing, 150)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// 进度 sorts its cards its own way; 播客 has its own order.
@@ -580,21 +663,26 @@ struct PhoneShelf: View {
                         .padding(.trailing, 16)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                if chrome.switching {
+                if hasSwitcher && chrome.switching {
+                    let stackAnchor: UnitPoint = switch chrome.shelfStackAlignment {
+                    case .bottomTrailing: .bottomTrailing
+                    case .bottom: .bottom
+                    default: .bottomLeading
+                    }
                     Color.black.opacity(0.06)
                         .ignoresSafeArea()
                         .onTapGesture { withAnimation(PhoneChrome.dismissMotion) { chrome.switching = false } }
                         .transition(.opacity)
                     PlaceStack(current: place,
-                               kinds: ShelfPlace.kinds.map(info),
+                               kinds: foldedKinds.map(info),
                                collections: library.collections.map { info(.collection($0.id)) }) { to in
                         withAnimation(PhoneChrome.dismissMotion) { chrome.switching = false }
                         if to != place { go(to) }
                     }
-                    .padding(.leading, inset - 8)
+                    .padding(.horizontal, max(12, inset - 8))
                     .padding(.bottom, 10)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                    .transition(YYMotion.reduce ? .opacity : .scale(scale: 0.92, anchor: .bottomLeading).combined(with: .opacity))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: chrome.shelfStackAlignment)
+                    .transition(YYMotion.reduce ? .opacity : .scale(scale: 0.92, anchor: stackAnchor).combined(with: .opacity))
                 }
                 if chipShown {
                     PlaceChip(info: info(place)) { openPanel(.chip) }
@@ -604,14 +692,14 @@ struct PhoneShelf: View {
                         .opacity(panelFrom == .chip ? 0 : 1)
                         .transition(YYMotion.reduce ? .opacity : .scale(scale: 0.92, anchor: .leading).combined(with: .opacity))
                 }
-                if let from = panelFrom {
+                if hasSwitcher, let from = panelFrom {
                     Color.black.opacity(0.001)
                         .ignoresSafeArea()
                         .onTapGesture { closePanel() }
                     // Under the bar's buttons, never over them; from the title, its head where the title was.
                     let top = max((from == .title ? titleFrameBox.frame.minY - 15 : chipFrame.minY) - origin.y, 58)
                     PlacePanel(current: info(place),
-                               kinds: ShelfPlace.kinds.map(info),
+                               kinds: foldedKinds.map(info),
                                collections: library.collections.map { info(.collection($0.id)) },
                                go: { to in
                                    closePanel()
@@ -644,12 +732,12 @@ struct PhoneShelf: View {
         }
     }
 
-    /// Only on the shelf itself, scrolled, and not while picking books.
-    private var chipShown: Bool { scrolled && barShown }
+    /// Only on the main 书架 tab itself, when switchable, scrolled, and not while picking books.
+    private var chipShown: Bool { hasSwitcher && scrolled && barShown }
 
-    /// The shelf itself, not a page pushed over it, and not picking books.
+    /// The shelf itself, not a page pushed over it, not Notes (which draws its own header), and not picking books.
     private var barShown: Bool {
-        !selecting && showing == nil && !wifiShown && !remoteShown && !watchShown
+        kind != .notes && !selecting && showing == nil && !wifiShown && !remoteShown && !watchShown
     }
 
     /// 反馈, 导入 (加书 in 进度) and 选择, at the top right, staying there as the shelf scrolls.

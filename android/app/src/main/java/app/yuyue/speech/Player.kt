@@ -374,6 +374,8 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         voices[language] = voice
         voiceVersion++
         ttsTrackedForSession = false
+        runCatching { app.yuyue.YuyueApp.instance.library.dramaSynth.invalidateCast(detail.summary.id) }
+        chapterLayer = null
         restartHere()
     }
 
@@ -412,12 +414,15 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                 failure = t("下载一个%@声音就能朗读这本书，系统会带你去它的下载页。", name)
                 return@launch
             }
-            saveVoicePreference(langTag, sys.id)
+            saveVoicePreference(langTag, sys.id, notify = false)
             val cacheKey = canonicalLanguage(langTag).ifEmpty { langTag }
             voices[cacheKey] = sys
             voices[langTag] = sys
             voiceVersion++
             ttsTrackedForSession = false
+            runCatching { app.yuyue.YuyueApp.instance.library.dramaSynth.invalidateCast(detail.summary.id) }
+            chapterLayer = null
+            chapterLiveAllMade = null
             if (resumeAt != null) play(resumeAt.position) else restartHere()
         }
     }
@@ -522,6 +527,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         val buffered = queued.size + staged.size
         if (buffered == 0) return true
         if (!lastUsingCardVoice) return buffered <= AHEAD
+        if (buffered >= CARD_AHEAD_MAX) return false
         val target = targetAheadSeconds(currentThermalStatus())
         return if (target <= 0.0) buffered <= AHEAD else queuedAheadSeconds() < target
     }
@@ -1140,6 +1146,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         /** The timer's fade, in ms. */
         const val FADE_MS = 20_000L
         private const val AHEAD = 2
+        private const val CARD_AHEAD_MAX = 3
         private const val NODE_AHEAD = 2
         internal const val THERMAL_SEVERE = 3
         internal const val THERMAL_CRITICAL = 4
@@ -1212,8 +1219,8 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         /** pre-synthesis duration budget (seconds) by `PowerManager` thermal status. */
         internal fun targetAheadSeconds(thermalStatus: Int): Double = when {
             thermalStatus >= THERMAL_CRITICAL -> 0.0
-            thermalStatus == THERMAL_SEVERE -> 15.0
-            else -> 60.0
+            thermalStatus == THERMAL_SEVERE -> 8.0
+            else -> 15.0
         }
 
         internal fun canonicalLanguage(language: String): String {
@@ -1259,6 +1266,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                     write("player.voice.$canon", voiceId)
                 }
             }
+            runCatching { app.yuyue.YuyueApp.instance.library.dramaSynth.invalidateCast(null) }
             if (notify) voicePrefChanged.tryEmit(Unit)
         }
     }
@@ -1268,11 +1276,13 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         ClonedVoices.init(context)
         scope.launch {
             voicePrefChanged.collect {
-                if (state == State.Stopped) {
-                    readyOfflineVoice = null
-                    voices.clear()
-                    voiceVersion++
-                }
+                readyOfflineVoice = null
+                voices.clear()
+                chapterLayer = null
+                chapterLiveAllMade = null
+                voiceVersion++
+                runCatching { app.yuyue.YuyueApp.instance.library.dramaSynth.invalidateCast(detail.summary.id) }
+                if (state != State.Stopped) restartHere()
             }
         }
         scope.launch {
@@ -1298,7 +1308,10 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         if (state == State.Stopped) {
             readyOfflineVoice = null
             voices.clear()
+            chapterLayer = null
+            chapterLiveAllMade = null
             voiceVersion++
+            runCatching { app.yuyue.YuyueApp.instance.library.dramaSynth.invalidateCast(detail.summary.id) }
             return
         }
         if (narrator != null) return

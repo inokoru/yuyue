@@ -19,6 +19,7 @@ struct MacReaderView: View {
     @State private var moreShown = false
     @State private var infoShown = false
     @State private var listenShown = false
+    @State private var hoverListen = false
     @AppStorage(MacReaderBrightness.followKey) private var brightnessFollow = true
     @AppStorage(MacReaderBrightness.valueKey) private var readerBrightness = 0.72
     @AppStorage(MacReaderBrightness.eyeCareKey) private var eyeCare = false
@@ -33,7 +34,10 @@ struct MacReaderView: View {
     /// settles away a few seconds after it stops. Reading, the page has nothing on it.
     @State private var listening = false
     @State private var settle: Task<Void, Never>?
-    private var barAway: Bool { !(listening || listenShown) || (model.immersive && !peek && !listenShown) }
+    private var barAway: Bool {
+        !(listening || listenShown || model.listenOnly || model.capsuleMode != .idle)
+            || (model.immersive && !peek && !listenShown && model.capsuleMode == .idle)
+    }
     @State private var unpeek: Task<Void, Never>?
     @State private var pageHeight = 0.0
     @State private var windowWidth: CGFloat = 1040
@@ -731,7 +735,72 @@ struct MacReaderView: View {
     }
 
     private var capsule: some View {
-        HStack(spacing: 4) {
+        let reading = model.player?.spot != nil
+        let showQuickIcons = reading || model.listenOnly
+        let isPron: Bool = if case .pronunciation = model.capsuleMode { true } else { false }
+        let width: CGFloat = switch model.capsuleMode {
+        case .idle: showQuickIcons ? 426 : 360
+        case .pronunciation: 472
+        case .pronunciationDone, .marked, .rewound: 396
+        }
+        let radius: CGFloat = isPron ? 24 : 25
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        let morphAnim: Animation? = YYMotion.reduce ? .easeOut(duration: 0.16) : .spring(duration: 0.36, bounce: 0.12)
+
+        return Group {
+            switch model.capsuleMode {
+            case .idle:
+                idleCapsuleContent(reading: reading, showQuickIcons: showQuickIcons)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+
+            case .pronunciation(let find, let sentence):
+                CapsulePronunciationPanel(
+                    initialFind: find,
+                    sentence: sentence,
+                    paper: paper,
+                    isPlaying: model.isPlaying,
+                    compact: false,
+                    onTogglePlay: { model.togglePlay() },
+                    onSave: { f, r, all in model.applyPronunciationFix(find: f, replace: r, wholeLibrary: all) },
+                    onClose: { model.dismissCapsuleMode() }
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
+
+            case .pronunciationDone, .marked, .rewound:
+                CapsuleFeedbackStrip(
+                    mode: model.capsuleMode,
+                    paper: paper,
+                    compact: false,
+                    onUndoMark: { model.undoMarkedInCapsule(id: $0) },
+                    onDismiss: { model.dismissCapsuleMode() }
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
+            }
+        }
+        .frame(width: width)
+        .yyGlass(shape, fill: paper.glass, shadow: paper.isDark ? 0.42 : 0.09, liquid: !paper.isEink)
+        .overlay(alignment: .bottom) {
+            if model.capsuleMode == .idle {
+                // How far into this chapter.
+                GeometryReader { g in
+                    Capsule().fill(paper.line)
+                    Capsule().fill(paper.ink).frame(width: g.size.width * model.chapterProgress)
+                        .animation(YYMotion.standard, value: model.chapterProgress)
+                }
+                .frame(height: 2)
+                .padding(.horizontal, 22)
+                .padding(.bottom, 1)
+                .transition(.opacity)
+            }
+        }
+        .overlay(shape.strokeBorder(paper.line, lineWidth: 0.5))
+        .animation(morphAnim, value: model.capsuleMode)
+        .animation(morphAnim, value: showQuickIcons)
+    }
+
+    private func idleCapsuleContent(reading: Bool, showQuickIcons: Bool) -> some View {
+        let accent = paper.isEink ? paper.ink : tint.accent
+        return HStack(spacing: 4) {
             Button { panel = panel == .toc ? nil : .toc } label: {
                 Image(systemName: "list.bullet")
                     .font(.yy(size: 13, weight: .medium))
@@ -740,42 +809,114 @@ struct MacReaderView: View {
             .help("目录")
             .accessibilityLabel(Text("目录"))
             Button { if let alert = model.capsuleAlert { alert.action() } else { listenShown.toggle() } } label: {
-                let reading = model.player?.spot != nil
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(model.capsuleAlert?.title ?? (reading && model.sentenceCount > 0 ? String(localized: "第 \(min(model.sentence + 1, model.sentenceCount)) / \(model.sentenceCount) 句") : (model.chapterTitle ?? model.detail?.summary.title ?? "")))
-                        .font(.yy(size: 12, weight: .semibold))
-                        .foregroundStyle(paper.ink)
-                        // The sentence number rolls on as the voice reads.
-                        .contentTransition(.numericText(value: Double(model.sentence)))
-                        .animation(YYMotion.standard, value: model.sentence)
-                    if let alert = model.capsuleAlert {
-                        Text(alert.note)
-                            .font(.yy(size: 10, weight: .semibold))
-                            .foregroundStyle(tint.accent)
-                    } else {
-                        Text(model.capsuleNote)
-                            .font(.yy(size: 10))
-                            .foregroundStyle(paper.ink2)
-                    }
+                let hasAlert = model.capsuleAlert != nil
+                let fill: Color = if hasAlert {
+                    paper.isEink ? paper.bg : tint.accentSoft
+                } else if listenShown {
+                    paper.line.opacity(0.85)
+                } else if hoverListen {
+                    paper.ink.opacity(paper.isDark ? 0.13 : 0.085)
+                } else {
+                    paper.isEink ? paper.bg : paper.ink.opacity(paper.isDark ? 0.07 : 0.045)
                 }
-                .monospacedDigit()
-                .lineLimit(1)
-                .padding(.horizontal, 8)
+                HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: 4) {
+                            if hasAlert {
+                                Image(systemName: "exclamationmark.circle.fill")
+                                    .font(.yy(size: 10, weight: .semibold))
+                                    .foregroundStyle(accent)
+                            } else if model.isPlaying || reading {
+                                SpeakingBars(paused: !model.isPlaying)
+                                    .frame(width: 11, height: 10)
+                            } else {
+                                Image(systemName: "headphones")
+                                    .font(.yy(size: 10, weight: .semibold))
+                                    .foregroundStyle(paper.ink2)
+                            }
+                            Text(model.capsuleAlert?.title ?? (reading && model.sentenceCount > 0 ? String(localized: "第 \(min(model.sentence + 1, model.sentenceCount)) / \(model.sentenceCount) 句") : (model.chapterTitle ?? model.detail?.summary.title ?? "")))
+                                .font(.yy(size: 12, weight: .semibold))
+                                .foregroundStyle(paper.ink)
+                                // The sentence number rolls on as the voice reads.
+                                .contentTransition(.numericText(value: Double(model.sentence)))
+                                .animation(YYMotion.standard, value: model.sentence)
+                        }
+                        if let alert = model.capsuleAlert {
+                            Text(alert.note)
+                                .font(.yy(size: 10, weight: .semibold))
+                                .foregroundStyle(tint.accent)
+                        } else {
+                            Text(model.capsuleNote)
+                                .font(.yy(size: 10))
+                                .foregroundStyle(paper.ink2)
+                        }
+                    }
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Image(systemName: hasAlert ? "chevron.right" : "chevron.up")
+                        .font(.yy(size: 9.5, weight: .semibold))
+                        .foregroundStyle(hasAlert ? accent : paper.ink2.opacity(0.85))
+                        .rotationEffect(.degrees(!hasAlert && listenShown ? 180 : 0))
+                        .animation(YYMotion.quick, value: listenShown)
+                }
+                .padding(.horizontal, 9)
                 .frame(height: 36)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(listenShown ? paper.line.opacity(0.8) : .clear, in: .rect(cornerRadius: 12))
-                .contentShape(.rect)
+                .background(fill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(
+                            hasAlert ? accent.opacity(0.3) : (paper.isEink ? paper.line : paper.ink.opacity(paper.isDark ? 0.1 : 0.06)),
+                            lineWidth: 0.5
+                        )
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
+            .onHover { hoverListen = $0 }
+            .animation(YYMotion.quick, value: hoverListen)
             .help(model.capsuleAlert?.note ?? String(localized: "听书：声音、速度、睡眠定时"))
             .popover(isPresented: $listenShown, arrowEdge: .top) {
                 ListenCard(model: model)
                     .presentationBackground(YYColor.card)
             }
-            Button { step(forward: false) } label: {
-                Image(systemName: "chevron.left").font(.yy(size: 13, weight: .semibold)).frame(width: 30, height: 36)
+
+            if showQuickIcons {
+                Button { model.markCurrentHeard() } label: {
+                    Image(systemName: "bookmark")
+                        .font(.yy(size: 12.5, weight: .medium))
+                        .foregroundStyle(paper.ink2)
+                        .frame(width: 30, height: 30)
+                        .contentShape(.circle)
+                }
+                .buttonStyle(YYPressStyle(scale: 0.92))
+                .help("记下这句")
+                .accessibilityLabel(Text("记下这句"))
+
+                Button { model.promptPronunciation() } label: {
+                    Image(systemName: "waveform")
+                        .font(.yy(size: 13, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .frame(width: 30, height: 30)
+                        .background(accent.opacity(paper.isDark ? 0.18 : 0.10), in: .circle)
+                        .contentShape(.circle)
+                }
+                .buttonStyle(YYPressStyle(scale: 0.92))
+                .help("纠正读音（划选读错的字并重念）")
+                .accessibilityLabel(Text("纠正读音"))
+
+                Rectangle()
+                    .fill(paper.line)
+                    .frame(width: 0.5, height: 16)
+                    .padding(.horizontal, 2)
             }
-            .help(model.player?.spot != nil ? String(localized: "上一句 ⌘[") : String(localized: "上一页 ←"))
-            .accessibilityLabel(model.player?.spot != nil ? Text("上一句") : Text("上一页"))
+
+            Button { step(forward: false) } label: {
+                Image(systemName: "chevron.left").font(.yy(size: 13, weight: .semibold)).frame(width: 28, height: 36)
+            }
+            .help(reading ? String(localized: "上一句 ⌘[") : String(localized: "上一页 ←"))
+            .accessibilityLabel(reading ? Text("上一句") : Text("上一页"))
             Button { model.togglePlay() } label: {
                 Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
                     // ▶ and ❚❚ turn into each other.
@@ -790,29 +931,15 @@ struct MacReaderView: View {
             .help(model.isPlaying ? String(localized: "暂停 空格") : String(localized: "朗读 空格"))
             .accessibilityLabel(model.isPlaying ? Text("暂停") : Text("朗读"))
             Button { step(forward: true) } label: {
-                Image(systemName: "chevron.right").font(.yy(size: 13, weight: .semibold)).frame(width: 30, height: 36)
+                Image(systemName: "chevron.right").font(.yy(size: 13, weight: .semibold)).frame(width: 28, height: 36)
             }
-            .help(model.player?.spot != nil ? String(localized: "下一句 ⌘]") : String(localized: "下一页 →"))
-            .accessibilityLabel(model.player?.spot != nil ? Text("下一句") : Text("下一页"))
+            .help(reading ? String(localized: "下一句 ⌘]") : String(localized: "下一页 →"))
+            .accessibilityLabel(reading ? Text("下一句") : Text("下一页"))
         }
         .buttonStyle(.plain)
         .foregroundStyle(paper.ink)
         .padding(.horizontal, 6)
         .padding(.vertical, 5)
-        .frame(width: 360)
-        .yyGlass(Capsule(), fill: paper.glass, shadow: paper.isDark ? 0.4 : 0.08, liquid: !paper.isEink)
-        .overlay(alignment: .bottom) {
-            // How far into this chapter.
-            GeometryReader { g in
-                Capsule().fill(paper.line)
-                Capsule().fill(paper.ink).frame(width: g.size.width * model.chapterProgress)
-                    .animation(YYMotion.standard, value: model.chapterProgress)
-            }
-            .frame(height: 2)
-            .padding(.horizontal, 22)
-            .padding(.bottom, 1)
-        }
-        .overlay(Capsule().strokeBorder(paper.line, lineWidth: 0.5))
     }
 
     private func step(forward: Bool) {
@@ -919,6 +1046,9 @@ struct MacReaderView: View {
             items.append(.separator())
             items.append(ActionMenuItem(String(localized: "想法…"), symbol: "square.and.pencil") { startThought() })
             items.append(ActionMenuItem(String(localized: "从这听"), symbol: "speaker.wave.2") { model.readFromSelection() })
+            if selection.text.trimmingCharacters(in: .whitespacesAndNewlines).count <= 20 {
+                items.append(ActionMenuItem(String(localized: "改读音…"), symbol: "waveform") { model.promptPronunciation(word: selection.text) })
+            }
             if model.canPin {
                 items.append(ActionMenuItem(String(localized: "从这里对准"), symbol: "scope") { model.pinHere(section: selection.section, sentence: selection.start.s) })
             }
@@ -996,6 +1126,10 @@ struct MacReaderView: View {
     /// Keys the page hands over before turning pages.
     private static func key(_ event: NSEvent, model: ReaderModel) -> Bool {
         guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty else { return false }
+        if event.keyCode == 53, model.capsuleMode != .idle {
+            model.dismissCapsuleMode()
+            return true
+        }
         if event.keyCode == 53, model.selection != nil || model.openMark != nil {  // esc
             model.dismissCards()
             return true

@@ -145,7 +145,7 @@ final class UpdateCenter {
         didSet {
             guard channel != oldValue else { return }
             UserDefaults.standard.set(channel.rawValue, forKey: UpdateKeys.channel)
-            Task { await check(manual: false) }
+            Task { await check(manual: true, force: true) }
         }
     }
     private(set) var skipped: String?
@@ -158,6 +158,10 @@ final class UpdateCenter {
     var dialog: Dialog = .none
     private var booted = false
     private var signAnchor: Date?
+    private var activeCheck: Task<Void, Never>?
+    private var activeCheckManual = false
+    private var checkSeq = 0
+    private var beforeCheck: UpdatePhase = .idle
 
     enum Dialog: Equatable { case none, flow, current, offline }
 
@@ -235,7 +239,11 @@ final class UpdateCenter {
     private static func newestBase() async throws -> String? {
         struct Asset: Decodable { let name: String }
         struct Release: Decodable { let tag_name: String; let draft: Bool; let assets: [Asset] }
-        var request = URLRequest(url: URL(string: "https://api.github.com/repos/\(UpdateRules.repo)/releases?per_page=20")!)
+        var request = URLRequest(
+            url: URL(string: "https://api.github.com/repos/\(UpdateRules.repo)/releases?per_page=20")!,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: 15
+        )
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
@@ -249,7 +257,11 @@ final class UpdateCenter {
         struct Asset: Decodable { let name: String }
         struct Release: Decodable { let tag_ref: String; let is_draft: Bool?; let assets: [Asset]? }
         struct Wrapper: Decodable { let releases: [Release] }
-        var request = URLRequest(url: URL(string: "https://cnb.cool/\(UpdateRules.repo)/-/releases?page=1&page_size=20")!)
+        var request = URLRequest(
+            url: URL(string: "https://cnb.cool/\(UpdateRules.repo)/-/releases?page=1&page_size=20")!,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: 15
+        )
         request.setValue("application/vnd.cnb.web+json", forHTTPHeaderField: "Accept")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
@@ -327,62 +339,91 @@ final class UpdateCenter {
         }
     }
 
-    func check(manual: Bool) async {
-        guard Self.enabled, phase != .checking else { return }
-        let before = phase
+    func check(manual: Bool, force: Bool = false) async {
+        guard Self.enabled else { return }
+        let running = activeCheck
+        if let running, !force && (!manual || activeCheckManual) {
+            await running.value
+            return
+        }
+        if phase != .checking { beforeCheck = phase }
+        let before = beforeCheck
+        checkSeq += 1
+        let seq = checkSeq
+        running?.cancel()
+        activeCheckManual = manual
         if manual { phase = .checking }
         let now = Date()
         UserDefaults.standard.set(now, forKey: UpdateKeys.checked)
-        do {
-            let bases = await candidateBases()
-            var chosenBase: String?
-            var loadedJson: String?
-            var lastError: Error?
-            for base in bases {
-                do {
-                    if let json = try await optionalText(base + "update.json") {
-                        chosenBase = base
-                        loadedJson = json
-                        break
-                    } else if chosenBase == nil {
-                        chosenBase = base
-                    }
-                } catch {
-                    lastError = error
+        let task = Task {
+            defer {
+                if checkSeq == seq {
+                    activeCheck = nil
+                    activeCheckManual = false
+                    if phase == .checking { phase = manual ? .checkFailed : before }
                 }
             }
-            if chosenBase == nil, let lastError { throw lastError }
-            if let chosenBase { UserDefaults.standard.set(chosenBase, forKey: UpdateKeys.feedBase) }
-            if let json = loadedJson {
-                let info = try parseUpdate(json: json)
-                let newer = info.code > 0 ? Int64(info.code) > Self.build : compareVersions(a: info.version, b: Self.current) > 0
-                if newer {
-                    let log = info.changelog.isEmpty ? "" : ((try? await text(info.changelog)) ?? "")
-                    let all = log.isEmpty ? [] : parseChangelog(text: log)
-                    let between = releasesAfter(text: log, current: Self.current)
-                    offer = UpdateOffer(
-                        info: info,
-                        releases: between.contains { $0.version == info.version } ? between : [updateRelease(u: info)] + between,
-                        edition: UpdateRules.edition(of: info.version, in: all)
-                    )
+            do {
+                let bases = await candidateBases()
+                try Task.checkCancellation()
+                var chosenBase: String?
+                var loadedInfo: UpdateInfo?
+                var lastError: Error?
+                for base in bases {
+                    try Task.checkCancellation()
+                    do {
+                        if let json = try await optionalText(base + "update.json") {
+                            let info = try parseUpdate(json: json)
+                            chosenBase = base
+                            loadedInfo = info
+                            break
+                        } else if chosenBase == nil {
+                            chosenBase = base
+                        }
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        lastError = error
+                    }
+                }
+                guard checkSeq == seq, !Task.isCancelled else { return }
+                if chosenBase == nil, let lastError { throw lastError }
+                if let chosenBase { UserDefaults.standard.set(chosenBase, forKey: UpdateKeys.feedBase) }
+                if let info = loadedInfo {
+                    let newer = info.code > 0 ? Int64(info.code) > Self.build : compareVersions(a: info.version, b: Self.current) > 0
+                    if newer {
+                        let log = info.changelog.isEmpty ? "" : ((try? await text(info.changelog)) ?? "")
+                        guard checkSeq == seq, !Task.isCancelled else { return }
+                        let all = log.isEmpty ? [] : parseChangelog(text: log)
+                        let between = releasesAfter(text: log, current: Self.current)
+                        offer = UpdateOffer(
+                            info: info,
+                            releases: between.contains { $0.version == info.version } ? between : [updateRelease(u: info)] + between,
+                            edition: UpdateRules.edition(of: info.version, in: all)
+                        )
+                    } else {
+                        offer = nil
+                    }
                 } else {
                     offer = nil
                 }
-            } else {
-                offer = nil
+                lastSuccess = now
+                lastSuccessAuto = !manual
+                lastWasCurrent = offer == nil
+                let d = UserDefaults.standard
+                d.set(Self.build, forKey: UpdateKeys.checkedBuild)
+                d.set(now.timeIntervalSince1970, forKey: UpdateKeys.lastSuccess)
+                d.set(!manual, forKey: UpdateKeys.lastSuccessAuto)
+                d.set(offer == nil, forKey: UpdateKeys.lastWasCurrent)
+                reconcile()
+            } catch is CancellationError {
+                if checkSeq == seq, phase == .checking { phase = before }
+            } catch {
+                if checkSeq == seq { phase = manual ? .checkFailed : before }
             }
-            lastSuccess = now
-            lastSuccessAuto = !manual
-            lastWasCurrent = offer == nil
-            let d = UserDefaults.standard
-            d.set(Self.build, forKey: UpdateKeys.checkedBuild)
-            d.set(now.timeIntervalSince1970, forKey: UpdateKeys.lastSuccess)
-            d.set(!manual, forKey: UpdateKeys.lastSuccessAuto)
-            d.set(offer == nil, forKey: UpdateKeys.lastWasCurrent)
-            reconcile()
-        } catch {
-            phase = manual ? .checkFailed : before
         }
+        activeCheck = task
+        await task.value
     }
 
     private func reconcile() {
@@ -445,7 +486,8 @@ final class UpdateCenter {
 
     private func optionalText(_ url: String) async throws -> String? {
         guard let u = URL(string: url) else { throw URLError(.badURL) }
-        let (data, response) = try await URLSession.shared.data(from: u)
+        let request = URLRequest(url: u, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        let (data, response) = try await URLSession.shared.data(for: request)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         if code == 404 { return nil }
         guard code == 200 else { throw URLError(.badServerResponse) }

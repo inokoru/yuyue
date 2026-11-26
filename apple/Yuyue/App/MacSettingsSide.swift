@@ -86,18 +86,27 @@ struct SettingsSidebar: View {
 
 // MARK: - 右栏
 
-/// The top right of 设置: 已存在这台 Mac and 最近改过. At the head of the right column, or on its
+/// The top right of 设置: 已存在这台 Mac, 搜索设置 and 最近改过. At the head of the right column, or on its
 /// own in the corner on pages with nothing to show there.
 struct SettingsCorner: View {
     /// In the corner by itself: the two side by side, not spread across the column.
     var compact = false
+    @Binding var searchOpen: Bool
     private var log: SettingsLog { SettingsLog.shared }
+
+    init(compact: Bool = false, searchOpen: Binding<Bool> = .constant(false)) {
+        self.compact = compact
+        _searchOpen = searchOpen
+    }
 
     var body: some View {
         HStack(spacing: compact ? 10 : 6) {
             saved
             if !compact { Spacer(minLength: 4) }
-            SettingsHistoryButton()
+            HStack(spacing: 4) {
+                SettingsSearchButton(open: $searchOpen)
+                SettingsHistoryButton()
+            }
         }
         .animation(.easeOut(duration: 0.2), value: log.flash?.id)
         .task(id: log.flash?.id) {
@@ -130,9 +139,17 @@ struct SettingsInspector: View {
     let page: SettingsPage
     let library: Library
     var windowWidth: CGFloat = 1020
+    @Binding var searchOpen: Bool
     @State private var reader = ReaderSettings.standard
     @AppStorage("settings.inspectorWidth") private var preferredWidth = 304.0
     private var log: SettingsLog { SettingsLog.shared }
+
+    init(page: SettingsPage, library: Library, windowWidth: CGFloat = 1020, searchOpen: Binding<Bool> = .constant(false)) {
+        self.page = page
+        self.library = library
+        self.windowWidth = windowWidth
+        _searchOpen = searchOpen
+    }
 
     private static let minWidth: Double = 252
     private static let defaultWidth: Double = 304
@@ -155,7 +172,7 @@ struct SettingsInspector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsCorner()
+            SettingsCorner(searchOpen: $searchOpen)
                 .padding(.leading, 16)
                 .padding(.trailing, 10)
                 // Level with the window's buttons.

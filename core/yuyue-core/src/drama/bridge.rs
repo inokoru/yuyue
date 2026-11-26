@@ -90,6 +90,42 @@ impl YuyueCore {
         let roles = self.book_roles(book.to_string())?;
         let among: Vec<String> = b.cast.chars.iter().map(|c| c.shown.clone()).collect();
         let shown = |id: u32| b.cast.get(id).filter(|c| !c.narrator).map(|c| c.shown.clone());
+        let any_manual_right = roles.iter().any(|r| r.voice.right);
+        let auto_right_who: Option<String> = if any_manual_right {
+            None
+        } else {
+            // Auto-place the lead protagonist on the right when 2+ characters speak in this section
+            // so dialogue naturally alternates left/right without manual setup.
+            let mut sec_counts: HashMap<String, usize> = HashMap::new();
+            let mut seen_u = std::collections::HashSet::new();
+            for seg in &ds.segments {
+                let Some(u) = seg.utterance else { continue };
+                if !seen_u.insert(u) {
+                    continue;
+                }
+                let speaking = matches!(seg.kind, SegKind::Speech | SegKind::Thought)
+                    || (seg.kind == SegKind::Quoted && matches!(seg.speaker, DramaSpeaker::Char { .. }));
+                if !speaking {
+                    continue;
+                }
+                if let DramaSpeaker::Char { id } = seg.speaker
+                    && let Some(name) = shown(id)
+                {
+                    *sec_counts.entry(name).or_default() += 1;
+                }
+            }
+            if sec_counts.len() >= 2 {
+                // Prefer the book's overall protagonist if present in this section, else the section's top speaker.
+                b.cast
+                    .chars
+                    .iter()
+                    .filter(|c| !c.narrator && sec_counts.contains_key(&c.shown))
+                    .max_by(|a, b| a.lines.cmp(&b.lines).then(sec_counts[&a.shown].cmp(&sec_counts[&b.shown])).then(b.shown.cmp(&a.shown)))
+                    .map(|c| c.shown.clone())
+            } else {
+                None
+            }
+        };
         let mut out: Vec<BubbleLine> = Vec::new();
         let mut i = 0;
         let segs = &ds.segments;
@@ -120,7 +156,11 @@ impl YuyueCore {
                 DramaSpeaker::Unsure { top } => (None, top.iter().filter_map(|c| shown(c.id)).take(2).collect()),
             };
             let (avatar_s, color_s, right) = match &who {
-                Some(n) => (avatar(n, &among), color(n).to_string(), role_for(&roles, n).is_some_and(|r| r.right)),
+                Some(n) => (
+                    avatar(n, &among),
+                    color(n).to_string(),
+                    role_for(&roles, n).is_some_and(|r| r.right) || auto_right_who.as_deref() == Some(n.as_str()),
+                ),
                 None => ("?".into(), "#888888".into(), false),
             };
             let same = f.sentence == l.sentence;
@@ -186,24 +226,77 @@ impl YuyueCore {
     /// Fast check on book open: whether the book has enough dialogue (quoted, dash `——`, or
     /// script `人物：`) to offer dialogue features. Scans at most the first 12 sections without
     /// building a full-book cast or drama state, stopping as soon as 6 distinct utterances are found.
+    /// Whether the book has genuine character dialogue (not just essays, psychology/non-fiction
+    /// books with citations or inline quoted terms): books without don't offer 气泡模式 / 广播剧.
     pub fn book_has_dialogue(&self, book_id: String) -> Result<bool> {
         let n = self.manifest(&book_id)?.sections.len() as u32;
-        let mut count = 0usize;
+        let mut explicit_lines = 0usize;
+        let mut standalone_lines = 0usize;
+        let mut consecutive_standalone = 0usize;
+
         for s in 0..n.min(12) {
             let sentences = match self.sentences(book_id.clone(), s) {
                 Ok(v) => v,
                 Err(crate::error::CoreError::NotFound { .. }) => continue,
                 Err(e) => return Err(e),
             };
-            let segs = super::spans::segments(&sentences, self.unquoted_lines_of(&book_id, s).as_deref());
-            let mut seen = std::collections::HashSet::new();
-            for seg in &segs {
-                if matches!(seg.kind, SegKind::Speech | SegKind::Thought)
-                    && let Some(u) = seg.utterance
-                    && seen.insert(u)
-                {
-                    count += 1;
-                    if count >= 6 {
+            let model_unquoted = self.unquoted_lines_of(&book_id, s);
+            let is_unquoted = super::spans::unquoted(&sentences);
+            let segs = super::spans::segments(&sentences, model_unquoted.as_deref());
+
+            // Group speech/thought segments by utterance to inspect each dialogue turn once.
+            let mut last_standalone_sentence: Option<u32> = None;
+            let mut i = 0;
+            while i < segs.len() {
+                let f = &segs[i];
+                let Some(u) = f.utterance else {
+                    i += 1;
+                    continue;
+                };
+                let mut j = i;
+                while j + 1 < segs.len() && segs[j + 1].utterance == Some(u) {
+                    j += 1;
+                }
+                let l = &segs[j];
+                i = j + 1;
+                if !matches!(f.kind, SegKind::Speech | SegKind::Thought) {
+                    continue;
+                }
+                if is_unquoted {
+                    explicit_lines += 1;
+                    if explicit_lines >= 4 {
+                        return Ok(true);
+                    }
+                    continue;
+                }
+                let Some(first_s) = sentences.get(f.sentence as usize) else { continue };
+                let Some(last_s) = sentences.get(l.sentence as usize) else { continue };
+                let first_chars: Vec<char> = first_s.chars().collect();
+                let last_chars: Vec<char> = last_s.chars().collect();
+                let before: String = first_chars[..((f.start as usize).min(first_chars.len()))].iter().collect();
+                let after: String = last_chars[((l.end as usize).min(last_chars.len()))..].iter().collect();
+
+                if has_dialogue_cue(&before, &after) {
+                    explicit_lines += 1;
+                    if explicit_lines >= 4 {
+                        return Ok(true);
+                    }
+                    continue;
+                }
+
+                // Tagless standalone dialogue turn (e.g., “你去哪儿？” on its own sentence).
+                let standalone = before.trim().is_empty()
+                    && after.trim().is_empty()
+                    && has_spoken_end(first_s, last_s);
+                if standalone {
+                    standalone_lines += 1;
+                    if let Some(prev) = last_standalone_sentence
+                        && f.sentence <= prev + 1
+                    {
+                        consecutive_standalone += 1;
+                    }
+                    last_standalone_sentence = Some(l.sentence);
+                    if consecutive_standalone >= 3 && standalone_lines >= 6 {
                         return Ok(true);
                     }
                 }
@@ -282,6 +375,62 @@ impl YuyueCore {
         v.extend(rest);
         Ok(v)
     }
+}
+
+fn has_dialogue_cue(before: &str, after: &str) -> bool {
+    const ZH_BEFORE: &[&str] = &[
+        "道", "说", "說", "问", "問", "答", "笑", "喊", "叫", "嚷", "喝", "叹", "嘆",
+        "骂", "罵", "哭", "泣", "劝", "勸", "唤", "喚", "催", "回", "吟", "唱", "心想", "暗道", "寻思", "尋思",
+    ];
+    const ZH_NON_SAY: &[&str] = &[
+        "也就是说", "也就是說", "换句话说", "換句話說", "来说", "來說", "比如说", "比如說",
+        "例如说", "例如說", "俗话说", "俗話說", "据说", "據說", "传说", "傳說", "报道", "報道",
+        "知道", "写道", "寫道", "指出", "认为", "認為", "强调", "強調", "提出",
+    ];
+    const ZH_AFTER: &[&str] = &[
+        "道", "说", "說", "问", "問", "答", "笑", "喊", "叫", "嚷", "喝", "叹", "嘆",
+    ];
+    const EN_VERBS: &[&str] = &[
+        "said", "asked", "replied", "answered", "cried", "whispered", "shouted", "muttered",
+        "murmured", "exclaimed", "laughed", "smiled", "sighed", "added", "continued",
+        "interrupted", "demanded", "remarked", "called", "yelled", "thought", "wondered", "says",
+    ];
+
+    let b = before.trim_end_matches([' ', '\u{3000}', '：', ':', '，', ',']);
+    if !b.is_empty() && !ZH_NON_SAY.iter().any(|p| b.ends_with(p)) {
+        if ZH_BEFORE.iter().any(|v| b.ends_with(v)) {
+            return true;
+        }
+        let bl = b.to_lowercase();
+        if EN_VERBS.iter().any(|v| {
+            bl.strip_suffix(v)
+                .is_some_and(|pre| pre.is_empty() || !pre.chars().last().is_some_and(|c| c.is_ascii_alphabetic()))
+        }) {
+            return true;
+        }
+    }
+
+    let a = after.trim_start_matches([' ', '\u{3000}', '，', ',']);
+    if !a.is_empty() && !a.starts_with(['之', '的']) {
+        let head_zh: String = a.chars().take(8).collect();
+        if ZH_AFTER.iter().any(|v| head_zh.contains(v)) {
+            return true;
+        }
+        let head_en: String = a.chars().take(32).collect::<String>().to_lowercase();
+        if head_en
+            .split(|c: char| !c.is_ascii_alphabetic())
+            .take(4)
+            .any(|w| EN_VERBS.contains(&w))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn has_spoken_end(first_s: &str, last_s: &str) -> bool {
+    let check = |s: &str| s.chars().any(|c| matches!(c, '。' | '！' | '？' | '…' | '!' | '?' | '.'));
+    check(last_s) || check(first_s)
 }
 
 #[cfg(test)]
@@ -444,6 +593,33 @@ mod tests {
             }
         }
         assert!(!check_txt("plain.txt", &plain), "plain prose must not trigger book_has_dialogue");
+
+        // 5. Psychology / non-fiction book full of inline quoted terms and academic citations -> false.
+        let mut psychology = String::new();
+        psychology.push_str("译者序\n\n");
+        psychology.push_str("卡伦·霍尼的这本书适用于神经症患者，更适用于有成长需求的正常人群。\n\n");
+        psychology.push_str("在日常生活中，内心的冲突是常有之事。霍尼开篇就指出，“并非神经症患者内心才有冲突……正如我们自己与周围环境经常发生冲突一样，我们的内心冲突也是生活中不可或缺的一部分。”\n\n");
+        psychology.push_str("“有意识地体验冲突，尽管可能比较痛苦，但它也是一种无价的资产。我们越是敢于面对自己的冲突并寻求解决方法，就越能获得更多的内心自由和更大的力量。”\n\n");
+        psychology.push_str("这本心理学读物为何有此能耐，可以引起读者恒久的共鸣呢？这恐怕与霍尼及其创立的“新精神分析”理论密不可分。\n\n");
+        for ch in 1..=8 {
+            psychology.push_str(&format!("第{ch}章 内心冲突的根源\n\n"));
+            psychology.push_str(&format!("霍尼在第{ch}章中认为，“神经症冲突本质上源于相互矛盾的倾向，而非简单的外部压力。”\n\n"));
+            psychology.push_str("她将这种防御模式称为“理想化意象”，并进一步强调，“只有直面矛盾本身，人格才能走向整合与成熟。”\n\n");
+            psychology.push_str("许多人在阅读时会联想到“基本焦虑”和“神经症需求”等概念。\n\n");
+        }
+        assert!(!check_txt("psychology.txt", &psychology), "non-fiction book with citations & quoted terms must not trigger book_has_dialogue");
+
+        // 6. Modern tagless dialogue novel (consecutive standalone quoted lines) -> true.
+        let mut tagless_novel = String::new();
+        tagless_novel.push_str("第一章 车站\n\n");
+        tagless_novel.push_str("雨停了，站台上亮起一排黄灯。\n\n");
+        tagless_novel.push_str("“你还是来了。”\n\n");
+        tagless_novel.push_str("“我说过会来的。”\n\n");
+        tagless_novel.push_str("“车票买好了吗？”\n\n");
+        tagless_novel.push_str("“买好了，七点半的那班。”\n\n");
+        tagless_novel.push_str("“那我们走吧，别误了点。”\n\n");
+        tagless_novel.push_str("“好，拿好你的包。”\n\n");
+        assert!(check_txt("tagless-novel.txt", &tagless_novel), "tagless back-and-forth dialogue novel should trigger book_has_dialogue");
 
         std::fs::remove_dir_all(dir).ok();
     }

@@ -62,6 +62,13 @@ object Session {
     fun update() = player.refresh()
     fun updateLine() = player.refresh()
 
+    /** Pauses any active playback (TTS, audiobook, podcast) before playing a voice preview. */
+    fun pauseActivePlayback() {
+        current?.pause()
+        audio?.pause()
+        podcast?.pause()
+    }
+
     /** 有声书: its own ExoPlayer goes to the notification instead of the sentence player. */
     var audio: AudiobookPlayer? = null
         private set

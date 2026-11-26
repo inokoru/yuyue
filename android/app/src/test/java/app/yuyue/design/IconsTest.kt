@@ -28,11 +28,11 @@ class IconsTest {
 
     @Test
     fun placeIconsAndCollectionIconsMatchIosMappings() {
-        assertEquals(Icons.microphone, PlaceIcons.podcasts)
+        assertEquals(Icons.radio, PlaceIcons.podcasts)
         assertEquals(Icons.chevronUpDown, PlaceIcons.switch)
         assertEquals(Icons.bookFill, PlaceIcons.filled(PlaceIcons.books))
         assertEquals(Icons.bookmark, PlaceIcons.filled(PlaceIcons.progress))
-        assertEquals(Icons.microphoneFill, PlaceIcons.filled(PlaceIcons.podcasts))
+        assertEquals(Icons.radioFill, PlaceIcons.filled(PlaceIcons.podcasts))
 
         for ((symbol, _) in CollectionIcon.choices) {
             val v = CollectionIcon.vector(symbol)

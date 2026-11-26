@@ -156,7 +156,7 @@ struct PhoneMe: View {
     private var lookGroup: some View {
         group(nil) {
             link(String(localized: "通用"), "slider.horizontal.3", nil) { PhoneGeneral(library: library) }
-            link(String(localized: "外观"), "sun.max", "\(mode.title) · \(tint.name)") { PhoneAppearance() }
+            link(String(localized: "外观"), "sun.max", "\(mode.title) · \(tint.name)") { PhoneAppearance(collectionCount: library.collections.count) }
         }
     }
 

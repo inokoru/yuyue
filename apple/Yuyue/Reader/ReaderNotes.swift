@@ -142,8 +142,19 @@ extension ReaderModel {
         pager.keepShown(made.id)
         reloadNotes()
         let new = !known.contains(made.id)
-        show(Library.Toast(icon: "headphones", title: new ? String(localized: "划下了刚听到的这句") : String(localized: "这句已经划过了"), detail: "“\(text.prefix(16))”",
-                           undo: new ? { [weak self] in self?.run { try $0.core.deleteMark(book: $0.bookID, id: made.id) } } : nil))
+        listenRippleToken += 1
+        if player?.spot != nil || listenOnly {
+            setCapsuleMode(.marked(excerpt: String(text.prefix(16)), undoID: new ? made.id : nil), autoDismissAfter: 2.6)
+        } else {
+            show(Library.Toast(icon: "headphones", title: new ? String(localized: "划下了刚听到的这句") : String(localized: "这句已经划过了"), detail: "“\(text.prefix(16))”",
+                               undo: new ? { [weak self] in self?.run { try $0.core.deleteMark(book: $0.bookID, id: made.id) } } : nil))
+        }
+    }
+
+    func undoMarkedInCapsule(id: String) {
+        run { try $0.core.deleteMark(book: $0.bookID, id: id) }
+        reloadNotes()
+        setCapsuleMode(.idle)
     }
 
     func deleteMark(_ mark: Mark) {

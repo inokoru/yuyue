@@ -237,6 +237,9 @@ struct SelectionCard: View {
                 if Self.touch, current == nil, model.contextLine != nil {
                     action(String(localized: "谁说的"), "person.crop.circle") { model.pickSpeakerFromMenu() }
                 }
+                if current == nil, let sel = model.selection, sel.text.trimmingCharacters(in: .whitespacesAndNewlines).count <= 16, model.player?.spot != nil {
+                    action(String(localized: "改读音"), "waveform") { model.promptPronunciation(word: sel.text) }
+                }
                 if current == nil, let sel = model.selection, model.canPin {
                     action(String(localized: "对准"), "scope") { model.pinHere(section: sel.section, sentence: sel.start.s) }
                 }

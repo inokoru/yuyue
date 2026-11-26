@@ -2474,28 +2474,125 @@ private final class CompanionNSTextView: NSTextView {
 
 // MARK: - 只听
 
-/// The page covered while 只听 is on: just where the voice is.
+/// The page covered while 只听 is on: 100% preserves the original quiet minimalist composition.
+/// Tapping the empty paper softly crossfades to depth-of-field 3-line lyrics (tap again to return
+/// to stillness); marking a sentence blooms a subtle golden ink ripple across the paper.
 struct ListenOnlyCover: View {
     let model: ReaderModel
+    @State private var showLyrics = false
+    @State private var rippleScale: CGFloat = 0.25
+    @State private var rippleOpacity: Double = 0
 
     var body: some View {
         let paper = model.paperTokens
-        VStack(spacing: 14) {
-            Image(systemName: "headphones")
-                .font(.yy(size: 34, weight: .light))
-                .foregroundStyle(paper.ink2)
-            Text(model.chapterTitle ?? model.detail?.summary.title ?? "")
-                .font(YYUI.serif(17, .semibold))
-                .foregroundStyle(paper.ink)
-            Text("纯听模式 · 已隐藏正文")
-                .font(.yy(size: 12))
-                .foregroundStyle(paper.ink2)
-            Button("显示原文") { model.listenOnly = false }
-                .buttonStyle(YYButtonStyle(kind: .raised, size: .small))
-                .padding(.top, 6)
+        let lines = model.focusListeningLines()
+
+        ZStack {
+            paper.bg.ignoresSafeArea()
+
+            // Subtle golden ink ripple when a sentence is marked via the morphing capsule.
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [paper.hl.opacity(paper.isDark ? 0.42 : 0.65), .clear],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: 150
+                    )
+                )
+                .frame(width: 280, height: 280)
+                .scaleEffect(rippleScale)
+                .opacity(rippleOpacity)
+                .allowsHitTesting(false)
+
+            // Default serene original composition (untouched!)
+            VStack(spacing: 14) {
+                Image(systemName: "headphones")
+                    .font(.yy(size: 34, weight: .light))
+                    .foregroundStyle(paper.ink2)
+                Text(model.chapterTitle ?? model.detail?.summary.title ?? "")
+                    .font(YYUI.serif(17, .semibold))
+                    .foregroundStyle(paper.ink)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                Text("纯听模式 · 已隐藏正文")
+                    .font(.yy(size: 12))
+                    .foregroundStyle(paper.ink2)
+                Button("显示原文") { model.listenOnly = false }
+                    .buttonStyle(YYButtonStyle(kind: .raised, size: .small))
+                    .padding(.top, 6)
+            }
+            .opacity(showLyrics ? 0 : 1)
+            .scaleEffect(showLyrics && !YYMotion.reduce ? 0.965 : 1)
+            .blur(radius: showLyrics && !YYMotion.reduce ? 4 : 0)
+            .allowsHitTesting(!showLyrics)
+
+            // Tap-to-reveal depth-of-field 3-line literary lyrics
+            VStack(spacing: 18) {
+                if let ch = model.chapterTitle ?? model.detail?.summary.title, !ch.isEmpty {
+                    Text(ch)
+                        .font(.yy(size: 11))
+                        .tracking(1.4)
+                        .foregroundStyle(paper.ink2.opacity(0.65))
+                        .lineLimit(1)
+                }
+                if let prev = lines.prev {
+                    Text(prev)
+                        .font(YYUI.serif(14.5))
+                        .foregroundStyle(paper.ink2.opacity(0.38))
+                        .blur(radius: YYMotion.reduce ? 0 : 0.8)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                }
+                Text(lines.current ?? String(localized: "轻按下方播放开始听书"))
+                    .font(YYUI.serif(20, .medium))
+                    .foregroundStyle(paper.ink)
+                    .lineSpacing(7)
+                    .lineLimit(4)
+                    .multilineTextAlignment(.center)
+                    .contentTransition(.opacity)
+                    .animation(YYMotion.standard, value: lines.current)
+                if let next = lines.next {
+                    Text(next)
+                        .font(YYUI.serif(14.5))
+                        .foregroundStyle(paper.ink2.opacity(0.38))
+                        .blur(radius: YYMotion.reduce ? 0 : 0.8)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                }
+                Text("再点一次纸面归于留白")
+                    .font(.yy(size: 11))
+                    .foregroundStyle(paper.ink2.opacity(0.5))
+                    .padding(.top, 4)
+            }
+            .frame(maxWidth: 500)
+            .padding(.horizontal, 32)
+            .padding(.bottom, 48)
+            .opacity(showLyrics ? 1 : 0)
+            .scaleEffect(showLyrics || YYMotion.reduce ? 1 : 0.965)
+            .blur(radius: showLyrics || YYMotion.reduce ? 0 : 4)
+            .allowsHitTesting(showLyrics)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if model.capsuleMode != .idle {
+                model.dismissCapsuleMode()
+                return
+            }
+            withAnimation(YYMotion.reduce ? .easeOut(duration: 0.16) : .spring(duration: 0.34, bounce: 0)) {
+                showLyrics.toggle()
+            }
+        }
+        .onChange(of: model.listenRippleToken) { _, _ in
+            guard !YYMotion.reduce else { return }
+            rippleScale = 0.25
+            rippleOpacity = 0.7
+            withAnimation(.easeOut(duration: 0.76)) {
+                rippleScale = 2.4
+                rippleOpacity = 0
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(paper.bg)
         .environment(\.yyButtonOnPaper, paper.id == "sage")
     }
 }

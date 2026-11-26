@@ -156,6 +156,54 @@ public sealed class KokoroVoiceModel
         return GetAllSpeakers().FirstOrDefault(s => s.Id == id);
     }
 
+    /// <summary>
+    /// Extracts an L2-normalized 256-dim timbre vector directly from <c>voices.bin</c> (<c>[103, 510, 256]</c> f32)
+    /// so <c>casting.rs</c> maximizes acoustic separation between characters sharing scenes at zero extra cost.
+    /// </summary>
+    public float[] ExtractStyleEmbedding(uint sid)
+    {
+        if (sid >= 103) return [];
+        string path = Path.Combine(ModelDir, "voices.bin");
+        if (!File.Exists(path)) return [];
+        const int dim = 256;
+        const int bytesPerVec = dim * sizeof(float);
+        int[] buckets = [10, 20, 40, 80];
+        float[] acc = new float[dim];
+        byte[] buf = new byte[bytesPerVec];
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            foreach (int b in buckets)
+            {
+                long offset = ((long)sid * 510 + b) * bytesPerVec;
+                if (offset + bytesPerVec > fs.Length) return [];
+                fs.Seek(offset, SeekOrigin.Begin);
+                int read = 0;
+                while (read < bytesPerVec)
+                {
+                    int n = fs.Read(buf, read, bytesPerVec - read);
+                    if (n <= 0) return [];
+                    read += n;
+                }
+                for (int i = 0; i < dim; i++)
+                {
+                    acc[i] += System.Buffers.Binary.BinaryPrimitives.ReadSingleLittleEndian(buf.AsSpan(i * 4, 4));
+                }
+            }
+        }
+        catch
+        {
+            return [];
+        }
+
+        double sumSq = 0;
+        for (int i = 0; i < dim; i++) sumSq += (double)acc[i] * acc[i];
+        float norm = (float)Math.Sqrt(sumSq);
+        if (norm <= 1e-6f) return [];
+        for (int i = 0; i < dim; i++) acc[i] /= norm;
+        return acc;
+    }
+
     public void QueueSelection(string voiceId, string languageKey = "zh")
     {
         if (string.IsNullOrWhiteSpace(voiceId)) return;

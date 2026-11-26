@@ -284,6 +284,7 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
 
     public void ReloadVoicePrefs()
     {
+        DramaSynthService.InvalidateCast(_bookId);
         string vid = _library.Prefs.GetVoiceForLanguage(_detail.Summary.Language);
         _audio.SetVoice(vid);
         _audio.SetRate(_library.Prefs.SpeechRate);

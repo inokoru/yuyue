@@ -81,17 +81,60 @@ nonisolated enum KokoroModel {
         KokoroSpeaker(id: "kokoro.zf_006", voiceId: "zf_006", sid: 8, name: "茗烟", lang: "zh", gender: .f, narrator: false, summary: "轻快自然 · 适合随笔与故事"),
         KokoroSpeaker(id: "kokoro.zf_018", voiceId: "zf_018", sid: 12, name: "晚晴", lang: "zh", gender: .f, narrator: false, summary: "柔和细腻 · 适合夜读"),
         KokoroSpeaker(id: "kokoro.zf_028", voiceId: "zf_028", sid: 20, name: "素心", lang: "zh", gender: .f, narrator: false, summary: "干净利落 · 适合非虚构长文"),
+        KokoroSpeaker(id: "kokoro.zf_079", voiceId: "zf_079", sid: 46, name: "凌霜", lang: "zh", gender: .f, narrator: false, summary: "清冷干练 · 适合独立女主"),
+        KokoroSpeaker(id: "kokoro.zf_074", voiceId: "zf_074", sid: 41, name: "映月", lang: "zh", gender: .f, narrator: false, summary: "婉转清澈 · 适合古典与言情"),
+        KokoroSpeaker(id: "kokoro.zf_090", voiceId: "zf_090", sid: 53, name: "疏桐", lang: "zh", gender: .f, narrator: false, summary: "沉着知性 · 适合熟龄女角"),
+        KokoroSpeaker(id: "kokoro.zf_094", voiceId: "zf_094", sid: 56, name: "晴川", lang: "zh", gender: .f, narrator: false, summary: "明朗清脆 · 适合少女角色"),
+        KokoroSpeaker(id: "kokoro.zf_024", voiceId: "zf_024", sid: 17, name: "念安", lang: "zh", gender: .f, narrator: false, summary: "温婉平和 · 适合日常对话"),
+        KokoroSpeaker(id: "kokoro.zf_027", voiceId: "zf_027", sid: 19, name: "语微", lang: "zh", gender: .f, narrator: false, summary: "轻柔低语 · 适合细腻内心戏"),
+        KokoroSpeaker(id: "kokoro.zf_019", voiceId: "zf_019", sid: 13, name: "含烟", lang: "zh", gender: .f, narrator: false, summary: "灵动俏皮 · 适合活泼角色"),
+        KokoroSpeaker(id: "kokoro.zf_076", voiceId: "zf_076", sid: 43, name: "听兰", lang: "zh", gender: .f, narrator: false, summary: "雅致从容 · 适合长辈与配角"),
         KokoroSpeaker(id: "kokoro.zm_010", voiceId: "zm_010", sid: 59, name: "沉舟", lang: "zh", gender: .m, narrator: true, summary: "醇厚稳重 · 推荐中文男声"),
         KokoroSpeaker(id: "kokoro.zm_009", voiceId: "zm_009", sid: 58, name: "松风", lang: "zh", gender: .m, narrator: false, summary: "清朗平和 · 适合纪实与传记"),
         KokoroSpeaker(id: "kokoro.zm_012", voiceId: "zm_012", sid: 61, name: "远山", lang: "zh", gender: .m, narrator: false, summary: "低沉内敛 · 适合经典文学"),
         KokoroSpeaker(id: "kokoro.zm_025", voiceId: "zm_025", sid: 67, name: "怀瑾", lang: "zh", gender: .m, narrator: false, summary: "青年明快 · 适合科幻与通识"),
         KokoroSpeaker(id: "kokoro.zm_035", voiceId: "zm_035", sid: 73, name: "竹轩", lang: "zh", gender: .m, narrator: false, summary: "温厚从容 · 适合长篇慢听"),
         KokoroSpeaker(id: "kokoro.zm_052", voiceId: "zm_052", sid: 78, name: "景行", lang: "zh", gender: .m, narrator: false, summary: "清晰有力 · 适合论著与技术"),
+        KokoroSpeaker(id: "kokoro.zm_098", voiceId: "zm_098", sid: 101, name: "沧澜", lang: "zh", gender: .m, narrator: false, summary: "苍劲浑厚 · 适合长者与反派"),
+        KokoroSpeaker(id: "kokoro.zm_056", voiceId: "zm_056", sid: 82, name: "拂晓", lang: "zh", gender: .m, narrator: false, summary: "爽朗少年 · 适合年轻男角"),
+        KokoroSpeaker(id: "kokoro.zm_041", voiceId: "zm_041", sid: 75, name: "临渊", lang: "zh", gender: .m, narrator: false, summary: "冷静深沉 · 适合悬疑与谋士"),
+        KokoroSpeaker(id: "kokoro.zm_082", voiceId: "zm_082", sid: 95, name: "昭明", lang: "zh", gender: .m, narrator: false, summary: "端正大气 · 适合正派主角"),
+        KokoroSpeaker(id: "kokoro.zm_033", voiceId: "zm_033", sid: 71, name: "墨白", lang: "zh", gender: .m, narrator: false, summary: "温润书生 · 适合文人角色"),
+        KokoroSpeaker(id: "kokoro.zm_095", voiceId: "zm_095", sid: 98, name: "听涛", lang: "zh", gender: .m, narrator: false, summary: "豪迈粗犷 · 适合侠客配角"),
+        KokoroSpeaker(id: "kokoro.zm_080", voiceId: "zm_080", sid: 93, name: "敬之", lang: "zh", gender: .m, narrator: false, summary: "沉稳温和 · 适合中年男角"),
+        KokoroSpeaker(id: "kokoro.zm_096", voiceId: "zm_096", sid: 99, name: "扶摇", lang: "zh", gender: .m, narrator: false, summary: "轻快松弛 · 适合幽默角色"),
         KokoroSpeaker(id: "kokoro.af_maple", voiceId: "af_maple", sid: 0, name: "Maple", lang: "en", gender: .f, narrator: true, summary: "Warm American narrator · Default"),
         KokoroSpeaker(id: "kokoro.bf_vale", voiceId: "bf_vale", sid: 2, name: "Vale", lang: "en", gender: .f, narrator: true, summary: "Crisp British RP narrator"),
         KokoroSpeaker(id: "kokoro.af_sol", voiceId: "af_sol", sid: 1, name: "Sol", lang: "en", gender: .f, narrator: false, summary: "Bright conversational American"),
         KokoroSpeaker(id: "kokoro.zm_010.en", voiceId: "zm_010", sid: 59, name: "Arthur (Bilingual)", lang: "en", gender: .m, narrator: false, summary: "Calm bilingual male narrator"),
     ]
+
+    /// Extracts an L2-normalized 256-dim timbre vector directly from `voices.bin` (`[103, 510, 256]` f32)
+    /// so `casting.rs` maximizes acoustic separation between characters sharing scenes at zero extra cost.
+    static func styleEmbedding(sid: UInt32, dataDir: URL) -> [Float] {
+        guard sid < 103 else { return [] }
+        let url = folder(dataDir).appending(path: "voices.bin")
+        guard let fh = try? FileHandle(forReadingFrom: url) else { return [] }
+        defer { try? fh.close() }
+        let buckets: [UInt64] = [10, 20, 40, 80]
+        var acc = [Float](repeating: 0, count: 256)
+        let bytesPerVec = 256 * MemoryLayout<Float>.size
+        for b in buckets {
+            let offset = (UInt64(sid) * 510 + b) * UInt64(bytesPerVec)
+            guard (try? fh.seek(toOffset: offset)) != nil,
+                  let data = try? fh.read(upToCount: bytesPerVec),
+                  data.count == bytesPerVec else { return [] }
+            data.withUnsafeBytes { raw in
+                let ptr = raw.bindMemory(to: Float.self)
+                for i in 0 ..< 256 {
+                    acc[i] += Float(bitPattern: ptr[i].bitPattern.littleEndian)
+                }
+            }
+        }
+        let norm = sqrt(acc.reduce(Float(0)) { $0 + $1 * $1 })
+        guard norm > 1e-6 else { return [] }
+        return acc.map { $0 / norm }
+    }
 
     static var totalVoices: Int { fallbackSpeakers.count }
 
@@ -299,7 +342,10 @@ final class KokoroDownload {
     private func applyPendingVoices() {
         guard !pendingVoice.isEmpty else { return }
         for (bookKey, voiceID) in pendingVoice {
-            UserDefaults.standard.set(voiceID, forKey: bookKey)
+            let lang = bookKey.hasPrefix("player.voice.")
+                ? String(bookKey.dropFirst("player.voice.".count))
+                : bookKey
+            Player.saveVoicePreference(voiceID, for: lang)
         }
         pendingVoice.removeAll()
         UserDefaults.standard.removeObject(forKey: Self.pendingVoiceKey)
@@ -352,6 +398,7 @@ final class KokoroDownload {
                 guard let self, self.runID == currentRun else { return }
                 self.applyPendingVoices()
                 self.phase = .ready
+                DramaWork.tellCore(core)
                 NotificationCenter.default.post(name: KokoroModel.ready, object: nil)
             } catch is CancellationError {
                 if let self, self.runID == currentRun, self.phase != .ready { self.phase = .idle }

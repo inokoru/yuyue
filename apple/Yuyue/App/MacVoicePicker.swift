@@ -78,7 +78,9 @@ struct ListeningPage: View {
                     focus.addingProvider = nil
                     focus.addingSheet = true
                 }
+                .settingsAnchor(.listeningAddSource)
             }
+            .settingsAnchor(.listeningSources, card: true)
             SettingsNote(String(localized: "推荐下载「语阅离线语音（Kokoro）」跨端断网畅听，或直接使用免 Key 的「在线自然语音」。系统自带合成音机械感较重（不推荐），仅作断网兜底。"))
             SettingsHeading(String(localized: "语速"), note: String(localized: "读书窗口里调的也是这一个"))
             FlatCard {
@@ -94,6 +96,7 @@ struct ListeningPage: View {
                 .padding(.horizontal, 9)
                 .frame(height: 40)
             }
+            .settingsAnchor(.listeningRate, card: true)
             Spacer(minLength: 0)
         }
     }
@@ -433,7 +436,7 @@ enum VoiceBook: String, CaseIterable, Identifiable {
     }
 
     func choose(_ voice: any Voice) {
-        UserDefaults.standard.set(voice.id, forKey: key)
+        Player.saveVoicePreference(voice.id, for: rawValue)
     }
 
     /// Lines to try a voice on, for the “ at the start of the box.
@@ -753,6 +756,9 @@ struct VoiceSourcePage: View {
                                     .ring(YYColor.line, radius: 15)
                                 }
                                 .buttonStyle(.plain)
+                                #if os(macOS)
+                                .settingsAnchor(.listeningCloneVoice)
+                                #endif
                                 Spacer()
                             }
                             .padding(.horizontal, 10)

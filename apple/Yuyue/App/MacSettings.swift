@@ -30,6 +30,10 @@ struct MacSettings: View {
     }
 
     @State private var windowWidth: CGFloat = 1020
+    @State private var searchOpen = false
+    @State private var searchInitialQuery = ""
+    @State private var pendingReveal: SettingsReveal?
+    @State private var highlightedAnchor: SettingsAnchor?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -47,7 +51,7 @@ struct MacSettings: View {
                         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
                         .ignoresSafeArea(.container, edges: .top)
                 } else if page == .update {
-                    MacUpdateSettings()
+                    MacUpdateSettings(reveal: pendingReveal)
                         .buttonStyle(SettingsActionStyle())
                         .ignoresSafeArea(.container, edges: .top)
                         .id(page)
@@ -55,12 +59,22 @@ struct MacSettings: View {
                 } else {
                     SettingsPageHeader(page: page)
                     ZStack(alignment: .top) {
-                        ScrollView {
-                            content(page)
+                        ScrollViewReader { scrollProxy in
+                            ScrollView {
+                                content(page)
+                            }
+                            .scrollBounceBehavior(.basedOnSize)
+                            // The scroller keeps clear of the line by the right column.
+                            .padding(.trailing, 6)
+                            .task(id: pendingReveal?.id) {
+                                guard let reveal = pendingReveal, reveal.anchor.page == page else { return }
+                                try? await Task.sleep(for: .milliseconds(60))
+                                guard !Task.isCancelled else { return }
+                                withAnimation(YYMotion.standard) {
+                                    scrollProxy.scrollTo(reveal.anchor, anchor: .center)
+                                }
+                            }
                         }
-                        .scrollBounceBehavior(.basedOnSize)
-                        // The scroller keeps clear of the line by the right column.
-                        .padding(.trailing, 6)
                         // A new page starts at its top, and comes in a few points lower with a fade.
                         .id(page)
                         .transition(YYMotion.swap)
@@ -79,22 +93,35 @@ struct MacSettings: View {
             .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
             .background(YYColor.bg.ignoresSafeArea())
             if page.hasInspector {
-                SettingsInspector(page: page, library: library, windowWidth: windowWidth)
+                SettingsInspector(page: page, library: library, windowWidth: windowWidth, searchOpen: $searchOpen)
                     .ignoresSafeArea(.container, edges: .top)
                     .zIndex(1)
             }
         }
+        .environment(\.settingsHighlightedAnchor, highlightedAnchor)
         .onKeyPress(.upArrow) { stepPage(-1) }
         .onKeyPress(.downArrow) { stepPage(1) }
         // Nothing for the right column: the page takes the width, the corner stays where it was.
         .overlay(alignment: .topTrailing) {
             if !page.hasInspector {
-                SettingsCorner(compact: true)
+                SettingsCorner(compact: true, searchOpen: $searchOpen)
                     .padding(.trailing, 10)
                     .padding(.top, 13)
                     .ignoresSafeArea(.container, edges: .top)
             }
         }
+        .overlay {
+            if searchOpen {
+                SettingsSearchOverlay(initialQuery: searchInitialQuery) {
+                    closeSearch()
+                } jump: { item in
+                    jumpToSetting(item)
+                }
+                .transition(.opacity)
+                .zIndex(20)
+            }
+        }
+        .animation(searchOpen ? YYMotion.standard : YYMotion.exit, value: searchOpen)
         // The title bar is see-through over the three columns; no toolbar, no title in it.
         .yyHideWindowToolbarChrome()
         .frame(minWidth: 860, idealWidth: 1020, maxWidth: .infinity, minHeight: 540, idealHeight: height, maxHeight: .infinity)
@@ -110,8 +137,29 @@ struct MacSettings: View {
         .onAppear {
             SettingsLog.shared.library = library
             Task { _ = await LoginItem.refresh() }
+            #if DEBUG
+            if let q = UserDefaults.standard.string(forKey: "debugSettingsSearch") {
+                searchInitialQuery = q
+                searchOpen = true
+            }
+            #endif
         }
-        .background(SettingsUndoKey())
+        .task(id: pendingReveal?.id) {
+            guard let reveal = pendingReveal else { return }
+            try? await Task.sleep(for: .milliseconds(90))
+            guard !Task.isCancelled else { return }
+            withAnimation(YYMotion.standard) {
+                highlightedAnchor = reveal.anchor
+            }
+            try? await Task.sleep(for: .milliseconds(1600))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.45)) {
+                highlightedAnchor = nil
+            }
+        }
+        .background(SettingsWindowKeys {
+            openSearch()
+        })
         // Opened again in the new language: the old words swept away.
         .overlay(alignment: .top) {
             if let note = library.toast {
@@ -195,6 +243,7 @@ struct MacSettings: View {
     }
 
     private func stepPage(_ delta: Int) -> KeyPress.Result {
+        if searchOpen { return .ignored }
         if NSApp.keyWindow?.firstResponder is NSTextView { return .ignored }
         let all = SettingsPage.allCases
         guard let i = all.firstIndex(of: page) else { return .ignored }
@@ -205,6 +254,59 @@ struct MacSettings: View {
         t.disablesAnimations = true
         withTransaction(t) { page = next }
         return .handled
+    }
+
+    private func openSearch() {
+        searchInitialQuery = ""
+        withAnimation(YYMotion.standard) {
+            searchOpen = true
+        }
+    }
+
+    private func closeSearch() {
+        withAnimation(YYMotion.exit) {
+            searchOpen = false
+        }
+        searchInitialQuery = ""
+    }
+
+    private func jumpToSetting(_ item: SettingsSearchItem) {
+        closeSearch()
+        var targetAnchor = item.anchor
+
+        switch item.anchor {
+        case .listeningCloneVoice:
+            ListeningFocus.shared.open(.neural)
+        case .listeningSources, .listeningAddSource, .listeningRate:
+            ListeningFocus.shared.close()
+        case .syncICloud:
+            SyncFocus.shared.selected = .icloud
+        case .syncWebDAV:
+            SyncFocus.shared.selected = .webdav
+        case .syncGoogleDrive:
+            if GoogleAuth.clientID != nil { SyncFocus.shared.selected = .googleDrive }
+        case .notesObsidian:
+            NotesFocus.shared.target = .obsidian
+        case .notesNotion:
+            NotesFocus.shared.target = .notion
+        case .notesFlomo:
+            NotesFocus.shared.target = .flomo
+        case .notesXinzhi:
+            NotesFocus.shared.target = .xinzhi
+        case .readingPageTurnAnimation, .readingPageTurnSound:
+            let readerMode = (try? library.core.readerSettings().mode) ?? .paginated
+            if readerMode != .paginated {
+                targetAnchor = .readingLayoutMode
+            }
+        default:
+            break
+        }
+
+        if page != item.page {
+            page = item.page
+        }
+        highlightedAnchor = nil
+        pendingReveal = SettingsReveal(anchor: targetAnchor)
     }
 }
 
@@ -326,10 +428,13 @@ struct SettingsActionStyle: ButtonStyle {
     }
 }
 
-/// ⌘Z in 设置 takes back the last change in 最近改过, unless a text field is being typed in, where
-/// it undoes the typing as usual.
-private struct SettingsUndoKey: NSViewRepresentable {
+/// ⌘Z in 设置 takes back the last change in 最近改过 (unless a text field is being typed in);
+/// ⌘F and ⌘K open Settings Search inside this window instead of leaking to the background shelf.
+private struct SettingsWindowKeys: NSViewRepresentable {
+    var onSearch: () -> Void
+
     final class Host: NSView {
+        var onSearch: (() -> Void)?
         nonisolated(unsafe) private var monitor: Any?
 
         override func viewDidMoveToWindow() {
@@ -339,7 +444,17 @@ private struct SettingsUndoKey: NSViewRepresentable {
             guard window != nil else { return }
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-                      event.charactersIgnoringModifiers == "z" else { return event }
+                      let key = event.charactersIgnoringModifiers?.lowercased() else { return event }
+                if key == "f" || key == "k" {
+                    let handled = MainActor.assumeIsolated { () -> Bool in
+                        guard let window = self?.window, event.window === window,
+                              window.attachedSheet == nil else { return false }
+                        self?.onSearch?()
+                        return true
+                    }
+                    return handled ? nil : event
+                }
+                guard key == "z" else { return event }
                 let handled = MainActor.assumeIsolated { () -> Bool in
                     guard let window = self?.window, event.window === window,
                           !(window.firstResponder is NSText),
@@ -354,8 +469,15 @@ private struct SettingsUndoKey: NSViewRepresentable {
         deinit { monitor.map(NSEvent.removeMonitor) }
     }
 
-    func makeNSView(context: Context) -> Host { Host() }
-    func updateNSView(_ host: Host, context: Context) {}
+    func makeNSView(context: Context) -> Host {
+        let host = Host()
+        host.onSearch = onSearch
+        return host
+    }
+
+    func updateNSView(_ host: Host, context: Context) {
+        host.onSearch = onSearch
+    }
 }
 
 /// The title bar is drawn over the three columns, see-through, with no line under it and no title
@@ -751,13 +873,17 @@ private struct GeneralSettings: View {
                         }
                     }
                 )
+                .settingsAnchor(.generalLanguage)
                 SettingsRow(String(localized: "启动时继续上次阅读"), detail: String(localized: "关闭则进入书架")) {
                     SettingsSwitch(isOn: $reopenLast)
                 }
+                .settingsAnchor(.generalReopenLast)
                 LoginItemRow()
+                    .settingsAnchor(.generalLoginItem)
                 SettingsRow(String(localized: "朗读时防止系统休眠"), detail: String(localized: "合上屏幕仍会暂停朗读")) {
                     SettingsSwitch(isOn: $keepAwake)
                 }
+                .settingsAnchor(.generalKeepAwake)
             }
             SettingsHeading(String(localized: "导入"))
             SettingsCard {
@@ -765,6 +891,7 @@ private struct GeneralSettings: View {
                     Text(verbatim: "EPUB PDF MOBI AZW3 TXT").font(.yy(size: 11, design: .monospaced)).foregroundStyle(YYColor.t3)
                         .lineLimit(1).fixedSize()
                 }
+                .settingsAnchor(.generalImport)
             }
             Spacer(minLength: 0)
         }
@@ -857,6 +984,7 @@ struct AppearanceSettings: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
             }
+            .settingsAnchor(.appearanceMode, card: true)
             SettingsCard {
                 HStack(alignment: .center) {
                     VStack(alignment: .leading, spacing: 3) {
@@ -868,6 +996,7 @@ struct AppearanceSettings: View {
                 }
                 .padding(16)
             }
+            .settingsAnchor(.appearanceTint, card: true)
             SettingsCard {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .firstTextBaseline) {
@@ -887,6 +1016,7 @@ struct AppearanceSettings: View {
                 }
                 .padding(16)
             }
+            .settingsAnchor(.appearanceIcon, card: true)
             SettingsCard {
                 SettingsRow(String(localized: "书架封面大小"), detail: String(localized: "每行本数随窗口宽度自动排布")) {
                     HStack(spacing: 10) {
@@ -897,9 +1027,11 @@ struct AppearanceSettings: View {
                         RoundedRectangle(cornerRadius: 2).fill(YYColor.tint).frame(width: 11, height: 16)
                     }
                 }
+                .settingsAnchor(.appearanceCoverSize)
                 SettingsRow(String(localized: "封面下显示进度"), detail: String(localized: "关闭后仅显示书名")) {
                     SettingsSwitch(isOn: $showProgress)
                 }
+                .settingsAnchor(.appearanceShowProgress)
                 SettingsRow(String(localized: "书架样式"), stackWhenNarrow: true) {
                     YYSegments(
                         items: [(ShelfViewStyle.grid, String(localized: "封面")), (.spine, String(localized: "书脊"))],
@@ -908,15 +1040,18 @@ struct AppearanceSettings: View {
                     )
                     .frame(minWidth: 130).fixedSize()
                 }
+                .settingsAnchor(.appearanceShelfStyle)
                 SettingsRow(String(localized: "浅木层板"), detail: String(localized: "为书架每排加上浅木层板与柔和投影")) {
                     SettingsSwitch(isOn: $woodLedge)
                 }
+                .settingsAnchor(.appearanceWoodLedge)
             }
             if LiquidGlass.supported {
                 SettingsCard {
                     SettingsRow(String(localized: "液态玻璃效果"), detail: String(localized: "浮动工具栏与提示条使用系统液态玻璃，关闭则为毛玻璃")) {
                         SettingsSwitch(isOn: $liquid)
                     }
+                    .settingsAnchor(.appearanceLiquidGlass)
                 }
             }
             Spacer(minLength: 0)
@@ -1193,6 +1328,7 @@ private struct ReadingSettings: View {
                     }
                 }
                 .animation(YYMotion.layout, value: Papers.shared.list.map(\.id))
+                .settingsAnchor(.readingPaper)
                 // 字体: the built-in three, the faces picked before, and 更多字体 for the rest.
                 tiles(String(localized: "字体"), columns: 5) {
                     ForEach(FontShelf.builtIn + row, id: \.self) { id in
@@ -1202,6 +1338,7 @@ private struct ReadingSettings: View {
                     MoreFontsTile { fontBook = true }
                 }
                 .animation(YYMotion.layout, value: row)
+                .settingsAnchor(.readingFont)
                 #if DEBUG
                 // `-debugFontBook 1` opens 字样册.
                 .task { if UserDefaults.standard.bool(forKey: "debugFontBook") { try? await Task.sleep(for: .seconds(0.6)); fontBook = true } }
@@ -1222,11 +1359,13 @@ private struct ReadingSettings: View {
                         Text("\(Int(settings.fontSize))").monospacedDigit().foregroundStyle(YYColor.t2).frame(width: 22)
                     }
                 }
+                .settingsAnchor(.readingFontSize)
                 SettingsRow(String(localized: "行距"), stackWhenNarrow: true) {
                     YYSegments(items: [(Double?.some(1.6), String(localized: "紧")), (nil, String(localized: "适中")), (.some(2.2), String(localized: "松"))],
                                selection: Binding(get: { settings.lineHeight }, set: { v in change { $0.lineHeight = v } }), small: true)
                         .frame(minWidth: 160).fixedSize()
                 }
+                .settingsAnchor(.readingLineHeight)
             }
             SettingsCard {
                 SettingsRow(String(localized: "翻页方式"), stackWhenNarrow: true) {
@@ -1234,6 +1373,7 @@ private struct ReadingSettings: View {
                                selection: Binding(get: { settings.mode }, set: { v in change { $0.mode = v } }), small: true)
                         .frame(minWidth: 160).fixedSize()
                 }
+                .settingsAnchor(.readingLayoutMode)
                 if settings.mode == .paginated {
                     SettingsRow(String(localized: "翻页动画"), stackWhenNarrow: true) {
                         YYSegments(
@@ -1243,6 +1383,7 @@ private struct ReadingSettings: View {
                         )
                         .frame(minWidth: 180).fixedSize()
                     }
+                    .settingsAnchor(.readingPageTurnAnimation)
                     VStack(alignment: .leading, spacing: 10) {
                         SettingsRow(String(localized: "翻页音效"), detail: String(localized: "手动翻页时播放，朗读时自动静音")) {
                             SettingsSwitch(
@@ -1268,19 +1409,24 @@ private struct ReadingSettings: View {
                         }
                     }
                     .animation(YYMotion.standard, value: pageTurnSound)
+                    .settingsAnchor(.readingPageTurnSound)
                 }
                 SettingsRow(String(localized: "宽窗口下双栏显示"), detail: String(localized: "左右并排显示两页")) {
                     SettingsSwitch(isOn: $twoColumns)
                 }
+                .settingsAnchor(.readingTwoColumns)
                 SettingsRow(String(localized: "两端对齐")) {
                     SettingsSwitch(isOn: Binding(get: { settings.justify ?? true }, set: { v in change { $0.justify = v } }))
                 }
+                .settingsAnchor(.readingJustify)
                 SettingsRow(String(localized: "首行缩进两字")) {
                     SettingsSwitch(isOn: Binding(get: { settings.indent ?? true }, set: { v in change { $0.indent = v } }))
                 }
+                .settingsAnchor(.readingIndent)
                 SettingsRow(String(localized: "中文标点挤压"), detail: String(localized: "收紧连续标点的留白")) {
                     SettingsSwitch(isOn: Binding(get: { settings.compress }, set: { v in change { $0.compress = v } }))
                 }
+                .settingsAnchor(.readingCompressPunctuation)
             }
             SettingsHeading(String(localized: "沉浸阅读"))
             SettingsCard {
@@ -1288,17 +1434,24 @@ private struct ReadingSettings: View {
                     Text("⌃⌘F 或 Esc").font(.yy(size: 12)).foregroundStyle(YYColor.t2)
                         .lineLimit(1).fixedSize()
                 }
+                .settingsAnchor(.readingImmersiveShortcut)
                 SettingsRow(String(localized: "打开书籍时自动进入")) { SettingsSwitch(isOn: $immersiveAlways) }
+                    .settingsAnchor(.readingImmersiveAlways)
                 SettingsRow(String(localized: "底部保留进度细线")) { SettingsSwitch(isOn: $immersiveLine) }
+                    .settingsAnchor(.readingImmersiveLine)
                 SettingsRow(String(localized: "隐藏划线与想法"), detail: String(localized: "退出沉浸后恢复显示")) { SettingsSwitch(isOn: $immersiveMarks) }
+                    .settingsAnchor(.readingImmersiveMarks)
                 SettingsRow(String(localized: "隐藏书伴提示与难词注释")) { SettingsSwitch(isOn: $immersiveHints) }
+                    .settingsAnchor(.readingImmersiveHints)
                 SettingsRow(String(localized: "关闭翻页动画"), detail: String(localized: "直接切换整页，无滑动过渡")) { SettingsSwitch(isOn: $immersiveStill) }
+                    .settingsAnchor(.readingImmersiveStill)
                 SettingsRow(String(localized: "专注模式联动"), detail: String(localized: "在系统「阅读」专注模式中关联语阅")) {
                     Button("专注模式设置…") {
                         if let url = URL(string: "x-apple.systempreferences:com.apple.Focus-Settings.extension") { NSWorkspace.shared.open(url) }
                     }
                     .lineLimit(1).fixedSize()
                 }
+                .settingsAnchor(.readingFocusMode)
             }
             Spacer(minLength: 0)
         }
@@ -1465,12 +1618,14 @@ private struct DataSettings: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 11)
             }
+            .settingsAnchor(.dataSnapshots, card: true)
             SettingsCard {
                 SettingsRow(String(localized: "导出阅读记录"), detail: String(localized: "导出想读、在读、读完状态与完成日期（CSV），可导入 Goodreads 或 StoryGraph")) {
                     Button("导出…") { exporting = true }
                         .buttonStyle(YYButtonStyle(kind: .raised, size: .small))
                         .lineLimit(1).fixedSize()
                 }
+                .settingsAnchor(.dataReadingExport)
             }
             if !snapshots.saved.isEmpty {
                 SettingsHeading(String(localized: "历史快照"))
@@ -1558,6 +1713,7 @@ private struct StorageSettings: View {
                     if let usage { bar(usage) }
                 }
                 .padding(16)
+                .settingsAnchor(.storageOverview)
                 SettingsRow(String(localized: "最近删除 · \(usage?.deleted.count ?? 0) 本（\(Self.size(usage?.deletedBytes ?? 0))）"),
                             detail: String(localized: "保留 30 天以便恢复，到期自动清理")) {
                     Button("立即清空", role: .destructive) {
@@ -1570,6 +1726,7 @@ private struct StorageSettings: View {
                     .disabled((usage?.deleted.isEmpty ?? true) || cleaning)
                 }
                 .monospacedDigit()
+                .settingsAnchor(.storageDeleted)
                 if let usage, usage.voiceModelBytes > 0 {
                     SettingsRow(String(localized: "朗读模型与声音包"), detail: String(localized: "离线朗读模型、自带声音与音效包；移除后可在听书设置里重新下载")) {
                         HStack(spacing: 10) {
@@ -1632,6 +1789,7 @@ private struct StorageSettings: View {
                     }
                     .lineLimit(1).fixedSize()
                 }
+                .settingsAnchor(.storageCache)
             }
             if let usage, !usage.books.isEmpty {
                 SettingsHeading(String(localized: "各书占用空间"))

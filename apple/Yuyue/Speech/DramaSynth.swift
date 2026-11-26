@@ -105,7 +105,7 @@ import UIKit
         return enabled
     }
 
-    /// 旁白回退升级：当即时层与声音包就绪且用户未手选非系统声音时，优先使用该语言默认旁白声音卡。
+    /// 旁白回退升级：与普通朗读 `Player.voice(for:)` 保持一致（手选 > Kokoro > LiveVoice > 免 Key 在线 > 系统自带）。
     static func effectiveNarrator(for language: String, chosen: String?) -> String? {
         if let chosen, !chosen.isEmpty {
             return chosen
@@ -118,26 +118,39 @@ import UIKit
            let def = VoicePack.defaultNarrator(for: language) {
             return def.id
         }
+        if CloudVoice.Provider.free.isSetUp, CardVoice.supportsLanguage(language),
+           let free = CloudVoice.all().first(where: { $0.provider == .free && $0.speaks(language) }) {
+            return free.id
+        }
         return SystemVoice.best(for: language)?.id
     }
 
     /// The voices the core casts `language` with:
     /// - When Live voice cards are installed for zh/en: the 48 built-in cards + this book's
-    ///   designed character cards (`card.d.*`), never `SystemVoice` or cloned cards.
-    /// - Otherwise (e.g. Japanese or < 6 GB iPhone): `SystemVoice` fallback.
-    /// - Plus any debug `ActorVoice`s and paid `CloudVoice`s when narrator is cloud.
+    ///   designed character cards (`card.d.*`).
+    /// - When Kokoro lightweight offline voices are installed for zh/en: curated Mandarin/English
+    ///   Kokoro speakers (`kokoro.*`) whenever Live voice cards aren't installed or Kokoro is the narrator.
+    /// - Plus any debug `ActorVoice`s and `CloudVoice`s of the chosen cloud provider when narrator is cloud.
+    /// - Only when none of the above exist: `SystemVoice` fallback (never pollutes a cloud cast with system voices).
     static func voices(for language: String, narrator: String?, book: String? = nil) -> [VoiceInfo] {
         var out: [VoiceInfo] = []
         if LiveVoiceModel.isInstalled, CardVoice.supportsLanguage(language), let ctx = LiveVoiceModel.context {
             LiveVoiceModel.register(ctx.core, ctx.dataDir)
             let builtin = VoicePack.builtinCards(for: language)
             let designed = book.flatMap { try? ctx.core.cardsOfBook(bookId: $0) } ?? []
-            for card in builtin + designed {
+            let clonedNarrator: [VoiceCard] = if let n = narrator, n.hasPrefix("cloned."),
+                let card = ctx.core.cardFind(bookId: nil, id: n) {
+                [card]
+            } else {
+                []
+            }
+            for card in builtin + designed + clonedNarrator {
                 out.append(ctx.core.cardVoiceInfo(card: card, embedding: card.embedding, acts: true))
             }
         }
-        if out.isEmpty {
-            out += systemVoices(for: language)
+        if KokoroModel.isInstalled, CardVoice.supportsLanguage(language),
+           out.isEmpty || narrator?.hasPrefix("kokoro.") == true {
+            out += kokoroVoices(for: language)
         }
         out += actorVoices(language)
         if let n = narrator, n.hasPrefix("cloud.") {
@@ -156,6 +169,9 @@ import UIKit
                 }
                 return VoiceInfo(id: v.id, langs: [v.language ?? language], gender: gender, age: age, tags: [], embedding: [], acts: true, narratorOk: true, loudnessLufs: -20)
             }
+        }
+        if out.isEmpty {
+            out += systemVoices(for: language)
         }
         return out
     }
@@ -181,6 +197,31 @@ import UIKit
             default: .unknown
             }
             return VoiceInfo(id: v.id, langs: [language], gender: gender, age: age, tags: [], embedding: [], acts: true, narratorOk: true, loudnessLufs: -20)
+        }
+    }
+
+    nonisolated private static func kokoroVoices(for language: String) -> [VoiceInfo] {
+        let dataDir = LiveVoiceModel.context?.dataDir
+        return KokoroModel.builtinVoices(for: language).map { v in
+            let s = v.speaker
+            let age: CharacterAge = switch s.voiceId {
+            case "zm_025", "zm_056", "zm_033", "zm_096", "zf_006", "zf_094", "zf_019": .young
+            case "zm_010", "zm_012", "zm_035", "zm_041", "zm_080", "zm_095", "zf_004", "zf_079", "zf_090": .middle
+            case "zm_098", "zf_076": .old
+            default: .unknown
+            }
+            let emb = dataDir.map { KokoroModel.styleEmbedding(sid: s.sid, dataDir: $0) } ?? []
+            return VoiceInfo(
+                id: s.id,
+                langs: [s.lang],
+                gender: s.gender,
+                age: age,
+                tags: [],
+                embedding: emb,
+                acts: false,
+                narratorOk: s.narrator,
+                loudnessLufs: -20
+            )
         }
     }
 
@@ -542,11 +583,33 @@ import UIKit
         language: String,
         narratorFallback: String?
     ) async throws -> Speech? {
+        let resolvedNarrator = await MainActor.run {
+            Self.effectiveNarrator(for: language, chosen: narratorFallback)
+        }
+        let borrowed = core.dramaBorrowedFrom(bookId: book) != nil
+        let borrowedMatchesNarrator: Bool = {
+            guard borrowed else { return false }
+            guard let resolved = resolvedNarrator else { return true }
+            guard let ds = try? core.dramaSection(bookId: book, section: section),
+                  let asks = try? core.dramaLiveSentenceAsks(bookId: book, section: section, sentence: sentence) else {
+                return true
+            }
+            let narrStarts = Set(ds.segments.filter { $0.sentence == sentence && $0.kind == .narration }.map(\.start))
+            let narrAsks = asks.filter { narrStarts.contains($0.start) }
+            return narrAsks.isEmpty || narrAsks.allSatisfy { $0.voice == resolved }
+        }()
+        if !borrowedMatchesNarrator {
+            guard await LiveCastCache.shared.plan(core: core, dataDir: dir, book: book, language: language, narrator: resolvedNarrator) != nil else {
+                return nil
+            }
+        }
         if let mixed = await Self.sentence(core, dir, book: book, section: section, sentence: sentence) {
             return mixed
         }
-        guard let plan = await LiveCastCache.shared.plan(core: core, dataDir: dir, book: book, language: language, narrator: narratorFallback) else {
-            return nil
+        if borrowedMatchesNarrator {
+            guard await LiveCastCache.shared.plan(core: core, dataDir: dir, book: book, language: language, narrator: resolvedNarrator) != nil else {
+                return nil
+            }
         }
         SoundLibrary.register(core, dir)
         guard let asks = try? core.dramaLiveSentenceAsks(bookId: book, section: section, sentence: sentence), !asks.isEmpty else {
@@ -782,7 +845,7 @@ nonisolated final class LiveCastCache: Sendable {
 
     private init() {
         let center = NotificationCenter.default
-        for raw in ["yuyue.castChanged", "yuyue.dramaUpdated", "yuyue.dramaSettingsChanged", "yuyue.clonedVoicesChanged", "yuyue.liveVoiceReady"] {
+        for raw in ["yuyue.castChanged", "yuyue.dramaUpdated", "yuyue.dramaSettingsChanged", "yuyue.clonedVoicesChanged", "yuyue.liveVoiceReady", "yuyue.kokoroReady"] {
             center.addObserver(forName: Notification.Name(raw), object: nil, queue: nil) { note in
                 if let book = note.object as? String {
                     LiveCastCache.shared.invalidate(book: book)
@@ -816,18 +879,21 @@ nonisolated final class LiveCastCache: Sendable {
     }
 
     @concurrent func plan(core: YuyueCore, dataDir: URL, book: String, language: String, narrator: String?) async -> CastingPlan? {
-        if let existing = lock.withLock({ $0.plans[book] }) { return existing }
+        let resolvedNarrator = await MainActor.run {
+            DramaSynth.effectiveNarrator(for: language, chosen: narrator)
+        }
+        if let existing = lock.withLock({ $0.plans[book] }),
+           resolvedNarrator == nil || existing.narrator == resolvedNarrator {
+            return existing
+        }
         await DramaSynth.syncRoleVoices(core, book: book)
         let voices = await MainActor.run {
-            let resolved = DramaSynth.effectiveNarrator(for: language, chosen: narrator)
-            return DramaSynth.voices(for: language, narrator: resolved, book: book)
+            DramaSynth.voices(for: language, narrator: resolvedNarrator, book: book)
         }
         guard !voices.isEmpty else { return nil }
         await SpeakerPrint.printVoices(core, dataDir, voices: voices, language: language)
-        let resolvedNarrator = await MainActor.run {
-            DramaSynth.effectiveNarrator(for: language, chosen: narrator) ?? voices.first!.id
-        }
-        guard let made = try? core.dramaCastVoices(bookId: book, voices: voices, narrator: resolvedNarrator) else {
+        let finalNarrator = resolvedNarrator ?? voices.first!.id
+        guard let made = try? core.dramaCastVoices(bookId: book, voices: voices, narrator: finalNarrator) else {
             return nil
         }
         store(book: book, plan: made)

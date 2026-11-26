@@ -241,12 +241,22 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
     var pickedReadyVoiceId by remember { mutableStateOf<String?>(null) }
     var moreShown by remember { mutableStateOf(false) }
     var tocInitialTab by remember { mutableIntStateOf(0) }
+    var chromeActivity by remember { mutableIntStateOf(0) }
+
+    val chromeBusy = moreShown || model.listenShown || model.settingsShown || model.tocShown
+        || model.castShown || model.immersiveShown || model.rulesShown || model.txtShown
+        || model.infoShown || model.companionShown || readyVoicePickerShown
+        || model.searchShown || thought != null || translating != null || model.translatingSentence != null
 
     // 读书时通知不打扰, while 沉浸阅读 is on.
     LaunchedEffect(model.immersive) { if (ImmersivePrefs.quiet) DoNotDisturb.set(context, model.immersive) }
-    // 沉浸: called up by a tap, gone again by itself.
-    LaunchedEffect(model.immersive, model.chromeShown, moreShown) {
-        if (model.immersive && model.chromeShown) { kotlinx.coroutines.delay(4000); if (!model.listenShown && !model.settingsShown && !moreShown) model.chromeShown = false }
+    // Auto-hide summoned chrome after idle (4 s in Focus Reading, 5 s in normal reading)
+    // so the full top & bottom bars never stay stuck over the page text.
+    LaunchedEffect(model.chromeShown, chromeBusy, model.immersive, chromeActivity) {
+        if (model.chromeShown && !chromeBusy) {
+            kotlinx.coroutines.delay(if (model.immersive) 4000L else 5000L)
+            if (model.chromeShown && !chromeBusy) model.chromeShown = false
+        }
     }
     DisposableEffect(barOverride) {
         onDispose {
@@ -283,6 +293,7 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
                     pickedReadyVoiceId = readyId
                     readyVoicePickerShown = true
                 },
+                onChromeActivity = { chromeActivity++ },
                 close = close,
             )
             Cards(model, paper, thought = { thought = it }, translate = { translating = it })
@@ -435,6 +446,7 @@ private fun Chrome(
     openMore: () -> Unit,
     openToc: () -> Unit,
     openReadyVoicePicker: (String) -> Unit,
+    onChromeActivity: () -> Unit,
     close: () -> Unit,
 ) {
     // 跳过了片头: offered for 5 seconds.
@@ -490,7 +502,7 @@ private fun Chrome(
             val edge = Brush.verticalGradient(0f to paper.bg, 0.72f to paper.bg, 1f to paper.bg.copy(alpha = 0f))
             Box(Modifier.fillMaxWidth().background(edge).padding(bottom = 20.dp), contentAlignment = Alignment.TopCenter) {
                 Box(Modifier.windowInsetsPadding(WindowInsets.statusBars).padding(horizontal = 12.dp).padding(top = 4.dp).widthIn(max = 560.dp)) {
-                    if (model.searchShown) SearchField(model, paper, haze) else TopBar(model, paper, haze, openMore, close)
+                    if (model.searchShown) SearchField(model, paper, haze) else TopBar(model, paper, haze, openMore, onChromeActivity, close)
                 }
             }
         }
@@ -593,7 +605,7 @@ private fun Chrome(
                 enter = YYMotion.barIn(fromTop = false, reduce),
                 exit = YYMotion.barOut(toTop = false, reduce),
             ) {
-                if (model.searchShown) SearchCapsule(model, paper, haze) else Capsule(model, paper, haze, openToc)
+                if (model.searchShown) SearchCapsule(model, paper, haze) else Capsule(model, paper, haze, openToc, onChromeActivity)
             }
             AnimatedVisibility(
                 bottomMode == BottomBarMode.MiniListen,
@@ -633,7 +645,7 @@ private fun Chrome(
 }
 
 @Composable
-private fun TopBar(model: ReaderModel, paper: YYPaper, haze: HazeState, openMore: () -> Unit, close: () -> Unit) {
+private fun TopBar(model: ReaderModel, paper: YYPaper, haze: HazeState, openMore: () -> Unit, onChromeActivity: () -> Unit, close: () -> Unit) {
     val line = listOfNotNull(model.chapterTitle?.takeIf { it != model.detail?.summary?.title }, model.bookPage?.let { t("第 %lld 页", it) }).joinToString(" · ")
     ReaderTopBar(
         paper, haze,
@@ -642,7 +654,10 @@ private fun TopBar(model: ReaderModel, paper: YYPaper, haze: HazeState, openMore
         bookmarked = model.bookmarkHere != null,
         onClose = close,
         onSearch = { model.chromeShown = false; model.searchShown = true },
-        onBookmark = { model.toggleBookmark() },
+        onBookmark = {
+            onChromeActivity()
+            model.toggleBookmark()
+        },
         more = {
             Glyph(Icons.more, t("更多"), paper.ink, openMore)
         },
@@ -690,7 +705,7 @@ private fun Glyph(icon: ImageVector, label: String, tint: Color, onClick: () -> 
 
 /** 平时只有一条胶囊: 目录, where the reader is, ‹ 朗读 ›, Aa, and how far into the chapter. */
 @Composable
-private fun Capsule(model: ReaderModel, paper: YYPaper, haze: HazeState, openToc: () -> Unit) {
+private fun Capsule(model: ReaderModel, paper: YYPaper, haze: HazeState, openToc: () -> Unit, onChromeActivity: () -> Unit) {
     val alert = model.capsuleAlert
     val reading = model.player?.spot != null
     val n = model.sentenceCount
@@ -705,9 +720,23 @@ private fun Capsule(model: ReaderModel, paper: YYPaper, haze: HazeState, openToc
         sentenceStep = reading,
         onToc = openToc,
         onCenter = { if (alert != null) alert.action() else model.listenShown = true },
-        onPrevious = { model.step(false) },
-        onPlay = { model.togglePlay() },
-        onNext = { model.step(true) },
+        onPrevious = {
+            onChromeActivity()
+            model.step(false)
+        },
+        onPlay = {
+            val starting = !model.isPlaying
+            model.togglePlay()
+            if (starting) {
+                model.chromeShown = false
+            } else {
+                onChromeActivity()
+            }
+        },
+        onNext = {
+            onChromeActivity()
+            model.step(true)
+        },
         onTypeset = { model.settingsShown = true },
     )
 }
@@ -731,25 +760,76 @@ internal fun ReaderCapsuleBar(
     onPlay: () -> Unit,
     onTypeset: () -> Unit,
 ) {
+    val eink = EInk.on
+    val accentColor = if (eink) paper.ink else YY.tint.accent
+    val pillShape = RoundedCornerShape(16.dp)
+    val pillBg = when {
+        noteAccent -> if (eink) paper.bg else YY.tint.accentSoft
+        eink -> paper.bg
+        else -> paper.ink.copy(alpha = if (paper.isDark) 0.09f else 0.055f)
+    }
+    val pillBorder = when {
+        noteAccent -> if (eink) paper.ink else YY.tint.accent.copy(alpha = 0.32f)
+        eink -> paper.line
+        else -> paper.ink.copy(alpha = if (paper.isDark) 0.11f else 0.065f)
+    }
     Box(Modifier.fillMaxWidth().heightIn(min = 50.dp).glass(paper, haze)) {
         Row(Modifier.fillMaxWidth().heightIn(min = 50.dp).padding(horizontal = 5.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             Glyph(Icons.list, t("目录、书签和笔记"), paper.ink, onToc)
-            Column(Modifier.weight(1f).padding(start = 2.dp).clickable(enabled = playEnabled, onClick = onCenter)) {
-                Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = paper.ink, style = YY.tnum, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                Text(
-                    note,
-                    fontSize = 12.sp, fontWeight = if (noteAccent) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (noteAccent) YY.tint.accent else paper.ink2, style = YY.tnum, maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 40.dp)
+                    .clip(pillShape)
+                    .background(pillBg)
+                    .border(0.5.dp, pillBorder, pillShape)
+                    .pressable(scale = 0.96f, enabled = playEnabled, label = t("听书：声音、速度、睡眠定时"), onClick = onCenter)
+                    .padding(start = 9.dp, end = 7.dp, top = 3.dp, bottom = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            imageVector = when {
+                                noteAccent -> Icons.warning
+                                playing || sentenceStep -> Icons.waveform
+                                else -> Icons.headphones
+                            },
+                            contentDescription = null,
+                            tint = if (noteAccent || playing) accentColor else paper.ink2,
+                            modifier = Modifier.size(11.dp),
+                        )
+                        Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = paper.ink, style = YY.tnum, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    }
+                    Text(
+                        note,
+                        fontSize = 10.5.sp, fontWeight = if (noteAccent) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (noteAccent) accentColor else paper.ink2, style = YY.tnum, maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                }
+                Icon(
+                    imageVector = if (noteAccent) Icons.chevronRight else Icons.chevronUp,
+                    contentDescription = null,
+                    tint = if (noteAccent) accentColor else paper.ink2.copy(alpha = 0.85f),
+                    modifier = Modifier.size(11.dp),
                 )
             }
-            Glyph(Icons.chevronLeft, if (sentenceStep) t("上一句") else t("上一页"), paper.ink, onPrevious)
+            Box(Modifier.size(width = 32.dp, height = 44.dp).clip(CircleShape).pressable(label = if (sentenceStep) t("上一句") else t("上一页"), scale = 0.9f, onClick = onPrevious), contentAlignment = Alignment.Center) {
+                Icon(Icons.chevronLeft, if (sentenceStep) t("上一句") else t("上一页"), tint = paper.ink, modifier = Modifier.size(18.dp))
+            }
             // The play button takes the theme colour on every paper but e-ink (YYTint.play).
             Box(Modifier.size(40.dp).clip(CircleShape).background(LocalTint.current.play(paper)).pressable(label = if (playing) t("暂停") else t("朗读"), enabled = playEnabled, scale = 0.92f, onClick = onPlay), contentAlignment = Alignment.Center) {
                 androidx.compose.animation.Crossfade(playing, animationSpec = YYMotion.quick(), label = "play") { on -> Icon(if (on) Icons.pause else Icons.play, if (on) t("暂停") else t("朗读"), tint = paper.onMain, modifier = Modifier.size(20.dp)) }
             }
-            Glyph(Icons.chevronRight, if (sentenceStep) t("下一句") else t("下一页"), paper.ink, onNext)
-            Box(Modifier.size(width = 40.dp, height = 44.dp).clip(CircleShape).pressable(label = t("排版"), scale = 0.9f, onClick = onTypeset), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(width = 32.dp, height = 44.dp).clip(CircleShape).pressable(label = if (sentenceStep) t("下一句") else t("下一页"), scale = 0.9f, onClick = onNext), contentAlignment = Alignment.Center) {
+                Icon(Icons.chevronRight, if (sentenceStep) t("下一句") else t("下一页"), tint = paper.ink, modifier = Modifier.size(18.dp))
+            }
+            Box(Modifier.size(width = 36.dp, height = 44.dp).clip(CircleShape).pressable(label = t("排版"), scale = 0.9f, onClick = onTypeset), contentAlignment = Alignment.Center) {
                 Text("Aa", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = paper.ink)
             }
         }
@@ -881,6 +961,7 @@ private fun MiniListenPill(model: ReaderModel, paper: YYPaper, haze: HazeState, 
                         maxLines = 1,
                     )
                 }
+                Icon(Icons.chevronUp, null, tint = paper.ink2.copy(alpha = 0.75f), modifier = Modifier.size(10.dp))
             }
             Box(
                 Modifier.size(width = 28.dp, height = 34.dp).clip(CircleShape).pressable(label = t("上一句"), scale = 0.9f) { model.step(false) },

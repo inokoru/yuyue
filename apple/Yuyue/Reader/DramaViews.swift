@@ -331,8 +331,10 @@ struct DramaStatusBlock: View {
             if !loaded || (lines == 0 && book.state != .running) {
                 // Not EmptyView: a view that isn't there never runs its task.
                 Color.clear.frame(height: 0)
-            } else if unsureSoFar == 0, progress?.castReady == true, book.state != .running {
-                Text("读到这里的台词都认好了")
+            } else if progress?.castReady == true, book.state != .running {
+                Text(unsureSoFar == 0
+                     ? String(localized: "读到这里的台词都认好了")
+                     : String(localized: "角色已识别 · 未写明说话人的句子由旁白自然衔接"))
                     .font(YYUI.font(10.5)).foregroundStyle(YYColor.t3)
                     .padding(.horizontal, 4)
             } else {
@@ -467,14 +469,14 @@ struct DramaStatusBlock: View {
     private func subtitleText(progress p: DramaProgress?, missing: Int) -> String {
         if p?.castReady == true {
             return unsureSoFar > 0
-                ? String(localized: "截至当前共有 \(unsureSoFar) 句待确认")
+                ? String(localized: "未写明说话人的句子由旁白自然衔接")
                 : String(localized: "读到这里的台词都认好了")
         }
         if DramaWork.config == nil {
             return String(localized: "在「设置 › 书伴」中配置大模型后可自动补全")
         }
         return missing > 0
-            ? String(localized: "余 \(missing) 句未写明说话人")
+            ? String(localized: "其余 \(missing) 句将由旁白衔接，可按需用大模型补全")
             : String(localized: "本章台词已全部识别")
     }
 

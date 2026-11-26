@@ -107,8 +107,18 @@ val importTypes = arrayOf("*/*")
  *  panel that goes to another. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, openRemote: () -> Unit, openWatched: () -> Unit, openFeedback: () -> Unit = {}, openRecord: (String) -> Unit = {}) {
-    var place by remember { mutableStateOf<ShelfPlace>(ShelfPlace.Books) }
+fun ShelfScreen(
+    library: Library,
+    chrome: ShelfChrome,
+    openWifi: () -> Unit,
+    openRemote: () -> Unit,
+    openWatched: () -> Unit,
+    openFeedback: () -> Unit = {},
+    openRecord: (String) -> Unit = {},
+    fixedPlace: ShelfPlace? = null,
+) {
+    var chosenPlace by remember { mutableStateOf<ShelfPlace>(fixedPlace ?: ShelfPlace.Books) }
+    val place = fixedPlace ?: chosenPlace
     var asking by remember { mutableStateOf<app.yuyue.me.Confirm?>(null) }
     app.yuyue.me.ConfirmHost(asking) { asking = null }
     var sortKey by rememberPref("shelf.sort", "recent")
@@ -139,6 +149,41 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
         library.importUris(uris, collection, source = "file_picker")
     }
 
+    val bottomTabsRaw by rememberPref(app.yuyue.design.BottomNav.KEY, app.yuyue.design.BottomNav.DEFAULT_RAW)
+    val shelfHiddenRaw by rememberPref(app.yuyue.design.BottomNav.SHELF_HIDDEN_KEY, app.yuyue.design.BottomNav.DEFAULT_HIDDEN_SHELF_RAW)
+    val navConfig = remember(bottomTabsRaw, shelfHiddenRaw) { app.yuyue.design.BottomNav.config(bottomTabsRaw, shelfHiddenRaw) }
+    val foldedPlaces = remember(navConfig) {
+        listOf(ShelfPlace.Books) + app.yuyue.design.BottomNav.foldedInShelf(navConfig).mapNotNull {
+            when (it) {
+                app.yuyue.design.BottomTab.Progress -> ShelfPlace.Progress
+                app.yuyue.design.BottomTab.Podcasts -> ShelfPlace.Podcasts
+                app.yuyue.design.BottomTab.Audio -> ShelfPlace.Audio
+                app.yuyue.design.BottomTab.Notes -> ShelfPlace.Notes
+                else -> null
+            }
+        }
+    }
+    var notesMarkCount by remember { mutableStateOf(0) }
+    var notesBookCount by remember { mutableStateOf(0) }
+    LaunchedEffect(library.books, library.notesVersion, foldedPlaces) {
+        if (ShelfPlace.Notes !in foldedPlaces) return@LaunchedEffect
+        val (marks, books) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            var m = 0
+            var b = 0
+            for (book in library.books) {
+                if (!book.available) continue
+                val n = runCatching { library.core.marks(book.id).size }.getOrDefault(0)
+                if (n > 0) {
+                    m += n
+                    b += 1
+                }
+            }
+            m to b
+        }
+        notesMarkCount = marks
+        notesBookCount = books
+    }
+
     val all = library.shelfBooks
     fun info(p: ShelfPlace): PlaceInfo = when (p) {
         ShelfPlace.Books -> PlaceInfo(p, t("书"), PlaceIcons.books, t("%lld 本", all.size), listOf(t("%lld 本", all.size), t("在读 %lld", all.count { it.status == ReadingStatus.READING })))
@@ -163,30 +208,52 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
             val listening = audio.count { it.status == ReadingStatus.READING }
             PlaceInfo(p, t("有声"), PlaceIcons.audio, if (listening > 0) t("在听 %lld", listening) else t("%lld 本", audio.size), listOf(t("%lld 本", audio.size), t("在听 %lld", listening)))
         }
+        ShelfPlace.Notes -> {
+            PlaceInfo(p, t("笔记"), PlaceIcons.notes, t("%lld 条", notesMarkCount), listOf(t("%lld 条划线", notesMarkCount), t("%lld 本书", notesBookCount)))
+        }
         is ShelfPlace.Collection -> {
             val c = library.collections.firstOrNull { it.id == p.id }
             val n = c?.count?.toInt() ?: 0
             PlaceInfo(p, c?.name ?: t("合集"), c?.let { app.yuyue.library.CollectionIcon.of(it) } ?: Icons.collection, t("%lld 本", n), listOf(t("合集"), t("%lld 本", n)), c)
         }
     }
-    // A 合集 deleted elsewhere: back to 书.
-    if (place is ShelfPlace.Collection && library.collections.none { it.id == (place as ShelfPlace.Collection).id }) place = ShelfPlace.Books
+    val hasSwitcher = fixedPlace == null && (foldedPlaces.size > 1 || library.collections.isNotEmpty())
+    LaunchedEffect(hasSwitcher, fixedPlace) {
+        if (fixedPlace == null) {
+            chrome.hasSwitcher = hasSwitcher
+            if (!hasSwitcher) {
+                chrome.switching = false
+                panel = null
+            }
+        }
+    }
+    // A 合集 deleted elsewhere, or a shelf sub-place promoted/hidden in 底部导航: back to 书.
+    if (fixedPlace == null) {
+        val currentInvalid = when (val p = chosenPlace) {
+            is ShelfPlace.Collection -> library.collections.none { it.id == p.id }
+            else -> p !in foldedPlaces
+        }
+        if (currentInvalid) chosenPlace = ShelfPlace.Books
+    }
     val now = info(place)
-    // The first tab wears the place: 进度, 播客, 有声 or the 合集, with its mark.
-    LaunchedEffect(place, now.name, now.icon) {
-        chrome.place = place
-        chrome.name = if (place == ShelfPlace.Books) null else now.name
-        chrome.icon = if (place == ShelfPlace.Books) null else now.icon
+    // The 书架 tab wears its active place: 进度, 播客, 有声 or the 合集, with its mark.
+    if (fixedPlace == null) {
+        LaunchedEffect(place, now.name, now.icon) {
+            chrome.place = place
+            chrome.name = if (place == ShelfPlace.Books) null else now.name
+            chrome.icon = if (place == ShelfPlace.Books) null else now.icon
+        }
     }
     fun go(to: ShelfPlace) {
-        place = to
+        if (fixedPlace != null) return
+        chosenPlace = to
         scope.launch { grid.scrollToItem(0) }
     }
-    val kinds = ShelfPlace.kinds.map(::info)
+    val kinds = foldedPlaces.map(::info)
     val collections = library.collections.map { info(ShelfPlace.Collection(it.id)) }
 
     val shown = when (val p = place) {
-        ShelfPlace.Progress, ShelfPlace.Podcasts -> emptyList()
+        ShelfPlace.Progress, ShelfPlace.Podcasts, ShelfPlace.Notes -> emptyList()
         ShelfPlace.Audio -> sort.sorted(all.filter { it.format == BookFormat.AUDIO })
         is ShelfPlace.Collection -> sort.sorted(all.filter { p.id in it.collections })
         ShelfPlace.Books -> sort.sorted(all)
@@ -197,7 +264,18 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(YY.c.bg)) {
         val innerWidth = (maxWidth - 32.dp).coerceAtLeast(160.dp)
         val gridCols = ((innerWidth.value + 18f) / ((96f * coverSize / 100f) + 18f)).toInt().coerceAtLeast(1)
-        LazyVerticalGrid(
+        if (place == ShelfPlace.Notes) {
+            app.yuyue.notes.NotesScreen(
+                library = library,
+                titleContent = {
+                    PlaceTitle(
+                        now,
+                        Modifier.alpha(if (panel == PanelFrom.Title) 0f else 1f),
+                        interactive = hasSwitcher,
+                    ) { if (hasSwitcher) panel = PanelFrom.Title }
+                },
+            )
+        } else LazyVerticalGrid(
             columns = GridCells.Adaptive((96 * coverSize / 100f).dp),
             state = grid,
             modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars),
@@ -212,9 +290,15 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
                         onDone = { selecting = false; selected = emptySet() },
                         onToggleAll = { selected = if (selected.size == shown.size) emptySet() else shown.map { it.id }.toSet() },
                     )
+                } else if (fixedPlace != null) {
+                    PageTitle(now.icon, now.name, Modifier.padding(top = 14.dp, end = 150.dp))
                 } else {
                     // Room at the right for the buttons, which stay at the top as the shelf scrolls.
-                    PlaceTitle(now, Modifier.padding(top = 14.dp, end = 150.dp).alpha(if (panel == PanelFrom.Title) 0f else 1f)) { panel = PanelFrom.Title }
+                    PlaceTitle(
+                        now,
+                        Modifier.padding(top = 14.dp, end = 150.dp).alpha(if (panel == PanelFrom.Title) 0f else 1f),
+                        interactive = hasSwitcher,
+                    ) { if (hasSwitcher) panel = PanelFrom.Title }
                 }
             }
             // 在读 — shown only when there is at least one book being read.
@@ -318,7 +402,7 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
         }
 
         val reduce = YYMotion.isReduceMotion()
-        if (!selecting) {
+        if (!selecting && place != ShelfPlace.Notes) {
             // Scrolled: the shelf fades out under the chip and the buttons.
             val fade by animateFloatAsState(if (scrolled) 1f else 0f, YYMotion.standard(), label = "fade")
             Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars.add(WindowInsets(top = 74.dp))).alpha(fade)
@@ -339,57 +423,67 @@ fun ShelfScreen(library: Library, chrome: ShelfChrome, openWifi: () -> Unit, ope
                     }
                 }
             }
+            if (hasSwitcher) {
+                AnimatedVisibility(
+                    scrolled, Modifier.windowInsetsPadding(WindowInsets.statusBars).padding(top = 11.5.dp, start = 16.dp),
+                    enter = if (reduce) fadeIn(YYMotion.quick()) else fadeIn(YYMotion.quick()) + scaleIn(YYMotion.quick(), initialScale = 0.92f, transformOrigin = TransformOrigin(0f, 0.5f)),
+                    exit = if (reduce) fadeOut(YYMotion.exit()) else fadeOut(YYMotion.exit()) + scaleOut(YYMotion.exit(), targetScale = 0.92f, transformOrigin = TransformOrigin(0f, 0.5f)),
+                ) {
+                    Box(Modifier.alpha(if (panel == PanelFrom.Chip) 0f else 1f)) { PlaceChip(now) { chrome.switching = false; panel = PanelFrom.Chip } }
+                }
+            }
+        }
+
+        if (hasSwitcher) {
+            // 书架 tapped again: the places stand up over the 书架 tab wherever it sits.
+            AnimatedVisibility(chrome.switching, enter = fadeIn(YYMotion.quick()), exit = fadeOut(YYMotion.exit())) {
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.06f)).clickable(remember { MutableInteractionSource() }, null) { chrome.switching = false })
+            }
+            val stackOriginX = when (chrome.stackAlignment) {
+                Alignment.BottomEnd -> 1f
+                Alignment.BottomCenter -> 0.5f
+                else -> 0f
+            }
             AnimatedVisibility(
-                scrolled, Modifier.windowInsetsPadding(WindowInsets.statusBars).padding(top = 11.5.dp, start = 16.dp),
-                enter = if (reduce) fadeIn(YYMotion.quick()) else fadeIn(YYMotion.quick()) + scaleIn(YYMotion.quick(), initialScale = 0.92f, transformOrigin = TransformOrigin(0f, 0.5f)),
-                exit = if (reduce) fadeOut(YYMotion.exit()) else fadeOut(YYMotion.exit()) + scaleOut(YYMotion.exit(), targetScale = 0.92f, transformOrigin = TransformOrigin(0f, 0.5f)),
+                chrome.switching,
+                Modifier.align(chrome.stackAlignment).padding(horizontal = 12.dp).padding(bottom = app.yuyue.LocalTabBarHeight.current + 10.dp),
+                enter = if (reduce) fadeIn(YYMotion.quick()) else fadeIn(YYMotion.quick()) + scaleIn(YYMotion.quick(), initialScale = 0.92f, transformOrigin = TransformOrigin(stackOriginX, 1f)),
+                exit = if (reduce) fadeOut(YYMotion.exit()) else fadeOut(YYMotion.exit()) + scaleOut(YYMotion.exit(), targetScale = 0.92f, transformOrigin = TransformOrigin(stackOriginX, 1f)),
             ) {
-                Box(Modifier.alpha(if (panel == PanelFrom.Chip) 0f else 1f)) { PlaceChip(now) { chrome.switching = false; panel = PanelFrom.Chip } }
+                PlaceStack(place, kinds, collections) { to -> chrome.switching = false; if (to != place) go(to) }
             }
-        }
 
-        // 书架 tapped again: the places stand up over the tab.
-        AnimatedVisibility(chrome.switching, enter = fadeIn(YYMotion.quick()), exit = fadeOut(YYMotion.exit())) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.06f)).clickable(remember { MutableInteractionSource() }, null) { chrome.switching = false })
-        }
-        AnimatedVisibility(
-            chrome.switching, Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = app.yuyue.LocalTabBarHeight.current + 10.dp),
-            enter = if (reduce) fadeIn(YYMotion.quick()) else fadeIn(YYMotion.quick()) + scaleIn(YYMotion.quick(), initialScale = 0.92f, transformOrigin = TransformOrigin(0f, 1f)),
-            exit = if (reduce) fadeOut(YYMotion.exit()) else fadeOut(YYMotion.exit()) + scaleOut(YYMotion.exit(), targetScale = 0.92f, transformOrigin = TransformOrigin(0f, 1f)),
-        ) {
-            PlaceStack(place, kinds, collections) { to -> chrome.switching = false; if (to != place) go(to) }
-        }
-
-        // The panel grows out of the title (or the chip), its head where the title was.
-        if (panel != null) {
-            Box(Modifier.fillMaxSize().clickable(remember { MutableInteractionSource() }, null) { panel = null })
-        }
-        val from = panel
-        AnimatedVisibility(
-            from != null, Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            enter = if (reduce) fadeIn(YYMotion.quick()) else fadeIn(YYMotion.quick()) + scaleIn(YYMotion.quick(), initialScale = 0.92f, transformOrigin = TransformOrigin(0.12f, 0.06f)),
-            exit = if (reduce) fadeOut(YYMotion.exit()) else fadeOut(YYMotion.exit()) + scaleOut(YYMotion.exit(), targetScale = 0.92f, transformOrigin = TransformOrigin(0.12f, 0.06f)),
-        ) {
-            // Under the buttons at the top right, never over them.
-            val top = with(density) { WindowInsets.statusBars.getTop(this).toDp() } + 58.dp
-            Box(Modifier.padding(top = top)) {
-                PlacePanel(
-                    now, kinds, collections,
-                    go = { to -> panel = null; if (to != place) go(to) },
-                    newCollection = { panel = null; naming = true },
-                    rename = { panel = null; renaming = it },
-                    icon = { panel = null; iconFor = it },
-                    delete = { c ->
-                        panel = null
-                        asking = app.yuyue.me.Confirm(t("删除合集“%@”？", c.name), t("这个合集删掉，里面的书还在书架上。"), t("删除")) {
-                            if (place == ShelfPlace.Collection(c.id)) go(ShelfPlace.Books)
-                            library.deleteCollection(c)
-                        }
-                    },
-                )
+            // The panel grows out of the title (or the chip), its head where the title was.
+            if (panel != null) {
+                Box(Modifier.fillMaxSize().clickable(remember { MutableInteractionSource() }, null) { panel = null })
             }
+            val from = panel
+            AnimatedVisibility(
+                from != null, Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                enter = if (reduce) fadeIn(YYMotion.quick()) else fadeIn(YYMotion.quick()) + scaleIn(YYMotion.quick(), initialScale = 0.92f, transformOrigin = TransformOrigin(0.12f, 0.06f)),
+                exit = if (reduce) fadeOut(YYMotion.exit()) else fadeOut(YYMotion.exit()) + scaleOut(YYMotion.exit(), targetScale = 0.92f, transformOrigin = TransformOrigin(0.12f, 0.06f)),
+            ) {
+                // Under the buttons at the top right, never over them.
+                val top = with(density) { WindowInsets.statusBars.getTop(this).toDp() } + 58.dp
+                Box(Modifier.padding(top = top)) {
+                    PlacePanel(
+                        now, kinds, collections,
+                        go = { to -> panel = null; if (to != place) go(to) },
+                        newCollection = { panel = null; naming = true },
+                        rename = { panel = null; renaming = it },
+                        icon = { panel = null; iconFor = it },
+                        delete = { c ->
+                            panel = null
+                            asking = app.yuyue.me.Confirm(t("删除合集“%@”？", c.name), t("这个合集删掉，里面的书还在书架上。"), t("删除")) {
+                                if (place == ShelfPlace.Collection(c.id)) go(ShelfPlace.Books)
+                                library.deleteCollection(c)
+                            }
+                        },
+                    )
+                }
+            }
+            BackHandler(enabled = panel != null || chrome.switching) { panel = null; chrome.switching = false }
         }
-        BackHandler(enabled = panel != null || chrome.switching) { panel = null; chrome.switching = false }
 
         Column(Modifier.align(Alignment.BottomCenter).padding(bottom = app.yuyue.LocalTabBarHeight.current).padding(horizontal = 8.dp, vertical = 8.dp)) {
             AnimatedVisibility(selecting, enter = YYMotion.barIn(false, YYMotion.isReduceMotion()), exit = YYMotion.barOut(false, YYMotion.isReduceMotion())) {

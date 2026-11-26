@@ -83,6 +83,11 @@ import YuyueCore
             ttsOn = DramaSynth.shared.on
             canDesign = false
             sameEachTime = false
+        } else if KokoroModel.isInstalled {
+            engine = KokoroModel.engine
+            ttsOn = DramaSynth.shared.on
+            canDesign = false
+            sameEachTime = true
         } else {
             engine = "apple-system-voices-1"
             ttsOn = DramaSynth.shared.on

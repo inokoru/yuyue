@@ -36,29 +36,24 @@ test('setBubbles keeps every sentence and puts them back', async ({ page }) => {
   expect((await checkPaginated(page)).problems).toEqual([]);
   const align = await page.evaluate(() => {
     let maxDelta = 0;
-    let wrapped = 0;
     for (const q of Array.from(document.querySelectorAll('#yy-content .yy-bq'))) {
       const av = q.querySelector('.yy-bq-av') as HTMLElement;
       const bu = q.querySelector('.yy-bq-bu') as HTMLElement;
-      const nm = q.querySelector('.yy-bq-nm') as HTMLElement | null;
       const d = Math.abs(av.getClientRects()[0].top - bu.getClientRects()[0].top);
       if (d > maxDelta) maxDelta = d;
-      if (nm && nm.getClientRects()[0] && nm.getBoundingClientRect().height > 26 && nm.getClientRects().length === 1) wrapped++;
     }
     const avEl = document.querySelector('#yy-content .yy-bq-av') as HTMLElement;
     const avBefore = getComputedStyle(avEl, '::before');
     const avHitH = avEl.getBoundingClientRect().height - parseFloat(avBefore.top) - parseFloat(avBefore.bottom);
-    const chEl = document.querySelector('#yy-content .yy-bq-ch') as HTMLElement;
-    const chBefore = getComputedStyle(chEl, '::before');
-    const chHitH = chEl.getBoundingClientRect().height - parseFloat(chBefore.top) - parseFloat(chBefore.bottom);
-    const moreTag = document.querySelector('#yy-content .yy-bq-ch-more')?.tagName;
-    return { maxDelta, wrapped, avHitH, chHitH, moreTag };
+    const unkCount = document.querySelectorAll('#yy-content .yy-bq-unk').length;
+    const choiceCount = document.querySelectorAll('#yy-content .yy-bq-ch').length;
+    return { maxDelta, avHitH, unkCount, choiceCount };
   });
   expect(align.maxDelta).toBeLessThanOrEqual(0.5);
-  expect(align.wrapped).toBeGreaterThan(0);
   expect(align.avHitH).toBeGreaterThanOrEqual(44);
-  expect(align.chHitH).toBeGreaterThanOrEqual(44);
-  expect(align.moreTag).toBe('BUTTON');
+  // Unattributed quotes must stay as clean prose, never `? 谁说的？` bubbles or choice buttons.
+  expect(align.unkCount).toBe(0);
+  expect(align.choiceCount).toBe(0);
   await page.screenshot({ path: `${SCREENS}/bubbles.png` });
   await page.evaluate(() => (window as any).yy.scrollToSentence(40, false));
   await page.screenshot({ path: `${SCREENS}/bubbles-40.png` });
@@ -74,9 +69,11 @@ test('setBubbles updates in-place when called repeatedly (speaker reassign + rig
   const initialCount = await page.locator('.yy-bq').count();
   expect(initialCount).toBeGreaterThan(10);
 
-  // Reassign the first line to a custom speaker on the right, and flip every other line's `right`.
+  // Reassign the first attributed line to a custom speaker on the right, and flip every other line's `right`.
+  const firstKnownIdx = lines.findIndex((l) => !!l.who);
+  expect(firstKnownIdx).toBeGreaterThanOrEqual(0);
   const updated = lines.map((l, idx) =>
-    idx === 0
+    idx === firstKnownIdx
       ? { ...l, who: '新說話人', avatar: '新', color: '#3E8F62', right: true, choices: undefined }
       : { ...l, right: !l.right && !!l.who },
   );
@@ -86,7 +83,7 @@ test('setBubbles updates in-place when called repeatedly (speaker reassign + rig
   expect(await page.locator('.yy-bq').count()).toBe(initialCount);
   expect(await page.evaluate(texts)).toEqual(before);
   expect((await checkPaginated(page)).problems).toEqual([]);
-  const firstBubble = page.locator('#yy-content .yy-bq[data-yy-line="0"]');
+  const firstBubble = page.locator(`#yy-content .yy-bq[data-yy-line="${firstKnownIdx}"]`);
   await expect(firstBubble).toHaveClass(/yy-bq-r/);
   await expect(firstBubble.locator('.yy-bq-av')).toHaveText('新');
   await expect(firstBubble.locator('.yy-bq-nm')).toContainText('新說話人');
@@ -115,14 +112,15 @@ test('scrolled mode with bubbles tracks progress and preserves position across s
   const yBefore = await page.evaluate(() => scrollY);
   expect(yBefore).toBeGreaterThan(1000);
 
-  // Refresh bubbles (reassign speaker + toggle right): position must stay near the current sentence,
-  // not snap back to sentence 0, and bubbles must stay rendered.
+  // Refresh bubbles (assign a speaker + toggle right): position must stay near the current sentence,
+  // not snap back to sentence 0, and bubbles must stay rendered (newly attributed lines become bubbles).
+  const expectedAfter = count + (lines[5].who ? 0 : 1);
   const updated = lines.map((l, idx) =>
     idx === 5 ? { ...l, who: '甄士隱', avatar: '甄', right: true, choices: undefined } : { ...l, right: !l.right && !!l.who },
   );
   await clearMessages(page);
   await page.evaluate((ls) => (window as any).yy.setBubbles(ls), updated);
-  expect(await page.locator('.yy-bq').count()).toBe(count);
+  expect(await page.locator('.yy-bq').count()).toBe(expectedAfter);
 
   await page.waitForTimeout(200);
   const yAfter = await page.evaluate(() => scrollY);
@@ -205,22 +203,17 @@ test('dash (——) and script (老周：) dialogue lines render as bubbles and 
   expect(await page.evaluate(texts)).toEqual(before);
 });
 
-test('dark and kaminight papers preserve tinted bubbles, avatars, names, choices, and eink wireframe', async ({ page }) => {
+test('dark and kaminight papers preserve tinted bubbles, avatars, names, and eink wireframe', async ({ page }) => {
   await open(page, 'hlm/s/2.html', { mode: 'scrolled' });
   await page.evaluate((ls) => (window as any).yy.setBubbles(ls), lines);
 
   for (const paper of ['dark', 'kaminight'] as const) {
     await page.evaluate((p) => (window as any).yy.applySettings({ paper: p }), paper);
     const styles = await page.evaluate(() => {
-      const known = document.querySelector('#yy-content .yy-bq:not(.yy-bq-unk)') as HTMLElement;
-      const unk = document.querySelector('#yy-content .yy-bq.yy-bq-unk') as HTMLElement;
+      const known = document.querySelector('#yy-content .yy-bq') as HTMLElement;
       const bu = known.querySelector('.yy-bq-bu') as HTMLElement;
       const av = known.querySelector('.yy-bq-av') as HTMLElement;
       const nmB = known.querySelector('.yy-bq-nm b') as HTMLElement;
-      const unkBu = unk.querySelector('.yy-bq-bu') as HTMLElement;
-      const unkAv = unk.querySelector('.yy-bq-av') as HTMLElement;
-      const ch = unk.querySelector('.yy-bq-ch') as HTMLElement;
-      const chMore = unk.querySelector('.yy-bq-ch-more') as HTMLElement;
       const rootInk = getComputedStyle(document.documentElement).getPropertyValue('--yy-p-ink').trim();
       const rootBg = getComputedStyle(document.documentElement).getPropertyValue('--yy-p-bg').trim();
       return {
@@ -231,21 +224,13 @@ test('dark and kaminight papers preserve tinted bubbles, avatars, names, choices
         avBg: getComputedStyle(av).backgroundColor,
         avColor: getComputedStyle(av).color,
         nmBColor: getComputedStyle(nmB).color,
-        unkBuBg: getComputedStyle(unkBu).backgroundColor,
-        unkBuShadow: getComputedStyle(unkBu).boxShadow,
-        unkAvBg: getComputedStyle(unkAv).backgroundColor,
-        chBg: getComputedStyle(ch).backgroundColor,
-        chMoreShadow: getComputedStyle(chMore).boxShadow,
+        unkCount: document.querySelectorAll('#yy-content .yy-bq-unk').length,
       };
     });
     expect(styles.buBg).not.toBe('rgba(0, 0, 0, 0)');
     expect(styles.buShadow).not.toBe('none');
     expect(styles.avBg).not.toBe('rgba(0, 0, 0, 0)');
-    expect(styles.unkAvBg).not.toBe('rgba(0, 0, 0, 0)');
-    expect(styles.unkBuBg).toBe('rgba(0, 0, 0, 0)');
-    expect(styles.unkBuShadow).not.toBe('none');
-    expect(styles.chBg).not.toBe('rgba(0, 0, 0, 0)');
-    expect(styles.chMoreShadow).not.toBe('none');
+    expect(styles.unkCount).toBe(0);
     // Speaker name & avatar text must be tinted rather than collapsing to transparent or pure black.
     expect(styles.avColor).not.toBe('rgba(0, 0, 0, 0)');
     expect(styles.nmBColor).not.toBe('rgba(0, 0, 0, 0)');
@@ -258,7 +243,7 @@ test('dark and kaminight papers preserve tinted bubbles, avatars, names, choices
     document.documentElement.setAttribute('data-yy-eink', '1');
   });
   const einkStyles = await page.evaluate(() => {
-    const known = document.querySelector('#yy-content .yy-bq:not(.yy-bq-unk)') as HTMLElement;
+    const known = document.querySelector('#yy-content .yy-bq') as HTMLElement;
     const bu = known.querySelector('.yy-bq-bu') as HTMLElement;
     const av = known.querySelector('.yy-bq-av') as HTMLElement;
     return {

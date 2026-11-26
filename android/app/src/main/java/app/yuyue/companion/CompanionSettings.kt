@@ -811,9 +811,9 @@ private fun Picker(back: (() -> Unit)?, close: () -> Unit, pick: (CompanionProvi
     for (group in CompanionProvider.Group.entries) {
         val list = matches.filter { it.group == group }
         if (list.isEmpty()) continue
-        Text(group.title, style = YY.font(10f, FontWeight.SemiBold), color = YY.c.t3, modifier = Modifier.padding(start = YY.s(8), top = YY.s(12), bottom = YY.s(2)))
-        Column(verticalArrangement = Arrangement.spacedBy(YY.s(2))) {
-            for (pair in list.chunked(2)) Row(horizontalArrangement = Arrangement.spacedBy(YY.s(2))) {
+        Text(group.title, style = YY.font(10f, FontWeight.SemiBold), color = YY.c.t3, modifier = Modifier.padding(start = YY.s(4), top = YY.s(12), bottom = YY.s(5)))
+        Column(verticalArrangement = Arrangement.spacedBy(YY.s(6))) {
+            for (pair in list.chunked(2)) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(YY.s(6))) {
                 for (p in pair) Tile(p, Modifier.weight(1f)) { pick(p) }
                 if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
@@ -839,8 +839,15 @@ private fun Picker(back: (() -> Unit)?, close: () -> Unit, pick: (CompanionProvi
 
 @Composable
 private fun Tile(p: CompanionProvider, modifier: Modifier, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(YY.s(10))
     Row(
-        modifier.height(YY.s(36)).clip(RoundedCornerShape(YY.s(8))).clickable(onClick = onClick).padding(horizontal = YY.s(8)),
+        modifier
+            .height(YY.s(38))
+            .clip(shape)
+            .background(YY.c.card)
+            .border(0.5.dp, if (YY.dark) Color.White.copy(alpha = 0.06f) else YY.c.line, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = YY.s(10)),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(YY.s(8)),
     ) {

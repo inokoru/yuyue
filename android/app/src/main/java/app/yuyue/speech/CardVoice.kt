@@ -3,9 +3,11 @@ package app.yuyue.speech
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import android.os.Process
 import app.yuyue.YuyueApp
 import app.yuyue.t
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -21,6 +23,7 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.nio.LongBuffer
 import java.security.MessageDigest
+import java.util.concurrent.Executors
 import kotlin.coroutines.coroutineContext
 
 /**
@@ -43,7 +46,7 @@ class CardVoice(
     override suspend fun render(text: String, language: String): Speech? =
         render(text, language, CardStyle.NEUTRAL)
 
-    suspend fun render(text: String, language: String, style: CardStyle): Speech? = withContext(Dispatchers.Default) {
+    suspend fun render(text: String, language: String, style: CardStyle): Speech? = withContext(Engine.dispatcher) {
         val plain = plainSpokenText(text)
         if (plain.none { it.isLetterOrDigit() }) return@withContext null
         val app = runCatching { YuyueApp.instance }.getOrNull() ?: return@withContext null
@@ -181,6 +184,13 @@ class CardVoice(
             }
         }
 
+        internal val dispatcher = Executors.newSingleThreadExecutor { r ->
+            Thread({
+                runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND) }
+                r.run()
+            }, "yuyue-cardvoice").apply { isDaemon = true }
+        }.asCoroutineDispatcher()
+
         private val inferLock = Mutex()
         private var loaded: Sessions? = null
         private val prompts = PromptLruCache<PromptKey, ZipVoicePrompt>(16)
@@ -201,7 +211,8 @@ class CardVoice(
             loaded = null
             return runCatching {
                 val env = OrtEnvironment.getEnvironment()
-                val threads = minOf(4, maxOf(2, Runtime.getRuntime().availableProcessors() - 1))
+                // Keep intra-op threads capped so UI and WebView rendering stay responsive on mobile/tablets.
+                val threads = minOf(2, maxOf(1, Runtime.getRuntime().availableProcessors() / 2))
                 fun makeOptions() = OrtSession.SessionOptions().apply {
                     setCPUArenaAllocator(false)
                     setMemoryPatternOptimization(false)
@@ -259,12 +270,13 @@ class CardVoice(
                 ((text.hashCode().toLong() and 0xFFFF_FFFFL) shl 13)).toULong() or 1uL
 
             var bestFloats: FloatArray? = null
-            for (attempt in 0..2) {
+            for (attempt in 0..1) {
                 coroutineContext.ensureActive()
                 val seed = baseSeed + attempt.toULong() * 0x9E37_79B9_7F4A_7C15uL
                 val floats = runCatching {
                     synthesizeClauses(core, sess, prompt, clauses, language, seed)
                 }.onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
                     android.util.Log.e("CardVoice", "synthesizeClauses failed (attempt=$attempt, card=${card.id})", it)
                 }.getOrNull()
                 if (floats != null && floats.isNotEmpty()) {
@@ -286,7 +298,7 @@ class CardVoice(
                     }
                 }
             }
-            // 若三次均未过严格时长/静音门槛但产出了有效人声，保留同一声卡结果，避免中途切回系统音。
+            // 若两次均未过严格时长/静音门槛但产出了有效人声，保留同一声卡结果，避免中途切回系统音。
             bestFloats?.let { floats ->
                 val shorts = ShortArray(floats.size) {
                     (floats[it].coerceIn(-1f, 1f) * 32767f).toInt().toShort()
@@ -317,7 +329,7 @@ class CardVoice(
             clipLang: String,
             text: String,
             language: String,
-        ): Speech? = withContext(Dispatchers.Default) {
+        ): Speech? = withContext(dispatcher) {
             inferLock.withLock {
                 val sess = sessions(core, dataDir) ?: return@withLock null
                 val prompt = runCatching { core.liveVoicePrompt(clipPath, clipText, clipLang) }.getOrNull() ?: return@withLock null
@@ -365,7 +377,7 @@ class CardVoice(
             return out
         }
 
-        private fun synthesizeOneClause(
+        private suspend fun synthesizeOneClause(
             core: YuyueCore,
             sess: Sessions,
             prompt: ZipVoicePrompt,
@@ -420,6 +432,7 @@ class CardVoice(
                 OnnxTensor.createTensor(env, FloatBuffer.wrap(scData), shape3d).use { scT ->
                     OnnxTensor.createTensor(env, FloatBuffer.wrap(floatArrayOf(3.0f)), longArrayOf()).use { gsT ->
                         for (step in 0 until (timesteps.size - 1)) {
+                            coroutineContext.ensureActive()
                             val tCur = timesteps[step]
                             val dt = timesteps[step + 1] - tCur
                             OnnxTensor.createTensor(env, FloatBuffer.wrap(floatArrayOf(tCur)), longArrayOf()).use { tT ->
@@ -446,6 +459,7 @@ class CardVoice(
                 }
             }
 
+            coroutineContext.ensureActive()
             // 3. Transpose generated suffix [kept, 100] * 10f -> [1, 100, kept] for Vocos 24 kHz
             val mels = FloatArray(100 * kept)
             val baseOff = promptFrames * 100

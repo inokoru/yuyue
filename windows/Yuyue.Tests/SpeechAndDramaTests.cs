@@ -82,6 +82,8 @@ public sealed class SpeechAndDramaTests : IDisposable
         Assert.Equal("cloned.abc123", DramaSynthService.NormalizeVoiceId("card:cloned.abc123"));
         Assert.Equal("card.b.02", DramaSynthService.NormalizeVoiceId("card.b.02"));
         Assert.Equal("cloud.openai.nova", DramaSynthService.NormalizeVoiceId("cloud.openai.nova"));
+        Assert.Equal("cloud.edge.zh-CN-XiaoxiaoNeural", DramaSynthService.NormalizeVoiceId("edge.zh-CN-XiaoxiaoNeural"));
+        Assert.Equal("cloud.edge.en-US-JennyNeural", DramaSynthService.NormalizeVoiceId("cloud.edge.en-US-JennyNeural"));
         Assert.Equal("sys.Microsoft Huihui", DramaSynthService.NormalizeVoiceId("sys.Microsoft Huihui"));
         Assert.Equal("auto", DramaSynthService.NormalizeVoiceId("auto"));
     }
@@ -125,6 +127,20 @@ public sealed class SpeechAndDramaTests : IDisposable
         var plan = core.DramaCastVoices(book.Id, voices, "card.b.02");
         Assert.NotNull(plan);
         Assert.Equal("card.b.02", plan.Narrator);
+
+        // Explicit narrator outside the local voice pool (Kokoro, cloud, cloned, system) must be preserved verbatim.
+        foreach (string externalNarrator in new[]
+        {
+            "kokoro.zf_001",
+            "cloud.edge.zh-CN-XiaoxiaoNeural",
+            "cloned.custom01",
+            "sys:Microsoft-Xiaoxiao",
+        })
+        {
+            var extPlan = core.DramaCastVoices(book.Id, voices, externalNarrator);
+            Assert.NotNull(extPlan);
+            Assert.Equal(externalNarrator, extPlan.Narrator);
+        }
     }
 
     private static float Rms(ReadOnlySpan<float> span)

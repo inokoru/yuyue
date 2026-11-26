@@ -81,10 +81,10 @@ fun UpdateScreen() {
                     UpdatePhase.CheckFailed -> FailedCheck()
                     UpdatePhase.Skipped -> Skipped()
                     UpdatePhase.Later -> Later()
-                    UpdatePhase.Release -> u.offer?.let { Release(it) { scope.launch { u.download(context) } } } ?: Status(checking = false)
+                    UpdatePhase.Release -> u.offer?.let { Release(it) { u.startDownload(context) } } ?: Status(checking = false)
                     is UpdatePhase.Downloading -> Progress(phase.done)
-                    is UpdatePhase.DownloadFailed -> FailedDownload(phase.why) { scope.launch { u.download(context) } }
-                    UpdatePhase.Ready -> Ready { scope.launch { u.install(context) } }
+                    is UpdatePhase.DownloadFailed -> FailedDownload(phase.why) { u.startDownload(context) }
+                    UpdatePhase.Ready -> Ready { u.startInstall(context) }
                     UpdatePhase.NeedPermission -> Permission({ u.openInstallSettings(context) }, { u.installLater() })
                     else -> Status(checking = false)
                 }
@@ -146,7 +146,6 @@ private fun Permission(openSettings: () -> Unit, later: () -> Unit) {
 private fun Status(checking: Boolean) {
     val u = Updates
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Mark(64)
         Text(t("语阅"), style = YY.font(17f, FontWeight.Bold), color = YY.c.t1, modifier = Modifier.padding(top = YY.s(8)))
@@ -155,7 +154,7 @@ private fun Status(checking: Boolean) {
         else if (u.lastWasCurrent && u.lastSuccess != null) Text(u.checkedLine(), style = YY.font(13f, FontWeight.SemiBold), color = YY.c.ok, modifier = Modifier.padding(top = YY.s(8)))
     }
     YYButton(if (checking) t("正在检查…") else t("检查更新"), ButtonKind.Main, wide = true, enabled = !checking, modifier = Modifier.padding(top = YY.s(14))) {
-        scope.launch { u.checkNow(context, byHand = true) }
+        u.startCheck(context, byHand = true)
     }
     Toggles()
     Text(t("更新检查仅获取版本信息，不上传任何本地数据。"), style = YY.font(11.5f), color = YY.c.t3, modifier = Modifier.padding(top = YY.s(10)))
@@ -165,14 +164,13 @@ private fun Status(checking: Boolean) {
 private fun FailedCheck() {
     val u = Updates
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Mark(64)
         Text(t("语阅"), style = YY.font(17f, FontWeight.Bold), color = YY.c.t1, modifier = Modifier.padding(top = YY.s(8)))
         Text(u.currentLabel, style = YY.font(12.5f), color = YY.c.t3)
         Text(t("无法检查更新，请检查网络连接后重试。"), style = YY.font(13f, FontWeight.SemiBold), color = YY.c.danger, textAlign = TextAlign.Center, modifier = Modifier.padding(top = YY.s(8)))
     }
-    YYButton(t("重试"), ButtonKind.Main, wide = true, modifier = Modifier.padding(top = YY.s(14))) { scope.launch { u.checkNow(context, byHand = true) } }
+    YYButton(t("重试"), ButtonKind.Main, wide = true, modifier = Modifier.padding(top = YY.s(14))) { u.startCheck(context, byHand = true) }
     Text(u.offlineFine(), style = YY.font(11.5f), color = YY.c.t3, textAlign = TextAlign.Center, modifier = Modifier.padding(top = YY.s(10)).fillMaxWidth())
     Toggles()
 }
@@ -219,7 +217,6 @@ private fun Later() {
 private fun Toggles() {
     val u = Updates
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     Column(
         Modifier.padding(top = YY.s(12)).clip(RoundedCornerShape(YY.s(16))).background(YY.c.card).border(0.5.dp, YY.c.line, RoundedCornerShape(YY.s(16))).padding(horizontal = YY.s(14)),
     ) {
@@ -228,7 +225,7 @@ private fun Toggles() {
                 Text(t("自动检查"), style = YY.font(15f, FontWeight.Medium), color = YY.c.t1)
                 Text(t("每天启动时自动检查；无新版本时不提醒"), style = YY.font(11.5f), color = YY.c.t3)
             }
-            Switch(u.autoOn, { on -> u.setAuto(context, on) { work -> scope.launch { work() } } }, colors = SwitchDefaults.colors(checkedTrackColor = YY.tint.fill, checkedThumbColor = Color.White))
+            Switch(u.autoOn, { on -> u.setAuto(context, on) }, colors = SwitchDefaults.colors(checkedTrackColor = YY.tint.fill, checkedThumbColor = Color.White))
         }
         HorizontalDivider(color = YY.c.line)
         var choosing by remember { mutableStateOf(false) }
@@ -247,7 +244,7 @@ private fun Toggles() {
                         DropdownMenuItem(
                             text = { Text(c.title, color = YY.c.t1, fontSize = 15.sp) },
                             trailingIcon = { if (c == u.channel) Icon(Icons.check, null, tint = YY.c.t1, modifier = Modifier.size(18.dp)) },
-                            onClick = { choosing = false; u.setChannel(context, c) { work -> scope.launch { work() } } },
+                            onClick = { choosing = false; u.setChannel(context, c) },
                         )
                     }
                 }
