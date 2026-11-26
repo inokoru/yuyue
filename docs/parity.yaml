@@ -364,7 +364,7 @@ features:
       windows:
         status: done
         tests:
-          - windows:Yuyue.Tests/UpstreamParityTests.cs::KokoroModel_Exposes16CuratedSpeakersAndCoreFfiWorks
+          - windows:Yuyue.Tests/UpstreamParityTests.cs::KokoroModel_Exposes32CuratedSpeakersAndCoreFfiWorks
           - windows:Yuyue.Tests/CompanionAndCloudVoiceTests.cs::CompanionAndCloudVoiceTests
 
   - id: listening.background_and_media_controls
