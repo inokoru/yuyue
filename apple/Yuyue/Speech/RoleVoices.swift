@@ -27,11 +27,29 @@ import YuyueCore
 
     func role(_ name: String) -> RoleVoice? { roles.first { $0.name == name }?.voice }
 
+    nonisolated enum RoleVoiceError: LocalizedError {
+        case voiceUnavailable(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .voiceUnavailable(let name):
+                String(localized: "角色「\(name)」设定的声音当前不可用，请在人物声音中重选")
+            }
+        }
+    }
+
     /// Resolves a character's voice (and rate/pitch tuning) if the reader configured anything for them.
-    func voiceForRole(_ name: String, language: String, narrator: () -> (any Voice)?) -> (any Voice)? {
+    func voiceForRole(_ name: String, language: String, narrator: () -> (any Voice)?) throws -> (any Voice)? {
         guard let role = role(name) else { return nil }
         var base: (any Voice)?
-        if let id = role.voice, let v = Voices.find(id, bookID: bookID), v.speaks(language), (v as? ClonedVoice)?.isReady ?? true { base = v }
+        if let id = role.voice, !id.isEmpty {
+            guard let v = Voices.find(id, bookID: bookID),
+                  v.speaks(language),
+                  (v as? ClonedVoice)?.isReady ?? true else {
+                throw RoleVoiceError.voiceUnavailable(name)
+            }
+            base = v
+        }
         if base == nil, abs(role.rate - 1) < 0.01, abs(role.pitch) < 0.01 { return nil }
         guard let voice = base ?? narrator() else { return nil }
         if abs(role.rate - 1) < 0.01, abs(role.pitch) < 0.01 { return voice }
@@ -43,14 +61,14 @@ import YuyueCore
         guard any else { return nil }
         if speakers[section] == nil { speakers[section] = (try? core.sectionRoles(bookId: bookID, section: section)) ?? [] }
         guard let list = speakers[section], list.indices.contains(sentence), let who = list[sentence] else { return nil }
-        return voiceForRole(who, language: language, narrator: narrator)
+        return try? voiceForRole(who, language: language, narrator: narrator)
     }
 
     /// Segment-level plan for manual role reading (used when 广播剧模式 is off): splits
     /// `"宝玉笑道：「你好。」"` into narrator + character speech so narration tags stay in the
     /// narrator's voice and two speakers in one sentence don't overwrite each other.
     /// Returns nil when the whole sentence uses a single narrator voice.
-    func segmentPlan(section: UInt32, sentence: Int, language: String, narrator: () -> (any Voice)?) -> [(voice: any Voice, text: String)]? {
+    func segmentPlan(section: UInt32, sentence: Int, language: String, narrator: () -> (any Voice)?) throws -> [(voice: any Voice, text: String)]? {
         guard any, let defaultVoice = narrator() else { return nil }
         guard let segs = try? core.roleSentenceSegments(bookId: bookID, section: section, sentence: UInt32(sentence)),
               !segs.isEmpty else {
@@ -59,7 +77,7 @@ import YuyueCore
         var hasCustom = false
         var out: [(voice: any Voice, text: String)] = []
         for seg in segs {
-            if let who = seg.role, let custom = voiceForRole(who, language: language, narrator: { defaultVoice }) {
+            if let who = seg.role, let custom = try voiceForRole(who, language: language, narrator: { defaultVoice }) {
                 hasCustom = true
                 out.append((custom, seg.text))
             } else {

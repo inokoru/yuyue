@@ -2151,14 +2151,13 @@ public sealed class AudioPlayer : IDisposable
                         : null;
                     wav = await _library.CloudVoices.SynthesizeWavAsync($"cloud.elevenlabs.{elId}", text, _language, cloudActing, ct);
                     if (wav is { Length: > 44 }) return wav;
-                    if (!_library.LiveVoice.IsModelInstalled)
-                        throw new InvalidOperationException("克隆云端语音未返回有效音频，已暂停朗读");
+                    throw new InvalidOperationException("克隆云端语音（ElevenLabs）未返回有效音频，已暂停朗读；可重试或在声音详情中关闭云端改用本机离线克隆");
                 }
                 catch (OperationCanceledException) { throw; }
+                catch (InvalidOperationException) { throw; }
                 catch (Exception ex)
                 {
-                    if (!_library.LiveVoice.IsModelInstalled)
-                        throw new InvalidOperationException($"克隆云端语音暂不可用（{ex.Message}），已暂停朗读", ex);
+                    throw new InvalidOperationException($"克隆云端语音（ElevenLabs）暂不可用（{ex.Message}），已暂停朗读；可重试或改用本机离线克隆", ex);
                 }
             }
 

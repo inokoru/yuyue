@@ -40,7 +40,14 @@ class BookRoles(private val core: YuyueCore, private val bookID: String) {
     suspend fun voiceForRole(name: String, language: String, narrator: suspend () -> BookVoice?): BookVoice? {
         val role = role(name) ?: return null
         val plain = abs(role.rate - 1) < 0.01 && abs(role.pitch) < 0.01
-        var base: BookVoice? = role.voice?.let { Voices.find(it, bookID) }?.takeIf { it.speaks(language) && (it as? ClonedVoice)?.isReady != false }
+        val configuredId = role.voice?.takeIf { it.isNotEmpty() }
+        var base: BookVoice? = if (configuredId != null) {
+            val found = Voices.find(configuredId, bookID)
+            if (found == null || !found.speaks(language) || (found as? ClonedVoice)?.isReady == false) {
+                throw IllegalStateException(t("角色「%@」设定的声音当前不可用，请在人物声音中重选", name))
+            }
+            found
+        } else null
         if (base == null && plain) return null
         if (base == null) base = narrator() ?: return null
         return if (plain) base else TunedVoice(base, role.rate.toFloat(), role.pitch.toFloat())

@@ -92,12 +92,16 @@ struct CloneVoiceView: View {
     }
 
     var body: some View {
+        let _ = LiveVoiceDownload.shared.phase
         CloneCardPage {
             VStack(alignment: .leading, spacing: YYUI.s(12)) {
                 header
                     #if os(iOS)
                     .padding(.top, YYUI.s(8))
                     #endif
+                if !LiveVoiceModel.isModelInstalled && !LiveVoiceModel.deviceUnsupported {
+                    LiveVoicePrepBanner(language: language, alwaysShowIdle: true, pill: true)
+                }
                 if decodedPCM == nil { consentCard }
                 if checkResult?.ok != true { promptCard }
                 Group {
@@ -150,6 +154,9 @@ struct CloneVoiceView: View {
             isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })
         )
         .onAppear {
+            if !LiveVoiceModel.isModelInstalled && !LiveVoiceModel.deviceUnsupported {
+                LiveVoiceDownload.shared.startIfWifi(for: language)
+            }
             if name.isEmpty {
                 name = initialName.isEmpty ? (forName ?? String(localized: "我的声音")) : initialName
             }
@@ -796,6 +803,7 @@ struct ClonedCardDetailView: View {
     ]
 
     var body: some View {
+        let _ = LiveVoiceDownload.shared.phase
         CloneCardPage {
             if let entry {
               VStack(alignment: .leading, spacing: YYUI.s(12)) {
@@ -803,6 +811,10 @@ struct ClonedCardDetailView: View {
                     #if os(iOS)
                     .padding(.top, YYUI.s(8))
                     #endif
+
+                if !LiveVoiceModel.isModelInstalled && !LiveVoiceModel.deviceUnsupported && !entry.useElevenLabs {
+                    LiveVoicePrepBanner(language: language, alwaysShowIdle: true, pill: true)
+                }
 
                 if let card = entry.card {
                     HStack {
@@ -930,6 +942,9 @@ struct ClonedCardDetailView: View {
     }
 
     private func reload() {
+        if !LiveVoiceModel.isModelInstalled && !LiveVoiceModel.deviceUnsupported {
+            LiveVoiceDownload.shared.startIfWifi(for: language)
+        }
         #if DEBUG
         if entryID == "debug", var card = LiveVoiceModel.context?.core.cardsBuiltin().first {
             card.name = String(localized: "我的声音")

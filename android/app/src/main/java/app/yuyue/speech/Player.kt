@@ -191,9 +191,8 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
 
     /** Where the first sentence starts when it isn't its own start (搜索 found a word in it). */
     private var startWord: Pair<Spot, Double>? = null
-    /** Shown when critical phone heat temporarily falls back to system voice for the rest of a chapter. */
+    /** Shown when critical device heat throttles background pre-synthesis (never auto-switches voice). */
     var thermalNotice by mutableStateOf<String?>(null)
-    private var thermalFallbackSection: Int? = null
     /** Remember where playback failed so 重试 / 换成系统声音 resumes from the same sentence. */
     private var failedSpot: Spot? = null
     private var chapterLayer: Pair<Int, uniffi.yuyue_core.DramaLayer>? = null
@@ -210,7 +209,6 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         failedSpot = null
         missingVoice = null
         thermalNotice = null
-        thermalFallbackSection = null
         pausedForFocus = false
         (sleep as? Sleep.Until)?.let { if (System.currentTimeMillis() >= it.at) sleep = Sleep.Off }
         reset()
@@ -221,10 +219,17 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         state = State.Loading
         // speak immediately with SystemVoice while preparing the better voices in the background.
         val langTag = lang(start.section)
-        if (savedVoiceId(langTag).isEmpty() && CardVoice.speaksLanguage(langTag)) {
+        val chosenId = savedVoiceId(langTag)
+        if (CardVoice.speaksLanguage(langTag)) {
             runCatching { app.yuyue.YuyueApp.instance.library }.getOrNull()?.let { lib ->
-                if (!KokoroModel.installed(lib.dataDir) && !KokoroModel.deviceUnsupported) {
+                if (chosenId.isEmpty() && !KokoroModel.installed(lib.dataDir) && !KokoroModel.deviceUnsupported) {
                     KokoroModel.onFirstListen(context, core, lib.dataDir)
+                }
+                if ((chosenId.startsWith("cloned.") || chosenId.startsWith("card.")) &&
+                    !LiveVoiceModel.canRun(lib.dataDir) &&
+                    !LiveVoiceModel.deviceUnsupported
+                ) {
+                    LiveVoiceModel.onFirstListen(context, core, lib.dataDir)
                 }
             }
         }
@@ -238,7 +243,6 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         failedSpot = null
         missingVoice = null
         thermalNotice = null
-        thermalFallbackSection = null
         reset()
         startWord = null
         val start = first(Spot(from.section.toInt(), from.sentence.toInt())) ?: return stop()
@@ -309,7 +313,6 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         fetching?.third?.cancel()
         fetching = null
         thermalNotice = null
-        thermalFallbackSection = null
         readyOfflineVoice = null
         voices.clear()
         voiceVersion++
@@ -540,11 +543,6 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                         roles?.reload()
                     }
                     if (enteringNextChapter) {
-                        // retry CardVoice on the new chapter after thermal fallback.
-                        if (thermalFallbackSection != null && thermalFallbackSection != s.section) {
-                            thermalFallbackSection = null
-                            thermalNotice = null
-                        }
                         if (lib != null && lib.dramaSynth.isDramaActive(detail.summary.id)) {
                             lib.recordingFetch.want(detail.summary.id, s.section.toUInt())
                         }
@@ -590,13 +588,13 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                 }
                 val language = lang(s.section)
                 val thermal = currentThermalStatus()
-                val forceSystemForHeat = thermal >= THERMAL_CRITICAL || thermalFallbackSection == s.section
                 if (thermal >= THERMAL_CRITICAL) {
-                    thermalFallbackSection = s.section
-                    if (thermalNotice == null) thermalNotice = t("手机有点热，这一章先用系统声音")
+                    if (thermalNotice == null) thermalNotice = t("设备有点热，已放慢后台预合成；可暂歇或手动换声音")
+                } else if (thermalNotice != null) {
+                    thermalNotice = null
                 }
                 // 听成一部剧: whole-chapter Studio vs Live layer switching with instant Live synthesis.
-                if (lib != null && !forceSystemForHeat && lib.dramaSynth.isDramaActive(detail.summary.id)) {
+                if (lib != null && lib.dramaSynth.isDramaActive(detail.summary.id)) {
                     val synth = lib.dramaSynth
                     val layer = chapterLayer?.takeIf { it.first == s.section }?.second ?: run {
                         val l = runCatching { core.dramaSectionLayer(detail.summary.id, s.section.toUInt(), DramaSynth.STUDIO_ENGINE) }
@@ -606,14 +604,25 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                     }
                     val chosenNarrator = savedVoiceId(language).ifEmpty { null }
                     lastUsingCardVoice = (layer == uniffi.yuyue_core.DramaLayer.LIVE) && LiveVoiceModel.canRun(lib.dataDir)
-                    val played: Speech? = when (layer) {
-                        uniffi.yuyue_core.DramaLayer.STUDIO -> {
-                            kotlinx.coroutines.withContext(Dispatchers.IO) { synth.sentence(detail.summary.id, s.section, s.sentence) }
-                                ?: synth.liveSentence(detail.summary.id, s.section, s.sentence, language, chosenNarrator)
+                    val played: Speech? = try {
+                        when (layer) {
+                            uniffi.yuyue_core.DramaLayer.STUDIO -> {
+                                val studio = kotlinx.coroutines.withContext(Dispatchers.IO) { synth.sentence(detail.summary.id, s.section, s.sentence) }
+                                if (studio == null && text(s).any { it.isLetterOrDigit() }) {
+                                    throw IllegalStateException(t("广播剧这一句预制音频缺失，请重试或换一个声音"))
+                                }
+                                studio
+                            }
+                            uniffi.yuyue_core.DramaLayer.LIVE -> {
+                                synth.liveSentence(detail.summary.id, s.section, s.sentence, language, chosenNarrator)
+                            }
                         }
-                        uniffi.yuyue_core.DramaLayer.LIVE -> {
-                            synth.liveSentence(detail.summary.id, s.section, s.sentence, language, chosenNarrator)
-                        }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        if (generation != g || renderToken != token) return@launch
+                        failed(t("朗读出错了（%@）", e.message ?: e.toString()))
+                        return@launch
                     }
                     if (generation != g || renderToken != token) return@launch
                     if (played != null) {
@@ -625,11 +634,20 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                         nextToRender = after(s)
                         schedule(Line(s, played))
                         continue
+                    } else if (!text(s).any { it.isLetterOrDigit() }) {
+                        nextToRender = after(s)
+                        continue
                     }
                 }
-                val segPlan = if (!forceSystemForHeat) {
-                    roles?.segmentPlan(s.section, s.sentence, language) { voice(language) }
-                } else null
+                val segPlan = try {
+                    roles?.segmentPlan(s.section, s.sentence, language) { resolveVoiceForPlayback(language) }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    if (generation != g || renderToken != token) return@launch
+                    failed(t("朗读出错了（%@）", e.message ?: e.toString()))
+                    return@launch
+                }
                 if (segPlan != null) {
                     lastUsingCardVoice = segPlan.any { (v, _) -> v is CardVoice || (v is TunedVoice && v.base is CardVoice) }
                     val speech = try {
@@ -655,7 +673,15 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                     }
                     continue
                 }
-                var voice = if (forceSystemForHeat) Voices.systemBest(language) ?: voice(language) else voice(language)
+                val voice = try {
+                    resolveVoiceForPlayback(language)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    if (generation != g || renderToken != token) return@launch
+                    failed(e.message ?: t("你之前选的声音当前不可用，请重新选择声音"))
+                    return@launch
+                }
                 if (voice == null) {
                     val name = java.util.Locale.forLanguageTag(language).getDisplayLanguage(java.util.Locale.getDefault()).ifEmpty { language }
                     failed(t("下载一个%@声音就能朗读这本书，系统会带你去它的下载页。", name))
@@ -663,7 +689,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                     return@launch
                 }
                 val isCard = voice is CardVoice || (voice is TunedVoice && voice.base is CardVoice)
-                lastUsingCardVoice = isCard && !forceSystemForHeat
+                lastUsingCardVoice = isCard
                 if (voice is CloudVoice && roles?.any != true) fetchAhead(voice, s, language)
                 val speech = try {
                     voice.render(text(s), language)
@@ -1065,6 +1091,28 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
             ?.let { Voices.find(it, detail.summary.id) }
             ?.takeIf { it.speaks(language) }
         val v = chosen ?: Voices.best(language)
+        voices[cacheKey] = v
+        return v
+    }
+
+    /**
+     * Resolves the voice for active playback: if the user explicitly saved a voice for `language`
+     * and it is now missing or does not support this chapter's language, fail explicitly rather
+     * than silently switching to another voice.
+     */
+    private suspend fun resolveVoiceForPlayback(language: String): BookVoice? {
+        val cacheKey = canonicalLanguage(language).ifEmpty { language }
+        if (voices.containsKey(cacheKey)) return voices[cacheKey]
+        val saved = savedVoiceId(language)
+        if (saved.isNotEmpty()) {
+            val chosen = Voices.find(saved, detail.summary.id)
+            if (chosen == null || !chosen.speaks(language)) {
+                throw IllegalStateException(t("你之前选的声音当前不可用或不支持这一章语言，请重新选择声音"))
+            }
+            voices[cacheKey] = chosen
+            return chosen
+        }
+        val v = Voices.best(language)
         voices[cacheKey] = v
         return v
     }

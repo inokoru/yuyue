@@ -154,6 +154,10 @@ struct VoiceCatalogSections: View {
 
             // 2. 我的（本机克隆卡 + 当前书生成的角色卡 + 克隆一个声音入口）
             YYLabel(String(localized: "我的"))
+            if !LiveVoiceModel.isModelInstalled && !LiveVoiceModel.deviceUnsupported && !catalog.clones.isEmpty {
+                LiveVoicePrepBanner(language: language, alwaysShowIdle: true, pill: true)
+                    .padding(.bottom, YYUI.s(6))
+            }
             YYGroup {
                 ForEach(catalog.clones) { entry in
                     clonedRow(entry)

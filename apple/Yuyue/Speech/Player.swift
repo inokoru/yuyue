@@ -175,8 +175,6 @@ final class Player {
     @ObservationIgnored private var failedSpot: Spot?
     /// 整章锁定的广播剧音质层（`Studio` vs `Live`），绝不在章内句间切换音质。
     @ObservationIgnored private var sectionLayers: [UInt32: DramaLayer] = [:]
-    /// 设备 `.critical` 过热时回退到系统声音的章节号。
-    @ObservationIgnored private var thermalFallbackSection: UInt32?
     @ObservationIgnored private var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
     @ObservationIgnored private var fetchingAhead: (section: UInt32, sentence: Int, voice: String, task: Task<Void, Never>)?
     /// Sliding prefetch window for paid cloud voices: keeps the next few sentences warm
@@ -222,7 +220,10 @@ final class Player {
             MainActor.assumeIsolated { self?.liveVoiceBecameReady() }
         })
         observers.append(center.addObserver(forName: ClonedVoices.changed, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.voices.removeAll() }
+            MainActor.assumeIsolated {
+                guard let self, self.state == .stopped else { return }
+                self.voices.removeAll()
+            }
         })
         observers.append(center.addObserver(forName: .yyAudioClaimed, object: nil, queue: .main) { [weak self] note in
             let isOther = (note.object as AnyObject?) !== self
@@ -302,8 +303,7 @@ final class Player {
                 LiveVoiceDownload.shared.startIfWifi(for: startLang)
             }
         }
-        if let hotSec = thermalFallbackSection, hotSec != start.section, thermalState != .critical {
-            thermalFallbackSection = nil
+        if thermalState != .critical {
             thermalNotice = nil
         }
         spot = start
@@ -383,7 +383,6 @@ final class Player {
         sectionLayers.removeAll()
         voices.removeAll()
         readyOfflineVoice = nil
-        thermalFallbackSection = nil
         thermalNotice = nil
         state = .stopped
         clearFadeIfNeeded()
@@ -517,7 +516,7 @@ final class Player {
         if buffered == 0 { return true }
         if buffered >= 40 { return false }
         if narrated { return buffered <= Self.ahead }
-        if thermalState == .critical || thermalFallbackSection == spot.section {
+        if thermalState == .critical {
             return buffered <= Self.ahead
         }
         let lang = language(of: spot.section)
@@ -537,11 +536,9 @@ final class Player {
 
     private func thermalChanged() {
         thermalState = ProcessInfo.processInfo.thermalState
-        if thermalState == .critical, state == .playing || state == .loading, let current = spot {
-            thermalFallbackSection = current.section
-            thermalNotice = String(localized: "手机有点热，这一章先用系统声音")
-        } else if thermalState != .critical, let hot = thermalFallbackSection, spot?.section != hot {
-            thermalFallbackSection = nil
+        if thermalState == .critical, state == .playing || state == .loading {
+            thermalNotice = String(localized: "设备有点热，已放慢后台预合成；可暂歇或手动换声音")
+        } else if thermalState != .critical {
             thermalNotice = nil
         }
     }
@@ -557,7 +554,8 @@ final class Player {
         guard !narrated else { return }
         let lang = language
         guard !hasSavedVoice(for: lang) else { return }
-        let current = voices[lang].flatMap { $0 }
+        let key = Self.cacheKey(for: lang)
+        let current = voices[key].flatMap { $0 } ?? voices[lang].flatMap { $0 }
         if current is KokoroVoice || current is CardVoice { return }
         let candidate: (any Voice)? = (KokoroModel.isInstalled ? KokoroModel.defaultNarrator(for: lang) : nil)
             ?? (LiveVoiceModel.isInstalled ? VoicePack.defaultNarrator(for: lang) : nil)
@@ -600,12 +598,12 @@ final class Player {
                 guard self.wantsMoreBuffered(at: spot) else { break }
                 let language = self.language(of: spot.section)
                 if self.thermalState == .critical {
-                    self.thermalFallbackSection = spot.section
                     if self.thermalNotice == nil {
-                        self.thermalNotice = String(localized: "手机有点热，这一章先用系统声音")
+                        self.thermalNotice = String(localized: "设备有点热，已放慢后台预合成；可暂歇或手动换声音")
                     }
+                } else if self.thermalNotice != nil {
+                    self.thermalNotice = nil
                 }
-                let forceSystemForHeat = (self.thermalFallbackSection == spot.section)
                 var speech: Speech?
                 if self.narrated, let recording = self.recording {
                     // Not in the recording, and not to be read by the voice: on to the next.
@@ -631,22 +629,31 @@ final class Player {
                     speech = await Self.narrate(recording, spot, from: word)
                 }
                 // 听成一部剧: whole-chapter Studio vs Live layer switching.
-                if speech == nil, !self.narrated, !forceSystemForHeat,
+                if speech == nil, !self.narrated,
                    DramaSynth.isDramaActive(self.core, self.detail.summary.id),
                    let dir = Audiobooks.shared?.dataDir {
                     if self.spot?.section == spot.section {
                         RecordingFetch.shared.readingDrama(bookID: self.detail.summary.id, section: spot.section, core: self.core)
                     }
                     let layer = self.dramaLayer(for: spot.section)
+                    let key = Self.cacheKey(for: language)
                     let chosenNarrator = UserDefaults.standard.string(forKey: Self.voiceKey(language))
-                    switch layer {
-                    case .studio:
-                        speech = await Self.play(self.core, dir, book: self.detail.summary.id, spot)
-                        if speech == nil {
-                            speech = await Self.playLive(self.core, dir, book: self.detail.summary.id, spot, language: language, narrator: chosenNarrator)
+                        ?? UserDefaults.standard.string(forKey: Self.voiceKey(key))
+                    let hasSpoken = self.text(at: spot).unicodeScalars.contains { CharacterSet.alphanumerics.contains($0) }
+                    do {
+                        switch layer {
+                        case .studio:
+                            speech = await Self.play(self.core, dir, book: self.detail.summary.id, spot)
+                            if speech == nil, hasSpoken {
+                                throw DramaSynth.PlaybackError.studioClipMissing
+                            }
+                        case .live:
+                            speech = try await Self.playLive(self.core, dir, book: self.detail.summary.id, spot, language: language, narrator: chosenNarrator)
                         }
-                    case .live:
-                        speech = await Self.playLive(self.core, dir, book: self.detail.summary.id, spot, language: language, narrator: chosenNarrator)
+                    } catch {
+                        if error is CancellationError || Task.isCancelled || self.generation != generation || self.renderToken != token { return }
+                        self.failed(String(localized: "朗读出错了（\(error.localizedDescription)）"))
+                        return
                     }
                     if speech != nil, !self.ttsTrackedForRun {
                         self.ttsTrackedForRun = true
@@ -657,12 +664,22 @@ final class Player {
                     }
                 }
                 if speech == nil {
-                    let customScriptVoice = forceSystemForHeat ? nil : self.script.voice?(spot.section, spot.sentence, language)
-                    let segPlan: [(voice: any Voice, text: String)]? = (!forceSystemForHeat && customScriptVoice == nil)
-                        ? self.script.roles?.segmentPlan(section: spot.section, sentence: spot.sentence, language: language) {
-                            self.voice(for: language, section: spot.section)
+                    let customScriptVoice = self.script.voice?(spot.section, spot.sentence, language)
+                    let segPlan: [(voice: any Voice, text: String)]?
+                    do {
+                        if customScriptVoice == nil, let roles = self.script.roles, roles.any {
+                            let playbackNarrator = try self.resolveVoiceForPlayback(for: language)
+                            segPlan = try roles.segmentPlan(section: spot.section, sentence: spot.sentence, language: language) {
+                                playbackNarrator
+                            }
+                        } else {
+                            segPlan = nil
                         }
-                        : nil
+                    } catch {
+                        if error is CancellationError || Task.isCancelled || self.generation != generation || self.renderToken != token { return }
+                        self.failed(String(localized: "朗读出错了（\(error.localizedDescription)）"))
+                        return
+                    }
                     if let segPlan {
                         do {
                             speech = try await BookRoles.renderSegments(segPlan, language: language)
@@ -680,10 +697,12 @@ final class Player {
                         }
                     } else {
                         let chosenVoice: (any Voice)?
-                        if forceSystemForHeat {
-                            chosenVoice = SystemVoice.best(for: language)
-                        } else {
-                            chosenVoice = customScriptVoice ?? self.voice(for: language, section: spot.section)
+                        do {
+                            chosenVoice = try customScriptVoice ?? self.resolveVoiceForPlayback(for: language)
+                        } catch {
+                            if error is CancellationError || Task.isCancelled || self.generation != generation || self.renderToken != token { return }
+                            self.failed(error.localizedDescription)
+                            return
                         }
                         guard let voice = chosenVoice else {
                             let name = Locale.current.localizedString(forLanguageCode: language) ?? language
@@ -750,8 +769,8 @@ final class Player {
         await DramaSynth.sentence(core, dir, book: book, section: spot.section, sentence: UInt32(spot.sentence))
     }
 
-    @concurrent nonisolated private static func playLive(_ core: YuyueCore, _ dir: URL, book: String, _ spot: Spot, language: String, narrator: String?) async -> Speech? {
-        await DramaSynth.liveSentence(core, dir, book: book, section: spot.section, sentence: UInt32(spot.sentence), language: language, narratorFallback: narrator)
+    @concurrent nonisolated private static func playLive(_ core: YuyueCore, _ dir: URL, book: String, _ spot: Spot, language: String, narrator: String?) async throws -> Speech? {
+        try await DramaSynth.liveSentence(core, dir, book: book, section: spot.section, sentence: UInt32(spot.sentence), language: language, narratorFallback: narrator)
     }
 
     @concurrent nonisolated private static func narrate(_ recording: Recording, _ spot: Spot, from: Double? = nil) async -> Speech? {
@@ -973,8 +992,7 @@ final class Player {
         if line.extra == nil, skippedHead != nil, spot != nil, spot != line.spot { skippedHead = nil }
         spot = line.spot
         if newSection {
-            if let hot = thermalFallbackSection, hot != line.spot.section, thermalState != .critical {
-                thermalFallbackSection = nil
+            if thermalState != .critical {
                 thermalNotice = nil
             }
             if !narrated, DramaSynth.isDramaActive(core, detail.summary.id) {
@@ -1109,9 +1127,10 @@ final class Player {
 
     /// Whether the user has explicitly saved a voice override for `language`.
     func hasSavedVoice(for language: String) -> Bool {
-        let canon = CardVoice.canonicalLanguage(language)
-        return UserDefaults.standard.string(forKey: Self.voiceKey(language)) != nil
-            || UserDefaults.standard.string(forKey: Self.voiceKey(canon)) != nil
+        let key = Self.cacheKey(for: language)
+        if let v = UserDefaults.standard.string(forKey: Self.voiceKey(language)), !v.isEmpty { return true }
+        if let v = UserDefaults.standard.string(forKey: Self.voiceKey(key)), !v.isEmpty { return true }
+        return false
     }
 
     /// The voice reading `language` now.
@@ -1119,22 +1138,47 @@ final class Player {
         voice(for: language, section: spot?.section)
     }
 
+    private static func cacheKey(for language: String) -> String {
+        let t = language.replacingOccurrences(of: "_", with: "-").trimmingCharacters(in: .whitespaces).lowercased()
+        if t == "yue" || t.hasPrefix("zh-hk") || t.hasPrefix("zh-mo") { return "yue" }
+        if t == "zh" || t.hasPrefix("zh-") || t == "cmn" || t.hasPrefix("cmn-") { return "zh" }
+        if t == "en" || t.hasPrefix("en-") { return "en" }
+        let base = t.split(separator: "-").first.map(String.init) ?? t
+        return base.isEmpty ? language : base
+    }
+
+    private enum SavedVoiceError: LocalizedError {
+        case unavailable
+
+        var errorDescription: String? {
+            String(localized: "你之前选的声音当前不可用或不支持这一章语言，请重新选择声音")
+        }
+    }
+
     /// Reads `language` with another voice from now on, starting the sentence again in it.
     func choose(_ voice: any Voice, for language: String) {
+        let key = Self.cacheKey(for: language)
         UserDefaults.standard.set(voice.id, forKey: Self.voiceKey(language))
+        if key != language {
+            UserDefaults.standard.set(voice.id, forKey: Self.voiceKey(key))
+        }
         readyOfflineVoice = nil
-        voices[language] = voice
+        voices[key] = voice
         restartHere()
     }
 
     /// The current voice failed: switch to a system voice on this device and continue from where it stopped.
     func useSystemVoice() {
         let lang = language
+        let key = Self.cacheKey(for: lang)
         let resumeAt = failedSpot ?? spot
         failure = nil
         if let sys = SystemVoice.best(for: lang) {
             UserDefaults.standard.set(sys.id, forKey: Self.voiceKey(lang))
-            voices[lang] = sys
+            if key != lang {
+                UserDefaults.standard.set(sys.id, forKey: Self.voiceKey(key))
+            }
+            voices[key] = sys
             if let resumeAt {
                 play(from: resumeAt.position)
             } else {
@@ -1161,30 +1205,45 @@ final class Player {
         Voices.preview(voice, text: text)
     }
 
-    private func voice(for language: String, section: UInt32? = nil) -> (any Voice)? {
-        if let known = voices[language] { return known }
-        let canon = CardVoice.canonicalLanguage(language)
+    private func resolveVoiceForPlayback(for language: String) throws -> (any Voice)? {
+        let key = Self.cacheKey(for: language)
+        if let known = voices[key] { return known }
         let savedID = UserDefaults.standard.string(forKey: Self.voiceKey(language))
-            ?? UserDefaults.standard.string(forKey: Self.voiceKey(canon))
-        if let savedID, let chosen = Voices.find(savedID, bookID: detail.summary.id) {
-            voices[language] = chosen
+            ?? UserDefaults.standard.string(forKey: Self.voiceKey(key))
+        if let savedID, !savedID.isEmpty {
+            guard let chosen = Voices.find(savedID, bookID: detail.summary.id), chosen.speaks(language) else {
+                throw SavedVoiceError.unavailable
+            }
+            voices[key] = chosen
+            return chosen
+        }
+        return voice(for: language)
+    }
+
+    private func voice(for language: String, section: UInt32? = nil) -> (any Voice)? {
+        let key = Self.cacheKey(for: language)
+        if let known = voices[key] { return known }
+        let savedID = UserDefaults.standard.string(forKey: Self.voiceKey(language))
+            ?? UserDefaults.standard.string(forKey: Self.voiceKey(key))
+        if let savedID, !savedID.isEmpty, let chosen = Voices.find(savedID, bookID: detail.summary.id) {
+            voices[key] = chosen
             return chosen
         }
         if KokoroModel.isInstalled, let def = KokoroModel.defaultNarrator(for: language) {
-            voices[language] = def
+            voices[key] = def
             return def
         }
         if LiveVoiceModel.isInstalled, let def = VoicePack.defaultNarrator(for: language) {
-            voices[language] = def
+            voices[key] = def
             return def
         }
         if CloudVoice.Provider.free.isSetUp, CardVoice.supportsLanguage(language),
            let free = CloudVoice.all().first(where: { $0.provider == .free && $0.speaks(language) }) {
-            voices[language] = free
+            voices[key] = free
             return free
         }
         let sys = SystemVoice.best(for: language)
-        voices[language] = sys
+        voices[key] = sys
         return sys
     }
 

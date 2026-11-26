@@ -153,6 +153,82 @@ fun PrepareBetterVoiceRow(core: YuyueCore, dataDir: File, language: String) {
     }
 }
 
+/**
+ * Inline preparation bar for the on-device voice cloning & role synthesizer (`live-zipvoice-1`).
+ * Shown wherever cloned / book-designed `CardVoice` cards are created, edited, picked, or played
+ * before the ZipVoice model is installed on disk.
+ */
+@Composable
+fun PrepareLiveVoiceRow(core: YuyueCore, dataDir: File, modifier: Modifier = Modifier) {
+    if (LiveVoiceModel.deviceUnsupported) return
+    val st = LiveVoiceModel.state
+    if (LiveVoiceModel.canRun(dataDir) || st is LiveVoiceModel.State.Unsupported) return
+
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(YY.c.bg)
+            .border(0.5.dp, YY.c.line, RoundedCornerShape(10.dp))
+            .padding(horizontal = 11.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        when (st) {
+            is LiveVoiceModel.State.Downloading -> {
+                val pct = (st.progress * 100).roundToInt().coerceIn(0, 99)
+                Text(
+                    t("正在准备声音克隆模型 %lld%%", pct.toLong()),
+                    fontSize = 11.5.sp,
+                    color = YY.c.t2,
+                    style = YY.tnum,
+                    modifier = Modifier.weight(1f),
+                )
+                Box(
+                    Modifier
+                        .width(88.dp)
+                        .height(3.dp)
+                        .clip(CircleShape)
+                        .background(YY.c.inset),
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(st.progress.toFloat().coerceIn(0.03f, 1f))
+                            .height(3.dp)
+                            .background(YY.tint.accent),
+                    )
+                }
+            }
+            LiveVoiceModel.State.Failed -> {
+                Text(t("声音克隆模型没下下来"), fontSize = 11.5.sp, color = YY.c.t2, modifier = Modifier.weight(1f))
+                Text(
+                    t("再试"),
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = YY.c.danger,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { LiveVoiceModel.startDownload(core, dataDir) }
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+            else -> {
+                Text(t("声音克隆模型 · %lld MB（下载后即可用克隆声朗读）", LiveVoiceModel.TOTAL_MB), fontSize = 11.5.sp, color = YY.c.t2, modifier = Modifier.weight(1f))
+                Text(
+                    t("下载"),
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = YY.tint.accent,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { LiveVoiceModel.startDownload(core, dataDir) }
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+        }
+    }
+}
+
 private sealed interface PickerSubRoute {
     data object List : PickerSubRoute
     data class Clone(val replacingId: String? = null, val initialName: String? = null) : PickerSubRoute
@@ -629,6 +705,11 @@ fun VoiceGroupsContent(
 
     // 2. 我的
     YYLabel(t("我的"), t("克隆与本书角色"), top = if (!hasFollowRow && !showRecommended) 4.dp else YY.s(18))
+    if (!LiveVoiceModel.canRun(dataDir) && !LiveVoiceModel.deviceUnsupported &&
+        (clonedCards.isNotEmpty() || designedCards.isNotEmpty())
+    ) {
+        PrepareLiveVoiceRow(core, dataDir, Modifier.padding(bottom = 8.dp))
+    }
     YYGroup {
         for (card in clonedCards) {
             val eleven = ClonedVoices.find(card.id)?.takeIf { it.isReady }
@@ -644,7 +725,11 @@ fun VoiceGroupsContent(
                 canLocal -> t("本机 · 已录 %lld 档语气", toneCount.toLong())
                 eleven != null -> "ElevenLabs"
                 LiveVoiceModel.deviceUnsupported -> t("已存本机 · 内存不足 6 GB，暂不能朗读")
-                else -> t("已存本机 · 下载朗读声音后可念")
+                liveState is LiveVoiceModel.State.Downloading -> {
+                    val pct = (liveState.progress * 100).roundToInt().coerceIn(0, 99)
+                    t("已存本机 · 克隆模型下载中 %lld%%", pct.toLong())
+                }
+                else -> t("已存本机 · 下载上方声音克隆模型后可念")
             }
             row {
                 VoiceChoiceRow(

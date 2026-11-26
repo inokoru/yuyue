@@ -280,6 +280,8 @@ object LiveVoiceModel {
             }
             completedBytes += MODEL_BYTES
             runCatching { core.liveVoiceSetDir(folder(dataDir).path) }
+            // Cloned and designed cards can run as soon as live-zipvoice-1 is unpacked.
+            readyEvents.tryEmit(Unit)
         }
 
         if (needPack) {

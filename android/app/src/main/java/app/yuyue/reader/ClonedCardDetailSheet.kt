@@ -112,6 +112,7 @@ fun ClonedCardDetailPanel(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val liveState = LiveVoiceModel.state
     var card by remember { mutableStateOf<VoiceCard?>(null) }
     var alsoEleven by remember { mutableStateOf(false) }
     var busyEleven by remember { mutableStateOf(false) }
@@ -120,6 +121,12 @@ fun ClonedCardDetailPanel(
     var deleting by remember { mutableStateOf(false) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var tick by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        if (!LiveVoiceModel.canRun(dataDir) && !LiveVoiceModel.deviceUnsupported) {
+            LiveVoiceModel.onFirstListen(context, core, dataDir)
+        }
+    }
 
     LaunchedEffect(cardId, tick) {
         card = withContext(Dispatchers.IO) { core.cardFind(null, cardId) }
@@ -153,15 +160,22 @@ fun ClonedCardDetailPanel(
 
     fun playStyle(style: CardStyle) {
         SystemVoice.Engine.stopPreview()
+        errorMsg = null
         scope.launch {
-            val sp = withContext(Dispatchers.IO) {
-                if (LiveVoiceModel.canRun(dataDir)) {
-                    CardVoice(currentCard).render(sampleLine, language, style)
-                } else {
-                    core.cardClipPath(null, currentCard.id, style)?.let { SystemVoice.Engine.wav(File(it)) }
+            try {
+                val sp = withContext(Dispatchers.IO) {
+                    if (LiveVoiceModel.canRun(dataDir)) {
+                        CardVoice(currentCard).render(sampleLine, language, style)
+                    } else {
+                        core.cardClipPath(null, currentCard.id, style)?.let { SystemVoice.Engine.wav(File(it)) }
+                    }
                 }
+                if (sp != null) SystemVoice.Engine.preview(sp)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                errorMsg = e.message ?: e.toString()
             }
-            if (sp != null) SystemVoice.Engine.preview(sp)
         }
     }
 
@@ -195,6 +209,8 @@ fun ClonedCardDetailPanel(
 
     if (LiveVoiceModel.deviceUnsupported && !alsoEleven) {
         YYNote(t("这台设备内存不足 6 GB，暂不支持用本机克隆声音朗读"), YY.c.t3)
+    } else if (!LiveVoiceModel.canRun(dataDir) && !alsoEleven && liveState !is LiveVoiceModel.State.Unsupported) {
+        PrepareLiveVoiceRow(core, dataDir, Modifier.padding(bottom = 8.dp))
     }
 
     // Six acting tones

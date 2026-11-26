@@ -57,13 +57,16 @@ nonisolated struct ClonedEntry: Identifiable, Sendable {
 
     var subtitle: String {
         if let card {
+            if !LiveVoiceModel.isModelInstalled {
+                return meta?.remote != nil && CloneEngine.available
+                    ? "ElevenLabs"
+                    : String(localized: "本机 · 等朗读声音下好后可用")
+            }
             let extra = card.clips.filter { $0.style != .neutral }.count
             if extra > 0 {
                 return String(localized: "本机 · 已录 \(extra + 1) 档语气")
             }
-            return LiveVoiceModel.isModelInstalled
-                ? String(localized: "本机 · 平常语气")
-                : (meta?.remote != nil && CloneEngine.available ? "ElevenLabs" : String(localized: "本机 · 等朗读声音下好后可用"))
+            return String(localized: "本机 · 平常语气")
         }
         if meta?.needsRerecord == true {
             return String(localized: "要重录 · 旧录音缺对应文字")

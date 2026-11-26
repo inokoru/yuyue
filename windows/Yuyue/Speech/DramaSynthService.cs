@@ -359,16 +359,7 @@ public static class DramaSynthService
             }
             catch { }
 
-            // 1:1 CompanionUsage.cloudSaveNarrator: keep narrator on free local voice when casting cloud drama
-            if (library.Prefs.DramaCloudSaveNarrator &&
-                resolvedNarrator.StartsWith("cloud.", StringComparison.Ordinal) &&
-                CloudVoiceService.TryParseFullId(resolvedNarrator, out var np, out _) &&
-                CloudVoiceService.IsPaidCloud(np))
-            {
-                var localFallback = voices.FirstOrDefault(v => !v.Id.StartsWith("cloud.", StringComparison.Ordinal));
-                if (localFallback is not null) resolvedNarrator = localFallback.Id;
-            }
-
+            // Respect the user's chosen narrator verbatim — never silently replace a cloud narrator with a local one.
             var plan = library.Core.DramaCastVoices(bookId, voices, resolvedNarrator);
             CastPlans[bookId] = plan;
             return plan;

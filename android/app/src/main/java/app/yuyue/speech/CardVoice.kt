@@ -60,6 +60,20 @@ class CardVoice(
             throw IllegalStateException(t("离线语音合成失败，请重试或换一个声音"))
         }
 
+        if (!LiveVoiceModel.modelInstalled(dataDir)) {
+            withContext(Dispatchers.Main) {
+                LiveVoiceModel.onFirstListen(app, core, dataDir)
+            }
+            val msg = when (val st = LiveVoiceModel.state) {
+                is LiveVoiceModel.State.Downloading -> {
+                    val pct = (st.progress * 100).toInt().coerceIn(0, 99)
+                    t("本机声音克隆模型正在下载（%lld%%），下好后即可使用", pct.toLong())
+                }
+                else -> t("本机声音克隆模型尚未下载，请先在声音列表点击下载后再试")
+            }
+            throw IllegalStateException(msg)
+        }
+
         val speech = Engine.synthesizeWithGate(
             core = core,
             dataDir = dataDir,
@@ -198,6 +212,8 @@ class CardVoice(
                 val dec = makeOptions().use { env.createSession(File(dir, "decoder.int8.onnx").path, it) }
                 val voc = makeOptions().use { env.createSession(File(dir, "vocos_24khz.onnx").path, it) }
                 Sessions(dir.path, enc, dec, voc)
+            }.onFailure {
+                android.util.Log.e("CardVoice", "Failed to open ZipVoice ONNX sessions", it)
             }.getOrNull()?.also { loaded = it }
         }
 
@@ -207,10 +223,15 @@ class CardVoice(
             bookID: String?,
             style: CardStyle,
         ): ZipVoicePrompt? {
-            val clip = core.cardClipResolved(bookID, card.id, style) ?: return null
+            val clip = core.cardClipResolved(bookID, card.id, style) ?: run {
+                android.util.Log.w("CardVoice", "No resolved clip for card=${card.id} style=$style")
+                return null
+            }
             val key = PromptKey(card.id, card.version, clip.style)
             prompts.get(key)?.let { return it }
-            val built = runCatching { core.liveVoicePrompt(clip.file, clip.text, card.lang) }.getOrNull() ?: return null
+            val built = runCatching { core.liveVoicePrompt(clip.file, clip.text, card.lang) }
+                .onFailure { android.util.Log.e("CardVoice", "liveVoicePrompt failed for ${clip.file}", it) }
+                .getOrNull() ?: return null
             prompts.put(key, built)
             return built
         }
@@ -243,6 +264,8 @@ class CardVoice(
                 val seed = baseSeed + attempt.toULong() * 0x9E37_79B9_7F4A_7C15uL
                 val floats = runCatching {
                     synthesizeClauses(core, sess, prompt, clauses, language, seed)
+                }.onFailure {
+                    android.util.Log.e("CardVoice", "synthesizeClauses failed (attempt=$attempt, card=${card.id})", it)
                 }.getOrNull()
                 if (floats != null && floats.isNotEmpty()) {
                     val ok = core.liveVoiceCheck(
@@ -432,11 +455,13 @@ class CardVoice(
                     mels[b * kept + f] = x[row + b] * 10f
                 }
             }
+            var vocFrames = kept
             val (mag, xCos, ySin) = OnnxTensor.createTensor(env, FloatBuffer.wrap(mels), longArrayOf(1L, 100L, kept.toLong())).use { melT ->
                 sess.vocoder.run(mapOf("mels" to melT)).use { vocRes ->
                     val magT = (vocRes.get("mag").orElse(null) as? OnnxTensor) ?: (vocRes[0] as OnnxTensor)
                     val xT = (vocRes.get("x").orElse(null) as? OnnxTensor) ?: (vocRes[1] as OnnxTensor)
                     val yT = (vocRes.get("y").orElse(null) as? OnnxTensor) ?: (vocRes[2] as OnnxTensor)
+                    magT.info.shape.getOrNull(2)?.toInt()?.takeIf { it > 0 }?.let { vocFrames = it }
                     fun takeFloats(t: OnnxTensor): FloatArray {
                         val fb = t.floatBuffer
                         return FloatArray(fb.remaining()).also { fb.get(it) }
@@ -446,7 +471,7 @@ class CardVoice(
             }
 
             // 4. Vocos ISTFT + −20 LUFS loudness normalization in Rust core
-            return core.liveVoiceIstft(mag.asList(), xCos.asList(), ySin.asList(), kept.toUInt()).toFloatArray()
+            return core.liveVoiceIstft(mag.asList(), xCos.asList(), ySin.asList(), vocFrames.toUInt()).toFloatArray()
         }
 
         private fun sentenceCacheFile(

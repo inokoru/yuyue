@@ -1124,16 +1124,30 @@ fun VoiceSourceSettings(id: String, back: () -> Unit) {
     }
     YYPage {
         if (id == NEURAL) {
+            val liveState = app.yuyue.speech.LiveVoiceModel.state
+            val liveReady = app.yuyue.speech.LiveVoiceModel.canRun(lib.dataDir)
             PanelHeader(voiceSourceTitle(NEURAL), t("跨端轻量离线模型 · 推荐"), YY.c.ok) { SourceTile(NEURAL, 34f) }
             YYGroup {
-                row { YYRow(t("状态"), value = if (app.yuyue.speech.KokoroModel.installed(lib.dataDir)) t("已就绪 · 16 音色") else t("待下载 · 125 MB")) }
+                row { YYRow(t("旁白模型"), value = if (app.yuyue.speech.KokoroModel.installed(lib.dataDir)) t("已就绪 · 16 音色") else t("待下载 · 125 MB")) }
+                if (!app.yuyue.speech.LiveVoiceModel.deviceUnsupported) {
+                    val liveVal = when {
+                        liveReady -> t("已就绪 · 支持声音克隆与角色")
+                        liveState is app.yuyue.speech.LiveVoiceModel.State.Downloading -> t("下载中 %lld%%", (liveState.progress * 100).roundToInt().toLong())
+                        else -> t("待下载 · %lld MB", app.yuyue.speech.LiveVoiceModel.TOTAL_MB)
+                    }
+                    row { YYRow(t("声音克隆模型"), value = liveVal) }
+                }
                 row { YYRow(t("费用"), value = t("免费 · 不联网")) }
             }
             if (!app.yuyue.speech.KokoroModel.installed(lib.dataDir)) {
                 Spacer(Modifier.height(YY.s(10)))
                 app.yuyue.reader.PrepareBetterVoiceRow(lib.core, lib.dataDir, "zh")
             }
-            YYNote(t("Kokoro-82M v1.1 Int8 跨端统一使用 ONNX Runtime 离线合成，无需联网即可自然朗读中英文书籍。"))
+            if (!liveReady && !app.yuyue.speech.LiveVoiceModel.deviceUnsupported) {
+                Spacer(Modifier.height(YY.s(10)))
+                app.yuyue.reader.PrepareLiveVoiceRow(lib.core, lib.dataDir)
+            }
+            YYNote(t("Kokoro-82M v1.1 Int8 用于离线自然旁白；声音克隆模型（ZipVoice）用于本机克隆声音与多语气角色演绎，均无需联网。"))
         } else if (p == null) {
             PanelHeader(voiceSourceTitle(SYSTEM), t("系统自带 · 不推荐"), Color(0xFFD97706)) { SourceTile(SYSTEM, 34f) }
             YYGroup {

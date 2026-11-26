@@ -73,6 +73,12 @@ fun ListenSheet(model: ReaderModel, dismiss: () -> Unit) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             VoiceRow(model, player, currentVoice, onCurrentChanged = { currentVoice = it }) { pickingVoice = true }
             PrepareBetterVoiceRow(model.core, model.library.dataDir, player.language)
+            val liveState = app.yuyue.speech.LiveVoiceModel.state
+            val needsLiveModel = (currentVoice is app.yuyue.speech.CardVoice || currentVoice?.id?.startsWith("cloned.") == true) &&
+                !app.yuyue.speech.LiveVoiceModel.canRun(model.library.dataDir)
+            if (needsLiveModel || liveState is app.yuyue.speech.LiveVoiceModel.State.Downloading) {
+                PrepareLiveVoiceRow(model.core, model.library.dataDir)
+            }
             player.thermalNotice?.let { notice ->
                 Text(notice, fontSize = 11.sp, color = YY.c.warn, modifier = Modifier.padding(horizontal = 4.dp))
             }

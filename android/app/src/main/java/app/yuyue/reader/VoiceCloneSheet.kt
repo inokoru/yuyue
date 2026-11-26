@@ -106,8 +106,15 @@ fun VoiceClonePanel(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val liveState = LiveVoiceModel.state
     val cardLang = if (language.lowercase().startsWith("en")) "en" else "zh"
     val script = remember(cardLang) { core.cardScript(cardLang, CardStyle.NEUTRAL) }
+
+    LaunchedEffect(Unit) {
+        if (!LiveVoiceModel.canRun(dataDir) && !LiveVoiceModel.deviceUnsupported) {
+            LiveVoiceModel.onFirstListen(context, core, dataDir)
+        }
+    }
 
     var consent by remember { mutableStateOf(false) }
     var step by remember { mutableStateOf<CloneStep>(CloneStep.Record) }
@@ -260,6 +267,10 @@ fun VoiceClonePanel(
             Text(t("这台设备内存不足 6 GB，暂不支持离线克隆"), fontSize = 13.sp, color = YY.c.t2)
         }
         return
+    }
+
+    if (!LiveVoiceModel.canRun(dataDir) && liveState !is LiveVoiceModel.State.Unsupported) {
+        PrepareLiveVoiceRow(core, dataDir, Modifier.padding(bottom = 10.dp))
     }
 
     when (val s = step) {

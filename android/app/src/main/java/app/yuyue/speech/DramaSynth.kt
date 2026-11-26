@@ -1,6 +1,7 @@
 package app.yuyue.speech
 
 import app.yuyue.library.Library
+import app.yuyue.t
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
@@ -82,13 +83,10 @@ class DramaSynth(private val context: android.content.Context, private val libra
             val voices = voices(language, chosenNarrator, book)
             if (voices.isEmpty()) return@withContext null
             val liveReady = LiveVoiceModel.canRun(library.dataDir) && CardVoice.speaksLanguage(language)
-            val freeLocalNarrator = if (liveReady) Voices.defaultNarrator(language)?.id?.takeIf { id -> voices.any { it.id == id } } else null
+            // Respect the user's chosen narrator voice verbatim (never silently replace cloud/system narrators).
             val narratorID = when {
-                app.yuyue.companion.CompanionUsage.cloudSaveNarrator && chosenNarrator?.startsWith("cloud.") == true && freeLocalNarrator != null ->
-                    freeLocalNarrator
-                liveReady && (chosenNarrator == null || chosenNarrator.startsWith("system.")) ->
-                    Voices.defaultNarrator(language)?.id ?: voices.first().id
                 chosenNarrator != null -> chosenNarrator
+                liveReady -> Voices.defaultNarrator(language)?.id ?: voices.first().id
                 else -> voices.first().id
             }
             val castVoices = SpeakerPrint.printVoices(library.core, library.dataDir, voices, language)
@@ -197,13 +195,10 @@ class DramaSynth(private val context: android.content.Context, private val libra
                 return@launch
             }
             val liveReady = LiveVoiceModel.canRun(library.dataDir) && CardVoice.speaksLanguage(language)
-            val freeLocalNarrator = if (liveReady) Voices.defaultNarrator(language)?.id?.takeIf { id -> voices.any { it.id == id } } else null
+            // Respect the user's chosen narrator voice verbatim (never silently replace cloud/system narrators).
             val narratorID = when {
-                app.yuyue.companion.CompanionUsage.cloudSaveNarrator && chosenNarrator?.startsWith("cloud.") == true && freeLocalNarrator != null ->
-                    freeLocalNarrator
-                liveReady && (chosenNarrator == null || chosenNarrator.startsWith("system.")) ->
-                    Voices.defaultNarrator(language)?.id ?: voices.first().id
                 chosenNarrator != null -> chosenNarrator
+                liveReady -> Voices.defaultNarrator(language)?.id ?: voices.first().id
                 else -> voices.first().id
             }
             // Core reads `roles/book/{id}` directly as single source of truth.
@@ -481,21 +476,17 @@ class DramaSynth(private val context: android.content.Context, private val libra
         for (ask in asks) {
             if (!isActive) return@withContext null
             val voice = Voices.find(ask.voice, book)
-                ?: Voices.find(plan.narrator, book)
-                ?: Voices.systemBest(language)
-                ?: continue
+                ?: throw IllegalStateException(t("广播剧里角色的声音当前不可用，请检查离线模型或在人物声音中重选"))
             val parts = library.core.dramaSpokenParts(ask.text)
             val plain = parts.joinToString("") { it.text }
-            val rendered = runCatching {
-                when (voice) {
-                    is CardVoice -> {
-                        val style = if (sound.acting) library.core.cardStyleFor(ask.act) else uniffi.yuyue_core.CardStyle.NEUTRAL
-                        voice.render(ask.text, language, style)
-                    }
-                    is CloudVoice -> voice.render(parts, language, if (sound.acting) acting(ask.act, chinese) else null)
-                    else -> voice.render(plain, language)
+            val rendered = when (voice) {
+                is CardVoice -> {
+                    val style = if (sound.acting) library.core.cardStyleFor(ask.act) else uniffi.yuyue_core.CardStyle.NEUTRAL
+                    voice.render(ask.text, language, style)
                 }
-            }.getOrNull()
+                is CloudVoice -> voice.render(parts, language, if (sound.acting) acting(ask.act, chinese) else null)
+                else -> voice.render(plain, language)
+            }
             if (rendered == null || rendered.samples.isEmpty()) {
                 madeClips += MadeClip(ask.key, 0.0, emptyList())
                 continue

@@ -107,8 +107,7 @@ import UIKit
 
     /// 旁白回退升级：当即时层与声音包就绪且用户未手选非系统声音时，优先使用该语言默认旁白声音卡。
     static func effectiveNarrator(for language: String, chosen: String?) -> String? {
-        if let chosen,
-           chosen.hasPrefix("kokoro.") || chosen.hasPrefix("card.") || chosen.hasPrefix("cloned.") || chosen.hasPrefix("cloud.") || chosen.hasPrefix("actor.") {
+        if let chosen, !chosen.isEmpty {
             return chosen
         }
         if KokoroModel.isInstalled, CardVoice.supportsLanguage(language),
@@ -119,7 +118,7 @@ import UIKit
            let def = VoicePack.defaultNarrator(for: language) {
             return def.id
         }
-        return chosen ?? SystemVoice.best(for: language)?.id
+        return SystemVoice.best(for: language)?.id
     }
 
     /// The voices the core casts `language` with:
@@ -309,18 +308,8 @@ import UIKit
             DramaWork.tellCore(core)
             return
         }
-        let narratorID: String
-        if CompanionUsage.cloudSaveNarrator,
-           resolvedNarrator?.hasPrefix("cloud.") == true,
-           LiveVoiceModel.isInstalled,
-           CardVoice.supportsLanguage(language),
-           let freeLocal = VoicePack.defaultNarrator(for: language)?.id,
-           voices.contains(where: { $0.id == freeLocal }) {
-            // Hybrid cast: free on-device narrator (~60–75% of text) + cloud character voices.
-            narratorID = freeLocal
-        } else {
-            narratorID = resolvedNarrator ?? voices.first!.id
-        }
+        // Respect the user's chosen narrator verbatim — never silently substitute a local narrator for a cloud one.
+        let narratorID = resolvedNarrator ?? voices.first!.id
         loops[book] = Task(priority: .utility) { [weak self] in
             await Self.syncRoleVoices(core, book: book)
             await SpeakerPrint.ensure(dataDir)
@@ -527,6 +516,20 @@ import UIKit
         return Speech(buffer: out)
     }
 
+    nonisolated enum PlaybackError: LocalizedError {
+        case voiceUnavailable
+        case studioClipMissing
+
+        var errorDescription: String? {
+            switch self {
+            case .voiceUnavailable:
+                String(localized: "广播剧里角色的声音当前不可用，请检查离线模型或在人物声音中重选")
+            case .studioClipMissing:
+                String(localized: "广播剧这一句预制音频缺失，请重试或换一个声音")
+            }
+        }
+    }
+
     /// 当某章尚未完成精做（`DramaLayer == .live`）时，若本机已做好该句混音则直接播，
     /// 否则走统一的核心分角、读音标注、情感语气、快慢高低与 `DramaMixer` 混音管线（带环境音/音效/声场/混响），
     /// 落入 500 MB 上限的按章缓存。
@@ -538,7 +541,7 @@ import UIKit
         sentence: UInt32,
         language: String,
         narratorFallback: String?
-    ) async -> Speech? {
+    ) async throws -> Speech? {
         if let mixed = await Self.sentence(core, dir, book: book, section: section, sentence: sentence) {
             return mixed
         }
@@ -573,26 +576,23 @@ import UIKit
         let gapFrames = AVAudioFrameCount(Speech.format.sampleRate * 0.08)
 
         for (idx, ask) in asks.enumerated() {
-            if Task.isCancelled { return nil }
-            let chosenVoice: (any Voice)? = await MainActor.run {
-                Voices.find(ask.voice, bookID: book)
-                    ?? Voices.find(plan.narrator, bookID: book)
-                    ?? SystemVoice.best(for: language)
+            try Task.checkCancellation()
+            guard let voice = await MainActor.run(body: { Voices.find(ask.voice, bookID: book) }) else {
+                throw PlaybackError.voiceUnavailable
             }
-            guard let voice = chosenVoice else { continue }
             let parts = core.dramaSpokenParts(text: ask.text)
             let plain = parts.map(\.text).joined()
             let rendered: Speech?
             if let cardVoice = voice as? CardVoice {
                 let style: CardStyle = sound.acting ? core.cardStyleFor(act: ask.act) : .neutral
-                rendered = try? await cardVoice.render(ask.text, language: language, style: style)
+                rendered = try await cardVoice.render(ask.text, language: language, style: style)
             } else if let cloud = voice as? CloudVoice {
-                rendered = try? await cloud.render(parts: parts, language: language, acting: sound.acting ? acting(core, ask.act, chinese: chinese) : nil)
+                rendered = try await cloud.render(parts: parts, language: language, acting: sound.acting ? acting(core, ask.act, chinese: chinese) : nil)
             } else if let actor = voice as? ActorVoice {
                 let instr = sound.acting ? core.dramaActInstruction(act: ask.act, chinese: chinese) : ""
-                rendered = try? await actor.render(plain, instruction: instr)
+                rendered = try await actor.render(plain, instruction: instr)
             } else {
-                rendered = try? await voice.render(plain, language: language)
+                rendered = try await voice.render(plain, language: language)
             }
             guard let rawSpeech = rendered, rawSpeech.buffer.frameLength > 0 else {
                 madeClips.append(MadeClip(key: ask.key, seconds: 0, charTimes: []))
