@@ -145,8 +145,8 @@ function onUp(e: PointerEvent): void {
   if (d.moved || now() - d.t > LONG_PRESS_MS || hasSelection()) return;
   if (Math.abs(e.clientX - d.x) > slop(d) || Math.abs(e.clientY - d.y) > slop(d)) return;
   // The page moved under the finger (a swipe the scroll view took over) unless it was our own
-  // smooth page turn still running from an earlier tap.
-  const scrolled = Math.abs(window.pageXOffset - d.sx) > 1 || Math.abs(window.pageYOffset - d.sy) > 1;
+  // smooth page turn still running from an earlier tap. Allow small subpixel/DPI drift (<= 4px).
+  const scrolled = Math.abs(window.pageXOffset - d.sx) > 4 || Math.abs(window.pageYOffset - d.sy) > 4;
   if (scrolled && !isScrollAnimating()) return;
 
   const target = e.target as Element | null;

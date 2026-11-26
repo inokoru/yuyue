@@ -4,6 +4,7 @@
 //! (many public-domain Chinese books: one huge `<p>` per few hundred lines, hard-wrapped, with
 //! "　　" starting each paragraph and no table of contents).
 
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use encoding_rs::Encoding;
@@ -106,16 +107,31 @@ impl Headings {
     }
 }
 
-const CJK_NUMBER: &str = r"[\s　]*[0-9０-９零〇一二三四五六七八九十百千万两]+[\s　]*";
+const CJK_NUMBER: &str = r"[\s　]*[0-9０-９零〇一二三四五六七八九十百千万两壹贰叁肆伍陆柒捌玖拾佰仟萬]+[\s　]*";
 const LATIN_NUMBER: &str = r"(?i:[0-9]+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last)";
 
+/// Optional volume / section prefix before a CJK chapter heading:
+/// "正文 第1章 …", "正文卷 第001章 …", "第一卷 农家子弟 第1章 …", "VIP卷 第100章 …".
+static VOLUME_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^(?:正文卷?|VIP卷|vip卷|公众卷|免费卷|外篇|番外卷?|卷[\s　]*[0-9０-９零〇一二三四五六七八九十百千万两上中下终]+|第[\s　]*[0-9０-９零〇一二三四五六七八九十百千万两]+[\s　]*[卷部篇集])(?:[\s　：:·\-—]+[^第\s　][^\s　]{0,23})?[\s　]+",
+    )
+    .unwrap()
+});
 static CJK_HEADING: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(&format!(r"^第{CJK_NUMBER}[章回节節卷部篇集幕]([\s　：:．.、]|$)")).unwrap()
+    Regex::new(&format!(
+        r"^第{CJK_NUMBER}[章回节節卷部篇集幕话話](?:[\s　：:．.、，,·\-—–_~～!！?？(（\[【『「《\x22“'‘/|]|$)"
+    ))
+    .unwrap()
+});
+/// "第1章山村少年" (no space or punctuation after 章/回/节/话). Checked against prose starters.
+static CJK_HEADING_COMPACT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(r"^第{CJK_NUMBER}[章回节節话話]([^\s　])")).unwrap()
 });
 static CJK_BARE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(&format!(r"^第{CJK_NUMBER}[章回节節卷部篇集幕]$")).unwrap());
+    LazyLock::new(|| Regex::new(&format!(r"^第{CJK_NUMBER}[章回节節卷部篇集幕话話]$")).unwrap());
 static NAMED_HEADING: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(序章|序言|序|楔子|引子|引言|前言|后记|後記|尾声|尾聲|终章|終章|番外|附录|附錄|跋)([\s　：:].*)?$").unwrap()
+    Regex::new(r"^(序章|序言|序幕|序|楔子|引子|引言|前言|后记|後記|尾声|尾聲|终章|終章|大结局|大結局|番外|外传|外傳|附录|附錄|跋|上架感言|完本感言)(?:[\s　]*[0-9０-９零〇一二三四五六七八九十百千万两]+)?([\s　：:．.、·\-—（(【\[].*)?$").unwrap()
 });
 /// "CHAPTER XII.", "Chapter 3: The Party", "BOOK ONE — THE RIVER", "Prologue". A sentence that
 /// merely starts with "Chapter one of…" doesn't match: anything after the number must follow a
@@ -129,22 +145,72 @@ static LATIN_HEADING: LazyLock<Regex> = LazyLock::new(|| {
 static LATIN_BARE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(r"^(?i:chapter|book|part|volume)\s+{LATIN_NUMBER}(?:[\s-]{LATIN_NUMBER})*\.?$")).unwrap()
 });
+/// Bare numeric headings ("001 联盟远征军", "1. 山猫流浪记", "251、大梦学宫", "【001】标题"),
+/// enabled only by whole-book detection when a TXT numbers chapters without "第…章".
+static BARE_NUMERIC_HEADING: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(?:[【『\[\(（][\s　]*([0-9０-９]{1,4})[\s　]*[】』\]\)）][\s　]*|([0-9０-９]{1,4})(?:[\s　]*[．.、:：\-—][\s　]*|[\s　]+))(\S.*)$")
+        .unwrap()
+});
+
+/// Strips balanced outer brackets and leading decoration / volume prefixes so headings like
+/// "正文 第1章 …", "【第1章 …】", "☆、第1章 …" or "=== 第1章 … ===" match cleanly.
+fn unwrap_heading_candidate(line: &str) -> &str {
+    let mut s = trim(line);
+    for (open, close) in [('【', '】'), ('『', '』'), ('「', '」'), ('[', ']'), ('（', '）'), ('(', ')'), ('《', '》')] {
+        if let Some(inner) = s.strip_prefix(open).and_then(|rest| rest.strip_suffix(close)) {
+            s = trim(inner);
+            break;
+        }
+    }
+    let stripped = s.trim_start_matches(|c: char| {
+        matches!(c, '☆' | '★' | '●' | '◆' | '◇' | '※' | '•' | '·' | '=' | '-' | '—' | '*' | '#' | '~' | '～')
+    });
+    if stripped.len() < s.len() {
+        s = trim(stripped.trim_start_matches('、'));
+    }
+    if let Some(m) = VOLUME_PREFIX.find(s)
+        && s[m.end()..].starts_with('第')
+    {
+        s = &s[m.end()..];
+    }
+    s
+}
+
+/// Characters that immediately follow "第X章" in prose ("第三章说的是…", "第一章里…") rather than
+/// starting a compact title without a space ("第1章山村少年").
+const PROSE_AFTER_CHAPTER: &str = "说写讲里中的是有会在就把被给让到了也都还很太真不没可但而和与才便又再只却并若如虽因为从向对于以之其这那他她它我你们过完后前末尾头";
 
 pub fn is_heading(line: &str) -> bool {
     let n = line.chars().count();
-    if n == 0 || n > 60 {
+    if n == 0 || n > 70 {
         return false;
     }
-    if CJK_HEADING.is_match(line) || NAMED_HEADING.is_match(line) {
-        // "第三章说的是……。" is a sentence, not a heading.
-        return n <= 50 && !line.contains(['。', '！', '？']);
+    // Dialogue lines starting with quotes are prose, not chapter headings.
+    if line.starts_with(['“', '”', '"', '\'']) {
+        return false;
     }
-    LATIN_HEADING.is_match(line)
+    let candidate = unwrap_heading_candidate(line);
+    if candidate.is_empty() {
+        return false;
+    }
+    if CJK_HEADING.is_match(candidate) || NAMED_HEADING.is_match(candidate) {
+        // "第三章说的是……。" is a sentence, not a heading; web-novel titles often contain ！ / ？.
+        return !candidate.contains('。');
+    }
+    if let Some(c) = CJK_HEADING_COMPACT.captures(candidate) {
+        let next = c[1].chars().next().unwrap_or(' ');
+        return n <= 60
+            && !candidate.contains('。')
+            && !candidate.ends_with(['，', '；', '：', '、', ',', ';', ':'])
+            && !PROSE_AFTER_CHAPTER.contains(next);
+    }
+    n <= 60 && LATIN_HEADING.is_match(candidate)
 }
 
 /// A heading with only its number ("第一章", "CHAPTER I."), whose name may be on the next line.
 fn is_bare_heading(line: &str) -> bool {
-    CJK_BARE.is_match(line) || LATIN_BARE.is_match(line)
+    let candidate = unwrap_heading_candidate(line);
+    CJK_BARE.is_match(candidate) || LATIN_BARE.is_match(candidate)
 }
 
 static COUPLET_HEADING: LazyLock<Regex> = LazyLock::new(|| {
@@ -274,16 +340,21 @@ pub fn analyze(bytes: &[u8], encoding: Option<&'static Encoding>, headings: &Hea
     Analysis { decoded, book, outline, long, doubt }
 }
 
-/// A chapter two and a half times as long as the usual one, and long in itself.
+/// A chapter far longer than the usual one, suggesting a heading the rule missed.
+/// Zero-char volume dividers are ignored when taking the median, and normal web-novel big
+/// chapters (~10k chars) don't trigger a false alarm.
 fn long_chapter(outline: &[(Option<String>, usize, usize)]) -> Option<usize> {
     if outline.len() < 5 {
         return None;
     }
-    let mut sizes: Vec<usize> = outline.iter().map(|(_, n, _)| *n).collect();
+    let mut sizes: Vec<usize> = outline.iter().map(|(_, n, _)| *n).filter(|&n| n > 0).collect();
+    if sizes.len() < 5 {
+        return None;
+    }
     sizes.sort_unstable();
     let median = sizes[sizes.len() / 2];
     let (i, &(_, n, _)) = outline.iter().enumerate().max_by_key(|(_, (_, n, _))| *n)?;
-    (n >= 8_000 && n * 2 >= median * 5).then_some(i)
+    ((n >= 18_000 && n >= median * 4) || n >= 80_000).then_some(i)
 }
 
 /// Finds the title, author, paragraphs and chapters of a text file.
@@ -309,8 +380,121 @@ pub fn chapters(text: &str) -> Vec<Chapter> {
     chapters_from(&lines, 0, &Headings::default())
 }
 
+/// Parses an ASCII or fullwidth decimal integer ("001", "２５０").
+fn parse_digits(s: &str) -> Option<u32> {
+    let mut val: u32 = 0;
+    let mut any = false;
+    for c in s.chars() {
+        let d = match c {
+            '0'..='9' => c as u32 - '0' as u32,
+            '０'..='９' => c as u32 - '０' as u32,
+            _ => return None,
+        };
+        val = val.checked_mul(10)?.checked_add(d)?;
+        any = true;
+    }
+    any.then_some(val)
+}
+
+/// Units after a number that mark a date, quantity or list item rather than a chapter title
+/// ("2026年…", "100元…", "3个人…").
+const QUANTITY_AFTER_NUMBER: &str = "年月日号点分秒元块万亿千百个名人次岁米斤克%％";
+
+fn bare_numeric_chapter(line: &str) -> Option<u32> {
+    let n = line.chars().count();
+    if n < 2 || n > 60 || line.contains('。') || line.starts_with(['“', '”', '"', '\'']) {
+        return None;
+    }
+    let c = BARE_NUMERIC_HEADING.captures(line)?;
+    let num_str = c.get(1).or_else(|| c.get(2))?.as_str();
+    let num = parse_digits(num_str)?;
+    if num == 0 || num > 9999 {
+        return None;
+    }
+    let title = trim(&c[3]);
+    if title.is_empty() || title.ends_with(['，', '；', '：', ',', ';', ':']) {
+        return None;
+    }
+    let first = title.chars().next().unwrap_or(' ');
+    if QUANTITY_AFTER_NUMBER.contains(first) {
+        return None;
+    }
+    Some(num)
+}
+
+/// Detects bare numeric chapter headings ("001 标题", "1. 标题", "251、标题") across the whole
+/// book when the standard auto rule left large unsplit stretches. Short numbered lists in prose
+/// are ignored by requiring sequential numbering separated by real chapter bodies.
+fn detect_numeric_headings(lines: &[&str], start: usize) -> HashSet<usize> {
+    let mut total_chars = 0usize;
+    let mut std_count = 0usize;
+    let mut last_std_offset = 0usize;
+    let mut max_std_gap = 0usize;
+    let mut candidates: Vec<(usize, u32, usize)> = Vec::new();
+
+    for (i, raw) in lines.iter().enumerate().skip(start) {
+        let line = trim(raw);
+        if line.is_empty() {
+            continue;
+        }
+        let len = line.chars().count();
+        if is_heading(line) {
+            std_count += 1;
+            max_std_gap = max_std_gap.max(total_chars.saturating_sub(last_std_offset));
+            last_std_offset = total_chars;
+        } else if let Some(num) = bare_numeric_chapter(line) {
+            candidates.push((i, num, total_chars));
+        }
+        total_chars += len;
+    }
+    max_std_gap = max_std_gap.max(total_chars.saturating_sub(last_std_offset));
+
+    let needs_fallback = total_chars >= 3_000
+        && (std_count == 0 || total_chars / std_count.max(1) >= 20_000 || max_std_gap >= 40_000);
+    if !needs_fallback || candidates.len() < 5 {
+        return HashSet::new();
+    }
+
+    // Keep candidates that have meaningful spacing (filtering out tight inline numbered lists
+    // while still allowing a leading TOC list which `drop_contents_lists` will remove).
+    let mut body_gaps: Vec<usize> = Vec::with_capacity(candidates.len());
+    let mut sequential = 0usize;
+    for w in candidates.windows(2) {
+        let (_, n0, o0) = w[0];
+        let (_, n1, o1) = w[1];
+        let gap = o1.saturating_sub(o0);
+        if gap >= 50 {
+            body_gaps.push(gap);
+        }
+        if n1 > n0 && n1 <= n0 + 20 {
+            sequential += 1;
+        }
+    }
+    if body_gaps.len() < 4 || sequential < 4 || sequential * 2 < candidates.len().saturating_sub(1) {
+        return HashSet::new();
+    }
+    body_gaps.sort_unstable();
+    let median_gap = body_gaps[body_gaps.len() / 2];
+    if median_gap < 300 {
+        return HashSet::new();
+    }
+
+    // Drop isolated inline numbered-list items (too close to neighbours with tiny gap), while
+    // keeping actual chapters spaced apart (or runs of 3+ empty TOC lines).
+    let mut accepted = HashSet::with_capacity(candidates.len());
+    for (idx, &(line_i, _, off)) in candidates.iter().enumerate() {
+        let prev_gap = idx.checked_sub(1).map(|p| off.saturating_sub(candidates[p].2)).unwrap_or(usize::MAX);
+        let next_gap = candidates.get(idx + 1).map(|n| n.2.saturating_sub(off)).unwrap_or(usize::MAX);
+        if prev_gap >= 150 || next_gap >= 150 {
+            accepted.insert(line_i);
+        }
+    }
+    if accepted.len() >= 5 { accepted } else { HashSet::new() }
+}
+
 fn chapters_from(lines: &[&str], start: usize, headings: &Headings) -> Vec<Chapter> {
     let layout = Layout::of(lines);
+    let extra_headings = if headings.0.is_none() { detect_numeric_headings(lines, start) } else { HashSet::new() };
 
     let mut chapters = vec![Chapter::default()];
     let mut para: Option<String> = None;
@@ -331,14 +515,14 @@ fn chapters_from(lines: &[&str], start: usize, headings: &Headings) -> Vec<Chapt
             prev_full = false;
             continue;
         }
-        if headings.is(line) {
+        if headings.is(line) || extra_headings.contains(&i) {
             end_para(&mut para, &mut chapters);
             let (title, rest) = split_heading(line);
             chapters.push(Chapter { title: Some(title), ..Default::default() });
             // Text that ran on into the heading line continues on the next line.
             prev_full = rest.is_some();
             para = rest;
-            bare_heading = headings.is_bare(line);
+            bare_heading = !extra_headings.contains(&i) && headings.is_bare(line);
             continue;
         }
         if let Some(starting) = is_gutenberg_marker(line) {
@@ -419,24 +603,136 @@ fn chapters_from(lines: &[&str], start: usize, headings: &Headings) -> Vec<Chapt
 const TITLE_LABELS: &[&str] = &["书名", "書名", "Title"];
 const AUTHOR_LABELS: &[&str] = &["作者", "著者", "Author"];
 
-/// "作者：曹雪芹" → "曹雪芹".
+/// Strips one or two pairs of matching decorative brackets ("『…』", "【…】", "《…》"…).
+fn strip_brackets(mut s: &str) -> &str {
+    for _ in 0..2 {
+        let before = s;
+        s = trim(s);
+        for (open, close) in [('『', '』'), ('【', '】'), ('「', '」'), ('《', '》'), ('[', ']'), ('（', '）'), ('(', ')')] {
+            if let Some(inner) = s.strip_prefix(open).and_then(|r| r.strip_suffix(close)) {
+                s = trim(inner);
+                break;
+            }
+        }
+        if s == before {
+            break;
+        }
+    }
+    s
+}
+
+/// "作者：曹雪芹" / "『作者:曹雪芹』" → "曹雪芹".
 fn labelled<'a>(line: &'a str, labels: &[&str]) -> Option<&'a str> {
-    let rest = labels.iter().find_map(|l| line.strip_prefix(l))?;
+    let inner = strip_brackets(line);
+    let rest = labels.iter().find_map(|l| inner.strip_prefix(l))?;
     let value = trim(rest.trim_start().strip_prefix([':', '：'])?);
+    let value = value.trim_end_matches(['』', '】', '」', ']', '）', ')']);
+    let value = trim(value);
     (!value.is_empty()).then_some(value)
 }
 
-/// Title and author: labelled lines near the top ("书名：…", Gutenberg's "Title: …"), or a short
-/// first line followed by a short name. Returns the index of the first line after them.
+/// Download-site promos, URLs, metadata tags and watermarks commonly pasted at the top of web-novel
+/// TXTs; never treat them as a book title.
+fn looks_like_junk_title(line: &str) -> bool {
+    let s = trim(line);
+    if s.is_empty() || is_decoration(s) {
+        return true;
+    }
+    let lower = s.to_ascii_lowercase();
+    const URL_TOKENS: &[&str] = &[
+        "http://", "https://", "www.", ".com", ".net", ".cn", ".org", ".cc", ".tv", ".la", ".me",
+        ".xyz", ".top", ".info", ".txt", ".epub", ".zip", ".rar",
+    ];
+    if URL_TOKENS.iter().any(|t| lower.contains(t)) {
+        return true;
+    }
+    const PROMO_TOKENS: &[&str] = &[
+        "推荐", "下载", "网址", "网站", "整理", "版权", "声明", "仅供", "试读", "更新到", "每天更新",
+        "最新章节", "收藏", "访问", "更多精彩", "全本", "完结", "电子书", "书包", "书库", "小说网",
+        "阅读网", "免费阅读", "qq群", "微信", "公众号", "作品相关", "内容简介", "内容介绍",
+        "书籍简介", "简介", "状态", "文案", "标签", "主角", "配角", "字数", "分类", "评分", "目录",
+        "正文", "制作",
+    ];
+    if PROMO_TOKENS.iter().any(|t| lower.contains(t)) {
+        return true;
+    }
+    if s.contains([':', '：', '/', '\\', '|', '=', '*', '#', '@', '©']) {
+        return true;
+    }
+    // Unparsed metadata lines wrapped in 『…』 / 【…】 / […] / (…) are almost always site headers.
+    if s.starts_with(['『', '【', '[', '（', '(']) {
+        return true;
+    }
+    false
+}
+
+/// Parses combined title + author headers common in web-novel TXTs and filenames:
+/// "《暴风城打工实录》作者：又一个鱼雷", "『神农道君/作者:神威校尉』", "书名：三体 作者：刘慈欣".
+pub fn parse_title_author(raw: &str) -> Option<(String, Option<String>)> {
+    let inner = strip_brackets(raw);
+    if inner.is_empty() || inner.chars().count() > 80 {
+        return None;
+    }
+    let split = ["作者", "著者"].iter().find_map(|label| {
+        let pos = inner.find(label)?;
+        let after_label = &inner[pos + label.len()..];
+        let after_colon = after_label.trim_start().strip_prefix([':', '：'])?;
+        Some((&inner[..pos], after_colon))
+    })?;
+
+    let mut title_part = trim(split.0);
+    // Drop separator characters between title and "作者：" ("/", "|", "（", "-", spaces).
+    title_part = trim(title_part.trim_end_matches(|c: char| {
+        matches!(c, '/' | '|' | '-' | '—' | '–' | '·' | '(' | '（' | '[' | '【' | '『' | ' ' | '\u{3000}')
+    }));
+    if let Some(v) = labelled(title_part, TITLE_LABELS) {
+        title_part = v;
+    }
+    let title = trim(strip_brackets(title_part));
+    if title.is_empty()
+        || title.chars().count() > 40
+        || title.contains(['。', '！', '？', '，', '；'])
+        || looks_like_junk_title(title)
+    {
+        return None;
+    }
+
+    // Stop the author value before any trailing metadata field ("/ 状态:…", "| …", "【…").
+    let raw_author = split.1.split(['/', '|', '【', '『', '（', '(']).next().unwrap_or(split.1);
+    let author = trim(raw_author.trim_end_matches(['』', '】', '」', '》', ']', '）', ')']));
+    let author = (!author.is_empty()
+        && author.chars().count() <= 30
+        && !author.contains(['。', '！', '？', '，', '；', ',', ';'])
+        && !looks_like_junk_title(author))
+    .then(|| author.to_string());
+
+    Some((title.to_string(), author))
+}
+
+/// Title and author: labelled lines near the top ("书名：…", Gutenberg's "Title: …"), combined
+/// web-novel headers ("《书名》作者：…", "『书名/作者:…』"), or a clean short first line followed by
+/// a short name. Returns the index of the first line after them.
 fn front_matter(lines: &[&str], headings: &Headings) -> (Option<String>, Option<String>, usize) {
     let mut title = None;
     let mut author = None;
     for line in lines.iter().take(100).map(|l| trim(l)) {
+        if line.is_empty() {
+            continue;
+        }
+        if let Some((t, a)) = parse_title_author(line) {
+            if title.is_none() {
+                title = Some(t);
+            }
+            if author.is_none() && a.is_some() {
+                author = a;
+            }
+            continue;
+        }
         if title.is_none() {
-            title = labelled(line, TITLE_LABELS).map(|v| v.trim_matches(['《', '》']).to_string());
+            title = labelled(line, TITLE_LABELS).map(|v| strip_brackets(v).to_string()).filter(|v| !v.is_empty());
         }
         if author.is_none() {
-            author = labelled(line, AUTHOR_LABELS).map(str::to_string);
+            author = labelled(line, AUTHOR_LABELS).map(|v| strip_brackets(v).to_string()).filter(|v| !v.is_empty());
         }
     }
     let mut start = 0;
@@ -447,13 +743,17 @@ fn front_matter(lines: &[&str], headings: &Headings) -> (Option<String>, Option<
             continue;
         }
         seen += 1;
-        let consumed = if labelled(line, TITLE_LABELS).is_some() || labelled(line, AUTHOR_LABELS).is_some() {
+        let consumed = if labelled(line, TITLE_LABELS).is_some()
+            || labelled(line, AUTHOR_LABELS).is_some()
+            || parse_title_author(line).is_some()
+        {
             true
         } else if seen == 1
             && title.is_none()
             && !headings.is(line)
+            && !looks_like_junk_title(line)
             && line.chars().count() <= 30
-            && !line.ends_with(['。', '！', '？', '，', '.', '!', '?', ','])
+            && !line.ends_with(['。', '！', '？', '，', '；', '.', '!', '?', ',', ';'])
         {
             title = Some(line.trim_matches(['《', '》']).to_string());
             true
@@ -735,5 +1035,101 @@ mod tests {
         assert!(book.chapters[1].continued);
         assert_eq!(book.chapters[1].title.as_deref(), Some("第一章 很长"));
         assert!(!chapter_body(&book.chapters[1]).find(&|e| e.is("h2")).is_some());
+    }
+
+    #[test]
+    fn web_novel_front_matter_skips_ads_and_parses_inline_title_author() {
+        // Case 1: download-site promo line before "《书名》作者：…"
+        let text = concat!(
+            "推荐一个小说下载必备网址：www.688txt.com\n",
+            "每天更新，喜欢的去看看。\n",
+            "《暴风城打工实录》作者：又一个鱼雷\n",
+            "作品相关\n\n",
+            "第一卷\n",
+            "第001章 联盟远征军\n",
+            "　　正文内容。\n",
+        );
+        let book = structure(text);
+        assert_eq!(book.title.as_deref(), Some("暴风城打工实录"));
+        assert_eq!(book.author.as_deref(), Some("又一个鱼雷"));
+
+        // Case 2: bracketed "『书名/作者:…』"
+        let text2 = concat!(
+            "『神农道君/作者:神威校尉』\n",
+            "『状态:更新到:第687章 山猫流浪记（八）』\n",
+            "『内容简介:\n",
+            "【国风游戏】【全新设定】\n\n",
+            "第1章 山村少年\n",
+            "　　正文。\n",
+        );
+        let book2 = structure(text2);
+        assert_eq!(book2.title.as_deref(), Some("神农道君"));
+        assert_eq!(book2.author.as_deref(), Some("神威校尉"));
+
+        // Case 3: promo-only header with no title inside -> returns None so filename fallback wins
+        let text3 = concat!(
+            "更多精彩小说请访问 www.example.com\n",
+            "本书由网友整理，仅供试读。\n\n",
+            "第1章 开始\n",
+            "　　正文。\n",
+        );
+        let book3 = structure(text3);
+        assert_eq!(book3.title, None);
+    }
+
+    #[test]
+    fn web_novel_headings_with_punctuation_prefixes_and_compact_titles() {
+        assert!(is_heading("第251章：谁说我不行？！（求月票！）"));
+        assert!(is_heading("第100章 什么？竟然是他！"));
+        assert!(is_heading("第1章山村少年"));
+        assert!(is_heading("第250章（上）"));
+        assert!(is_heading("正文 第1章 联盟远征军"));
+        assert!(is_heading("正文卷 第001章 联盟远征军"));
+        assert!(is_heading("第一卷 第2章 出发"));
+        assert!(is_heading("第一卷 农家子弟 第2章 出发"));
+        assert!(is_heading("【第3章 大战】"));
+        assert!(is_heading("☆、第4章 尾声"));
+        assert!(is_heading("=== 第5章 结局 ==="));
+        assert!(is_heading("番外1 归途"));
+        assert!(is_heading("大结局"));
+        // Prose sentences must still be rejected.
+        assert!(!is_heading("第三章说的是一件旧事。"));
+        assert!(!is_heading("第三章里写着他的名字"));
+        assert!(!is_heading("“第一章？”他疑惑地问道。"));
+    }
+
+    #[test]
+    fn bare_numeric_chapters_detected_without_breaking_prose_lists() {
+        let para = "　　这是一段很长的小说正文，用来模拟真实的章节内容，确保每章字数足够多。".repeat(25);
+        let mut novel = String::from("『神农道君/作者:神威校尉』\n\n");
+        for i in 1..=10 {
+            novel.push_str(&format!("{i:03} 山猫流浪记（{i}）\n{para}\n\n"));
+        }
+        let book = structure(&novel);
+        assert_eq!(book.title.as_deref(), Some("神农道君"));
+        assert_eq!(book.chapters.len(), 10, "expected 10 numeric chapters, got {:?}", book.chapters.iter().map(|c| &c.title).collect::<Vec<_>>());
+
+        // Short numbered list in a chapter should NOT be split into chapters.
+        let mut essay = String::from("第1章 随笔\n");
+        for i in 1..=6 {
+            essay.push_str(&format!("{i}. 第{i}点想法\n"));
+        }
+        essay.push_str(&para);
+        let book2 = structure(&essay);
+        assert_eq!(book2.chapters.len(), 1);
+    }
+
+    #[test]
+    fn long_chapter_ignores_volume_headers_and_normal_ten_thousand_char_chapters() {
+        let mut outline = vec![(Some("第一卷".into()), 0, 0)];
+        for i in 1..=20 {
+            outline.push((Some(format!("第{i}章")), 4_000, i));
+        }
+        // A single 10,487-char chapter in a 4,000-char median novel is normal, not missing headings.
+        outline.push((Some("第21章".into()), 10_487, 21));
+        assert_eq!(long_chapter(&outline), None);
+        // A 25,000-char stretch (> 4x median) is flagged.
+        outline.push((Some("第22章".into()), 25_000, 22));
+        assert_eq!(long_chapter(&outline), Some(22));
     }
 }

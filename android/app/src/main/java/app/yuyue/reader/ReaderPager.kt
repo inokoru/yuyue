@@ -122,6 +122,8 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
     private var scrollAnimator: ValueAnimator? = null
     private var verticalAnimator: ValueAnimator? = null
     private var pendingManualSound = false
+    /** Pending tap turn across a section edge while the neighbour WebView is still settling (+1 / -1 / 0). */
+    private var pendingTurn = 0
 
     // Cover transition overlay (single recycled viewport snapshot + trailing edge shadow).
     private var coverBitmap: android.graphics.Bitmap? = null
@@ -226,6 +228,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
             return
         }
         pendingOpen = null
+        pendingTurn = 0
         cancelCover()
         resetVerticalPull()
         val cur = current
@@ -282,7 +285,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
     private fun pageFor(section: Int, target: Target): SectionPage {
         slots.firstOrNull { it.section == section }?.let { return it }
         val p = makePage()
-        p.load(bookID, section, target)
+        p.load(bookID, section, target, revealAfterReady = false)
         return p
     }
 
@@ -391,14 +394,45 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
         }
         if (scrolled) {
             val neighbour = if (forward) nextSlot else previousSlot
-            if (neighbour?.isReady != true) return
+            if (neighbour?.isReady != true) {
+                val hasTarget = neighbour != null || cur.section?.let { if (forward) next(it) else previous(it) } != null
+                if (hasTarget) {
+                    if (neighbour == null) loadNeighbours()
+                    pendingTurn = if (forward) 1 else -1
+                }
+                return
+            }
+            pendingTurn = 0
             listener?.turnedByHand(this)
             crossVertically(forward = forward, initialOffset = 0f, animated = !calm)
             return
         }
         val target = cur.page + if (forward) 1 else -1
-        if (target >= n && nextSlot?.isReady != true) return
-        if (target < 0 && previousSlot?.isReady != true) return
+        if (target >= n && nextSlot?.isReady != true) {
+            val nx = nextSlot
+            val hasNext = nx != null || cur.section?.let(::next) != null
+            if (hasNext) {
+                if (nx == null) loadNeighbours() else {
+                    nx.webView.alpha = 1f
+                    nx.webView.invalidate()
+                }
+                pendingTurn = 1
+            }
+            return
+        }
+        if (target < 0 && previousSlot?.isReady != true) {
+            val prev = previousSlot
+            val hasPrev = prev != null || cur.section?.let(::previous) != null
+            if (hasPrev) {
+                if (prev == null) loadNeighbours() else {
+                    prev.webView.alpha = 1f
+                    prev.webView.invalidate()
+                }
+                pendingTurn = -1
+            }
+            return
+        }
+        pendingTurn = 0
         listener?.turnedByHand(this)
         pendingManualSound = true
         if (useCover && beginCover(forward)) {
@@ -451,7 +485,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
                 break
             }
         }
-        animator = ValueAnimator.ofFloat(0f, totalSec).apply {
+        val anim = ValueAnimator.ofFloat(0f, totalSec).apply {
             duration = (totalSec * 1000f).roundToInt().toLong()
             interpolator = LinearInterpolator()
             addUpdateListener {
@@ -464,8 +498,9 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
                     if (animator === animation) landed()
                 }
             })
-            start()
         }
+        animator = anim
+        anim.start()
     }
 
     /** The strip has stopped on a page: cross into a neighbour when it went past an end. */
@@ -631,7 +666,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
                 break
             }
         }
-        animator = ValueAnimator.ofFloat(0f, totalSec).apply {
+        val anim = ValueAnimator.ofFloat(0f, totalSec).apply {
             duration = (totalSec * 1000f).roundToInt().toLong()
             interpolator = LinearInterpolator()
             addUpdateListener {
@@ -643,8 +678,9 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
                     if (animator === animation) finishCover(commit)
                 }
             })
-            start()
         }
+        animator = anim
+        anim.start()
     }
 
     private fun finishCover(commit: Boolean) {
@@ -755,6 +791,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
     }
 
     private fun startDrag() {
+        pendingTurn = 0
         dragging = true
         startPosition = position
         parent?.requestDisallowInterceptTouchEvent(true)
@@ -968,7 +1005,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
             cur.webView.translationY = 0f
             return
         }
-        verticalAnimator = ValueAnimator.ofFloat(start, 0f).apply {
+        val anim = ValueAnimator.ofFloat(start, 0f).apply {
             duration = 180
             interpolator = DecelerateInterpolator(1.6f)
             addUpdateListener { cur.webView.translationY = it.animatedValue as Float }
@@ -977,8 +1014,9 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
                     if (verticalAnimator === animation) verticalAnimator = null
                 }
             })
-            start()
         }
+        verticalAnimator = anim
+        anim.start()
     }
 
     private fun crossVertically(forward: Boolean, initialOffset: Float, animated: Boolean) {
@@ -1016,7 +1054,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
         target.webView.translationY = startTargetY
         cur.webView.translationY = startCurY
         verticalAnimator?.let { verticalAnimator = null; it.cancel() }
-        verticalAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+        val anim = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 260
             interpolator = DecelerateInterpolator(1.8f)
             addUpdateListener {
@@ -1031,8 +1069,9 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
                     finish()
                 }
             })
-            start()
         }
+        verticalAnimator = anim
+        anim.start()
     }
 
     private fun resetVerticalPull() {
@@ -1077,6 +1116,13 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
                         else if (page === nextSlot) page.webView.scrollTo(0, 0)
                     }
                     render()
+                    if (pendingTurn > 0 && page === nextSlot && page.isReady) {
+                        pendingTurn = 0
+                        turn(true)
+                    } else if (pendingTurn < 0 && page === previousSlot && page.isReady) {
+                        pendingTurn = 0
+                        turn(false)
+                    }
                 }
             }
             "tap" -> if (page === current && !dragging && !pulling && !verticalTransitioning) listener?.tapped(m)
@@ -1386,6 +1432,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
     }
 
     fun close() {
+        pendingTurn = 0
         animator?.cancel()
         scrollAnimator?.cancel()
         verticalAnimator?.cancel()

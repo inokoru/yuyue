@@ -90,10 +90,12 @@ fun TxtLayoutSheet(library: Library, bookID: String, title: String, rebuilt: () 
                 if (!allChapters && chapters.size > 3) row { YYRow(t("全部 %lld 章", chapters.size), chevron = true) { allChapters = true } }
             }
             YYNote(t("每一行从头比对规则，对上的就是一章的标题。自动识别还认得序章、楔子、Chapter 1 这些。"))
-            l?.long?.toInt()?.takeIf { it in l.chapters.indices }?.let { i ->
-                YYNote(t("第 %lld 章之后有 %@字，可能漏了几章", i + 1, "%,d ".format(l.chapters[i].chars.toInt())), YY.c.warn)
+            val longIdx = l?.long?.toInt()?.takeIf { it in l.chapters.indices }
+            if (longIdx != null) {
+                YYNote(t("第 %lld 章之后有 %@字，可能漏了几章", longIdx + 1, "%,d ".format(l.chapters[longIdx].chars.toInt())), YY.c.warn)
+            } else {
+                l?.doubt?.takeIf { l.unreadable == 0u }?.let { YYNote(it, YY.c.warn) }
             }
-            l?.doubt?.takeIf { l.unreadable == 0u }?.let { YYNote(it, YY.c.warn) }
             failure?.let { YYNote(it, YY.c.danger) }
             Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

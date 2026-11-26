@@ -461,8 +461,19 @@ fn build_txt(tmp: &Path, id: &str, bytes: &[u8], fallback_title: &str, options: 
         return Err(CoreError::bad_book("the file has no text"));
     }
     let start = start.min(built.len() - 1) as u32;
-    let title = structured.title.clone().filter(|t| !t.is_empty()).unwrap_or_else(|| fallback_title.to_string());
-    let authors = structured.author.clone().into_iter().collect();
+    let parsed_fallback = txt::parse_title_author(fallback_title);
+    let title = structured
+        .title
+        .clone()
+        .filter(|t| !t.is_empty())
+        .or_else(|| parsed_fallback.as_ref().map(|(t, _)| t.clone()))
+        .unwrap_or_else(|| fallback_title.trim_matches(['《', '》']).to_string());
+    let authors = structured
+        .author
+        .clone()
+        .or_else(|| parsed_fallback.and_then(|(_, a)| a))
+        .into_iter()
+        .collect();
     finish(tmp, id, Format::Txt, title, authors, language, None, None, start, built, toc)
 }
 

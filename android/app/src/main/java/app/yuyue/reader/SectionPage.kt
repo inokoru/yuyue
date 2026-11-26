@@ -112,6 +112,7 @@ class SectionPage(context: Context, private val core: YuyueCore, private val boo
     /** In scrolled mode, the first sentence in view (from `scroll`). */
     var scrolledTo: Int? = null
     private var target: Target? = null
+    private var settled = false
     var generation = 0
         private set
     /** Called when a newly loaded section has been laid out and positioned. */
@@ -151,13 +152,16 @@ class SectionPage(context: Context, private val core: YuyueCore, private val boo
 
     fun setBackground(color: Int) = webView.setBackgroundColor(color)
 
-    fun load(bookID: String, section: Int, target: Target) {
+    fun load(bookID: String, section: Int, target: Target, revealAfterReady: Boolean = true) {
         generation++
         this.section = section
         this.target = target
         layout = null
         page = 0
-        webView.alpha = 0f
+        settled = false
+        // Keep off-screen neighbours at alpha=1 so Android's ViewGroup draw pass doesn't skip
+        // them and stall Chromium's initial paint / ready callback before a chapter turn.
+        webView.alpha = if (revealAfterReady) 0f else 1f
         webView.loadUrl("$ORIGIN/book/$bookID/s/$section.html?g=$generation")
     }
 
@@ -167,6 +171,7 @@ class SectionPage(context: Context, private val core: YuyueCore, private val boo
         section = null
         layout = null
         target = null
+        settled = false
         webView.stopLoading()
         webView.loadUrl("about:blank")
     }
@@ -177,7 +182,7 @@ class SectionPage(context: Context, private val core: YuyueCore, private val boo
         layout = SectionLayout.of(m) ?: return
     }
 
-    val isReady: Boolean get() = layout != null && target == null
+    val isReady: Boolean get() = layout != null && target == null && settled
 
     /** After `take`: a newly loaded section goes to its target and shows itself (returns true);
      *  one laid out again learns which page the reader kept in view. */
@@ -189,10 +194,12 @@ class SectionPage(context: Context, private val core: YuyueCore, private val boo
             target = null
             go(t)
             if (g != generation) return false
+            settled = true
             webView.alpha = 1f
             onReady?.invoke(this)
             return true
         }
+        if (!settled) return false
         (ask("yy.currentPage()") as? Number)?.toInt()?.let { if (g == generation) page = minOf(it, layout.pageCount - 1) }
         return false
     }
@@ -266,10 +273,14 @@ class SectionPage(context: Context, private val core: YuyueCore, private val boo
                             html = PaperAppearance.applyToHTML(html, resolved)
                         }
                     }
-                    if (EInk.on) {
-                        val attrs = if (EInk.grayscale) "data-yy-eink=\"1\" data-yy-eink-gray=\"1\" " else "data-yy-eink=\"1\" "
-                        html = html.replaceFirst("<html ", "<html $attrs")
+                    val htmlAttrs = buildString {
+                        append("data-yy-android=\"1\" ")
+                        if (EInk.on) {
+                            append("data-yy-eink=\"1\" ")
+                            if (EInk.grayscale) append("data-yy-eink-gray=\"1\" ")
+                        }
                     }
+                    html = html.replaceFirst("<html ", "<html $htmlAttrs")
                     WebResourceResponse("text/html", "utf-8", ByteArrayInputStream(html.toByteArray())).noStore()
                 }
                 is Served.File -> {

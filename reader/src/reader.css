@@ -117,6 +117,10 @@ html[data-yy-mode="paginated"] {
   overflow-y: hidden !important;
   position: relative !important;
 }
+/* Android ReaderPager owns horizontal swipes; stop Chromium from hijacking taps as a horizontal pan. */
+html[data-yy-android="1"][data-yy-mode="paginated"] {
+  touch-action: pan-y !important;
+}
 html[data-yy-mode="paginated"] body {
   width: var(--yy-pw, 100vw) !important;
   height: var(--yy-ph, 100vh) !important;
