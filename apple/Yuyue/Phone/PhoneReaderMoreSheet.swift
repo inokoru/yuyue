@@ -24,6 +24,8 @@ struct PhoneReaderMoreSheet: View {
     @AppStorage(ReaderBrightness.eyeCareKey) private var eyeCare = false
     @AppStorage(PageTurnPrefs.key) private var pageTurnRaw = PageTurn.slide.rawValue
     @AppStorage(PageTurnPrefs.soundKey) private var pageTurnSound = false
+    @AppStorage(PageTurnPrefs.soundStyleKey) private var pageTurnSoundStyleRaw = PageTurnSoundStyle.softPaper.rawValue
+    @AppStorage(PageTurnPrefs.hapticKey) private var pageTurnHaptic = false
     @AppStorage(EInk.key) private var einkOn = false
     @State private var activeRuleCount = 0
     @State private var measuredHeight: CGFloat = 0
@@ -39,7 +41,7 @@ struct PhoneReaderMoreSheet: View {
         if einkOn {
             return 350 + (showTranslate ? 54 : 0)
         }
-        return 456 + (showTranslate ? 54 : 0) + (showTurn ? 56 : 0)
+        return 456 + (showTranslate ? 54 : 0) + (showTurn ? (pageTurnSound ? 210 : 56) : 0)
     }
     private var sheetHeight: CGFloat {
         measuredHeight > 0 ? measuredHeight : estimatedHeight
@@ -476,54 +478,116 @@ struct PhoneReaderMoreSheet: View {
             (.cover, String(localized: "覆盖")),
             (.none, String(localized: "无动画")),
         ]
-        return HStack(spacing: 8) {
-            Text("翻页")
-                .font(.yy(size: 12, weight: .medium))
-                .foregroundStyle(ink2)
-                .padding(.leading, 4)
-            HStack(spacing: 3) {
-                ForEach(turns, id: \.0.rawValue) { pt, label in
-                    let on = current == pt
-                    Button {
-                        pageTurnRaw = pt.rawValue
-                        model.pager.pageTurn = pt
-                    } label: {
-                        Text(label)
-                            .font(.yy(size: 12, weight: on ? .semibold : .medium))
-                            .foregroundStyle(on ? ink : ink2)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 28)
-                            .background(on ? cardBg : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            .shadow(color: on ? .black.opacity(0.07) : .clear, radius: 1.5, y: 1)
+        return VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text("翻页")
+                    .font(.yy(size: 12, weight: .medium))
+                    .foregroundStyle(ink2)
+                    .padding(.leading, 4)
+                HStack(spacing: 3) {
+                    ForEach(turns, id: \.0.rawValue) { pt, label in
+                        let on = current == pt
+                        Button {
+                            pageTurnRaw = pt.rawValue
+                            model.pager.pageTurn = pt
+                        } label: {
+                            Text(label)
+                                .font(.yy(size: 12, weight: on ? .semibold : .medium))
+                                .foregroundStyle(on ? ink : ink2)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 28)
+                                .background(on ? cardBg : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .shadow(color: on ? .black.opacity(0.07) : .clear, radius: 1.5, y: 1)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
-            }
-            .padding(3)
-            .background(insetBg, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .padding(3)
+                .background(insetBg, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
 
-            Button {
-                pageTurnSound.toggle()
-            } label: {
-                Image(systemName: pageTurnSound ? "speaker.wave.2" : "speaker.slash")
-                    .font(.yy(size: 14, weight: .medium))
-                    .foregroundStyle(pageTurnSound ? YYTint.standard.accent : ink2)
-                    .frame(width: 40, height: 32)
-                    .background(pageTurnSound ? YYTint.standard.accentSoft : insetBg, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .strokeBorder(pageTurnSound ? YYTint.standard.accent.opacity(0.35) : .clear, lineWidth: 0.5)
-                    )
+                Button {
+                    let next = !pageTurnHaptic
+                    pageTurnHaptic = next
+                    if next {
+                        PageTurnHaptics.shared.preview()
+                    }
+                } label: {
+                    Image(systemName: "iphone.radiowaves.left.and.right")
+                        .font(.yy(size: 13.5, weight: .medium))
+                        .foregroundStyle(pageTurnHaptic ? YYTint.standard.accent : ink2)
+                        .frame(width: 34, height: 32)
+                        .background(pageTurnHaptic ? YYTint.standard.accentSoft : insetBg, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                .strokeBorder(pageTurnHaptic ? YYTint.standard.accent.opacity(0.35) : .clear, lineWidth: 0.5)
+                        )
+                }
+                .buttonStyle(YYPressStyle(scale: 0.92))
+                .accessibilityLabel(Text("翻页轻震"))
+                .accessibilityValue(Text(pageTurnHaptic ? "已开启" : "已关闭"))
+
+                Button {
+                    let next = !pageTurnSound
+                    pageTurnSound = next
+                    if next {
+                        PageTurnSound.shared.previewSelection(pageTurnSoundStyleRaw)
+                    }
+                } label: {
+                    Image(systemName: pageTurnSound ? "speaker.wave.2" : "speaker.slash")
+                        .font(.yy(size: 13.5, weight: .medium))
+                        .foregroundStyle(pageTurnSound ? YYTint.standard.accent : ink2)
+                        .frame(width: 34, height: 32)
+                        .background(pageTurnSound ? YYTint.standard.accentSoft : insetBg, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                .strokeBorder(pageTurnSound ? YYTint.standard.accent.opacity(0.35) : .clear, lineWidth: 0.5)
+                        )
+                }
+                .buttonStyle(YYPressStyle(scale: 0.92))
+                .accessibilityLabel(Text("翻页音效"))
+                .accessibilityValue(Text(pageTurnSound ? PageTurnPrefs.displayName(for: pageTurnSoundStyleRaw) : String(localized: "已关闭")))
             }
-            .buttonStyle(YYPressStyle(scale: 0.92))
-            .accessibilityLabel(Text("翻页音效"))
-            .accessibilityValue(Text(pageTurnSound ? "已开启" : "已关闭"))
+            .padding(.horizontal, 8)
+            .frame(height: 46)
+
+            if pageTurnSound {
+                Rectangle()
+                    .fill(borderColor)
+                    .frame(height: 0.5)
+                    .padding(.horizontal, 10)
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack {
+                        Text("翻页音效")
+                            .font(.yy(size: 11, weight: .medium))
+                            .foregroundStyle(ink2)
+                        Spacer()
+                        Text("点按试听")
+                            .font(.yy(size: 10.5))
+                            .foregroundStyle(ink2.opacity(0.8))
+                    }
+                    .padding(.horizontal, 2)
+                    PageTurnSoundStyleGrid(
+                        selectedRaw: $pageTurnSoundStyleRaw,
+                        showSubtitle: false,
+                        compact: false,
+                        cardBg: cardBg,
+                        insetBg: insetBg,
+                        ink: ink,
+                        ink2: ink2,
+                        borderColor: borderColor,
+                        eink: einkOn
+                    )
+                }
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
-        .padding(.horizontal, 8)
-        .frame(height: 46)
         .background(cardBg, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(borderColor, lineWidth: 0.5))
+        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(borderColor, lineWidth: strokeWidth))
+        .animation(YYMotion.standard, value: pageTurnSound)
     }
 
     // MARK: 4. Bookstore Tool Footer Cards

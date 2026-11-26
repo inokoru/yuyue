@@ -12,6 +12,8 @@ struct TypesetCard: View {
     @AppStorage(EInk.key) private var einkOn = false
     @AppStorage(PageTurnPrefs.key) private var pageTurnRaw = PageTurn.slide.rawValue
     @AppStorage(PageTurnPrefs.soundKey) private var pageTurnSound = false
+    @AppStorage(PageTurnPrefs.soundStyleKey) private var pageTurnSoundStyleRaw = PageTurnSoundStyle.softPaper.rawValue
+    @AppStorage(PageTurnPrefs.hapticKey) private var pageTurnHaptic = false
     @State private var more = false
     /// 全部纸张, when 我的纸 are more than two rows.
     @State private var all = false
@@ -152,7 +154,37 @@ struct TypesetCard: View {
                     ) { _, t in Text(t) }
                         .frame(width: 170)
                 }
-                switchRow(String(localized: "翻页音效"), $pageTurnSound)
+                switchRow(
+                    String(localized: "翻页音效"),
+                    Binding(
+                        get: { pageTurnSound },
+                        set: { next in
+                            pageTurnSound = next
+                            if next { PageTurnSound.shared.previewSelection(pageTurnSoundStyleRaw) }
+                        }
+                    )
+                )
+                if pageTurnSound {
+                    PageTurnSoundStyleGrid(
+                        selectedRaw: $pageTurnSoundStyleRaw,
+                        showSubtitle: false,
+                        compact: true,
+                        eink: einkOn
+                    )
+                    .transition(.opacity)
+                }
+                #if os(iOS)
+                switchRow(
+                    String(localized: "翻页轻震"),
+                    Binding(
+                        get: { pageTurnHaptic },
+                        set: { next in
+                            pageTurnHaptic = next
+                            if next { PageTurnHaptics.shared.preview() }
+                        }
+                    )
+                )
+                #endif
             }
             row(String(localized: "段距")) {
                 Segments(items: [(Double?.some(0), String(localized: "无")), (nil, String(localized: "适中")), (.some(1), String(localized: "宽"))], selection: binding(\.paragraphSpacing)) { _, t in Text(t) }

@@ -152,10 +152,15 @@ fun ReaderScreen(library: Library, bookID: String, close: () -> Unit) {
     model.pager.accent = paper.accent.toArgb()
     val pageTurnRaw by app.yuyue.design.rememberPref(PageTurnPrefs.KEY, PageTurn.SLIDE.key)
     val pageTurnSound by app.yuyue.design.rememberPref(PageTurnPrefs.SOUND_KEY, false)
+    val pageTurnSoundStyleRaw by app.yuyue.design.rememberPref(PageTurnPrefs.SOUND_STYLE_KEY, PageTurnSoundStyle.SOFT_PAPER.key)
+    val pageTurnHaptic by app.yuyue.design.rememberPref(PageTurnPrefs.HAPTIC_KEY, false)
     model.pager.pageTurn = PageTurn.of(pageTurnRaw)
     model.pager.soundEnabled = pageTurnSound
+    model.pager.hapticEnabled = pageTurnHaptic
     model.pager.isReadingAloud = model.isPlaying
-    LaunchedEffect(pageTurnSound) { if (pageTurnSound) PageTurnSound.prepare(context) }
+    LaunchedEffect(pageTurnSound, pageTurnSoundStyleRaw) {
+        if (pageTurnSound) PageTurnSound.prepareSelection(context, pageTurnSoundStyleRaw)
+    }
     LaunchedEffect(model, Papers.version, PaperAppearance.version) { model.papersChanged() }
     LaunchedEffect(model, bookID) { model.consumeIntent() }
     DisposableEffect(model) {

@@ -513,6 +513,12 @@ fun ReadingPage(library: Library, push: (MePage) -> Unit) {
     val eink by rememberPref(EInk.KEY, false)
     var pageTurnRaw by rememberPref(app.yuyue.reader.PageTurnPrefs.KEY, app.yuyue.reader.PageTurn.SLIDE.key)
     var pageTurnSound by rememberPref(app.yuyue.reader.PageTurnPrefs.SOUND_KEY, false)
+    var pageTurnSoundStyleRaw by rememberPref(
+        app.yuyue.reader.PageTurnPrefs.SOUND_STYLE_KEY,
+        app.yuyue.reader.PageTurnSoundStyle.SOFT_PAPER.key,
+    )
+    var pageTurnHaptic by rememberPref(app.yuyue.reader.PageTurnPrefs.HAPTIC_KEY, false)
+    val view = androidx.compose.ui.platform.LocalView.current
     var editingPaper by remember { mutableStateOf<CustomPaper?>(null) }
     var previewPaper by remember { mutableStateOf<CustomPaper?>(null) }
     var renamingPaper by remember { mutableStateOf<CustomPaper?>(null) }
@@ -662,7 +668,32 @@ fun ReadingPage(library: Library, push: (MePage) -> Unit) {
                         )
                     })
                 }
-                row { DetailSwitch(t("翻页音效"), t("手动翻页时播放轻纸声，朗读时自动静音"), pageTurnSound) { pageTurnSound = it } }
+                row {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DetailSwitch(t("翻页音效"), t("手动翻页时播放，朗读时自动静音"), pageTurnSound) { next ->
+                            pageTurnSound = next
+                            if (next) {
+                                app.yuyue.reader.PageTurnSound.previewSelection(context, pageTurnSoundStyleRaw)
+                            }
+                        }
+                        if (pageTurnSound) {
+                            Box(Modifier.padding(bottom = 8.dp)) {
+                                app.yuyue.reader.PageTurnSoundStyleGrid(
+                                    selectedRaw = pageTurnSoundStyleRaw,
+                                    onSelectKey = { pageTurnSoundStyleRaw = it },
+                                    showSubtitle = true,
+                                    compact = false,
+                                )
+                            }
+                        }
+                    }
+                }
+                row {
+                    DetailSwitch(t("翻页轻震"), t("手动翻页时轻触震动，静音也可用"), pageTurnHaptic) { next ->
+                        pageTurnHaptic = next
+                        if (next) view.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+                    }
+                }
             }
             row { DetailSwitch(t("两端对齐"), null, s.justify ?: true) { v -> change { it.copy(justify = v) } } }
             row { DetailSwitch(t("首行缩进两字"), null, s.indent ?: true) { v -> change { it.copy(indent = v) } } }

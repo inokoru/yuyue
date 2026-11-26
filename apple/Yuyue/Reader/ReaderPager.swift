@@ -596,6 +596,9 @@ final class ReaderPager: PlatformView {
     }
 
     private func playManualTurnSound() {
+        #if os(iOS)
+        PageTurnHaptics.shared.trigger()
+        #endif
         guard !isReadingAloud else { return }
         PageTurnSound.shared.play()
     }

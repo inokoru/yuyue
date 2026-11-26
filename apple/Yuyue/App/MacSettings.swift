@@ -1128,6 +1128,7 @@ private struct ReadingSettings: View {
     @AppStorage("reader.twoColumns") private var twoColumns = true
     @AppStorage(PageTurnPrefs.key) private var pageTurnRaw = PageTurn.slide.rawValue
     @AppStorage(PageTurnPrefs.soundKey) private var pageTurnSound = false
+    @AppStorage(PageTurnPrefs.soundStyleKey) private var pageTurnSoundStyleRaw = PageTurnSoundStyle.softPaper.rawValue
     @AppStorage(ImmersivePrefs.lineKey) private var immersiveLine = true
     @AppStorage(ImmersivePrefs.marksKey) private var immersiveMarks = false
     @AppStorage(ImmersivePrefs.hintsKey) private var immersiveHints = true
@@ -1242,9 +1243,31 @@ private struct ReadingSettings: View {
                         )
                         .frame(minWidth: 180).fixedSize()
                     }
-                    SettingsRow(String(localized: "翻页音效"), detail: String(localized: "手动翻页时播放轻纸声，朗读时自动静音")) {
-                        SettingsSwitch(isOn: $pageTurnSound)
+                    VStack(alignment: .leading, spacing: 10) {
+                        SettingsRow(String(localized: "翻页音效"), detail: String(localized: "手动翻页时播放，朗读时自动静音")) {
+                            SettingsSwitch(
+                                isOn: Binding(
+                                    get: { pageTurnSound },
+                                    set: { next in
+                                        pageTurnSound = next
+                                        if next { PageTurnSound.shared.previewSelection(pageTurnSoundStyleRaw) }
+                                    }
+                                )
+                            )
+                        }
+                        if pageTurnSound {
+                            PageTurnSoundStyleGrid(
+                                selectedRaw: $pageTurnSoundStyleRaw,
+                                showSubtitle: true,
+                                compact: false,
+                                eink: EInk.on
+                            )
+                            .padding(.horizontal, 14)
+                            .padding(.bottom, 12)
+                            .transition(.opacity)
+                        }
                     }
+                    .animation(YYMotion.standard, value: pageTurnSound)
                 }
                 SettingsRow(String(localized: "宽窗口下双栏显示"), detail: String(localized: "左右并排显示两页")) {
                     SettingsSwitch(isOn: $twoColumns)

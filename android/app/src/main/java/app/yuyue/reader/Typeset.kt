@@ -141,9 +141,13 @@ private fun Main(model: ReaderModel, openMore: () -> Unit, openFonts: () -> Unit
 
 @Composable
 private fun More(model: ReaderModel, back: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
     val s = model.settings
     var pageTurnRaw by rememberPref(PageTurnPrefs.KEY, PageTurn.SLIDE.key)
     var pageTurnSound by rememberPref(PageTurnPrefs.SOUND_KEY, false)
+    var pageTurnSoundStyleRaw by rememberPref(PageTurnPrefs.SOUND_STYLE_KEY, PageTurnSoundStyle.SOFT_PAPER.key)
+    var pageTurnHaptic by rememberPref(PageTurnPrefs.HAPTIC_KEY, false)
     Row(Modifier.height(40.dp).clickable(onClick = back), verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.chevronLeft, null, tint = YY.tint.accent, modifier = Modifier.size(18.dp))
         Text(t("排版"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = YY.tint.accent)
@@ -161,7 +165,22 @@ private fun More(model: ReaderModel, back: () -> Unit) {
                 modifier = Modifier.widthIn(min = 176.dp),
             )
         }
-        SwitchRow(t("翻页音效"), pageTurnSound) { pageTurnSound = it }
+        SwitchRow(t("翻页音效"), pageTurnSound) { next ->
+            pageTurnSound = next
+            if (next) PageTurnSound.previewSelection(context, pageTurnSoundStyleRaw)
+        }
+        if (pageTurnSound) {
+            PageTurnSoundStyleGrid(
+                selectedRaw = pageTurnSoundStyleRaw,
+                onSelectKey = { pageTurnSoundStyleRaw = it },
+                showSubtitle = false,
+                compact = true,
+            )
+        }
+        SwitchRow(t("翻页轻震"), pageTurnHaptic) { next ->
+            pageTurnHaptic = next
+            if (next) view.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+        }
     }
     Row2(t("段距")) {
         YYSegments(listOf<Pair<Double?, String>>(0.0 to t("无"), null to t("适中"), 1.0 to t("宽")), s.paragraphSpacing, { v -> model.update { it.copy(paragraphSpacing = v) } }, modifier = Modifier.widthIn(min = 160.dp))

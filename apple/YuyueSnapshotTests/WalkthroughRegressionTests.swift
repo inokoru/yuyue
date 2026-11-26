@@ -932,6 +932,112 @@ struct WalkthroughRegressionTests {
         #expect(tight.leftWidth + tight.gutter + tight.rightWidth + tight.horizontalMargin * 2 <= 560.5)
     }
     #endif
+
+    @Test func `page turn sound styles synthesize clean 44.1kHz WAVs with distinct variants`() {
+        #expect(PageTurnSoundStyle.allCases.count == 6)
+        #expect(PageTurnSoundStyle.of("unknown") == .softPaper)
+        #expect(PageTurnSoundStyle.of("inkDrop") == .inkDrop)
+
+        for style in PageTurnSoundStyle.allCases {
+            var variants: [Data] = []
+            for v in 0 ..< PageTurnSound.variantCount {
+                let wav = PageTurnSound.synthesizeWav(style: style, variant: v)
+                #expect(wav.count > 44 + 4_000)
+                #expect(String(decoding: wav[0 ..< 4], as: UTF8.self) == "RIFF")
+                #expect(String(decoding: wav[8 ..< 12], as: UTF8.self) == "WAVE")
+                #expect(String(decoding: wav[36 ..< 40], as: UTF8.self) == "data")
+                let sr = wav.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 24, as: UInt32.self).littleEndian }
+                #expect(Int(sr) == PageTurnSound.sampleRate)
+
+                let sampleCount = (wav.count - 44) / 2
+                var sum = 0.0
+                var peak = 0
+                wav.withUnsafeBytes { raw in
+                    let base = raw.baseAddress!.advanced(by: 44)
+                    for i in 0 ..< sampleCount {
+                        let s = Int(base.loadUnaligned(fromByteOffset: i * 2, as: Int16.self).littleEndian)
+                        sum += Double(s)
+                        peak = max(peak, abs(s))
+                    }
+                    // Edges fade cleanly to near silence (no audible click).
+                    let first = abs(Int(base.loadUnaligned(fromByteOffset: 0, as: Int16.self).littleEndian))
+                    let last = abs(Int(base.loadUnaligned(fromByteOffset: (sampleCount - 1) * 2, as: Int16.self).littleEndian))
+                    #expect(first < 64)
+                    #expect(last < 64)
+                }
+                let mean = abs(sum / Double(sampleCount)) / Double(Int16.max)
+                #expect(mean < 0.01)
+                #expect(peak > 10_000 && peak < 25_000)
+                variants.append(wav)
+            }
+            #expect(variants[0] != variants[1])
+            #expect(variants[1] != variants[2])
+        }
+    }
+
+    @Test func `custom page turn sound processor trims silence, caps duration, and rejects silent clips`() throws {
+        let sr = PageTurnSound.sampleRate
+
+        // 1. 300 ms leading silence + 120 ms 700 Hz burst + 400 ms trailing silence → trimmed & normalized.
+        let lead = Int(Double(sr) * 0.30)
+        let burst = Int(Double(sr) * 0.12)
+        let trail = Int(Double(sr) * 0.40)
+        var padded = [Float](repeating: 0, count: lead + burst + trail)
+        for i in 0 ..< burst {
+            let env = sin(Double.pi * Double(i) / Double(burst))
+            padded[lead + i] = Float(0.18 * env * sin(2.0 * Double.pi * 700.0 * Double(i) / Double(sr)))
+        }
+        let trimmed = try CustomPageTurnSounds.trimAndNormalize(samples: padded, sampleRate: sr)
+        #expect(trimmed.durationMs >= 100 && trimmed.durationMs <= 185)
+        #expect(trimmed.waveform.count == CustomPageTurnSounds.waveformBarCount)
+        #expect(trimmed.trimStart >= 0.0 && trimmed.trimEnd <= 1.0 && trimmed.trimEnd > trimmed.trimStart)
+        #expect(String(decoding: trimmed.wavData[0 ..< 4], as: UTF8.self) == "RIFF")
+        #expect(String(decoding: trimmed.wavData[8 ..< 12], as: UTF8.self) == "WAVE")
+        let trimmedCount = (trimmed.wavData.count - 44) / 2
+        trimmed.wavData.withUnsafeBytes { raw in
+            let base = raw.baseAddress!.advanced(by: 44)
+            var peak = 0
+            for i in 0 ..< trimmedCount {
+                peak = max(peak, abs(Int(base.loadUnaligned(fromByteOffset: i * 2, as: Int16.self).littleEndian)))
+            }
+            let first = abs(Int(base.loadUnaligned(fromByteOffset: 0, as: Int16.self).littleEndian))
+            let last = abs(Int(base.loadUnaligned(fromByteOffset: (trimmedCount - 1) * 2, as: Int16.self).littleEndian))
+            #expect(first < 64)
+            #expect(last < 64)
+            #expect(peak >= 17_000 && peak <= 22_000)
+        }
+
+        // 1b. Interactive micro-trim re-slices cleanly inside the context window.
+        let midEnd = (trimmed.trimStart + trimmed.trimEnd) * 0.5
+        let sub = CustomPageTurnSounds.renderTrimmed(from: trimmed, startFraction: trimmed.trimStart, endFraction: midEnd)
+        #expect(sub != nil)
+        if let sub {
+            #expect(sub.durationMs < trimmed.durationMs)
+            #expect(sub.durationMs >= 25)
+            #expect(sub.autoTrimStart == trimmed.autoTrimStart)
+        }
+
+        // 2. 2.0 s continuous tone → capped to <= 0.65 s with smooth fade-out.
+        let longCount = sr * 2
+        var longTone = [Float](repeating: 0, count: longCount)
+        for i in 0 ..< longCount {
+            longTone[i] = Float(0.30 * sin(2.0 * Double.pi * 520.0 * Double(i) / Double(sr)))
+        }
+        let capped = try CustomPageTurnSounds.trimAndNormalize(samples: longTone, sampleRate: sr)
+        #expect(capped.durationMs >= 640 && capped.durationMs <= 660)
+        let cappedCount = (capped.wavData.count - 44) / 2
+        capped.wavData.withUnsafeBytes { raw in
+            let base = raw.baseAddress!.advanced(by: 44)
+            let last = abs(Int(base.loadUnaligned(fromByteOffset: (cappedCount - 1) * 2, as: Int16.self).littleEndian))
+            #expect(last < 64)
+        }
+
+        // 3. Silent / near-silent buffer → rejected with .silentOrEmpty.
+        let silent = [Float](repeating: 0.0005, count: sr / 4)
+        #expect(throws: CustomSoundError.silentOrEmpty) {
+            _ = try CustomPageTurnSounds.trimAndNormalize(samples: silent, sampleRate: sr)
+        }
+    }
 }
 
 private struct StubPreviewVoice: Voice {

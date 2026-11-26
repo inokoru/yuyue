@@ -230,6 +230,7 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         pager.calm = EInk.on
         pager.pageTurn = PageTurnPrefs.current
         pager.soundEnabled = PageTurnPrefs.sound
+        pager.hapticEnabled = PageTurnPrefs.haptic
         pager.bubbles = bubbles
         pager.background = paperTokens.bg.toArgb()
         pager.ink = paperTokens.ink.toArgb()

@@ -48732,6 +48732,476 @@
           }
         }
       }
+    },
+    "轻纸" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Soft Paper"
+          }
+        }
+      }
+    },
+    "脆页" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Crisp Page"
+          }
+        }
+      }
+    },
+    "精装" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hardcover"
+          }
+        }
+      }
+    },
+    "轻叩" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Soft Wood"
+          }
+        }
+      }
+    },
+    "滴墨" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ink Drop"
+          }
+        }
+      }
+    },
+    "柔和薄页" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gentle thin paper"
+          }
+        }
+      }
+    },
+    "清爽新书" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Crisp new book"
+          }
+        }
+      }
+    },
+    "绵厚柔润" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plush cotton paper"
+          }
+        }
+      }
+    },
+    "沉稳厚页" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Heavy bound stock"
+          }
+        }
+      }
+    },
+    "指尖木案" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Warm wood tap"
+          }
+        }
+      }
+    },
+    "水墨落砚" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Drop into inkstone"
+          }
+        }
+      }
+    },
+    "点按试听" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to preview"
+          }
+        }
+      }
+    },
+    "手动翻页时播放，朗读时自动静音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plays on manual page turns; mutes while reading aloud"
+          }
+        }
+      }
+    },
+    "已关闭" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off"
+          }
+        }
+      }
+    },
+    "从文件导入音频" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import audio file"
+          }
+        }
+      }
+    },
+    "保存自定义音效失败，请重试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't save custom sound. Please try again."
+          }
+        }
+      }
+    },
+    "停止录音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop recording"
+          }
+        }
+      }
+    },
+    "声音太短了，换一段试试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clip is too short. Try another sound."
+          }
+        }
+      }
+    },
+    "导入或实录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import or record"
+          }
+        }
+      }
+    },
+    "已保存的自定义音效" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved custom sounds"
+          }
+        }
+      }
+    },
+    "录一段翻书声" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Record a page-turn sound"
+          }
+        }
+      }
+    },
+    "手动翻页时轻触震动，静音也可用" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subtle haptic tap on manual page turns, even when muted"
+          }
+        }
+      }
+    },
+    "手边实录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recorded clip"
+          }
+        }
+      }
+    },
+    "无法启动录音，请重试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't start recording. Please try again."
+          }
+        }
+      }
+    },
+    "没有检测到明显声音，再试一次" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No clear sound detected. Try again."
+          }
+        }
+      }
+    },
+    "翻页轻震" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Page-turn haptics"
+          }
+        }
+      }
+    },
+    "自定义翻页音效" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom page-turn sound"
+          }
+        }
+      }
+    },
+    "自定义音效" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom sound"
+          }
+        }
+      }
+    },
+    "请在系统设置中允许语阅使用麦克风，或直接从文件导入音频" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow microphone access in System Settings, or import an audio file instead."
+          }
+        }
+      }
+    },
+    "这段音频读不出来，换一个试试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't read this audio file. Try another one."
+          }
+        }
+      }
+    },
+    "重选" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retake"
+          }
+        }
+      }
+    },
+    "音效音量" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sound volume"
+          }
+        }
+      }
+    },
+    "从文件导入…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import File…"
+          }
+        }
+      }
+    },
+    "只保存在本地，不上传" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stored on device only"
+          }
+        }
+      }
+    },
+    "导入音频" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Imported Audio"
+          }
+        }
+      }
+    },
+    "录完稍停自动截取 · 自动去静音并调平音量" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-stops after sound settles · trims & levels automatically"
+          }
+        }
+      }
+    },
+    "正在收音 · %@ 秒" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Listening · %@ s"
+          }
+        }
+      }
+    },
+    "正在裁剪与调平音量…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trimming & leveling…"
+          }
+        }
+      }
+    },
+    "给音效起个名字" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name this sound"
+          }
+        }
+      }
+    },
+    "翻一页真书，或轻敲桌面" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flip a real page, or tap your desk"
+          }
+        }
+      }
+    },
+    "翻完停顿片刻自动完成，或轻点停止" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pause briefly to finish automatically, or tap to stop"
+          }
+        }
+      }
+    },
+    "轻敲桌面" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desk Tap"
+          }
+        }
+      }
+    },
+    "再翻一页试试节奏，满意就可以直接保存使用。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flip once more to feel the rhythm, then save whenever it feels right."
+          }
+        }
+      }
+    },
+    "点此试翻" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap to flip"
+          }
+        }
+      }
+    },
+    "纸页轻轻掠过指尖，声音恰到好处，不惊扰夜读。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A soft brush of paper beneath your fingers—gentle enough for late-night reading."
+          }
+        }
+      }
+    },
+    "轻点或轻扫这一页，听听你刚录下的翻书声。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap or swipe this page to hear the page-turn sound you just captured."
+          }
+        }
+      }
+    },
+    "音效名" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

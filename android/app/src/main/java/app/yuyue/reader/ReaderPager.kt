@@ -79,6 +79,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
     var pageTurn: PageTurn = PageTurn.SLIDE
     /** Plays a light synthesized paper turn sound on manual turns when not reading aloud. */
     var soundEnabled: Boolean = false
+    var hapticEnabled: Boolean = false
     var isReadingAloud: Boolean = false
     private val instantTurn: Boolean get() = calm || pageTurn == PageTurn.NONE
     private val useCover: Boolean get() = !calm && mode == LayoutMode.PAGINATED && pageTurn == PageTurn.COVER
@@ -532,10 +533,13 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
             }
         }
         val movedPage = current?.section != prevSection || current?.page != prevPage
-        val playTurn = pendingManualSound && movedPage && soundEnabled && !isReadingAloud
+        val manualTurn = pendingManualSound && movedPage
         pendingManualSound = false
         render()
-        if (playTurn) PageTurnSound.play(context)
+        if (manualTurn) {
+            if (hapticEnabled) performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+            if (soundEnabled && !isReadingAloud) PageTurnSound.play(context)
+        }
         listener?.moved(this)
     }
 

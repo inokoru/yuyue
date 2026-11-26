@@ -24,6 +24,7 @@ struct MacReaderMorePopover: View {
     @AppStorage(MacReaderBrightness.eyeCareKey) private var eyeCare = false
     @AppStorage(PageTurnPrefs.key) private var pageTurnRaw = PageTurn.slide.rawValue
     @AppStorage(PageTurnPrefs.soundKey) private var pageTurnSound = false
+    @AppStorage(PageTurnPrefs.soundStyleKey) private var pageTurnSoundStyleRaw = PageTurnSoundStyle.softPaper.rawValue
     @AppStorage(EInk.key) private var einkOn = false
     @State private var activeRuleCount = 0
 
@@ -91,7 +92,24 @@ struct MacReaderMorePopover: View {
                         onKnob: switchOnKnob,
                         offTrack: switchOffTrack
                     ) {
-                        pageTurnSound.toggle()
+                        let next = !pageTurnSound
+                        pageTurnSound = next
+                        if next { PageTurnSound.shared.previewSelection(pageTurnSoundStyleRaw) }
+                    }
+                    if pageTurnSound {
+                        PageTurnSoundStyleGrid(
+                            selectedRaw: $pageTurnSoundStyleRaw,
+                            showSubtitle: false,
+                            compact: true,
+                            cardBg: cardBg,
+                            insetBg: insetBg,
+                            ink: ink,
+                            ink2: ink2,
+                            borderColor: lineColor,
+                            eink: einkOn
+                        )
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
                     }
                 }
                 MacPopoverToggleRow(

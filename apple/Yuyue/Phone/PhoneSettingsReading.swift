@@ -377,6 +377,8 @@ struct PhoneReading: View {
     @AppStorage(EInk.key) private var einkOn = false
     @AppStorage(PageTurnPrefs.key) private var pageTurnRaw = PageTurn.slide.rawValue
     @AppStorage(PageTurnPrefs.soundKey) private var pageTurnSound = false
+    @AppStorage(PageTurnPrefs.soundStyleKey) private var pageTurnSoundStyleRaw = PageTurnSoundStyle.softPaper.rawValue
+    @AppStorage(PageTurnPrefs.hapticKey) private var pageTurnHaptic = false
     @State private var editingPaper: PaperDraft?
     @State private var previewPaper: CustomPaper?
     @State private var renamingPaper: CustomPaper?
@@ -486,13 +488,52 @@ struct PhoneReading: View {
                         )
                         .fixedSize()
                     }
+                    VStack(alignment: .leading, spacing: YYUI.s(8)) {
+                        HStack(spacing: YYUI.s(10)) {
+                            VStack(alignment: .leading, spacing: YYUI.s(1)) {
+                                Text("翻页音效").font(YYUI.font(11.5)).foregroundStyle(YYColor.t1)
+                                Text("手动翻页时播放，朗读时自动静音").font(YYUI.font(10)).foregroundStyle(YYColor.t3)
+                            }
+                            Spacer(minLength: YYUI.s(8))
+                            YYSwitch(
+                                isOn: Binding(
+                                    get: { pageTurnSound },
+                                    set: { next in
+                                        pageTurnSound = next
+                                        if next { PageTurnSound.shared.previewSelection(pageTurnSoundStyleRaw) }
+                                    }
+                                ),
+                                label: String(localized: "翻页音效")
+                            )
+                        }
+                        if pageTurnSound {
+                            PageTurnSoundStyleGrid(
+                                selectedRaw: $pageTurnSoundStyleRaw,
+                                showSubtitle: true,
+                                compact: false,
+                                eink: einkOn
+                            )
+                            .transition(.opacity)
+                        }
+                    }
+                    .padding(.vertical, YYUI.s(8))
+                    .animation(YYMotion.standard, value: pageTurnSound)
                     HStack(spacing: YYUI.s(10)) {
                         VStack(alignment: .leading, spacing: YYUI.s(1)) {
-                            Text("翻页音效").font(YYUI.font(11.5)).foregroundStyle(YYColor.t1)
-                            Text("手动翻页时播放轻纸声，朗读时自动静音").font(YYUI.font(10)).foregroundStyle(YYColor.t3)
+                            Text("翻页轻震").font(YYUI.font(11.5)).foregroundStyle(YYColor.t1)
+                            Text("手动翻页时轻触震动，静音也可用").font(YYUI.font(10)).foregroundStyle(YYColor.t3)
                         }
                         Spacer(minLength: YYUI.s(8))
-                        YYSwitch(isOn: $pageTurnSound, label: String(localized: "翻页音效"))
+                        YYSwitch(
+                            isOn: Binding(
+                                get: { pageTurnHaptic },
+                                set: { next in
+                                    pageTurnHaptic = next
+                                    if next { PageTurnHaptics.shared.preview() }
+                                }
+                            ),
+                            label: String(localized: "翻页轻震")
+                        )
                     }
                     .padding(.vertical, YYUI.s(8))
                 }

@@ -94,11 +94,15 @@ fun ReaderMoreSheet(
     val isPdf = format == BookFormat.PDF
     val isTxt = format == BookFormat.TXT
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
     var followSystem by rememberPref(ReaderBrightness.FOLLOW_KEY, true)
     var readerBrightness by rememberPref(ReaderBrightness.VALUE_KEY, 0.6f)
     var eyeCare by rememberPref(ReaderBrightness.EYE_CARE_KEY, false)
     var pageTurnRaw by rememberPref(PageTurnPrefs.KEY, PageTurn.SLIDE.key)
     var pageTurnSound by rememberPref(PageTurnPrefs.SOUND_KEY, false)
+    var pageTurnSoundStyleRaw by rememberPref(PageTurnPrefs.SOUND_STYLE_KEY, PageTurnSoundStyle.SOFT_PAPER.key)
+    var pageTurnHaptic by rememberPref(PageTurnPrefs.HAPTIC_KEY, false)
     var activeRuleCount by remember(model.bookID) { mutableIntStateOf(0) }
     var exportMenuOpen by remember { mutableStateOf(false) }
 
@@ -577,88 +581,158 @@ fun ReaderMoreSheet(
                 }
             }
 
-            // 4. Page Turn Strip + Sound Toggle (paginated & non-E-Ink)
+            // 4. Page Turn Strip + Sound Style Picker (paginated & non-E-Ink)
             if (model.settings.mode == LayoutMode.PAGINATED && !eink) {
                 val currentTurn = PageTurn.of(pageTurnRaw)
                 val stripShape = RoundedCornerShape(15.dp)
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(46.dp)
                         .clip(stripShape)
                         .background(cardBg)
-                        .border(0.5.dp, borderColor, stripShape)
-                        .padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        .border(0.5.dp, borderColor, stripShape),
                 ) {
-                    Text(
-                        t("翻页"),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = ink2,
-                        modifier = Modifier.padding(start = 4.dp),
-                    )
                     Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .height(34.dp)
-                            .clip(RoundedCornerShape(11.dp))
-                            .background(insetBg)
-                            .padding(3.dp),
-                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                            .fillMaxWidth()
+                            .height(46.dp)
+                            .padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        val turns = listOf(
-                            PageTurn.SLIDE to t("滑动"),
-                            PageTurn.COVER to t("覆盖"),
-                            PageTurn.NONE to t("无动画"),
+                        Text(
+                            t("翻页"),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = ink2,
+                            modifier = Modifier.padding(start = 4.dp),
                         )
-                        for ((pt, label) in turns) {
-                            val on = currentTurn == pt
-                            val segShape = RoundedCornerShape(8.dp)
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                                    .then(if (on) Modifier.shadow(1.5.dp, segShape) else Modifier)
-                                    .clip(segShape)
-                                    .background(if (on) cardBg else Color.Transparent)
-                                    .clickable { pageTurnRaw = pt.key },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    label,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
-                                    color = if (on) ink else ink2,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(34.dp)
+                                .clip(RoundedCornerShape(11.dp))
+                                .background(insetBg)
+                                .padding(3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            val turns = listOf(
+                                PageTurn.SLIDE to t("滑动"),
+                                PageTurn.COVER to t("覆盖"),
+                                PageTurn.NONE to t("无动画"),
+                            )
+                            for ((pt, label) in turns) {
+                                val on = currentTurn == pt
+                                val segShape = RoundedCornerShape(8.dp)
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .then(if (on) Modifier.shadow(1.5.dp, segShape) else Modifier)
+                                        .clip(segShape)
+                                        .background(if (on) cardBg else Color.Transparent)
+                                        .clickable { pageTurnRaw = pt.key },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        label,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                                        color = if (on) ink else ink2,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
                             }
                         }
-                    }
-                    val soundShape = RoundedCornerShape(11.dp)
-                    Box(
-                        modifier = Modifier
-                            .size(width = 40.dp, height = 32.dp)
-                            .clip(soundShape)
-                            .background(if (pageTurnSound) YY.tint.accentSoft else insetBg)
-                            .border(
-                                0.5.dp,
-                                if (pageTurnSound) YY.tint.accent.copy(alpha = 0.35f) else Color.Transparent,
-                                soundShape,
+                        val btnShape = RoundedCornerShape(11.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(width = 34.dp, height = 32.dp)
+                                .clip(btnShape)
+                                .background(if (pageTurnHaptic) YY.tint.accentSoft else insetBg)
+                                .border(
+                                    0.5.dp,
+                                    if (pageTurnHaptic) YY.tint.accent.copy(alpha = 0.35f) else Color.Transparent,
+                                    btnShape,
+                                )
+                                .pressable(scale = 0.92f, label = t("翻页轻震")) {
+                                    val next = !pageTurnHaptic
+                                    pageTurnHaptic = next
+                                    if (next) {
+                                        view.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+                                    }
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.handTap,
+                                t("翻页轻震"),
+                                tint = if (pageTurnHaptic) YY.tint.accent else ink2,
+                                modifier = Modifier.size(15.dp),
                             )
-                            .pressable(scale = 0.92f, label = t("翻页音效")) {
-                                pageTurnSound = !pageTurnSound
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            if (pageTurnSound) Icons.speakerWave else Icons.speakerSlash,
-                            t("翻页音效"),
-                            tint = if (pageTurnSound) YY.tint.accent else ink2,
-                            modifier = Modifier.size(16.dp),
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(width = 34.dp, height = 32.dp)
+                                .clip(btnShape)
+                                .background(if (pageTurnSound) YY.tint.accentSoft else insetBg)
+                                .border(
+                                    0.5.dp,
+                                    if (pageTurnSound) YY.tint.accent.copy(alpha = 0.35f) else Color.Transparent,
+                                    btnShape,
+                                )
+                                .pressable(scale = 0.92f, label = t("翻页音效")) {
+                                    val next = !pageTurnSound
+                                    pageTurnSound = next
+                                    if (next) {
+                                        PageTurnSound.previewSelection(context, pageTurnSoundStyleRaw)
+                                    }
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                if (pageTurnSound) Icons.speakerWave else Icons.speakerSlash,
+                                t("翻页音效"),
+                                tint = if (pageTurnSound) YY.tint.accent else ink2,
+                                modifier = Modifier.size(15.dp),
+                            )
+                        }
+                    }
+                    if (pageTurnSound) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp)
+                                .height(0.5.dp)
+                                .background(borderColor),
                         )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(7.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(t("翻页音效"), fontSize = 11.sp, fontWeight = FontWeight.Medium, color = ink2)
+                                Text(t("点按试听"), fontSize = 10.5.sp, color = ink2.copy(alpha = 0.8f))
+                            }
+                            PageTurnSoundStyleGrid(
+                                selectedRaw = pageTurnSoundStyleRaw,
+                                onSelectKey = { pageTurnSoundStyleRaw = it },
+                                showSubtitle = false,
+                                compact = false,
+                                insetBg = insetBg,
+                                ink = ink,
+                                ink2 = ink2,
+                                borderColor = borderColor,
+                                eink = eink,
+                            )
+                        }
                     }
                 }
             }
