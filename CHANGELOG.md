@@ -4,6 +4,18 @@
 
 Each version has a section, newest first. The app's changelog page and update notices come from here.
 
+## 0.1.6 · 2026-11-27
+
+### zh
+- 广播剧旁白与语音修复：修复开启广播剧模式后旁白被切回系统自带声音、设置页与阅读页偏好键（`zh`/`zh-Hans`）不同步以及旧预合成片段未随旁白刷新的全端问题；扩展 Kokoro 离线音色库并彻底清除 INT8 底噪与高频蜂鸣，优化 Android 系统 TTS（三星、一加及第三方引擎）默认直连与语言匹配。
+- 翻页音效与阅读细节：新增自定义翻页音效、音量调节与触觉反馈；改进广播剧对话气泡拆分与展示；统一 macOS 阅读器翻译浮窗样式，并把全端「播客」图标统一为收音机图标。
+- 自定义底部导航与设置搜索：iPhone / Android 新增可视化拖拽定制底部导航（支持排序、替换、折叠进书架与隐藏）及 Android 液态玻璃底栏；macOS 设置页新增全局即时搜索（支持中文、拼音首字母与英文关键词）。
+
+### en
+- Audio drama narrator & voice fixes: fixed turning on Audio Drama mode unexpectedly switching the narrator back to a system voice, unified canonical voice preference keys across Settings and Reader, and refreshed Live casting plans before reading stale cached clips across Apple, Android, and Windows; expanded curated Kokoro offline voices to 32 while eliminating INT8 DC/carrier buzz, and improved Android OEM system TTS detection and locale matching.
+- Custom page-turn sounds & reader polish: added custom page-turn audio, volume control, and haptics; refined dialogue speech bubbles and spans; aligned the macOS reader translation popover with Windows; and unified the Podcast icon across iOS, Android, and Windows to match macOS's radio icon.
+- Customizable bottom navigation & macOS Settings search: added direct-manipulation bottom tab customization on iOS and Android (reorder, replace, fold into Shelf, hide) plus Android Liquid Glass tab bar support, and added instant global search (Chinese, pinyin initials, and English keywords) to macOS Settings.
+
 ## 0.1.5 · 2026-11-26
 
 ### zh
