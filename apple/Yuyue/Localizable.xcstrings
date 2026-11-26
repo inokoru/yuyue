@@ -18513,6 +18513,26 @@
         }
       }
     },
+    "外文译中文" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Translate to Chinese"
+          }
+        }
+      }
+    },
+    "外文译英文" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Translate to English"
+          }
+        }
+      }
+    },
     "外文阅读" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -26825,6 +26845,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Script"
+          }
+        }
+      }
+    },
+    "文言 / 古文译白话" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Classical to Modern Chinese"
           }
         }
       }

@@ -601,10 +601,59 @@ private struct MacPopoverRowChrome<Trailing: View>: View {
 }
 
 /// Compact 3-row macOS popover anchored to the toolbar `译` button:
-/// 原文 / 双语对照 / 仅译文, each with a crisp icon and active checkmark.
+/// contextual header (e.g. 文言 / 古文译白话 or 外文译中文) + 原文 / 双语对照 / 仅译文
+/// with theme-tinted active pill, semantic iconography, and active checkmark.
 struct MacReaderTranslatePopover: View {
+    struct Option: Equatable, Sendable {
+        let mode: TranslateMode
+        let icon: String
+        let title: String
+    }
+
     @Bindable var model: ReaderModel
     let dismiss: () -> Void
+
+    static var options: [Option] {
+        [
+            Option(mode: .off, icon: "text.alignleft", title: String(localized: "原文")),
+            Option(mode: .bilingual, icon: "translate", title: String(localized: "双语对照")),
+            Option(mode: .only, icon: "text.quote", title: String(localized: "仅译文")),
+        ]
+    }
+
+    nonisolated static func headerTitle(bookLanguage: String?, uiChinese: Bool) -> String {
+        let prefix = bookLanguage?
+            .lowercased()
+            .split(whereSeparator: { $0 == "-" || $0 == "_" })
+            .first
+            .map(String.init) ?? ""
+        let isChineseOrUntagged = prefix.isEmpty || prefix == "zh" || prefix == "und"
+        if uiChinese {
+            return isChineseOrUntagged
+                ? String(localized: "文言 / 古文译白话")
+                : String(localized: "外文译中文")
+        }
+        return prefix == "en"
+            ? String(localized: "外文译中文")
+            : String(localized: "外文译英文")
+    }
+
+    var body: some View {
+        let uiChinese = (Bundle.main.preferredLocalizations.first ?? "zh").hasPrefix("zh")
+        MacReaderTranslateMenuContent(
+            header: Self.headerTitle(bookLanguage: model.detail?.summary.language, uiChinese: uiChinese),
+            selectedMode: model.translateMode
+        ) { mode in
+            model.setTranslateMode(mode)
+            dismiss()
+        }
+    }
+}
+
+struct MacReaderTranslateMenuContent: View {
+    let header: String
+    let selectedMode: TranslateMode
+    let onSelect: (TranslateMode) -> Void
 
     @Environment(\.colorScheme) private var scheme
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
@@ -614,34 +663,44 @@ struct MacReaderTranslatePopover: View {
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
     private var ink: Color { einkOn ? YYColor.t1 : (dark ? Color(hex: "#EDEDEE") : Color(hex: "#262523")) }
     private var ink2: Color { einkOn ? YYColor.t2 : (dark ? Color(hex: "#9A9895") : Color(hex: "#736E67")) }
+    private var headerInk: Color { einkOn ? YYColor.t2 : (dark ? Color(hex: "#8E8C88") : Color(hex: "#858079")) }
     private var accent: Color { einkOn ? YYColor.t1 : (dark ? tint.paperAccentDark : tint.paperAccentLight) }
-    private var rowHover: Color { einkOn ? YYColor.inset : (dark ? Color.white.opacity(0.07) : Color.black.opacity(0.048)) }
+    private var selectedBg: Color { einkOn ? YYColor.inset : (dark ? accent.opacity(0.18) : tint.soft) }
+    private var rowHover: Color { einkOn ? YYColor.inset : (dark ? Color.white.opacity(0.07) : Color.black.opacity(0.045)) }
 
     var body: some View {
-        let items: [(TranslateMode, String, String)] = [
-            (.off, "doc.plaintext", String(localized: "原文")),
-            (.bilingual, "rectangle.split.1x2", String(localized: "双语对照")),
-            (.only, "translate", String(localized: "仅译文")),
-        ]
-        VStack(spacing: 2) {
-            ForEach(items, id: \.0.rawValue) { mode, icon, title in
-                let on = model.translateMode == mode
-                MacTranslateOptionRow(
-                    icon: icon,
-                    title: title,
-                    selected: on,
-                    ink: ink,
-                    ink2: ink2,
-                    accent: accent,
-                    hoverBg: rowHover
-                ) {
-                    model.setTranslateMode(mode)
-                    dismiss()
+        VStack(alignment: .leading, spacing: 0) {
+            Text(header)
+                .font(.yy(size: 11.5, weight: .medium))
+                .foregroundStyle(headerInk)
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .padding(.top, 2)
+                .padding(.bottom, 8)
+
+            VStack(spacing: 4) {
+                ForEach(MacReaderTranslatePopover.options, id: \.mode.rawValue) { item in
+                    let on = selectedMode == item.mode
+                    MacTranslateOptionRow(
+                        icon: item.icon,
+                        title: item.title,
+                        selected: on,
+                        ink: ink,
+                        ink2: ink2,
+                        accent: accent,
+                        selectedBg: selectedBg,
+                        hoverBg: rowHover,
+                        eink: einkOn
+                    ) {
+                        onSelect(item.mode)
+                    }
                 }
             }
         }
-        .padding(6)
-        .frame(width: 162)
+        .padding(.horizontal, 10)
+        .padding(.top, 11)
+        .padding(.bottom, 10)
+        .frame(width: 210)
     }
 }
 
@@ -652,35 +711,51 @@ private struct MacTranslateOptionRow: View {
     let ink: Color
     let ink2: Color
     let accent: Color
+    let selectedBg: Color
     let hoverBg: Color
+    let eink: Bool
     let action: () -> Void
 
     @State private var hovered = false
 
+    private var rowBackground: Color {
+        if selected { return selectedBg }
+        return hovered ? hoverBg : .clear
+    }
+
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
         Button(action: action) {
-            HStack(spacing: 9) {
+            HStack(spacing: 11) {
                 Image(systemName: icon)
-                    .font(.yy(size: 13, weight: .medium))
+                    .font(.yy(size: icon == "translate" ? 12.5 : 13.5, weight: .medium))
                     .foregroundStyle(selected ? accent : ink2)
-                    .frame(width: 16)
+                    .frame(width: 18, alignment: .center)
                 Text(title)
-                    .font(.yy(size: 12.5, weight: selected ? .semibold : .medium))
-                    .foregroundStyle(ink)
+                    .font(.yy(size: 13.5, weight: selected ? .semibold : .medium))
+                    .foregroundStyle(selected ? accent : ink)
                     .lineLimit(1)
-                Spacer(minLength: 6)
+                Spacer(minLength: 10)
                 Image(systemName: "checkmark")
-                    .font(.yy(size: 11.5, weight: .semibold))
+                    .font(.yy(size: 12, weight: .semibold))
                     .foregroundStyle(accent)
                     .opacity(selected ? 1 : 0)
             }
-            .padding(.horizontal, 10)
-            .frame(height: 32)
-            .background(hovered ? hoverBg : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .contentShape(.rect)
+            .padding(.horizontal, 12)
+            .frame(height: 36)
+            .background(rowBackground, in: shape)
+            .overlay {
+                if eink && selected {
+                    shape.strokeBorder(YYColor.t1.opacity(0.28), lineWidth: 0.75)
+                }
+            }
+            .contentShape(shape)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(YYPressStyle(scale: 0.98))
         .onHover { hovered = $0 }
+        .animation(YYMotion.quick, value: hovered)
+        .animation(YYMotion.quick, value: selected)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 #endif

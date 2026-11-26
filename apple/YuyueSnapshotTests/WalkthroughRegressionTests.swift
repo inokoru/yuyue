@@ -291,6 +291,22 @@ struct WalkthroughRegressionTests {
         #expect(ParagraphTranslation.parseNumbered("单段直接返回译文。", count: 1) == ["单段直接返回译文。"])
     }
 
+    #if os(macOS)
+    @Test @MainActor func `macOS translate popover exposes contextual header and semantic options`() {
+        #expect(MacReaderTranslatePopover.headerTitle(bookLanguage: "zh-Hans", uiChinese: true) == String(localized: "文言 / 古文译白话"))
+        #expect(MacReaderTranslatePopover.headerTitle(bookLanguage: nil, uiChinese: true) == String(localized: "文言 / 古文译白话"))
+        #expect(MacReaderTranslatePopover.headerTitle(bookLanguage: "und", uiChinese: true) == String(localized: "文言 / 古文译白话"))
+        #expect(MacReaderTranslatePopover.headerTitle(bookLanguage: "en-US", uiChinese: true) == String(localized: "外文译中文"))
+        #expect(MacReaderTranslatePopover.headerTitle(bookLanguage: "ja", uiChinese: true) == String(localized: "外文译中文"))
+        #expect(MacReaderTranslatePopover.headerTitle(bookLanguage: "zh-Hans", uiChinese: false) == String(localized: "外文译英文"))
+        #expect(MacReaderTranslatePopover.headerTitle(bookLanguage: "en", uiChinese: false) == String(localized: "外文译中文"))
+
+        let opts = MacReaderTranslatePopover.options
+        #expect(opts.map(\.mode) == [.off, .bilingual, .only])
+        #expect(opts.map(\.icon) == ["text.alignleft", "translate", "text.quote"])
+    }
+    #endif
+
     @Test func `custom companion prompts deduplicate, sanitize commands, cap at eight, and wire into slash commands`() {
         #expect(CompanionPrompts.defaults.map(\.command) == ["grammar", "baihua", "logic"])
 
