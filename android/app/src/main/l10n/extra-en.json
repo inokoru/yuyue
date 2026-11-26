@@ -672,5 +672,19 @@
   "广播剧这一句预制音频缺失，请重试或换一个声音": "Pre-rendered drama audio is missing for this line. Retry or switch voices.",
   "角色「%@」设定的声音当前不可用，请在人物声音中重选": "The voice set for “%@” isn't available right now. Choose another voice in Cast.",
   "你之前选的声音当前不可用或不支持这一章语言，请重新选择声音": "Your chosen voice isn't available or doesn't support this chapter's language. Please pick a voice.",
-  "你之前选的声音当前不可用，请重新选择声音": "Your chosen voice isn't available right now. Please pick another voice."
+  "你之前选的声音当前不可用，请重新选择声音": "Your chosen voice isn't available right now. Please pick another voice.",
+  "%lld 个音色 · 免下载，直接调用手机系统 TTS": "%lld voices · No download, uses your phone's system TTS",
+  "免下载 · 跟随手机系统 TTS": "No download · Uses your phone's system TTS",
+  "可在系统「文字转语音」设置切换或下载更多语音引擎，返回后自动生效。": "Switch or download TTS engines in Android Text-to-Speech settings; changes apply automatically when you return.",
+  "当前引擎": "Current engine",
+  "打开系统文字转语音设置": "Open system text-to-speech settings",
+  "推荐下载「语阅离线语音（Kokoro）」断网畅听，也可直接使用手机「系统语音」或免 Key 的「在线自然语音」。": "Download Yuyue Offline Voices (Kokoro) for offline listening, or use your phone's System Speech or keyless Online Natural Voices directly.",
+  "本机离线": "On-device",
+  "直接调用手机已配置的系统 TTS（如三星、一加自带或第三方语音引擎），无需下载额外模型。": "Uses your phone's configured system TTS engine (such as Samsung, OnePlus, or third-party engines) with no extra downloads.",
+  "直接调用手机当前系统 TTS 引擎": "Uses your phone's current system TTS engine directly",
+  "直接调用手机当前系统 TTS（三星、一加及第三方语音引擎皆可用）": "Uses your phone's current system TTS (works with Samsung, OnePlus, and third-party engines)",
+  "系统自带 · 免下载离线朗读": "Built-in · Offline with no downloads",
+  "系统设置": "System settings",
+  "系统默认": "System default",
+  "系统默认语音": "System Default Voice"
 }

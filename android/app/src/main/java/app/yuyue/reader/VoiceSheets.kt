@@ -474,7 +474,9 @@ fun VoiceGroupsContent(
                     .filter { Voices.cardMatchesTag(it.lang, language) }
             } else emptyList()
             val cld = CloudVoice.all().filter { it.speaks(language) }
-            val sys = SystemVoice.Engine.voices().filter { it.speaks(language) }.sortedByDescending { it.isOffline }
+            val sys = SystemVoice.Engine.voices()
+                .filter { it.speaks(language) }
+                .sortedWith(compareByDescending<SystemVoice> { it.isSystemDefault }.thenByDescending { it.isOffline })
             kokoroVoices = kok
             recommended = rec
             clonedCards = cCards
@@ -493,7 +495,7 @@ fun VoiceGroupsContent(
         previewingId = key
         if (v is SystemVoice) {
             previewLoading = false
-            val started = v.preview(sampleText) {
+            val started = v.preview(sampleText, language) {
                 if (previewingId == key) {
                     previewingId = null
                     previewLoading = false
@@ -854,9 +856,52 @@ fun VoiceGroupsContent(
         }
     }
 
-    // 4. 系统自带（不推荐）
-    YYLabel(t("系统自带 · 不推荐"), t("机械音仅断网兜底"))
+    // 4. 系统自带
+    YYLabel(t("系统自带"), t("免下载 · 跟随手机系统 TTS"))
     YYGroup {
+        for (v in systemVoices) {
+            val used = roles.filter { it.voice.voice == v.id && it.name != roleName }.map { it.name }
+            val sub = if (v.isSystemDefault) {
+                listOfNotNull(
+                    if (used.isNotEmpty()) t("%@在用", used.joinToString(t("、"))) else null,
+                    t("直接调用手机当前系统 TTS 引擎"),
+                    if (!v.isOffline) t("联网") else null,
+                ).joinToString(" · ")
+            } else {
+                listOfNotNull(
+                    if (used.isNotEmpty()) t("%@在用", used.joinToString(t("、"))) else null,
+                    t("系统自带"),
+                    if (!v.isOffline) t("联网") else null,
+                ).joinToString(" · ")
+            }
+            row {
+                VoiceChoiceRow(
+                    avatar = if (v.isSystemDefault) "系" else v.name.substringAfterLast(' ').take(1).ifEmpty { "A" },
+                    title = v.name,
+                    badge = if (v.isSystemDefault) (v.qualityName ?: t("系统默认")) else v.qualityName,
+                    badgeAccent = false,
+                    subtitle = sub,
+                    selected = selectedId == v.id,
+                    previewState = previewStateOf(v.id),
+                    error = previewErrorOf(v.id),
+                    onPreview = { playPreview(v) },
+                    onMore = null,
+                    onClick = { onPickVoice(v) },
+                )
+            }
+        }
+        row {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { SystemVoice.Engine.openTtsSettings(context) }
+                    .padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(t("打开系统文字转语音设置"), fontSize = 12.sp, color = YY.tint.accent, modifier = Modifier.weight(1f))
+                Icon(Icons.chevronRight, null, tint = YY.c.t3, modifier = Modifier.size(12.dp))
+            }
+        }
         if (systemVoices.isEmpty()) {
             row {
                 Row(
@@ -868,31 +913,6 @@ fun VoiceGroupsContent(
                 ) {
                     Text(t("下载系统文字转语音数据"), fontSize = 12.sp, color = YY.tint.accent, modifier = Modifier.weight(1f))
                     Icon(Icons.chevronRight, null, tint = YY.c.t3, modifier = Modifier.size(12.dp))
-                }
-            }
-        } else {
-            for (v in systemVoices) {
-                val used = roles.filter { it.voice.voice == v.id && it.name != roleName }.map { it.name }
-                val sub = listOfNotNull(
-                    if (used.isNotEmpty()) t("%@在用", used.joinToString(t("、"))) else null,
-                    t("系统自带"),
-                    v.qualityName,
-                    if (!v.isOffline) t("联网") else null,
-                ).joinToString(" · ")
-                row {
-                    VoiceChoiceRow(
-                        avatar = v.name.substringAfterLast(' ').take(1).ifEmpty { "A" },
-                        title = v.name,
-                        badge = v.qualityName ?: t("不推荐"),
-                        badgeAccent = false,
-                        subtitle = sub,
-                        selected = selectedId == v.id,
-                        previewState = previewStateOf(v.id),
-                        error = previewErrorOf(v.id),
-                        onPreview = { playPreview(v) },
-                        onMore = null,
-                        onClick = { onPickVoice(v) },
-                    )
                 }
             }
         }

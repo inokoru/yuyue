@@ -416,38 +416,16 @@ class KokoroVoice(val speaker: KokoroSpeaker) : BookVoice {
                 coroutineContext.ensureActive()
                 val inner = runCatching { core.kokoroTokens(clause, language) }.getOrDefault(emptyList())
                 if (inner.isEmpty()) continue
-                val capped = if (inner.size > STYLE_MAX_LEN) inner.subList(0, STYLE_MAX_LEN) else inner
-                val padded = LongArray(capped.size + 2)
-                for (i in capped.indices) padded[i + 1] = capped[i]
-
-                val lenIdx = minOf(capped.size, STYLE_MAX_LEN - 1)
-                val styleOffset = (sid * STYLE_MAX_LEN + lenIdx) * STYLE_DIM
-                val styleVec = FloatArray(STYLE_DIM)
-                val dup = h.voicesBuf.duplicate()
-                dup.position(styleOffset)
-                dup.get(styleVec, 0, STYLE_DIM)
-
-                val rawAudio = OnnxTensor.createTensor(env, LongBuffer.wrap(padded), longArrayOf(1L, padded.size.toLong())).use { tokT ->
-                    OnnxTensor.createTensor(env, FloatBuffer.wrap(styleVec), longArrayOf(1L, STYLE_DIM.toLong())).use { styleT ->
-                        OnnxTensor.createTensor(env, FloatBuffer.wrap(floatArrayOf(1.0f)), longArrayOf(1L)).use { speedT ->
-                            h.session.run(
-                                mapOf(
-                                    "tokens" to tokT,
-                                    "style" to styleT,
-                                    "speed" to speedT,
-                                )
-                            ).use { res ->
-                                val outT = res[0] as OnnxTensor
-                                val fb = outT.floatBuffer
-                                FloatArray(fb.remaining()).also { fb.get(it) }
-                            }
-                        }
+                val clean = runClauseClean(core, env, h, inner, sid, 1.0f)
+                    ?: run {
+                        // Retry once with slight alignment/speed perturbation to recover from ARM INT8 STFT 0/0 or rail-pinning.
+                        val nudged = if (inner.size < STYLE_MAX_LEN - 1) inner + listOf(inner.last()) else inner
+                        runClauseClean(core, env, h, nudged, sid, 1.015f)
                     }
-                }
-                if (rawAudio.isNotEmpty()) {
+                if (clean != null && clean.isNotEmpty()) {
                     if (chunks.isNotEmpty()) total += CLAUSE_GAP_SAMPLES
-                    chunks.add(rawAudio)
-                    total += rawAudio.size
+                    chunks.add(clean)
+                    total += clean.size
                 }
             }
 
@@ -460,18 +438,57 @@ class KokoroVoice(val speaker: KokoroSpeaker) : BookVoice {
                     pos += c.size
                 }
             }
-            val norm = runCatching { core.kokoroPostprocess(merged.asList(), SAMPLE_RATE.toUInt()) }
-                .getOrNull() ?: return@withLock null
-            if (norm.isEmpty()) return@withLock null
-            val shorts = ShortArray(norm.size) {
-                (norm[it].coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+            val shorts = ShortArray(merged.size) {
+                (merged[it].coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             }
             Speech(shorts, SAMPLE_RATE)
         }
 
+        private fun runClauseClean(
+            core: YuyueCore,
+            env: OrtEnvironment,
+            h: Loaded,
+            inner: List<Long>,
+            sid: Int,
+            speed: Float,
+        ): FloatArray? {
+            val capped = if (inner.size > STYLE_MAX_LEN) inner.subList(0, STYLE_MAX_LEN) else inner
+            val padded = LongArray(capped.size + 2)
+            for (i in capped.indices) padded[i + 1] = capped[i]
+
+            val lenIdx = minOf(capped.size, STYLE_MAX_LEN - 1)
+            val styleOffset = (sid * STYLE_MAX_LEN + lenIdx) * STYLE_DIM
+            val styleVec = FloatArray(STYLE_DIM)
+            val dup = h.voicesBuf.duplicate()
+            dup.position(styleOffset)
+            dup.get(styleVec, 0, STYLE_DIM)
+
+            val rawAudio = OnnxTensor.createTensor(env, LongBuffer.wrap(padded), longArrayOf(1L, padded.size.toLong())).use { tokT ->
+                OnnxTensor.createTensor(env, FloatBuffer.wrap(styleVec), longArrayOf(1L, STYLE_DIM.toLong())).use { styleT ->
+                    OnnxTensor.createTensor(env, FloatBuffer.wrap(floatArrayOf(speed)), longArrayOf(1L)).use { speedT ->
+                        h.session.run(
+                            mapOf(
+                                "tokens" to tokT,
+                                "style" to styleT,
+                                "speed" to speedT,
+                            )
+                        ).use { res ->
+                            val outT = res[0] as OnnxTensor
+                            val fb = outT.floatBuffer
+                            FloatArray(fb.remaining()).also { fb.get(it) }
+                        }
+                    }
+                }
+            }
+            if (rawAudio.isEmpty()) return null
+            val norm = runCatching { core.kokoroPostprocess(rawAudio.asList(), SAMPLE_RATE.toUInt()) }
+                .getOrNull() ?: return null
+            return if (norm.isEmpty()) null else norm.toFloatArray()
+        }
+
         private fun cacheFile(cacheRoot: File, speakerId: String, language: String, text: String): File {
             val md = MessageDigest.getInstance("SHA-256")
-            md.update("kokoro-v1_1|$speakerId|$language|$text".toByteArray())
+            md.update("kokoro-v1_1-v2|$speakerId|$language|$text".toByteArray())
             val hex = md.digest().take(16).joinToString("") { "%02x".format(it) }
             return File(cacheRoot, "kokoro/$hex.pcm")
         }

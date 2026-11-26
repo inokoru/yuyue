@@ -274,7 +274,7 @@ private object ListeningFocus {
         val secs = seconds(text)
         job = scope.launch {
             if (v is SystemVoice) {
-                if (v.preview(text)) {
+                if (v.preview(text, book.tag)) {
                     startedAt = System.currentTimeMillis(); lasts = secs * 1000L
                     delay(secs * 1000L)
                 } else {
@@ -424,10 +424,10 @@ fun ListeningPage(open: (String) -> Unit) {
                             verticalArrangement = Arrangement.spacedBy(YY.s(3)),
                             itemVerticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(voiceSourceTitle(id), style = YY.font(11.5f, FontWeight.Medium), color = if (id == SYSTEM) YY.c.t2 else YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(voiceSourceTitle(id), style = YY.font(11.5f, FontWeight.Medium), color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             when {
                                 id == NEURAL -> SourceBadgePill(t("推荐"), 0)
-                                id == SYSTEM -> SourceBadgePill(t("不推荐"), 1)
+                                id == SYSTEM -> SourceBadgePill(t("本机离线"), 2)
                                 p?.badge != null -> SourceBadgePill(p.badge!!, if (p.isFreeOnline || p == CloudVoice.Provider.Xiaomi) 0 else 2)
                             }
                         }
@@ -438,7 +438,7 @@ fun ListeningPage(open: (String) -> Unit) {
                                 } else {
                                     t("一键下载（125 MB）· 跨端离线自然语音")
                                 }
-                                id == SYSTEM -> t("%lld 个音色 · 机械音明显，仅作断网兜底", systemCount)
+                                id == SYSTEM -> t("%lld 个音色 · 免下载，直接调用手机系统 TTS", systemCount)
                                 p != null && p == CloudVoice.Provider.Edge -> t("%lld 个微软神经音色 · 免 Key 直连，已读缓存在本机", CloudVoice.all().count { it.provider == p })
                                 p != null && p == CloudVoice.Provider.Free -> t("%lld 个音色 · 零配置免 Key 即点即听", CloudVoice.all().count { it.provider == p })
                                 p != null && p.isLocal -> t("%lld 个音色 · 局域网语音", CloudVoice.all().count { it.provider == p })
@@ -468,7 +468,7 @@ fun ListeningPage(open: (String) -> Unit) {
                 }
             }
         }
-        YYNote(t("推荐下载「语阅离线语音（Kokoro）」断网畅听，或直接使用免 Key 的「在线自然语音」。系统自带语音机械感较重（不推荐），仅作断网兜底。"))
+        YYNote(t("推荐下载「语阅离线语音（Kokoro）」断网畅听，也可直接使用手机「系统语音」或免 Key 的「在线自然语音」。"))
         YYLabel(t("语速"))
         YYGroup {
             row {
@@ -667,8 +667,22 @@ fun VoiceSourcePage(id: String, openSettings: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(YY.s(6)),
                 ) {
-                    SourceBadgePill(t("不推荐"), 1)
-                    Text(t("系统自带合成音机械感较重，建议改用「语阅离线语音」或「在线自然语音」"), style = YY.font(10f), color = YY.c.t3, maxLines = 2)
+                    Text(
+                        t("直接调用手机当前系统 TTS（三星、一加及第三方语音引擎皆可用）"),
+                        style = YY.font(10f),
+                        color = YY.c.t3,
+                        maxLines = 2,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        t("系统设置"),
+                        style = YY.font(10.5f, FontWeight.Medium),
+                        color = YY.tint.accent,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { SystemVoice.Engine.openTtsSettings(context) }
+                            .padding(horizontal = YY.s(6), vertical = YY.s(2)),
+                    )
                 }
             }
             val others = voices.orEmpty().filter { it.id != current?.id }
@@ -701,7 +715,7 @@ fun VoiceSourcePage(id: String, openSettings: () -> Unit) {
                     items(others, key = { it.id }) { v -> VoiceMessage(v, book, scope) }
                 }
                 if (id == SYSTEM) item {
-                    Text(t("想要更自然的音色：点击右上角 ⚙ 下载语音数据，完成后即可使用。"), style = YY.font(10f), color = YY.c.t3, textAlign = TextAlign.Center,
+                    Text(t("可在系统「文字转语音」设置切换或下载更多语音引擎，返回后自动生效。"), style = YY.font(10f), color = YY.c.t3, textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth().padding(vertical = YY.s(14)))
                 }
             }
@@ -956,8 +970,10 @@ private fun VoiceMessage(v: BookVoice, book: VoiceBook, scope: kotlinx.coroutine
             Row(horizontalArrangement = Arrangement.spacedBy(YY.s(6)), verticalAlignment = Alignment.CenterVertically) {
                 Text(v.name, style = YY.font(11.5f, FontWeight.Medium), color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 if (v is SystemVoice) {
-                    val sysTag = listOfNotNull(v.qualityName ?: t("不推荐"), if (v.isOffline) null else t("联网")).joinToString(" · ")
-                    Text(sysTag, style = YY.font(10f), color = if (v.qualityName == null) Color(0xFFD97706) else YY.c.t3, maxLines = 1)
+                    val sysTag = listOfNotNull(v.qualityName, if (v.isOffline) null else t("联网")).joinToString(" · ")
+                    if (sysTag.isNotEmpty()) {
+                        Text(sysTag, style = YY.font(10f), color = YY.c.t3, maxLines = 1)
+                    }
                 } else if (v is app.yuyue.speech.KokoroVoice) {
                     Text(v.summaryLine, style = YY.font(10f), color = YY.c.t3, maxLines = 1)
                 }
@@ -1149,21 +1165,26 @@ fun VoiceSourceSettings(id: String, back: () -> Unit) {
             }
             YYNote(t("Kokoro-82M v1.1 Int8 用于离线自然旁白；声音克隆模型（ZipVoice）用于本机克隆声音与多语气角色演绎，均无需联网。"))
         } else if (p == null) {
-            PanelHeader(voiceSourceTitle(SYSTEM), t("系统自带 · 不推荐"), Color(0xFFD97706)) { SourceTile(SYSTEM, 34f) }
+            PanelHeader(voiceSourceTitle(SYSTEM), t("系统自带 · 免下载离线朗读"), YY.c.t2) { SourceTile(SYSTEM, 34f) }
             YYGroup {
-                row { YYRow(t("评级"), value = t("不推荐 · 仅断网兜底")) }
+                row { YYRow(t("当前引擎"), value = SystemVoice.Engine.defaultEngineLabel() ?: t("系统默认")) }
                 row { YYRow(t("声音"), value = t("%lld 个声音", count)) }
                 row { YYRow(t("费用"), value = t("免费 · 不联网")) }
             }
             Spacer(Modifier.height(YY.s(10)))
             YYGroup {
                 row {
+                    LinkRow(t("打开系统文字转语音设置")) {
+                        SystemVoice.Engine.openTtsSettings(context)
+                    }
+                }
+                row {
                     LinkRow(t("下载系统文字转语音数据")) {
                         SystemVoice.Engine.openSettings(context)
                     }
                 }
             }
-            YYNote(t("系统自带合成音机械感明显，仅建议在未下载离线语音且完全断网时兜底使用。"))
+            YYNote(t("直接调用手机已配置的系统 TTS（如三星、一加自带或第三方语音引擎），无需下载额外模型。"))
         } else {
             var removing by remember { mutableStateOf(false) }
             val inUse = listOf("zh", "en").any { Prefs.string("player.voice.$it").startsWith("cloud.${p.key}.") }

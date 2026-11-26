@@ -816,7 +816,9 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
         }.getOrNull() ?: return null
-        runCatching { t.playbackParams = PlaybackParams().setSpeed(this.rate).setPitch(1f) }
+        if (kotlin.math.abs(this.rate - 1f) > 0.001f) {
+            runCatching { t.playbackParams = PlaybackParams().setSpeed(this.rate).setPitch(1f) }
+        }
         if (fading) runCatching { t.setVolume(fadeVolume(sleep, fading, System.currentTimeMillis())) }
         track = t
         trackRate = rate

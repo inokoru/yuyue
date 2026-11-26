@@ -550,31 +550,13 @@ public sealed class KokoroEngine : IDisposable
                     long[] inner = core.KokoroTokens(clause, lang);
                     if (inner.Length == 0) continue;
 
-                    int cappedLen = Math.Min(inner.Length, StyleMaxLen);
-                    long[] padded = new long[cappedLen + 2];
-                    Array.Copy(inner, 0, padded, 1, cappedLen);
-
-                    int lenIdx = Math.Min(cappedLen, StyleMaxLen - 1);
-                    long byteOffset = (long)(sid * StyleMaxLen + lenIdx) * StyleDim * sizeof(float);
-                    float[] styleVec = new float[StyleDim];
-                    h.VoicesView.ReadArray(byteOffset, styleVec, 0, StyleDim);
-
-                    var tokTensor = new DenseTensor<long>(padded, [1, padded.Length]);
-                    var styleTensor = new DenseTensor<float>(styleVec, [1, StyleDim]);
-                    var speedTensor = new DenseTensor<float>(new[] { 1.0f }, [1]);
-
-                    using var results = h.Session.Run(
-                    [
-                        NamedOnnxValue.CreateFromTensor("tokens", tokTensor),
-                        NamedOnnxValue.CreateFromTensor("style", styleTensor),
-                        NamedOnnxValue.CreateFromTensor("speed", speedTensor),
-                    ]);
-
-                    var rawAudio = results.First().AsEnumerable<float>().ToArray();
-                    if (rawAudio.Length == 0) continue;
-
-                    float[] clean = core.KokoroPostprocess(rawAudio, (uint)SampleRate);
-                    if (clean.Length == 0) continue;
+                    float[]? clean = RunClauseClean(core, h, inner, sid, 1.0f);
+                    if (clean is null || clean.Length == 0)
+                    {
+                        long[] nudged = inner.Length < StyleMaxLen - 1 ? [.. inner, inner[^1]] : inner;
+                        clean = RunClauseClean(core, h, nudged, sid, 1.015f);
+                    }
+                    if (clean is null || clean.Length == 0) continue;
 
                     if (chunks.Count > 0) total += ClauseGapSamples;
                     chunks.Add(clean);
@@ -674,9 +656,37 @@ public sealed class KokoroEngine : IDisposable
         return ms.ToArray();
     }
 
+    private static float[]? RunClauseClean(YuyueCore core, Loaded h, long[] inner, int sid, float speed)
+    {
+        int cappedLen = Math.Min(inner.Length, StyleMaxLen);
+        long[] padded = new long[cappedLen + 2];
+        Array.Copy(inner, 0, padded, 1, cappedLen);
+
+        int lenIdx = Math.Min(cappedLen, StyleMaxLen - 1);
+        long byteOffset = (long)(sid * StyleMaxLen + lenIdx) * StyleDim * sizeof(float);
+        float[] styleVec = new float[StyleDim];
+        h.VoicesView.ReadArray(byteOffset, styleVec, 0, StyleDim);
+
+        var tokTensor = new DenseTensor<long>(padded, [1, padded.Length]);
+        var styleTensor = new DenseTensor<float>(styleVec, [1, StyleDim]);
+        var speedTensor = new DenseTensor<float>(new[] { speed }, [1]);
+
+        using var results = h.Session.Run(
+        [
+            NamedOnnxValue.CreateFromTensor("tokens", tokTensor),
+            NamedOnnxValue.CreateFromTensor("style", styleTensor),
+            NamedOnnxValue.CreateFromTensor("speed", speedTensor),
+        ]);
+
+        var rawAudio = results.First().AsEnumerable<float>().ToArray();
+        if (rawAudio.Length == 0) return null;
+        float[] clean = core.KokoroPostprocess(rawAudio, (uint)SampleRate);
+        return clean.Length == 0 ? null : clean;
+    }
+
     private static string GetCacheFilePath(string dataDir, string speakerId, string lang, string text)
     {
-        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes($"kokoro-v1_1|{speakerId}|{lang}|{text}"));
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes($"kokoro-v1_1-v2|{speakerId}|{lang}|{text}"));
         string hex = Convert.ToHexString(hash.AsSpan(0, 16)).ToLowerInvariant();
         return Path.Combine(dataDir, "cache", "kokoro", $"{hex}.wav");
     }

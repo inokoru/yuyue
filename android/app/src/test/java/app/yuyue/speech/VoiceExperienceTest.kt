@@ -269,4 +269,81 @@ class VoiceExperienceTest {
         KokoroModel.finishDownloadRun(run4, KokoroModel.State.Idle)
         assertEquals(KokoroModel.State.Idle, KokoroModel.state)
     }
+
+    @Test
+    fun spokenLanguageMatchesOemChineseAndEnglishLocaleVariants() {
+        for (oemTag in listOf("zh-CN", "zh-Hans-CN", "zh-Hans", "zh", "zh_CN", "cmn-CN", "cmn-Hans-CN", "zho-CHN", "zh-SG", "zh-TW", "zh-Hant-TW")) {
+            assertTrue("expected $oemTag to match zh", SpokenLanguage.matches(oemTag, "zh"))
+            assertTrue("expected $oemTag to match zh-Hans", SpokenLanguage.matches(oemTag, "zh-Hans"))
+        }
+        assertFalse(SpokenLanguage.matches("en-US", "zh"))
+        assertFalse(SpokenLanguage.matches("ja-JP", "zh"))
+        assertFalse(SpokenLanguage.matches("zh-HK", "zh-Hans"))
+        assertTrue(SpokenLanguage.matches("zh-HK", "yue"))
+        assertTrue(SpokenLanguage.matches("yue-HK", "zh-HK"))
+
+        for (enTag in listOf("en", "en-US", "en-GB", "eng-USA", "en_AU")) {
+            assertTrue("expected $enTag to match en", SpokenLanguage.matches(enTag, "en"))
+            assertTrue("expected $enTag to match en-US", SpokenLanguage.matches(enTag, "en-US"))
+        }
+        assertEquals("zh-CN", SpokenLanguage.localeForTag("zh-Hans").toLanguageTag())
+        assertEquals("zh-TW", SpokenLanguage.localeForTag("zh-Hant").toLanguageTag())
+        assertEquals("en-US", SpokenLanguage.localeForTag("en").toLanguageTag())
+    }
+
+    @Test
+    fun systemDefaultVoiceHasCanonicalIdAndRespectsSupportPredicate() {
+        val voice = SystemVoice.systemDefault(
+            engineLabel = "Samsung TTS",
+            isOffline = true,
+            supports = { it.lowercase().startsWith("zh") },
+        )
+        assertEquals(SystemVoice.DEFAULT_ID, voice.id)
+        assertTrue(voice.isSystemDefault)
+        assertEquals("Samsung TTS", voice.qualityName)
+        assertTrue(voice.isOffline)
+        assertTrue(voice.speaks("zh-Hans"))
+        assertFalse(voice.speaks("en-US"))
+        assertEquals("system", app.yuyue.analytics.AirTraffic.ttsEngineForVoiceId(voice.id))
+    }
+
+    @Test
+    fun systemVoiceWavDecodesFloat32And8BitPcm() {
+        val dir = Files.createTempDirectory("yuyue-wav-formats").toFile()
+        try {
+            // 32-bit IEEE float mono WAV: [0.5f, -0.5f]
+            val f32Data = java.nio.ByteBuffer.allocate(8).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                .putFloat(0.5f).putFloat(-0.5f).array()
+            val f32Wav = java.nio.ByteBuffer.allocate(44 + f32Data.size).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                .put("RIFF".toByteArray()).putInt(36 + f32Data.size)
+                .put("WAVEfmt ".toByteArray()).putInt(16).putShort(3).putShort(1) // IEEE float, mono
+                .putInt(24_000).putInt(24_000 * 4).putShort(4).putShort(32)
+                .put("data".toByteArray()).putInt(f32Data.size).put(f32Data)
+                .array()
+            val f32File = dir.resolve("f32.wav").apply { writeBytes(f32Wav) }
+            val decodedF32 = SystemVoice.Engine.wav(f32File)
+            assertEquals(24_000, decodedF32?.rate)
+            assertEquals(2, decodedF32?.samples?.size)
+            assertTrue(decodedF32!!.samples[0] in 16_300..16_400)
+            assertTrue(decodedF32.samples[1] in -16_400..-16_300)
+
+            // 8-bit unsigned PCM mono WAV: [128 -> 0, 255 -> ~32512]
+            val u8Data = byteArrayOf(128.toByte(), 255.toByte())
+            val u8Wav = java.nio.ByteBuffer.allocate(44 + u8Data.size).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                .put("RIFF".toByteArray()).putInt(36 + u8Data.size)
+                .put("WAVEfmt ".toByteArray()).putInt(16).putShort(1).putShort(1)
+                .putInt(16_000).putInt(16_000).putShort(1).putShort(8)
+                .put("data".toByteArray()).putInt(u8Data.size).put(u8Data)
+                .array()
+            val u8File = dir.resolve("u8.wav").apply { writeBytes(u8Wav) }
+            val decodedU8 = SystemVoice.Engine.wav(u8File)
+            assertEquals(16_000, decodedU8?.rate)
+            assertEquals(2, decodedU8?.samples?.size)
+            assertEquals(0.toShort(), decodedU8?.samples?.get(0))
+            assertTrue(decodedU8!!.samples[1] > 32_000)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }
+

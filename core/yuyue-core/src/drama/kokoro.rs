@@ -406,15 +406,117 @@ fn append_pinyin_kokoro(raw: &str, tokens: &HashMap<String, u16>, out: &mut Vec<
     }
 }
 
-/// Trims leading/trailing near-silence (`−42 dB` relative to peak, keeping `50 ms` breath pad)
-/// and normalizes active RMS to `−20 LUFS` (`rms ≈ 0.1`, peak ≤ `0.891`) so Kokoro matches
-/// ZipVoice and CloudVoice volume seamlessly.
+/// Applies a second-order biquad IIR filter in-place using `f64` state for numerical stability.
+fn apply_biquad(samples: &mut [f32], b0: f64, b1: f64, b2: f64, a1: f64, a2: f64) {
+    let mut x1 = 0.0f64;
+    let mut x2 = 0.0f64;
+    let mut y1 = 0.0f64;
+    let mut y2 = 0.0f64;
+    for s in samples.iter_mut() {
+        let x = *s as f64;
+        let y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+        x2 = x1;
+        x1 = x;
+        y2 = y1;
+        y1 = y;
+        *s = y as f32;
+    }
+}
+
+/// 2nd-order Butterworth high-pass filter (removes Kokoro INT8 envelope-coupled DC bias & sub-50 Hz drift).
+fn apply_highpass(samples: &mut [f32], rate: f64, fc: f64) {
+    if rate <= 0.0 || fc <= 0.0 || fc >= rate * 0.45 {
+        return;
+    }
+    let w0 = 2.0 * std::f64::consts::PI * fc / rate;
+    let cosw = w0.cos();
+    let sinw = w0.sin();
+    let alpha = sinw / (2.0 * std::f64::consts::FRAC_1_SQRT_2);
+    let a0 = 1.0 + alpha;
+    let b0 = ((1.0 + cosw) * 0.5) / a0;
+    let b1 = (-(1.0 + cosw)) / a0;
+    let b2 = b0;
+    let a1 = (-2.0 * cosw) / a0;
+    let a2 = (1.0 - alpha) / a0;
+    apply_biquad(samples, b0, b1, b2, a1, a2);
+}
+
+/// Narrow RBJ biquad notch filter (removes Kokoro INT8 iSTFTNet hop-rate carrier tones at `fs/5` and `2*fs/5`).
+fn apply_notch(samples: &mut [f32], rate: f64, fc: f64, q: f64) {
+    if rate <= 0.0 || fc <= 0.0 || fc >= rate * 0.49 || q <= 0.0 {
+        return;
+    }
+    let w0 = 2.0 * std::f64::consts::PI * fc / rate;
+    let cosw = w0.cos();
+    let sinw = w0.sin();
+    let alpha = sinw / (2.0 * q);
+    let a0 = 1.0 + alpha;
+    let b0 = 1.0 / a0;
+    let b1 = (-2.0 * cosw) / a0;
+    let b2 = b0;
+    let a1 = b1;
+    let a2 = (1.0 - alpha) / a0;
+    apply_biquad(samples, b0, b1, b2, a1, a2);
+}
+
+/// Cleans Kokoro INT8 vocoder artifacts, trims leading/trailing silence, fades boundaries, and
+/// normalizes active RMS to `−20 LUFS` (`rms ≈ 0.1`, peak ≤ `0.891`) so Kokoro matches
+/// ZipVoice and CloudVoice volume cleanly without electric buzz or boundary clicks.
+///
+/// Specifically addresses known `Kokoro-82M-v1.1-zh Int8` artifacts:
+/// - Rejects degenerate NaN/Inf (`0/0` STFT) or rail-pinned (`|x| ≥ 0.995`) outputs so callers retry.
+/// - Removes envelope-coupled DC bias & sub-50 Hz drift via mean subtraction + 65 Hz Butterworth HPF.
+/// - Notches out exact iSTFTNet hop-rate carrier buzz at `fs/5` (4800 Hz) and `2*fs/5` (9600 Hz).
+/// - Applies an 8 ms raised-cosine fade-in/out to prevent inter-clause/sentence clicks.
+/// - Caps normalization gain (`≤ 4.5×`) so quiet clauses never amplify quantization floor into static.
 pub fn postprocess_pcm(samples: &[f32], rate: u32) -> Vec<f32> {
     if samples.is_empty() || rate == 0 {
         return Vec::new();
     }
-    let mut peak = 0.0f32;
+
+    let n = samples.len();
+    let mut non_finite = 0usize;
+    let mut rail_pinned = 0usize;
+    let mut sum = 0.0f64;
+    let mut clean = Vec::with_capacity(n);
     for &x in samples {
+        if !x.is_finite() {
+            non_finite += 1;
+            clean.push(0.0);
+        } else if x.abs() > 4.0 {
+            rail_pinned += 1;
+            clean.push(0.0);
+        } else {
+            if x.abs() >= 0.995 {
+                rail_pinned += 1;
+            }
+            sum += x as f64;
+            clean.push(x);
+        }
+    }
+    // Reject severely corrupted ONNX INT8 outputs (NaN collapse or ARM rail-pinned garbage) so callers can retry.
+    if non_finite * 20 > n || (n >= 1200 && rail_pinned * 10 > n * 3) {
+        return Vec::new();
+    }
+
+    // Remove global DC bias before IIR filtering to avoid startup transient.
+    let mean = (sum / n as f64) as f32;
+    for s in clean.iter_mut() {
+        *s -= mean;
+    }
+
+    let rate_f = rate as f64;
+    if rate >= 1_000 {
+        apply_highpass(&mut clean, rate_f, 65.0);
+    }
+    // Kokoro iSTFTNet hop_size = 5 generates exact narrowband carrier tones at fs/5 (4800 Hz) & 2*fs/5 (9600 Hz).
+    if rate >= 20_000 {
+        apply_notch(&mut clean, rate_f, rate_f / 5.0, 16.0);
+        apply_notch(&mut clean, rate_f, 2.0 * rate_f / 5.0, 16.0);
+    }
+
+    let mut peak = 0.0f32;
+    for &x in &clean {
         let a = x.abs();
         if a.is_finite() && a > peak {
             peak = a;
@@ -423,36 +525,61 @@ pub fn postprocess_pcm(samples: &[f32], rate: u32) -> Vec<f32> {
     if peak < 1e-6 {
         return Vec::new();
     }
+
     let thresh = peak * 0.008; // ~-42 dB
-    let first = samples.iter().position(|x| x.abs() > thresh).unwrap_or(0);
-    let last = samples.iter().rposition(|x| x.abs() > thresh).unwrap_or(samples.len() - 1);
+    let first = clean.iter().position(|x| x.abs() > thresh).unwrap_or(0);
+    let last = clean.iter().rposition(|x| x.abs() > thresh).unwrap_or(clean.len() - 1);
     let pad = (rate as usize) / 20; // 50 ms
     let s = first.saturating_sub(pad);
-    let e = (last + 1 + pad).min(samples.len());
-    let slice = &samples[s..e];
+    let e = (last + 1 + pad).min(clean.len());
+    let mut out = clean[s..e].to_vec();
+    if out.is_empty() {
+        return out;
+    }
+
+    // 8 ms raised-cosine fade-in/out prevents click/pop discontinuities between clauses and sentences.
+    let fade = (out.len() / 2).min(((rate as usize) * 8) / 1000);
+    if fade > 0 {
+        let out_len = out.len();
+        for i in 0..fade {
+            let w = (0.5 * (1.0 - (std::f64::consts::PI * i as f64 / fade as f64).cos())) as f32;
+            out[i] *= w;
+            out[out_len - 1 - i] *= w;
+        }
+    }
 
     let mut sum_sq = 0.0f64;
     let mut active = 0usize;
-    for &x in slice {
-        if x.abs() > 1e-3 {
+    let mut slice_peak = 0.0f32;
+    for &x in &out {
+        let a = x.abs();
+        if a > slice_peak {
+            slice_peak = a;
+        }
+        if a > 1e-3 {
             sum_sq += (x as f64) * (x as f64);
             active += 1;
         }
     }
+    if slice_peak < 1e-6 {
+        return Vec::new();
+    }
     let rms = if active >= 64 {
         (sum_sq / active as f64).sqrt() as f32
     } else {
-        (slice.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>() / slice.len() as f64).sqrt() as f32
+        (out.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>() / out.len() as f64).sqrt() as f32
     };
     if rms < 1e-6 {
-        return slice.to_vec();
+        return out;
     }
-    let mut gain = 0.10f32 / rms;
-    let max_after = peak * gain;
-    if max_after > 0.891f32 {
-        gain = 0.891f32 / peak;
+    let mut gain = (0.10f32 / rms).min(4.5f32);
+    if slice_peak * gain > 0.891f32 {
+        gain = 0.891f32 / slice_peak;
     }
-    slice.iter().map(|&x| (x * gain).clamp(-0.98, 0.98)).collect()
+    for x in out.iter_mut() {
+        *x = (*x * gain).clamp(-0.98, 0.98);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -502,4 +629,72 @@ mod tests {
         assert!(parts.len() >= 2);
         assert!(parts.iter().all(|p| !p.is_empty()));
     }
+
+    #[test]
+    fn postprocess_removes_dc_and_istft_carrier_buzz_while_preserving_speech() {
+        let rate = 24_000u32;
+        let n = 24_000usize; // 1.0 s
+        let two_pi = 2.0 * std::f32::consts::PI;
+        // Synthetic signal: 300 Hz speech tone + +0.04 DC bias + 4800 Hz & 9600 Hz iSTFT carrier buzz.
+        let mut raw = Vec::with_capacity(n);
+        for i in 0..n {
+            let t = i as f32 / rate as f32;
+            let speech = 0.14 * (two_pi * 300.0 * t).sin();
+            let buzz4800 = 0.02 * (two_pi * 4800.0 * t).sin();
+            let buzz9600 = 0.02 * (two_pi * 9600.0 * t).sin();
+            raw.push(0.04 + speech + buzz4800 + buzz9600);
+        }
+
+        let out = postprocess_pcm(&raw, rate);
+        assert!(!out.is_empty());
+
+        // Edges are faded smoothly to zero to prevent boundary clicks.
+        assert!(out[0].abs() < 1e-4, "start not faded: {}", out[0]);
+        assert!(out[out.len() - 1].abs() < 1e-4, "end not faded: {}", out[out.len() - 1]);
+
+        // DC offset is effectively eliminated.
+        let dc = (out.iter().map(|&x| x as f64).sum::<f64>() / out.len() as f64).abs();
+        assert!(dc < 1e-3, "DC offset remained too high: {dc}");
+
+        // Measure steady-state projection amplitude at 300 Hz, 4800 Hz, 9600 Hz in the middle 0.5 s.
+        let measure = |buf: &[f32], freq: f64| -> f64 {
+            let start = buf.len() / 4;
+            let end = (buf.len() * 3) / 4;
+            let len = (end - start) as f64;
+            let mut re = 0.0f64;
+            let mut im = 0.0f64;
+            for (idx, &x) in buf[start..end].iter().enumerate() {
+                let ph = 2.0 * std::f64::consts::PI * freq * idx as f64 / rate as f64;
+                re += (x as f64) * ph.cos();
+                im += (x as f64) * ph.sin();
+            }
+            2.0 * (re * re + im * im).sqrt() / len
+        };
+
+        let a300 = measure(&out, 300.0);
+        let a4800 = measure(&out, 4800.0);
+        let a9600 = measure(&out, 9600.0);
+        assert!(a300 > 0.10, "speech fundamental attenuated unexpectedly: {a300}");
+        assert!(a4800 < a300 * 0.005, "4800 Hz carrier not suppressed enough: {a4800} vs {a300}");
+        assert!(a9600 < a300 * 0.005, "9600 Hz carrier not suppressed enough: {a9600} vs {a300}");
+    }
+
+    #[test]
+    fn postprocess_rejects_nan_and_rail_pinned_int8_outputs() {
+        let rate = 24_000u32;
+        let all_nan = vec![f32::NAN; 4800];
+        assert!(postprocess_pcm(&all_nan, rate).is_empty());
+
+        let rail_pinned = vec![1.0f32; 4800];
+        assert!(postprocess_pcm(&rail_pinned, rate).is_empty());
+
+        // Gain cap prevents near-silent quantization floor from blowing up past 4.5x.
+        let tiny_hiss: Vec<f32> = (0..4800)
+            .map(|i| 0.002 * (2.0 * std::f32::consts::PI * 300.0 * i as f32 / rate as f32).sin())
+            .collect();
+        let out = postprocess_pcm(&tiny_hiss, rate);
+        let peak = out.iter().map(|x| x.abs()).fold(0.0f32, f32::max);
+        assert!(peak <= 0.015, "quiet floor over-amplified: peak={peak}");
+    }
 }
+

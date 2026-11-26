@@ -467,10 +467,17 @@ actor KokoroEngine {
             try Task.checkCancellation()
             let tokens = core.kokoroTokens(text: clause, lang: language)
             guard !tokens.isEmpty else { continue }
-            guard let chunk = Self.runClause(ort: ort, tokens: tokens, sid: Int32(speaker.sid)) else {
+            guard let chunk = Self.runClause(ort: ort, tokens: tokens, sid: Int32(speaker.sid), speed: 1.0) else {
                 return nil
             }
-            let clean = core.kokoroPostprocess(samples: chunk, rate: 24_000)
+            var clean = core.kokoroPostprocess(samples: chunk, rate: 24_000)
+            if clean.isEmpty {
+                // Retry once with slight token/speed perturbation if INT8 STFT hits 0/0 NaN or rail-pinning.
+                let nudged = tokens.count < 508 ? tokens + [tokens.last!] : tokens
+                if let retry = Self.runClause(ort: ort, tokens: nudged, sid: Int32(speaker.sid), speed: 1.015) {
+                    clean = core.kokoroPostprocess(samples: retry, rate: 24_000)
+                }
+            }
             guard !clean.isEmpty else { continue }
             if !out.isEmpty {
                 out.append(contentsOf: repeatElement(Float(0), count: Self.clauseGapSamples))
@@ -513,10 +520,10 @@ actor KokoroEngine {
         return opened
     }
 
-    nonisolated private static func runClause(ort: OpaquePointer, tokens: [Int64], sid: Int32) -> [Float]? {
+    nonisolated private static func runClause(ort: OpaquePointer, tokens: [Int64], sid: Int32, speed: Float = 1.0) -> [Float]? {
         var audio = YYKokoroAudio()
         let rc = tokens.withUnsafeBufferPointer { ptr in
-            yy_ort_kokoro_synth(ort, ptr.baseAddress, Int64(tokens.count), sid, 1.0, &audio)
+            yy_ort_kokoro_synth(ort, ptr.baseAddress, Int64(tokens.count), sid, speed, &audio)
         }
         defer { yy_ort_kokoro_free(&audio) }
         guard rc == 0, audio.count > 0, let base = audio.samples else { return nil }
@@ -524,7 +531,7 @@ actor KokoroEngine {
     }
 
     nonisolated private static func cacheFile(speakerID: String, lang: String, text: String) -> URL {
-        let key = SHA256.hash(data: Data("\(speakerID)|\(lang)|\(text)".utf8))
+        let key = SHA256.hash(data: Data("kokoro-v1_1-v2|\(speakerID)|\(lang)|\(text)".utf8))
             .prefix(16).map { String(format: "%02x", $0) }.joined()
         return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appending(path: "yuyue-kokoro", directoryHint: .isDirectory)

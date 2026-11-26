@@ -163,8 +163,10 @@ class DramaSynth(private val context: android.content.Context, private val libra
     }
 
     private suspend fun systemVoiceInfos(language: String): List<VoiceInfo> {
-        val sys = SystemVoice.Engine.voices().filter { it.speaks(language) }
-        return (sys.filter { it.isOffline }.ifEmpty { sys }).map { v ->
+        val allSys = SystemVoice.Engine.voices().filter { it.speaks(language) }
+        val named = allSys.filter { !it.isSystemDefault }
+        val pool = named.ifEmpty { allSys }
+        return (pool.filter { it.isOffline }.ifEmpty { pool }).map { v ->
             val hinted = v.inferredGender
             val gender = if (hinted != CharacterGender.UNKNOWN) hinted else library.core.speakerKnownGender(v.id)
             VoiceInfo(v.id, listOf(language), gender, CharacterAge.UNKNOWN, emptyList(), emptyList(), false, true, -20f)

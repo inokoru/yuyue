@@ -181,7 +181,7 @@ private fun VoiceRow(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(v?.let(Voices::title) ?: t("没有能读的声音"), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 if (v is SystemVoice) {
-                    Text(t("系统自带 · 不推荐"), fontSize = 9.5.sp, color = Color(0xFFD97706), modifier = Modifier.background(YY.c.card, RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp))
+                    Text(t("系统语音"), fontSize = 9.5.sp, color = YY.c.t2, modifier = Modifier.background(YY.c.card, RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp))
                 }
             }
             val subText = when {
@@ -203,7 +203,7 @@ private fun VoiceRow(
                     return@clickable
                 }
                 if (v is SystemVoice) {
-                    if (!v.preview(sample(language))) {
+                    if (!v.preview(sample(language), language)) {
                         player.failure = t("系统朗读还没准备好，请稍后再试或检查文字转语音设置")
                     }
                 } else {

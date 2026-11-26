@@ -1197,11 +1197,12 @@ fun HistoryPage(push: (MePage) -> Unit) {
             val v = Voices.find(voiceId)
             if (v != null) {
                 val latin = label.count { it.code < 128 } > label.length / 2
-                val sample = app.yuyue.speech.DailyQuote.current(if (latin && v.speaks("en") && !v.speaks("zh")) "en" else "zh").text
+                val langTag = if (latin && v.speaks("en") && !v.speaks("zh")) "en" else "zh"
+                val sample = app.yuyue.speech.DailyQuote.current(langTag).text
                 if (v is SystemVoice) {
-                    if (v.preview(sample)) delay(2400)
+                    if (v.preview(sample, langTag)) delay(2400)
                 } else {
-                    val s = runCatching { withContext(Dispatchers.IO) { v.render(sample, if (latin) "en" else "zh") } }.getOrNull()
+                    val s = runCatching { withContext(Dispatchers.IO) { v.render(sample, langTag) } }.getOrNull()
                     if (s != null) {
                         val ms = (s.samples.size * 1000L / maxOf(1, s.rate)).coerceAtLeast(800L)
                         SystemVoice.Engine.preview(s)
