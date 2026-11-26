@@ -4,6 +4,20 @@
 
 Each version has a section, newest first. The app's changelog page and update notices come from here.
 
+## 0.1.5 · 2026-11-26
+
+### zh
+- 本机声音克隆修复：修复 Android 端在切换默认离线旁白后缺失声音克隆模型（ZipVoice）下载入口、导致录完音仍报「合成失败」的问题；在克隆、详情、选声、朗读面板与离线语音设置中全面补齐自动准备与手动下载进度条，Apple 端同步补齐引导。
+- 绝不擅自换声：全端移除广播剧隐藏替换云端旁白的逻辑，取消设备发烫时自动切回系统机械音（改为放慢后台预合成并轻提示）；广播剧、角色分声、跨章语言不兼容或云端克隆异常时均停下明确告知，由用户决定重试或更换声音；修复 Apple 端跨章语言标签与后台同步导致的静默切声。
+- TXT 识别与翻页体验：改进网文 TXT 行内书名/作者解析并过滤下载站广告，增强卷标、紧凑标题与纯数字章节目录识别；修复 Android 分页阅读点击翻页与跨章预加载衔接稳定性。
+- Apple 书伴优化：在不支持 Apple 智能的设备上自动隐藏该项并优先选用已配置的第三方模型或展示引导配置卡片。
+
+### en
+- Local voice cloning fix: restored the missing on-device voice cloning model (ZipVoice) download triggers and inline progress bars across Android and Apple cloning, detail, voice picker, listen, and settings screens, replacing misleading synthesis failure errors with clear download status.
+- Never switch voices without consent: removed hidden cloud-narrator substitution in drama mode across all platforms, stopped thermal throttling from auto-switching to system voices (throttling background pre-rendering with a gentle notice instead), and ensured drama, character, saved-voice, and ElevenLabs errors pause with clear choices rather than silently falling back; fixed Apple canonical language cache keys and mid-playback cache clears.
+- TXT parsing & tap page turns: improved inline title/author parsing while filtering promo lines, broadened TXT chapter heading detection, and fixed Android paginated WebView tap page turns and cross-section settling.
+- Apple Companion polish: hid unsupported Apple Intelligence options on older devices and added a clear setup card when no third-party model provider is configured.
+
 ## 0.1.4 · 2026-11-26
 
 ### zh
