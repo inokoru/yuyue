@@ -24,11 +24,11 @@ public sealed class UpstreamParityTests : IDisposable
     }
 
     [Fact]
-    public void KokoroModel_Exposes16CuratedSpeakersAndCoreFfiWorks()
+    public void KokoroModel_Exposes32CuratedSpeakersAndCoreFfiWorks()
     {
         var all = _library.Kokoro.GetAllSpeakers();
-        Assert.Equal(16, all.Count);
-        Assert.Equal(12, _library.Kokoro.GetSpeakers("zh-Hans").Count);
+        Assert.Equal(32, all.Count);
+        Assert.Equal(28, _library.Kokoro.GetSpeakers("zh-Hans").Count);
         Assert.Equal(4, _library.Kokoro.GetSpeakers("en-US").Count);
 
         Assert.NotNull(_library.Kokoro.FindSpeaker("kokoro.zf_001"));

@@ -50892,6 +50892,366 @@
           }
         }
       }
+    },
+    "仅本书" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This book only"
+          }
+        }
+      }
+    },
+    "你之前选的声音当前不可用或不支持这一章语言，请重新选择声音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your chosen voice isn't available or doesn't support this chapter's language. Please pick a voice."
+          }
+        }
+      }
+    },
+    "保存并重念" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save & Re-read"
+          }
+        }
+      }
+    },
+    "再点一次纸面归于留白" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap again to clear the page"
+          }
+        }
+      }
+    },
+    "划选读错的字" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select the misread word"
+          }
+        }
+      }
+    },
+    "去配置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set Up"
+          }
+        }
+      }
+    },
+    "去配置模型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set Up Model"
+          }
+        }
+      }
+    },
+    "填入 API Key 后即可开始问答" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter an API key to start asking"
+          }
+        }
+      }
+    },
+    "已为你回退一句" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stepped back one sentence"
+          }
+        }
+      }
+    },
+    "已切换「标准」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switched to Standard"
+          }
+        }
+      }
+    },
+    "已记下这句" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sentence saved"
+          }
+        }
+      }
+    },
+    "广播剧这一句预制音频缺失，请重试或换一个声音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pre-rendered drama audio is missing for this line. Retry or switch voices."
+          }
+        }
+      }
+    },
+    "广播剧里角色的声音当前不可用，请检查离线模型或在人物声音中重选" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A character voice in this drama isn't available right now. Check the offline model or pick another voice in Cast."
+          }
+        }
+      }
+    },
+    "开启 Apple 智能，或添加其他服务商" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn on Apple Intelligence, or add another provider"
+          }
+        }
+      }
+    },
+    "开启或添加 AI 服务商" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable or add an AI provider"
+          }
+        }
+      }
+    },
+    "接上暂停前的语境" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick up the context before pausing"
+          }
+        }
+      }
+    },
+    "支持 DeepSeek、通义千问、Claude、OpenAI、Ollama 等" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Supports DeepSeek, Qwen, Claude, OpenAI, Ollama, and more"
+          }
+        }
+      }
+    },
+    "改读音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pronunciation"
+          }
+        }
+      }
+    },
+    "改读音…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fix Pronunciation…"
+          }
+        }
+      }
+    },
+    "未写明说话人的句子由旁白自然衔接" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lines without a named speaker flow naturally in the narrator's voice"
+          }
+        }
+      }
+    },
+    "未配置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not configured"
+          }
+        }
+      }
+    },
+    "正在重念…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Re-reading…"
+          }
+        }
+      }
+    },
+    "添加 AI 服务商以使用书伴" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add an AI provider to use Companion"
+          }
+        }
+      }
+    },
+    "添加 AI 服务商即可开始" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add an AI provider to get started"
+          }
+        }
+      }
+    },
+    "纠正读音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fix Pronunciation"
+          }
+        }
+      }
+    },
+    "继续朗读" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resume"
+          }
+        }
+      }
+    },
+    "角色已识别 · 未写明说话人的句子由旁白自然衔接" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Characters cast · lines without a named speaker flow in the narrator's voice"
+          }
+        }
+      }
+    },
+    "记下这句" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save line"
+          }
+        }
+      }
+    },
+    "设备有点热，已放慢后台预合成；可暂歇或手动换声音" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device is warm — background pre-rendering slowed. Take a break or switch voices manually."
+          }
+        }
+      }
+    },
+    "轻按下方播放开始听书" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap play below to start listening"
+          }
+        }
+      }
+    },
+    "输入同音字…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter a homophone…"
+          }
+        }
+      }
+    },
+    "还没添加 AI 服务商" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No AI provider added yet"
+          }
+        }
+      }
+    },
+    "还没配置 AI 模型，请先去设置 · 书伴添加服务商" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No AI model configured yet. Add a provider in Settings › Companion."
+          }
+        }
+      }
+    },
+    "选字" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick Word"
+          }
+        }
+      }
+    },
+    "配置模型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set Up Model"
+          }
+        }
+      }
+    },
+    "错词" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Word"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
