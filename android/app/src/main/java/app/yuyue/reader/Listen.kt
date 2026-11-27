@@ -75,7 +75,6 @@ fun ListenSheet(model: ReaderModel, dismiss: () -> Unit) {
     var pickingVoice by remember { mutableStateOf(false) }
     var currentVoice by remember { mutableStateOf<BookVoice?>(null) }
     var page by remember { mutableStateOf(ListenPage.Main) }
-    var moreOpen by remember { mutableStateOf(false) }
     ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = YY.c.card, dragHandle = { YYSheetDragHandle() }) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             when (page) {
@@ -84,10 +83,7 @@ fun ListenSheet(model: ReaderModel, dismiss: () -> Unit) {
                 ListenPage.Main -> Unit
             }
             if (page == ListenPage.Main) {
-            ListenHeader(player, moreOpen, onMore = { moreOpen = it }, onSleep = { page = ListenPage.Sleep }, onMark = {
-                model.markCurrentHeard()
-                dismiss()
-            }, onFix = { page = ListenPage.Pronounce })
+            ListenHeader(player) { page = ListenPage.Sleep }
             VoiceRow(model, player, currentVoice, onCurrentChanged = { currentVoice = it }) { pickingVoice = true }
             PrepareBetterVoiceRow(model.core, model.library.dataDir, player.language)
             val liveState = app.yuyue.speech.LiveVoiceModel.state
@@ -100,6 +96,13 @@ fun ListenSheet(model: ReaderModel, dismiss: () -> Unit) {
                 Text(notice, fontSize = 11.sp, color = YY.c.warn, modifier = Modifier.padding(horizontal = 4.dp))
             }
             Speed(model, player)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Tile(Icons.bookmarkOutline, t("记下这句"), t("划下了刚听到的这句"), false, Modifier.weight(1f)) {
+                    model.markCurrentHeard()
+                    dismiss()
+                }
+                Tile(Icons.waveform, t("纠正读音"), t("划选读错的字"), false, Modifier.weight(1f)) { page = ListenPage.Pronounce }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (model.hasDialogue) {
                     // 分角色 / 广播剧: 人物声音.
@@ -322,54 +325,27 @@ private fun sleepBadge(player: Player): String? = when (val s = player.sleep) {
 }
 
 @Composable
-private fun ListenHeader(
-    player: Player,
-    moreOpen: Boolean,
-    onMore: (Boolean) -> Unit,
-    onSleep: () -> Unit,
-    onMark: () -> Unit,
-    onFix: () -> Unit,
-) {
+private fun ListenHeader(player: Player, onSleep: () -> Unit) {
     val sleepOn = player.sleep != Player.Sleep.Off
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(t("听书"), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = YY.c.t1)
         Spacer(Modifier.weight(1f))
-        Box {
-            HeaderCapsule(t("更多"), highlighted = moreOpen) { onMore(true) }
-            DropdownMenu(moreOpen, { onMore(false) }) {
-                DropdownMenuItem(
-                    text = { Text(t("记下这句")) },
-                    leadingIcon = { Icon(Icons.bookmarkOutline, null, modifier = Modifier.size(16.dp)) },
-                    onClick = { onMore(false); onMark() },
-                )
-                DropdownMenuItem(
-                    text = { Text(t("纠正读音")) },
-                    leadingIcon = { Icon(Icons.waveform, null, modifier = Modifier.size(16.dp)) },
-                    onClick = { onMore(false); onFix() },
-                )
+        val ink = if (sleepOn) YY.tint.accent else YY.c.t2
+        Row(
+            Modifier
+                .heightIn(min = 32.dp)
+                .clip(CircleShape)
+                .background(if (sleepOn) YY.tint.accentSoft else YY.c.inset)
+                .clickable(onClickLabel = t("睡眠定时"), onClick = onSleep)
+                .padding(horizontal = if (sleepOn) 10.dp else 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(if (sleepOn) Icons.sleepFill else Icons.sleep, t("睡眠定时"), tint = ink, modifier = Modifier.size(15.dp))
+            sleepBadge(player)?.let { badge ->
+                Text(badge, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = ink, style = YY.tnum, maxLines = 1)
             }
         }
-        Spacer(Modifier.size(6.dp))
-        HeaderCapsule(sleepBadge(player) ?: t("睡眠定时"), highlighted = sleepOn, icon = if (sleepOn) Icons.sleepFill else Icons.sleep, showLabel = sleepOn, onClick = onSleep)
-    }
-}
-
-@Composable
-private fun HeaderCapsule(label: String, highlighted: Boolean, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, showLabel: Boolean = false, onClick: () -> Unit) {
-    val ink = if (highlighted) YY.tint.accent else YY.c.t2
-    Row(
-        Modifier
-            .heightIn(min = 32.dp)
-            .clip(CircleShape)
-            .background(if (highlighted) YY.tint.accentSoft else YY.c.inset)
-            .clickable(onClickLabel = label, onClick = onClick)
-            .padding(horizontal = if (showLabel) 10.dp else 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        if (icon != null) Icon(icon, null, tint = ink, modifier = Modifier.size(15.dp))
-        else Icon(Icons.more, null, tint = ink, modifier = Modifier.size(16.dp))
-        if (showLabel) Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = ink, style = YY.tnum, maxLines = 1)
     }
 }
 

@@ -683,7 +683,7 @@ struct ListenCard: View {
     var unit = String(localized: "章")
     /// 人物声音: the book and the chapter, for the cast page (a PDF has none).
     var castBook: (core: YuyueCore, bookID: String, section: UInt32)?
-    /// The open book, when this card is the reader's. A PDF player has none, so 更多 stays hidden.
+    /// The open book, when this card is the reader's. A PDF player has none, so 记下这句 / 纠正读音 stay hidden.
     private let reader: ReaderModel?
     /// Closes the sheet or popover after 记下这句 / 纠正读音, so the playback capsule can morph.
     private let dismissListen: () -> Void
@@ -814,16 +814,18 @@ struct ListenCard: View {
                 }
                 .font(.yy(size: 10.5))
                 .foregroundStyle(YYColor.t3)
-                headerActions(player)
+                if let player {
+                    sleepToggleButton(player)
+                }
             }
             #else
-            if player != nil {
+            if let player {
                 HStack(alignment: .center) {
                     Text(String(localized: "听书"))
                         .font(.yy(size: 15, weight: .bold))
                         .foregroundStyle(YYColor.t1)
                     Spacer()
-                    headerActions(player)
+                    sleepToggleButton(player)
                 }
                 .padding(.horizontal, 2)
             }
@@ -853,6 +855,7 @@ struct ListenCard: View {
                     }
                 }
                 speed(player)
+                if reader != nil { sentenceActions() }
                 tiles(player)
             }
         }
@@ -1104,46 +1107,18 @@ struct ListenCard: View {
         }
     }
 
-    /// 更多 sits beside the sleep toggle: the chip row that used to fill this header is now `sleepPage`.
-    @ViewBuilder private func headerActions(_ player: Player?) -> some View {
+    /// Where the sleep-timer chip row used to sit, between speed and the other tiles.
+    /// The moon toggle now opens `sleepPage`; these keep the bookmark and waveform icons.
+    @ViewBuilder private func sentenceActions() -> some View {
         HStack(spacing: 6) {
-            moreMenu
-            if let player {
-                sleepToggleButton(player)
+            Tile(icon: "bookmark", title: String(localized: "记下这句"), detail: String(localized: "划下了刚听到的这句"), on: false) {
+                reader?.markCurrentHeard()
+                dismissListen()
             }
-        }
-    }
-
-    @ViewBuilder private var moreMenu: some View {
-        if let reader {
-            Menu {
-                Button {
-                    reader.markCurrentHeard()
-                    dismissListen()
-                } label: {
-                    Label(String(localized: "记下这句"), systemImage: "bookmark")
-                }
-                Button {
-                    reader.promptPronunciation()
-                    dismissListen()
-                } label: {
-                    Label(String(localized: "纠正读音"), systemImage: "waveform")
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.yy(size: 13, weight: .semibold))
-                    .foregroundStyle(YYColor.t2)
-                    .frame(minWidth: 32, minHeight: 32)
-                    .background(YYColor.inset, in: .capsule)
-                    .overlay(Capsule().strokeBorder(YYColor.line, lineWidth: 0.5))
-                    .contentShape(Capsule().inset(by: -4))
+            Tile(icon: "waveform", title: String(localized: "纠正读音"), detail: String(localized: "划选读错的字"), on: false) {
+                reader?.promptPronunciation()
+                dismissListen()
             }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help(String(localized: "更多"))
-            .accessibilityLabel(String(localized: "更多"))
         }
     }
 
