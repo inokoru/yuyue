@@ -1,0 +1,35 @@
+id: 07-companion-voices-and-about
+title: 书伴服务商目录、朗读声音与试听、笔记导出品牌与关于页
+testing_ref: testing.md#一.8,二.6,六.7-8
+parity_ids:
+  - companion.qa_and_commands
+  - listening.local_and_cloud_voices
+  - notes.export
+  - accessibility.l10n_and_dark_mode
+fixtures: []
+platforms:
+  - windows
+  - macos
+  - android
+  - ios
+
+tasks:
+  - name: 检查书伴服务商入口与朗读声音配置页完整可读
+    flow:
+      - ai: 打开应用设置，进入「书伴」页面
+      - sleep: 800
+      - aiAssert: 书伴页面清晰可见当前服务商配置或添加服务商入口，排版完整无文字裁切或重叠
+      - ai: 打开添加服务商目录（若有添加入口），确认常见模型服务商分类展示清晰后返回
+      - sleep: 800
+      - ai: 切换到设置中的「朗读」或「声音」页面
+      - sleep: 800
+      - aiAssert: 朗读页面清晰可见默认声音（中英文）、语速控制以及声音来源或试听入口，无报错弹窗
+
+  - name: 检查笔记导出品牌目标与关于页版式完整
+    flow:
+      - ai: 切换到设置中的「笔记导出」页面
+      - sleep: 800
+      - aiAssert: 页面可见 Obsidian、flomo、Notion、新枝等导出目标及其清晰端正的品牌图标，没有变形、裁切或错位
+      - ai: 切换到设置中的「关于」页面
+      - sleep: 800
+      - aiAssert: 关于页面清晰展示语阅标识、版本号与相关信息，排版克制工整、无遮挡或异常报错

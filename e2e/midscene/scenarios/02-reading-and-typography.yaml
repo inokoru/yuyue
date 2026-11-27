@@ -12,7 +12,6 @@ platforms:
   - macos
   - android
   - ios
-  - web
 
 tasks:
   - name: 打开书页并验证翻页与目录跳转

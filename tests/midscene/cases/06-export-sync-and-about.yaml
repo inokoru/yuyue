@@ -1,0 +1,73 @@
+afterEach:
+  - yuyue.close: {}
+
+cases:
+  - name: 浅色与深色模式「笔记导出」四款品牌图标与卡片一致性校验
+    steps:
+      - yuyue.launch:
+          theme: light
+          settings: export
+      - aiWaitFor:
+          prompt: 语阅设置窗口已打开浅色模式的「笔记导出」页面
+          options:
+            timeoutMs: 20000
+      - aiAssert:
+          prompt: 页面依次显示 Obsidian、flomo、Notion、新枝四个导出目标卡片，四个左侧品牌图标均为尺寸统一、带清晰细边框的圆角白色方砖图标，新枝图标轮廓清晰端正、没有被裁断或发虚变形，整体排版整齐
+          message: 浅色模式笔记导出品牌方砖图标一致性检查失败
+      - yuyue.close: {}
+      - yuyue.launch:
+          theme: dark
+          settings: export
+      - aiWaitFor:
+          prompt: 语阅设置窗口已打开深色模式的「笔记导出」页面
+          options:
+            timeoutMs: 20000
+      - aiAssert:
+          prompt: 深色模式下 Obsidian、flomo、Notion、新枝四个导出卡片背景为深色且文字清晰可读，四个品牌图标均为风格统一的圆角方砖图标，没有出现尖角方框或突兀不一致的底色
+          message: 深色模式笔记导出品牌方砖图标一致性检查失败
+
+  - name: 「同步」与「数据」快照备份恢复入口完整性校验
+    steps:
+      - yuyue.launch:
+          theme: light
+          settings: sync
+      - aiWaitFor:
+          prompt: 语阅设置窗口已打开「同步」页面
+          options:
+            timeoutMs: 20000
+      - aiAssert:
+          prompt: 同步页面清晰展示「同步方式」卡片与下拉选择框（当前为「停止同步」），卡片排版工整无报错
+      - aiAct: 点击「同步方式」右侧下拉框，在展开列表中选择「WebDAV（坚果云、群晖、Nextcloud…）」
+      - sleep:
+          ms: 800
+      - aiAssert:
+          prompt: 页面展开了 WebDAV 同步配置项（包含服务器地址、账号/邮箱或检查连接按钮），排版工整无报错
+      - aiTap: 左侧设置导航栏中的「数据」分类项
+      - sleep:
+          ms: 700
+      - aiAssert:
+          prompt: 数据页面清晰展示整库数据快照（.yuyue）的导出与导入恢复入口，按钮完整无遮挡
+
+  - name: 「关于」双栏藏书票排版与手写签名校验（浅色与深色）
+    steps:
+      - yuyue.launch:
+          theme: light
+          settings: about
+      - aiWaitFor:
+          prompt: 语阅设置窗口已打开浅色模式的「关于」页面
+          options:
+            timeoutMs: 20000
+      - aiAssert:
+          prompt: 关于页面为左右双栏布局：左侧为藏书票名片，包含红色「阅」印章、宋体「语阅」、副标题「Yuyue for Windows」、版本号、手写铅笔签名以及「by nowtin · GPL-3.0」；右侧为版本更新、反馈等 Fluent 2 设置卡片，整体雅致对齐、无文字溢出或重叠
+          message: 浅色模式关于页藏书票与签名校验失败
+      - yuyue.close: {}
+      - yuyue.launch:
+          theme: dark
+          settings: about
+      - aiWaitFor:
+          prompt: 语阅设置窗口已打开深色模式的「关于」页面
+          options:
+            timeoutMs: 20000
+      - aiAssert:
+          prompt: 深色模式下关于页左右双栏藏书票与右侧设置卡片对比度均清晰优雅，「Yuyue for Windows」与手写签名在深色纸面上清晰可见，无白底残留或裁切
+          message: 深色模式关于页藏书票与签名校验失败

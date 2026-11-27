@@ -350,22 +350,26 @@ features:
           - apple:YuyueSnapshotTests/WalkthroughRegressionTests.swift::kokoro installation checks English lexicon
           - apple:YuyueSnapshotTests/WalkthroughRegressionTests.swift::EdgeTTS rejects truncated stream
           - apple:YuyueSnapshotTests/WalkthroughRegressionTests.swift::CloudVoice deduplicates concurrent fetches
+          - midscene:07-companion-voices-and-about.yaml
       ios:
         status: done
         tests:
           - apple:YuyueSnapshotTests/WalkthroughRegressionTests.swift::kokoro installation checks English lexicon
           - apple:YuyueSnapshotTests/WalkthroughRegressionTests.swift::EdgeTTS rejects truncated stream
+          - midscene:07-companion-voices-and-about.yaml
       android:
         status: done
         tests:
           - android:app/src/test/java/app/yuyue/speech/CloudVoiceTest.kt::CloudVoiceTest
           - android:app/src/test/java/app/yuyue/speech/EdgeTTSTest.kt::EdgeTTSTest
           - android:app/src/test/java/app/yuyue/speech/ModelDownloadTest.kt::ModelDownloadTest
+          - midscene:07-companion-voices-and-about.yaml
       windows:
         status: done
         tests:
           - windows:Yuyue.Tests/UpstreamParityTests.cs::KokoroModel_Exposes32CuratedSpeakersAndCoreFfiWorks
           - windows:Yuyue.Tests/CompanionAndCloudVoiceTests.cs::CompanionAndCloudVoiceTests
+          - midscene:07-companion-voices-and-about.yaml
 
   - id: listening.background_and_media_controls
     title: 后台继续听与锁屏/耳机/任务栏媒体控制
@@ -481,19 +485,23 @@ features:
         tests:
           - apple:YuyueSnapshotTests/WalkthroughRegressionTests.swift::companion slash parsing extracts command
           - apple:YuyueSnapshotTests/WalkthroughRegressionTests.swift::companion chapter excerpts cover the whole read chapter
+          - midscene:07-companion-voices-and-about.yaml
       ios:
         status: done
         tests:
           - apple:YuyueSnapshotTests/WalkthroughRegressionTests.swift::companion slash parsing extracts command
+          - midscene:07-companion-voices-and-about.yaml
       android:
         status: done
         tests:
           - android:app/src/test/java/app/yuyue/companion/CompanionCommandTest.kt::CompanionCommandTest
+          - midscene:07-companion-voices-and-about.yaml
       windows:
         status: done
         tests:
           - windows:Yuyue.Tests/UpstreamParityTests.cs::CompanionClient_PersistsCachedModelsStarsRecentsAndInfersMakers
           - windows:Yuyue.Tests/CompanionAndCloudVoiceTests.cs::CompanionAndCloudVoiceTests
+          - midscene:07-companion-voices-and-about.yaml
 
   # ==================== 六、笔记与导出 ====================
   - id: notes.highlights_and_thoughts

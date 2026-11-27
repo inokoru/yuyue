@@ -2,7 +2,7 @@ afterEach:
   - yuyue.close: {}
 
 cases:
-  - name: 深色模式打开红楼梦并验证翻页与版面不撑破
+  - name: 深色模式打开红楼梦并验证翻页、目录跳章与排版面板
     steps:
       - yuyue.launch:
           theme: dark
@@ -18,7 +18,20 @@ cases:
       - sleep:
           ms: 800
       - aiAssert:
-          prompt: 阅读器仍然处于正常显示状态，没有白屏、卡死或错位
+          prompt: 翻页后阅读器仍然处于正常显示状态，没有白屏、卡死或错位
+      - aiAct: 点击顶部工具栏中的「目录」图标打开左侧目录面板，并点击列表中的任意一个正文回目标题跳转
+      - sleep:
+          ms: 1000
+      - aiAssert:
+          prompt: 目录面板正常显示章节列表且跳转后正文清晰可读，没有界面重叠或报错弹窗
+      - aiAct: 点击顶部工具栏中的「外观」或「Aa」排版设置按钮打开排版浮层
+      - sleep:
+          ms: 800
+      - aiAssert:
+          prompt: 排版浮层完整可见，包含纸张主题、字号或行距调节控件，深色模式下对比度清晰无裁切
+      - aiKeyboardPress: Escape
+      - sleep:
+          ms: 400
 
   - name: 打开 PDF 夹具校验页面渲染
     steps:
@@ -30,4 +43,4 @@ cases:
           options:
             timeoutMs: 25000
       - aiAssert:
-          prompt: PDF 页面内容正常可见，没有空白画布或崩溃提示
+          prompt: PDF 页面内容正常可见，没有空白画布、错位或崩溃提示

@@ -1,0 +1,31 @@
+id: 08-web-reader-smoke
+title: 共享书页（Web Reader Demo）排版、换纸、翻页与墨线跟读冒烟
+testing_ref: testing.md#一.5-6,二.1
+parity_ids:
+  - reading.pagination
+  - reading.typography
+  - listening.tts_and_ink
+fixtures: []
+platforms:
+  - web
+
+tasks:
+  - name: 验证 Web 书页渲染、翻页与换纸字号调节
+    flow:
+      - aiWaitFor: 页面加载完成，左侧显示控制面板，右侧设备预览区显示中文书页正文
+      - aiAssert: 右侧书页中文正文排版清晰可读，文字不贴边、不裁切，控制面板与书页互不遮挡
+      - ai: 点击左侧控制面板中的下一页按钮（›）
+      - sleep: 600
+      - aiAssert: 书页正常向前翻页，页码或正文内容已更新，无白屏或错乱
+      - ai: 在左侧 Paper 区域切换到暗黑纸张（深黑色圆形按钮），再切换回纸本暖色纸张（米黄色圆形按钮）
+      - sleep: 800
+      - aiAssert: 书页背景变为暖纸色调，正文与背景对比度清晰可读
+
+  - name: 验证双栏与朗读墨线推进
+    flow:
+      - ai: 点击左侧 Play 按钮开始模拟朗读跟读
+      - sleep: 1200
+      - aiAssert: 书页正文中出现当前朗读句子的高亮或墨线指示，且页面无报错日志
+      - ai: 再次点击 Play/Pause 按钮暂停播放
+      - sleep: 500
+      - aiAssert: 页面保持稳定可读状态，无崩溃或异常报错

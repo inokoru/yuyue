@@ -1,0 +1,100 @@
+afterEach:
+  - yuyue.close: {}
+
+cases:
+  - name: 书伴服务商列表与「添加服务商」分类搜索弹窗校验
+    steps:
+      - yuyue.launch:
+          theme: light
+          settings: companion
+      - aiWaitFor:
+          prompt: 语阅设置窗口已打开「书伴」页面
+          options:
+            timeoutMs: 20000
+      - aiAssert:
+          prompt: 页面显示已添加的服务商卡片与「添加服务商」入口，没有长长的扁平下拉列表，卡片排版清晰无遮挡
+      - aiTap: 带有加号图标与「添加服务商…」文字的设置卡片
+      - sleep:
+          ms: 800
+      - aiAssert:
+          prompt: 弹出「添加书伴服务商」弹窗，包含搜索框、顶部一键登录卡片（如 OpenRouter）、多列网格的服务商分类卡片以及底部的「自己添加」入口，整体无裁切或文字重叠
+      - aiAct: 在弹窗顶部搜索框中输入 DeepSeek
+      - sleep:
+          ms: 600
+      - aiAssert:
+          prompt: 搜索结果准确过滤出 DeepSeek 卡片，其他不相关服务商已隐藏
+      - aiKeyboardPress: Escape
+      - sleep:
+          ms: 400
+
+  - name: 朗读页首屏默认声音、音色试听工作台与声音来源目录校验
+    steps:
+      - yuyue.launch:
+          theme: light
+          settings: listening
+      - aiWaitFor:
+          prompt: 语阅设置窗口已打开「朗读」页面
+          options:
+            timeoutMs: 20000
+      - aiAssert:
+          prompt: 页面首屏上方显示「默认声音与语速」（包含中文书、英文书卡片和试听/换声音按钮以及语速调节），下方显示「声音来源」及「添加声音来源」入口，排版清晰无重叠
+      - aiTap: 中文书卡片右侧的「换声音…」按钮
+      - sleep:
+          ms: 900
+      - aiAssert:
+          prompt: 弹出选声试听工作台，包含试听句条（带换一句/场景）、搜索与中英文筛选、以及分组排列的可试听声音列表，界面采用克制的 Fluent 2 暖纸风格与小圆角控件，没有突兀的大胶囊药丸按钮或控件错位
+      - aiKeyboardPress: Escape
+      - sleep:
+          ms: 600
+      - aiTap: 声音来源列表底部带有加号与「添加声音来源…」文字的设置卡片
+      - sleep:
+          ms: 900
+      - aiAssert:
+          prompt: 弹出「添加声音来源」目录弹窗，按免费在线/海外云端/本机局域网等分类以多列网格展示，底部有自定义语音接口入口，无视觉裁切
+      - aiKeyboardPress: Escape
+      - sleep:
+          ms: 400
+
+  - name: 在线声音隐藏后可从朗读页一键恢复
+    steps:
+      - yuyue.launch:
+          theme: dark
+          settings: listening
+      - aiWaitFor:
+          prompt: 语阅深色模式设置窗口已打开「朗读」页面，声音来源列表中可见「微软 Edge」卡片
+          options:
+            timeoutMs: 20000
+      - aiTap: 微软 Edge 卡片最右侧的「隐藏」文字按钮
+      - sleep:
+          ms: 800
+      - aiAssert:
+          prompt: 微软 Edge 卡片已从当前声音来源列表中隐藏，且「声音来源」标题栏右侧立即出现了「恢复在线声音」入口，没有死胡同
+      - aiTap: 声音来源标题栏右侧的「恢复在线声音」文字按钮
+      - sleep:
+          ms: 900
+      - aiAssert:
+          prompt: 微软 Edge 卡片已恢复回到声音来源列表中，深色模式对比度清晰可读
+
+  - name: 阅读器底部朗读控制条（选声、语速、定时）视觉与交互校验
+    steps:
+      - yuyue.launch:
+          theme: light
+          fixtures:
+            - beiying.epub
+      - aiWaitFor:
+          prompt: 语阅窗口已打开《背影》阅读界面并显示中文正文
+          options:
+            timeoutMs: 25000
+      - aiAct: 点击阅读器顶部工具栏中的朗读/耳机/播放按钮开启朗读条
+      - sleep:
+          ms: 1500
+      - aiAssert:
+          prompt: 窗口底部出现朗读播控条，清晰可见播放/暂停按钮、当前声音名称按钮、语速按钮（如 1×）与睡眠定时月亮图标，没有遮挡顶部工具栏或产生布局错乱
+      - aiAct: 点击底部播控条上的睡眠定时月亮图标
+      - sleep:
+          ms: 600
+      - aiAssert:
+          prompt: 弹出睡眠定时菜单，包含「本页读完」、「本章结束」与分钟定时选项，清晰可读
+      - aiKeyboardPress: Escape
+      - sleep:
+          ms: 400

@@ -3,10 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "midscene-test",
+    "test": "node run.mjs",
+    "test:release": "node run.mjs --release",
+    "test:smoke": "node run.mjs --smoke",
+    "test:release:smoke": "node run.mjs --release --smoke",
+    "test:settings": "node run.mjs --settings",
+    "test:release:settings": "node run.mjs --release --settings",
     "nodes": "midscene-test nodes",
     "model:verify": "midscene-test model verify",
     "typecheck": "tsc --noEmit",
+    "check": "tsc --noEmit && midscene-test nodes",
     "displays": "node -e \"import('@midscene/computer').then(async m => console.log(await m.ComputerDevice.listDisplays()))\"",
     "postinstall": "midscene-test nodes"
   },

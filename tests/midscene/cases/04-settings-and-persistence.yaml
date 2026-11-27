@@ -2,7 +2,7 @@ afterEach:
   - yuyue.close: {}
 
 cases:
-  - name: 深色模式下设置页可视化与切换检查
+  - name: 深色模式下设置页可视化、搜索与导航切换检查
     steps:
       - yuyue.launch:
           theme: dark
@@ -13,11 +13,31 @@ cases:
             timeoutMs: 20000
       - aiAssert:
           prompt: 设置页左侧导航与右侧设置卡片均为深色风格，所有文字清晰可读，没有白底白字或黑底黑字等明显对比度异常，也没有控件裁切或重叠
-      - aiAct: 点击设置左侧导航中的「阅读」或「朗读」分类项
+      - aiAct: 点击设置左侧导航中的「外观」分类项
       - sleep:
-          ms: 800
+          ms: 700
       - aiAssert:
-          prompt: 右侧设置内容已正常切换，滑块、下拉框或开关控件布局完整可读，无崩溃或空白页
+          prompt: 右侧已切换为外观设置页，主题模式、强调色或应用图标选项布局完整清晰，无裁切或重叠
+      - aiAct: 点击设置左侧导航中的「阅读」分类项
+      - sleep:
+          ms: 700
+      - aiAssert:
+          prompt: 右侧已切换为阅读设置页，滑块、下拉框或开关控件布局完整可读，无崩溃或空白页
+
+  - name: 英文界面语言切换与本地化完整性校验
+    steps:
+      - yuyue.launch:
+          theme: light
+          settings: general
+          prefs:
+            UiLanguage: en
+      - aiWaitFor:
+          prompt: 语阅设置窗口已打开并显示英文界面的 General 设置页
+          options:
+            timeoutMs: 20000
+      - aiAssert:
+          prompt: 左侧设置导航项与右侧通用设置卡片均显示为清晰的英文文案，没有明显的未翻译中文标题残留，也没有文字被按钮或卡片裁切
+          message: 英文界面本地化或布局检查失败
 
   - name: 导入书籍后重启应用验证书库持久化
     steps:

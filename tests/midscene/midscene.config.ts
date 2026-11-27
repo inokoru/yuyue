@@ -62,31 +62,37 @@ function findExeRecursively(dir: string): string | null {
 }
 
 function resolveYuyueExe(explicitPath?: string): string {
+  const debugExe = path.join(
+    REPO_ROOT,
+    'windows',
+    'Yuyue',
+    'bin',
+    'x64',
+    'Debug',
+    'net8.0-windows10.0.22621.0',
+    'win-x64',
+    'Yuyue.exe',
+  );
+  const releaseExe = path.join(
+    REPO_ROOT,
+    'windows',
+    'Yuyue',
+    'bin',
+    'x64',
+    'Release',
+    'net8.0-windows10.0.22621.0',
+    'win-x64',
+    'Yuyue.exe',
+  );
+
+  const buildPref = (process.env.YUYUE_BUILD || '').trim().toLowerCase();
+  const orderedDefaults =
+    buildPref === 'release' ? [releaseExe, debugExe] : [debugExe, releaseExe];
+
   const candidates = [
     explicitPath,
     process.env.YUYUE_EXE,
-    path.join(
-      REPO_ROOT,
-      'windows',
-      'Yuyue',
-      'bin',
-      'x64',
-      'Debug',
-      'net8.0-windows10.0.22621.0',
-      'win-x64',
-      'Yuyue.exe',
-    ),
-    path.join(
-      REPO_ROOT,
-      'windows',
-      'Yuyue',
-      'bin',
-      'x64',
-      'Release',
-      'net8.0-windows10.0.22621.0',
-      'win-x64',
-      'Yuyue.exe',
-    ),
+    ...orderedDefaults,
   ].filter((p): p is string => Boolean(p && p.trim()));
 
   for (const candidate of candidates) {
@@ -102,25 +108,91 @@ function resolveYuyueExe(explicitPath?: string): string {
   if (discovered) return discovered;
 
   throw new Error(
-    '未找到 Yuyue.exe。请先在仓库根目录构建 Windows 端（dotnet build windows/Yuyue/Yuyue.csproj），或在 tests/midscene/.env 中设置 YUYUE_EXE。',
+    '未找到 Yuyue.exe。请先在仓库根目录构建 Windows 端（dotnet build windows/Yuyue/Yuyue.csproj -c Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64），或在 tests/midscene/.env 中设置 YUYUE_EXE。',
   );
 }
 
-function bringProcessWindowToFront(pid: number, timeoutMs = 10_000): boolean {
+function seedWindowsPrefs(
+  libraryDir: string,
+  theme?: 'light' | 'dark',
+  prefsOverride?: Record<string, unknown>,
+): void {
+  if (!theme && !prefsOverride) return;
+  const prefsPath = path.join(libraryDir, 'windows-prefs.json');
+  let current: Record<string, unknown> = {};
+  if (fs.existsSync(prefsPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(prefsPath, 'utf8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        current = parsed as Record<string, unknown>;
+      }
+    } catch {
+      current = {};
+    }
+  }
+  if (theme) {
+    current.ThemeMode = theme;
+  }
+  if (prefsOverride) {
+    Object.assign(current, prefsOverride);
+  }
+  fs.writeFileSync(prefsPath, JSON.stringify(current, null, 2), 'utf8');
+}
+
+function bringProcessWindowToFront(pid: number, timeoutMs = 12_000): boolean {
   if (process.platform !== 'win32') return true;
   const psScript = `
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public static class WinFocus {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT r);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+  public static IntPtr FindMainWindow(uint targetPid) {
+    IntPtr best = IntPtr.Zero;
+    long bestArea = 0;
+    EnumWindows((h, l) => {
+      uint p;
+      GetWindowThreadProcessId(h, out p);
+      if (p != targetPid || !IsWindowVisible(h)) return true;
+      RECT r;
+      if (!GetWindowRect(h, out r)) return true;
+      long w = r.Right - r.Left, ht = r.Bottom - r.Top;
+      if (w >= 400 && ht >= 300 && w * ht > bestArea) {
+        bestArea = w * ht;
+        best = h;
+      }
+      return true;
+    }, IntPtr.Zero);
+    return best;
+  }
   public static void Focus(IntPtr h) {
+    uint curThread = GetCurrentThreadId();
+    IntPtr fg = GetForegroundWindow();
+    uint fgPid;
+    uint fgThread = fg != IntPtr.Zero ? GetWindowThreadProcessId(fg, out fgPid) : 0;
+    uint targetPid;
+    uint targetThread = GetWindowThreadProcessId(h, out targetPid);
+    if (fgThread != 0 && fgThread != curThread) AttachThreadInput(curThread, fgThread, true);
+    if (targetThread != 0 && targetThread != curThread) AttachThreadInput(curThread, targetThread, true);
     ShowWindow(h, 9);
     SetWindowPos(h, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040);
     SetWindowPos(h, new IntPtr(-2), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040);
+    BringWindowToTop(h);
     SetForegroundWindow(h);
+    if (targetThread != 0 && targetThread != curThread) AttachThreadInput(curThread, targetThread, false);
+    if (fgThread != 0 && fgThread != curThread) AttachThreadInput(curThread, fgThread, false);
   }
 }
 "@
@@ -128,9 +200,9 @@ $deadline = (Get-Date).AddMilliseconds(${timeoutMs})
 while ((Get-Date) -lt $deadline) {
   $p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
   if (-not $p) { exit 2 }
-  $p.Refresh()
-  if ($p.MainWindowHandle -ne [IntPtr]::Zero) {
-    [WinFocus]::Focus($p.MainWindowHandle)
+  $h = [WinFocus]::FindMainWindow([uint32]${pid})
+  if ($h -ne [IntPtr]::Zero) {
+    [WinFocus]::Focus($h)
     exit 0
   }
   Start-Sleep -Milliseconds 200
@@ -150,16 +222,26 @@ function readCrashLogSnippet(libraryDir: string): string {
   if (!fs.existsSync(logPath)) return '';
   try {
     const content = fs.readFileSync(logPath, 'utf8').trim();
-    return content.length > 800 ? content.slice(-800) : content;
+    return content.length > 1200 ? content.slice(-1200) : content;
   } catch {
     return '';
   }
 }
 
+function findFatalCrashEntries(libraryDir: string): string | null {
+  const snippet = readCrashLogSnippet(libraryDir);
+  if (!snippet) return null;
+  if (/\[(STARTUP_FATAL|APPDOMAIN|TASK|FATAL)\]|Unhandled/i.test(snippet)) {
+    return snippet;
+  }
+  return null;
+}
+
 async function stopYuyueProcess(
   context: FileContext,
   cleanupLibrary: boolean,
-): Promise<void> {
+  checkCrashLog = false,
+): Promise<string | null> {
   const proc = context.appProcess;
   context.appProcess = null;
 
@@ -176,24 +258,31 @@ async function stopYuyueProcess(
         // ignore
       }
     }
-    // Wait briefly so WebView2 / SQLite handles release before deleting temp library.
-    await sleepWithSignal(400);
+    // Wait briefly so WebView2 / SQLite handles release before inspecting or deleting temp library.
+    await sleepWithSignal(450);
   }
+
+  const crashReport =
+    checkCrashLog && context.libraryDir
+      ? findFatalCrashEntries(context.libraryDir)
+      : null;
 
   if (cleanupLibrary && context.ownsLibraryDir && context.libraryDir) {
     const dirToDelete = context.libraryDir;
     context.libraryDir = null;
     context.ownsLibraryDir = false;
 
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 4; attempt++) {
       try {
         fs.rmSync(dirToDelete, { recursive: true, force: true });
         break;
       } catch {
-        await sleepWithSignal(300);
+        await sleepWithSignal(350);
       }
     }
   }
+
+  return crashReport;
 }
 
 const fileSetup = defineFileSetup<FileContext, undefined>({
@@ -209,7 +298,7 @@ const fileSetup = defineFileSetup<FileContext, undefined>({
       ownsLibraryDir: false,
     };
     onTeardown(async () => {
-      await stopYuyueProcess(ctx, true);
+      await stopYuyueProcess(ctx, true, false);
       await agent.destroy();
     });
     return ctx;
@@ -250,16 +339,44 @@ const yuyueLaunchInputSchema = z.strictObject({
   theme: z
     .enum(['light', 'dark'])
     .optional()
-    .describe('Pass --light or --dark (Debug build only) to force theme mode.'),
+    .describe(
+      'Force Light or Dark mode. Seeds windows-prefs.json so it works identically in BOTH Release and Debug builds.',
+    ),
   tab: z
     .string()
     .optional()
-    .describe('Pass --tab <name> to switch the shelf tab on launch.'),
+    .describe('Pass --tab <name> to switch the shelf tab on launch (e.g. shelf, notes, podcasts, vocab).'),
+  view: z
+    .enum(['grid', 'list'])
+    .optional()
+    .describe('Pass --view <grid|list> to choose the shelf view layout.'),
   settings: z
     .union([z.boolean(), z.string()])
     .optional()
     .describe(
-      'Pass --settings or --settings <page> to open the Settings window directly.',
+      'Pass --settings or --settings <page> (e.g. general, appearance, reading, foreign, listening, companion, sync, export, storage, data, about) to open Settings directly.',
+    ),
+  settingsDialog: z
+    .enum(['companion-catalog', 'voice-catalog', 'voice-picker'])
+    .optional()
+    .describe('Pass --settings-dialog <name> (Debug build only) to open a Settings dialog directly.'),
+  panel: z
+    .string()
+    .optional()
+    .describe('Pass --panel <name> (Debug build only) to open a right-side reader panel (e.g. companion, notes, translate).'),
+  leftPanel: z
+    .string()
+    .optional()
+    .describe('Pass --left-panel <name> (Debug build only) to open a left-side reader panel (e.g. toc, bookmarks, search).'),
+  listenBar: z
+    .boolean()
+    .optional()
+    .describe('Pass --listen-bar (Debug build only) to show the bottom TTS bar immediately.'),
+  prefs: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe(
+      'Optional PascalCase DevicePrefs overrides written to windows-prefs.json before launch (works in BOTH Release and Debug builds, e.g. { HiddenVoiceProviders: ["edge", "free"], UiLanguage: "en" }).',
     ),
   extraArgs: z
     .array(z.string())
@@ -271,7 +388,7 @@ const yuyueLaunchInputSchema = z.strictObject({
     .min(0)
     .max(30_000)
     .optional()
-    .describe('Milliseconds to wait after spawning Yuyue.exe (default: 3000).'),
+    .describe('Milliseconds to wait after spawning Yuyue.exe (default: 2200).'),
 });
 
 const yuyueLaunch = defineNode<
@@ -288,7 +405,7 @@ const yuyueLaunch = defineNode<
     signal.throwIfAborted();
 
     const shouldReuse = Boolean(input.reuseLibrary && context.libraryDir);
-    await stopYuyueProcess(context, !shouldReuse);
+    await stopYuyueProcess(context, !shouldReuse, false);
 
     const exePath = resolveYuyueExe(input.exePath);
 
@@ -305,16 +422,26 @@ const yuyueLaunch = defineNode<
     }
     context.libraryDir = libraryDir;
 
+    // Pre-seed windows-prefs.json so theme/prefs work identically in Release AND Debug builds.
+    seedWindowsPrefs(libraryDir, input.theme, input.prefs);
+
     const args: string[] = ['--library', libraryDir];
     if (input.seedDemo) args.push('--seed-demo');
     if (input.theme === 'dark') args.push('--dark');
     if (input.theme === 'light') args.push('--light');
     if (input.tab) args.push('--tab', input.tab);
+    if (input.view) args.push('--view', input.view);
     if (input.open) args.push('--open', input.open);
+    if (input.panel) args.push('--panel', input.panel);
+    if (input.leftPanel) args.push('--left-panel', input.leftPanel);
+    if (input.listenBar) args.push('--listen-bar');
     if (input.settings === true) {
       args.push('--settings');
     } else if (typeof input.settings === 'string' && input.settings.trim()) {
       args.push('--settings', input.settings.trim());
+    }
+    if (input.settingsDialog) {
+      args.push('--settings-dialog', input.settingsDialog);
     }
     if (input.extraArgs?.length) {
       args.push(...input.extraArgs);
@@ -342,7 +469,7 @@ const yuyueLaunch = defineNode<
     context.appProcess = child;
 
     const focused = bringProcessWindowToFront(child.pid, 12_000);
-    await sleepWithSignal(input.waitMs ?? 2000, signal);
+    await sleepWithSignal(input.waitMs ?? 2200, signal);
     signal.throwIfAborted();
 
     if (child.exitCode !== null) {
@@ -360,7 +487,7 @@ const yuyueLaunch = defineNode<
     }
 
     return {
-      summary: `Launched Yuyue.exe (PID ${child.pid}) with isolated library ${libraryDir}`,
+      summary: `Launched ${path.basename(path.dirname(path.dirname(path.dirname(exePath))))} Yuyue.exe (PID ${child.pid}) with isolated library ${libraryDir}`,
       data: {
         pid: child.pid,
         exePath,
@@ -378,23 +505,68 @@ const yuyueCloseInputSchema = z.strictObject({
     .describe(
       'Keep the isolated temporary library on disk so a subsequent yuyue.launch({ reuseLibrary: true }) can verify persistence.',
     ),
+  ignoreCrashLog: z
+    .boolean()
+    .optional()
+    .describe(
+      'Skip asserting that yuyue.log has no fatal/unhandled exception entries before cleanup.',
+    ),
 });
 
 const yuyueClose = defineNode<typeof yuyueCloseInputSchema, void, FileContext>({
   name: 'yuyue.close',
   title: 'Close Yuyue Windows test instance',
   description:
-    'Terminate the test-launched Yuyue.exe process and optionally clean up its temporary library folder.',
+    'Terminate the test-launched Yuyue.exe process, check yuyue.log for fatal crashes, and optionally clean up its temporary library folder.',
   inputSchema: yuyueCloseInputSchema,
   async execute({ input, context }) {
-    await stopYuyueProcess(context, !input.keepLibrary);
+    const crash = await stopYuyueProcess(
+      context,
+      !input.keepLibrary,
+      !input.ignoreCrashLog,
+    );
+    if (crash) {
+      throw new Error(`运行期间在 yuyue.log 检测到未捕获异常或致命错误:\n${crash}`);
+    }
     return {
       summary: input.keepLibrary
-        ? 'Closed Yuyue.exe and kept temporary library for relaunch.'
-        : 'Closed Yuyue.exe and cleaned up temporary library.',
+        ? 'Closed Yuyue.exe cleanly (zero crash logs) and kept temporary library for relaunch.'
+        : 'Closed Yuyue.exe cleanly (zero crash logs) and cleaned up temporary library.',
     };
   },
 });
+
+const yuyueCheckLogInputSchema = z.strictObject({});
+
+const yuyueCheckLog = defineNode<
+  typeof yuyueCheckLogInputSchema,
+  { clean: boolean },
+  FileContext
+>({
+  name: 'yuyue.checkLog',
+  title: 'Assert Yuyue runtime crash log is clean',
+  description:
+    'Verify the isolated library yuyue.log does not contain unhandled exceptions or startup fatal errors.',
+  inputSchema: yuyueCheckLogInputSchema,
+  async execute({ context }) {
+    if (!context.libraryDir) {
+      return { summary: 'No active libraryDir to inspect.', data: { clean: true } };
+    }
+    const crash = findFatalCrashEntries(context.libraryDir);
+    if (crash) {
+      throw new Error(`yuyue.log 检测到异常:\n${crash}`);
+    }
+    return {
+      summary: 'yuyue.log is clean (no fatal/unhandled exceptions).',
+      data: { clean: true },
+    };
+  },
+});
+
+const caseFilesOverride = (process.env.YUYUE_CASE_FILES || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 export default defineTestProject<FileContext, undefined>({
   projects: [
@@ -402,12 +574,18 @@ export default defineTestProject<FileContext, undefined>({
       name: 'computer',
       fileSetup,
       maxConcurrentFiles: 1,
-      files: { include: ['cases/**/*.{yaml,yml}'] },
+      files: {
+        include:
+          caseFilesOverride.length > 0
+            ? caseFilesOverride
+            : ['cases/**/*.{yaml,yml}'],
+      },
     },
   ],
   nodes: [
     yuyueLaunch,
     yuyueClose,
+    yuyueCheckLog,
     ...createMidsceneNodes<FileContext>({
       agentClass: ComputerAgent,
       getAgent,

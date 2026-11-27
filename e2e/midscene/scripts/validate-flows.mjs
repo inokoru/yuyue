@@ -86,6 +86,10 @@ function main() {
       if (!rendered.includes('tasks:') || !rendered.includes('flow:')) {
         errors.push(`${file}: rendered Midscene YAML for ${p} missing tasks/flow`);
       }
+      const expectedTargetKey = p === 'windows' || p === 'macos' ? 'computer:' : `${p}:`;
+      if (!rendered.includes(expectedTargetKey)) {
+        errors.push(`${file}: rendered Midscene YAML for ${p} missing target header "${expectedTargetKey}"`);
+      }
     }
 
     let assertsInScenario = 0;

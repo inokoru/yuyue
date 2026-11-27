@@ -15,7 +15,7 @@ cases:
           prompt: 页面上的中文文字清晰正常，没有出现乱码（如问号块或错乱符号），无崩溃弹窗
           message: GBK 编码 TXT 文件解码或渲染异常
 
-  - name: 导入英文原著 EPUB 验证西文排版
+  - name: 导入英文原著 EPUB 验证西文排版与翻页
     steps:
       - yuyue.launch:
           fixtures:
@@ -24,8 +24,14 @@ cases:
           prompt: 语阅阅读界面已打开《The Great Gatsby》英文内容或封面页
           options:
             timeoutMs: 25000
+      - aiKeyboardPress: Right
+      - sleep:
+          ms: 800
+      - aiKeyboardPress: Right
+      - sleep:
+          ms: 800
       - aiAssert:
-          prompt: 英文排版清晰对齐，没有文字溢出窗口边界或异常报错框
+          prompt: 英文排版清晰对齐，字距行距自然，没有文字溢出窗口边界或异常报错框
 
   - name: 导入空文件与损坏 EPUB 验证容错不崩溃
     steps:
