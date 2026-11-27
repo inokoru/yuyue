@@ -239,13 +239,17 @@ class SystemVoice private constructor(
                 .getOrNull()
                 ?.takeIf { it.isNotBlank() }
 
+        internal fun hasEngineChanged(wantedPkg: String?, boundPkg: String?): Boolean =
+            !wantedPkg.isNullOrBlank() && !boundPkg.isNullOrBlank() && wantedPkg != boundPkg
+
         @Synchronized
         fun init(context: Context) {
             val ctx = context.applicationContext
             appContext = ctx
             val wantedPkg = configuredDefaultSynth(ctx)
+                ?: runCatching { tts?.defaultEngine }.getOrNull()?.takeIf { it.isNotBlank() }
             if (tts != null) {
-                val engineChanged = wantedPkg != null && boundEnginePkg != null && wantedPkg != boundEnginePkg
+                val engineChanged = hasEngineChanged(wantedPkg, boundEnginePkg)
                 if (readyOk != false && !engineChanged) return
                 runCatching { tts?.shutdown() }
                 tts = null
@@ -260,14 +264,16 @@ class SystemVoice private constructor(
             }
             cache = File(ctx.cacheDir, "tts").apply { mkdirs() }
             boundEnginePkg = wantedPkg
-            tts = TextToSpeech(ctx) { status ->
+            var created: TextToSpeech? = null
+            created = TextToSpeech(ctx) { status ->
                 val ok = status == TextToSpeech.SUCCESS
                 if (ok) {
-                    boundEnginePkg = runCatching { tts?.defaultEngine }.getOrNull() ?: wantedPkg
+                    boundEnginePkg = runCatching { created?.defaultEngine ?: tts?.defaultEngine }.getOrNull() ?: wantedPkg
                 }
                 readyOk = ok
                 ready.complete(ok)
             }
+            tts = created
         }
 
         private suspend fun awaitReady(): Boolean =
@@ -705,13 +711,14 @@ class SystemVoice private constructor(
             val ctx = appContext ?: return false
             if (readyOk == false) return false
             val wantedPkg = configuredDefaultSynth(ctx)
+                ?: runCatching { previewTts?.defaultEngine ?: tts?.defaultEngine }.getOrNull()?.takeIf { it.isNotBlank() }
             val token: Long
             val readyEngine: TextToSpeech?
             synchronized(previewLock) {
                 token = previewToken
                 previewOnDone = onComplete
                 val existing = previewTts
-                val engineChanged = wantedPkg != null && previewEnginePkg != null && wantedPkg != previewEnginePkg
+                val engineChanged = hasEngineChanged(wantedPkg, previewEnginePkg)
                 if (existing != null && previewReadyOk == true && !engineChanged) {
                     readyEngine = existing
                 } else {

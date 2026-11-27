@@ -389,7 +389,19 @@ fun ListeningPage(open: (String) -> Unit) {
     var neuralCount by remember { mutableIntStateOf(0) }
     var systemCount by remember { mutableIntStateOf(0) }
     var reading by remember { mutableStateOf<Map<VoiceBook, BookVoice>>(emptyMap()) }
-    LaunchedEffect(zh, en, kokoroState::class, liveState::class) {
+    var resumeTick by remember { mutableIntStateOf(0) }
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
+        var sawFirstResume = false
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                if (sawFirstResume) resumeTick++ else sawFirstResume = true
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(zh, en, resumeTick, kokoroState::class, liveState::class) {
         SystemVoice.Engine.init(context)
         val system = SystemVoice.Engine.voices()
         val kokoro = app.yuyue.speech.KokoroModel.voices(lib.core, lib.dataDir)
@@ -604,7 +616,19 @@ fun VoiceSourcePage(id: String, openSettings: () -> Unit) {
     var draft by remember { mutableStateOf("") }
     var linesOpen by remember { mutableStateOf(false) }
     var pickerOpen by remember { mutableStateOf(false) }
-    LaunchedEffect(book, chosenID, version, kokoroState::class, liveState::class) {
+    var resumeTick by remember { mutableIntStateOf(0) }
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
+        var sawFirstResume = false
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                if (sawFirstResume) resumeTick++ else sawFirstResume = true
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(book, chosenID, version, resumeTick, kokoroState::class, liveState::class) {
         SystemVoice.Engine.init(context)
         val all = Voices.all(book.tag)
         voices = all.filter { sourceOf(it) == id }

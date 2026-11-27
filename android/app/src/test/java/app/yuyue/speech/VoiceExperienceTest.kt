@@ -348,6 +348,16 @@ class VoiceExperienceTest {
     }
 
     @Test
+    fun systemTtsDetectsDefaultEngineSwitchAcrossOemEngines() {
+        assertTrue(SystemVoice.Engine.hasEngineChanged("com.oplus.tts", "com.google.android.tts"))
+        assertTrue(SystemVoice.Engine.hasEngineChanged("com.samsung.SMT", "com.google.android.tts"))
+        assertFalse(SystemVoice.Engine.hasEngineChanged("com.oplus.tts", "com.oplus.tts"))
+        assertFalse(SystemVoice.Engine.hasEngineChanged(null, "com.oplus.tts"))
+        assertFalse(SystemVoice.Engine.hasEngineChanged("com.oplus.tts", null))
+        assertFalse(SystemVoice.Engine.hasEngineChanged("", "com.oplus.tts"))
+    }
+
+    @Test
     fun systemVoiceWavDecodesFloat32And8BitPcm() {
         val dir = Files.createTempDirectory("yuyue-wav-formats").toFile()
         try {

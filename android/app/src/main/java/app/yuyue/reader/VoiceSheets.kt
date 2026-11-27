@@ -448,6 +448,19 @@ fun VoiceGroupsContent(
     var previewJob by remember { mutableStateOf<Job?>(null) }
     var previewFailedKey by remember { mutableStateOf<String?>(null) }
     var previewError by remember { mutableStateOf<String?>(null) }
+    var resumeTick by remember { mutableIntStateOf(0) }
+
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        var sawFirstResume = false
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                if (sawFirstResume) resumeTick++ else sawFirstResume = true
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
 
     fun stopLocalPreview() {
         previewJob?.cancel()
@@ -461,7 +474,7 @@ fun VoiceGroupsContent(
 
     DisposableEffect(Unit) { onDispose { stopLocalPreview() } }
 
-    LaunchedEffect(language, bookID, refreshKey, kokoroState::class, liveState::class) {
+    LaunchedEffect(language, bookID, refreshKey, resumeTick, kokoroState::class, liveState::class) {
         SystemVoice.Engine.init(context)
         ClonedVoices.init(context)
         withContext(Dispatchers.IO) {
