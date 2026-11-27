@@ -1110,6 +1110,7 @@ public sealed partial class ReaderPaneView : IMiniPlayerSource
         });
 
         dlgRef = YYChrome.CreateFluentDialog(xamlRoot, dark, 600, root, tint: library.Prefs.Tint);
+        dlgRef.Opened += (_, _) => searchBox.Focus(FocusState.Programmatic);
         dlgRef.Closed += (_, _) =>
         {
             dialogOpen = false;

@@ -827,6 +827,13 @@ public sealed partial class MainWindow : Window, IDebugScreenshotCapable
 
     private void RootGrid_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (YYChrome.HasBlockingModalOrFlyoutOpen(RootGrid.XamlRoot))
+        {
+            if (e.Key == VirtualKey.Escape && YYChrome.TryHideTopmostContentDialog(RootGrid.XamlRoot))
+                e.Handled = true;
+            return;
+        }
+
         bool ctrl = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(CoreVirtualKeyStates.Down);
         bool shift = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(CoreVirtualKeyStates.Down);
         bool alt = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu).HasFlag(CoreVirtualKeyStates.Down);

@@ -12,7 +12,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
@@ -102,6 +102,14 @@ const bin = path.join(
   '.bin',
   process.platform === 'win32' ? 'midscene-test.cmd' : 'midscene-test',
 );
+
+if (process.platform === 'win32') {
+  const retryUrl = pathToFileURL(path.join(HERE, 'win-fs-retry.mjs')).href;
+  const importFlag = `--import ${retryUrl}`;
+  if (!(env.NODE_OPTIONS || '').includes('win-fs-retry.mjs')) {
+    env.NODE_OPTIONS = env.NODE_OPTIONS ? `${env.NODE_OPTIONS} ${importFlag}` : importFlag;
+  }
+}
 
 const res = spawnSync(bin, finalArgs, {
   cwd: HERE,

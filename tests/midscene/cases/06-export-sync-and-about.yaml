@@ -48,7 +48,7 @@ cases:
       - aiAssert:
           prompt: 数据页面清晰展示整库数据快照（.yuyue）的导出与导入恢复入口，按钮完整无遮挡
 
-  - name: 「关于」双栏藏书票排版与手写签名校验（浅色与深色）
+  - name: 「关于」双栏藏书票排版与点击手写签名校验（浅色与深色）
     steps:
       - yuyue.launch:
           theme: light
@@ -58,8 +58,14 @@ cases:
           options:
             timeoutMs: 20000
       - aiAssert:
-          prompt: 关于页面为左右双栏布局：左侧为藏书票名片，包含红色「阅」印章、宋体「语阅」、副标题「Yuyue for Windows」、版本号、手写铅笔签名以及「by nowtin · GPL-3.0」；右侧为版本更新、反馈等 Fluent 2 设置卡片，整体雅致对齐、无文字溢出或重叠
-          message: 浅色模式关于页藏书票与签名校验失败
+          prompt: 关于页面为左右双栏布局：左侧为藏书票名片，包含「阅」印章、宋体「语阅」、副标题「Yuyue for Windows」、版本号以及底部「by nowtin · GPL-3.0」，此时底部上方默认未绘制手写铅笔签名（留白干净）；右侧为版本更新、反馈等 Fluent 2 设置卡片，整体雅致对齐、无文字溢出或重叠
+          message: 浅色模式关于页藏书票初始排版（默认不画签名）校验失败
+      - aiTap: 左侧藏书票卡片底部的「GPL-3.0」标签（点击触发手写签名）
+      - sleep:
+          ms: 2200
+      - aiAssert:
+          prompt: 点击后左侧藏书票「by nowtin · GPL-3.0」上方已完整绘出手写铅笔签名（CTT 字样笔迹），清晰自然无裁切
+          message: 浅色模式点击后绘制手写签名校验失败
       - yuyue.close: {}
       - yuyue.launch:
           theme: dark
@@ -69,5 +75,11 @@ cases:
           options:
             timeoutMs: 20000
       - aiAssert:
-          prompt: 深色模式下关于页左右双栏藏书票与右侧设置卡片对比度均清晰优雅，「Yuyue for Windows」与手写签名在深色纸面上清晰可见，无白底残留或裁切
-          message: 深色模式关于页藏书票与签名校验失败
+          prompt: 深色模式下关于页左右双栏藏书票与右侧设置卡片对比度均清晰优雅，「Yuyue for Windows」与「by nowtin · GPL-3.0」清晰可见，且默认未绘制手写签名、无白底残留或裁切
+          message: 深色模式关于页初始排版校验失败
+      - aiTap: 左侧藏书票卡片底部的「GPL-3.0」标签（点击触发手写签名）
+      - sleep:
+          ms: 2200
+      - aiAssert:
+          prompt: 深色模式下点击后「by nowtin · GPL-3.0」上方已绘出清晰可见的浅色手写铅笔签名，无裁切或错位
+          message: 深色模式点击后绘制手写签名校验失败

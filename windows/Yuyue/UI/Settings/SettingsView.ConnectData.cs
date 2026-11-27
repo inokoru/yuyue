@@ -2080,15 +2080,14 @@ public sealed partial class SettingsView
         });
         leftGrid.Children.Add(leftTop);
 
-        // Graphite PencilSignature + by nowtin · GPL-3.0
-        var (sigView, triggerSigWrite) = YYChrome.MakePencilSignature(58, dark, autoWrite: true);
+        // Graphite PencilSignature + by nowtin · GPL-3.0 (not drawn on open; writes out when clicked, matching macOS/iOS/Android)
+        var (sigView, triggerSigWrite) = YYChrome.MakePencilSignature(58, dark, autoWrite: false);
         var sigWrap = new StackPanel
         {
             Spacing = 5,
             Margin = new Thickness(0, 20, 0, 0),
             Background = new SolidColorBrush(Colors.Transparent),
         };
-        ToolTipService.SetToolTip(sigWrap, L10n.T("点击重绘手写签名"));
         sigWrap.PointerPressed += (_, _) => triggerSigWrite();
         sigWrap.Children.Add(sigView);
 

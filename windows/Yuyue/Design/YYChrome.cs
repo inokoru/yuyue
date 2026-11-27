@@ -172,6 +172,28 @@ public static class YYChrome
     }
 
     /// <summary>
+    /// Hides the topmost open <see cref="ContentDialog"/> on <paramref name="xamlRoot"/> if any.
+    /// Used as a safety net when <c>Escape</c> reaches the window root while focus has not yet entered the dialog.
+    /// </summary>
+    public static bool TryHideTopmostContentDialog(XamlRoot? xamlRoot)
+    {
+        if (xamlRoot is null) return false;
+        try
+        {
+            foreach (var pop in VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot))
+            {
+                if (pop.Child is ContentDialog dlg)
+                {
+                    dlg.Hide();
+                    return true;
+                }
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    /// <summary>
     /// Strips WinUI 3's inner focus border and opaque focus/hover fill from a <see cref="TextBox"/>
     /// placed inside a custom rounded container <see cref="Border"/>.
     /// </summary>
@@ -930,10 +952,10 @@ public static class YYChrome
 
     /// <summary>
     /// Interactive graphite pencil signature (<c>CTT</c>) for the About bookplate folio
-    /// (1:1 <c>apple/Yuyue/Phone/PhoneSignature.swift</c> &amp; <c>MacUpdate.swift</c>).
-    /// Writes out all three bezier strokes sequentially on load and whenever clicked.
+    /// (1:1 <c>apple/Yuyue/Phone/PhoneSignature.swift</c>, <c>MacUpdate.swift</c>, &amp; Android <c>Signature.kt</c>).
+    /// Not drawn when the page opens; writes out all three bezier strokes sequentially whenever clicked.
     /// </summary>
-    public static (FrameworkElement View, Action TriggerWrite) MakePencilSignature(double size, bool dark, bool autoWrite = true)
+    public static (FrameworkElement View, Action TriggerWrite) MakePencilSignature(double size, bool dark, bool autoWrite = false)
     {
         double k = size / 60.0;
         double w = size;
