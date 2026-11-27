@@ -4,6 +4,18 @@
 
 Each version has a section, newest first. The app's changelog page and update notices come from here.
 
+## 0.1.8 · 2026-11-27
+
+### zh
+- 翻页稳定性与启动续读：修复 Android 分页模式跨章后点击翻页卡死与连击误丢，加固 iOS 跨章预加载与点击排队；全端（iOS / Android / macOS / Windows）默认开启「启动时继续上次阅读」，退出时停留在阅读页则重启直接回到上次书籍。
+- Android 离线语音与系统 TTS 优化：在线声音断网出错时改为友好提示并优先引导一键「换成离线声音」，修复点击下载系统语音无响应的问题；Kokoro 离线语音详情页补齐当前朗读来源状态与一键切换入口，并修复分角色朗读出错时的音色归因与精准恢复。
+- Windows 交互修复：修复关于页签名点击绘制与弹窗按 Esc 关闭等细节问题。
+
+### en
+- Page-turn reliability & reopen-last-book: fixed Android paginated tap page turns getting stuck after chapter crossings and dropping rapid taps, hardened iOS chapter-edge preloading and tap queuing, and enabled "Continue last book on launch" by default across iOS, Android, macOS, and Windows so relaunching from a book returns directly to it.
+- Android offline TTS & system voice polish: replaced raw offline network errors with friendly guidance that offers one-tap switching to a downloaded offline voice, fixed broken system TTS download navigation, added active-voice status and a one-tap switch banner on the Kokoro offline voice page, and fixed per-segment failure attribution and recovery in manual character-voice mode.
+- Windows interaction fixes: fixed click-to-draw signature behavior on the About page and Esc key dismissal for modals.
+
 ## 0.1.7 · 2026-11-27
 
 ### zh
