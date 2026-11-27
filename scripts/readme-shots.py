@@ -101,18 +101,47 @@ def cmd_compose(_: argparse.Namespace) -> None:
     rewrite_readme(made)
 
 
+def cmd_covers(args: argparse.Namespace) -> None:
+    _need_pillow()
+    from readme_shots.books import all_covers
+    from readme_shots.covers import contact_sheet, render
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    specs = all_covers()
+    for spec in specs:
+        (out / f"{spec.title}.png").write_bytes(render(spec))
+    sheet = contact_sheet(specs, out / "sheet.png")
+    print(f"{len(specs)} 张封面 → {sheet}")
+
+
 def cmd_self_check(_: argparse.Namespace) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         books = prepare(root / "books")
-        assert len(books) >= 16, len(books)
-        epub = next(p for p in books if p.name == "beiying.epub")
+        names = {p.name for p in books}
+        assert len(books) == 22, len(books)
+        assert "alice.epub" not in names and "ailianshuo.epub" not in names
+        assert "guwen.epub" in names and "shijing.epub" in names
+        from readme_shots.books import FIXTURES, same_file
+        assert same_file(root / "books" / "great-gatsby.epub", FIXTURES / "great-gatsby.epub")
+        assert same_file(root / "books" / "pride-and-prejudice.epub", FIXTURES / "pride-and-prejudice.epub")
         import zipfile
+        with zipfile.ZipFile(root / "books" / "hongloumeng.epub") as zf:
+            opf = zf.read("OEBPS/content.opf").decode("utf-8")
+            assert "<dc:title>红楼梦</dc:title>" in opf
+            assert "曹雪芹" in opf
+            assert "Xueqin Cao" not in opf
+            assert "紅樓夢" not in opf
+            cover_name = next(n for n in zf.namelist() if n.endswith("24264-cover.png"))
+            assert len(zf.read(cover_name)) != 49495
+        epub = next(p for p in books if p.name == "beiying.epub")
         with zipfile.ZipFile(epub) as zf:
             assert zf.namelist()[0] == "mimetype", zf.namelist()[:3]
             assert zf.getinfo("mimetype").compress_type == zipfile.ZIP_STORED
             assert zf.read("mimetype") == b"application/epub+zip"
             assert "OEBPS/cover.png" in zf.namelist()
+            assert zf.read("OEBPS/content.opf").decode().count("<itemref") == 2
 
         lib = root / "library"
         book = lib / "books" / "0123456789abcdef0123456789abcdef"
@@ -173,6 +202,9 @@ def main() -> None:
     p.add_argument("--width", type=int, default=1320)
     p.add_argument("--height", type=int, default=900)
     p.set_defaults(func=cmd_prefs)
+    p = sub.add_parser("covers")
+    p.add_argument("--out", default="build/readme-shots/covers")
+    p.set_defaults(func=cmd_covers)
     p = sub.add_parser("compose")
     p.set_defaults(func=cmd_compose)
     p = sub.add_parser("self-check")

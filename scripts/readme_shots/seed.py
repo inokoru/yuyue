@@ -15,14 +15,13 @@ from pathlib import Path
 PLAN = [
     ("红楼", "reading", 0.36),
     ("背影", "reading", 0.22),
-    ("Walden", "reading", 0.24),
+    ("瓦尔登", "reading", 0.24),
     ("Gatsby", "reading", 0.41),
     ("论语", "done", 1.0),
-    ("岳阳楼记", "done", 1.0),
-    ("爱莲说", "done", 1.0),
     ("唐诗", "done", 1.0),
-    ("Christmas", "done", 1.0),
-    ("陋室铭", "done", 1.0),
+    ("人间词话", "done", 1.0),
+    ("朝花夕拾", "done", 1.0),
+    ("古文观止", "done", 1.0),
 ]
 
 # Highlights land on 背影 sentences that contain these phrases.
