@@ -28,7 +28,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -1667,14 +1666,29 @@ private fun CustomPageTurnSoundSheet(
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             val currentDraft = draft
-            CustomPageTurnCaptureHeader(
-                onClose = {
-                    recording = false
-                    recordJob?.cancel()
-                    playJob?.cancel()
-                    dismiss()
-                },
-            )
+            if (currentDraft != null) {
+                CustomPageTurnDraftHeader(
+                    draftFromFile = draftFromFile,
+                    onReset = {
+                        focusManager.clearFocus()
+                        playJob?.cancel()
+                        playingDraft = false
+                        pageFlipping = false
+                        draft = null
+                        errorMsg = null
+                    },
+                    onSave = { saveCurrentDraft(currentDraft) },
+                )
+            } else {
+                CustomPageTurnCaptureHeader(
+                    onClose = {
+                        recording = false
+                        recordJob?.cancel()
+                        playJob?.cancel()
+                        dismiss()
+                    },
+                )
+            }
 
             Column(
                 modifier = Modifier
@@ -1700,15 +1714,6 @@ private fun CustomPageTurnSoundSheet(
                         playProgress = playProgress.value,
                         onClearFocus = { focusManager.clearFocus() },
                         onFlipAndAudition = { flipAndAudition(currentDraft) },
-                        onReset = {
-                            focusManager.clearFocus()
-                            playJob?.cancel()
-                            playingDraft = false
-                            pageFlipping = false
-                            draft = null
-                            errorMsg = null
-                        },
-                        onSave = { saveCurrentDraft(currentDraft) },
                     )
                 } else {
                     CustomPageTurnCaptureStudio(
@@ -1751,6 +1756,59 @@ private fun CustomPageTurnSoundSheet(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun CustomPageTurnDraftHeader(
+    draftFromFile: Boolean,
+    onReset: () -> Unit,
+    onSave: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp)
+            .padding(bottom = 14.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .heightIn(min = 32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onReset)
+                .padding(end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Icon(Icons.back, null, tint = YY.c.t2, modifier = Modifier.size(13.dp))
+            Text(
+                if (draftFromFile) t("重选") else t("重录"),
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Medium,
+                color = YY.c.t2,
+            )
+        }
+
+        Text(
+            t("自定义翻页音效"),
+            fontSize = 15.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = YY.c.t1,
+            modifier = Modifier.align(Alignment.Center),
+        )
+
+        Text(
+            t("保存"),
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = YY.tint.accent,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .clip(RoundedCornerShape(8.dp))
+                .pressable(scale = 0.94f, onClick = onSave)
+                .padding(horizontal = 6.dp, vertical = 5.dp),
+        )
     }
 }
 
@@ -1808,8 +1866,6 @@ private fun CustomPageTurnDraftContent(
     playProgress: Float,
     onClearFocus: () -> Unit,
     onFlipAndAudition: () -> Unit,
-    onReset: () -> Unit,
-    onSave: () -> Unit,
 ) {
     val isDark = YY.dark
     val paperBg = if (isDark) Color(0xFF26231F) else Color(0xFFF4EFE6)
@@ -1993,7 +2049,7 @@ private fun CustomPageTurnDraftContent(
         Text(t("音效名"), fontSize = 12.5.sp, color = YY.c.t3)
         Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
             if (draftName.isEmpty()) {
-                Text(t("输入名称"), fontSize = 14.sp, color = YY.c.t3)
+                Text(t("给音效起个名字"), fontSize = 14.sp, color = YY.c.t3)
             }
             BasicTextField(
                 value = draftName,
@@ -2017,76 +2073,6 @@ private fun CustomPageTurnDraftContent(
             ) {
                 Icon(Icons.close, t("清空"), tint = YY.c.t3, modifier = Modifier.size(11.dp))
             }
-        }
-    }
-
-    Row(
-        modifier = Modifier.horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-    ) {
-        listOf("真纸翻书", "轻敲桌面", "书页沙沙", "清脆一响").forEach { chip ->
-            val label = t(chip)
-            val on = draftName == label
-            Box(
-                modifier = Modifier
-                    .height(28.dp)
-                    .clip(CircleShape)
-                    .background(if (on) YY.tint.accentSoft else YY.c.card)
-                    .border(0.6.dp, if (on) YY.tint.edge else YY.c.line, CircleShape)
-                    .clickable {
-                        onDraftNameChange(label)
-                        onClearFocus()
-                    }
-                    .padding(horizontal = 11.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    label,
-                    fontSize = 11.5.sp,
-                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
-                    color = if (on) YY.tint.accent else YY.c.t2,
-                )
-            }
-        }
-    }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .height(42.dp)
-                .clip(CircleShape)
-                .background(YY.c.card)
-                .border(0.7.dp, YY.c.line, CircleShape)
-                .pressable(scale = 0.97f, onClick = onReset)
-                .padding(horizontal = 18.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                if (draftFromFile) t("重选") else t("重录"),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = YY.c.t2,
-            )
-        }
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .height(42.dp)
-                .clip(CircleShape)
-                .background(YY.tint.accent)
-                .pressable(scale = 0.97f, onClick = onSave),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                t("保存并使用"),
-                fontSize = 13.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White,
-            )
         }
     }
 }

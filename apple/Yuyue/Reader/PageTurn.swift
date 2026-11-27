@@ -1466,7 +1466,7 @@ struct CustomPageTurnSoundSheet: View {
     #if os(iOS)
     private var sheetDetents: Set<PresentationDetent> {
         if draft != nil {
-            return [.height(492)]
+            return [.height(344)]
         }
         if store.items.isEmpty {
             return [.height(372)]
@@ -1478,26 +1478,39 @@ struct CustomPageTurnSoundSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            YYSheetHeader(title: String(localized: "自定义翻页音效")) {
-                cleanupAndDismiss()
+            if let draft {
+                draftHeader(draft)
+                    .padding(.horizontal, YYUI.s(18))
+                    .padding(.top, YYUI.sheetGrabberTop)
+                    .padding(.bottom, YYUI.s(14))
+            } else {
+                YYSheetHeader(title: String(localized: "自定义翻页音效")) {
+                    cleanupAndDismiss()
+                }
+                .padding(.horizontal, YYUI.s(18))
+                .padding(.top, YYUI.sheetGrabberTop)
+                .padding(.bottom, YYUI.s(12))
             }
-            .padding(.horizontal, YYUI.s(18))
-            .padding(.top, YYUI.sheetGrabberTop)
-            .padding(.bottom, YYUI.s(12))
 
             ScrollView {
                 VStack(alignment: .leading, spacing: YYUI.s(14)) {
                     if let errorMessage {
                         errorBanner(errorMessage)
-                            .transition(.opacity)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
                     if let draft {
                         draftBookStudio(draft)
-                            .transition(.opacity)
+                            .transition(.asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.97)),
+                                removal: .opacity
+                            ))
                     } else {
                         captureStudio
-                            .transition(.opacity)
+                            .transition(.asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.97)),
+                                removal: .opacity
+                            ))
                         if !store.items.isEmpty {
                             savedList
                         }
@@ -1510,6 +1523,7 @@ struct CustomPageTurnSoundSheet: View {
             .scrollDismissesKeyboard(.interactively)
             .onTapGesture { nameFocused = false }
         }
+        .animation(YYMotion.standard, value: draft != nil)
         .animation(YYMotion.quick, value: errorMessage != nil)
         .background(YYColor.bg)
         #if os(iOS)
@@ -1517,7 +1531,7 @@ struct CustomPageTurnSoundSheet: View {
         .presentationDragIndicator(.visible)
         .presentationBackground(YYColor.bg)
         #else
-        .frame(width: 410, height: draft != nil ? 468 : (store.items.isEmpty ? 350 : 450))
+        .frame(width: 410, height: draft != nil ? 336 : (store.items.isEmpty ? 350 : 450))
         .paperWindow()
         #endif
         .fileImporter(isPresented: $importing, allowedContentTypes: [.audio]) { result in
@@ -1532,6 +1546,52 @@ struct CustomPageTurnSoundSheet: View {
         .onDisappear {
             playTask?.cancel()
             recorder.discard()
+        }
+    }
+
+    private func draftHeader(_ item: ProcessedCustomSound) -> some View {
+        ZStack {
+            Text("自定义翻页音效")
+                .font(YYUI.font(14.5, .semibold))
+                .foregroundStyle(YYColor.t1)
+                .lineLimit(1)
+
+            HStack {
+                Button {
+                    nameFocused = false
+                    playTask?.cancel()
+                    playStartTime = nil
+                    pageFlipping = false
+                    draft = nil
+                    errorMessage = nil
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "chevron.left")
+                            .font(YYUI.font(11.5, .semibold))
+                        Text(draftFromFile ? String(localized: "重选") : String(localized: "重录"))
+                            .font(YYUI.font(13, .medium))
+                    }
+                    .foregroundStyle(YYColor.t2)
+                    .frame(minHeight: YYUI.s(28))
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                Button {
+                    saveDraft(item)
+                } label: {
+                    Text("保存")
+                        .font(YYUI.font(13.5, .semibold))
+                        .foregroundStyle(tint.accent)
+                        .frame(minHeight: YYUI.s(28))
+                        .padding(.horizontal, 4)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(YYPressStyle(scale: 0.94))
+                .keyboardShortcut(.defaultAction)
+            }
         }
     }
 
@@ -1704,15 +1764,6 @@ struct CustomPageTurnSoundSheet: View {
     }
 
 
-    private func discardDraft() {
-        nameFocused = false
-        playTask?.cancel()
-        playStartTime = nil
-        pageFlipping = false
-        draft = nil
-        errorMessage = nil
-    }
-
     /// Style-3 prototype ease: cubic-bezier(0.22, 1, 0.36, 1) over 0.36s.
     private var pageFlipAnimation: Animation {
         YYMotion.reduce ? .linear(duration: 0) : .timingCurve(0.22, 1, 0.36, 1, duration: 0.36)
@@ -1849,11 +1900,11 @@ struct CustomPageTurnSoundSheet: View {
             .accessibilityLabel(Text("点此试翻"))
             .accessibilityAddTraits(.isButton)
 
-            HStack(spacing: 10) {
+            HStack(spacing: YYUI.s(10)) {
                 Text("音效名")
                     .font(YYUI.font(12))
                     .foregroundStyle(YYColor.t3)
-                TextField("", text: $draftName, prompt: Text("输入名称").foregroundStyle(YYColor.t3))
+                TextField("", text: $draftName, prompt: Text("给音效起个名字").foregroundStyle(YYColor.t3))
                     .textFieldStyle(.plain)
                     .font(YYUI.font(13.5, .semibold))
                     .foregroundStyle(YYColor.t1)
@@ -1869,78 +1920,24 @@ struct CustomPageTurnSoundSheet: View {
                     Button {
                         draftName = ""
                     } label: {
-                        Image(systemName: "xmark")
-                            .font(YYUI.font(9, .bold))
-                            .foregroundStyle(YYColor.t3)
-                            .frame(width: 18, height: 18)
-                            .background(YYColor.inset, in: Circle())
+                        Image(systemName: "xmark.circle.fill")
+                            .font(YYUI.font(13.5))
+                            .foregroundStyle(YYColor.t3.opacity(0.6))
+                            .frame(width: 24, height: 24)
                             .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text("清空"))
                 }
             }
-            .padding(.horizontal, 14)
-            .frame(height: 44)
-            .background(YYColor.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, YYUI.s(14))
+            .frame(minHeight: YYUI.s(44))
+            .background(YYColor.card, in: RoundedRectangle(cornerRadius: YYUI.s(14), style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(dark ? Color.white.opacity(0.07) : YYColor.line, lineWidth: 0.6)
+                RoundedRectangle(cornerRadius: YYUI.s(14), style: .continuous)
+                    .strokeBorder(scheme == .dark ? Color.white.opacity(0.07) : YYColor.line, lineWidth: 0.6)
             )
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 7) {
-                    nameChip("真纸翻书", value: String(localized: "真纸翻书"))
-                    nameChip("轻敲桌面", value: String(localized: "轻敲桌面"))
-                    nameChip("书页沙沙", value: String(localized: "书页沙沙"))
-                    nameChip("清脆一响", value: String(localized: "清脆一响"))
-                }
-            }
-
-            HStack(spacing: 10) {
-                Button {
-                    discardDraft()
-                } label: {
-                    Text(draftFromFile ? String(localized: "重选") : String(localized: "重录"))
-                        .font(YYUI.font(13, .semibold))
-                        .foregroundStyle(YYColor.t2)
-                        .padding(.horizontal, 18)
-                        .frame(height: 42)
-                        .background(YYColor.card, in: Capsule())
-                        .overlay(Capsule().strokeBorder(YYColor.line, lineWidth: 0.7))
-                }
-                .buttonStyle(YYPressStyle(scale: 0.97))
-
-                Button {
-                    saveDraft(item)
-                } label: {
-                    Text("保存并使用")
-                        .font(YYUI.font(13.5, .semibold))
-                        .foregroundStyle(Color.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 42)
-                        .background(tint.accent, in: Capsule())
-                }
-                .buttonStyle(YYPressStyle(scale: 0.97))
-            }
         }
-    }
-
-    private func nameChip(_ title: LocalizedStringKey, value: String) -> some View {
-        let on = draftName == value
-        return Button {
-            draftName = value
-            nameFocused = false
-        } label: {
-            Text(title)
-                .font(YYUI.font(11.5, on ? .semibold : .medium))
-                .foregroundStyle(on ? tint.accent : YYColor.t2)
-                .padding(.horizontal, 11)
-                .frame(height: 28)
-                .background(on ? tint.accentSoft : YYColor.card, in: Capsule())
-                .overlay(Capsule().strokeBorder(on ? tint.edge : YYColor.line, lineWidth: 0.6))
-        }
-        .buttonStyle(YYPressStyle(scale: 0.96))
     }
 
     // MARK: Saved List (Capture Mode)
