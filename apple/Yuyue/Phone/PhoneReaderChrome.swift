@@ -20,9 +20,9 @@ enum ReaderBrightness {
 
 /// The phone's page: only the words and a quiet single-line footer at the bottom. A tap in the
 /// middle floats 返回, the book's name and page, 搜索, 书签 and 更多 along the top together with
-/// the full glass capsule at the bottom (目录, where the reader is, ‹ 朗读 ›, Aa). While reading
-/// aloud with the chrome tucked away, a slim mini listening pill (swipe down to fold into a corner
-/// orb) stays clear of the text. 书内搜索 takes over both; 沉浸阅读 leaves only a hairline.
+/// the glass capsule at the bottom (目录, where the reader is, ‹ 朗读 ›, Aa). While reading aloud
+/// with the top bar tucked away, the same capsule stays in place (swipe down to fold into a corner
+/// orb) clear of the text. 书内搜索 takes over both; 沉浸阅读 leaves only a hairline.
 struct PhoneReaderChrome: View {
     @Bindable var model: ReaderModel
     let close: () -> Void
@@ -35,6 +35,7 @@ struct PhoneReaderChrome: View {
     @State private var moreShown = false
     @State private var pendingMoreAction: (() -> Void)?
     @State private var chromeActivity = 0
+    @State private var capsuleDragY: CGFloat = 0
     @AppStorage(ImmersivePrefs.progressKey) private var hidesProgress = true
     @State private var exported: URL?
     @FocusState private var typing: Bool
@@ -48,14 +49,14 @@ struct PhoneReaderChrome: View {
     private var paper: YYPaper { model.paperTokens }
 
     private enum BottomBarMode: Equatable {
-        case search, morphCapsule, fullCapsule, miniListen, miniOrb, footer, none
+        case search, morphCapsule, fullCapsule, miniOrb, footer, none
     }
 
     /// Mutually exclusive bottom chrome state:
     /// - 书内搜索 → searchCapsule
     /// - 灵动胶囊展开（改读音 / 记下这句 / 智能回退） → morphCapsule
-    /// - 点中央唤出 / 有重要录音提示 → fullCapsule (float over bottom margin without reflow)
-    /// - 听书中（或只听模式）且收起顶栏 → slim miniListen (or corner miniOrb when tucked / scrolling down)
+    /// - 点中央唤出 / 有重要录音提示 / 听书中（未收起到角标） → single unified fullCapsule
+    /// - 听书中下滑收起 / 滚动收起 → corner miniOrb
     /// - 纯看书（非沉浸、非双页） → quiet single-line footer clear of the text
     private var bottomMode: BottomBarMode {
         if model.searchShown { return .search }
@@ -65,7 +66,7 @@ struct PhoneReaderChrome: View {
             return .fullCapsule
         }
         if !model.immersive && (model.isPlaying || model.listenOnly) {
-            return (!model.listenOnly && (model.playerTucked || model.barsAway)) ? .miniOrb : .miniListen
+            return (!model.listenOnly && (model.playerTucked || model.barsAway)) ? .miniOrb : .fullCapsule
         }
         if !model.immersive && !model.barsAway && !InnerDisplay.isOn(sizeClass) {
             return .footer
@@ -191,10 +192,7 @@ struct PhoneReaderChrome: View {
             )
         }
         .sheet(isPresented: $listenShown) {
-            ScrollView { ListenCard(model: model) }
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-                .presentationBackground(YYColor.card)
+            PhoneListenSheet(model: model)
         }
         .sheet(isPresented: $readyVoicePickerShown, onDismiss: {
             pickedReadyVoiceID = nil
@@ -423,9 +421,6 @@ struct PhoneReaderChrome: View {
             case .fullCapsule:
                 capsule
                     .transition(Self.slide(.bottom))
-            case .miniListen:
-                miniListenPill
-                    .transition(Self.slide(.bottom))
             case .miniOrb:
                 HStack {
                     Spacer(minLength: 0)
@@ -495,30 +490,6 @@ struct PhoneReaderChrome: View {
         }
         .frame(maxWidth: 420)
         .glass(paper, in: shape)
-    }
-
-    private var miniListenPill: some View {
-        let n = model.sentenceCount
-        let label = n > 0
-            ? String(localized: "第 \(min(model.sentence + 1, n)) / \(n) 句")
-            : (model.chapterTitle ?? model.detail?.summary.title ?? "")
-        let rateBadge: String? = abs(model.rate - 1.0) >= 0.05
-            ? "\(model.rate.formatted(.number.precision(.fractionLength(0...1))))×"
-            : nil
-        return PhoneMiniListenPill(
-            paper: paper,
-            label: label,
-            rateBadge: rateBadge,
-            isPlaying: model.isPlaying,
-            progress: model.chapterProgress,
-            onOpenListen: { listenShown = true },
-            onMarkHeard: { model.markCurrentHeard() },
-            onFixPronunciation: { model.promptPronunciation() },
-            onPrevious: { model.stepSentence(forward: false) },
-            onPause: { model.togglePlay() },
-            onNext: { model.stepSentence(forward: true) },
-            onTuck: { model.playerTucked = true }
-        )
     }
 
     /// 沉浸, with the capsule away: the progress line, or the hairline.
@@ -616,6 +587,7 @@ struct PhoneReaderChrome: View {
     private var capsule: some View {
         let reading = model.player?.spot != nil
         let n = model.sentenceCount
+        let canTuck = model.isPlaying && !model.listenOnly
         return PhoneReaderCapsule(
             paper: paper,
             title: model.capsuleAlert?.title ?? (reading && n > 0 ? String(localized: "第 \(min(model.sentence + 1, n)) / \(n) 句") : (model.chapterTitle ?? model.detail?.summary.title ?? "")),
@@ -638,8 +610,9 @@ struct PhoneReaderChrome: View {
             onPlay: {
                 let starting = !model.isPlaying
                 model.togglePlay()
-                if starting {
-                    // Collapse full chrome immediately into the slim mini listening pill.
+                if starting && model.isPlaying {
+                    // Dismiss the top bar while keeping this same playback capsule in place.
+                    model.playerTucked = false
                     model.chromeShown = false
                 } else {
                     chromeActivity &+= 1
@@ -650,6 +623,29 @@ struct PhoneReaderChrome: View {
                 step(forward: true)
             },
             onTypeset: { model.settingsShown = true }
+        )
+        .offset(y: YYMotion.reduce ? 0 : (capsuleDragY >= 0 ? capsuleDragY : capsuleDragY * 0.18))
+        .opacity(YYMotion.reduce ? 1 : max(0.35, 1.0 - Double(max(0, capsuleDragY)) / 80.0))
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 12)
+                .onChanged { value in
+                    guard !YYMotion.reduce else { return }
+                    guard abs(value.translation.height) >= abs(value.translation.width) else { return }
+                    capsuleDragY = value.translation.height
+                }
+                .onEnded { value in
+                    if value.translation.height > 24 || value.predictedEndTranslation.height > 64 {
+                        capsuleDragY = 0
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        withAnimation(YYMotion.standard) {
+                            model.chromeShown = false
+                            model.playerTucked = true
+                        }
+                    } else {
+                        withAnimation(YYMotion.quick) { capsuleDragY = 0 }
+                    }
+                },
+            including: canTuck ? .all : .subviews
         )
     }
 
@@ -1094,165 +1090,36 @@ struct PhoneReaderCapsule: View {
     }
 }
 
-/// Slim 34pt listening pill shown while reading aloud with top chrome dismissed.
-/// Fits strictly below `--yy-bottom` (`safeArea + 44`), so it never covers the last line of text.
-/// Swipe down or tap the trailing chevron to tuck into `PhoneMiniListenOrb`.
-struct PhoneMiniListenPill: View {
-    var paper: YYPaper
-    var label: String
-    var rateBadge: String?
-    var isPlaying: Bool = true
-    var progress: Double
-    var onOpenListen: () -> Void
-    var onMarkHeard: () -> Void
-    var onFixPronunciation: () -> Void
-    var onPrevious: () -> Void
-    var onPause: () -> Void
-    var onNext: () -> Void
-    var onTuck: () -> Void
+/// Compact content-sized bottom sheet hosting `ListenCard` so there is no awkward dead space below it.
+private struct PhoneListenSheet: View {
+    let model: ReaderModel
+    @State private var measuredHeight: CGFloat = 0
 
-    @State private var dragY: CGFloat = 0
-
-    private var accentColor: Color {
-        paper.isEink ? paper.ink : YYTint.standard.accent
+    private var sheetHeight: CGFloat {
+        measuredHeight > 0 ? measuredHeight : 300
     }
 
     var body: some View {
-        let clampedProgress = min(1, max(0, progress))
-        HStack(spacing: 2) {
-            Button(action: onOpenListen) {
-                HStack(spacing: 5) {
-                    SpeakingBars(paused: !isPlaying)
-                        .frame(width: 13, height: 12)
-                    Text(label)
-                        .font(.yy(size: 11.5, weight: .medium))
-                        .foregroundStyle(paper.ink)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                    if let rateBadge {
-                        Text(rateBadge)
-                            .font(.yy(size: 10, weight: .medium))
-                            .foregroundStyle(paper.ink2)
-                            .monospacedDigit()
-                            .lineLimit(1)
-                    }
-                    Image(systemName: "chevron.up")
-                        .font(.yy(size: 8.5, weight: .semibold))
-                        .foregroundStyle(paper.ink2.opacity(0.75))
-                }
-                .padding(.leading, 10)
-                .padding(.trailing, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: 36)
-                .contentShape(Rectangle().inset(by: -5))
-            }
-            .buttonStyle(YYPressStyle(scale: 0.97))
-            .accessibilityLabel(label)
-            .accessibilityHint(String(localized: "听书：声音、速度、睡眠定时"))
-
-            Button(action: onMarkHeard) {
-                Image(systemName: "bookmark")
-                    .font(.yy(size: 11.5, weight: .medium))
-                    .foregroundStyle(paper.ink2)
-                    .frame(width: 28, height: 34)
-                    .contentShape(Rectangle().inset(by: -4))
-            }
-            .buttonStyle(YYPressStyle(scale: 0.9))
-            .accessibilityLabel("记下这句")
-
-            Button(action: onFixPronunciation) {
-                Image(systemName: "waveform")
-                    .font(.yy(size: 11.5, weight: .semibold))
-                    .foregroundStyle(accentColor)
-                    .frame(width: 26, height: 26)
-                    .background(accentColor.opacity(paper.isDark ? 0.18 : 0.10), in: .circle)
-                    .contentShape(Circle().inset(by: -6))
-            }
-            .buttonStyle(YYPressStyle(scale: 0.9))
-            .accessibilityLabel("纠正读音")
-
-            Rectangle()
-                .fill(paper.line)
-                .frame(width: 0.5, height: 14)
-                .padding(.horizontal, 2)
-
-            Button(action: onPrevious) {
-                Image(systemName: "chevron.left")
-                    .font(.yy(size: 11.5, weight: .semibold))
-                    .foregroundStyle(paper.ink)
-                    .frame(width: 24, height: 34)
-                    .contentShape(Rectangle().inset(by: -4))
-            }
-            .buttonStyle(YYPressStyle(scale: 0.9))
-            .accessibilityLabel("上一句")
-
-            Button(action: onPause) {
-                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                    .font(.yy(size: 11, weight: .semibold))
-                    .foregroundStyle(paper.onMain)
-                    .frame(width: 28, height: 28)
-                    .background(YYTint.standard.play(on: paper), in: .circle)
-                    .contentShape(Circle().inset(by: -8))
-            }
-            .buttonStyle(YYPressStyle(scale: 0.9))
-            .accessibilityLabel(isPlaying ? "暂停" : "播放")
-
-            Button(action: onNext) {
-                Image(systemName: "chevron.right")
-                    .font(.yy(size: 11.5, weight: .semibold))
-                    .foregroundStyle(paper.ink)
-                    .frame(width: 24, height: 34)
-                    .contentShape(Rectangle().inset(by: -4))
-            }
-            .buttonStyle(YYPressStyle(scale: 0.9))
-            .accessibilityLabel("下一句")
-
-            Button(action: onTuck) {
-                Image(systemName: "chevron.down")
-                    .font(.yy(size: 10.5, weight: .semibold))
-                    .foregroundStyle(paper.ink2)
-                    .frame(width: 24, height: 34)
-                    .contentShape(Rectangle().inset(by: -4))
-            }
-            .buttonStyle(YYPressStyle(scale: 0.9))
-            .accessibilityLabel("收起播放条")
-        }
-        .padding(.trailing, 4)
-        .frame(height: 38)
-        .frame(maxWidth: 360)
-        .glass(paper, in: Capsule())
-        .overlay(alignment: .bottom) {
-            GeometryReader { g in
-                Capsule().fill(paper.line)
-                Capsule().fill(accentColor).frame(width: g.size.width * clampedProgress)
-            }
-            .animation(YYMotion.standard, value: clampedProgress)
-            .frame(height: 1.5)
-            .padding(.horizontal, 18)
-        }
-        .offset(y: YYMotion.reduce ? 0 : (dragY >= 0 ? dragY : dragY * 0.18))
-        .opacity(YYMotion.reduce ? 1 : max(0.35, 1.0 - Double(max(0, dragY)) / 80.0))
-        .gesture(
-            DragGesture(minimumDistance: 8)
-                .onChanged { value in
-                    guard !YYMotion.reduce else { return }
-                    guard abs(value.translation.height) >= abs(value.translation.width) else { return }
-                    dragY = value.translation.height
-                }
-                .onEnded { value in
-                    if value.translation.height > 28 || value.predictedEndTranslation.height > 72 {
-                        dragY = 0
-                        withAnimation(YYMotion.standard) { onTuck() }
-                    } else {
-                        withAnimation(YYMotion.quick) { dragY = 0 }
+        ScrollView(.vertical, showsIndicators: false) {
+            ListenCard(model: model)
+                .frame(maxWidth: .infinity)
+                .onGeometryChange(for: CGFloat.self, of: \.size.height) { h in
+                    let rounded = ceil(h)
+                    if rounded > 0, abs(rounded - measuredHeight) > 0.5 {
+                        measuredHeight = rounded
                     }
                 }
-        )
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .background(YYColor.card.ignoresSafeArea())
+        .presentationDetents([.height(sheetHeight)])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(YYColor.card)
     }
 }
 
-/// Compact 36pt corner listening orb shown when the user tucks `PhoneMiniListenPill` or scrolls down
-/// while listening. Displays a hairline progress ring; tapping expands back to the mini pill.
+/// Compact 36pt corner listening orb shown when the user tucks the capsule or scrolls down
+/// while listening. Displays a hairline progress ring; tapping expands back to the playback capsule.
 struct PhoneMiniListenOrb: View {
     var paper: YYPaper
     var progress: Double

@@ -917,61 +917,48 @@ struct PhoneShelf: View {
         }
     }
 
-    /// Warm-paper stationery empty state tailored specifically for 有声书 (matches Podcast page visual craft).
+    /// Clean open empty state for 有声书 (no outer card container).
     private var audiobookEmpty: some View {
-        VStack(spacing: 14) {
-            PodcastStationeryCard(cornerRadius: 16) {
-                VStack(spacing: 0) {
-                    VStack(spacing: 12) {
-                        PodcastGlyphView(glyph: .waveform, size: 20, lineWidth: 1.55)
-                            .foregroundStyle(tint.accent)
-                            .frame(width: 46, height: 46)
-                            .background(PodcastStyle.rowTintWash(tint, scheme), in: Circle())
-                            .overlay(Circle().strokeBorder(PodcastStyle.accentRing(tint, scheme), lineWidth: 0.5))
+        VStack(spacing: 16) {
+            PodcastGlyphView(glyph: .waveform, size: 22, lineWidth: 1.55)
+                .foregroundStyle(tint.accent)
+                .frame(width: 52, height: 52)
+                .background(PodcastStyle.rowTintWash(tint, scheme), in: Circle())
+                .overlay(Circle().strokeBorder(PodcastStyle.accentRing(tint, scheme), lineWidth: 0.5))
 
-                        VStack(spacing: 5) {
-                            Text("还没有有声书")
-                                .font(PodcastStyle.songti(17.5))
-                                .foregroundStyle(YYColor.t1)
-                            Text("导入 M4B、MP3、M4A 音频文件，或将录音与书架里的电子书合成，听读同步翻页。")
-                                .font(.yy(size: 12.5))
-                                .foregroundStyle(YYColor.t3)
-                                .multilineTextAlignment(.center)
-                                .lineSpacing(4)
-                        }
-                    }
-                    .padding(.horizontal, 22)
-                    .padding(.top, 26)
-                    .padding(.bottom, 20)
-
-                    Rectangle().fill(YYColor.line).frame(height: 0.5)
-
-                    HStack(spacing: 10) {
-                        PodcastPaperPill(
-                            title: String(localized: "导入有声书"),
-                            glyph: .plus,
-                            accent: true,
-                            height: 32,
-                            horizontalPadding: 14
-                        ) {
-                            importerShown = true
-                        }
-
-                        PodcastPaperPill(
-                            title: String(localized: "Wi‑Fi 传书"),
-                            symbol: "wifi",
-                            height: 32,
-                            horizontalPadding: 14
-                        ) {
-                            wifiShown = true
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 13)
-                    .background(PodcastStyle.leafSurface(scheme))
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            VStack(spacing: 6) {
+                Text("还没有有声书")
+                    .font(PodcastStyle.songti(18))
+                    .foregroundStyle(YYColor.t1)
+                Text("导入 M4B、MP3、M4A 音频文件，或将录音与书架里的电子书合成，听读同步翻页。")
+                    .font(.yy(size: 13))
+                    .foregroundStyle(YYColor.t3)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(4)
             }
+            .padding(.horizontal, 12)
+
+            HStack(spacing: 10) {
+                PodcastPaperPill(
+                    title: String(localized: "导入有声书"),
+                    glyph: .plus,
+                    accent: true,
+                    height: 36,
+                    horizontalPadding: 16
+                ) {
+                    importerShown = true
+                }
+
+                PodcastPaperPill(
+                    title: String(localized: "Wi‑Fi 传书"),
+                    symbol: "wifi",
+                    height: 36,
+                    horizontalPadding: 16
+                ) {
+                    wifiShown = true
+                }
+            }
+            .padding(.top, 4)
 
             HStack(spacing: 16) {
                 Label("本地离线播放", systemImage: "internaldrive")
@@ -979,11 +966,10 @@ struct PhoneShelf: View {
             }
             .font(.yy(size: 11))
             .foregroundStyle(YYColor.t3)
-            .padding(.top, 2)
+            .padding(.top, 6)
         }
-        .padding(.horizontal, inset)
-        .padding(.top, 20)
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 28)
+        .frame(maxWidth: .infinity, minHeight: 360)
     }
 
     // MARK: 继续

@@ -201,6 +201,11 @@ struct PhoneRoot: View {
         .sheet(isPresented: Binding(get: { UpdateCenter.shared.signatureWarn && !signClosed }, set: { if !$0 { signClosed = true } })) {
             PhoneSignature()
         }
+        // TEMP-DEBUG-BEGIN
+        .sheet(isPresented: .constant(UserDefaults.standard.string(forKey: "yyDraft") != nil)) {
+            CustomPageTurnSoundSheet(selectedRaw: .constant(PageTurnSoundStyle.softPaper.rawValue))
+        }
+        // TEMP-DEBUG-END
         .onAppear {
             // 上次停在书页上，打开 App 就直接回到那一页.
             // 最近改过 notices changes from launch on, and writes reading settings back through the core.
