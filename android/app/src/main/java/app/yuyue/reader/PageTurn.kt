@@ -764,8 +764,19 @@ object PageTurnSound {
         playSelection(context, raw, volume)
     }
 
+    /** The sheet's try-flip clip. Replaced on each tap so rapid taps restart one sound. */
+    private var draftPreview: AudioTrack? = null
+
+    private fun stopDraftPreview() {
+        val track = draftPreview ?: return
+        draftPreview = null
+        runCatching { track.stop() }
+        runCatching { track.release() }
+    }
+
     /** Plays an unsaved 44.1 kHz 16-bit mono WAV buffer directly via static AudioTrack (zero temp files). */
     fun previewWavBytes(wav: ByteArray, volume: Float = PageTurnPrefs.soundVolume) {
+        stopDraftPreview()
         if (wav.size <= 44) return
         val pcmBytes = wav.size - 44
         val gain = gainFor(volume)
@@ -791,10 +802,12 @@ object PageTurnSound {
             track.notificationMarkerPosition = totalFrames
             track.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
                 override fun onMarkerReached(t: AudioTrack) {
+                    if (draftPreview === t) draftPreview = null
                     runCatching { t.stop(); t.release() }
                 }
                 override fun onPeriodicNotification(t: AudioTrack) {}
             })
+            draftPreview = track
             track.play()
         }
     }
@@ -1429,6 +1442,7 @@ private fun CustomPageTurnSoundSheet(
     var draftName by remember { mutableStateOf("") }
     var flipQuoteIndex by remember { mutableIntStateOf(0) }
     var pageFlipping by remember { mutableStateOf(false) }
+    var flipGeneration by remember { mutableIntStateOf(0) }
     var playingDraft by remember { mutableStateOf(false) }
     var playJob by remember { mutableStateOf<Job?>(null) }
     val playProgress = remember { Animatable(0f) }
@@ -1451,6 +1465,8 @@ private fun CustomPageTurnSoundSheet(
 
     fun flipAndAudition(item: ProcessedCustomSound, animatePage: Boolean = true) {
         playJob?.cancel()
+        flipGeneration += 1
+        val generation = flipGeneration
         PageTurnSound.previewWavBytes(item.wavData)
         if (animatePage) {
             view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
@@ -1458,21 +1474,32 @@ private fun CustomPageTurnSoundSheet(
         playJob = scope.launch {
             playingDraft = true
             playProgress.snapTo(0f)
-            if (animatePage) {
-                pageFlipping = true
-                launch {
-                    delay(230)
-                    flipQuoteIndex++
-                    pageFlipping = false
+            val wave = launch {
+                playProgress.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(durationMillis = max(120, item.durationMs), easing = LinearEasing),
+                )
+                if (isActive && generation == flipGeneration) {
+                    playingDraft = false
+                    playProgress.snapTo(0f)
                 }
             }
-            playProgress.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = max(120, item.durationMs), easing = LinearEasing),
-            )
-            delay(50)
-            playingDraft = false
-            playProgress.snapTo(0f)
+            if (animatePage) {
+                // Setting the same lifted target again does not restart the tween, so a
+                // burst of taps froze the page up and piled sentence swaps. Ease flat
+                // first, then run one lift: the line changes once, at the apex.
+                if (pageFlipping) {
+                    pageFlipping = false
+                    delay(120)
+                    if (!isActive || generation != flipGeneration) return@launch
+                }
+                pageFlipping = true
+                delay(230)
+                if (!isActive || generation != flipGeneration) return@launch
+                flipQuoteIndex++
+                pageFlipping = false
+            }
+            wave.join()
         }
     }
 

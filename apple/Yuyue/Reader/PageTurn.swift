@@ -570,6 +570,9 @@ final class PageTurnSound {
 
     private var wavCache: [CacheKey: Data] = [:]
     private var players: [AVAudioPlayer] = []
+    /// The sheet's try-flip clip. Replaced on each tap so rapid taps restart one sound
+    /// instead of stacking on the page-turn voice pool.
+    private var auditionPlayer: AVAudioPlayer?
     private var variantCursor = 0
 
     private init() {}
@@ -590,8 +593,20 @@ final class PageTurnSound {
     }
 
     /// Auditions an unsaved WAV buffer (used inside the custom sound recorder/importer sheet).
+    /// Stops the previous audition first, so a second tap restarts the clip instead of layering it.
     func previewData(_ wav: Data, volume: Double? = nil) {
-        playWav(wav, volume: volume ?? PageTurnPrefs.soundVolume)
+        auditionPlayer?.stop()
+        auditionPlayer = nil
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+        #endif
+        guard let player = try? AVAudioPlayer(data: wav) else { return }
+        let requested = volume ?? PageTurnPrefs.soundVolume
+        let clamped = min(PageTurnPrefs.volumeRange.upperBound, max(PageTurnPrefs.volumeRange.lowerBound, requested))
+        player.volume = Float(clamped * 0.80)
+        player.prepareToPlay()
+        player.play()
+        auditionPlayer = player
     }
 
     private func playSelection(_ raw: String, volume: Double) {
@@ -1423,6 +1438,8 @@ struct CustomPageTurnSoundSheet: View {
     @State private var draftName = ""
     @State private var flipQuoteIndex = 0
     @State private var pageFlipping = false
+    /// Bumped on every try-flip so a cancelled tap cannot still swap the sentence.
+    @State private var flipGeneration = 0
     @State private var playStartTime: Date?
     @State private var playDurationSec: Double = 0.28
     @State private var playTask: Task<Void, Never>?
@@ -1701,6 +1718,11 @@ struct CustomPageTurnSoundSheet: View {
         YYMotion.reduce ? .linear(duration: 0) : .timingCurve(0.22, 1, 0.36, 1, duration: 0.36)
     }
 
+    /// Short ease back to flat so a second tap can start a new lift. A snap to 0 reads as a jump.
+    private var flipRelease: Animation {
+        YYMotion.reduce ? .linear(duration: 0) : .timingCurve(0.22, 1, 0.36, 1, duration: 0.12)
+    }
+
     private func draftBookStudio(_ item: ProcessedCustomSound) -> some View {
         let dark = scheme == .dark
         let paperBg = dark ? Color(yy: YYRGBA(38, 35, 31)) : Color(yy: YYRGBA(244, 239, 230))
@@ -1804,7 +1826,6 @@ struct CustomPageTurnSoundSheet: View {
                 )
                 .scaleEffect(flipping ? 0.985 : 1, anchor: .leading)
                 .offset(x: flipping ? -8 : 0)
-                .animation(pageFlipAnimation, value: pageFlipping)
                 .padding(.trailing, 6)
                 .padding(.bottom, 4)
             }
@@ -1988,7 +2009,11 @@ struct CustomPageTurnSoundSheet: View {
     }
 
     private func flipAndAudition(_ item: ProcessedCustomSound, animatePage: Bool = true) {
+        // Cancel the previous apex. A new tap owns the only in-flight flip, so an old
+        // sleep cannot swap the sentence after a newer tap has already started.
         playTask?.cancel()
+        flipGeneration += 1
+        let generation = flipGeneration
         PageTurnSound.shared.previewData(item.wavData)
         #if os(iOS)
         if animatePage {
@@ -1999,23 +2024,36 @@ struct CustomPageTurnSoundSheet: View {
         playDurationSec = sec
         playStartTime = Date()
 
-        if animatePage, !YYMotion.reduce {
-            pageFlipping = true
-        } else if animatePage {
-            flipQuoteIndex += 1
-        }
-        playTask = Task {
-            if animatePage, !YYMotion.reduce {
-                try? await Task.sleep(for: .milliseconds(230))
-                guard !Task.isCancelled else { return }
-                flipQuoteIndex += 1
-                pageFlipping = false
-                let remain = max(40, item.durationMs - 230)
-                try? await Task.sleep(for: .milliseconds(remain))
-            } else {
+        guard animatePage, !YYMotion.reduce else {
+            if animatePage { flipQuoteIndex += 1 }
+            playTask = Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(max(40, item.durationMs)))
+                guard !Task.isCancelled, generation == flipGeneration else { return }
+                playStartTime = nil
             }
-            guard !Task.isCancelled else { return }
+            return
+        }
+
+        playTask = Task { @MainActor in
+            // `pageFlipping = true` does nothing while a lift is already running, which
+            // left the page stuck tilted and the sentence swap waiting on a timer that
+            // every new tap cancelled. Ease back to flat first so the next lift is a
+            // real change, then run one apex: swap the line once, then settle.
+            if pageFlipping {
+                withAnimation(flipRelease) { pageFlipping = false }
+                try? await Task.sleep(for: .milliseconds(120))
+                guard !Task.isCancelled, generation == flipGeneration else { return }
+            }
+            withAnimation(pageFlipAnimation) { pageFlipping = true }
+            try? await Task.sleep(for: .milliseconds(230))
+            guard !Task.isCancelled, generation == flipGeneration else { return }
+            var quiet = Transaction()
+            quiet.disablesAnimations = true
+            withTransaction(quiet) { flipQuoteIndex += 1 }
+            withAnimation(pageFlipAnimation) { pageFlipping = false }
+            let remain = max(40, item.durationMs - 230)
+            try? await Task.sleep(for: .milliseconds(remain))
+            guard !Task.isCancelled, generation == flipGeneration else { return }
             playStartTime = nil
         }
     }
