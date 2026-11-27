@@ -321,11 +321,18 @@ fun Root(library: Library) {
     // 检查更新: once a day at most (the APK from GitHub only).
     val context = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) { app.yuyue.update.Updates.checkNow(context) }
-    // 通用 › 打开语阅时接着读上次那本: 上次停在书页上，打开 App 就直接回到那一页.
+    // 通用 › 启动时继续上次阅读: 上次停在书页上，打开 App 就直接回到那一页.
     LaunchedEffect(Unit) {
         if (!reopened) {
             reopened = true
-            if (Prefs.bool(app.yuyue.me.General.REOPEN_LAST, false) && lastBook.isNotEmpty() && library.books.any { it.id == lastBook && it.available }) library.presented = lastBook
+            if (library.presented == null) {
+                val availableIds = library.books.asSequence().filter { it.available }.map { it.id }.toSet()
+                app.yuyue.me.General.bookToReopen(
+                    reopenLast = Prefs.bool(app.yuyue.me.General.REOPEN_LAST, app.yuyue.me.General.REOPEN_LAST_DEFAULT),
+                    lastBook = lastBook,
+                    availableIds = availableIds,
+                )?.let { library.presented = it }
+            }
         }
     }
     val haze = rememberHazeState()

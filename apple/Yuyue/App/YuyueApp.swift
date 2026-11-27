@@ -84,6 +84,8 @@ struct YuyueApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Opened before the shelf was there to take them.
     @MainActor static var waiting: [URL] = []
+    /// True once the app begins terminating (`⌘Q`), so closing reader windows keeps `mac.lastBook`.
+    @MainActor static var isTerminating = false
 
     /// Started by macOS as a login item (开机时打开语阅): no window, only the menu bar.
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -120,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Ends any open sheets so `NSApp.terminate` doesn't stall waiting for a modal session.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         MainActor.assumeIsolated {
+            Self.isTerminating = true
             for window in sender.windows {
                 for sheet in window.sheets { window.endSheet(sheet) }
             }

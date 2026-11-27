@@ -208,6 +208,7 @@ final class SectionPage {
     var scrolledTo: Int?
     /// Where to go once the section is laid out.
     private var target: Target?
+    private var settled = false
     /// Goes up with every load and every clear. It is in the document's address, so messages
     /// from a document this view has since replaced can be told apart, and work that awaited
     /// the WebView can tell whether the page still shows what it started on.
@@ -244,15 +245,17 @@ final class SectionPage {
         #endif
     }
 
-    func load(bookID: String, section: UInt32, target: Target) {
+    func load(bookID: String, section: UInt32, target: Target, revealAfterReady: Bool = true) {
         generation += 1
         self.section = section
         self.target = target
         layout = nil
         settling = false
+        settled = false
         page = 0
         scrolledTo = nil
-        webView.alphaValue = 0
+        // Keep off-screen preloaded neighbours at alpha 1 so WebKit doesn't skip initial paint.
+        webView.alphaValue = revealAfterReady ? 0 : 1
         // The query is for telling documents apart only; the scheme handler serves by path.
         let raw = "\(SchemeHandler.origin)/book/\(bookID)/s/\(section).html?g=\(generation)"
         if let url = URL(string: raw) {
@@ -266,6 +269,7 @@ final class SectionPage {
         section = nil
         layout = nil
         settling = false
+        settled = false
         target = nil
         webView.stopLoading()
     }
@@ -302,10 +306,12 @@ final class SectionPage {
             await go(to: target, animated: false)
             // Recycled meanwhile: the new section shows itself when it is ready.
             guard generation == self.generation else { return false }
+            settled = true
             webView.alphaValue = 1
             onReady?(self)
             return true
         }
+        guard settled else { return false }
         // A re-layout keeps the first visible sentence in view, which may move it to another page.
         if let p = await ask("yy.currentPage()") as? Int, generation == self.generation {
             page = min(p, layout.pageCount - 1)
@@ -313,7 +319,7 @@ final class SectionPage {
         return false
     }
 
-    var isReady: Bool { layout != nil && target == nil }
+    var isReady: Bool { layout != nil && target == nil && settled }
 
     func go(to target: Target, animated: Bool) async {
         guard let layout else {

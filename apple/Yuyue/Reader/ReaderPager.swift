@@ -105,6 +105,8 @@ final class ReaderPager: PlatformView {
     }
     private var spare: [SectionPage] = []
     private var pendingOpen: (section: UInt32, target: SectionPage.Target)?
+    /// Pending tap turn across a section edge while the neighbour WebView is still settling (+1 / -1 / 0).
+    private var pendingTurn = 0
     private var appliedGeometry: PageGeometry?
     private var verticalTransitioning = false
 
@@ -151,6 +153,8 @@ final class ReaderPager: PlatformView {
     private var coverTargetSlot = 0
     private var coverProgress: CGFloat = 0
     private var coverAnimating = false
+    private var coverCommitting = false
+    private var coverAnimationID = 0
     #else
     private let pullCue = MacPullCueView()
     private struct MacPullState {
@@ -241,6 +245,7 @@ final class ReaderPager: PlatformView {
             return
         }
         pendingOpen = nil
+        pendingTurn = 0
         pin(section: section, target: target)
         if let current, current.section == section, current.isReady {
             Task {
@@ -300,7 +305,7 @@ final class ReaderPager: PlatformView {
     private func page(for section: UInt32, target: SectionPage.Target) -> SectionPage {
         if let loaded = slots.first(where: { $0.section == section }) { return loaded }
         let page = makePage()
-        page.load(bookID: bookID, section: section, target: target)
+        page.load(bookID: bookID, section: section, target: target, revealAfterReady: false)
         return page
     }
 
@@ -377,6 +382,14 @@ final class ReaderPager: PlatformView {
                         loadNeighbours()
                         #endif
                     }
+                } else if pendingTurn != 0, page.isReady,
+                          let cur = current,
+                          let i = slots.firstIndex(where: { $0 === cur }),
+                          let j = slots.firstIndex(where: { $0 === page }),
+                          (pendingTurn > 0 && j == i + 1) || (pendingTurn < 0 && j == i - 1) {
+                    let forward = pendingTurn > 0
+                    pendingTurn = 0
+                    turn(forward: forward)
                 }
             }
         case .tap:
@@ -539,18 +552,35 @@ final class ReaderPager: PlatformView {
             let maxY = max(0, scroll.contentSize.height - scroll.bounds.height)
             let y = scroll.contentOffset.y
             if (forward && y < maxY - 1) || (!forward && y > 1) {
+                pendingTurn = 0
                 scroll.setContentOffset(CGPoint(x: 0, y: min(maxY, max(0, y + (forward ? step : -step)))), animated: animated)
                 return
             }
         } else {
             if useCover {
+                if coverActive && coverAnimating {
+                    coverAnimationID &+= 1
+                    coverAnimating = false
+                    finishCover(commit: coverCommitting)
+                }
                 if beginCover(forward: forward) {
+                    pendingTurn = 0
                     settleCover(commit: true, velocity: 0)
+                } else if let cur = self.current, let l = cur.layout,
+                          let idx = slots.firstIndex(where: { $0 === cur }) {
+                    let nextPage = cur.page + (forward ? 1 : -1)
+                    if nextPage < 0 || nextPage >= l.pageCount {
+                        let j = forward ? idx + 1 : idx - 1
+                        if slots.indices.contains(j), !slots[j].isReady {
+                            pendingTurn = forward ? 1 : -1
+                        }
+                    }
                 }
                 return
             }
             let target = current.page + (forward ? 1 : -1)
             if target >= 0 && target < layout.pageCount {
+                pendingTurn = 0
                 turn(to: target, animated: animated)
                 playManualTurnSound()
                 return
@@ -559,10 +589,15 @@ final class ReaderPager: PlatformView {
         guard let i = slots.firstIndex(where: { $0 === current }) else { return }
         let j = forward ? i + 1 : i - 1
         guard slots.indices.contains(j) else {
+            pendingTurn = 0
             if forward && mode == .scrolled { delegate?.pagerReachedBookEnd(self) }
             return
         }
-        guard slots[j].isReady else { return }
+        guard slots[j].isReady else {
+            pendingTurn = forward ? 1 : -1
+            return
+        }
+        pendingTurn = 0
         move(toSlot: j, animated: animated, snapEdge: true)
         if mode == .paginated { playManualTurnSound() }
         #else
@@ -1634,6 +1669,7 @@ extension ReaderPager: UIScrollViewDelegate {
     private func atEnd(_ s: UIScrollView) -> Bool { s.contentOffset.x >= s.contentSize.width - s.bounds.width - 1 }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        pendingTurn = 0
         barsLastY = scrollView.contentOffset.y
         barsTravel = 0
         delegate?.pagerTurnedByHand(self)
@@ -1907,6 +1943,7 @@ extension ReaderPager: UIScrollViewDelegate {
         let vx = pan.velocity(in: self).x
         switch pan.state {
         case .began:
+            pendingTurn = 0
             delegate?.pagerTurnedByHand(self)
         case .changed:
             if !coverActive, abs(tx) > 4 {
@@ -2014,6 +2051,9 @@ extension ReaderPager: UIScrollViewDelegate {
     private func settleCover(commit: Bool, velocity: CGFloat) {
         guard coverActive else { return }
         coverAnimating = true
+        coverCommitting = commit
+        coverAnimationID &+= 1
+        let animID = coverAnimationID
         let targetProgress: CGFloat = commit ? 1 : 0
         let remaining = abs(targetProgress - coverProgress)
         let duration = max(0.14, min(0.28, Double(remaining) * 0.28))
@@ -2026,7 +2066,7 @@ extension ReaderPager: UIScrollViewDelegate {
         ) {
             self.renderCover(progress: targetProgress)
         } completion: { [weak self] _ in
-            guard let self else { return }
+            guard let self, self.coverAnimationID == animID else { return }
             self.coverAnimating = false
             self.finishCover(commit: commit)
         }
@@ -2039,6 +2079,7 @@ extension ReaderPager: UIScrollViewDelegate {
         outer.transform = .identity
         let wasActive = coverActive
         coverActive = false
+        coverCommitting = false
         guard wasActive else { return }
         if commit {
             if slots.indices.contains(coverTargetSlot) {
@@ -2064,6 +2105,7 @@ extension ReaderPager: UIScrollViewDelegate {
 
     private func cancelCover() {
         guard coverActive else { return }
+        coverAnimationID &+= 1
         coverAnimating = false
         finishCover(commit: false)
     }

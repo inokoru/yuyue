@@ -689,7 +689,7 @@ final class SettingsLog {
     }
 
     private static let watched: [String: Watched] = [
-        "general.reopenLast": Watched(title: String(localized: "启动时继续上次阅读"), kind: .bool, standard: .bool(false)),
+        "general.reopenLast": Watched(title: String(localized: "启动时继续上次阅读"), kind: .bool, standard: .bool(true)),
         "general.keepAwake": Watched(title: String(localized: "朗读时防止系统休眠"), kind: .bool, standard: .bool(true)),
         AppAppearance.key: Watched(title: String(localized: "界面"), kind: .string, standard: .string(AppAppearance.system.rawValue)) {
             if case .string(let s) = $0 { AppAppearance(rawValue: s)?.title ?? s } else { "" }

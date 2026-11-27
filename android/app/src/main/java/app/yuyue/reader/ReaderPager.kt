@@ -377,6 +377,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
 
     /** One page on or back, as a tap on the side or a volume key does. */
     fun turn(forward: Boolean) {
+        finishInFlightTurn()
         val cur = current ?: return
         val n = cur.layout?.pageCount ?: return
         val scrolled = mode == LayoutMode.SCROLLED
@@ -464,9 +465,23 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
 
     fun clearInk() = callAll("yy.setActive(null)")
 
+    /** Cancels any running page animator without firing its completion callback. */
+    private fun cancelAnimator() {
+        val old = animator ?: return
+        animator = null
+        old.cancel()
+    }
+
+    /** Commits an in-flight turn animation synchronously before starting the next turn or touch. */
+    private fun finishInFlightTurn() {
+        val active = animator ?: return
+        active.end()
+        animator = null
+    }
+
     /** Goes to page `p` of the current section (`-1` and `pageCount` cross into the neighbours). */
     private fun settle(to: Float, animated: Boolean, initialVelocity: Float = 0f) {
-        animator?.cancel()
+        cancelAnimator()
         val d0 = position - to
         if (!animated || abs(d0) < 0.0005f) {
             position = to
@@ -496,7 +511,12 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
-                    if (animator === animation) landed()
+                    if (animator === animation) {
+                        // Critically damped decay stops slightly short of `to` at `totalSec`; snap exact
+                        // so forward chapter crossings (`to == pageCount`) always commit to `nextSlot`.
+                        position = to
+                        landed()
+                    }
                 }
             })
         }
@@ -510,25 +530,25 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
         val cur = current ?: return
         val prevSection = cur.section
         val prevPage = cur.page
-        val n = cur.layout?.pageCount ?: 1
-        when {
-            position >= n -> nextSlot?.let { nx ->
+        val n = maxOf(1, cur.layout?.pageCount ?: 1)
+        when (val landing = PagerSettleMath.resolveLanding(position, n, hasPrev = previousSlot != null, hasNext = nextSlot != null)) {
+            PagerSettleMath.Landing.NextSection -> nextSlot?.let { nx ->
                 current = nx
                 nx.page = 0
                 if (mode == LayoutMode.SCROLLED) nx.webView.scrollTo(0, 0)
                 position = 0f
                 loadNeighbours()
             }
-            position < 0 -> previousSlot?.let { prev ->
+            PagerSettleMath.Landing.PreviousSection -> previousSlot?.let { prev ->
                 current = prev
-                val last = (prev.layout?.pageCount ?: 1) - 1
+                val last = maxOf(0, (prev.layout?.pageCount ?: 1) - 1)
                 prev.page = last
                 if (mode == LayoutMode.SCROLLED) prev.webView.scrollTo(0, prev.webView.maxScrollY)
                 position = last.toFloat()
                 loadNeighbours()
             }
-            else -> {
-                cur.page = position.roundToInt()
+            is PagerSettleMath.Landing.Page -> {
+                cur.page = landing.page
                 position = cur.page.toFloat()
             }
         }
@@ -652,7 +672,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
     }
 
     private fun settleCover(commit: Boolean, initialVelocity: Float) {
-        animator?.cancel()
+        cancelAnimator()
         val target = if (commit) 1f else 0f
         val d0 = coverProgress - target
         if (instantTurn || abs(d0) < 0.002f) {
@@ -705,8 +725,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
 
     private fun cancelCover() {
         if (!coverActive) return
-        animator?.cancel()
-        animator = null
+        cancelAnimator()
         coverOverlay.visibility = View.GONE
         coverShadow.visibility = View.GONE
         coverActive = false
@@ -729,10 +748,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
                 velocity = VelocityTracker.obtain().apply { addMovement(e) }
                 // Finish an in-flight turn immediately so rapid taps register as the next page turn
                 // instead of being intercepted and swallowed as a zero-distance drag.
-                if (animator != null) {
-                    animator?.end()
-                    animator = null
-                }
+                finishInFlightTurn()
             }
             MotionEvent.ACTION_MOVE -> {
                 velocity?.addMovement(e)
@@ -1436,7 +1452,7 @@ class ReaderPager(context: Context, private val core: YuyueCore, private val boo
 
     fun close() {
         pendingTurn = 0
-        animator?.cancel()
+        cancelAnimator()
         scrollAnimator?.cancel()
         verticalAnimator?.cancel()
         cancelCover()
@@ -1464,5 +1480,24 @@ internal object ScrolledPullMath {
         dy < 0f && !canScrollDown -> 1
         dy > 0f && !canScrollUp -> -1
         else -> 0
+    }
+}
+
+/** Pure landing resolver for paginated horizontal strip settles (unit-tested on JVM). */
+internal object PagerSettleMath {
+    sealed interface Landing {
+        data object PreviousSection : Landing
+        data object NextSection : Landing
+        data class Page(val page: Int) : Landing
+    }
+
+    fun resolveLanding(position: Float, pageCount: Int, hasPrev: Boolean, hasNext: Boolean): Landing {
+        val count = maxOf(1, pageCount)
+        val rounded = position.roundToInt()
+        return when {
+            rounded >= count && hasNext -> Landing.NextSection
+            rounded < 0 && hasPrev -> Landing.PreviousSection
+            else -> Landing.Page(rounded.coerceIn(0, count - 1))
+        }
     }
 }

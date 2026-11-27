@@ -58,6 +58,9 @@ struct ReaderScreen: View {
         }
         #endif
         .onAppear {
+            #if os(macOS)
+            OneWindowPerBook.rememberActive(bookID)
+            #endif
             guard model == nil, pdf == nil, audio == nil else { return }
             #if os(iOS)
             // Still being read aloud from the shelf: pick it up as it is.
@@ -149,6 +152,9 @@ struct ReaderScreen: View {
             }
             #else
             if let model { library.openModels.remove(model) }
+            if !AppDelegate.isTerminating {
+                OneWindowPerBook.windowDidDisappear(bookID)
+            }
             // An episode playing, or paused, in the 播放条 goes on there without its window.
             if let model, library.nowPlaying === model {
                 model.flush()
@@ -183,6 +189,7 @@ extension EnvironmentValues {
 struct OneWindowPerBook: NSViewRepresentable {
     let bookID: String
 
+    static let lastBookKey = "mac.lastBook"
     @MainActor private static var open: [String: WeakWindow] = [:]
     private struct WeakWindow { weak var window: NSWindow? }
 
@@ -192,9 +199,26 @@ struct OneWindowPerBook: NSViewRepresentable {
         return window.isVisible || window.isMiniaturized
     }
 
+    @MainActor static func rememberActive(_ bookID: String) {
+        UserDefaults.standard.set(bookID, forKey: lastBookKey)
+    }
+
+    /// Updates `mac.lastBook` when a reader window is closed by the user (not on app quit).
+    @MainActor static func windowDidDisappear(_ bookID: String) {
+        open[bookID] = nil
+        let remaining = open.first(where: { _, ref in
+            guard let w = ref.window else { return false }
+            return w.isVisible || w.isMiniaturized
+        })?.key ?? ""
+        UserDefaults.standard.set(remaining, forKey: lastBookKey)
+    }
+
     @MainActor static func closeWindow(_ bookID: String) {
         open[bookID]?.window?.close()
         open[bookID] = nil
+        if !AppDelegate.isTerminating {
+            windowDidDisappear(bookID)
+        }
     }
 
     func makeNSView(context: Context) -> NSView {

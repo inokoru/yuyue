@@ -12,6 +12,7 @@ struct PhoneRoot: View {
     @State private var tab: PhoneTab
     @State private var chrome = PhoneChrome()
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
+    @AppStorage("general.reopenLast") private var reopenLast = true
     @AppStorage("phone.lastBook") private var lastBook = ""
     @AppStorage(AppAppearance.key) private var mode = AppAppearance.system
     @State private var reopened = false
@@ -206,8 +207,8 @@ struct PhoneRoot: View {
             SettingsLog.shared.library = library
             guard !reopened else { return }
             reopened = true
-            // 设置 · 通用 · 打开语阅时接着读上次那本, as on the Mac; off, the shelf.
-            if UserDefaults.standard.bool(forKey: "general.reopenLast"), !lastBook.isEmpty,
+            // 设置 · 通用 · 启动时继续上次阅读: 上次停在书页上就直接回到书页；关闭则进入书架.
+            if reopenLast, library.presented == nil, !lastBook.isEmpty,
                let book = library.books.first(where: { $0.id == lastBook && $0.available }) {
                 library.open(book, nil)
             }

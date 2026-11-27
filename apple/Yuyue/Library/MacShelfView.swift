@@ -65,7 +65,8 @@ struct MacShelfView: View {
     }
 
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
-    @AppStorage("general.reopenLast") private var reopenLast = false
+    @AppStorage("general.reopenLast") private var reopenLast = true
+    @AppStorage(OneWindowPerBook.lastBookKey) private var lastBook = ""
     @State private var reopened = false
     private var tint: YYTint { YYTint.all.first { $0.id == tintID } ?? .byDefault }
 
@@ -120,10 +121,12 @@ struct MacShelfView: View {
         .onAppear {
             AppAppearance.apply()
             MacMenuBar.openWindow = openWindow
-            // 打开语阅时接着读上次那本: once, when the app starts.
+            // 启动时继续上次阅读: 上次退出时仍停在书籍窗口，打开后直接回到那本书；若已关闭书窗则停在书架.
             guard reopenLast, !reopened else { return }
             reopened = true
-            if let last = library.books.filter({ $0.openedAt != nil }).max(by: { ($0.openedAt ?? 0) < ($1.openedAt ?? 0) }),
+            if !lastBook.isEmpty,
+               !OneWindowPerBook.hasWindow(lastBook),
+               let last = library.books.first(where: { $0.id == lastBook && $0.available }),
                library.open(last, nil) {
                 openWindow(id: "reader", value: last.id)
             }

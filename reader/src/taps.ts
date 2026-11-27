@@ -145,9 +145,14 @@ function onUp(e: PointerEvent): void {
   if (d.moved || now() - d.t > LONG_PRESS_MS || hasSelection()) return;
   if (Math.abs(e.clientX - d.x) > slop(d) || Math.abs(e.clientY - d.y) > slop(d)) return;
   // The page moved under the finger (a swipe the scroll view took over) unless it was our own
-  // smooth page turn still running from an earlier tap. Allow small subpixel/DPI drift (<= 4px).
-  const scrolled = Math.abs(window.pageXOffset - d.sx) > 4 || Math.abs(window.pageYOffset - d.sy) > 4;
-  if (scrolled && !isScrollAnimating()) return;
+  // smooth page turn still running from an earlier tap. On Android paginated WebViews, native
+  // ReaderPager owns horizontal swipes and cancels WebView touches when dragging; async scrollTo
+  // updates from an interrupted page turn can change pageXOffset between pointerdown and pointerup.
+  const root = document.documentElement;
+  const androidPaged = root.getAttribute('data-yy-android') === '1' && root.getAttribute('data-yy-mode') !== 'scrolled';
+  const movedX = !androidPaged && Math.abs(window.pageXOffset - d.sx) > 4;
+  const movedY = Math.abs(window.pageYOffset - d.sy) > 4;
+  if ((movedX || movedY) && !isScrollAnimating()) return;
 
   const target = e.target as Element | null;
   const hit = bubbleHit(target);

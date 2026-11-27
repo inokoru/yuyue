@@ -934,7 +934,7 @@ private struct PhoneTranslationSettingsSection: View {
 /// being the phone's ways in, where the Mac takes them dragged onto its window.
 struct PhoneGeneral: View {
     let library: Library
-    @AppStorage("general.reopenLast") private var reopenLast = false
+    @AppStorage("general.reopenLast") private var reopenLast = true
     @AppStorage("appearance.tint") private var tintID = YYTint.byDefault.id
     @Environment(\.colorScheme) private var scheme
 

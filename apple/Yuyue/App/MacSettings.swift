@@ -846,7 +846,7 @@ private final class TriggerBottomBox {
 }
 
 private struct GeneralSettings: View {
-    @AppStorage("general.reopenLast") private var reopenLast = false
+    @AppStorage("general.reopenLast") private var reopenLast = true
     @AppStorage("general.keepAwake") private var keepAwake = true
     @State private var langChoice = AppLanguage.chosen
     @State private var langLater = false

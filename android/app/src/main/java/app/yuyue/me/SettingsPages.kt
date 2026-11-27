@@ -181,13 +181,18 @@ private fun Modifier.settingsTile(on: Boolean, line: Color, accent: Color): Modi
 
 object General {
     const val REOPEN_LAST = "general.reopenLast"
+    const val REOPEN_LAST_DEFAULT = true
+
+    /** Returns the book ID to reopen on cold launch, or null to land on the shelf. */
+    fun bookToReopen(reopenLast: Boolean, lastBook: String, availableIds: Set<String>): String? =
+        if (reopenLast && lastBook.isNotEmpty() && lastBook in availableIds) lastBook else null
 }
 
 /** 通用, as the Mac's: what opening 语阅 does, and how books come in — 书库来源 and Wi‑Fi 传书
  *  being the phone's ways in, where the Mac takes them dragged onto its window. */
 @Composable
 fun GeneralPage(library: Library, push: (MePage) -> Unit) {
-    var reopenLast by rememberPref(General.REOPEN_LAST, false)
+    var reopenLast by rememberPref(General.REOPEN_LAST, General.REOPEN_LAST_DEFAULT)
     val activity = LocalContext.current as android.app.Activity
     var language by remember { mutableStateOf(app.yuyue.AppLanguage.chosen(activity)) }
     val systemChinese = remember(activity) { app.yuyue.AppLanguage.systemChinese(activity) }
@@ -891,7 +896,7 @@ object SettingsLog {
     private fun onOff(v: Any?) = if (v == true) t("开") else t("关")
 
     private val watched: Map<String, Watched> = mapOf(
-        General.REOPEN_LAST to Watched({ t("启动时继续上次阅读") }, MePage.General, false),
+        General.REOPEN_LAST to Watched({ t("启动时继续上次阅读") }, MePage.General, General.REOPEN_LAST_DEFAULT),
         Appearance.KEY to Watched({ t("界面") }, MePage.Appearance, Appearance.SYSTEM) {
             when (it) { Appearance.LIGHT -> t("浅色"); Appearance.DARK -> t("深色"); else -> t("跟随系统") }
         },
