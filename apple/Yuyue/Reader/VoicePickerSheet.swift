@@ -291,12 +291,28 @@ struct VoiceCatalogSections: View {
         .buttonStyle(.plain)
     }
 
-    private func avatar(_ name: String, selected: Bool, plus: Bool = false) -> some View {
-        Text(String(name.prefix(1)))
-            .font(YYUI.font(11.5, .semibold))
-            .foregroundStyle(selected ? tint.accent : YYColor.t2)
-            .frame(width: YYUI.s(28), height: YYUI.s(28))
-            .background(selected ? tint.accent.opacity(0.16) : YYColor.inset, in: .circle)
+    private func avatar(_ name: String, voiceID: String, selected: Bool) -> some View {
+        let preview = PreviewState.shared
+        let loading = preview.voiceID == voiceID && preview.started == nil
+        let playing = preview.voiceID == voiceID && preview.started != nil
+        let active = loading || playing
+        return ZStack {
+            if loading {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(tint.accent)
+            } else if playing {
+                SpeakingBars(color: tint.accent, paused: false)
+                    .scaleEffect(0.8)
+            } else {
+                Text(String(name.prefix(1)))
+                    .font(YYUI.font(11.5, .semibold))
+                    .foregroundStyle(selected ? tint.accent : YYColor.t2)
+            }
+        }
+        .frame(width: YYUI.s(28), height: YYUI.s(28))
+        .background((selected || active) ? tint.accent.opacity(0.16) : YYColor.inset, in: .circle)
+        .animation(YYMotion.quick, value: active)
     }
 
     private func badgeView(_ text: String, green: Bool) -> some View {
@@ -318,15 +334,21 @@ struct VoiceCatalogSections: View {
     private func clonedRow(_ entry: ClonedEntry) -> some View {
         let resolved = ClonedVoices.resolveVoice(entry.id, bookID: bookID)
         let selected = (selectedID == entry.id)
-        let failedHere = PreviewState.shared.failedID == entry.id
+        let preview = PreviewState.shared
+        let previewingHere = preview.voiceID == entry.id
+        let failedHere = preview.failedID == entry.id
         return HStack(spacing: YYUI.s(10)) {
             Button {
-                if let resolved, entry.isPlayable { onPreview(resolved) }
+                if previewingHere {
+                    Voices.stopPreview()
+                } else if let resolved, entry.isPlayable {
+                    onPreview(resolved)
+                }
             } label: {
-                avatar(entry.name, selected: selected)
+                avatar(entry.name, voiceID: entry.id, selected: selected)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("试听"))
+            .buttonStyle(YYPressStyle(scale: 0.92))
+            .accessibilityLabel(previewingHere ? Text("停止试听") : Text("试听"))
 
             Button {
                 if entry.needsRerecord {
@@ -389,15 +411,21 @@ struct VoiceCatalogSections: View {
     /// 首字 · 名字 [标] / 一行说明 · ✓. The initial plays a line; the rest picks it.
     private func row(voice: any Voice, badge: String?, green: Bool = false, detail: String) -> some View {
         let selected = (selectedID == voice.id)
-        let failedHere = PreviewState.shared.failedID == voice.id
+        let preview = PreviewState.shared
+        let previewingHere = preview.voiceID == voice.id
+        let failedHere = preview.failedID == voice.id
         return HStack(spacing: YYUI.s(10)) {
             Button {
-                onPreview(voice)
+                if previewingHere {
+                    Voices.stopPreview()
+                } else {
+                    onPreview(voice)
+                }
             } label: {
-                avatar(voice.name, selected: selected)
+                avatar(voice.name, voiceID: voice.id, selected: selected)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("试听"))
+            .buttonStyle(YYPressStyle(scale: 0.92))
+            .accessibilityLabel(previewingHere ? Text("停止试听") : Text("试听"))
 
             Button {
                 onSelect(voice)

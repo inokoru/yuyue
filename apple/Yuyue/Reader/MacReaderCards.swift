@@ -685,6 +685,8 @@ struct ListenCard: View {
     var castBook: (core: YuyueCore, bookID: String, section: UInt32)?
     @State private var castShown = false
     @State private var voicePickerShown = false
+    @State private var sleepOpen = false
+    @State private var mainHeight: CGFloat = 0
     @State private var ownVoices = 0
     @State private var dramaOn = false
     private let tint = YYTint.standard
@@ -708,57 +710,44 @@ struct ListenCard: View {
     private static let rates: [Float] = [0.8, 1.0, 1.2, 1.5, 2.0]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            #if os(macOS)
-            HStack(spacing: 4) {
-                Text(String(localized: "听书")).font(.yy(size: 13.5, weight: .bold)).foregroundStyle(YYColor.t1)
-                Spacer()
-                Key(String(localized: "空格"))
-                Text("暂停").padding(.trailing, 6)
-                Key("⌘[")
-                Key("⌘]")
-                Text("上一句 / 下一句")
-            }
-            .font(.yy(size: 10.5))
-            .foregroundStyle(YYColor.t3)
-            #endif
-            if let player {
-                if player.recording != nil { narrator(player) }
-                if let hotNotice = player.thermalNotice {
-                    HStack(spacing: 8) {
-                        Image(systemName: "thermometer.medium")
-                            .font(.yy(size: 12))
-                            .foregroundStyle(YYColor.warn)
-                        Text(hotNotice)
-                            .font(.yy(size: 11, weight: .medium))
-                            .foregroundStyle(YYColor.t1)
-                        Spacer()
+        Group {
+            if let player, sleepOpen {
+                sleepPage(player)
+                    .frame(minHeight: mainHeight, alignment: .top)
+                    .transition(
+                        YYMotion.reduce
+                            ? .opacity
+                            : .asymmetric(
+                                insertion: .move(edge: .trailing).combined(with: .opacity),
+                                removal: .move(edge: .trailing).combined(with: .opacity)
+                            )
+                    )
+            } else {
+                mainContent
+                    .onGeometryChange(for: CGFloat.self, of: \.size.height) { h in
+                        if h > 0, !sleepOpen { mainHeight = ceil(h) }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(YYColor.warn.opacity(0.10), in: .rect(cornerRadius: 11))
-                }
-                voice(player)
-                if !player.narrated {
-                    if case .downloading = KokoroDownload.shared.phase, CardVoice.supportsLanguage(player.language) {
-                        KokoroPrepBanner(language: player.language, alwaysShowIdle: false)
-                    } else {
-                        LiveVoicePrepBanner(language: player.language)
-                    }
-                }
-                speed(player)
-                sleep(player)
-                tiles(player)
+                    .transition(
+                        YYMotion.reduce
+                            ? .opacity
+                            : .asymmetric(
+                                insertion: .move(edge: .leading).combined(with: .opacity),
+                                removal: .move(edge: .leading).combined(with: .opacity)
+                            )
+                    )
             }
         }
+        .clipped()
+        .animation(YYMotion.standard, value: sleepOpen)
         .padding(.horizontal, 16)
         #if os(iOS)
-        .padding(.top, YYUI.sheetCardTop)
-        .padding(.bottom, 16)
+        .padding(.top, 20)
+        .padding(.bottom, 18)
         #else
         .padding(.vertical, 14)
         .frame(width: 460)
         #endif
+        .onDisappear { Voices.stopPreview() }
         .task(id: castShown) { countOwnVoices() }
         .task {
             #if DEBUG
@@ -798,6 +787,67 @@ struct ListenCard: View {
                     }
                 )
                 .presentationBackground(YYColor.bg)
+            }
+        }
+    }
+
+    private var mainContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            #if os(macOS)
+            HStack(spacing: 6) {
+                Text(String(localized: "听书")).font(.yy(size: 13.5, weight: .bold)).foregroundStyle(YYColor.t1)
+                Spacer()
+                HStack(spacing: 4) {
+                    Key(String(localized: "空格"))
+                    Text("暂停").padding(.trailing, 4)
+                    Key("⌘[")
+                    Key("⌘]")
+                    Text("上一句 / 下一句")
+                }
+                .font(.yy(size: 10.5))
+                .foregroundStyle(YYColor.t3)
+                if let player {
+                    sleepToggleButton(player)
+                }
+            }
+            #else
+            if let player {
+                HStack(alignment: .center) {
+                    Text(String(localized: "听书"))
+                        .font(.yy(size: 15, weight: .bold))
+                        .foregroundStyle(YYColor.t1)
+                    Spacer()
+                    sleepToggleButton(player)
+                }
+                .padding(.horizontal, 2)
+            }
+            #endif
+            if let player {
+                if player.recording != nil { narrator(player) }
+                if let hotNotice = player.thermalNotice {
+                    HStack(spacing: 8) {
+                        Image(systemName: "thermometer.medium")
+                            .font(.yy(size: 12))
+                            .foregroundStyle(YYColor.warn)
+                        Text(hotNotice)
+                            .font(.yy(size: 11, weight: .medium))
+                            .foregroundStyle(YYColor.t1)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(YYColor.warn.opacity(0.10), in: .rect(cornerRadius: 11))
+                }
+                voice(player)
+                if !player.narrated {
+                    if case .downloading = KokoroDownload.shared.phase, CardVoice.supportsLanguage(player.language) {
+                        KokoroPrepBanner(language: player.language, alwaysShowIdle: false)
+                    } else {
+                        LiveVoicePrepBanner(language: player.language)
+                    }
+                }
+                speed(player)
+                tiles(player)
             }
         }
     }
@@ -858,69 +908,111 @@ struct ListenCard: View {
     private func voice(_ player: Player) -> some View {
         let language = player.language
         let current = player.currentVoice(for: language)
-        return HStack(spacing: 10) {
-            // Animated speaking bars: they move while the voice reads.
-            SpeakingBars(paused: player.state != .playing)
-            .frame(width: 32, height: 32)
-            .background(YYColor.card, in: .rect(cornerRadius: 9))
-            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(YYColor.line, lineWidth: 0.5))
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 5) {
-                    Text(current.map(Voices.title) ?? String(localized: "没有能读的声音"))
-                        .font(.yy(size: 12.5, weight: .semibold))
-                        .foregroundStyle(YYColor.t1)
-                    if current is SystemVoice {
-                        Text("系统自带")
-                            .font(.yy(size: 9.5, weight: .medium))
-                            .foregroundStyle(YYColor.t2)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(YYColor.t1.opacity(0.06), in: .rect(cornerRadius: 4))
-                            .fixedSize()
+        let preview = PreviewState.shared
+        let previewLoading = current.map { preview.voiceID == $0.id && preview.started == nil } ?? false
+        let previewPlaying = current.map { preview.voiceID == $0.id && preview.started != nil } ?? false
+        let previewActive = previewLoading || previewPlaying
+        let previewFailed = current.map { preview.failedID == $0.id } ?? false
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                // Animated speaking bars: they move while the voice reads or previews.
+                SpeakingBars(paused: player.state != .playing && !previewPlaying)
+                    .frame(width: 32, height: 32)
+                    .background(YYColor.card, in: .rect(cornerRadius: 9))
+                    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(YYColor.line, lineWidth: 0.5))
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 5) {
+                        Text(current.map(Voices.title) ?? String(localized: "没有能读的声音"))
+                            .font(.yy(size: 12.5, weight: .semibold))
+                            .foregroundStyle(YYColor.t1)
+                        if current is SystemVoice {
+                            Text("系统自带")
+                                .font(.yy(size: 9.5, weight: .medium))
+                                .foregroundStyle(YYColor.t2)
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(YYColor.t1.opacity(0.06), in: .rect(cornerRadius: 4))
+                                .fixedSize()
+                        }
                     }
+                    Text(voiceLine(player, current))
+                        .font(.yy(size: 10.5))
+                        .foregroundStyle(YYColor.t2)
                 }
-                Text(voiceLine(player, current))
-                    .font(.yy(size: 10.5))
-                    .foregroundStyle(YYColor.t2)
-            }
-            .lineLimit(1)
-            Spacer(minLength: 4)
-            if let current {
-                Button { player.preview(current, text: sample(language)) } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "play.fill").font(.yy(size: 8.5))
-                        Text("试听")
-                    }
+                .lineLimit(1)
+                Spacer(minLength: 4)
+                if let current {
+                    Button {
+                        if previewActive {
+                            Voices.stopPreview()
+                        } else {
+                            player.preview(current, text: sample(language))
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Group {
+                                if previewLoading {
+                                    ProgressView()
+                                        .controlSize(.mini)
+                                        .scaleEffect(0.72)
+                                        .tint(YYColor.t2)
+                                } else if previewPlaying {
+                                    Image(systemName: "stop.fill")
+                                        .font(.yy(size: 8))
+                                        .foregroundStyle(tint.accent)
+                                } else {
+                                    Image(systemName: "play.fill")
+                                        .font(.yy(size: 8.5))
+                                        .foregroundStyle(YYColor.t1)
+                                }
+                            }
+                            .frame(width: 11, height: 11)
+                            Text(previewPlaying ? String(localized: "停止") : String(localized: "试听"))
+                                .foregroundStyle(previewLoading ? YYColor.t2 : YYColor.t1)
+                        }
                         .font(.yy(size: 11, weight: .semibold))
-                        .foregroundStyle(YYColor.t1)
                         .padding(.leading, 8).padding(.trailing, 10)
                         .frame(height: 26)
                         .background(YYColor.card, in: .capsule)
                         .overlay(Capsule().strokeBorder(YYColor.line, lineWidth: 0.5))
                         .shadow(color: .black.opacity(0.05), radius: 1, y: 1)
+                        .animation(YYMotion.quick, value: previewLoading)
+                        .animation(YYMotion.quick, value: previewPlaying)
+                    }
+                    .buttonStyle(YYPressStyle(scale: 0.94))
+                    .fixedSize()
+                    .accessibilityLabel(previewLoading ? String(localized: "准备中") : previewPlaying ? String(localized: "停止试听") : String(localized: "试听"))
+                }
+                Button { voicePickerShown = true } label: {
+                    HStack(spacing: 3) {
+                        if player.readyOfflineVoice != nil {
+                            Circle()
+                                .fill(YYColor.ok)
+                                .frame(width: 6, height: 6)
+                        }
+                        Text("换声音")
+                        Image(systemName: "chevron.right").font(.yy(size: 9, weight: .semibold))
+                    }
+                    .font(.yy(size: 11))
+                    .foregroundStyle(player.readyOfflineVoice != nil ? YYColor.t1 : YYColor.t2)
+                    .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .fixedSize()
+                .padding(.trailing, 2)
             }
-            Button { voicePickerShown = true } label: {
-                HStack(spacing: 3) {
-                    if player.readyOfflineVoice != nil {
-                        Circle()
-                            .fill(YYColor.ok)
-                            .frame(width: 6, height: 6)
-                    }
-                    Text("换声音")
-                    Image(systemName: "chevron.right").font(.yy(size: 9, weight: .semibold))
-                }
-                .font(.yy(size: 11))
-                .foregroundStyle(player.readyOfflineVoice != nil ? YYColor.t1 : YYColor.t2)
-                .contentShape(.rect)
+            if previewFailed {
+                Text(preview.failedMessage ?? String(localized: "试听暂不可用，请检查网络或稍后再试"))
+                    .font(.yy(size: 10.5))
+                    .foregroundStyle(YYColor.danger)
+                    .padding(.leading, 42)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .transition(.opacity)
             }
-            .buttonStyle(.plain)
-            .fixedSize()
-            .padding(.trailing, 2)
         }
         .padding(.leading, 9).padding(.trailing, 8).padding(.vertical, 9)
         .background(YYColor.inset, in: .rect(cornerRadius: 14))
+        .animation(YYMotion.quick, value: previewFailed)
     }
 
     /// Under the voice's name: while a better offline voice downloads and a fallback voice stands in,
@@ -1006,54 +1098,177 @@ struct ListenCard: View {
         }
     }
 
-    private func sleep(_ player: Player) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("睡眠定时").font(.yy(size: 11.5, weight: .semibold)).foregroundStyle(YYColor.t1)
-                Spacer()
-                Text("停止时自动添加书签").font(.yy(size: 10.5)).foregroundStyle(YYColor.t3)
-            }
-            .padding(.horizontal, 2)
-            HStack(spacing: 2) {
-                sleepChoice(player, String(localized: "关"), nil, .off)
-                sleepChoice(player, String(localized: "本句读完"), nil, .sentence)
-                sleepChoice(player, unit == String(localized: "章") ? String(localized: "本章结束") : unit == String(localized: "集") ? String(localized: "本集结束") : String(localized: "本\(unit)读完"), String(localized: "约 \(minutesLeft) 分钟"), .chapter)
-                ForEach([15, 30, 60], id: \.self) { m in
-                    let left = minutesLeft(player, of: m)
-                    sleepChoice(player, String(localized: "\(m) 分钟"), left.map { String(localized: "还剩 \($0) 分") }, .until(Date().addingTimeInterval(Double(m) * 60), minutes: m))
+    private func sleepToggleButton(_ player: Player) -> some View {
+        let on = player.sleep != .off
+        let highlighted = on || sleepOpen
+        return Button {
+            withAnimation(YYMotion.standard) { sleepOpen.toggle() }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: on ? "moon.zzz.fill" : "moon.zzz")
+                    .font(.yy(size: 13, weight: .medium))
+                if let badge = sleepBadge(player) {
+                    Text(badge)
+                        .font(.yy(size: 11, weight: .semibold))
+                        .monospacedDigit()
                 }
             }
-            .padding(3)
-            .background(YYColor.inset, in: .rect(cornerRadius: 12))
+            .foregroundStyle(highlighted ? tint.accent : YYColor.t2)
+            .padding(.horizontal, on ? 10 : 0)
+            .frame(minWidth: 32, minHeight: 32)
+            .background(highlighted ? tint.accentSoft : YYColor.inset, in: .capsule)
+            .overlay(Capsule().strokeBorder(highlighted ? tint.accent.opacity(0.26) : YYColor.line, lineWidth: 0.5))
+            .contentShape(Capsule().inset(by: -4))
+            .animation(YYMotion.quick, value: highlighted)
+            .animation(YYMotion.quick, value: on)
+        }
+        .buttonStyle(YYPressStyle(scale: 0.92))
+        .fixedSize()
+        .help(String(localized: "睡眠定时"))
+        .accessibilityLabel(String(localized: "睡眠定时"))
+        .accessibilityValue(sleepBadge(player) ?? String(localized: "关"))
+    }
+
+    private func sleepPage(_ player: Player) -> some View {
+        let chapterTitle = unit == String(localized: "章")
+            ? String(localized: "本章结束")
+            : unit == String(localized: "集")
+                ? String(localized: "本集结束")
+                : String(localized: "本\(unit)读完")
+        return VStack(alignment: .leading, spacing: 12) {
+            ZStack {
+                Text("睡眠定时")
+                    .font(.yy(size: 14, weight: .semibold))
+                    .foregroundStyle(YYColor.t1)
+                HStack {
+                    Button {
+                        withAnimation(YYMotion.standard) { sleepOpen = false }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "chevron.left")
+                                .font(.yy(size: 12, weight: .semibold))
+                            Text("听书")
+                                .font(.yy(size: 13, weight: .medium))
+                        }
+                        .foregroundStyle(tint.accent)
+                        .frame(minHeight: 32)
+                        .contentShape(Rectangle().inset(by: -6))
+                    }
+                    .buttonStyle(YYPressStyle(scale: 0.94))
+                    Spacer()
+                    if player.sleep != .off {
+                        Button {
+                            #if os(iOS)
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            #endif
+                            withAnimation(YYMotion.standard) {
+                                player.sleep = .off
+                                sleepOpen = false
+                            }
+                        } label: {
+                            Text("关闭")
+                                .font(.yy(size: 13, weight: .medium))
+                                .foregroundStyle(tint.accent)
+                                .frame(minHeight: 32)
+                                .contentShape(Rectangle().inset(by: -6))
+                        }
+                        .buttonStyle(YYPressStyle(scale: 0.94))
+                    }
+                }
+            }
+            .padding(.horizontal, 2)
+
+            VStack(spacing: 0) {
+                sleepOptionRow(player, title: String(localized: "本句读完"), detail: nil, value: .sentence)
+                sleepDivider
+                sleepOptionRow(player, title: chapterTitle, detail: String(localized: "约 \(minutesLeft) 分钟"), value: .chapter)
+                ForEach([15, 30, 60], id: \.self) { m in
+                    let left = minutesLeft(player, of: m)
+                    sleepDivider
+                    sleepOptionRow(
+                        player,
+                        title: String(localized: "\(m) 分钟"),
+                        detail: left.map { String(localized: "还剩 \($0) 分") },
+                        value: .until(Date().addingTimeInterval(Double(m) * 60), minutes: m)
+                    )
+                }
+            }
+            .background(YYColor.inset)
+            .clipShape(.rect(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(YYColor.line.opacity(0.6), lineWidth: 0.5))
+
+            Text("停止时自动添加书签")
+                .font(.yy(size: 11))
+                .foregroundStyle(YYColor.t3)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    private var sleepDivider: some View {
+        Rectangle()
+            .fill(YYColor.line)
+            .frame(height: 0.5)
+            .padding(.horizontal, 14)
+    }
+
+    private func sleepOptionRow(_ player: Player, title: String, detail: String?, value: Player.Sleep) -> some View {
+        let on: Bool = switch (player.sleep, value) {
+        case (.until(_, let a), .until(_, let b)): a == b
+        default: player.sleep == value
+        }
+        return Button {
+            #if os(iOS)
+            UISelectionFeedbackGenerator().selectionChanged()
+            #endif
+            withAnimation(YYMotion.standard) {
+                player.sleep = on ? .off : value
+                sleepOpen = false
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.yy(size: 13.5, weight: on ? .semibold : .regular))
+                    .foregroundStyle(on ? tint.accent : YYColor.t1)
+                if let detail {
+                    Text(detail)
+                        .font(.yy(size: 11.5))
+                        .foregroundStyle(on ? tint.accent.opacity(0.8) : YYColor.t3)
+                        .monospacedDigit()
+                }
+                Spacer(minLength: 8)
+                if on {
+                    Image(systemName: "checkmark")
+                        .font(.yy(size: 12.5, weight: .bold))
+                        .foregroundStyle(tint.accent)
+                }
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 44)
+            .background(on ? tint.accentSoft : .clear)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    private func sleepBadge(_ player: Player) -> String? {
+        switch player.sleep {
+        case .off: nil
+        case .sentence: String(localized: "本句")
+        case .chapter:
+            unit == String(localized: "章")
+                ? String(localized: "本章")
+                : unit == String(localized: "集")
+                    ? String(localized: "本集")
+                    : String(localized: "本\(unit)")
+        case .until(let date, _):
+            String(localized: "\(max(1, Int((date.timeIntervalSinceNow / 60).rounded(.up)))) 分")
         }
     }
 
     private func minutesLeft(_ player: Player, of minutes: Int) -> Int? {
         guard case .until(let date, let m) = player.sleep, m == minutes else { return nil }
         return max(1, Int((date.timeIntervalSinceNow / 60).rounded(.up)))
-    }
-
-    private func sleepChoice(_ player: Player, _ title: String, _ detail: String?, _ value: Player.Sleep) -> some View {
-        let on: Bool = switch (player.sleep, value) {
-        case (.until(_, let a), .until(_, let b)): a == b
-        default: player.sleep == value
-        }
-        return Button { player.sleep = on ? .off : value } label: {
-            VStack(spacing: 1) {
-                Text(title).font(.yy(size: 11, weight: on ? .bold : .regular))
-                if on, let detail { Text(detail).font(.yy(size: 10)).foregroundStyle(YYColor.t2) }
-            }
-            .foregroundStyle(YYColor.t1)
-            .monospacedDigit()
-            .frame(maxWidth: .infinity)
-            .frame(height: 36)
-            .background(on ? YYColor.card : .clear, in: .rect(cornerRadius: 9))
-            .shadow(color: .black.opacity(on ? 0.07 : 0), radius: 1.5, y: 0.5)
-            .animation(YYMotion.quick, value: on)
-            .contentShape(.rect)
-        }
-        .accessibilityAddTraits(on ? .isSelected : [])
-        .buttonStyle(.plain)
     }
 
     /// Minutes of listening left in the chapter at this speed (about 220 characters a minute at 1×).

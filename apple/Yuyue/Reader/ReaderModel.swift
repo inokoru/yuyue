@@ -48,7 +48,9 @@ final class ReaderModel {
     @ObservationIgnored let translator = Translator()
     @ObservationIgnored var speaker: AVSpeechSynthesizer?
     /// 只听: the text hidden while the voice reads.
-    var listenOnly = false
+    var listenOnly = false {
+        didSet { syncBottomClearance() }
+    }
     /// 沉浸阅读: only the words on the page.
     var immersive = false {
         didSet {
@@ -68,12 +70,11 @@ final class ReaderModel {
 
     private func syncBottomClearance() {
         #if os(iOS)
+        let listenCapsuleVisible = !immersive && (isPlaying || listenOnly) && (listenOnly || (!playerTucked && !barsAway))
         if lookup != nil {
             pager.bottomClearance = 16
-        } else if searchShown || chromeShown || (capsuleAlert != nil && !immersive && !barsAway) {
+        } else if searchShown || chromeShown || (capsuleAlert != nil && !immersive && !barsAway) || listenCapsuleVisible {
             pager.bottomClearance = 66
-        } else if !immersive && isPlaying {
-            pager.bottomClearance = 48
         } else if !immersive && !barsAway {
             pager.bottomClearance = 28
         } else {
