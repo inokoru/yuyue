@@ -54,6 +54,9 @@
 - 禁止在 Swift、Kotlin、C# 中各自重复实现一套业务规则；发现重复实现时优先下沉到 `yuyue-core` 并补充 `fixtures/conformance/` 用例。
 - 禁止修改 `reader/src/bridge.ts` 字段而不更新 `reader/schema/bridge-messages.schema.json` 及三端解析测试。
 
+### 朗读声音硬规则
+- **任何涉及回退或自动切换声音的地方，都需要经过我的确认**；未经确认，禁止在代码中添加静默回退或自动切声逻辑。
+
 ---
 
 ## 四、各层细则

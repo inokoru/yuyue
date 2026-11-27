@@ -1197,22 +1197,35 @@ fun VoiceSourceSettings(id: String, back: () -> Unit) {
     val context = LocalContext.current
     val lib = app.yuyue.YuyueApp.instance.library
     val p = cloud(id)
+    val book = ListeningFocus.book
+    val chosenID by rememberPref(book.key, "")
+    val kokoroState = app.yuyue.speech.KokoroModel.state
+    val liveState = app.yuyue.speech.LiveVoiceModel.state
     var count by remember { mutableIntStateOf(0) }
-    LaunchedEffect(id) {
+    var version by remember { mutableIntStateOf(0) }
+    var current by remember { mutableStateOf<BookVoice?>(null) }
+    var defaultOffline by remember { mutableStateOf<BookVoice?>(null) }
+    LaunchedEffect(id, book, chosenID, version, kokoroState::class, liveState::class) {
         if (id == SYSTEM) {
             SystemVoice.Engine.init(context)
             count = SystemVoice.Engine.voices().size
         } else if (id == NEURAL) {
-            count = app.yuyue.speech.KokoroModel.voices(lib.core, lib.dataDir).size
+            SystemVoice.Engine.init(context)
+            val kokoro = app.yuyue.speech.KokoroModel.voices(lib.core, lib.dataDir)
+            count = kokoro.size
+            current = (if (chosenID.isNotEmpty()) Voices.find(chosenID)?.takeIf { it.speaks(book.tag) } else null) ?: Voices.best(book.tag)
+            defaultOffline = Voices.defaultNarrator(book.tag) ?: kokoro.firstOrNull { it.speaks(book.tag) } ?: kokoro.firstOrNull()
         }
     }
     YYPage {
         if (id == NEURAL) {
-            val liveState = app.yuyue.speech.LiveVoiceModel.state
+            val kokoroReady = app.yuyue.speech.KokoroModel.installed(lib.dataDir)
             val liveReady = app.yuyue.speech.LiveVoiceModel.canRun(lib.dataDir)
+            val cur = current
+            val usingOffline = cur != null && sourceOf(cur) == NEURAL
             PanelHeader(voiceSourceTitle(NEURAL), t("跨端轻量离线模型 · 推荐"), YY.c.ok) { SourceTile(NEURAL, 34f) }
             YYGroup {
-                row { YYRow(t("旁白模型"), value = if (app.yuyue.speech.KokoroModel.installed(lib.dataDir)) t("已就绪 · 16 音色") else t("待下载 · 125 MB")) }
+                row { YYRow(t("旁白模型"), value = if (kokoroReady) t("已就绪 · 16 音色") else t("待下载 · 125 MB")) }
                 if (!app.yuyue.speech.LiveVoiceModel.deviceUnsupported) {
                     val liveVal = when {
                         liveReady -> t("已就绪 · 支持声音克隆与角色")
@@ -1221,9 +1234,53 @@ fun VoiceSourceSettings(id: String, back: () -> Unit) {
                     }
                     row { YYRow(t("声音克隆模型"), value = liveVal) }
                 }
+                if (kokoroReady) {
+                    val statusVal = when {
+                        usingOffline -> t("已启用 · %@", cur.name)
+                        cur != null -> t("仍在使用「%@」", voiceSourceTitle(sourceOf(cur)))
+                        else -> t("未选用")
+                    }
+                    row { YYRow(t("当前朗读"), value = statusVal) }
+                }
                 row { YYRow(t("费用"), value = t("免费 · 不联网")) }
             }
-            if (!app.yuyue.speech.KokoroModel.installed(lib.dataDir)) {
+            if (kokoroReady && cur != null && !usingOffline && defaultOffline != null) {
+                Spacer(Modifier.height(YY.s(10)))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(YY.c.card)
+                        .border(0.5.dp, YY.c.line, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 11.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        t("离线语音已就绪，当前仍在使用「%@」", voiceSourceTitle(sourceOf(cur))),
+                        style = YY.font(11f),
+                        color = YY.c.t2,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        t("立即切换"),
+                        style = YY.font(11.5f, FontWeight.SemiBold),
+                        color = YY.tint.accent,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable {
+                                defaultOffline?.let {
+                                    ListeningFocus.pick(it)
+                                    version++
+                                }
+                            }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+            }
+            if (!kokoroReady) {
                 Spacer(Modifier.height(YY.s(10)))
                 app.yuyue.reader.PrepareBetterVoiceRow(lib.core, lib.dataDir, "zh")
             }

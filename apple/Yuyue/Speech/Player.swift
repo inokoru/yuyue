@@ -1307,6 +1307,7 @@ final class Player {
         let key = Self.cacheKey(for: language)
         if let known = voices[key] { return known }
         if let savedID = Self.savedVoiceID(for: language) {
+            // 任何涉及回退或自动切换声音的地方都需要经过确认（见 docs/dev/multi-platform-architecture.md）。
             guard let chosen = Voices.find(savedID, bookID: detail.summary.id), chosen.speaks(language) else {
                 throw SavedVoiceError.unavailable
             }

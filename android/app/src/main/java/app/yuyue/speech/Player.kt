@@ -197,6 +197,8 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     private var failedSpot: Spot? = null
     /** Remember which voice failed so offline fallback never loops back to the same voice. */
     private var failedVoiceId: String? = null
+    /** Remember which character role failed (if any) so explicit recovery buttons update that role. */
+    private var failedRoleName: String? = null
     private var chapterLayer: Pair<Int, uniffi.yuyue_core.DramaLayer>? = null
     private var chapterLiveAllMade: Pair<Int, Boolean>? = null
     private var lastRenderedSection: Int? = null
@@ -210,6 +212,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         failure = null
         failedSpot = null
         failedVoiceId = null
+        failedRoleName = null
         missingVoice = null
         thermalNotice = null
         pausedForFocus = false
@@ -245,6 +248,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         failure = null
         failedSpot = null
         failedVoiceId = null
+        failedRoleName = null
         missingVoice = null
         thermalNotice = null
         reset()
@@ -401,10 +405,11 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         return if (shouldOfferOfflineFallback(candidate.id, failedVoiceId)) candidate else null
     }
 
-    /** Switches to the downloaded on-device offline voice pack and resumes from where playback failed. */
+    /** Switches to the downloaded on-device offline voice pack only on explicit user action (never silently). */
     fun useOfflineVoice() {
         val langTag = language
         val resumeAt = failedSpot ?: spot
+        val targetRole = failedRoleName
         val offline = offlineFallbackVoice(langTag)
         if (offline == null) {
             useSystemVoice()
@@ -412,11 +417,20 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         }
         failure = null
         failedVoiceId = null
+        failedRoleName = null
         missingVoice = null
-        saveVoicePreference(langTag, offline.id, notify = false)
-        val cacheKey = canonicalLanguage(langTag).ifEmpty { langTag }
-        voices[cacheKey] = offline
-        voices[langTag] = offline
+        if (targetRole != null) {
+            val prev = roles?.role(targetRole)
+            val updated = prev?.copy(voice = offline.id)
+                ?: uniffi.yuyue_core.RoleVoice(voice = offline.id, rate = 1.0, pitch = 0.0, right = false)
+            runCatching { core.setBookRole(detail.summary.id, targetRole, updated) }
+            roles?.reload()
+        } else {
+            saveVoicePreference(langTag, offline.id, notify = false)
+            val cacheKey = canonicalLanguage(langTag).ifEmpty { langTag }
+            voices[cacheKey] = offline
+            voices[langTag] = offline
+        }
         voiceVersion++
         ttsTrackedForSession = false
         runCatching { app.yuyue.YuyueApp.instance.library.dramaSynth.invalidateCast(detail.summary.id) }
@@ -425,12 +439,14 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         if (resumeAt != null) play(resumeAt.position) else restartHere()
     }
 
-    /** Switches to a local system voice and resumes from where playback failed. */
+    /** Switches to a local system voice only on explicit user action (never silently). */
     fun useSystemVoice() {
         val langTag = language
         val resumeAt = failedSpot ?: spot
+        val targetRole = failedRoleName
         failure = null
         failedVoiceId = null
+        failedRoleName = null
         missingVoice = null
         scope.launch {
             SystemVoice.Engine.init(context)
@@ -440,20 +456,30 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                 throw e
             } catch (e: Throwable) {
                 failedSpot = resumeAt
+                failedRoleName = targetRole
                 failure = t("朗读出错了（%@）", e.message ?: e.toString())
                 return@launch
             }
             if (sys == null) {
                 val name = java.util.Locale.forLanguageTag(langTag).getDisplayLanguage(java.util.Locale.getDefault()).ifEmpty { langTag }
                 failedSpot = resumeAt
+                failedRoleName = targetRole
                 missingVoice = name
                 failure = missingVoiceGuidance(langTag, name)
                 return@launch
             }
-            saveVoicePreference(langTag, sys.id, notify = false)
-            val cacheKey = canonicalLanguage(langTag).ifEmpty { langTag }
-            voices[cacheKey] = sys
-            voices[langTag] = sys
+            if (targetRole != null) {
+                val prev = roles?.role(targetRole)
+                val updated = prev?.copy(voice = sys.id)
+                    ?: uniffi.yuyue_core.RoleVoice(voice = sys.id, rate = 1.0, pitch = 0.0, right = false)
+                runCatching { core.setBookRole(detail.summary.id, targetRole, updated) }
+                roles?.reload()
+            } else {
+                saveVoicePreference(langTag, sys.id, notify = false)
+                val cacheKey = canonicalLanguage(langTag).ifEmpty { langTag }
+                voices[cacheKey] = sys
+                voices[langTag] = sys
+            }
             voiceVersion++
             ttsTrackedForSession = false
             runCatching { app.yuyue.YuyueApp.instance.library.dramaSynth.invalidateCast(detail.summary.id) }
@@ -475,6 +501,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         val resumeAt = failedSpot ?: spot
         failure = null
         failedVoiceId = null
+        failedRoleName = null
         missingVoice = null
         if (resumeAt != null) play(resumeAt.position)
     }
@@ -704,19 +731,24 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                     return@launch
                 }
                 if (segPlan != null) {
-                    lastUsingCardVoice = segPlan.any { (v, _) -> v is CardVoice || (v is TunedVoice && v.base is CardVoice) }
+                    lastUsingCardVoice = segPlan.any { seg -> seg.voice is CardVoice || (seg.voice is TunedVoice && seg.voice.base is CardVoice) }
                     val speech = try {
                         roles?.renderSegments(segPlan, language)
                     } catch (e: kotlinx.coroutines.CancellationException) {
                         throw e
                     } catch (e: Throwable) {
                         if (generation != g || renderToken != token) return@launch
-                        val msg = if (e is CloudVoice.Failure && !e.message.isNullOrBlank()) {
-                            e.message!!
+                        val segErr = e as? BookRoles.SegmentFailure
+                        val root = segErr?.cause ?: e
+                        val failedId = segErr?.voiceId ?: segPlan.firstOrNull()?.voice?.let(BookRoles::baseVoiceId)
+                        val failedRole = segErr?.role
+                        val baseMsg = if (root is CloudVoice.Failure && !root.message.isNullOrBlank()) {
+                            root.message!!
                         } else {
-                            t("朗读出错了（%@）", e.message ?: e.toString())
+                            t("朗读出错了（%@）", root.message ?: root.toString())
                         }
-                        failed(msg, voiceId = segPlan.firstOrNull()?.first?.id)
+                        val msg = if (!failedRole.isNullOrBlank()) t("角色「%@」：%@", failedRole, baseMsg) else baseMsg
+                        failed(msg, voiceId = failedId, roleName = failedRole)
                         return@launch
                     }
                     if (generation != g || renderToken != token) return@launch
@@ -725,7 +757,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                         if (!ttsTrackedForSession) {
                             ttsTrackedForSession = true
                             app.yuyue.analytics.AirTraffic.trackTtsStarted(
-                                app.yuyue.analytics.AirTraffic.ttsEngineForVoice(segPlan.firstOrNull()?.first),
+                                app.yuyue.analytics.AirTraffic.ttsEngineForVoice(segPlan.firstOrNull()?.voice),
                                 "reader",
                             )
                         }
@@ -1014,11 +1046,12 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         sleep = Sleep.Until(System.currentTimeMillis() + 600_000, s.minutes)
     }
 
-    private fun failed(message: String, voiceId: String? = null) {
+    private fun failed(message: String, voiceId: String? = null, roleName: String? = null) {
         val resumeAt = spot ?: nextToRender
         stop()
         failedSpot = resumeAt
         failedVoiceId = voiceId
+        failedRoleName = roleName
         failure = message
     }
 
@@ -1164,9 +1197,8 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     }
 
     /**
-     * Resolves the voice for active playback: if the user explicitly saved a voice for `language`
-     * and it is now missing or does not support this chapter's language, fail explicitly rather
-     * than silently switching to another voice.
+     * Resolves the voice for active playback (see docs/dev/multi-platform-architecture.md):
+     * 任何涉及回退或自动切换声音的地方都需要经过确认，不得静默替用户切换音色。
      */
     private suspend fun resolveVoiceForPlayback(language: String): BookVoice? {
         val cacheKey = canonicalLanguage(language).ifEmpty { language }

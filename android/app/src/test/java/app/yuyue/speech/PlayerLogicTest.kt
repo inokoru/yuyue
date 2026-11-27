@@ -178,4 +178,20 @@ class PlayerLogicTest {
         assertFalse(Player.shouldOfferOfflineFallback(null, "cloud.edge.zh-CN-XiaoxiaoNeural"))
         assertFalse(Player.shouldOfferOfflineFallback("", "cloud.edge.zh-CN-XiaoxiaoNeural"))
     }
+
+    @Test
+    fun baseVoiceIdUnwrapsTunedVoicesForSegmentFailureAttribution() {
+        val fakeCloud = object : BookVoice {
+            override val id = "cloud.edge.zh-CN-XiaoxiaoNeural"
+            override val name = "Xiaoxiao"
+            override val qualityName: String? = null
+            override val isOffline = false
+            override fun speaks(tag: String) = true
+            override suspend fun render(text: String, language: String): Speech? = null
+        }
+        val tuned = TunedVoice(fakeCloud, rate = 1.1f, pitch = 1.0f)
+        assertEquals("cloud.edge.zh-CN-XiaoxiaoNeural", BookRoles.baseVoiceId(fakeCloud))
+        assertEquals("cloud.edge.zh-CN-XiaoxiaoNeural", BookRoles.baseVoiceId(tuned))
+        assertTrue(Player.shouldOfferOfflineFallback("kokoro.zf_001", BookRoles.baseVoiceId(tuned)))
+    }
 }

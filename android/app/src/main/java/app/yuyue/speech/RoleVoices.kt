@@ -61,37 +61,58 @@ class BookRoles(private val core: YuyueCore, private val bookID: String) {
         return voiceForRole(who, language, narrator)
     }
 
+    /** One spoken slice inside a multi-speaker sentence (`role == null` means narrator). */
+    data class Segment(val voice: BookVoice, val text: String, val role: String?)
+
+    /** Preserves which underlying voice (and optional role) actually failed while rendering segments. */
+    class SegmentFailure(val voiceId: String, val role: String?, cause: Throwable) : Exception(cause.message, cause)
+
     /**
      * Segment-level plan for manual role reading (used when 广播剧模式 is off): splits
      * `"宝玉笑道：「你好。」"` into narrator + character speech so narration tags stay in the
      * narrator's voice and two speakers in one sentence don't overwrite each other.
      * Returns null when the whole sentence uses a single narrator voice.
      */
-    suspend fun segmentPlan(section: Int, sentence: Int, language: String, narrator: suspend () -> BookVoice?): List<Pair<BookVoice, String>>? {
+    suspend fun segmentPlan(section: Int, sentence: Int, language: String, narrator: suspend () -> BookVoice?): List<Segment>? {
         if (!any) return null
         val defaultVoice = narrator() ?: return null
         val segs = runCatching { core.roleSentenceSegments(bookID, section.toUInt(), sentence.toUInt()) }.getOrNull().orEmpty()
         if (segs.isEmpty()) return null
         var hasCustom = false
-        val out = ArrayList<Pair<BookVoice, String>>(segs.size)
+        val out = ArrayList<Segment>(segs.size)
         for (seg in segs) {
             val custom = seg.role?.let { voiceForRole(it, language) { defaultVoice } }
             if (custom != null) {
                 hasCustom = true
-                out += custom to seg.text
+                out += Segment(custom, seg.text, seg.role)
             } else {
-                out += defaultVoice to seg.text
+                out += Segment(defaultVoice, seg.text, null)
             }
         }
         return if (hasCustom) out else null
     }
 
     /** Renders a multi-segment manual-role sentence into one `Speech` at 48 kHz with a short breath between speaker changes. */
-    suspend fun renderSegments(plan: List<Pair<BookVoice, String>>, language: String): Speech? {
-        if (plan.size == 1) return plan[0].first.render(plan[0].second, language)
+    suspend fun renderSegments(plan: List<Segment>, language: String): Speech? {
+        if (plan.size == 1) {
+            val seg = plan[0]
+            return try {
+                seg.voice.render(seg.text, language)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                throw SegmentFailure(baseVoiceId(seg.voice), seg.role, e)
+            }
+        }
         val parts = ArrayList<FloatArray>(plan.size)
-        for ((voice, text) in plan) {
-            val sp = voice.render(text, language) ?: continue
+        for (seg in plan) {
+            val sp = try {
+                seg.voice.render(seg.text, language)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                throw SegmentFailure(baseVoiceId(seg.voice), seg.role, e)
+            } ?: continue
             if (sp.samples.isEmpty()) continue
             val floats = sp.samples.map { it / 32768f }
             val at48 = core.dramaResample(floats, sp.rate.toUInt()).toFloatArray()
@@ -110,6 +131,11 @@ class BookRoles(private val core: YuyueCore, private val bookID: String) {
             at += part.size
         }
         return Speech(joined, 48_000)
+    }
+
+    companion object {
+        internal fun baseVoiceId(voice: BookVoice): String =
+            if (voice is TunedVoice) baseVoiceId(voice.base) else voice.id
     }
 }
 

@@ -699,5 +699,10 @@
   "系统文字转语音暂无%@声音。可以去系统设置切换或下载语音引擎；联网后也可以在「我的 › 朗读」下载语阅离线语音，断网直接听。": "System text-to-speech has no %@ voice yet. Switch or download an engine in system settings, or download Yuyue Offline Voices in Mine › Listening once online to listen offline.",
   "系统文字转语音暂无%@声音，可以去系统「文字转语音」设置切换或下载语音引擎。": "System text-to-speech has no %@ voice yet. Switch or download an engine in Android Text-to-Speech settings.",
   "离线语音已就绪，当前仍在使用「%@」": "Offline voices are ready; currently using “%@”",
-  "立即切换": "Switch Now"
+  "立即切换": "Switch Now",
+  "当前朗读": "Active voice",
+  "已启用 · %@": "Active · %@",
+  "仍在使用「%@」": "Still using “%@”",
+  "未选用": "Not selected",
+  "角色「%@」：%@": "Character “%@”: %@"
 }
