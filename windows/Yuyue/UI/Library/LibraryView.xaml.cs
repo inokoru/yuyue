@@ -85,6 +85,7 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         _podcastBuilder = new PodcastWorkspaceBuilder(this, library);
 
         _navCompact = _library.Prefs.NavPaneCompact;
+        _activeSection = string.IsNullOrWhiteSpace(_library.Prefs.LastShelfSection) ? "all" : _library.Prefs.LastShelfSection;
         _sortKey = string.IsNullOrWhiteSpace(_library.Prefs.BooksSort) ? "recent" : _library.Prefs.BooksSort;
         _sortAsc = string.Equals(_library.Prefs.ShelfSortDirection, "asc", StringComparison.OrdinalIgnoreCase);
 
@@ -119,6 +120,11 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
             _ => section,
         };
         _activeSection = section;
+        if (!string.Equals(_library.Prefs.LastShelfSection, section, StringComparison.Ordinal))
+        {
+            _library.Prefs.LastShelfSection = section;
+            _library.SavePrefs();
+        }
         _selectedBookIds.Clear();
         UpdateNavSelectionVisuals();
         RenderCurrentSection();
@@ -504,6 +510,17 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         // Prune stale selections
         var validIds = _keptBooks.Select(b => b.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
         _selectedBookIds.RemoveWhere(id => !validIds.Contains(id));
+
+        if (_activeSection.StartsWith("col:", StringComparison.Ordinal))
+        {
+            string colId = _activeSection["col:".Length..];
+            if (!_collections.Any(c => c.Id == colId))
+            {
+                _activeSection = "all";
+                _library.Prefs.LastShelfSection = "all";
+                _library.SavePrefs();
+            }
+        }
 
         RebuildNavItems();
         UpdateSyncFooter();

@@ -31,6 +31,7 @@ public sealed class Win11RebuildTests : IDisposable
             Assert.Equal("tray_when_playing", lib.Prefs.CloseWindowBehavior);
             Assert.False(lib.Prefs.ShelfSingleClickOpen); // default: single-click select + double-click open
             Assert.Equal("grid", lib.Prefs.ShelfViewMode);
+            Assert.Equal("all", lib.Prefs.LastShelfSection);
             Assert.Equal("smart", lib.Prefs.ReaderSpaceAction); // default: smart space
             Assert.True(lib.Prefs.UseWarmMica);
 
@@ -39,6 +40,7 @@ public sealed class Win11RebuildTests : IDisposable
             lib.Prefs.CloseWindowBehavior = "always_tray";
             lib.Prefs.ShelfSingleClickOpen = true;
             lib.Prefs.ShelfViewMode = "list";
+            lib.Prefs.LastShelfSection = "podcasts";
             lib.Prefs.ReaderSpaceAction = "listen";
             lib.Prefs.UseWarmMica = false;
             lib.Prefs.NavPaneCompact = true;
@@ -55,6 +57,7 @@ public sealed class Win11RebuildTests : IDisposable
         Assert.Equal("always_tray", reloaded.Prefs.CloseWindowBehavior);
         Assert.True(reloaded.Prefs.ShelfSingleClickOpen);
         Assert.Equal("list", reloaded.Prefs.ShelfViewMode);
+        Assert.Equal("podcasts", reloaded.Prefs.LastShelfSection);
         Assert.Equal("listen", reloaded.Prefs.ReaderSpaceAction);
         Assert.False(reloaded.Prefs.UseWarmMica);
         Assert.True(reloaded.Prefs.NavPaneCompact);

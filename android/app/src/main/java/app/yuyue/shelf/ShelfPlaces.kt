@@ -60,9 +60,40 @@ sealed interface ShelfPlace {
     data object Notes : ShelfPlace
     data class Collection(val id: String) : ShelfPlace
 
+    val key: String
+        get() = when (this) {
+            Books -> "books"
+            Progress -> "progress"
+            Podcasts -> "podcasts"
+            Audio -> "audio"
+            Notes -> "notes"
+            is Collection -> "collection:$id"
+        }
+
     companion object {
+        const val PREF_KEY = "shelf.lastPlace"
+
         /** The shelf's own, in the panel's order. */
         val kinds = listOf(Books, Progress, Podcasts, Audio)
+
+        fun parse(raw: String?): ShelfPlace = when {
+            raw.isNullOrBlank() || raw == "books" -> Books
+            raw == "progress" -> Progress
+            raw == "podcasts" -> Podcasts
+            raw == "audio" -> Audio
+            raw == "notes" -> Notes
+            raw.startsWith("collection:") && raw.length > "collection:".length -> Collection(raw.removePrefix("collection:"))
+            else -> Books
+        }
+
+        fun resolveValid(
+            place: ShelfPlace,
+            foldedPlaces: List<ShelfPlace>,
+            collectionIds: Set<String>,
+        ): ShelfPlace = when (place) {
+            is Collection -> if (place.id in collectionIds) place else Books
+            else -> if (place in foldedPlaces) place else Books
+        }
     }
 }
 
@@ -102,9 +133,9 @@ object PlaceIcons {
 /** Between the root and the shelf: 书架 tapped again while you're on it, and where the shelf is,
  *  for its tab to wear. */
 @Stable
-class ShelfChrome {
+class ShelfChrome(initialPlace: ShelfPlace = ShelfPlace.Books) {
     var switching by mutableStateOf(false)
-    var place by mutableStateOf<ShelfPlace>(ShelfPlace.Books)
+    var place by mutableStateOf<ShelfPlace>(initialPlace)
     var name by mutableStateOf<String?>(null)
     var icon by mutableStateOf<ImageVector?>(null)
     /** Horizontal alignment of the pop-up PlaceStack above the 书架 tab wherever the user placed it. */

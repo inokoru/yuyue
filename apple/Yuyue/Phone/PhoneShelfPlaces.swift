@@ -4,12 +4,55 @@ import YuyueCore
 
 /// Where the phone's 书架 is: 书 · 进度 · 播客 · 有声 · 笔记, or one of your 合集. The title names it;
 /// a tap on the title (or, scrolled, on the chip at the top left) opens the panel to go to another.
-enum ShelfPlace: Hashable {
+enum ShelfPlace: Hashable, Sendable {
     case books, progress, podcasts, audio, notes
     case collection(String)
 
+    static let prefKey = "shelf.lastPlace"
+
     /// The shelf's four, in the panel's order (matching Mac's 书 · 进度 · 播客 · 有声).
     static let kinds: [ShelfPlace] = [.books, .progress, .podcasts, .audio]
+
+    var storageKey: String {
+        switch self {
+        case .books: "books"
+        case .progress: "progress"
+        case .podcasts: "podcasts"
+        case .audio: "audio"
+        case .notes: "notes"
+        case .collection(let id): "collection:\(id)"
+        }
+    }
+
+    static func parse(_ raw: String?) -> ShelfPlace {
+        guard let raw, !raw.isEmpty else { return .books }
+        return switch raw {
+        case "books": .books
+        case "progress": .progress
+        case "podcasts": .podcasts
+        case "audio": .audio
+        case "notes": .notes
+        default:
+            if raw.hasPrefix("collection:"), raw.count > 11 {
+                .collection(String(raw.dropFirst(11)))
+            } else {
+                .books
+            }
+        }
+    }
+
+    static func resolveValid(
+        _ place: ShelfPlace,
+        foldedPlaces: [ShelfPlace],
+        collectionIDs: Set<String>
+    ) -> ShelfPlace {
+        switch place {
+        case .collection(let id):
+            collectionIDs.contains(id) ? place : .books
+        default:
+            foldedPlaces.contains(place) ? place : .books
+        }
+    }
 }
 
 /// The buttons at the top right of a tab that draws its own title: icons in one white capsule.

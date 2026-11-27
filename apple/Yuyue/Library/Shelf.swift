@@ -3,7 +3,7 @@ import SwiftUI
 import YuyueCore
 
 /// What the shelf shows: everything, one kind, one reading status or one collection.
-enum ShelfFilter: Hashable {
+enum ShelfFilter: Hashable, Sendable {
     case all
     case books
     /// 有声: books with a narrator's recording laid against them.
@@ -15,8 +15,49 @@ enum ShelfFilter: Hashable {
     /// 笔记 and 生词本.
     case notes
     case words
-    /// 播客: a place held for it; nothing behind it yet.
+    /// 播客: Audio-Magazine & Private Studio hub.
     case podcasts
+
+    static let prefKey = "shelf.lastPlace"
+
+    var storageKey: String {
+        switch self {
+        case .all: "books"
+        case .books, .status: "progress"
+        case .audio: "audio"
+        case .podcasts: "podcasts"
+        case .notes: "notes"
+        case .words: "words"
+        case .collections: "collections"
+        case .collection(let id): "collection:\(id)"
+        }
+    }
+
+    static func parse(_ raw: String?) -> ShelfFilter {
+        guard let raw, !raw.isEmpty else { return .all }
+        return switch raw {
+        case "books", "all": .all
+        case "progress": .books
+        case "audio": .audio
+        case "podcasts": .podcasts
+        case "notes": .notes
+        case "words": .words
+        case "collections": .collections
+        default:
+            if raw.hasPrefix("collection:"), raw.count > 11 {
+                .collection(String(raw.dropFirst(11)))
+            } else {
+                .all
+            }
+        }
+    }
+
+    static func resolveValid(_ filter: ShelfFilter, collectionIDs: Set<String>) -> ShelfFilter {
+        if case .collection(let id) = filter, !collectionIDs.contains(id) {
+            return .all
+        }
+        return filter
+    }
 }
 
 extension ReadingStatus {

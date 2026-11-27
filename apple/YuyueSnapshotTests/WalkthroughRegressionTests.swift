@@ -1054,6 +1054,56 @@ struct WalkthroughRegressionTests {
             _ = try CustomPageTurnSounds.trimAndNormalize(samples: silent, sampleRate: sr)
         }
     }
+
+    @MainActor @Test func `shelf filter round-trips storage key and falls back when collection is missing`() {
+        let cases: [(ShelfFilter, String)] = [
+            (.all, "books"),
+            (.books, "progress"),
+            (.podcasts, "podcasts"),
+            (.audio, "audio"),
+            (.notes, "notes"),
+            (.words, "words"),
+            (.collections, "collections"),
+            (.collection("col-42"), "collection:col-42"),
+        ]
+        for (filter, key) in cases {
+            #expect(filter.storageKey == key)
+            #expect(ShelfFilter.parse(key) == filter)
+        }
+        #expect(ShelfFilter.parse(nil) == .all)
+        #expect(ShelfFilter.parse("") == .all)
+        #expect(ShelfFilter.parse("collection:") == .all)
+        #expect(ShelfFilter.parse("unknown") == .all)
+
+        #expect(ShelfFilter.resolveValid(.collection("col-42"), collectionIDs: ["col-42"]) == .collection("col-42"))
+        #expect(ShelfFilter.resolveValid(.collection("gone"), collectionIDs: ["col-42"]) == .all)
+        #expect(ShelfFilter.resolveValid(.podcasts, collectionIDs: []) == .podcasts)
+    }
+
+    #if os(iOS)
+    @MainActor @Test func `phone shelf place round-trips storage key and validates against folded places and collections`() {
+        let cases: [(ShelfPlace, String)] = [
+            (.books, "books"),
+            (.progress, "progress"),
+            (.podcasts, "podcasts"),
+            (.audio, "audio"),
+            (.notes, "notes"),
+            (.collection("c1"), "collection:c1"),
+        ]
+        for (place, key) in cases {
+            #expect(place.storageKey == key)
+            #expect(ShelfPlace.parse(key) == place)
+        }
+        #expect(ShelfPlace.parse(nil) == .books)
+        #expect(ShelfPlace.parse("collection:") == .books)
+
+        let folded: [ShelfPlace] = [.books, .progress, .audio]
+        #expect(ShelfPlace.resolveValid(.podcasts, foldedPlaces: folded, collectionIDs: ["c1"]) == .books)
+        #expect(ShelfPlace.resolveValid(.audio, foldedPlaces: folded, collectionIDs: ["c1"]) == .audio)
+        #expect(ShelfPlace.resolveValid(.collection("c1"), foldedPlaces: folded, collectionIDs: ["c1"]) == .collection("c1"))
+        #expect(ShelfPlace.resolveValid(.collection("gone"), foldedPlaces: folded, collectionIDs: ["c1"]) == .books)
+    }
+    #endif
 }
 
 private struct StubPreviewVoice: Voice {

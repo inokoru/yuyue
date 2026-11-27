@@ -207,6 +207,7 @@ public sealed class DevicePrefs
     public bool ShelfSingleClickOpen { get; set; } = false; // false = 单击选中 + 双击打开 (Win11默认); true = 单击直开
     public string ShelfViewMode { get; set; } = "grid"; // grid | list
     public string ShelfSortDirection { get; set; } = "desc"; // asc | desc
+    public string LastShelfSection { get; set; } = "all"; // all | progress | podcasts | audio | notes | words | collections | col:<id>
     public bool NavPaneCompact { get; set; } = false;
     public string ReaderSpaceAction { get; set; } = "smart"; // smart (静读翻页/听书暂停) | listen (始终朗读暂停)
     public bool UseWarmMica { get; set; } = true;

@@ -13,7 +13,14 @@ private final class MainOriginBox {
 struct MacShelfView: View {
     @State private var confirming: YYConfirm?
     @Bindable var library: Library
-    @State private var filter: ShelfFilter? = .all
+    @State private var filter: ShelfFilter?
+
+    init(library: Library) {
+        self.library = library
+        let saved = ShelfFilter.parse(UserDefaults.standard.string(forKey: ShelfFilter.prefKey))
+        let valid = ShelfFilter.resolveValid(saved, collectionIDs: Set(library.collections.map(\.id)))
+        _filter = State(initialValue: valid)
+    }
     /// Whether the 在读 card strip shows every reading book inline instead of capping at one row.
     @State private var readingExpanded = false
     @State private var readingWidth: CGFloat = 0
@@ -214,6 +221,7 @@ struct MacShelfView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .quickSearch)) { _ in quick = quick == nil ? "" : nil }
         .onChange(of: filter) { old, next in
+            UserDefaults.standard.set((next ?? .all).storageKey, forKey: ShelfFilter.prefKey)
             if case .collection = next, old != .collections {
                 // Navigated directly from the sidebar rather than the wall.
                 cameFromWall = false
@@ -221,6 +229,11 @@ struct MacShelfView: View {
                 // Keep cameFromWall when arriving from .collections.
             } else {
                 cameFromWall = false
+            }
+        }
+        .onChange(of: library.collections.map(\.id)) { _, ids in
+            if case .collection(let id) = filter, !ids.contains(id) {
+                filter = .all
             }
         }
         .yyPrompt(

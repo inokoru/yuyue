@@ -164,4 +164,49 @@ class BottomNavTest {
         assertEquals(Icons.radio, app.yuyue.shelf.PlaceIcons.podcasts)
         assertEquals(Icons.radioFill, app.yuyue.shelf.PlaceIcons.filled(Icons.radio))
     }
+
+    @Test
+    fun shelfPlaceRoundTripsStorageKeyAndFallsBackWhenInvalid() {
+        val cases = listOf(
+            app.yuyue.shelf.ShelfPlace.Books to "books",
+            app.yuyue.shelf.ShelfPlace.Progress to "progress",
+            app.yuyue.shelf.ShelfPlace.Podcasts to "podcasts",
+            app.yuyue.shelf.ShelfPlace.Audio to "audio",
+            app.yuyue.shelf.ShelfPlace.Notes to "notes",
+            app.yuyue.shelf.ShelfPlace.Collection("col-123") to "collection:col-123",
+        )
+        for ((place, key) in cases) {
+            assertEquals(key, place.key)
+            assertEquals(place, app.yuyue.shelf.ShelfPlace.parse(key))
+        }
+        assertEquals(app.yuyue.shelf.ShelfPlace.Books, app.yuyue.shelf.ShelfPlace.parse(null))
+        assertEquals(app.yuyue.shelf.ShelfPlace.Books, app.yuyue.shelf.ShelfPlace.parse(""))
+        assertEquals(app.yuyue.shelf.ShelfPlace.Books, app.yuyue.shelf.ShelfPlace.parse("collection:"))
+        assertEquals(app.yuyue.shelf.ShelfPlace.Books, app.yuyue.shelf.ShelfPlace.parse("bogus"))
+
+        val folded = listOf(
+            app.yuyue.shelf.ShelfPlace.Books,
+            app.yuyue.shelf.ShelfPlace.Progress,
+            app.yuyue.shelf.ShelfPlace.Audio,
+        )
+        // Podcasts promoted to bottom tab -> no longer folded -> falls back to Books.
+        assertEquals(
+            app.yuyue.shelf.ShelfPlace.Books,
+            app.yuyue.shelf.ShelfPlace.resolveValid(app.yuyue.shelf.ShelfPlace.Podcasts, folded, setOf("col-1")),
+        )
+        // Audio still folded -> stays on Audio.
+        assertEquals(
+            app.yuyue.shelf.ShelfPlace.Audio,
+            app.yuyue.shelf.ShelfPlace.resolveValid(app.yuyue.shelf.ShelfPlace.Audio, folded, setOf("col-1")),
+        )
+        // Existing collection stays valid; deleted collection falls back to Books.
+        assertEquals(
+            app.yuyue.shelf.ShelfPlace.Collection("col-1"),
+            app.yuyue.shelf.ShelfPlace.resolveValid(app.yuyue.shelf.ShelfPlace.Collection("col-1"), folded, setOf("col-1")),
+        )
+        assertEquals(
+            app.yuyue.shelf.ShelfPlace.Books,
+            app.yuyue.shelf.ShelfPlace.resolveValid(app.yuyue.shelf.ShelfPlace.Collection("col-gone"), folded, setOf("col-1")),
+        )
+    }
 }

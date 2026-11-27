@@ -13,7 +13,7 @@ struct PhoneShelf: View {
     /// without the shelf place switcher or mutating `chrome`'s 书架 tab title/icon.
     let fixedPlace: ShelfPlace?
     @Environment(PhoneChrome.self) private var chrome
-    @State private var filter = ShelfFilter.all
+    @State private var filter: ShelfFilter
     @AppStorage("shelf.sort") private var sortName = "recent"
     @State private var importerShown = false
     @State private var feedbackShown = false
@@ -72,14 +72,37 @@ struct PhoneShelf: View {
     init(library: Library, fixedPlace: ShelfPlace? = nil) {
         self.library = library
         self.fixedPlace = fixedPlace
-        let initialKind: Kind = switch fixedPlace {
-        case .progress: .books
-        case .podcasts: .podcasts
-        case .audio: .audio
-        case .notes: .notes
-        default: .all
+        let restored: ShelfPlace
+        if let fixedPlace {
+            restored = fixedPlace
+        } else {
+            let tabsRaw = UserDefaults.standard.string(forKey: BottomNavPrefs.key)
+            let hiddenRaw = UserDefaults.standard.string(forKey: BottomNavPrefs.shelfHiddenKey)
+            let cfg = BottomNavPrefs.config(tabsRaw: tabsRaw, hiddenShelfRaw: hiddenRaw)
+            let folded = BottomNavPrefs.foldedShelfPlaces(cfg)
+            let saved = ShelfPlace.parse(UserDefaults.standard.string(forKey: ShelfPlace.prefKey))
+            restored = ShelfPlace.resolveValid(saved, foldedPlaces: folded, collectionIDs: Set(library.collections.map(\.id)))
         }
-        _kind = State(initialValue: initialKind)
+        switch restored {
+        case .books:
+            _filter = State(initialValue: .all)
+            _kind = State(initialValue: .all)
+        case .progress:
+            _filter = State(initialValue: .all)
+            _kind = State(initialValue: .books)
+        case .podcasts:
+            _filter = State(initialValue: .all)
+            _kind = State(initialValue: .podcasts)
+        case .audio:
+            _filter = State(initialValue: .all)
+            _kind = State(initialValue: .audio)
+        case .notes:
+            _filter = State(initialValue: .all)
+            _kind = State(initialValue: .notes)
+        case .collection(let id):
+            _filter = State(initialValue: .collection(id))
+            _kind = State(initialValue: .all)
+        }
     }
 
     private var regular: Bool { sizeClass == .regular }
@@ -179,7 +202,7 @@ struct PhoneShelf: View {
             }
         }
         // The 书架 tab wears its active place: 进度, 播客, 有声, 笔记 or the 合集, with its symbol.
-        .onChange(of: info(place).name, initial: true) { _, _ in
+        .onChange(of: "\(info(place).name)|\(info(place).symbol)", initial: true) { _, _ in
             guard fixedPlace == nil else { return }
             let now = info(place)
             chrome.shelfName = place == .books ? nil : now.name
@@ -197,7 +220,14 @@ struct PhoneShelf: View {
             if !allowed.contains(place) {
                 filter = .all
                 kind = .all
+                UserDefaults.standard.set(ShelfPlace.books.storageKey, forKey: ShelfPlace.prefKey)
             }
+        }
+        .onChange(of: library.collections.map(\.id)) { _, ids in
+            guard fixedPlace == nil, case .collection(let id) = place, !ids.contains(id) else { return }
+            filter = .all
+            kind = .all
+            UserDefaults.standard.set(ShelfPlace.books.storageKey, forKey: ShelfPlace.prefKey)
         }
         .task(id: foldedKinds.contains(.notes) ? library.books.map(\.id) : []) {
             guard foldedKinds.contains(.notes) else { return }
@@ -518,6 +548,9 @@ struct PhoneShelf: View {
     }
 
     private func go(_ to: ShelfPlace) {
+        if fixedPlace == nil {
+            UserDefaults.standard.set(to.storageKey, forKey: ShelfPlace.prefKey)
+        }
         withAnimation(YYMotion.layout) {
             switch to {
             case .books: filter = .all; kind = .all

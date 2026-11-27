@@ -117,8 +117,25 @@ fun ShelfScreen(
     openRecord: (String) -> Unit = {},
     fixedPlace: ShelfPlace? = null,
 ) {
-    var chosenPlace by remember { mutableStateOf<ShelfPlace>(fixedPlace ?: ShelfPlace.Books) }
-    val place = fixedPlace ?: chosenPlace
+    val bottomTabsRaw by rememberPref(app.yuyue.design.BottomNav.KEY, app.yuyue.design.BottomNav.DEFAULT_RAW)
+    val shelfHiddenRaw by rememberPref(app.yuyue.design.BottomNav.SHELF_HIDDEN_KEY, app.yuyue.design.BottomNav.DEFAULT_HIDDEN_SHELF_RAW)
+    val navConfig = remember(bottomTabsRaw, shelfHiddenRaw) { app.yuyue.design.BottomNav.config(bottomTabsRaw, shelfHiddenRaw) }
+    val foldedPlaces = remember(navConfig) {
+        listOf(ShelfPlace.Books) + app.yuyue.design.BottomNav.foldedInShelf(navConfig).mapNotNull {
+            when (it) {
+                app.yuyue.design.BottomTab.Progress -> ShelfPlace.Progress
+                app.yuyue.design.BottomTab.Podcasts -> ShelfPlace.Podcasts
+                app.yuyue.design.BottomTab.Audio -> ShelfPlace.Audio
+                app.yuyue.design.BottomTab.Notes -> ShelfPlace.Notes
+                else -> null
+            }
+        }
+    }
+    val place = fixedPlace ?: ShelfPlace.resolveValid(
+        chrome.place,
+        foldedPlaces,
+        library.collections.map { it.id }.toSet(),
+    )
     var asking by remember { mutableStateOf<app.yuyue.me.Confirm?>(null) }
     app.yuyue.me.ConfirmHost(asking) { asking = null }
     var sortKey by rememberPref("shelf.sort", "recent")
@@ -147,21 +164,6 @@ fun ShelfScreen(
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
         library.importUris(uris, collection, source = "file_picker")
-    }
-
-    val bottomTabsRaw by rememberPref(app.yuyue.design.BottomNav.KEY, app.yuyue.design.BottomNav.DEFAULT_RAW)
-    val shelfHiddenRaw by rememberPref(app.yuyue.design.BottomNav.SHELF_HIDDEN_KEY, app.yuyue.design.BottomNav.DEFAULT_HIDDEN_SHELF_RAW)
-    val navConfig = remember(bottomTabsRaw, shelfHiddenRaw) { app.yuyue.design.BottomNav.config(bottomTabsRaw, shelfHiddenRaw) }
-    val foldedPlaces = remember(navConfig) {
-        listOf(ShelfPlace.Books) + app.yuyue.design.BottomNav.foldedInShelf(navConfig).mapNotNull {
-            when (it) {
-                app.yuyue.design.BottomTab.Progress -> ShelfPlace.Progress
-                app.yuyue.design.BottomTab.Podcasts -> ShelfPlace.Podcasts
-                app.yuyue.design.BottomTab.Audio -> ShelfPlace.Audio
-                app.yuyue.design.BottomTab.Notes -> ShelfPlace.Notes
-                else -> null
-            }
-        }
     }
     var notesMarkCount by remember { mutableStateOf(0) }
     var notesBookCount by remember { mutableStateOf(0) }
@@ -227,26 +229,26 @@ fun ShelfScreen(
             }
         }
     }
-    // A 合集 deleted elsewhere, or a shelf sub-place promoted/hidden in 底部导航: back to 书.
-    if (fixedPlace == null) {
-        val currentInvalid = when (val p = chosenPlace) {
-            is ShelfPlace.Collection -> library.collections.none { it.id == p.id }
-            else -> p !in foldedPlaces
-        }
-        if (currentInvalid) chosenPlace = ShelfPlace.Books
-    }
     val now = info(place)
-    // The 书架 tab wears its active place: 进度, 播客, 有声 or the 合集, with its mark.
+    // The 书架 tab wears its active place: 进度, 播客, 有声, 笔记 or the 合集, with its mark.
     if (fixedPlace == null) {
         LaunchedEffect(place, now.name, now.icon) {
-            chrome.place = place
+            if (chrome.place != place) {
+                chrome.place = place
+                if (app.yuyue.design.Prefs.isReady) {
+                    app.yuyue.design.Prefs.set(ShelfPlace.PREF_KEY, place.key)
+                }
+            }
             chrome.name = if (place == ShelfPlace.Books) null else now.name
             chrome.icon = if (place == ShelfPlace.Books) null else now.icon
         }
     }
     fun go(to: ShelfPlace) {
         if (fixedPlace != null) return
-        chosenPlace = to
+        chrome.place = to
+        if (app.yuyue.design.Prefs.isReady) {
+            app.yuyue.design.Prefs.set(ShelfPlace.PREF_KEY, to.key)
+        }
         scope.launch { grid.scrollToItem(0) }
     }
     val kinds = foldedPlaces.map(::info)

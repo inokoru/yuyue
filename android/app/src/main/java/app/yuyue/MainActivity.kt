@@ -252,15 +252,22 @@ fun Root(library: Library) {
     var notesPop by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var mePop by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val pages = remember { mutableStateListOf<Page>() }
-    // 书架 tapped again, and where the shelf is, for its tab to wear.
-    val chrome = remember { app.yuyue.shelf.ShelfChrome() }
+    // 书架 tapped again, and where the shelf is, for its tab to wear (restored across tabs and launches).
+    val chrome = remember {
+        val initial = if (Prefs.isReady) {
+            app.yuyue.shelf.ShelfPlace.parse(Prefs.string(app.yuyue.shelf.ShelfPlace.PREF_KEY, ""))
+        } else {
+            app.yuyue.shelf.ShelfPlace.Books
+        }
+        app.yuyue.shelf.ShelfChrome(initial)
+    }
     val eink by rememberPref("eink.on", false)
     val liquidChosen by rememberPref(app.yuyue.design.LiquidGlass.KEY, false)
     val useLiquid = app.yuyue.design.LiquidGlass.supported && liquidChosen && !eink
     val shelfHasSwitcher = remember(navConfig, library.collections.size) {
         BottomNav.shelfHasSwitcher(navConfig, hasCollections = library.collections.isNotEmpty())
     }
-    LaunchedEffect(navConfig, shelfHasSwitcher, useLiquid) {
+    LaunchedEffect(navConfig, shelfHasSwitcher, useLiquid, library.collections) {
         chrome.hasSwitcher = shelfHasSwitcher
         val detached = useLiquid && BottomNav.usesDetachedSearchOrb(navTabs)
         val mainTabs = if (detached) navTabs.dropLast(1) else navTabs
@@ -271,20 +278,41 @@ fun Root(library: Library) {
             else -> Alignment.BottomCenter
         }
         if (shelfIdx < 0 || !shelfHasSwitcher) chrome.switching = false
-        // If the active shelf sub-place was promoted to its own tab or hidden while in Settings, reset tab label immediately.
+        // If the active shelf sub-place was promoted to its own tab, hidden, or its collection was deleted, reset immediately.
         val folded = BottomNav.foldedInShelf(navConfig)
-        val stillFolded = when (chrome.place) {
-            app.yuyue.shelf.ShelfPlace.Books -> true
-            app.yuyue.shelf.ShelfPlace.Progress -> BottomTab.Progress in folded
-            app.yuyue.shelf.ShelfPlace.Podcasts -> BottomTab.Podcasts in folded
-            app.yuyue.shelf.ShelfPlace.Audio -> BottomTab.Audio in folded
-            app.yuyue.shelf.ShelfPlace.Notes -> BottomTab.Notes in folded
-            is app.yuyue.shelf.ShelfPlace.Collection -> true
+        val foldedPlaces = listOf(app.yuyue.shelf.ShelfPlace.Books) + folded.mapNotNull {
+            when (it) {
+                BottomTab.Progress -> app.yuyue.shelf.ShelfPlace.Progress
+                BottomTab.Podcasts -> app.yuyue.shelf.ShelfPlace.Podcasts
+                BottomTab.Audio -> app.yuyue.shelf.ShelfPlace.Audio
+                BottomTab.Notes -> app.yuyue.shelf.ShelfPlace.Notes
+                else -> null
+            }
         }
-        if (!stillFolded) {
-            chrome.place = app.yuyue.shelf.ShelfPlace.Books
-            chrome.name = null
-            chrome.icon = null
+        val valid = app.yuyue.shelf.ShelfPlace.resolveValid(
+            chrome.place,
+            foldedPlaces,
+            library.collections.map { it.id }.toSet(),
+        )
+        if (valid != chrome.place) {
+            chrome.place = valid
+            if (Prefs.isReady) Prefs.set(app.yuyue.shelf.ShelfPlace.PREF_KEY, valid.key)
+        }
+        chrome.name = when (val p = chrome.place) {
+            app.yuyue.shelf.ShelfPlace.Books -> null
+            app.yuyue.shelf.ShelfPlace.Progress -> t("进度")
+            app.yuyue.shelf.ShelfPlace.Podcasts -> t("播客")
+            app.yuyue.shelf.ShelfPlace.Audio -> t("有声")
+            app.yuyue.shelf.ShelfPlace.Notes -> t("笔记")
+            is app.yuyue.shelf.ShelfPlace.Collection -> library.collections.firstOrNull { it.id == p.id }?.name ?: t("合集")
+        }
+        chrome.icon = when (val p = chrome.place) {
+            app.yuyue.shelf.ShelfPlace.Books -> null
+            app.yuyue.shelf.ShelfPlace.Progress -> app.yuyue.shelf.PlaceIcons.progress
+            app.yuyue.shelf.ShelfPlace.Podcasts -> app.yuyue.shelf.PlaceIcons.podcasts
+            app.yuyue.shelf.ShelfPlace.Audio -> app.yuyue.shelf.PlaceIcons.audio
+            app.yuyue.shelf.ShelfPlace.Notes -> app.yuyue.shelf.PlaceIcons.notes
+            is app.yuyue.shelf.ShelfPlace.Collection -> library.collections.firstOrNull { it.id == p.id }?.let { app.yuyue.library.CollectionIcon.of(it) } ?: Icons.collection
         }
     }
     var lastBook by rememberPref("phone.lastBook", "")
