@@ -1,5 +1,8 @@
 import org.gradle.process.ExecOperations
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.Properties
+import java.util.zip.ZipFile
 
 plugins {
     id("com.android.application")
@@ -121,6 +124,110 @@ val checkReaderDist = tasks.register("checkReaderDist") {
 tasks.configureEach {
     if (name.startsWith("merge") && name.endsWith("Assets")) {
         dependsOn(checkReaderDist)
+    }
+}
+
+// Guard against R8 9.4.x emitting invalid 8-bit register operands (VerifyError at startup)
+// when a single DEX method crosses 255 registers (e.g. a huge Compose lambda).
+val verifyReleaseDexRegisters = tasks.register("verifyReleaseDexRegisters") {
+    val apkProvider = layout.buildDirectory.file("outputs/apk/release/app-release.apk")
+    doLast {
+        val apk = apkProvider.get().asFile
+        if (!apk.isFile) return@doLast
+        val offenders = mutableListOf<String>()
+        var maxRegs = 0
+        var maxMethod = ""
+        ZipFile(apk).use { zip ->
+            val dexEntries = zip.entries().asSequence()
+                .filter { it.name.matches(Regex("""classes\d*\.dex""")) }
+                .toList()
+            for (entry in dexEntries) {
+                val bytes = zip.getInputStream(entry).readBytes()
+                val buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+                if (bytes.size < 112 || String(bytes, 0, 4) != "dex\n") continue
+                val stringIdsOff = buf.getInt(0x3C)
+                val typeIdsOff = buf.getInt(0x44)
+                val methodIdsOff = buf.getInt(0x5C)
+                val classDefsSize = buf.getInt(0x60)
+                val classDefsOff = buf.getInt(0x64)
+
+                fun readUleb128(pos: IntArray): Int {
+                    var result = 0
+                    var shift = 0
+                    while (true) {
+                        val b = bytes[pos[0]++].toInt() and 0xFF
+                        result = result or ((b and 0x7F) shl shift)
+                        if ((b and 0x80) == 0) break
+                        shift += 7
+                    }
+                    return result
+                }
+
+                fun readString(idx: Int): String {
+                    val dataOff = buf.getInt(stringIdsOff + idx * 4)
+                    val p = intArrayOf(dataOff)
+                    readUleb128(p) // UTF-16 length
+                    var end = p[0]
+                    while (end < bytes.size && bytes[end] != 0.toByte()) end++
+                    return String(bytes, p[0], end - p[0], Charsets.UTF_8)
+                }
+
+                fun methodName(methodIdx: Int): String {
+                    val off = methodIdsOff + methodIdx * 8
+                    val clsIdx = buf.getShort(off).toInt() and 0xFFFF
+                    val nameIdx = buf.getInt(off + 4)
+                    val clsDesc = readString(buf.getInt(typeIdsOff + clsIdx * 4))
+                    val name = readString(nameIdx)
+                    return "$clsDesc->$name"
+                }
+
+                for (i in 0 until classDefsSize) {
+                    val classDataOff = buf.getInt(classDefsOff + i * 32 + 24)
+                    if (classDataOff == 0) continue
+                    val p = intArrayOf(classDataOff)
+                    val staticFields = readUleb128(p)
+                    val instanceFields = readUleb128(p)
+                    val directMethods = readUleb128(p)
+                    val virtualMethods = readUleb128(p)
+                    repeat(staticFields + instanceFields) {
+                        readUleb128(p)
+                        readUleb128(p)
+                    }
+                    for (count in intArrayOf(directMethods, virtualMethods)) {
+                        var methodIdx = 0
+                        repeat(count) {
+                            methodIdx += readUleb128(p)
+                            readUleb128(p) // access_flags
+                            val codeOff = readUleb128(p)
+                            if (codeOff != 0) {
+                                val regs = buf.getShort(codeOff).toInt() and 0xFFFF
+                                if (regs > maxRegs) {
+                                    maxRegs = regs
+                                    maxMethod = "${entry.name}: ${methodName(methodIdx)}"
+                                }
+                                if (regs >= 256) {
+                                    offenders += "${entry.name}: ${methodName(methodIdx)} (registers=$regs)"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        logger.lifecycle("verifyReleaseDexRegisters: max registers = $maxRegs ($maxMethod)")
+        if (offenders.isNotEmpty()) {
+            throw GradleException(
+                "Release DEX contains method(s) with >= 256 registers, which triggers an R8 8-bit register truncation VerifyError on ART:\n" +
+                    offenders.joinToString("\n") { "  - $it" } +
+                    "\nSplit the offending composable/function into smaller helpers so every method stays under 256 registers."
+            )
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name == "assembleRelease") {
+        finalizedBy(verifyReleaseDexRegisters)
     }
 }
 

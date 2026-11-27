@@ -1641,85 +1641,27 @@ private fun CustomPageTurnSoundSheet(
         Column(modifier = Modifier.fillMaxWidth()) {
             val currentDraft = draft
             if (currentDraft != null) {
-                // Clean 3-part header: ‹ 重录 · 自定义翻页音效 · 保存
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 18.dp)
-                        .padding(bottom = 14.dp),
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .heightIn(min = 32.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                focusManager.clearFocus()
-                                playJob?.cancel()
-                                playingDraft = false
-                                pageFlipping = false
-                                draft = null
-                                errorMsg = null
-                            }
-                            .padding(end = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp),
-                    ) {
-                        Icon(Icons.back, null, tint = YY.c.t2, modifier = Modifier.size(13.dp))
-                        Text(
-                            if (draftFromFile) t("重选") else t("重录"),
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = YY.c.t2,
-                        )
-                    }
-
-                    Text(
-                        t("自定义翻页音效"),
-                        fontSize = 15.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = YY.c.t1,
-                        modifier = Modifier.align(Alignment.Center),
-                    )
-
-                    Text(
-                        t("保存"),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = YY.tint.accent,
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .clip(RoundedCornerShape(8.dp))
-                            .pressable(scale = 0.94f) { saveCurrentDraft(currentDraft) }
-                            .padding(horizontal = 6.dp, vertical = 5.dp),
-                    )
-                }
+                CustomPageTurnDraftHeader(
+                    draftFromFile = draftFromFile,
+                    onReset = {
+                        focusManager.clearFocus()
+                        playJob?.cancel()
+                        playingDraft = false
+                        pageFlipping = false
+                        draft = null
+                        errorMsg = null
+                    },
+                    onSave = { saveCurrentDraft(currentDraft) },
+                )
             } else {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 18.dp)
-                        .padding(bottom = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(t("自定义翻页音效"), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1)
-                    Box(
-                        Modifier
-                            .size(30.dp)
-                            .clip(CircleShape)
-                            .background(YY.c.inset)
-                            .pressable(scale = 0.92f, label = t("关闭")) {
-                                recording = false
-                                recordJob?.cancel()
-                                playJob?.cancel()
-                                dismiss()
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Icons.close, t("关闭"), tint = YY.c.t2, modifier = Modifier.size(13.dp))
-                    }
-                }
+                CustomPageTurnCaptureHeader(
+                    onClose = {
+                        recording = false
+                        recordJob?.cancel()
+                        playJob?.cancel()
+                        dismiss()
+                    },
+                )
             }
 
             Column(
@@ -1731,464 +1673,612 @@ private fun CustomPageTurnSoundSheet(
                     .padding(bottom = 26.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                errorMsg?.let { msg ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(YY.c.danger.copy(alpha = 0.09f))
-                            .border(0.5.dp, YY.c.danger.copy(alpha = 0.22f), RoundedCornerShape(12.dp))
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Icon(Icons.warning, null, tint = YY.c.danger, modifier = Modifier.size(15.dp))
-                        Text(msg, fontSize = 12.sp, color = YY.c.t1)
-                    }
-                }
+                errorMsg?.let { msg -> CustomPageTurnErrorBanner(msg) }
 
                 if (currentDraft != null) {
-                    val isDark = YY.dark
-                    val paperBg = if (isDark) Color(0xFF26231F) else Color(0xFFF4EFE6)
-                    val paperEdge = if (isDark) Color(0xFF38332C) else Color(0xFFE5DEC9)
-                    val paperInk = if (isDark) Color(0xFFEAE4DA) else Color(0xFF2C2925)
-                    val currentQuote = previewQuotes[flipQuoteIndex % previewQuotes.size]
-                    val nextQuote = previewQuotes[(flipQuoteIndex + 1) % previewQuotes.size]
-                    val rotY by animateFloatAsState(
-                        targetValue = if (pageFlipping) -22f else 0f,
-                        animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
-                        label = "pageFlipRotY",
+                    CustomPageTurnDraftContent(
+                        currentDraft = currentDraft,
+                        draftFromFile = draftFromFile,
+                        draftName = draftName,
+                        onDraftNameChange = { draftName = it },
+                        previewQuotes = previewQuotes,
+                        flipQuoteIndex = flipQuoteIndex,
+                        pageFlipping = pageFlipping,
+                        playingDraft = playingDraft,
+                        playProgress = playProgress.value,
+                        onClearFocus = { focusManager.clearFocus() },
+                        onFlipAndAudition = { flipAndAudition(currentDraft) },
                     )
-                    val shiftX by animateFloatAsState(
-                        targetValue = if (pageFlipping) -10f else 0f,
-                        animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
-                        label = "pageFlipShiftX",
-                    )
-
-                    // Style 3: Miniature stacked flippable book page
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .pointerInput(currentDraft) {
-                                detectTapGestures {
-                                    focusManager.clearFocus()
-                                    flipAndAudition(currentDraft)
-                                }
-                            }
-                            .pointerInput(currentDraft) {
-                                var dragTotal = 0f
-                                detectHorizontalDragGestures(
-                                    onDragStart = { dragTotal = 0f },
-                                    onHorizontalDrag = { _, dragAmount -> dragTotal += dragAmount },
-                                    onDragEnd = {
-                                        if (dragTotal < -36f) {
-                                            focusManager.clearFocus()
-                                            flipAndAudition(currentDraft)
-                                        }
-                                    },
-                                )
-                            },
-                    ) {
-                        // Underlying next page peek
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 5.dp, start = 7.dp)
-                                .heightIn(min = 172.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(paperBg.copy(alpha = 0.92f))
-                                .border(0.8.dp, paperEdge, RoundedCornerShape(16.dp))
-                                .padding(horizontal = 18.dp, vertical = 16.dp),
-                            contentAlignment = Alignment.CenterStart,
-                        ) {
-                            Text(
-                                nextQuote,
-                                fontSize = 14.sp,
-                                lineHeight = 24.sp,
-                                fontFamily = FontFamily.Serif,
-                                color = paperInk.copy(alpha = 0.32f),
-                                maxLines = 2,
-                            )
-                        }
-
-                        // Front flippable book page
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(end = 7.dp, bottom = 5.dp)
-                                .graphicsLayer {
-                                    rotationY = rotY
-                                    translationX = shiftX
-                                    transformOrigin = TransformOrigin(0f, 0.5f)
-                                    cameraDistance = 14f * density
-                                }
-                                .heightIn(min = 172.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(paperBg)
-                                .border(0.8.dp, paperEdge, RoundedCornerShape(16.dp)),
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 18.dp, vertical = 16.dp),
-                                verticalArrangement = Arrangement.spacedBy(14.dp),
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Box(Modifier.size(6.dp).clip(CircleShape).background(YY.tint.fill))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        if (draftFromFile) t("导入音频") else t("手边实录"),
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = YY.tint.accent,
-                                    )
-                                    Spacer(Modifier.weight(1f))
-                                    Text(
-                                        durationLabel(currentDraft.durationMs),
-                                        fontSize = 11.5.sp,
-                                        color = YY.c.t3,
-                                        style = YY.tnum,
-                                    )
-                                }
-
-                                Text(
-                                    currentQuote,
-                                    fontSize = 15.sp,
-                                    lineHeight = 25.sp,
-                                    fontFamily = FontFamily.Serif,
-                                    color = paperInk,
-                                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
-                                )
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                ) {
-                                    MiniPageWaveform(
-                                        waveform = currentDraft.waveform,
-                                        trimStart = currentDraft.trimStart,
-                                        trimEnd = currentDraft.trimEnd,
-                                        playProgress = if (playingDraft) playProgress.value else null,
-                                        modifier = Modifier.width(118.dp).height(18.dp),
-                                    )
-
-                                    Row(
-                                        modifier = Modifier.padding(end = 14.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(3.dp),
-                                    ) {
-                                        Text(t("点此试翻"), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = YY.tint.accent)
-                                        Icon(Icons.arrowRight, null, tint = YY.tint.accent, modifier = Modifier.size(11.dp))
-                                    }
-                                }
-                            }
-
-                            // Curled bottom-right paper corner
-                            val cornerAccent = YY.tint.accent
-                            Canvas(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .size(28.dp),
-                            ) {
-                                val path = Path().apply {
-                                    moveTo(0f, size.height)
-                                    lineTo(size.width, 0f)
-                                    lineTo(size.width, size.height)
-                                    close()
-                                }
-                                drawPath(
-                                    path = path,
-                                    brush = Brush.linearGradient(
-                                        colors = listOf(
-                                            cornerAccent.copy(alpha = if (isDark) 0.24f else 0.14f),
-                                            if (isDark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.72f),
-                                        ),
-                                        start = Offset(0f, 0f),
-                                        end = Offset(size.width, size.height),
-                                    ),
-                                )
-                            }
-                        }
-                    }
-
-                    // Clean single-row editorial name field
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 46.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(YY.c.card)
-                            .border(0.6.dp, YY.c.line, RoundedCornerShape(14.dp))
-                            .padding(horizontal = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Text(t("音效名"), fontSize = 12.5.sp, color = YY.c.t3)
-                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                            if (draftName.isEmpty()) {
-                                Text(t("给音效起个名字"), fontSize = 14.sp, color = YY.c.t3)
-                            }
-                            BasicTextField(
-                                value = draftName,
-                                onValueChange = { draftName = it.take(16) },
-                                singleLine = true,
-                                textStyle = TextStyle(color = YY.c.t1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
-                                cursorBrush = SolidColor(YY.tint.accent),
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                        if (draftName.isNotEmpty()) {
-                            Box(
-                                Modifier
-                                    .size(22.dp)
-                                    .clip(CircleShape)
-                                    .background(YY.c.inset)
-                                    .clickable { draftName = "" },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(Icons.close, t("清空"), tint = YY.c.t3, modifier = Modifier.size(11.dp))
-                            }
-                        }
-                    }
                 } else {
-                    // State 1: Capture Studio
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(YY.c.card)
-                            .border(0.5.dp, YY.c.line, RoundedCornerShape(18.dp))
-                            .padding(vertical = 20.dp, horizontal = 16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        // 24-bar live acoustic meter
-                        Row(
-                            modifier = Modifier.height(44.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            val count = 24
-                            for (i in 0 until count) {
-                                val h = if (recording) {
-                                    val offset = count - recordLevels.size
-                                    if (i < offset) 0.10f else recordLevels[i - offset]
-                                } else {
-                                    idleWaveHeights[i % idleWaveHeights.size]
-                                }
-                                val barColor = if (recording) {
-                                    val recency = (i + 1f) / count
-                                    YY.c.danger.copy(alpha = 0.32f + 0.68f * recency)
-                                } else {
-                                    YY.tint.accent.copy(alpha = 0.22f)
-                                }
-                                Box(
-                                    Modifier
-                                        .width(3.5.dp)
-                                        .height((h * 38f).coerceAtLeast(5f).dp)
-                                        .clip(CircleShape)
-                                        .background(barColor),
-                                )
+                    CustomPageTurnCaptureStudio(
+                        recording = recording,
+                        processing = processing,
+                        recordSeconds = recordSeconds,
+                        recordLevel = recordLevel,
+                        recordLevels = recordLevels,
+                        idleWaveHeights = idleWaveHeights,
+                        onToggleRecord = {
+                            if (recording) {
+                                recording = false
+                            } else {
+                                val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                                if (granted) startRecording() else micPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
                             }
-                        }
-
-                        // Sculpted record button with circular progress sweep
-                        val progress = (recordSeconds / 2.5f).coerceIn(0f, 1f)
-                        val trackRingColor = if (recording) YY.c.danger.copy(alpha = 0.16f) else YY.tint.accent.copy(alpha = 0.16f)
-                        val dangerColor = YY.c.danger
-                        Box(
-                            modifier = Modifier
-                                .size(76.dp)
-                                .pressable(scale = 0.94f, enabled = !processing, label = if (recording) t("停止录音") else t("录一段翻书声")) {
-                                    if (recording) {
-                                        recording = false
-                                    } else {
-                                        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-                                        if (granted) startRecording() else micPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                    }
-                                },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Canvas(Modifier.fillMaxSize()) {
-                                val stroke = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
-                                val pad = 2.dp.toPx()
-                                val arcSize = Size(size.width - pad * 2, size.height - pad * 2)
-                                drawArc(
-                                    color = trackRingColor,
-                                    startAngle = -90f,
-                                    sweepAngle = 360f,
-                                    useCenter = false,
-                                    topLeft = Offset(pad, pad),
-                                    size = arcSize,
-                                    style = stroke,
-                                )
-                                if (recording) {
-                                    drawArc(
-                                        color = dangerColor,
-                                        startAngle = -90f,
-                                        sweepAngle = 360f * progress,
-                                        useCenter = false,
-                                        topLeft = Offset(pad, pad),
-                                        size = arcSize,
-                                        style = stroke,
-                                    )
-                                }
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .size(60.dp)
-                                    .scale(if (recording) 1f + recordLevel * 0.07f else 1f)
-                                    .clip(CircleShape)
-                                    .background(if (recording) YY.c.danger else YY.tint.fill),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                when {
-                                    recording -> Box(
-                                        Modifier
-                                            .size(17.dp)
-                                            .clip(RoundedCornerShape(4.5.dp))
-                                            .background(Color.White),
-                                    )
-                                    processing -> CircularProgressIndicator(
-                                        modifier = Modifier.size(20.dp),
-                                        strokeWidth = 2.dp,
-                                        color = Color.White,
-                                    )
-                                    else -> Icon(Icons.microphoneFill, null, tint = Color.White, modifier = Modifier.size(23.dp))
-                                }
-                            }
-                        }
-
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            when {
-                                recording -> {
-                                    Text(
-                                        t("正在收音 · %@ 秒", "%.1f".format(recordSeconds)),
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = YY.c.danger,
-                                        style = YY.tnum,
-                                    )
-                                    Text(t("翻完停顿片刻自动完成，或轻点停止"), fontSize = 11.sp, color = YY.c.t3)
-                                }
-                                processing -> Text(t("正在裁剪与调平音量…"), fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1)
-                                else -> {
-                                    Text(t("翻一页真书，或轻敲桌面"), fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1)
-                                    Text(
-                                        t("录完稍停自动截取 · 自动去静音并调平音量"),
-                                        fontSize = 11.sp,
-                                        color = YY.c.t3,
-                                        textAlign = TextAlign.Center,
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Quiet local-only + file import bar
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(t("只保存在本地，不上传"), fontSize = 11.sp, color = YY.c.t3)
-                        Row(
-                            modifier = Modifier
-                                .height(32.dp)
-                                .clip(CircleShape)
-                                .background(YY.tint.accentSoft)
-                                .pressable(scale = 0.96f, enabled = !recording && !processing) {
-                                    errorMsg = null
-                                    audioPicker.launch(arrayOf("audio/*"))
-                                }
-                                .padding(horizontal = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        ) {
-                            Icon(Icons.folder, null, tint = YY.tint.accent, modifier = Modifier.size(13.dp))
-                            Text(t("从文件导入…"), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = YY.tint.accent)
-                        }
-                    }
+                        },
+                        onImportFile = {
+                            errorMsg = null
+                            audioPicker.launch(arrayOf("audio/*"))
+                        },
+                    )
 
                     if (customs.isNotEmpty()) {
-                        Text(
-                            t("已保存的自定义音效"),
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = YY.c.t3,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                        )
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(YY.c.card)
-                                .border(0.5.dp, YY.c.line, RoundedCornerShape(14.dp))
-                                .padding(horizontal = 12.dp),
-                        ) {
-                            customs.forEachIndexed { idx, c ->
-                                if (idx > 0) Box(Modifier.fillMaxWidth().height(0.5.dp).background(YY.c.line))
-                                val active = selectedRaw == c.selectionKey
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clickable {
-                                                onSelectKey(c.selectionKey)
-                                                PageTurnSound.previewSelection(context, c.selectionKey)
-                                            }
-                                            .padding(vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        Icon(
-                                            if (active) Icons.checkCircleFill else Icons.waveform,
-                                            null,
-                                            tint = if (active) YY.tint.accent else YY.c.t2,
-                                            modifier = Modifier.size(15.dp),
-                                        )
-                                        Text(
-                                            c.name,
-                                            fontSize = 12.5.sp,
-                                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                                            color = YY.c.t1,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        Text(durationLabel(c.durationMs), fontSize = 11.sp, color = YY.c.t3, style = YY.tnum)
-                                    }
-                                    Box(
-                                        Modifier
-                                            .size(32.dp)
-                                            .clip(CircleShape)
-                                            .clickable {
-                                                CustomPageTurnSounds.delete(context, c.id)
-                                                if (selectedRaw == c.selectionKey) {
-                                                    onSelectKey(PageTurnSoundStyle.SOFT_PAPER.key)
-                                                }
-                                            },
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Icon(Icons.delete, t("删除"), tint = YY.c.t3, modifier = Modifier.size(15.dp))
-                                    }
+                        CustomPageTurnSavedSoundsSection(
+                            customs = customs,
+                            selectedRaw = selectedRaw,
+                            onSelect = { item ->
+                                onSelectKey(item.selectionKey)
+                                PageTurnSound.previewSelection(context, item.selectionKey)
+                            },
+                            onDelete = { item ->
+                                CustomPageTurnSounds.delete(context, item.id)
+                                if (selectedRaw == item.selectionKey) {
+                                    onSelectKey(PageTurnSoundStyle.SOFT_PAPER.key)
                                 }
-                            }
-                        }
+                            },
+                        )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CustomPageTurnDraftHeader(
+    draftFromFile: Boolean,
+    onReset: () -> Unit,
+    onSave: () -> Unit,
+) {
+    // Clean 3-part header: ‹ 重录 · 自定义翻页音效 · 保存
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp)
+            .padding(bottom = 14.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .heightIn(min = 32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onReset)
+                .padding(end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Icon(Icons.back, null, tint = YY.c.t2, modifier = Modifier.size(13.dp))
+            Text(
+                if (draftFromFile) t("重选") else t("重录"),
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Medium,
+                color = YY.c.t2,
+            )
+        }
+
+        Text(
+            t("自定义翻页音效"),
+            fontSize = 15.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = YY.c.t1,
+            modifier = Modifier.align(Alignment.Center),
+        )
+
+        Text(
+            t("保存"),
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = YY.tint.accent,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .clip(RoundedCornerShape(8.dp))
+                .pressable(scale = 0.94f, onClick = onSave)
+                .padding(horizontal = 6.dp, vertical = 5.dp),
+        )
+    }
+}
+
+@Composable
+private fun CustomPageTurnCaptureHeader(onClose: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp)
+            .padding(bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(t("自定义翻页音效"), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1)
+        Box(
+            Modifier
+                .size(30.dp)
+                .clip(CircleShape)
+                .background(YY.c.inset)
+                .pressable(scale = 0.92f, label = t("关闭"), onClick = onClose),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.close, t("关闭"), tint = YY.c.t2, modifier = Modifier.size(13.dp))
+        }
+    }
+}
+
+@Composable
+private fun CustomPageTurnErrorBanner(message: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(YY.c.danger.copy(alpha = 0.09f))
+            .border(0.5.dp, YY.c.danger.copy(alpha = 0.22f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(Icons.warning, null, tint = YY.c.danger, modifier = Modifier.size(15.dp))
+        Text(message, fontSize = 12.sp, color = YY.c.t1)
+    }
+}
+
+@Composable
+private fun CustomPageTurnDraftContent(
+    currentDraft: ProcessedCustomSound,
+    draftFromFile: Boolean,
+    draftName: String,
+    onDraftNameChange: (String) -> Unit,
+    previewQuotes: List<String>,
+    flipQuoteIndex: Int,
+    pageFlipping: Boolean,
+    playingDraft: Boolean,
+    playProgress: Float,
+    onClearFocus: () -> Unit,
+    onFlipAndAudition: () -> Unit,
+) {
+    val isDark = YY.dark
+    val paperBg = if (isDark) Color(0xFF26231F) else Color(0xFFF4EFE6)
+    val paperEdge = if (isDark) Color(0xFF38332C) else Color(0xFFE5DEC9)
+    val paperInk = if (isDark) Color(0xFFEAE4DA) else Color(0xFF2C2925)
+    val currentQuote = previewQuotes[flipQuoteIndex % previewQuotes.size]
+    val nextQuote = previewQuotes[(flipQuoteIndex + 1) % previewQuotes.size]
+    val rotY by animateFloatAsState(
+        targetValue = if (pageFlipping) -22f else 0f,
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
+        label = "pageFlipRotY",
+    )
+    val shiftX by animateFloatAsState(
+        targetValue = if (pageFlipping) -10f else 0f,
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
+        label = "pageFlipShiftX",
+    )
+
+    // Style 3: Miniature stacked flippable book page
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(currentDraft) {
+                detectTapGestures {
+                    onClearFocus()
+                    onFlipAndAudition()
+                }
+            }
+            .pointerInput(currentDraft) {
+                var dragTotal = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { dragTotal = 0f },
+                    onHorizontalDrag = { _, dragAmount -> dragTotal += dragAmount },
+                    onDragEnd = {
+                        if (dragTotal < -36f) {
+                            onClearFocus()
+                            onFlipAndAudition()
+                        }
+                    },
+                )
+            },
+    ) {
+        // Underlying next page peek
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 5.dp, start = 7.dp)
+                .heightIn(min = 172.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(paperBg.copy(alpha = 0.92f))
+                .border(0.8.dp, paperEdge, RoundedCornerShape(16.dp))
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Text(
+                nextQuote,
+                fontSize = 14.sp,
+                lineHeight = 24.sp,
+                fontFamily = FontFamily.Serif,
+                color = paperInk.copy(alpha = 0.32f),
+                maxLines = 2,
+            )
+        }
+
+        // Front flippable book page
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 7.dp, bottom = 5.dp)
+                .graphicsLayer {
+                    rotationY = rotY
+                    translationX = shiftX
+                    transformOrigin = TransformOrigin(0f, 0.5f)
+                    cameraDistance = 14f * density
+                }
+                .heightIn(min = 172.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(paperBg)
+                .border(0.8.dp, paperEdge, RoundedCornerShape(16.dp)),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(YY.tint.fill))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        if (draftFromFile) t("导入音频") else t("手边实录"),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = YY.tint.accent,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        durationLabel(currentDraft.durationMs),
+                        fontSize = 11.5.sp,
+                        color = YY.c.t3,
+                        style = YY.tnum,
+                    )
+                }
+
+                Text(
+                    currentQuote,
+                    fontSize = 15.sp,
+                    lineHeight = 25.sp,
+                    fontFamily = FontFamily.Serif,
+                    color = paperInk,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    MiniPageWaveform(
+                        waveform = currentDraft.waveform,
+                        trimStart = currentDraft.trimStart,
+                        trimEnd = currentDraft.trimEnd,
+                        playProgress = if (playingDraft) playProgress else null,
+                        modifier = Modifier.width(118.dp).height(18.dp),
+                    )
+
+                    Row(
+                        modifier = Modifier.padding(end = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Text(t("点此试翻"), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = YY.tint.accent)
+                        Icon(Icons.arrowRight, null, tint = YY.tint.accent, modifier = Modifier.size(11.dp))
+                    }
+                }
+            }
+
+            // Curled bottom-right paper corner
+            val cornerAccent = YY.tint.accent
+            Canvas(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(28.dp),
+            ) {
+                val path = Path().apply {
+                    moveTo(0f, size.height)
+                    lineTo(size.width, 0f)
+                    lineTo(size.width, size.height)
+                    close()
+                }
+                drawPath(
+                    path = path,
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            cornerAccent.copy(alpha = if (isDark) 0.24f else 0.14f),
+                            if (isDark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.72f),
+                        ),
+                        start = Offset(0f, 0f),
+                        end = Offset(size.width, size.height),
+                    ),
+                )
+            }
+        }
+    }
+
+    // Clean single-row editorial name field
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 46.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(YY.c.card)
+            .border(0.6.dp, YY.c.line, RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(t("音效名"), fontSize = 12.5.sp, color = YY.c.t3)
+        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            if (draftName.isEmpty()) {
+                Text(t("给音效起个名字"), fontSize = 14.sp, color = YY.c.t3)
+            }
+            BasicTextField(
+                value = draftName,
+                onValueChange = { onDraftNameChange(it.take(16)) },
+                singleLine = true,
+                textStyle = TextStyle(color = YY.c.t1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+                cursorBrush = SolidColor(YY.tint.accent),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { onClearFocus() }),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (draftName.isNotEmpty()) {
+            Box(
+                Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(YY.c.inset)
+                    .clickable { onDraftNameChange("") },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.close, t("清空"), tint = YY.c.t3, modifier = Modifier.size(11.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun CustomPageTurnCaptureStudio(
+    recording: Boolean,
+    processing: Boolean,
+    recordSeconds: Float,
+    recordLevel: Float,
+    recordLevels: List<Float>,
+    idleWaveHeights: FloatArray,
+    onToggleRecord: () -> Unit,
+    onImportFile: () -> Unit,
+) {
+    // State 1: Capture Studio
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(YY.c.card)
+            .border(0.5.dp, YY.c.line, RoundedCornerShape(18.dp))
+            .padding(vertical = 20.dp, horizontal = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        // 24-bar live acoustic meter
+        Row(
+            modifier = Modifier.height(44.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val count = 24
+            for (i in 0 until count) {
+                val h = if (recording) {
+                    val offset = count - recordLevels.size
+                    if (i < offset) 0.10f else recordLevels[i - offset]
+                } else {
+                    idleWaveHeights[i % idleWaveHeights.size]
+                }
+                val barColor = if (recording) {
+                    val recency = (i + 1f) / count
+                    YY.c.danger.copy(alpha = 0.32f + 0.68f * recency)
+                } else {
+                    YY.tint.accent.copy(alpha = 0.22f)
+                }
+                Box(
+                    Modifier
+                        .width(3.5.dp)
+                        .height((h * 38f).coerceAtLeast(5f).dp)
+                        .clip(CircleShape)
+                        .background(barColor),
+                )
+            }
+        }
+
+        // Sculpted record button with circular progress sweep
+        val progress = (recordSeconds / 2.5f).coerceIn(0f, 1f)
+        val trackRingColor = if (recording) YY.c.danger.copy(alpha = 0.16f) else YY.tint.accent.copy(alpha = 0.16f)
+        val dangerColor = YY.c.danger
+        Box(
+            modifier = Modifier
+                .size(76.dp)
+                .pressable(scale = 0.94f, enabled = !processing, label = if (recording) t("停止录音") else t("录一段翻书声"), onClick = onToggleRecord),
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                val stroke = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
+                val pad = 2.dp.toPx()
+                val arcSize = Size(size.width - pad * 2, size.height - pad * 2)
+                drawArc(
+                    color = trackRingColor,
+                    startAngle = -90f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = Offset(pad, pad),
+                    size = arcSize,
+                    style = stroke,
+                )
+                if (recording) {
+                    drawArc(
+                        color = dangerColor,
+                        startAngle = -90f,
+                        sweepAngle = 360f * progress,
+                        useCenter = false,
+                        topLeft = Offset(pad, pad),
+                        size = arcSize,
+                        style = stroke,
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .scale(if (recording) 1f + recordLevel * 0.07f else 1f)
+                    .clip(CircleShape)
+                    .background(if (recording) YY.c.danger else YY.tint.fill),
+                contentAlignment = Alignment.Center,
+            ) {
+                when {
+                    recording -> Box(
+                        Modifier
+                            .size(17.dp)
+                            .clip(RoundedCornerShape(4.5.dp))
+                            .background(Color.White),
+                    )
+                    processing -> CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White,
+                    )
+                    else -> Icon(Icons.microphoneFill, null, tint = Color.White, modifier = Modifier.size(23.dp))
+                }
+            }
+        }
+
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            when {
+                recording -> {
+                    Text(
+                        t("正在收音 · %@ 秒", "%.1f".format(recordSeconds)),
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = YY.c.danger,
+                        style = YY.tnum,
+                    )
+                    Text(t("翻完停顿片刻自动完成，或轻点停止"), fontSize = 11.sp, color = YY.c.t3)
+                }
+                processing -> Text(t("正在裁剪与调平音量…"), fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1)
+                else -> {
+                    Text(t("翻一页真书，或轻敲桌面"), fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = YY.c.t1)
+                    Text(
+                        t("录完稍停自动截取 · 自动去静音并调平音量"),
+                        fontSize = 11.sp,
+                        color = YY.c.t3,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+        }
+    }
+
+    // Quiet local-only + file import bar
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(t("只保存在本地，不上传"), fontSize = 11.sp, color = YY.c.t3)
+        Row(
+            modifier = Modifier
+                .height(32.dp)
+                .clip(CircleShape)
+                .background(YY.tint.accentSoft)
+                .pressable(scale = 0.96f, enabled = !recording && !processing, onClick = onImportFile)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Icon(Icons.folder, null, tint = YY.tint.accent, modifier = Modifier.size(13.dp))
+            Text(t("从文件导入…"), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = YY.tint.accent)
+        }
+    }
+}
+
+@Composable
+private fun CustomPageTurnSavedSoundsSection(
+    customs: List<CustomPageTurnSound>,
+    selectedRaw: String,
+    onSelect: (CustomPageTurnSound) -> Unit,
+    onDelete: (CustomPageTurnSound) -> Unit,
+) {
+    Text(
+        t("已保存的自定义音效"),
+        fontSize = 11.5.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = YY.c.t3,
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(YY.c.card)
+            .border(0.5.dp, YY.c.line, RoundedCornerShape(14.dp))
+            .padding(horizontal = 12.dp),
+    ) {
+        customs.forEachIndexed { idx, c ->
+            if (idx > 0) Box(Modifier.fillMaxWidth().height(0.5.dp).background(YY.c.line))
+            val active = selectedRaw == c.selectionKey
+            Row(
+                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onSelect(c) }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        if (active) Icons.checkCircleFill else Icons.waveform,
+                        null,
+                        tint = if (active) YY.tint.accent else YY.c.t2,
+                        modifier = Modifier.size(15.dp),
+                    )
+                    Text(
+                        c.name,
+                        fontSize = 12.5.sp,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                        color = YY.c.t1,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(durationLabel(c.durationMs), fontSize = 11.sp, color = YY.c.t3, style = YY.tnum)
+                }
+                Box(
+                    Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .clickable { onDelete(c) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.delete, t("删除"), tint = YY.c.t3, modifier = Modifier.size(15.dp))
                 }
             }
         }
