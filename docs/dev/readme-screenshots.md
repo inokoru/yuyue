@@ -55,15 +55,15 @@ python3 scripts/readme-shots.py compose
 
 ## 演示书库
 
-`python3 scripts/readme-shots.py books` 写出 22 本。生成的 19 本是公版短篇，封面是衬线排的纸面或布面，不是界面稿：背影、呐喊、朝花夕拾、论语、道德经、庄子、诗经、唐诗三百首、宋词三百首、古文观止、世说新语、聊斋志异、人间词话、浮生六记、西游记、瓦尔登湖、简·爱、罪与罚、哈姆雷特。外文书的正文是原文或公版英译（罪与罚用 Constance Garnett），书架上的书名是中文。桃花源记、岳阳楼记、兰亭集序、出师表、师说、爱莲说、陋室铭收在《古文观止》里，不再各自成书。
+`python3 scripts/readme-shots.py books` 写出正好 14 本，7 本中文、7 本英文。中文是简体全文，来自维基文库（抓取脚本会把繁体转成简体）：野草、朝花夕拾（鲁迅），呼兰河传（萧红），浮生六记（沈复，含文库所收的后两卷），人间词话（王国维），志摩的诗（徐志摩；文库《志摩的诗》分类下的诗，沙扬娜拉用初版那一组），世说新语（刘义庆，含刘孝标注）。英文来自 Project Gutenberg 或维基文库：The Great Gatsby、Pride and Prejudice、Mrs Dalloway、Walden、Meditations（Marcus Aurelius，George Long 译本）、Dubliners、The Prophet。正文存在 `fixtures/readme-shelf/`，不在拍摄时现下。
 
-另外三本从 `fixtures/books/` 拷来。《了不起的盖茨比》和《傲慢与偏见》连封面原样保留（Francis Cugat 的蓝眼睛，Hugh Thomson 的孔雀布面）。《红楼梦》保留全文，换掉 Project Gutenberg 的封面和「紅樓夢 / Xueqin Cao」元数据，书架上是曹雪芹的布面封面。
+《了不起的盖茨比》和《傲慢与偏见》连封面原样保留。其余 12 本是衬线排的纸面或布面，不是界面稿。书架上没有《背影》，也没有《红楼梦》。
 
-在读是红楼、背影、瓦尔登湖、盖茨比。读完里有论语、唐诗三百首、人间词话、朝花夕拾、古文观止。同步页不拍：没有真实网盘就不做成「已经开着同步」的样子。
+在读是呼兰河传、Walden、盖茨比。读完里有朝花夕拾、人间词话、野草。同步页不拍：没有真实网盘就不做成「已经开着同步」的样子。
 
 要先看封面，可以 `python3 scripts/readme-shots.py covers`，图在 `build/readme-shots/covers/`。
 
-《背影》被拆成两节。听书短片从第一节最后一句开始，念完会翻到下一节。各端打开同一句，句子写在书库旁的 `position.json` 里（默认含「黑布小帽」）。
+中文阅读和听书都用《呼兰河传》里祖父的园子。「花开了，就像花睡醒了似的。」是那一节的最后一句，划在这句上，笔记是「花是自己醒的。」听完这一句会翻到下一节（「鸟飞了，就像鸟上天了似的。」）。各端打开同一句，写在书库旁的 `position.json` 里。英文那张截图打开 Walden。
 
 ## 输出
 
@@ -95,9 +95,9 @@ scripts/capture-readme.sh ios --clips
 | 文件 | 大约 | 画面 |
 |---|---|---|
 | `01-shelf-scroll` | 5 秒 | 浅色书架，在读几本，下面格子是满的。向下滚，封面陆续过去。 |
-| `02-listen-follow` | 9 秒 | 打开《背影》第一节最后一句。Mac / Windows 右键「从这句读」；手机长按后点「从这听」；Android 用调试参数从这一句开始念。墨线跟着走，这一句念完翻到下一节。 |
-| `03-highlight-note` | 11 秒 | 在《背影》开头拖出一行，按 `1` 划成黄色，点「想法」，贴上「父亲的话，是安慰我，也是安慰他自己。」Mac、Windows、iPhone 会做这一段。Android 的输入法贴不进中文，这一段不在 Android 上录。 |
-| `04-open-same-position` | 6 秒 | 从书架打开《背影》，停在 `position.json` 里的那一句。桌面一段、手机一段，剪的时候对在一起。 |
+| `02-listen-follow` | 9 秒 | 打开《呼兰河传》「花开了，就像花睡醒了似的。」这一句。Mac / Windows 右键「从这句读」；手机长按后点「从这听」；Android 用调试参数从这一句开始念。墨线跟着走，这一句念完翻到下一节。 |
+| `03-highlight-note` | 11 秒 | 在这一句上划线，按 `1` 划成黄色，点「想法」，贴上「花是自己醒的。」Mac、Windows、iPhone 会做这一段。Android 的输入法贴不进中文，这一段不在 Android 上录。 |
+| `04-open-same-position` | 6 秒 | 从书架打开《呼兰河传》，停在 `position.json` 里的那一句。桌面一段、手机一段，剪的时候对在一起。 |
 
 帧率：Windows 的 ffmpeg `gdigrab` 用 60 fps。Mac 的 `screencapture -v` 跟系统录屏（当前系统一般是 60）。模拟器的 `xcrun simctl io recordVideo` 在支持 `--fps` 时用 60，否则用模拟器自己的帧率。Android `screenrecord` 跟屏幕刷新，多数是 60 或 30，脚本不假装能强制 60。
 

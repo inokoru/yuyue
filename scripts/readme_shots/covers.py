@@ -211,6 +211,8 @@ def render(spec: Cover) -> bytes:
         _paint_cloth(draw, spec)
     elif layout == "panel":
         _paint_panel(im, draw, spec)
+    elif layout == "latin":
+        _paint_latin(im, draw, spec)
     else:
         raise ValueError(spec.layout)
     buf = io.BytesIO()
@@ -319,6 +321,74 @@ def _paint_panel(im, draw, spec: Cover) -> None:
     if spec.english:
         en = en_font(40, italic=True)
         _center_text(draw, spec.english, en, spec.ink, H - 118)
+
+
+def _luma(color: str) -> float:
+    r, g, b = _hex(color)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _paint_latin(im, draw, spec: Cover) -> None:
+    """English serif cover: hairlines on paper, a frame on cloth, a band when one is set."""
+    from PIL import ImageDraw
+
+    dark = _luma(spec.bg) < 150
+    if spec.band:
+        band_top, band_bot = int(H * 0.30), int(H * 0.72)
+        band = ImageDraw.Draw(im)
+        band.rectangle([0, band_top, W, band_bot], fill=spec.band)
+        draw = band
+        author_bottom = _center_text(draw, spec.author, en_font(32), spec.ink, band_top + 64)
+        rule_y = author_bottom + 32
+        _rule(draw, W / 2, rule_y, 56, spec.ink, 2)
+        size = 72 if len(spec.title) > 14 else 88
+        _center_text(draw, spec.title, en_font(size), spec.ink, rule_y + 48)
+        return
+    if dark:
+        draw.rectangle([58, 58, W - 58, H - 58], outline=spec.ink, width=2)
+        author_y = H * 0.36
+    else:
+        margin = 78
+        draw.line([(margin, 92), (W - margin, 92)], fill=spec.ink, width=1)
+        draw.line([(margin, H - 92), (W - margin, H - 92)], fill=spec.ink, width=1)
+        author_y = H * 0.36
+    author_bottom = _center_text(draw, spec.author, en_font(32), spec.ink, author_y)
+    rule_y = author_bottom + 32
+    _rule(draw, W / 2, rule_y, 64, spec.ink, 2)
+    size = 68 if len(spec.title) > 14 else 84
+    title_bottom = _center_text(draw, spec.title, en_font(size), spec.ink, rule_y + 40)
+    if spec.english:
+        _center_text(draw, spec.english, en_font(32, italic=True), spec.ink, title_bottom + 28)
+
+
+def contact_sheet_images(items: list[tuple[str, bytes]], out: Path) -> Path:
+    """items are (title, png bytes), including covers that were not drawn here."""
+    import io
+
+    from PIL import Image, ImageDraw
+
+    thumbs = []
+    for _title, raw in items:
+        im = Image.open(io.BytesIO(raw)).convert("RGB")
+        im.thumbnail((180, 260))
+        thumbs.append(im)
+    cols = 7
+    pad = 18
+    label = 36
+    cell_w, cell_h = 180, 260
+    rows = (len(thumbs) + cols - 1) // cols
+    sheet = Image.new("RGB", (cols * (cell_w + pad) + pad, rows * (cell_h + label + pad) + pad), (241, 235, 227))
+    draw = ImageDraw.Draw(sheet)
+    font = cn_font(15)
+    for i, (im, (title, _raw)) in enumerate(zip(thumbs, items)):
+        r, c = divmod(i, cols)
+        x = pad + c * (cell_w + pad)
+        y = pad + r * (cell_h + label + pad)
+        sheet.paste(im, (x + (cell_w - im.width) // 2, y))
+        draw.text((x, y + cell_h + 6), title, font=font, fill=(44, 36, 28))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(out, "PNG")
+    return out
 
 
 def contact_sheet(specs: list[Cover], out: Path) -> Path:

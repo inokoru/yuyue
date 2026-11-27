@@ -317,14 +317,14 @@ if (-not $Keep -or -not (Test-Path (Join-Path $Lib "position.json"))) {
     $n = Wait-Books @($bookFiles).Count
     Close-App $proc
     Write-Host "导入完成，书库里有 $n 本"
-    if ($n -lt 15) { throw "导入到的书只有 $n 本，至少要有 15 本。没有改你的真实书库 $Real" }
+    if ($n -ne 14) { throw "导入到的书只有 $n 本，要正好 14 本。没有改你的真实书库 $Real" }
     Invoke-Py "$Root\scripts\readme-shots.py" seed --library $Lib
 }
 
 function Assert-SeededLibrary {
     $n = @(Get-ChildItem (Join-Path $Lib "books") -Recurse -Filter book.json -ErrorAction SilentlyContinue).Count
-    if ($n -lt 15) {
-        throw "隔离书库里只有 $n 本书，至少要有 15 本才截图或录屏。没有改你的真实书库 $Real"
+    if ($n -ne 14) {
+        throw "隔离书库里只有 $n 本书，要正好 14 本才截图或录屏。没有改你的真实书库 $Real"
     }
     Write-Host "隔离书库里有 $n 本"
 }
@@ -341,7 +341,7 @@ if ($DoShots) {
     Close-App $p
 
     Invoke-Py "$Root\scripts\readme-shots.py" focus --library $Lib --mode notes
-    $id = Book-Id "背影"
+    $id = Book-Id "呼兰河传"
     Set-Prefs $id 1200 820
     $p = Launch-Lib
     $h = Wait-Window $p 15000
@@ -378,7 +378,7 @@ if ($DoClips) {
     Close-App $p
 
     Invoke-Py "$Root\scripts\readme-shots.py" focus --library $Lib --mode listen
-    $id = Book-Id "背影"
+    $id = Book-Id "呼兰河传"
     Set-Prefs $id 1200 820
     $p = Launch-Lib
     Record-Clip $p "02-listen-follow" 9 {
@@ -411,7 +411,7 @@ if ($DoClips) {
             if ($el) { $el.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
         } catch { Write-Host "没有点到「想法」，片段里可能只有划线。" }
         Start-Sleep -Milliseconds 600
-        Paste-Text "父亲的话，是安慰我，也是安慰他自己。"
+        Paste-Text "花是自己醒的。"
         Start-Sleep -Milliseconds 300
         Send-Keys "{ENTER}"
     }

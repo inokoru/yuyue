@@ -103,16 +103,17 @@ def cmd_compose(_: argparse.Namespace) -> None:
 
 def cmd_covers(args: argparse.Namespace) -> None:
     _need_pillow()
-    from readme_shots.books import all_covers
-    from readme_shots.covers import contact_sheet, render
+    from readme_shots.books import shelf_covers
+    from readme_shots.covers import contact_sheet_images
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    specs = all_covers()
-    for spec in specs:
-        (out / f"{spec.title}.png").write_bytes(render(spec))
-    sheet = contact_sheet(specs, out / "sheet.png")
-    print(f"{len(specs)} 张封面 → {sheet}")
+    items = shelf_covers()
+    for title, raw in items:
+        ext = "jpg" if raw[:3] == b"\xff\xd8\xff" else "png"
+        (out / f"{title}.{ext}").write_bytes(raw)
+    sheet = contact_sheet_images(items, out / "sheet.png")
+    print(f"{len(items)} 张封面 → {sheet}")
 
 
 def cmd_self_check(_: argparse.Namespace) -> None:
@@ -120,42 +121,46 @@ def cmd_self_check(_: argparse.Namespace) -> None:
         root = Path(tmp)
         books = prepare(root / "books")
         names = {p.name for p in books}
-        assert len(books) == 22, len(books)
-        assert "alice.epub" not in names and "ailianshuo.epub" not in names
-        assert "guwen.epub" in names and "shijing.epub" in names
-        from readme_shots.books import FIXTURES, same_file
+        assert len(books) == 14, len(books)
+        assert "beiying.epub" not in names and "hongloumeng.epub" not in names and "guwen.epub" not in names
+        from readme_shots.books import ANCHOR, FIXTURES, same_file
+        from readme_shots.seed import NOTE_TEXT
         assert same_file(root / "books" / "great-gatsby.epub", FIXTURES / "great-gatsby.epub")
         assert same_file(root / "books" / "pride-and-prejudice.epub", FIXTURES / "pride-and-prejudice.epub")
         import zipfile
-        with zipfile.ZipFile(root / "books" / "hongloumeng.epub") as zf:
+        with zipfile.ZipFile(root / "books" / "hulan.epub") as zf:
             opf = zf.read("OEBPS/content.opf").decode("utf-8")
-            assert "<dc:title>红楼梦</dc:title>" in opf
-            assert "曹雪芹" in opf
-            assert "Xueqin Cao" not in opf
-            assert "紅樓夢" not in opf
-            cover_name = next(n for n in zf.namelist() if n.endswith("24264-cover.png"))
-            assert len(zf.read(cover_name)) != 49495
-        epub = next(p for p in books if p.name == "beiying.epub")
-        with zipfile.ZipFile(epub) as zf:
-            assert zf.namelist()[0] == "mimetype", zf.namelist()[:3]
-            assert zf.getinfo("mimetype").compress_type == zipfile.ZIP_STORED
-            assert zf.read("mimetype") == b"application/epub+zip"
-            assert "OEBPS/cover.png" in zf.namelist()
-            assert zf.read("OEBPS/content.opf").decode().count("<itemref") == 2
+            assert "<dc:title>呼兰河传</dc:title>" in opf
+            body = "\n".join(
+                zf.read(n).decode("utf-8") for n in zf.namelist() if n.endswith(".xhtml")
+            )
+            assert ANCHOR in body
+        with zipfile.ZipFile(root / "books" / "walden.epub") as zf:
+            assert "Walden" in zf.read("OEBPS/content.opf").decode("utf-8")
+        with zipfile.ZipFile(root / "books" / "yecao.epub") as zf:
+            assert "<dc:title>野草</dc:title>" in zf.read("OEBPS/content.opf").decode("utf-8")
+        titles = []
+        for path in books:
+            with zipfile.ZipFile(path) as zf:
+                opf_name = next(n for n in zf.namelist() if n.endswith(".opf"))
+                opf = zf.read(opf_name).decode("utf-8", "replace")
+                title = opf.split("<dc:title>", 1)[1].split("</dc:title>", 1)[0]
+                titles.append(title)
+        assert "背影" not in titles and "红楼梦" not in titles
 
         lib = root / "library"
         book = lib / "books" / "0123456789abcdef0123456789abcdef"
         (book / "s").mkdir(parents=True)
         sentences = [
-            "我与父亲不相见已二年余了。",
-            "那年冬天，祖母死了，父亲的差使也交卸了。",
-            "父亲说，事已如此，不必难过，好在天无绝人之路。",
-            "我看见他戴着黑布小帽，穿着黑布大马褂。",
-            "这时我看见他的背影，我的泪很快地流下来了。",
-            "最后一句，用来翻到下一节。",
+            "太阳在园子里是特大的。",
+            "花开了，就像花睡醒了似的。",
         ]
         (book / "s" / "0.json").write_text(json.dumps(sentences, ensure_ascii=False), encoding="utf-8")
-        (book / "book.json").write_text(json.dumps({"title": "背影", "authors": ["朱自清"]}), encoding="utf-8")
+        (book / "s" / "1.json").write_text(
+            json.dumps(["鸟飞了，就像鸟上天了似的。"], ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (book / "book.json").write_text(json.dumps({"title": "呼兰河传", "authors": ["萧红"]}), encoding="utf-8")
         db = lib / "library.db"
         conn = sqlite3.connect(db)
         conn.executescript(SCHEMA)
@@ -171,11 +176,15 @@ def cmd_self_check(_: argparse.Namespace) -> None:
         ).fetchone()
         assert status and "reading" in status[0], status
         marks = check.execute("SELECT count(*) FROM registers WHERE entity LIKE 'mark/%' AND field='text'").fetchone()[0]
-        assert marks >= 2, marks
+        assert marks == 1, marks
+        note = check.execute("SELECT value FROM registers WHERE entity LIKE 'mark/%' AND field='note'").fetchone()
+        assert note and NOTE_TEXT in note[0], note
         focus(lib, "listen")
         pos = json.loads((lib / "position.json").read_text(encoding="utf-8"))
         assert pos["listen"]["sentence"] == len(sentences) - 1
-        assert "黑布小帽" in pos["same"]["text"]
+        assert ANCHOR in pos["same"]["text"]
+        assert ANCHOR in pos["listen"]["text"]
+        assert pos["note"] == NOTE_TEXT
         write_windows_prefs(lib, pos["bookId"], 1320, 900)
         prefs = json.loads((lib / "windows-prefs.json").read_text(encoding="utf-8"))
         assert prefs["ThemeMode"] == "light"

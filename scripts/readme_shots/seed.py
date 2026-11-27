@@ -13,26 +13,22 @@ from pathlib import Path
 
 # title substring, status, shelf fraction (None keeps the book as 想读 with no progress)
 PLAN = [
-    ("红楼", "reading", 0.36),
-    ("背影", "reading", 0.22),
-    ("瓦尔登", "reading", 0.24),
+    ("呼兰河传", "reading", 0.28),
+    ("Walden", "reading", 0.24),
     ("Gatsby", "reading", 0.41),
-    ("论语", "done", 1.0),
-    ("唐诗", "done", 1.0),
-    ("人间词话", "done", 1.0),
     ("朝花夕拾", "done", 1.0),
-    ("古文观止", "done", 1.0),
+    ("人间词话", "done", 1.0),
+    ("野草", "done", 1.0),
 ]
 
-# Highlights land on 背影 sentences that contain these phrases.
+# The Chinese reading demo is one sentence in 呼兰河传, 祖父的园子.
+DEMO_TITLE = "呼兰河传"
+ANCHOR = "花开了，就像花睡醒了似的"
+NOTE_TEXT = "花是自己醒的。"
 MARKS = [
-    ("那年冬天", "yellow", None),
-    ("事已如此", "wave", "父亲的话，是安慰我，也是安慰他自己。"),
-    ("我的泪很快地流下来了", "pink", "读到这里会停一下。"),
+    (ANCHOR, "yellow", NOTE_TEXT),
 ]
-
-SAME_PHRASE = "黑布小帽"
-NOTE_TEXT = "父亲的话，是安慰我，也是安慰他自己。"
+SAME_PHRASE = ANCHOR
 
 
 def _dumps(value) -> str:
@@ -154,7 +150,7 @@ def apply_plan(library: Path) -> dict:
     if not catalog:
         raise SystemExit(f"{library}/books 里没有书。导入还没完成。")
 
-    beiying = None
+    demo = None
     reading_rank = 0
     for book_id, title, book_dir in catalog:
         status, fraction = "want", None
@@ -183,21 +179,20 @@ def apply_plan(library: Path) -> dict:
             )
         else:
             store.put(entity, "finishedAt", None)
-        if _match(title, "背影"):
-            beiying = (book_id, book_dir)
+        if _match(title, DEMO_TITLE):
+            demo = (book_id, book_dir)
 
-    position = {"bookId": None, "title": "背影", "same": None, "listen": None, "note": NOTE_TEXT}
-    if beiying:
-        book_id, book_dir = beiying
+    position = {"bookId": None, "title": DEMO_TITLE, "same": None, "listen": None, "note": NOTE_TEXT}
+    if demo:
+        book_id, book_dir = demo
         position["bookId"] = book_id
-        sents = _sentences(book_dir, 0)
-        if sents:
-            last = len(sents) - 1
-            position["listen"] = {"section": 0, "sentence": last, "text": sents[last]}
         found = _find_sentence(book_dir, SAME_PHRASE)
         if found:
             section, idx, text = found
-            position["same"] = {"section": section, "sentence": idx, "text": text}
+            spot = {"section": section, "sentence": idx, "text": text}
+            # This sentence is the last one in its section, so listening it turns the page.
+            position["same"] = spot
+            position["listen"] = spot
         for phrase, style, note in MARKS:
             hit = _find_sentence(book_dir, phrase)
             if not hit:
@@ -230,11 +225,11 @@ def apply_plan(library: Path) -> dict:
 
 
 def focus(library: Path, mode: str) -> dict:
-    """Move 背影's progress. shelf / notes stay on an early sentence; listen uses the last."""
+    """Move 呼兰河传's progress onto the garden sentence, or the listen spot."""
     meta = json.loads((library / "position.json").read_text(encoding="utf-8"))
     book_id = meta.get("bookId")
     if not book_id:
-        raise SystemExit("position.json 里没有背影。先跑 seed。")
+        raise SystemExit("position.json 里没有呼兰河传。先跑 seed。")
     store = Store(library / "library.db")
     now = int(time.time() * 1000)
     if mode == "listen":
@@ -260,7 +255,7 @@ def focus(library: Path, mode: str) -> dict:
     store.commit()
     meta["focus"] = mode
     (library / "position.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"背影进度 → {mode} 第 {spot['section']} 节第 {spot['sentence']} 句")
+    print(f"呼兰河传进度 → {mode} 第 {spot['section']} 节第 {spot['sentence']} 句")
     return meta
 
 

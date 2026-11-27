@@ -90,8 +90,8 @@ prepare_books() {
   "$PY" "$ROOT/scripts/readme-shots.py" books --out "$BOOKS"
   local n
   n="$(find "$BOOKS" -type f \( -name '*.epub' -o -name '*.pdf' \) | wc -l | tr -d ' ')"
-  if [ "${n:-0}" -lt 15 ]; then
-    echo "演示书只生成了 ${n:-0} 本，至少要有 15 本。没有启动应用。"
+  if [ "${n:-0}" -ne 14 ]; then
+    echo "演示书只生成了 ${n:-0} 本，要正好 14 本。没有启动应用。"
     exit 1
   fi
 }
@@ -107,8 +107,8 @@ count_books() {
 require_library() {
   local n
   n="$(count_books "$1")"
-  if [ "${n:-0}" -lt 15 ]; then
-    echo "隔离书库里只有 ${n:-0} 本书，至少要有 15 本才截图或录屏。"
+  if [ "${n:-0}" -ne 14 ]; then
+    echo "隔离书库里只有 ${n:-0} 本书，要正好 14 本才截图或录屏。"
     echo "没有改你的真实书库。这是一次没导全的临时书库的话，删掉它再重跑，不要加 --keep。"
     exit 1
   fi
@@ -293,8 +293,8 @@ run_macos() {
   if [ "$DO_SHOTS" = "1" ]; then
     "$PY" "$ROOT/scripts/readme-shots.py" focus --library "$lib" --mode notes
     shot 01-shelf 6 1320 900
-    shot 02-listening 7 1200 820 -debugOpen 背影 -debugListen 1
-    shot 03-notes 7 1200 820 -debugOpen 背影 -debugPanel notes -debugSeed 1
+    shot 02-listening 7 1200 820 -debugOpen 呼兰河传 -debugListen 1
+    shot 03-notes 7 1200 820 -debugOpen 呼兰河传 -debugPanel notes -debugSeed 1
     shot 04-english 7 1200 820 -debugOpen Walden
   fi
   if [ "$DO_CLIPS" = "1" ]; then
@@ -327,7 +327,7 @@ run_macos() {
     sleep 1
 
     "$PY" "$ROOT/scripts/readme-shots.py" focus --library "$lib" --mode listen
-    "$bin" -debugLibrary "$lib" -debugOpen 背影 -AppleLanguages "(zh-Hans)" &
+    "$bin" -debugLibrary "$lib" -debugOpen 呼兰河传 -AppleLanguages "(zh-Hans)" &
     sleep 6
     resize_process "Yuyue" 1200 820
     record_mac_window "$CLIPS/macos/02-listen-follow.mov" 9 1 "Yuyue" &
@@ -344,7 +344,7 @@ run_macos() {
     sleep 1
 
     "$PY" "$ROOT/scripts/readme-shots.py" focus --library "$lib" --mode notes
-    "$bin" -debugLibrary "$lib" -debugOpen 背影 -AppleLanguages "(zh-Hans)" &
+    "$bin" -debugLibrary "$lib" -debugOpen 呼兰河传 -AppleLanguages "(zh-Hans)" &
     sleep 6
     resize_process "Yuyue" 1200 820
     record_mac_window "$CLIPS/macos/03-highlight-note.mov" 11 1 "Yuyue" &
@@ -363,7 +363,7 @@ run_macos() {
       sleep 0.6
       click_menu "想法" || click_menu "想法…" || true
       sleep 0.6
-      "$input" type "父亲的话，是安慰我，也是安慰他自己。"
+      "$input" type "花是自己醒的。"
       sleep 0.4
       "$input" key return
     fi
@@ -382,7 +382,7 @@ run_macos() {
 tell application "System Events"
   tell process "Yuyue"
     set frontmost to true
-    set hits to (every static text of window 1 whose value contains "背影")
+    set hits to (every static text of window 1 whose value contains "呼兰河传")
     if (count of hits) > 0 then click item 1 of hits
   end tell
 end tell
@@ -469,7 +469,7 @@ run_sim() {
     n=0
     while [ "$i" -lt 45 ]; do
       n="$(count_books "$lib/books")"
-      if [ "$n" -ge 15 ]; then break; fi
+      if [ "$n" -ge 14 ]; then break; fi
       sleep 1
       i=$((i + 1))
     done
@@ -491,8 +491,8 @@ run_sim() {
   if [ "$DO_SHOTS" = "1" ]; then
     "$PY" "$ROOT/scripts/readme-shots.py" focus --library "$lib" --mode notes
     sim_shot 01-shelf
-    sim_shot 02-reading -debugOpen 背影 -debugSheet chrome
-    sim_shot 03-listening -debugOpen 背影 -debugSheet listen
+    sim_shot 02-reading -debugOpen 呼兰河传 -debugSheet chrome
+    sim_shot 03-listening -debugOpen 呼兰河传 -debugSheet listen
     sim_shot 04-notes -debugTab notes
   fi
   if [ "$DO_CLIPS" = "1" ]; then
@@ -541,7 +541,7 @@ run_sim() {
     xcrun simctl terminate "$udid" app.yuyue.Yuyue 2>/dev/null || true
 
     "$PY" "$ROOT/scripts/readme-shots.py" focus --library "$lib" --mode listen
-    xcrun simctl launch "$udid" app.yuyue.Yuyue -debugLibrary '~/readme-lib' -debugOpen 背影 -AppleLanguages "(zh-Hans)" || true
+    xcrun simctl launch "$udid" app.yuyue.Yuyue -debugLibrary '~/readme-lib' -debugOpen 呼兰河传 -AppleLanguages "(zh-Hans)" || true
     sleep 6
     sim_clip 02-listen-follow 9
     sim_tap "${YY_TAP_SENTENCE_X:-0.5}" "${YY_TAP_SENTENCE_Y:-0.42}"
@@ -559,7 +559,7 @@ run_sim() {
     xcrun simctl terminate "$udid" app.yuyue.Yuyue 2>/dev/null || true
 
     "$PY" "$ROOT/scripts/readme-shots.py" focus --library "$lib" --mode notes
-    xcrun simctl launch "$udid" app.yuyue.Yuyue -debugLibrary '~/readme-lib' -debugOpen 背影 -AppleLanguages "(zh-Hans)" || true
+    xcrun simctl launch "$udid" app.yuyue.Yuyue -debugLibrary '~/readme-lib' -debugOpen 呼兰河传 -AppleLanguages "(zh-Hans)" || true
     sleep 6
     sim_clip 03-highlight-note 11
     set -- $(window_bounds "Simulator" || true)
@@ -569,7 +569,7 @@ run_sim() {
       sleep 0.6
       sim_tap 0.28 0.62
       sleep 0.5
-      "$input" type "父亲的话，是安慰我，也是安慰他自己。"
+      "$input" type "花是自己醒的。"
       sleep 0.3
       "$input" key return
     fi
