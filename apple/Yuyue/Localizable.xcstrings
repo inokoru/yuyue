@@ -25148,6 +25148,26 @@
         }
       }
     },
+    "纸页落下，静气自生。下一段文字正在温柔等待。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The page settles, and the quiet returns. The next lines are waiting."
+          }
+        }
+      }
+    },
+    "输入名称" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter a name"
+          }
+        }
+      }
+    },
     "打不开书库" : {
       "localizations" : {
         "en" : {

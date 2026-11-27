@@ -18,9 +18,9 @@ import android.view.HapticFeedbackConstants
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -28,6 +28,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -74,7 +75,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
@@ -1461,7 +1461,7 @@ private fun CustomPageTurnSoundSheet(
             if (animatePage) {
                 pageFlipping = true
                 launch {
-                    delay(190)
+                    delay(230)
                     flipQuoteIndex++
                     pageFlipping = false
                 }
@@ -1640,29 +1640,14 @@ private fun CustomPageTurnSoundSheet(
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             val currentDraft = draft
-            if (currentDraft != null) {
-                CustomPageTurnDraftHeader(
-                    draftFromFile = draftFromFile,
-                    onReset = {
-                        focusManager.clearFocus()
-                        playJob?.cancel()
-                        playingDraft = false
-                        pageFlipping = false
-                        draft = null
-                        errorMsg = null
-                    },
-                    onSave = { saveCurrentDraft(currentDraft) },
-                )
-            } else {
-                CustomPageTurnCaptureHeader(
-                    onClose = {
-                        recording = false
-                        recordJob?.cancel()
-                        playJob?.cancel()
-                        dismiss()
-                    },
-                )
-            }
+            CustomPageTurnCaptureHeader(
+                onClose = {
+                    recording = false
+                    recordJob?.cancel()
+                    playJob?.cancel()
+                    dismiss()
+                },
+            )
 
             Column(
                 modifier = Modifier
@@ -1688,6 +1673,15 @@ private fun CustomPageTurnSoundSheet(
                         playProgress = playProgress.value,
                         onClearFocus = { focusManager.clearFocus() },
                         onFlipAndAudition = { flipAndAudition(currentDraft) },
+                        onReset = {
+                            focusManager.clearFocus()
+                            playJob?.cancel()
+                            playingDraft = false
+                            pageFlipping = false
+                            draft = null
+                            errorMsg = null
+                        },
+                        onSave = { saveCurrentDraft(currentDraft) },
                     )
                 } else {
                     CustomPageTurnCaptureStudio(
@@ -1730,60 +1724,6 @@ private fun CustomPageTurnSoundSheet(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun CustomPageTurnDraftHeader(
-    draftFromFile: Boolean,
-    onReset: () -> Unit,
-    onSave: () -> Unit,
-) {
-    // Clean 3-part header: ‹ 重录 · 自定义翻页音效 · 保存
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 18.dp)
-            .padding(bottom = 14.dp),
-    ) {
-        Row(
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .heightIn(min = 32.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .clickable(onClick = onReset)
-                .padding(end = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            Icon(Icons.back, null, tint = YY.c.t2, modifier = Modifier.size(13.dp))
-            Text(
-                if (draftFromFile) t("重选") else t("重录"),
-                fontSize = 13.5.sp,
-                fontWeight = FontWeight.Medium,
-                color = YY.c.t2,
-            )
-        }
-
-        Text(
-            t("自定义翻页音效"),
-            fontSize = 15.5.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = YY.c.t1,
-            modifier = Modifier.align(Alignment.Center),
-        )
-
-        Text(
-            t("保存"),
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = YY.tint.accent,
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .clip(RoundedCornerShape(8.dp))
-                .pressable(scale = 0.94f, onClick = onSave)
-                .padding(horizontal = 6.dp, vertical = 5.dp),
-        )
     }
 }
 
@@ -1841,28 +1781,37 @@ private fun CustomPageTurnDraftContent(
     playProgress: Float,
     onClearFocus: () -> Unit,
     onFlipAndAudition: () -> Unit,
+    onReset: () -> Unit,
+    onSave: () -> Unit,
 ) {
     val isDark = YY.dark
     val paperBg = if (isDark) Color(0xFF26231F) else Color(0xFFF4EFE6)
     val paperEdge = if (isDark) Color(0xFF38332C) else Color(0xFFE5DEC9)
     val paperInk = if (isDark) Color(0xFFEAE4DA) else Color(0xFF2C2925)
     val currentQuote = previewQuotes[flipQuoteIndex % previewQuotes.size]
-    val nextQuote = previewQuotes[(flipQuoteIndex + 1) % previewQuotes.size]
+    val ease = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+    val flipSpec = tween<Float>(durationMillis = 360, easing = ease)
     val rotY by animateFloatAsState(
-        targetValue = if (pageFlipping) -22f else 0f,
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
+        targetValue = if (pageFlipping) -28f else 0f,
+        animationSpec = flipSpec,
         label = "pageFlipRotY",
     )
     val shiftX by animateFloatAsState(
-        targetValue = if (pageFlipping) -10f else 0f,
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
+        targetValue = if (pageFlipping) -8f else 0f,
+        animationSpec = flipSpec,
         label = "pageFlipShiftX",
+    )
+    val pageScale by animateFloatAsState(
+        targetValue = if (pageFlipping) 0.985f else 1f,
+        animationSpec = flipSpec,
+        label = "pageFlipScale",
     )
 
     // Style 3: Miniature stacked flippable book page
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .height(180.dp)
             .pointerInput(currentDraft) {
                 detectTapGestures {
                     onClearFocus()
@@ -1883,49 +1832,49 @@ private fun CustomPageTurnDraftContent(
                 )
             },
     ) {
-        // Underlying next page peek
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 5.dp, start = 7.dp)
-                .heightIn(min = 172.dp)
+                .padding(top = 4.dp, start = 8.dp, end = 2.dp)
+                .height(176.dp)
+                .graphicsLayer { alpha = 0.85f }
                 .clip(RoundedCornerShape(16.dp))
-                .background(paperBg.copy(alpha = 0.92f))
+                .background(paperBg)
                 .border(0.8.dp, paperEdge, RoundedCornerShape(16.dp))
-                .padding(horizontal = 18.dp, vertical = 16.dp),
-            contentAlignment = Alignment.CenterStart,
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+            contentAlignment = Alignment.TopStart,
         ) {
             Text(
-                nextQuote,
-                fontSize = 14.sp,
+                t("纸页落下，静气自生。下一段文字正在温柔等待。"),
+                fontSize = 13.sp,
                 lineHeight = 24.sp,
                 fontFamily = FontFamily.Serif,
-                color = paperInk.copy(alpha = 0.32f),
-                maxLines = 2,
+                color = paperInk.copy(alpha = 0.45f),
             )
         }
 
-        // Front flippable book page
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(end = 7.dp, bottom = 5.dp)
+                .padding(end = 6.dp, bottom = 4.dp)
                 .graphicsLayer {
                     rotationY = rotY
-                    translationX = shiftX
+                    translationX = shiftX * density
+                    scaleX = pageScale
+                    scaleY = pageScale
                     transformOrigin = TransformOrigin(0f, 0.5f)
-                    cameraDistance = 14f * density
+                    cameraDistance = 18f * density
                 }
-                .heightIn(min = 172.dp)
+                .height(176.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .background(paperBg)
                 .border(0.8.dp, paperEdge, RoundedCornerShape(16.dp)),
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .fillMaxSize()
                     .padding(horizontal = 18.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1950,11 +1899,11 @@ private fun CustomPageTurnDraftContent(
 
                 Text(
                     currentQuote,
-                    fontSize = 15.sp,
+                    fontSize = 14.5.sp,
                     lineHeight = 25.sp,
                     fontFamily = FontFamily.Serif,
                     color = paperInk,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 )
 
                 Row(
@@ -1967,7 +1916,7 @@ private fun CustomPageTurnDraftContent(
                         trimStart = currentDraft.trimStart,
                         trimEnd = currentDraft.trimEnd,
                         playProgress = if (playingDraft) playProgress else null,
-                        modifier = Modifier.width(118.dp).height(18.dp),
+                        modifier = Modifier.width(120.dp).height(18.dp),
                     )
 
                     Row(
@@ -1981,31 +1930,24 @@ private fun CustomPageTurnDraftContent(
                 }
             }
 
-            // Curled bottom-right paper corner
             val cornerAccent = YY.tint.accent
-            Canvas(
-                modifier = Modifier
+            Box(
+                Modifier
                     .align(Alignment.BottomEnd)
-                    .size(28.dp),
-            ) {
-                val path = Path().apply {
-                    moveTo(0f, size.height)
-                    lineTo(size.width, 0f)
-                    lineTo(size.width, size.height)
-                    close()
-                }
-                drawPath(
-                    path = path,
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            cornerAccent.copy(alpha = if (isDark) 0.24f else 0.14f),
-                            if (isDark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.72f),
+                    .size(30.dp)
+                    .clip(RoundedCornerShape(topStart = 8.dp))
+                    .background(
+                        Brush.linearGradient(
+                            colorStops = arrayOf(
+                                0.48f to Color.Transparent,
+                                0.50f to cornerAccent.copy(alpha = if (isDark) 0.28f else 0.14f),
+                                1f to Color.White.copy(alpha = if (isDark) 0.22f else 0.65f),
+                            ),
+                            start = Offset.Zero,
+                            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
                         ),
-                        start = Offset(0f, 0f),
-                        end = Offset(size.width, size.height),
                     ),
-                )
-            }
+            )
         }
     }
 
@@ -2024,7 +1966,7 @@ private fun CustomPageTurnDraftContent(
         Text(t("音效名"), fontSize = 12.5.sp, color = YY.c.t3)
         Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
             if (draftName.isEmpty()) {
-                Text(t("给音效起个名字"), fontSize = 14.sp, color = YY.c.t3)
+                Text(t("输入名称"), fontSize = 14.sp, color = YY.c.t3)
             }
             BasicTextField(
                 value = draftName,
@@ -2048,6 +1990,76 @@ private fun CustomPageTurnDraftContent(
             ) {
                 Icon(Icons.close, t("清空"), tint = YY.c.t3, modifier = Modifier.size(11.dp))
             }
+        }
+    }
+
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        listOf("真纸翻书", "轻敲桌面", "书页沙沙", "清脆一响").forEach { chip ->
+            val label = t(chip)
+            val on = draftName == label
+            Box(
+                modifier = Modifier
+                    .height(28.dp)
+                    .clip(CircleShape)
+                    .background(if (on) YY.tint.accentSoft else YY.c.card)
+                    .border(0.6.dp, if (on) YY.tint.edge else YY.c.line, CircleShape)
+                    .clickable {
+                        onDraftNameChange(label)
+                        onClearFocus()
+                    }
+                    .padding(horizontal = 11.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label,
+                    fontSize = 11.5.sp,
+                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                    color = if (on) YY.tint.accent else YY.c.t2,
+                )
+            }
+        }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .height(42.dp)
+                .clip(CircleShape)
+                .background(YY.c.card)
+                .border(0.7.dp, YY.c.line, CircleShape)
+                .pressable(scale = 0.97f, onClick = onReset)
+                .padding(horizontal = 18.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                if (draftFromFile) t("重选") else t("重录"),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = YY.c.t2,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(42.dp)
+                .clip(CircleShape)
+                .background(YY.tint.accent)
+                .pressable(scale = 0.97f, onClick = onSave),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                t("保存并使用"),
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+            )
         }
     }
 }

@@ -1449,7 +1449,7 @@ struct CustomPageTurnSoundSheet: View {
     #if os(iOS)
     private var sheetDetents: Set<PresentationDetent> {
         if draft != nil {
-            return [.height(344)]
+            return [.height(492)]
         }
         if store.items.isEmpty {
             return [.height(372)]
@@ -1461,39 +1461,26 @@ struct CustomPageTurnSoundSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let draft {
-                draftHeader(draft)
-                    .padding(.horizontal, YYUI.s(18))
-                    .padding(.top, YYUI.sheetGrabberTop)
-                    .padding(.bottom, YYUI.s(14))
-            } else {
-                YYSheetHeader(title: String(localized: "自定义翻页音效")) {
-                    cleanupAndDismiss()
-                }
-                .padding(.horizontal, YYUI.s(18))
-                .padding(.top, YYUI.sheetGrabberTop)
-                .padding(.bottom, YYUI.s(12))
+            YYSheetHeader(title: String(localized: "自定义翻页音效")) {
+                cleanupAndDismiss()
             }
+            .padding(.horizontal, YYUI.s(18))
+            .padding(.top, YYUI.sheetGrabberTop)
+            .padding(.bottom, YYUI.s(12))
 
             ScrollView {
                 VStack(alignment: .leading, spacing: YYUI.s(14)) {
                     if let errorMessage {
                         errorBanner(errorMessage)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
+                            .transition(.opacity)
                     }
 
                     if let draft {
                         draftBookStudio(draft)
-                            .transition(.asymmetric(
-                                insertion: .opacity.combined(with: .scale(scale: 0.97)),
-                                removal: .opacity
-                            ))
+                            .transition(.opacity)
                     } else {
                         captureStudio
-                            .transition(.asymmetric(
-                                insertion: .opacity.combined(with: .scale(scale: 0.97)),
-                                removal: .opacity
-                            ))
+                            .transition(.opacity)
                         if !store.items.isEmpty {
                             savedList
                         }
@@ -1506,7 +1493,6 @@ struct CustomPageTurnSoundSheet: View {
             .scrollDismissesKeyboard(.interactively)
             .onTapGesture { nameFocused = false }
         }
-        .animation(YYMotion.standard, value: draft != nil)
         .animation(YYMotion.quick, value: errorMessage != nil)
         .background(YYColor.bg)
         #if os(iOS)
@@ -1514,7 +1500,7 @@ struct CustomPageTurnSoundSheet: View {
         .presentationDragIndicator(.visible)
         .presentationBackground(YYColor.bg)
         #else
-        .frame(width: 410, height: draft != nil ? 336 : (store.items.isEmpty ? 350 : 450))
+        .frame(width: 410, height: draft != nil ? 468 : (store.items.isEmpty ? 350 : 450))
         .paperWindow()
         #endif
         .fileImporter(isPresented: $importing, allowedContentTypes: [.audio]) { result in
@@ -1532,256 +1518,47 @@ struct CustomPageTurnSoundSheet: View {
         }
     }
 
-    private func draftHeader(_ item: ProcessedCustomSound) -> some View {
-        ZStack {
-            Text("自定义翻页音效")
-                .font(YYUI.font(14.5, .semibold))
-                .foregroundStyle(YYColor.t1)
-                .lineLimit(1)
-
-            HStack {
-                Button {
-                    nameFocused = false
-                    playTask?.cancel()
-                    playStartTime = nil
-                    pageFlipping = false
-                    draft = nil
-                    errorMessage = nil
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "chevron.left")
-                            .font(YYUI.font(11.5, .semibold))
-                        Text(draftFromFile ? String(localized: "重选") : String(localized: "重录"))
-                            .font(YYUI.font(13, .medium))
-                    }
-                    .foregroundStyle(YYColor.t2)
-                    .frame(minHeight: YYUI.s(28))
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-
-                Spacer()
-
-                Button {
-                    saveDraft(item)
-                } label: {
-                    Text("保存")
-                        .font(YYUI.font(13.5, .semibold))
-                        .foregroundStyle(tint.accent)
-                        .frame(minHeight: YYUI.s(28))
-                        .padding(.horizontal, 4)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(YYPressStyle(scale: 0.94))
-                .keyboardShortcut(.defaultAction)
-            }
-        }
+    private func discardDraft() {
+        nameFocused = false
+        playTask?.cancel()
+        playStartTime = nil
+        pageFlipping = false
+        draft = nil
+        errorMessage = nil
     }
 
-    private func errorBanner(_ message: String) -> some View {
-        HStack(spacing: YYUI.s(8)) {
-            Image(systemName: "exclamationmark.circle.fill")
-                .font(YYUI.font(13))
-                .foregroundStyle(YYColor.danger)
-            Text(message)
-                .font(YYUI.font(11.5))
-                .foregroundStyle(YYColor.t1)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, YYUI.s(12))
-        .padding(.vertical, YYUI.s(10))
-        .background(YYColor.danger.opacity(0.09), in: RoundedRectangle(cornerRadius: YYUI.s(12), style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: YYUI.s(12), style: .continuous)
-                .strokeBorder(YYColor.danger.opacity(0.22), lineWidth: 0.5)
-        )
+    /// Style-3 prototype ease: cubic-bezier(0.22, 1, 0.36, 1) over 0.36s.
+    private var pageFlipAnimation: Animation {
+        YYMotion.reduce ? .linear(duration: 0) : .timingCurve(0.22, 1, 0.36, 1, duration: 0.36)
     }
-
-    // MARK: State 1 — Capture Studio
-
-    private var captureStudio: some View {
-        VStack(spacing: YYUI.s(12)) {
-            VStack(spacing: YYUI.s(16)) {
-                liveMeterView
-                    .frame(height: 44)
-                    .padding(.top, YYUI.s(4))
-
-                Button {
-                    toggleRecord()
-                } label: {
-                    let progress = min(1.0, recorder.seconds / PageTurnClipRecorder.maxSeconds)
-                    ZStack {
-                        Circle()
-                            .stroke(
-                                recorder.recording ? YYColor.danger.opacity(0.16) : tint.accent.opacity(0.16),
-                                lineWidth: 2.5
-                            )
-                            .frame(width: 74, height: 74)
-
-                        if recorder.recording {
-                            Circle()
-                                .trim(from: 0, to: progress)
-                                .stroke(YYColor.danger, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                                .rotationEffect(.degrees(-90))
-                                .frame(width: 74, height: 74)
-                                .animation(.linear(duration: 0.05), value: progress)
-                        }
-
-                        Circle()
-                            .fill(recorder.recording ? YYColor.danger : tint.fill)
-                            .frame(width: 60, height: 60)
-                            .scaleEffect(recorder.recording ? (1.0 + recorder.level * 0.07) : 1.0)
-                            .shadow(
-                                color: (recorder.recording ? YYColor.danger : tint.fill).opacity(0.26),
-                                radius: 10,
-                                y: 4
-                            )
-                            .animation(.easeOut(duration: 0.08), value: recorder.level)
-
-                        if recorder.recording {
-                            RoundedRectangle(cornerRadius: 4.5, style: .continuous)
-                                .fill(.white)
-                                .frame(width: 17, height: 17)
-                        } else if processing {
-                            ProgressView()
-                                .tint(.white)
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "mic.fill")
-                                .font(.yy(size: 22, weight: .semibold))
-                                .foregroundStyle(.white)
-                        }
-                    }
-                    .frame(width: 78, height: 78)
-                    .contentShape(.circle)
-                }
-                .buttonStyle(YYPressStyle(scale: 0.94))
-                .disabled(processing)
-                .accessibilityLabel(recorder.recording ? Text("停止录音") : Text("录一段翻书声"))
-
-                VStack(spacing: 4) {
-                    if recorder.recording {
-                        Text("正在收音 · \(recorder.seconds.formatted(.number.precision(.fractionLength(1)))) 秒")
-                            .font(YYUI.font(13, .semibold))
-                            .monospacedDigit()
-                            .foregroundStyle(YYColor.danger)
-                        Text("翻完停顿片刻自动完成，或轻点停止")
-                            .font(YYUI.font(10.5))
-                            .foregroundStyle(YYColor.t3)
-                    } else if processing {
-                        Text("正在裁剪与调平音量…")
-                            .font(YYUI.font(13, .semibold))
-                            .foregroundStyle(YYColor.t1)
-                    } else {
-                        Text("翻一页真书，或轻敲桌面")
-                            .font(YYUI.font(13, .semibold))
-                            .foregroundStyle(YYColor.t1)
-                        Text("录完稍停自动截取 · 自动去静音并调平音量")
-                            .font(YYUI.font(10.5))
-                            .foregroundStyle(YYColor.t3)
-                            .multilineTextAlignment(.center)
-                    }
-                }
-                .animation(YYMotion.quick, value: recorder.recording)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, YYUI.s(18))
-            .padding(.horizontal, YYUI.s(16))
-            .yyCard()
-
-            // Quiet local-only & import footer row
-            HStack(spacing: YYUI.s(8)) {
-                Text("只保存在本地，不上传")
-                    .font(YYUI.font(10.5))
-                    .foregroundStyle(YYColor.t3)
-                Spacer(minLength: 6)
-                Button {
-                    errorMessage = nil
-                    importing = true
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "folder")
-                            .font(YYUI.font(11, .semibold))
-                        Text("从文件导入…")
-                            .font(YYUI.font(11, .semibold))
-                    }
-                    .foregroundStyle(tint.accent)
-                    .padding(.horizontal, YYUI.s(11))
-                    .frame(height: YYUI.s(30))
-                    .background(tint.accentSoft, in: Capsule())
-                }
-                .buttonStyle(YYPressStyle(scale: 0.96))
-                .disabled(recorder.recording || processing)
-            }
-            .padding(.horizontal, YYUI.s(4))
-        }
-    }
-
-    private var liveMeterView: some View {
-        let count = PageTurnClipRecorder.barCount
-        let live = recorder.levels
-        return HStack(spacing: 4) {
-            ForEach(0 ..< count, id: \.self) { i in
-                let h: CGFloat = {
-                    if recorder.recording {
-                        let offset = count - live.count
-                        if i < offset { return 0.10 }
-                        return CGFloat(live[i - offset])
-                    }
-                    return Self.idleWaveHeights[i % Self.idleWaveHeights.count]
-                }()
-                let barColor: Color = {
-                    if recorder.recording {
-                        let recency = Double(i + 1) / Double(count)
-                        return YYColor.danger.opacity(0.32 + 0.68 * recency)
-                    }
-                    return tint.accent.opacity(0.22)
-                }()
-                Capsule()
-                    .fill(barColor)
-                    .frame(width: 3.5, height: max(5, h * 38))
-            }
-        }
-        .animation(.easeOut(duration: 0.08), value: recorder.levels.count)
-    }
-
-    // MARK: State 2 — Interactive Mini Flippable Book Page + Clean Name Field
 
     private func draftBookStudio(_ item: ProcessedCustomSound) -> some View {
-        let paperBg = scheme == .dark ? Color(yy: YYRGBA(38, 35, 31)) : Color(yy: YYRGBA(244, 239, 230))
-        let paperEdge = scheme == .dark ? Color(yy: YYRGBA(56, 51, 44)) : Color(yy: YYRGBA(229, 222, 201))
-        let paperInk = scheme == .dark ? Color(yy: YYRGBA(234, 228, 218)) : Color(yy: YYRGBA(44, 41, 37))
-        let quotes = previewQuotes
-        let currentQuote = quotes[flipQuoteIndex % quotes.count]
-        let nextQuote = quotes[(flipQuoteIndex + 1) % quotes.count]
+        let dark = scheme == .dark
+        let paperBg = dark ? Color(yy: YYRGBA(38, 35, 31)) : Color(yy: YYRGBA(244, 239, 230))
+        let paperEdge = dark ? Color(yy: YYRGBA(56, 51, 44)) : Color(yy: YYRGBA(229, 222, 201))
+        let paperInk = dark ? Color(yy: YYRGBA(234, 228, 218)) : Color(yy: YYRGBA(44, 41, 37))
+        let quote = previewQuotes[flipQuoteIndex % previewQuotes.count]
+        let flipping = pageFlipping && !YYMotion.reduce
+        let pageShape = RoundedRectangle(cornerRadius: 16, style: .continuous)
 
-        return VStack(alignment: .leading, spacing: YYUI.s(14)) {
-            // Miniature stacked tactile book page — tap or swipe left to physically flip & hear your sound
+        return VStack(alignment: .leading, spacing: 14) {
             ZStack {
-                // Underlying next page peeking gently at bottom-right
-                VStack(alignment: .leading) {
-                    Spacer(minLength: 0)
-                    Text(nextQuote)
-                        .font(YYUI.serif(14))
-                        .lineSpacing(7)
-                        .foregroundStyle(paperInk.opacity(0.32))
-                        .lineLimit(2)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, YYUI.s(18))
-                .padding(.vertical, YYUI.s(16))
-                .frame(maxWidth: .infinity, minHeight: 174, alignment: .leading)
-                .background(paperBg.opacity(0.92), in: RoundedRectangle(cornerRadius: YYUI.s(16), style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: YYUI.s(16), style: .continuous)
-                        .strokeBorder(paperEdge, lineWidth: 0.8)
-                )
-                .padding(.top, 5)
-                .padding(.leading, 7)
+                Text("纸页落下，静气自生。下一段文字正在温柔等待。")
+                    .font(YYUI.serif(13))
+                    .lineSpacing(5)
+                    .foregroundStyle(paperInk.opacity(0.45))
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .background(paperBg, in: pageShape)
+                    .overlay(pageShape.strokeBorder(paperEdge, lineWidth: 0.8))
+                    .opacity(0.85)
+                    .padding(.top, 4)
+                    .padding(.leading, 8)
+                    .padding(.trailing, 2)
+                    .allowsHitTesting(false)
 
-                // Front flippable page
-                VStack(alignment: .leading, spacing: YYUI.s(12)) {
+                VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 6) {
                         Circle()
                             .fill(tint.fill)
@@ -1789,30 +1566,32 @@ struct CustomPageTurnSoundSheet: View {
                         Text(draftFromFile ? String(localized: "导入音频") : String(localized: "手边实录"))
                             .font(YYUI.font(11, .semibold))
                             .foregroundStyle(tint.accent)
-                        Spacer()
+                        Spacer(minLength: 8)
                         Text(PageTurnSoundStyleGrid.durationLabel(item.durationMs))
                             .font(YYUI.font(11))
                             .monospacedDigit()
                             .foregroundStyle(YYColor.t3)
                     }
 
-                    Text(currentQuote)
-                        .font(YYUI.serif(15))
-                        .lineSpacing(8)
+                    Text(quote)
+                        .font(YYUI.serif(14.5))
+                        .lineSpacing(6)
                         .foregroundStyle(paperInk)
-                        .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
-                        .contentTransition(.opacity)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 8)
 
-                    HStack(spacing: YYUI.s(10)) {
+                    Spacer(minLength: 8)
+
+                    HStack(spacing: 8) {
                         MiniPageWaveformView(
                             waveform: item.waveform,
                             trimStart: item.trimStart,
                             trimEnd: item.trimEnd,
                             playStartTime: playStartTime,
                             playDurationSec: playDurationSec,
-                            tint: tint
+                            tint: tint.accent
                         )
-                        .frame(width: 118, height: 18)
+                        .frame(width: 120, height: 18)
 
                         Spacer(minLength: 6)
 
@@ -1826,45 +1605,51 @@ struct CustomPageTurnSoundSheet: View {
                         .padding(.trailing, 14)
                     }
                 }
-                .padding(.horizontal, YYUI.s(18))
-                .padding(.top, YYUI.s(16))
-                .padding(.bottom, YYUI.s(14))
-                .frame(maxWidth: .infinity, minHeight: 174, alignment: .leading)
-                .background(paperBg, in: RoundedRectangle(cornerRadius: YYUI.s(16), style: .continuous))
+                .padding(.horizontal, 18)
+                .padding(.top, 16)
+                .padding(.bottom, 14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(paperBg, in: pageShape)
                 .overlay(alignment: .bottomTrailing) {
-                    PageCornerFold(size: 28, accent: tint.accent, dark: scheme == .dark)
-                        .clipShape(RoundedRectangle(cornerRadius: YYUI.s(16), style: .continuous))
-                        .allowsHitTesting(false)
+                    PageCornerFold(size: 30, accent: tint.accent, dark: dark)
                 }
-                .overlay(
-                    RoundedRectangle(cornerRadius: YYUI.s(16), style: .continuous)
-                        .strokeBorder(paperEdge, lineWidth: 0.8)
-                )
-                .shadow(
-                    color: Color(yy: YYRGBA(55, 42, 26, scheme == .dark ? 0.34 : (pageFlipping ? 0.16 : 0.08))),
-                    radius: pageFlipping ? 18 : 10,
-                    x: pageFlipping ? 8 : 0,
-                    y: pageFlipping ? 10 : 5
-                )
+                .overlay(pageShape.strokeBorder(paperEdge, lineWidth: 0.8))
+                .overlay(alignment: .trailing) {
+                    LinearGradient(
+                        colors: [tint.accent.opacity(0.05), .clear],
+                        startPoint: .trailing,
+                        endPoint: .leading
+                    )
+                    .frame(width: 16)
+                    .clipShape(pageShape)
+                    .allowsHitTesting(false)
+                }
+                .clipShape(pageShape)
+                .drawingGroup(opaque: false)
+                .shadow(color: Color(yy: YYRGBA(55, 42, 26, dark ? 0.40 : 0.10)), radius: 12, y: 8)
                 .rotation3DEffect(
-                    .degrees(pageFlipping && !YYMotion.reduce ? -22 : 0),
+                    .degrees(flipping ? -28 : 0),
                     axis: (x: 0, y: 1, z: 0),
                     anchor: .leading,
-                    perspective: 0.48
+                    perspective: 0.35
                 )
-                .offset(x: pageFlipping && !YYMotion.reduce ? -5 : 0)
-                .padding(.trailing, 7)
-                .padding(.bottom, 5)
+                .scaleEffect(flipping ? 0.985 : 1, anchor: .leading)
+                .offset(x: flipping ? -8 : 0)
+                .animation(pageFlipAnimation, value: pageFlipping)
+                .padding(.trailing, 6)
+                .padding(.bottom, 4)
             }
+            .frame(height: 176)
             .contentShape(.rect)
             .onTapGesture {
                 nameFocused = false
                 flipAndAudition(item)
             }
-            .gesture(
+            .simultaneousGesture(
                 DragGesture(minimumDistance: 18)
                     .onEnded { value in
-                        if value.translation.width < -22 {
+                        let dx = value.translation.width
+                        if dx < -28, abs(dx) > abs(value.translation.height) {
                             nameFocused = false
                             flipAndAudition(item)
                         }
@@ -1874,12 +1659,11 @@ struct CustomPageTurnSoundSheet: View {
             .accessibilityLabel(Text("点此试翻"))
             .accessibilityAddTraits(.isButton)
 
-            // Clean single-row editorial name field
-            HStack(spacing: YYUI.s(10)) {
+            HStack(spacing: 10) {
                 Text("音效名")
                     .font(YYUI.font(12))
                     .foregroundStyle(YYColor.t3)
-                TextField("", text: $draftName, prompt: Text("给音效起个名字").foregroundStyle(YYColor.t3))
+                TextField("", text: $draftName, prompt: Text("输入名称").foregroundStyle(YYColor.t3))
                     .textFieldStyle(.plain)
                     .font(YYUI.font(13.5, .semibold))
                     .foregroundStyle(YYColor.t1)
@@ -1895,24 +1679,78 @@ struct CustomPageTurnSoundSheet: View {
                     Button {
                         draftName = ""
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(YYUI.font(13.5))
-                            .foregroundStyle(YYColor.t3.opacity(0.6))
-                            .frame(width: 24, height: 24)
+                        Image(systemName: "xmark")
+                            .font(YYUI.font(9, .bold))
+                            .foregroundStyle(YYColor.t3)
+                            .frame(width: 18, height: 18)
+                            .background(YYColor.inset, in: Circle())
                             .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text("清空"))
                 }
             }
-            .padding(.horizontal, YYUI.s(14))
-            .frame(minHeight: YYUI.s(44))
-            .background(YYColor.card, in: RoundedRectangle(cornerRadius: YYUI.s(14), style: .continuous))
+            .padding(.horizontal, 14)
+            .frame(height: 44)
+            .background(YYColor.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: YYUI.s(14), style: .continuous)
-                    .strokeBorder(scheme == .dark ? Color.white.opacity(0.07) : YYColor.line, lineWidth: 0.6)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(dark ? Color.white.opacity(0.07) : YYColor.line, lineWidth: 0.6)
             )
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) {
+                    nameChip("真纸翻书", value: String(localized: "真纸翻书"))
+                    nameChip("轻敲桌面", value: String(localized: "轻敲桌面"))
+                    nameChip("书页沙沙", value: String(localized: "书页沙沙"))
+                    nameChip("清脆一响", value: String(localized: "清脆一响"))
+                }
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    discardDraft()
+                } label: {
+                    Text(draftFromFile ? String(localized: "重选") : String(localized: "重录"))
+                        .font(YYUI.font(13, .semibold))
+                        .foregroundStyle(YYColor.t2)
+                        .padding(.horizontal, 18)
+                        .frame(height: 42)
+                        .background(YYColor.card, in: Capsule())
+                        .overlay(Capsule().strokeBorder(YYColor.line, lineWidth: 0.7))
+                }
+                .buttonStyle(YYPressStyle(scale: 0.97))
+
+                Button {
+                    saveDraft(item)
+                } label: {
+                    Text("保存并使用")
+                        .font(YYUI.font(13.5, .semibold))
+                        .foregroundStyle(Color.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 42)
+                        .background(tint.accent, in: Capsule())
+                }
+                .buttonStyle(YYPressStyle(scale: 0.97))
+            }
         }
+    }
+
+    private func nameChip(_ title: LocalizedStringKey, value: String) -> some View {
+        let on = draftName == value
+        return Button {
+            draftName = value
+            nameFocused = false
+        } label: {
+            Text(title)
+                .font(YYUI.font(11.5, on ? .semibold : .medium))
+                .foregroundStyle(on ? tint.accent : YYColor.t2)
+                .padding(.horizontal, 11)
+                .frame(height: 28)
+                .background(on ? tint.accentSoft : YYColor.card, in: Capsule())
+                .overlay(Capsule().strokeBorder(on ? tint.edge : YYColor.line, lineWidth: 0.6))
+        }
+        .buttonStyle(YYPressStyle(scale: 0.96))
     }
 
     // MARK: Saved List (Capture Mode)
@@ -1992,24 +1830,22 @@ struct CustomPageTurnSoundSheet: View {
         playDurationSec = sec
         playStartTime = Date()
 
-        if animatePage {
-            withAnimation(.spring(duration: 0.24, bounce: 0.06)) {
-                pageFlipping = true
-            }
+        if animatePage, !YYMotion.reduce {
+            pageFlipping = true
+        } else if animatePage {
+            flipQuoteIndex += 1
         }
         playTask = Task {
-            if animatePage {
-                try? await Task.sleep(for: .milliseconds(190))
+            if animatePage, !YYMotion.reduce {
+                try? await Task.sleep(for: .milliseconds(230))
                 guard !Task.isCancelled else { return }
-                withAnimation(YYMotion.quick) {
-                    flipQuoteIndex += 1
-                }
-                withAnimation(.spring(duration: 0.30, bounce: 0)) {
-                    pageFlipping = false
-                }
+                flipQuoteIndex += 1
+                pageFlipping = false
+                let remain = max(40, item.durationMs - 230)
+                try? await Task.sleep(for: .milliseconds(remain))
+            } else {
+                try? await Task.sleep(for: .milliseconds(max(40, item.durationMs)))
             }
-            let remain = max(60, item.durationMs + 80 - (animatePage ? 190 : 0))
-            try? await Task.sleep(for: .milliseconds(remain))
             guard !Task.isCancelled else { return }
             playStartTime = nil
         }
@@ -2088,87 +1924,84 @@ struct CustomPageTurnSoundSheet: View {
     }
 }
 
-/// Delicate 28-bar hairline waveform embedded on the miniature preview book page.
+/// 32-bar waveform drawn in one Canvas. The timeline pauses when nothing is playing,
+/// so scrolling the sheet does not rebuild bars.
 private struct MiniPageWaveformView: View {
     let waveform: [Float]
     let trimStart: Double
     let trimEnd: Double
     let playStartTime: Date?
     let playDurationSec: Double
-    let tint: YYTint
+    let tint: Color
 
-    private var activeBars: [Float] {
-        guard !waveform.isEmpty else { return Array(repeating: 0.25, count: 28) }
+    private var bars: [CGFloat] {
+        let outCount = 32
+        guard !waveform.isEmpty else { return Array(repeating: 0.25, count: outCount) }
         let n = waveform.count
         let s = max(0, min(n - 1, Int((trimStart * Double(n)).rounded(.down))))
         let e = max(s + 1, min(n, Int((trimEnd * Double(n)).rounded(.up))))
-        let slice = Array(waveform[s ..< e])
-        let outCount = 28
+        let slice = waveform[s ..< e]
+        let sliceCount = slice.count
         return (0 ..< outCount).map { i in
-            let idx = min(slice.count - 1, (i * slice.count) / outCount)
-            return slice[idx]
+            let idx = slice.index(slice.startIndex, offsetBy: min(sliceCount - 1, (i * sliceCount) / outCount))
+            return CGFloat(slice[idx])
         }
     }
 
     var body: some View {
-        let bars = activeBars
-        if let playStartTime {
-            TimelineView(.animation) { context in
+        let samples = bars
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: playStartTime == nil)) { context in
+            let progress: Double? = {
+                guard let playStartTime else { return nil }
                 let elapsed = context.date.timeIntervalSince(playStartTime)
-                let p = min(1.0, max(0.0, elapsed / max(0.06, playDurationSec)))
-                drawBars(bars, progress: p)
-            }
-        } else {
-            drawBars(bars, progress: nil)
-        }
-    }
-
-    private func drawBars(_ bars: [Float], progress: Double?) -> some View {
-        let count = bars.count
-        return HStack(spacing: 2) {
-            ForEach(0 ..< count, id: \.self) { i in
-                let pos = (Double(i) + 0.5) / Double(count)
-                let edge = sin(Double.pi * pos)
-                let amp = CGFloat(bars[i]) * CGFloat(0.42 + 0.58 * edge)
-                let lit = progress.map { pos <= $0 } ?? false
-                Capsule()
-                    .fill(tint.accent.opacity(lit ? 1.0 : 0.34))
-                    .frame(width: 2, height: max(3, amp * 16))
+                return min(1, max(0, elapsed / max(0.06, playDurationSec)))
+            }()
+            Canvas { ctx, size in
+                let count = samples.count
+                guard count > 0, size.width > 1, size.height > 1 else { return }
+                let step = size.width / CGFloat(count)
+                let barW = min(2.4, max(1.6, step * 0.42))
+                for i in 0 ..< count {
+                    let pos = (Double(i) + 0.5) / Double(count)
+                    let edge = sin(Double.pi * pos)
+                    let amp = samples[i] * CGFloat(0.45 + 0.55 * edge)
+                    let bh = max(3, amp * (size.height - 4))
+                    let cx = (CGFloat(i) + 0.5) * step
+                    let lit = progress.map { pos <= $0 } ?? false
+                    let rect = CGRect(x: cx - barW / 2, y: (size.height - bh) / 2, width: barW, height: bh)
+                    ctx.fill(Path(roundedRect: rect, cornerRadius: barW / 2), with: .color(tint.opacity(lit ? 1 : 0.34)))
+                }
             }
         }
         .allowsHitTesting(false)
     }
 }
 
-/// Subtle bottom-right curled page-corner hint for the miniature preview book page.
+/// Bottom-right dog-ear from the style-3 prototype (30pt, 135° fold, 8pt crease radius).
 private struct PageCornerFold: View {
     let size: CGFloat
     let accent: Color
     let dark: Bool
 
     var body: some View {
-        Canvas { ctx, canvasSize in
-            let w = canvasSize.width
-            let h = canvasSize.height
-            var fold = Path()
-            fold.move(to: CGPoint(x: w - size, y: h))
-            fold.addLine(to: CGPoint(x: w, y: h - size))
-            fold.addLine(to: CGPoint(x: w, y: h))
-            fold.closeSubpath()
-
-            let grad = Gradient(colors: [
-                accent.opacity(dark ? 0.24 : 0.14),
-                dark ? Color.white.opacity(0.08) : Color.white.opacity(0.72),
-            ])
-            ctx.fill(
-                fold,
-                with: .linearGradient(
-                    grad,
-                    startPoint: CGPoint(x: w - size, y: h - size),
-                    endPoint: CGPoint(x: w, y: h)
-                )
-            )
-        }
+        LinearGradient(
+            stops: [
+                .init(color: .clear, location: 0.48),
+                .init(color: accent.opacity(dark ? 0.28 : 0.14), location: 0.50),
+                .init(color: Color.white.opacity(dark ? 0.22 : 0.65), location: 1),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
         .frame(width: size, height: size)
+        .clipShape(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 8,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: 0
+            )
+        )
+        .allowsHitTesting(false)
     }
 }
