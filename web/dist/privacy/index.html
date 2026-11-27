@@ -4,8 +4,8 @@
   data-lang="zh"
   data-title-zh="语阅隐私说明 · Yuyue Privacy Policy"
   data-title-en="Yuyue Privacy Policy · 语阅隐私说明"
-  data-desc-zh="语阅不收集、不保存、不出售、不分享任何关于你的数据。没有账号、没有统计、没有追踪、没有广告。"
-  data-desc-en="Yuyue (语阅) collects no data. No accounts, no analytics, no tracking, no ads."
+  data-desc-zh="语阅没有账号、广告或跨应用追踪，书和笔记只留在你自己的设备上；匿名功能形态统计可随时关闭，应用内反馈仅发给开发者、不公开且不收邮箱。"
+  data-desc-en="Yuyue (语阅) has no accounts, no ads, and no cross-app tracking. Your books and notes stay on your own device; optional anonymous usage-shape analytics can be turned off anytime."
 >
 <head>
   <meta charset="utf-8">
@@ -14,7 +14,7 @@
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1A1613">
   <meta name="color-scheme" content="light dark">
   <title>语阅隐私说明 · Yuyue Privacy Policy</title>
-  <meta name="description" content="Yuyue (语阅) collects no data. No accounts, no analytics, no tracking, no ads.">
+  <meta name="description" content="Yuyue (语阅) has no accounts, no ads, and no cross-app tracking. Your books and notes stay on your own device; optional anonymous usage-shape analytics can be turned off anytime.">
   <link rel="manifest" href="/site.webmanifest">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23FBFAF7'/%3E%3Ctext x='32' y='42' font-size='32' text-anchor='middle' font-family='serif' font-weight='700' fill='%231C1D20'%3E%E9%98%85%3C/text%3E%3Crect x='20' y='50' width='24' height='2.5' rx='1.2' fill='%232B4C7E'/%3E%3C/svg%3E">
   <link rel="apple-touch-icon" href="/images/icon-256.png">
@@ -103,8 +103,8 @@
     <div class="doc-head">
       <h1><span class="i18n-zh">语阅隐私说明</span><span class="i18n-en">Yuyue Privacy Policy</span></h1>
       <p class="doc-date">
-        <span class="i18n-zh">生效日期：2026 年 11 月 23 日</span>
-        <span class="i18n-en">Effective: November 23, 2026</span>
+        <span class="i18n-zh">生效日期：2026 年 11 月 27 日</span>
+        <span class="i18n-en">Effective: November 27, 2026</span>
       </p>
     </div>
 
@@ -120,7 +120,7 @@
       </nav>
       <section class="doc">
         <h2 id="zh-short">一句话</h2>
-        <p>语阅是一款免费的读书、听书软件，没有自己的服务器，不收集、不保存、不出售、不分享任何关于你的数据。没有账号、没有统计、没有追踪、没有广告。</p>
+        <p>语阅是一款免费的本地读书与听书软件，没有注册登录、广告或跨应用追踪，也不向任何内容服务器上传你的书库。为了解功能使用情况，应用默认开启仅记录功能使用形态的匿名统计（不关联个人身份，绝不收集书名、笔记、划线或搜索词），可随时在「关于」页一键关闭。</p>
 
         <h2 id="zh-where">数据存在哪</h2>
         <p>书、进度、划线、想法、生词、播客和设置都存在你自己的设备上。打开同步时，它们只在你的设备和你自己选的网盘（iCloud 云盘或 WebDAV，Google Drive 即将支持）之间传，开发者收不到，也看不到。</p>
@@ -135,15 +135,16 @@
           <li><b>克隆声音</b>：本机克隆全程在设备上完成、不上传录音；仅在你主动接上自己的 ElevenLabs 账号克隆时，那段录音才会传到你自己的账号。</li>
           <li><b>笔记导出</b>：填了 Notion、flomo 或新枝的令牌或链接时，你发出去的划线直接发给那个服务。</li>
           <li><b>按需模型、声音包与字体</b>：用到有声书对齐、本机离线语音或下载字体时，会从 GitHub Releases、魔搭（ModelScope）或 Hugging Face 下载对齐模型、离线语音模型、内置声音包和开源字体（字体预览样字按需从 Google Fonts 加载）；运行全在你的设备上完成，原文与录音不出本机。</li>
-          <li><b>应用内反馈</b>（仅在你主动提交时）：你写的反馈、分类、可选的设备与版本信息及公开截图会通过 ntfy.sh（关闭 Firebase 推送）中转为公开的 GitHub Issue；不收集邮箱，非图片附件和未公开的截图会在发送前用开发者公钥在本机加密。</li>
-          <li><b>检查更新</b>（从 GitHub 下载安装的版本，默认开，可在设置里关掉）：每天从 GitHub 取一个小文件，看哪一版最新，不带任何关于你和设备的信息。App Store 和 Google Play 的版本不查，由商店更新。</li>
+          <li><b>应用内反馈</b>（仅在你主动提交时）：通过 AirFeedback 单通道直发给开发者，正文、可选的去 EXIF 截图与可选的基础设备/版本信息<b>仅开发者可见、不会公开</b>，也不收集邮箱或联系方式。Apple 端同时支持基于系统 MetricKit 的崩溃诊断上报以协助定位闪退。</li>
+          <li><b>匿名使用统计</b>（可在「关于」页随时关闭）：仅记录功能使用形态（如页面与功能开关的枚举值），不建立个人档案、不关联身份，绝不收集书名、作者、文件名、笔记、划线、搜索词或网址。</li>
+          <li><b>检查更新</b>（直接下载安装的版本，默认开，可在设置里关掉）：定期从国内镜像或 GitHub Releases 获取更新元数据（Mac、Windows、Android 均支持），不携带任何关于你和书库的信息。应用商店版本不自查，由商店更新。</li>
         </ul>
 
         <h2 id="zh-third">第三方</h2>
-        <p>语阅里没有任何统计、广告或追踪代码。上面这些请求都从你的设备直接发给你选的服务商，适用它们自己的隐私条款。</p>
+        <p>语阅不包含任何广告或跨应用追踪代码。除上述可随时关闭的匿名功能形态统计与你主动提交的私密反馈外，其余所有网络请求都从你的设备直接发给你自己选定的服务商，适用它们自己的隐私条款。</p>
 
         <h2 id="zh-keys">Key 和密码</h2>
-        <p>你填的 Key、令牌和密码只存在设备上，不同步、不上传。iPhone 和 iPad 存在钥匙串里，Android 存在由系统密钥库加密的存储里，Mac 存在 App 沙盒文件夹里的一个明文文件中，只有你的用户账号能读。</p>
+        <p>你填的 Key、令牌和密码只存在设备上，不同步、不上传。iPhone 和 iPad 存在系统钥匙串里，Android 存在由系统密钥库加密的存储里，Windows 使用 DPAPI（当前用户范围）加密保存在本机，Mac 存在 App 沙盒文件夹里的本机权限文件中，只有当前系统账号可读。</p>
 
         <h2 id="zh-ondevice">在设备上完成的</h2>
         <p>有声书对齐、播客本地转写与语音插话提问时的语音转文字，以及翻译、本机和系统声音朗读、查词，都在你的设备上完成。</p>
@@ -155,7 +156,7 @@
         <p>在设置里关掉同步、移除远程书库或播客订阅，或删掉 Key、令牌，语阅就立刻不再连那个服务。</p>
 
         <h2 id="zh-children">儿童</h2>
-        <p>语阅不收集任何人的数据，包括儿童。</p>
+        <p>语阅不收集任何人的个人身份信息或阅读内容，包括儿童。</p>
 
         <h2 id="zh-contact">联系</h2>
         <p>有问题请写信：<a href="mailto:yuyue.app@icloud.com">yuyue.app@icloud.com</a></p>
@@ -174,7 +175,7 @@
       </nav>
       <section class="doc">
         <h2 id="en-short">In short</h2>
-        <p>Yuyue (语阅) is a free reading and listening app with no servers of its own. It does not collect, store, sell or share any data about you. There are no accounts, no analytics, no tracking and no ads.</p>
+        <p>Yuyue (语阅) is a free local reading and listening app with no accounts, no ads, no cross-app tracking, and no content servers of its own. To understand how features are used, the app includes optional anonymous usage-shape analytics (never linked to identity; never collecting book titles, notes, highlights, or search queries), which you can turn off anytime in About.</p>
 
         <h2 id="en-where">Where your data lives</h2>
         <p>Your books, reading progress, highlights, notes, word lists, podcasts and settings are stored on your own device. If you turn on sync, they travel only between your devices and the storage you choose yourself — iCloud Drive or a WebDAV server (Google Drive coming soon). The developer never receives or sees them.</p>
@@ -189,15 +190,16 @@
           <li><b>Voice cloning</b> with your own ElevenLabs account: the short recording of you reading is kept on your device and sent to that account only when you explicitly clone a voice there; on-device voice cloning never uploads audio.</li>
           <li><b>Note export</b> to Notion, flomo or Xinzhi (新枝) with your own token or webhook: the highlights you send go directly to that service.</li>
           <li><b>On-demand models, voice packs and fonts</b>: alignment models, offline voice models, the built-in voice pack and optional open-source fonts are downloaded from GitHub Releases, ModelScope, or Hugging Face when you use those features (font preview samples load from Google Fonts on demand). They run locally on your device; your books and recordings never leave the device.</li>
-          <li><b>In-app feedback</b> (only when you choose to send it): your message, category, optional device/app info and any public screenshots are sent via ntfy.sh (with Firebase push disabled) and posted as a public GitHub Issue. No email or contact info is collected; non-image attachments and screenshots you keep private are sealed on your device with the developer's public key before sending.</li>
-          <li><b>Update checks</b> (versions downloaded from GitHub, on unless you turn it off in Settings): once a day the app reads a small file from GitHub saying which version is newest, sending nothing about you or your device. App Store and Google Play versions don't check; the store updates them.</li>
+          <li><b>In-app feedback</b> (only when you choose to send it): sent privately to the developer over AirFeedback; your message, optional EXIF-stripped screenshots, and optional basic device/app info are <b>never made public</b> and no email address is collected. Apple builds also support system MetricKit crash diagnostics to help fix crashes.</li>
+          <li><b>Anonymous usage analytics</b> (optional; switch off anytime in About): records closed-enum usage shapes only—never creates person profiles, never links to your identity, and never transmits book titles, authors, filenames, notes, highlights, search queries, or URLs.</li>
+          <li><b>Update checks</b> (direct-download builds for Mac, Windows, and Android; on by default, switchable in Settings): periodically fetches release metadata from the China mirror or GitHub Releases without sending personal or library data. App Store and Google Play builds leave updates to the store.</li>
         </ul>
 
         <h2 id="en-third">Third parties</h2>
-        <p>Yuyue contains no analytics, advertising or tracking code. The requests above go from your device straight to the provider you picked; their own privacy terms apply.</p>
+        <p>Yuyue contains no advertising or cross-app tracking code. Aside from the opt-out anonymous usage-shape analytics and private feedback you choose to submit, every other network request goes straight from your device to the provider you picked, under their own privacy terms.</p>
 
         <h2 id="en-keys">Keys and passwords</h2>
-        <p>Keys, tokens and passwords you enter stay on your device and are never synced or uploaded. On iPhone and iPad they are kept in the keychain, on Android in a store encrypted by the system's keystore, and on the Mac in a plain-text file in the app's sandbox folder, readable only by your user account.</p>
+        <p>Keys, tokens and passwords you enter stay on your device and are never synced or uploaded. On iPhone and iPad they are kept in the Keychain, on Android in a store encrypted by the system Keystore, on Windows encrypted locally with Windows DPAPI (CurrentUser scope), and on Mac in a local file inside the app’s sandbox folder readable only by your user account.</p>
 
         <h2 id="en-ondevice">On-device features</h2>
         <p>Speech recognition (for audiobook alignment, local podcast transcription and spoken podcast Q&amp;A), translation, read-aloud with local and system voices and the dictionary all run on your device.</p>
@@ -209,7 +211,7 @@
         <p>Turn off sync, remove a remote library or podcast feed, or delete a key or token in the app's settings, and Yuyue stops contacting that service right away.</p>
 
         <h2 id="en-children">Children</h2>
-        <p>Yuyue collects no data from anyone, including children.</p>
+        <p>Yuyue collects no personal information or reading content from anyone, including children.</p>
 
         <h2 id="en-contact">Contact</h2>
         <p>Questions: <a href="mailto:yuyue.app@icloud.com">yuyue.app@icloud.com</a></p>
