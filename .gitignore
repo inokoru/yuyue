@@ -39,6 +39,7 @@ android/keystore.properties
 *.keystore
 /build/window-catalog/
 /build/snapshot-catalog/
+/build/readme-shots/
 
 # Release files
 /dist/

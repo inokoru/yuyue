@@ -64,6 +64,8 @@ python3 scripts/snapshot-gallery.py
 
 全窗口图册的网页还是 `python3 scripts/window-gallery.py`。
 
+README 和宣传短片用的是另一套，不跟上面的回归图混：各端一条命令，隔离演示书库，见 [readme-screenshots.md](readme-screenshots.md)。
+
 ### Apple
 
 在 Mac 上，先按 README 编过核心和书页，再生成工程。模拟器和 macOS 各跑各的，图不要混用：换了一台 Mac、换了一个模拟器，像素会对不上，在那台机器上重录。
