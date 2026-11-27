@@ -77,7 +77,7 @@ perf(core): find anchors by longest increasing subsequence
 ## 一条提交多大
 
 - **一件事一条**。顺手修的别的毛病，另提一条。
-- **两端一起改**。同一个功能的核心、Apple、Android 放在同一条提交里，不要一端一条。
+- **各端一起改**。同一个功能的核心、Apple、Android、Windows 尽量放在同一条提交里，不要长期只改一端；暂缓端同步记入 `docs/parity.yaml`。
 - **每条都能编过、测试都过**。往回找毛病（`git bisect`）时，每一步都要能用。
 - 格式化、改名、挪文件单独一条，不和逻辑改动混在一起。
 

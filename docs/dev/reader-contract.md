@@ -10,7 +10,7 @@ Division of labour:
   inside the text (the ink line under the sentence being read, later highlights), and reports
   geometry to native. It never animates page turns and never parses books.
 - **Native** owns everything that moves: page turns (iOS: the WebView's own `UIScrollView`
-  with paging; Mac/Android: CSS scroll snapping inside the WebView for now), chapter-to-chapter
+  with paging; Mac/Android/Windows: CSS scroll snapping inside the WebView), chapter-to-chapter
   paging, gestures, floating cards, audio.
 
 ## 1. URLs
@@ -69,11 +69,13 @@ paper default in the reader CSS: `auto` or an absent variable means "use the pap
 | `data-yy-eink` | `0` `1` or absent | device-local 墨水屏模式: pure white/black high-contrast surface without grain, black mark lines, no animation; overrides synced paper & 我的纸 |
 | `data-yy-eink-gray` | `0` `1` or absent | grayscale images/videos while `data-yy-eink="1"` (off on colour e-ink screens) |
 | `data-yy-mode` | `paginated` `scrolled` | 翻页 or 滚动 |
-| `data-yy-paging` | `native` `snap` | `native`: the platform scroll view pages (iOS), so the reader must not add scroll snapping or animate scrolling. `snap`: the reader adds CSS scroll snapping and the JS page API scrolls smoothly (Mac, Android) |
+| `data-yy-paging` | `native` `snap` | `native`: the platform scroll view pages (iOS), so the reader must not add scroll snapping or animate scrolling. `snap`: the reader adds CSS scroll snapping and the JS page API scrolls smoothly (Mac, Android, Windows) |
 | `data-yy-justify` | `auto` `0` `1` | 两端对齐 |
 | `data-yy-indent` | `auto` `0` `1` | 首行缩进 2em |
 | `data-yy-compress` | `0` `1` | 中文标点挤压 (applies the `pz-*` classes below) |
 | `data-yy-motion` | `full` `reduced` | `reduced`: no ink-line animation (墨水屏模式, system reduced motion, 沉浸 option) |
+| `data-yy-tint` | `blue` `ink` or absent | accent ink palette override (墨蓝 / 墨黑) |
+| `data-yy-ui` | `zh` `en` | UI language used for reader-generated labels (set via `yy.setUi`) |
 | `--yy-fs` | px | font size (always set) |
 | `--yy-lh` | number | line height |
 | `--yy-ps` | em | paragraph spacing (margin after a paragraph) |
@@ -107,7 +109,7 @@ paper default in the reader CSS: `auto` or an absent variable means "use the pap
 
 | Call | Effect |
 |---|---|
-| `applySettings(s)` | `s` has the keys of §2 in camelCase (`paper`, `paperStyle`, `texture`, `eink`, `einkGray`, `mode`, `paging`, `justify`, `indent`, `compress`, `motion`, `fontSize`, `lineHeight`, `paragraphSpacing`, `font`, `margin`, `top`, `bottom`, `cols`); missing keys keep their current value, `null` means paper default. Re-lays out, keeps the first visible sentence in view, posts `layout` |
+| `applySettings(s)` | `s` has the keys of §2 in camelCase (`paper`, `paperStyle`, `texture`, `eink`, `einkGray`, `tint`, `mode`, `paging`, `justify`, `indent`, `compress`, `motion`, `fontSize`, `lineHeight`, `paragraphSpacing`, `font`, `margin`, `top`, `bottom`, `cols`); missing keys keep their current value, `null` means paper default. Re-lays out, keeps the first visible sentence in view, posts `layout` |
 | `scrollToPage(p, animated)` | go to page `p`. In `native` paging always instant (native animates by itself) |
 | `nextPage(animated)` / `prevPage(animated)` | returns `false` (and does nothing) at the last/first page, so native can move to the next/previous section |
 | `scrollToSentence(s, animated)` | go to the page where sentence `s` starts (scrolled mode: bring it to the top third); returns the page |
@@ -117,9 +119,18 @@ paper default in the reader CSS: `auto` or an absent variable means "use the pap
 | `setPlaying(playing)` | pause/resume the ink line |
 | `setMarks(list)` | draw the section's highlights (§8): `[{id, start: {s, o}, end: {s, o}, style, note}]` |
 | `setHits(query, current)` | mark every place `query` turns up; `current` (`{s, nth}`) gets the solid colour; returns the count. `null` clears |
+| `setSource(s)` | highlight the cited source sentence `s` jumped from Book Companion; `null` clears |
+| `setUi(ui)` | set reader UI language (`'zh'` or `'en'`) for reader-rendered labels |
+| `setLookup(on)` / `setLooking(start, end)` | toggle tap-to-look-up mode / highlight the currently looked-up word span |
+| `setFlag(first, last)` | audiobook alignment: draw an amber marker beside paragraphs spanning sentences `first..last` (`null` clears) |
+| `setUnread(list, tag)` | audiobook alignment: dim sentences not spoken in the recording and show `tag` after each run (`null` clears) |
+| `setVocab(words)` / `setGlosses(list)` | underline saved vocabulary words / render interlinear glosses (`[{form, gloss}]`) |
+| `paragraphs()` | return paragraph metadata for paragraph-level translation |
+| `setTranslations(list, only)` / `setTranslationOnly(only)` | render bilingual or translation-only paragraphs (`[{last, text, lang?}]`) and switch between bilingual / translation-only modes |
 | `clearSelection()` / `select(start, end)` | drop the text selection / select a range (a tapped highlight) |
 | `markRect(id)` | where a highlight is drawn on this page (`{x, y, width, height}` or null) |
 | `setBubbles(lines)` | 气泡模式: `lines` = core's `section_bubbles` (`[{first, last, start, end, who, avatar, color, right}]`; `start`/`end` in characters into sentence `first`). Each quote becomes `div.yy-bq` (avatar, a name line, the bubble); narration stays a paragraph (`.yy-bn`); short narration that only says who speaks (“宝钗因笑道：”) moves into the name line. Every sentence keeps its text and `data-s` (fragments split where a quote starts or ends), so ink, marks and taps are unchanged. A quote that runs out of its paragraph stays text. `null` puts the section back as it came. Re-lays out and keeps the first visible sentence |
+| `relayout()` | trigger a manual re-layout keeping the current reading anchor |
 
 ## 5. Messages (reader → native)
 

@@ -1,4 +1,6 @@
-# 反馈按需触发器（Cloudflare Worker）
+# 反馈按需触发器（Cloudflare Worker · 旧版归档）
+
+> **注意（已停用）**：Apple、Android 与 Windows 客户端已统一迁移至 **AirFeedback** 单通道直连方案，本目录下的 `ntfy.sh → Cloudflare Worker → GitHub Actions` 中转脚本目前处于**未启用状态**，仅作归档参考。当前生效的反馈与崩溃上报架构见 [docs/dev/feedback.md](../../docs/dev/feedback.md)。
 
 GitHub Actions 原生的 `on.schedule` 在私有仓库上经常延迟 4～8 小时甚至静默丢弃，超过 `ntfy.sh` 附件 3 小时的留存时间。
 

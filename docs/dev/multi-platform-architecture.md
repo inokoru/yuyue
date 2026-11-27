@@ -27,7 +27,7 @@
 
 ### 工具选型说明
 
-- **为什么第 4 层选 Midscene 而不是 Maestro + FlaUI + XCUITest**：Maestro 不支持 Windows WinUI 桌面端，强行拆多套工具维护成本高；Midscene（`@midscene/cli`）内置 `@midscene/computer` / `@midscene/android` / `@midscene/ios` / `@midscene/web`，无需先在三端统一无障碍 ID，可直接把 [testing.md](testing.md) 的主线写成一份共享自然语言剧本，并对中文界面友好、自带截图 HTML 报告。因其每次调用视觉模型有耗时与费用，**只用于 6 条核心主线验收**，细节与边界逻辑全部交给第 2、3、5 层确定性测试。
+- **为什么第 4 层选 Midscene 而不是 Maestro + FlaUI + XCUITest**：Maestro 不支持 Windows WinUI 桌面端，强行拆多套工具维护成本高；Midscene（`@midscene/cli`）内置 `@midscene/computer` / `@midscene/android` / `@midscene/ios` / `@midscene/web`，无需先在三端统一无障碍 ID，可直接把 [testing.md](testing.md) 的主线写成一份共享自然语言剧本，并对中文界面友好、自带截图 HTML 报告。因其每次调用视觉模型有耗时与费用，**只用于 8 套核心主线验收**，细节与边界逻辑全部交给第 2、3、5 层确定性测试。
 - **截图快照（辅助）**：Apple 已有 `YuyueSnapshotTests`，Android 已有 Compose Preview Screenshot Testing，Playwright 已有 `toHaveScreenshot`；截图比对只用于各端与自己上一版防回归，不要求三端像素相同。
 - **流程辅助（可选）**：`pstack` 的"验证技能 / 拿出真实运行证据再汇报"以及 Spec Kit / OpenSpec 的规格驱动思想，可用于约束 AI 辅助开发过程，但**最终兜底以本仓库的五层自动化校验和 CI 门禁为准**。
 
@@ -83,8 +83,8 @@
 - Windows（`ReaderBridgeContractTests.cs`）、Apple（`ReaderBridgeContractTests.swift`）、Android（`ReaderBridgeContractTest.kt`）各自校验规范消息样例。
 
 ### 第 4 层：Midscene 跨端主线测试
-- 共享剧本位于 `e2e/midscene/scenarios/`（6 条主线、70 步、22 个 `aiAssert`），与 [testing.md](testing.md) 和 [docs/parity.yaml](../parity.yaml) 一一对应。
-- `e2e/midscene/scripts/run-midscene.mjs` 按目标平台渲染 `@midscene/cli` YAML，在 Windows 上自动以 `Yuyue.exe --library <临时目录>` 拉起隔离实例并在结束时清理，绝不触碰真实书库。
+- 共享剧本位于 `e2e/midscene/scenarios/`（8 套共享剧本、101 步、32 个 `aiAssert`），覆盖 Windows / macOS / Android / iOS / Web 五端，与 [testing.md](testing.md) 和 [docs/parity.yaml](../parity.yaml) 一一对应。
+- `e2e/midscene/scripts/run-midscene.mjs` 按目标平台渲染 `@midscene/cli` YAML，在 Windows 上自动以 `Yuyue.exe --library <临时目录>`、在 macOS 上以 `-debugLibrary <临时目录>` 拉起隔离实例并在结束时清理，绝不触碰真实书库；Windows 端另配有发版前专项视觉套件 [tests/midscene/](../../tests/midscene/README.md)（6 组 17 条用例）。
 - `e2e/midscene/scripts/validate-flows.mjs` 在 CI 离线校验所有剧本语法、`parity_ids`、`fixtures` 与断言完整性（不消耗模型额度）。
 
 ### 第 5 层：WebDAV 同步模拟与旧书库兼容
@@ -93,16 +93,16 @@
 
 ---
 
-## 五、代码级审计基线与缺口清零记录（2026-11-25）
+## 五、代码级审计基线与缺口清零记录（最近核对：2026-11-27）
 
-运行 `node scripts/audit-api-parity.mjs` 得到的全仓覆盖变化（首轮审计 → 缺口补齐后）：
+运行 `node scripts/audit-api-parity.mjs` 与 `node scripts/check-parity.mjs` 得到的全仓覆盖现状：
 
 | 维度 | Apple | Android | Windows |
 |---|---:|---:|---:|
-| `YuyueCore` UniFFI（271 个导出方法） | 261 / 271 | 253 → **257 / 271** | 228 → **257 / 271** |
-| 书页 `window.yy.*`（25 个接口） | 24 / 25 | 19 / 25 | 25 / 25 |
+| `YuyueCore` UniFFI（272 个导出方法） | 261 / 272 | 257 / 272 | 257 / 272 |
+| 书页 `window.yy.*`（26 个接口） | 25 / 26 | 20 / 26 | 26 / 26 |
 | 桥接消息（11 种 Schema 类型） | 11 / 11 | 9 / 11 | 11 / 11 |
-| [docs/parity.yaml](../parity.yaml)（31 项功能） | 30 done / 1 partial | **29 done** / 1 partial / 1 N/A | **27 done** / 3 partial / 1 N/A |
+| [docs/parity.yaml](../parity.yaml)（31 项功能） | mac 30 done / 1 partial；ios 29 done / 1 partial / 1 N/A | 29 done / 1 partial / 1 N/A | 27 done / 3 partial / 1 N/A |
 
 已全部补齐并入库的原审计缺口（`[A K -]` 缺口清零，Android 功能型 `[A - W]` 缺口清零）：
 

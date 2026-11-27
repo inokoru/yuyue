@@ -24,13 +24,17 @@
 say -v Tingting -f fixtures/books/beiying.txt -o /tmp/beiying.m4a --file-format=m4af
 ```
 
-**不要用自己的真书库测。** Mac 调试版可以指定一个临时书库：
+**不要用自己的真书库测。** Mac 与 Windows 都可以指定一个临时书库（空文件夹就是新装的样子）：
 
 ```sh
+# Mac（调试版）
 open -n <调试版 .app 路径> --args -debugLibrary <一个空文件夹>
+
+# Windows（Debug / Release 均支持）
+Yuyue.exe --library <一个空文件夹>
 ```
 
-空文件夹就是新装的样子。Android 用模拟器或测试机，文件用 `adb push <文件> /sdcard/Download/` 推进去再从 App 里导入。
+Android 用模拟器或测试机，文件用 `adb push <文件> /sdcard/Download/` 推进去再从 App 里导入。跨端自动化主线验收另见 [e2e/midscene/README.md](../../e2e/midscene/README.md) 与 Windows 正式版视觉套件 [tests/midscene/README.md](../../tests/midscene/README.md)。
 
 ## 界面快照
 
@@ -101,7 +105,7 @@ cd android
 
 Android Studio 里，`@PreviewTest` 旁边的运行按钮也能录、也能比。
 
-## 一、读书（Mac / Android / iPhone 都要）
+## 一、读书（Mac / Windows / Android / iPhone 都要）
 
 | # | 做什么 | 应该 |
 |---|---|---|
@@ -123,7 +127,8 @@ Android Studio 里，`@PreviewTest` 旁边的运行按钮也能录、也能比�
 
 平台特有的：
 
-- **Mac**：⌘W 关掉所有窗口后点程序坞图标，书架回来；从访达双击 EPUB 能打开；菜单栏图标能点开。改了书架、阅读条、设置或 App 自己画的弹层，按下面「界面快照」重录 PNG 对着看。系统权限框、Sparkle 安装窗、网页书页仍跑 `scripts/window-catalog.sh`。
+- **Mac**：⌘W 关掉所有窗口后点程序坞图标，书架回来；从访达双击 EPUB 能打开；菜单栏图标能点开。改了书架、阅读条、设置或 App 自己画的弹层，按上面「界面快照」重录 PNG 对着看。系统权限框、Sparkle 安装窗、网页书页仍跑 `scripts/window-catalog.sh`。
+- **Windows**：从资源管理器双击 `.epub` / `.mobi` 能打开；切换深浅色与中英文后书架、阅读页、设置页无截断与对比度问题；关闭重开后上次书架标签与阅读位置完整恢复；发版前建议同时跑完 `tests/midscene`（`pnpm run test:release`）。
 - **Android**：双击屏幕左右边缘进出沉浸阅读；音量键翻页；预测式返回和系统返回手势回到上一层，不直接退出；横竖屏和分屏版面不乱。
 - **iPhone**：装好后先彻底退出再开一次。
 
@@ -135,7 +140,7 @@ Android Studio 里，`@PreviewTest` 旁边的运行按钮也能录、也能比�
 | 2 | 睡眠定时选“本章结束” | 到章末停 |
 | 3 | 朗读几句后暂停，退出再开 | 回到正在读的那句 |
 | 4 | 关掉书继续听；锁屏、通知栏、耳机按键 | 都能控制 |
-| 5 | 新书库第一次点朗读 | 马上用系统声音出声；本机声音在后台装好后，从下一章起换成默认旁白 |
+| 5 | 新书库首次点朗读与离线语音就绪 | 首次可立刻用免 Key 在线语音或系统声音出声；离线语音（Kokoro / 声音卡）下载就绪后弹出提示球，由用户确认切换，异常或发烫时绝不擅自换声 |
 | 6 | 声音列表 | 分组对，试听正常 |
 | 7 | 连念 30 分钟 | 不卡、不漏句、不重复 |
 | 8 | 断网时点朗读（本机声音没装） | 系统声音照常，不报错、不死等 |
@@ -201,7 +206,7 @@ Android 上的转写要 SenseVoice 模型，本地测试时启动加 `-e asrDir 
 
 ## 七、软件更新
 
-1. 把 `apple/project.yml` 和 `android/app/build.gradle.kts` 的版本临时改高一档，运行 `RELEASE_BASE=http://localhost:8000 scripts/publish-release.sh --local`，再把版本改回去，装上旧版。
+1. 把 `apple/project.yml`、`android/app/build.gradle.kts` 与 `windows/Yuyue/Yuyue.csproj` 的版本临时改高一档，运行 `RELEASE_BASE=http://localhost:8000 scripts/publish-release.sh --local`（Windows 另跑 `windows/package-release.ps1 -BuildInstaller` 生成 `windows-update-<arch>.json`），再把版本改回去，装上旧版。
 2. `cd dist/release-<新版本> && python3 -m http.server 8000`
 3. Mac：启动参数加 `-YYUpdateBase http://localhost:8000/`，检查更新并安装。应该验签通过，重开后是新版本，书和划线都在。
 4. Android 模拟器：启动加 `-e updateBase http://10.0.2.2:8000/`，检查更新并安装。数据都在。

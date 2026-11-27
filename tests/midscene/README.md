@@ -3,7 +3,7 @@
 基于 `@midscene/test` + `@midscene/computer` 搭建的 Windows 桌面正式版验收套件，用来覆盖 [docs/dev/testing.md](../../docs/dev/testing.md) 中单元测试无法验证的真实界面渲染、深浅色对比度、PDF 排版、品牌图标一致性、弹窗交互与重启持久化。
 
 > **与 `e2e/midscene/` 的分工**：
-> - **`tests/midscene/`（本目录）**：Windows 端发版前完整验收套件（6 个文件、16 条用例），内置 `yuyue.launch` / `yuyue.close` / `yuyue.checkLog` 生命周期节点，支持 Debug 与 **Release 正式构建**，自动隔离临时书库并在每条用例结束后扫描 `yuyue.log` 拦截未捕获异常。
+> - **`tests/midscene/`（本目录）**：Windows 端发版前完整验收套件（6 个文件、17 条用例），内置 `yuyue.launch` / `yuyue.close` / `yuyue.checkLog` 生命周期节点，支持 Debug 与 **Release 正式构建**，自动隔离临时书库并在每条用例结束后扫描 `yuyue.log` 拦截未捕获异常。
 > - **`e2e/midscene/`**：四端共享 Layer 4 主线剧本（CI 离线校验 `validate-flows.mjs` + `docs/parity.yaml` 对照表证据），已自动复用本目录 `.env` 配置。
 
 测试启动 `Yuyue.exe` 时始终传入 `--library <临时目录>`，**绝不会触碰你的真实书库**；每条用例结束或异常中断后会自动关闭测试进程、检查 `yuyue.log` 崩溃日志并清理临时书库。
@@ -45,7 +45,7 @@ pnpm run check
 # 2) 验证视觉模型连通性与坐标定位
 pnpm run model:verify
 
-# 3) 跑正式版（Release）全量 6 组 16 条视觉验收（推荐发版前必跑）
+# 3) 跑正式版（Release）全量 6 组 17 条视觉验收（推荐发版前必跑）
 pnpm run test:release
 
 # 4) 只跑快速冒烟（空书架 + 设置 + 持久化）

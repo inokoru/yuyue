@@ -39,3 +39,15 @@ Supported `op` values:
 - `assert_snapshot_counts`: `{ device, min_books?, min_notes? }`
 - `assert_page_sentences`: `{ text, expected_texts: string[] }`
 - `assert_compare_versions`: `{ cases: [{ a, b, sign: -1 | 0 | 1 }] }`
+- `assert_review_today`: `{ device, day_start, count, exact_items?, exact_done_today? }`
+- `set_mark_review`: `{ device, book, mark, keep }`
+- `add_time`: `{ device, book, section, read_seconds, listen_seconds, day }`
+- `assert_day_times`: `{ device, from, to, min_entries?, min_read_seconds?, min_listen_seconds? }`
+- `bookmark_undo_roundtrip`: `{ device, book, section, sentence }`
+- `collection_undo_roundtrip`: `{ device, name, book }`
+- `custom_paper_undo_roundtrip`: `{ device, name, bg }`
+- `word_undo_and_count`: `{ device, book, word, min_book_count }`
+- `replace_rule_reorder`: `{ device, book }`
+- `set_finished`: `{ device, book, finished }`
+- `keep_record_only`: `{ device, book }`
+- `purge_deleted`: `{ device, older_than_ms, min_purged }`
