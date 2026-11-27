@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="apple/Yuyue/Assets.xcassets/AppIcon.appiconset/icon_256.png" width="96" height="96" alt="语阅 Yuyue" />
+  <img src="assets/icon.png" width="96" height="96" alt="语阅 Yuyue" />
 </p>
 
 <h1 align="center">语阅 Yuyue</h1>
@@ -19,56 +19,37 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/01-shelf.png" alt="语阅书架" width="100%" />
+  <img src="assets/hero.png" alt="语阅书架：上排 macOS 与 iPhone，下排 Windows 与 Android" width="100%" />
 </p>
 
 ## 能做什么
 
 一本书，可以看、可以听、可以记，三件事对着同一句话。
 
-- **安静地读**  
-  支持 EPUB、PDF、TXT、无加密 MOBI / AZW3。内置素白、纸本、纸本·夜、芦苇、铅纸、暗黑等纸张并支持自定义「我的纸」，配有日夜一键切换、独立亮度与「护眼柔光」暖色滤蓝光；支持滑动 / 覆盖阴影 / 无动画三档翻页、自定义翻页音效、上下滚动拉动切章、双栏排版与正则替换规则；可通过局域网 Wi‑Fi 传书、监听文件夹，或连接 OPDS / WebDAV 远程书库（Calibre、Kavita、Komga）。
-
-- **读着听，听着读**  
-  点任意一句就从那一句开始朗读，墨线跟着声音逐句推进、自动翻页；支持本机离线语音（Kokoro 32 音色、声音卡与本机声音克隆）、免 Key 微软 Edge 在线神经语音、系统声音与自接云端声音，异常时明确提示而不擅自切声；同时内置双语播客（支持按需加载往期单集）与有声书空间。听到一半拿起来看，正好停在同一行。
-
-- **读外文原著**  
-  点词查释义、双击整句翻译，支持「原文 / 双语对照 / 仅译文」三态即时切换与导入 MDict 词典，带生词本与四六级、雅思、GRE 行间难词简注。
-
-- **不剧透的 AI 书伴**  
-  可接入端侧模型（Apple 智能）、本机服务（Ollama、LM Studio）或自有大模型 API（DeepSeek、OpenRouter、Claude、OpenAI 等）。隔天打开备好前情提要；随时通过快捷指令总结本章、梳理人物、段落翻译或划词追问，默认只在已读范围内流式作答，每句出处点一下就翻回原句，好回答支持多选一键存进想法。
-
-- **记下来，随时带走**  
-  支持多样式划线、随手写想法、今日回顾、年度阅读热力图与书摘卡片。笔记可导出为 Markdown、带划线的 EPUB、CSV，或直发 Obsidian、Notion、flomo、新枝与 Anki。
-
-- **无服务器同步**  
-  通过你自己的 iCloud Drive 或 WebDAV（坚果云、群晖、Nextcloud 等）同步进度、笔记与书文件，内置 WebDAV 同步检查视图；遇到冲突并排交给你选，不暗中覆盖，并支持整库 `.yuyue` 快照备份。
+- **安静地读** — 支持 EPUB、PDF、TXT、无加密 MOBI / AZW3。内置素白、纸本、纸本·夜、芦苇、铅纸、暗黑等纸张并支持自定义「我的纸」，配有日夜一键切换、独立亮度与「护眼柔光」暖色滤蓝光；支持滑动 / 覆盖阴影 / 无动画三档翻页、自定义翻页音效、上下滚动拉动切章、双栏排版与正则替换规则；可通过局域网 Wi‑Fi 传书、监听文件夹，或连接 OPDS / WebDAV 远程书库（Calibre、Kavita、Komga）。
+- **读着听，听着读** — 点任意一句就从那一句开始朗读，墨线跟着声音逐句推进、自动翻页；支持本机离线语音（Kokoro 32 音色、声音卡与本机声音克隆）、免 Key 微软 Edge 在线神经语音、系统声音与自接云端声音，异常时明确提示而不擅自切声；同时内置双语播客（支持按需加载往期单集）与有声书空间。听到一半拿起来看，正好停在同一行。
+- **记下来，随时带走** — 支持多样式划线、随手写想法、今日回顾、年度阅读热力图与书摘卡片。笔记可导出为 Markdown、带划线的 EPUB、CSV，或直发 Obsidian、Notion、flomo、新枝与 Anki。
+- **读外文原著** — 点词查释义、双击整句翻译，支持「原文 / 双语对照 / 仅译文」三态即时切换与导入 MDict 词典，带生词本与四六级、雅思、GRE 行间难词简注。
+- **不剧透的 AI 书伴** — 可接入端侧模型（Apple 智能）、本机服务（Ollama、LM Studio）或自有大模型 API（DeepSeek、OpenRouter、Claude、OpenAI 等）。隔天打开备好前情提要；随时通过快捷指令总结本章、梳理人物、段落翻译或划词追问，默认只在已读范围内流式作答，每句出处点一下就翻回原句，好回答支持多选一键存进想法。
+- **无服务器同步** — 通过你自己的 iCloud Drive 或 WebDAV（坚果云、群晖、Nextcloud 等）同步进度、笔记与书文件，内置 WebDAV 同步检查视图；遇到冲突并排交给你选，不暗中覆盖，并支持整库 `.yuyue` 快照备份。
 
 <p align="center">
-  <img src="docs/screenshots/02-listening.png" alt="逐句跟读与听书控制" width="49%" />
-  <img src="docs/screenshots/03-notes.png" alt="划线、想法与笔记面板" width="49%" />
+  <img src="assets/listening.png" alt="听书时逐句高亮，并可在手机上调节声音与语速" width="100%" />
 </p>
 <p align="center">
-  <img src="docs/screenshots/04-english.png" alt="外文原著双栏排版与难词注释" width="49%" />
-  <img src="docs/screenshots/05-sync.png" alt="无服务器个人网盘同步" width="49%" />
+  <img src="assets/notes.png" alt="阅读页划线、批注与笔记列表中的今日回顾" width="100%" />
 </p>
-
-### 手机端同样顺手
 
 手机与电脑共用同一套排版与同步内核：支持拖拽定制底部导航与自动记住上次书架标签，在**书、进度、播客、有声与个人合集**之间切换自如；提供书脊与浅木层板书架样式，阅读时支持纸张与字体细调、音量键翻页、双击边缘进出沉浸阅读与墨水屏模式，锁屏与耳机均可控制收听。
 
 <p align="center">
-  <img src="docs/screenshots/06-mobile-shelf.png" alt="手机端书架主页与在读书脊" width="32%" />
-  <img src="docs/screenshots/07-mobile-reading.png" alt="手机端暖纸划线阅读与听书胶囊" width="32%" />
-  <img src="docs/screenshots/08-mobile-notes.png" alt="手机端笔记列表与今日回顾" width="32%" />
-</p>
-<p align="center">
-  <img src="docs/screenshots/09-mobile-places.png" alt="手机端书、进度、播客、有声与合集切换面板" width="32%" />
-  <img src="docs/screenshots/10-mobile-podcast.png" alt="手机端播客与双轨收听台" width="32%" />
-  <img src="docs/screenshots/11-mobile-typeset.png" alt="手机端纸张、字体与排版抽屉" width="32%" />
+  <img src="assets/platforms.png" alt="同一页书在 macOS、Windows、iPad、iPhone 和 Android 上的阅读界面" width="100%" />
 </p>
 
 > **在做什么、不做什么**：语阅不做账号系统、自建内容服务器、广告、书城和推荐流；你的书、进度与笔记始终只留在你自己的设备或个人网盘里。为了解功能使用情况，应用默认开启仅记录功能使用形态的匿名统计（不关联个人身份，绝不收集书名、笔记、划线或搜索词），可随时在「关于」页关闭；应用内反馈仅直发给开发者，不公开且不收集邮箱。仓库中围绕有声书自动录音对齐、分角色广播剧配音及书房电台自动编排等进阶能力仍在持续打磨与真机验收中，暂不作为成熟功能过度承诺；具体进度与验收标准见 [ROADMAP.md](ROADMAP.md)。
+
+<details>
+<summary>下载与安装</summary>
 
 ## 下载与安装
 
@@ -113,6 +94,11 @@ API Key 与网盘密码使用 Windows DPAPI（当前用户范围）加密保存�
 - Impactor 为第三方工具，建议搭配备用 Apple ID 使用；苹果随时可能调整侧载机制，语阅无法保证此方式长期可用。
 
 ---
+
+</details>
+
+<details>
+<summary>给开发者</summary>
 
 ## 给开发者
 
@@ -172,6 +158,8 @@ node scripts/sync-webdav-e2e.mjs
 ```
 
 Windows 单元测试：`dotnet test windows/Yuyue.Tests/Yuyue.Tests.csproj -c Release -p:Platform=x64`。界面快照与手动测试说明见 [docs/dev/testing.md](docs/dev/testing.md)。打包发布见 `scripts/package-release.sh`（Mac / iOS / Android）与 `windows/package-release.ps1`（Windows）。
+
+</details>
 
 </details>
 
