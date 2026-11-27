@@ -132,7 +132,13 @@ def prepare_cnb_stage(release_dir: Path, stage_dir: Path, cnb_repo: str, tag: st
     gh_blob_cl = f"https://github.com/{GITHUB_REPO}/blob/main/CHANGELOG.md"
     cnb_cl = f"{cnb_dl}/CHANGELOG.md"
 
-    text_meta = {"update.json", "appcast.xml", "appcast-x86_64.xml"}
+    text_meta = {
+        "update.json",
+        "appcast.xml",
+        "appcast-x86_64.xml",
+        "windows-update-x64.json",
+        "windows-update-arm64.json",
+    }
     staged_files: list[Path] = []
 
     for src in sorted(release_dir.iterdir()):

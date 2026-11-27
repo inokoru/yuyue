@@ -7,11 +7,13 @@ Each version has a section, newest first. The app's changelog page and update no
 ## 0.1.7 · 2026-11-27
 
 ### zh
+- Windows 正式版同步发布：同步至 `0.1.7` 并补齐自定义翻页音效（6 种拟真声学预设、音量调节、麦克风录音与音频导入裁剪）、阅读页与设置页 Fluent 2 界面打磨、品牌图标统一及 150+ 项英文界面补全；修复书架双击打开竞态与批量操作栏弹出导致的布局跳动。
 - 书架标签记忆：全端（iOS / Android / macOS / Windows）记住上次停留的书架分类标签（书、播客、音频、收藏集等），重启后自动恢复；修复 Android 从笔记、发现或个人页切回首页时自动重置回「书」的问题，并在对应分类隐藏或删除时自动回退。
 - 播客往期拉取与排序：移除 RSS 仅保留近 14 天节目的硬限制，订阅与刷新改为拉取最近 20 期并按发布时间正确倒序展示；进入单个节目视图可查看全部已拉取单集，并新增按需「加载更多往期」分批拉取更早的历史节目。
 - Android 稳定性与系统语音修复：拆分自定义翻页音效弹窗组件并新增 Release 包 DEX 寄存器上限校验，避免 R8 压缩触发启动 `VerifyError`；优化 Android 切换系统默认 TTS 引擎后的热检测，并在返回页面时自动刷新音色列表。
 
 ### en
+- Windows 0.1.7 release & parity: shipped Windows alongside Apple and Android with custom page-turn sounds (6 acoustic presets, volume slider, mic recording & audio import with auto-trim/normalization), Fluent 2 polish across Settings, Reader, Library, Audiobook, and Podcast views, 150+ completed English UI translations, and fixes for shelf double-click races and batch-bar layout shifts.
 - Shelf tab persistence: remembered the last active Shelf sub-tab (Books, Podcasts, Audio, Collections, etc.) across app restarts on iOS, Android, macOS, and Windows, fixed Android resetting back to Books when returning from other bottom tabs, and automatically fall back when a sub-tab is promoted, hidden, or deleted.
 - Podcast archive fetching & sorting: removed the 14-day hard cutoff on RSS ingestion so subscribing and refreshing keep up to 20 recent episodes sorted newest-first, showed all fetched episodes when filtering by a single show across all platforms, and added on-demand "Load older episodes" to fetch earlier back-catalog batches.
 - Android release stability & system TTS refresh: split the custom page-turn sound sheet and added a release DEX register check (`< 256` registers) to guard against R8 `VerifyError` crashes, and refreshed Android system TTS voices on resume when switching OEM default TTS engines.
