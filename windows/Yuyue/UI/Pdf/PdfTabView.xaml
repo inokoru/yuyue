@@ -29,7 +29,7 @@
 
             <!-- 左：左侧栏开关 + 书名 + 页码快跳 -->
             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                <Button x:Name="LeftPaneBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="目录与搜索" Click="LeftPaneBtn_Click" />
+                <Button x:Name="LeftPaneBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="目录" Click="LeftPaneBtn_Click" />
                 <TextBlock x:Name="TitleText" FontSize="12.5" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" MaxWidth="220" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
             </StackPanel>
 
@@ -50,9 +50,9 @@
             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="3" VerticalAlignment="Center">
                 <Button x:Name="LayoutModeBtn" Style="{StaticResource YYToolbarIconButtonStyle}" Padding="9,0" FontSize="12" Content="连续滚动" ToolTipService.ToolTip="切换连续 / 单页 / 双页" Click="CycleLayout_Click" />
                 <Border Width="1" Height="14" Background="{ThemeResource YYLineBrush}" Margin="3,0" />
-                <Button x:Name="NightBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="护眼夜间阅读" Click="ToggleNight_Click" />
-                <Button x:Name="ListenBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="朗读当前页" Click="ToggleListen_Click" />
-                <Button x:Name="NotesPaneBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="PDF 标注与书签" Click="RightPaneBtn_Click" />
+                <Button x:Name="NightBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="夜间" Click="ToggleNight_Click" />
+                <Button x:Name="ListenBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="朗读这一页" Click="ToggleListen_Click" />
+                <Button x:Name="NotesPaneBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="笔记" Click="RightPaneBtn_Click" />
                 <Button x:Name="DetachBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="撕出到独立窗口" Click="Detach_Click" />
             </StackPanel>
         </Grid>
@@ -123,24 +123,24 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                <Button Tag="yellow" Padding="3" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="黄色划线 (1)" Click="PdfMarkStyle_Click">
+                                <Button Tag="yellow" Padding="3" CornerRadius="13" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="黄色 · 按 1" Click="PdfMarkStyle_Click">
                                     <Border Width="20" Height="20" CornerRadius="10" Background="#FBE7A0" BorderBrush="#28000000" BorderThickness="0.75" />
                                 </Button>
-                                <Button Tag="blue" Padding="3" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="蓝色划线 (2)" Click="PdfMarkStyle_Click">
+                                <Button Tag="blue" Padding="3" CornerRadius="13" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="蓝色 · 按 2" Click="PdfMarkStyle_Click">
                                     <Border Width="20" Height="20" CornerRadius="10" Background="#CFE6F4" BorderBrush="#28000000" BorderThickness="0.75" />
                                 </Button>
-                                <Button Tag="pink" Padding="3" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="粉色划线 (3)" Click="PdfMarkStyle_Click">
+                                <Button Tag="pink" Padding="3" CornerRadius="13" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="粉色 · 按 3" Click="PdfMarkStyle_Click">
                                     <Border Width="20" Height="20" CornerRadius="10" Background="#F6C7C0" BorderBrush="#28000000" BorderThickness="0.75" />
                                 </Button>
-                                <Button Tag="wave" Padding="3" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="波浪线 (4)" Click="PdfMarkStyle_Click">
+                                <Button Tag="wave" Padding="3" CornerRadius="13" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="波浪线 · 按 4" Click="PdfMarkStyle_Click">
                                     <Border Width="20" Height="20" CornerRadius="10" Background="{ThemeResource YYInsetBrush}">
                                         <TextBlock Text="~" FontSize="12" FontWeight="Bold" Foreground="#EF7F71" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
                                     </Border>
                                 </Button>
-                                <Button Tag="underline" Width="26" Height="24" Padding="0" CornerRadius="5" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" ToolTipService.ToolTip="实线下划线" Click="PdfMarkStyle_Click">
+                                <Button Tag="underline" Width="26" Height="24" Padding="0" CornerRadius="5" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" ToolTipService.ToolTip="下划线" Click="PdfMarkStyle_Click">
                                     <TextBlock Text="U" FontSize="11.5" FontWeight="SemiBold" TextDecorations="Underline" />
                                 </Button>
-                                <Button Tag="dotted" Width="26" Height="24" Padding="0" CornerRadius="5" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" ToolTipService.ToolTip="点线下划线" Click="PdfMarkStyle_Click">
+                                <Button Tag="dotted" Width="26" Height="24" Padding="0" CornerRadius="5" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" ToolTipService.ToolTip="点线" Click="PdfMarkStyle_Click">
                                     <TextBlock Text="···" FontSize="11.5" FontWeight="Bold" />
                                 </Button>
                             </StackPanel>
@@ -169,7 +169,7 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <Button Grid.Column="0" Style="{StaticResource YYTextActionButtonStyle}" HorizontalAlignment="Stretch" Content="想法" FontSize="11.5" Click="PdfSelNote_Click" />
-                            <Button Grid.Column="1" Style="{StaticResource YYTextActionButtonStyle}" HorizontalAlignment="Stretch" Content="朗读" FontSize="11.5" Click="PdfSelSpeak_Click" />
+                            <Button Grid.Column="1" Style="{StaticResource YYTextActionButtonStyle}" HorizontalAlignment="Stretch" Content="从这听" FontSize="11.5" Click="PdfSelSpeak_Click" />
                             <Button Grid.Column="2" Style="{StaticResource YYTextActionButtonStyle}" HorizontalAlignment="Stretch" Content="查词" FontSize="11.5" Click="PdfSelLookup_Click" />
                             <Button Grid.Column="3" Style="{StaticResource YYTextActionButtonStyle}" HorizontalAlignment="Stretch" Content="翻译" FontSize="11.5" Foreground="{ThemeResource YYAccentBrush}" Click="PdfSelTranslate_Click" />
                             <Button Grid.Column="4" Style="{StaticResource YYTextActionButtonStyle}" HorizontalAlignment="Stretch" Content="复制" FontSize="11.5" Click="PdfSelCopy_Click" />
@@ -214,7 +214,7 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
                 <Grid Grid.Row="0" Padding="12,10">
-                    <TextBlock Text="PDF 标注与划线" FontSize="13" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" VerticalAlignment="Center" />
+                    <TextBlock Text="笔记" FontSize="13" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" VerticalAlignment="Center" />
                     <Button HorizontalAlignment="Right" Style="{StaticResource YYTextActionButtonStyle}" Content="+ 记当前页" FontSize="11.5" Click="AddPageNote_Click" />
                 </Grid>
                 <ScrollViewer Grid.Row="1" Padding="12,0,12,16">

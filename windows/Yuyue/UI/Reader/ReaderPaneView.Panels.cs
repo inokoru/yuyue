@@ -1,11 +1,17 @@
+using System.Text.RegularExpressions;
 using Microsoft.UI;
+using Microsoft.UI.Input;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
 using Windows.UI;
+using Windows.UI.Core;
+using Windows.UI.Text;
 using Yuyue.Core;
 using Yuyue.Design;
 using Yuyue.Reader;
@@ -21,10 +27,40 @@ public sealed partial class ReaderPaneView
     private int _activeSearchHitIdx = -1;
     private TextBox? _leftSearchBox;
 
+    private sealed class CompanionAnchor
+    {
+        public string? MarkId { get; init; }
+        public uint Section { get; init; }
+        public TextPoint Start { get; init; } = null!;
+        public TextPoint End { get; init; } = null!;
+        public string Text { get; init; } = "";
+    }
+
+    private sealed class CompanionChatMsg
+    {
+        public string Id { get; } = Guid.NewGuid().ToString("N");
+        public bool IsUser { get; init; }
+        public string Text { get; init; } = "";
+        public IReadOnlyList<CompanionClient.CompanionSource>? Sources { get; init; }
+        public IReadOnlyList<string>? FollowUps { get; init; }
+        public CompanionAnchor? Anchor { get; init; }
+        public uint AskedSection { get; init; }
+        public int AskedSentence { get; init; }
+        public string? SavedMarkId { get; set; }
+        public bool IsError { get; init; }
+    }
+
     // Companion chat state
-    private readonly List<(bool IsUser, string Text, IReadOnlyList<CompanionClient.CompanionSource>? Sources, IReadOnlyList<string>? FollowUps)> _companionMessages = [];
+    private readonly List<CompanionChatMsg> _companionMessages = [];
     private bool _companionNoSpoiler = true;
     private bool _companionBusy;
+    private bool _companionPicking;
+    private readonly HashSet<string> _companionPickedIds = new(StringComparer.Ordinal);
+    private bool _companionPreviewMerged;
+    private ScrollViewer? _companionScroller;
+    private Border? _companionStreamBubble;
+    private string _companionStreamText = "";
+    private bool _companionStreamThinking;
     private int _castRenderGen;
 
     private sealed record CompanionSlashCmd(
@@ -34,9 +70,10 @@ public sealed partial class ReaderPaneView
         string Icon,
         string[] Keywords,
         bool TakesArg = false,
-        string? ArgHint = null);
+        string? ArgHint = null,
+        string? CustomPrompt = null);
 
-    private static readonly CompanionSlashCmd[] AllCompanionSlashCommands =
+    private static readonly CompanionSlashCmd[] BuiltInAskSlashCommands =
     [
         new("recap", "回顾前情", "梳理目前为止发生了什么", "clock-history", ["前情", "回顾", "剧情", "摘要", "summary"], TakesArg: true, ArgHint: "话题"),
         new("chapter", "总结本章", "概括当前章节的主要内容", "doc-lines", ["本章", "章节", "总结", "这一章"], TakesArg: true, ArgHint: "重点"),
@@ -44,12 +81,36 @@ public sealed partial class ReaderPaneView
         new("explain", "解释含义", "解读选中句子或当前段落", "doc-search", ["解释", "解析", "意思", "含义"], TakesArg: true, ArgHint: "词句"),
         new("quote", "挑出金句", "从已读内容里找值得回味的话", "text-quote", ["金句", "摘录", "名句", "句子"], TakesArg: true, ArgHint: "主题"),
         new("quiz", "考考我", "根据已读内容出两道思考题", "feedback", ["考考我", "测验", "提问", "思考"], TakesArg: true, ArgHint: "范围"),
+    ];
+
+    private static readonly CompanionSlashCmd[] BuiltInControlSlashCommands =
+    [
         new("read", "仅限已读", "切回不剧透模式", "eye-slash", ["已读", "不剧透", "防剧透"], TakesArg: true),
         new("whole", "全书范围", "检索整本书（可能剧透）", "book-open", ["全书", "剧透", "整本"], TakesArg: true),
         new("model", "切换模型", "打开模型与服务商选择", "sparkle", ["模型", "服务商", "切换", "provider"]),
         new("clear", "清空对话", "清除当前这本书的对话记录", "trash", ["清空", "新对话", "清除", "重置"]),
         new("settings", "书伴设置", "配置服务商与 API Key", "gear", ["设置", "配置", "key", "api"]),
     ];
+
+    private CompanionSlashCmd[] GetAllCompanionSlashCommands()
+    {
+        var customItems = CompanionPromptsHelper.GetItems(_library.Prefs);
+        var list = new List<CompanionSlashCmd>(BuiltInAskSlashCommands.Length + customItems.Count + BuiltInControlSlashCommands.Length);
+        list.AddRange(BuiltInAskSlashCommands);
+        foreach (var item in customItems)
+        {
+            list.Add(new CompanionSlashCmd(
+                item.Command,
+                item.Prompt,
+                "常用提问",
+                "bubble-lines",
+                ["常用", "自定义", "custom", "prompt"],
+                TakesArg: true,
+                CustomPrompt: item.Prompt));
+        }
+        list.AddRange(BuiltInControlSlashCommands);
+        return list.ToArray();
+    }
 
     // ---------- 左侧停靠栏：目录 / 书签 / 搜索 ----------
     private void RenderLeftPane()
@@ -101,17 +162,9 @@ public sealed partial class ReaderPaneView
         g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-        var filterBox = new TextBox
-        {
-            Style = (Style)Application.Current.Resources["YYSingleLineTextBoxStyle"],
-            Text = _tocFilterQuery,
-            PlaceholderText = L10n.T("筛选章节…"),
-            Margin = new Thickness(10, 0, 10, 8),
-            Height = 30,
-            MinHeight = 30,
-            FontSize = 12,
-            Padding = new Thickness(9, 0, 9, 0),
-        };
+        var filterBox = YYChrome.MakeSearchBox("筛选章节…", _tocFilterQuery, height: 30, fontSize: 12);
+        filterBox.Margin = new Thickness(10, 0, 10, 8);
+        filterBox.Padding = new Thickness(9, 0, 4, 0);
         var listStack = new StackPanel { Spacing = 2, Padding = new Thickness(8, 2, 8, 24) };
 
         void PopulateToc(string q)
@@ -362,17 +415,9 @@ public sealed partial class ReaderPaneView
         g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         g.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-        var box = new TextBox
-        {
-            Style = (Style)Application.Current.Resources["YYSingleLineTextBoxStyle"],
-            Text = _inBookSearchQuery,
-            PlaceholderText = L10n.T("搜索本书全文，Enter 查找…"),
-            Margin = new Thickness(10, 0, 10, 6),
-            Height = 30,
-            MinHeight = 30,
-            FontSize = 12,
-            Padding = new Thickness(9, 0, 9, 0),
-        };
+        var box = YYChrome.MakeSearchBox("搜索本书全文，Enter 查找…", _inBookSearchQuery, height: 30, fontSize: 12, onCleared: () => RunInBookSearch(""));
+        box.Margin = new Thickness(10, 0, 10, 6);
+        box.Padding = new Thickness(9, 0, 4, 0);
         box.KeyDown += (_, e) =>
         {
             if (e.Key == VirtualKey.Enter)
@@ -530,7 +575,7 @@ public sealed partial class ReaderPaneView
 
         RightPaneTabsBar.Children.Clear();
         var rightSeg = YYChrome.MakeSegmentedBar(
-            [("notes", "本书笔记"), ("companion", "书伴 AI"), ("cast", "演播")],
+            [("notes", "笔记"), ("companion", "书伴"), ("cast", "人物")],
             _rightPaneTab,
             cap =>
             {
@@ -569,7 +614,7 @@ public sealed partial class ReaderPaneView
         {
             stack.Children.Add(new TextBlock
             {
-                Text = L10n.T("本书还没有划线或想法。在书页中拖动划选文字即可随手记录。"),
+                Text = L10n.T("还没有划线。选中文字，按 1–4 就划上"),
                 FontSize = 12,
                 Foreground = ThemeHelper.Brush(p.T3),
                 TextWrapping = TextWrapping.Wrap,
@@ -655,22 +700,10 @@ public sealed partial class ReaderPaneView
         g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        // Top scope bar: Read-only No-Spoiler toggle + clear + inline model switcher pill
+        // Top scope bar: picking header OR Read-only No-Spoiler toggle + multi-pick + clear + inline model switcher pill
         var scopeBar = new Grid { Padding = new Thickness(12, 2, 12, 8), ColumnSpacing = 8 };
         scopeBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         scopeBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var noSpoilerCb = new CheckBox
-        {
-            Content = L10n.T("仅已读（防剧透）"),
-            IsChecked = _companionNoSpoiler,
-            FontSize = 11.5,
-            MinWidth = 0,
-            MinHeight = 26,
-            Padding = new Thickness(6, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Center,
-        };
-        noSpoilerCb.Click += (_, _) => _companionNoSpoiler = noSpoilerCb.IsChecked == true;
 
         string provName = CompanionClient.FindPreset(_library.Prefs.AiProvider)?.Name
             ?? (_library.Prefs.AiCustomProviderNames.TryGetValue(_library.Prefs.AiProvider, out var cn) && !string.IsNullOrWhiteSpace(cn) ? cn : _library.Prefs.AiProvider);
@@ -693,29 +726,126 @@ public sealed partial class ReaderPaneView
             Padding = new Thickness(6, 2, 6, 2),
             MinHeight = 24,
         };
-        ToolTipService.SetToolTip(modelBtn, L10n.T("点击切换 AI 模型或服务商"));
+        ToolTipService.SetToolTip(modelBtn, L10n.T("切换服务商与模型"));
         modelBtn.Click += (_, _) => ShowCompanionModelSwitcherFlyout(modelBtn, dark);
 
-        var rightScopeBtns = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
-        if (_companionMessages.Count > 0)
+        void ExitCompanionPicking()
         {
-            var clearBtn = new Button
+            _companionPicking = false;
+            _companionPickedIds.Clear();
+            _companionPreviewMerged = false;
+            RenderRightPane();
+        }
+
+        if (_companionPicking)
+        {
+            var pickCountTb = new TextBlock
+            {
+                Text = _companionPickedIds.Count > 0
+                    ? L10n.T($"已选 {_companionPickedIds.Count} 条")
+                    : L10n.T("多选存为想法"),
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = ThemeHelper.Brush(tc.Accent),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            var pickRight = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+            var selAllBtn = new Button
             {
                 Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
-                Content = L10n.T("清空"),
+                Content = L10n.T("全选"),
                 FontSize = 11,
-                Foreground = ThemeHelper.Brush(p.T3),
+                Foreground = ThemeHelper.Brush(tc.Accent),
                 Padding = new Thickness(5, 2, 5, 2),
                 MinHeight = 24,
             };
-            clearBtn.Click += (_, _) => { _companionMessages.Clear(); RenderRightPane(); };
-            rightScopeBtns.Children.Add(clearBtn);
+            selAllBtn.Click += (_, _) =>
+            {
+                foreach (var m in _companionMessages)
+                    if (!m.IsError) _companionPickedIds.Add(m.Id);
+                RenderRightPane();
+            };
+            var cancelPickTopBtn = new Button
+            {
+                Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
+                Content = L10n.T("取消"),
+                FontSize = 11,
+                Foreground = ThemeHelper.Brush(p.T2),
+                Padding = new Thickness(5, 2, 5, 2),
+                MinHeight = 24,
+            };
+            cancelPickTopBtn.Click += (_, _) => ExitCompanionPicking();
+            pickRight.Children.Add(selAllBtn);
+            pickRight.Children.Add(cancelPickTopBtn);
+            Grid.SetColumn(pickCountTb, 0);
+            Grid.SetColumn(pickRight, 1);
+            scopeBar.Children.Add(pickCountTb);
+            scopeBar.Children.Add(pickRight);
         }
-        rightScopeBtns.Children.Add(modelBtn);
-        Grid.SetColumn(noSpoilerCb, 0);
-        Grid.SetColumn(rightScopeBtns, 1);
-        scopeBar.Children.Add(noSpoilerCb);
-        scopeBar.Children.Add(rightScopeBtns);
+        else
+        {
+            var noSpoilerCb = new CheckBox
+            {
+                Content = L10n.T("仅限已读"),
+                IsChecked = _companionNoSpoiler,
+                FontSize = 11.5,
+                MinWidth = 0,
+                MinHeight = 26,
+                Padding = new Thickness(6, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center,
+            };
+            noSpoilerCb.Click += (_, _) => _companionNoSpoiler = noSpoilerCb.IsChecked == true;
+
+            var rightScopeBtns = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+            if (_companionMessages.Any(m => !m.IsError))
+            {
+                var multiPickBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
+                    Content = L10n.T("多选"),
+                    FontSize = 11,
+                    Foreground = ThemeHelper.Brush(p.T2),
+                    Padding = new Thickness(5, 2, 5, 2),
+                    MinHeight = 24,
+                };
+                ToolTipService.SetToolTip(multiPickBtn, L10n.T("多选存为想法"));
+                multiPickBtn.Click += (_, _) =>
+                {
+                    _companionPicking = true;
+                    _companionPickedIds.Clear();
+                    _companionPreviewMerged = false;
+                    RenderRightPane();
+                };
+                rightScopeBtns.Children.Add(multiPickBtn);
+            }
+            if (_companionMessages.Count > 0)
+            {
+                var clearBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
+                    Content = L10n.T("清空对话"),
+                    FontSize = 11,
+                    Foreground = ThemeHelper.Brush(p.T3),
+                    Padding = new Thickness(5, 2, 5, 2),
+                    MinHeight = 24,
+                };
+                clearBtn.Click += (_, _) =>
+                {
+                    _companionMessages.Clear();
+                    _companionPicking = false;
+                    _companionPickedIds.Clear();
+                    _companionPreviewMerged = false;
+                    RenderRightPane();
+                };
+                rightScopeBtns.Children.Add(clearBtn);
+            }
+            rightScopeBtns.Children.Add(modelBtn);
+            Grid.SetColumn(noSpoilerCb, 0);
+            Grid.SetColumn(rightScopeBtns, 1);
+            scopeBar.Children.Add(noSpoilerCb);
+            scopeBar.Children.Add(rightScopeBtns);
+        }
         Grid.SetRow(scopeBar, 0);
         g.Children.Add(scopeBar);
 
@@ -725,14 +855,23 @@ public sealed partial class ReaderPaneView
         {
             chatStack.Children.Add(new TextBlock
             {
-                Text = L10n.T("向书伴提问本书内容、人物或思想，或输入 / 使用快捷指令。回答会附上原句定位，且可严守已读进度不剧透。"),
+                Text = L10n.T("读到哪儿问到哪儿。回答标着出处，不剧透你还没读到的地方；也可点回答下方的「存为想法」收进笔记。"),
                 FontSize = 12,
                 LineHeight = 19,
                 Foreground = ThemeHelper.Brush(p.T3),
                 TextWrapping = TextWrapping.Wrap,
             });
             var quickRow = new StackPanel { Spacing = 7, Margin = new Thickness(0, 6, 0, 0) };
-            foreach (var prompt in new[] { "帮我梳理本章的核心脉络", "目前出场的几个主要人物是什么关系？", "提炼这一章最值得回味的细节" })
+            var quickPrompts = new List<string>();
+            var seenQuick = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var cp in CompanionPromptsHelper.GetItems(_library.Prefs))
+                if (!string.IsNullOrWhiteSpace(cp.Prompt) && seenQuick.Add(cp.Prompt))
+                    quickPrompts.Add(cp.Prompt);
+            foreach (var builtin in new[] { "前面发生了什么？", "这一章讲了什么？", "目前出场的几个主要人物是什么关系？" })
+                if (seenQuick.Add(builtin))
+                    quickPrompts.Add(builtin);
+
+            foreach (var prompt in quickPrompts.Take(6))
             {
                 string pr = prompt;
                 var qGrid = new Grid { ColumnSpacing = 8 };
@@ -773,24 +912,35 @@ public sealed partial class ReaderPaneView
             for (int mi = 0; mi < _companionMessages.Count; mi++)
             {
                 var msg = _companionMessages[mi];
+                var msgCap = msg;
+                bool pickable = _companionPicking && !msg.IsError;
+                bool isPicked = pickable && _companionPickedIds.Contains(msg.Id);
+
                 var bubble = new Border
                 {
                     CornerRadius = new CornerRadius(8),
                     Padding = new Thickness(12, 9, 12, 9),
                     Background = ThemeHelper.Brush(msg.IsUser ? tc.Soft : p.Card),
-                    BorderBrush = ThemeHelper.Brush(msg.IsUser ? tc.Edge : p.Line),
-                    BorderThickness = new Thickness(1),
+                    BorderBrush = ThemeHelper.Brush(isPicked ? tc.Accent : (msg.IsUser ? tc.Edge : p.Line)),
+                    BorderThickness = new Thickness(isPicked ? 1.5 : 1),
                 };
                 var bStack = new StackPanel { Spacing = 6 };
-                bStack.Children.Add(L10n.Skip(new TextBlock
+                if (msg.IsUser || msg.IsError)
                 {
-                    Text = msg.Text,
-                    FontSize = 12.5,
-                    LineHeight = 20,
-                    Foreground = ThemeHelper.Brush(p.T1),
-                    TextWrapping = TextWrapping.Wrap,
-                    IsTextSelectionEnabled = true,
-                }));
+                    bStack.Children.Add(L10n.Skip(new TextBlock
+                    {
+                        Text = msg.Text,
+                        FontSize = 12.5,
+                        LineHeight = 20,
+                        Foreground = ThemeHelper.Brush(msg.IsError ? p.Danger : p.T1),
+                        TextWrapping = TextWrapping.Wrap,
+                        IsTextSelectionEnabled = !pickable,
+                    }));
+                }
+                else
+                {
+                    bStack.Children.Add(BuildCompanionRichContent(msg.Text, msg.Sources, p, tc, selectable: !pickable));
+                }
 
                 if (msg.Sources is { Count: > 0 })
                 {
@@ -804,6 +954,7 @@ public sealed partial class ReaderPaneView
                             HorizontalAlignment = HorizontalAlignment.Stretch,
                             HorizontalContentAlignment = HorizontalAlignment.Left,
                             Padding = new Thickness(6, 3, 6, 3),
+                            IsHitTestVisible = !pickable,
                             Content = L10n.Skip(new TextBlock
                             {
                                 Text = $"[{src.Index}] {src.Snippet}",
@@ -819,11 +970,152 @@ public sealed partial class ReaderPaneView
                     bStack.Children.Add(cites);
                 }
 
+                // Assistant answer action row: 存为想法 / 复制 / 多选 (1:1 macOS MacReaderCards.swift:1537)
+                if (!msg.IsUser && !msg.IsError && !_companionPicking)
+                {
+                    var actRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(0, 2, 0, 0) };
+                    bool isSaved = !string.IsNullOrEmpty(msg.SavedMarkId);
+
+                    var saveInner = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+                    saveInner.Children.Add(YYIcons.Make(isSaved ? "checkmark" : "square.and.pencil", 10.5, ThemeHelper.Brush(isSaved ? p.Ok : p.T2)));
+                    saveInner.Children.Add(new TextBlock
+                    {
+                        Text = L10n.T(isSaved ? "已存想法" : "存为想法"),
+                        FontSize = 11,
+                        FontWeight = isSaved ? FontWeights.SemiBold : FontWeights.Medium,
+                        Foreground = ThemeHelper.Brush(isSaved ? p.Ok : p.T1),
+                        VerticalAlignment = VerticalAlignment.Center,
+                    });
+                    var saveBtn = new Button
+                    {
+                        Height = 25,
+                        MinHeight = 25,
+                        Padding = new Thickness(9, 0, 9, 0),
+                        CornerRadius = new CornerRadius(5),
+                        Background = isSaved ? ThemeHelper.Brush(Color.FromArgb(28, p.Ok.R, p.Ok.G, p.Ok.B)) : ThemeHelper.Brush(p.Inset),
+                        BorderBrush = ThemeHelper.Brush(isSaved ? Color.FromArgb(90, p.Ok.R, p.Ok.G, p.Ok.B) : p.Line),
+                        BorderThickness = new Thickness(1),
+                        UseSystemFocusVisuals = false,
+                        Content = saveInner,
+                    };
+                    ToolTipService.SetToolTip(saveBtn, L10n.T(isSaved ? "跳到这条想法" : "把这段回答存进划线想法"));
+                    saveBtn.Click += (_, _) => SaveCompanionThought(msgCap);
+
+                    var copyInner = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+                    copyInner.Children.Add(YYIcons.Make("copy", 10, ThemeHelper.Brush(p.T2)));
+                    copyInner.Children.Add(new TextBlock
+                    {
+                        Text = L10n.T("复制"),
+                        FontSize = 11,
+                        Foreground = ThemeHelper.Brush(p.T2),
+                        VerticalAlignment = VerticalAlignment.Center,
+                    });
+                    var copyBtn = new Button
+                    {
+                        Height = 25,
+                        MinHeight = 25,
+                        Padding = new Thickness(8, 0, 8, 0),
+                        CornerRadius = new CornerRadius(5),
+                        Background = new SolidColorBrush(Colors.Transparent),
+                        BorderBrush = ThemeHelper.Brush(p.Line),
+                        BorderThickness = new Thickness(1),
+                        UseSystemFocusVisuals = false,
+                        Content = copyInner,
+                    };
+                    copyBtn.Click += (_, _) =>
+                    {
+                        try
+                        {
+                            var dp = new DataPackage();
+                            dp.SetText(StripCompanionMarkdownForNote(msgCap.Text));
+                            Clipboard.SetContent(dp);
+                            ShowReaderAlert("复制好了");
+                        }
+                        catch { }
+                    };
+
+                    var pickBtn = new Button
+                    {
+                        Height = 25,
+                        MinHeight = 25,
+                        Padding = new Thickness(8, 0, 8, 0),
+                        CornerRadius = new CornerRadius(5),
+                        Background = new SolidColorBrush(Colors.Transparent),
+                        BorderBrush = ThemeHelper.Brush(p.Line),
+                        BorderThickness = new Thickness(1),
+                        UseSystemFocusVisuals = false,
+                        Content = new TextBlock
+                        {
+                            Text = L10n.T("多选"),
+                            FontSize = 11,
+                            Foreground = ThemeHelper.Brush(p.T2),
+                            VerticalAlignment = VerticalAlignment.Center,
+                        },
+                    };
+                    ToolTipService.SetToolTip(pickBtn, L10n.T("勾选多条对话合并存为想法"));
+                    pickBtn.Click += (_, _) =>
+                    {
+                        _companionPicking = true;
+                        _companionPickedIds.Clear();
+                        _companionPickedIds.Add(msgCap.Id);
+                        _companionPreviewMerged = false;
+                        RenderRightPane();
+                    };
+
+                    actRow.Children.Add(saveBtn);
+                    actRow.Children.Add(copyBtn);
+                    actRow.Children.Add(pickBtn);
+                    bStack.Children.Add(actRow);
+                }
+
                 bubble.Child = bStack;
-                chatStack.Children.Add(bubble);
+
+                if (pickable)
+                {
+                    var pickRow = new Grid { ColumnSpacing = 8 };
+                    pickRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    pickRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                    var ring = new Border
+                    {
+                        Width = 18,
+                        Height = 18,
+                        CornerRadius = new CornerRadius(9),
+                        Margin = new Thickness(0, 8, 0, 0),
+                        VerticalAlignment = VerticalAlignment.Top,
+                        Background = isPicked ? ThemeHelper.Brush(tc.Accent) : new SolidColorBrush(Colors.Transparent),
+                        BorderBrush = ThemeHelper.Brush(isPicked ? tc.Accent : p.T3),
+                        BorderThickness = new Thickness(1.5),
+                        Child = isPicked ? YYIcons.Make("checkmark", 10, ThemeHelper.Brush(Colors.White)) : null,
+                    };
+                    Grid.SetColumn(ring, 0);
+                    Grid.SetColumn(bubble, 1);
+                    pickRow.Children.Add(ring);
+                    pickRow.Children.Add(bubble);
+
+                    var pickWrap = new Border
+                    {
+                        CornerRadius = new CornerRadius(10),
+                        Padding = new Thickness(4),
+                        Background = isPicked ? ThemeHelper.Brush(Color.FromArgb(45, tc.Accent.R, tc.Accent.G, tc.Accent.B)) : new SolidColorBrush(Colors.Transparent),
+                        Child = pickRow,
+                    };
+                    pickWrap.PointerPressed += (_, ev) =>
+                    {
+                        if (!ev.GetCurrentPoint(pickWrap).Properties.IsLeftButtonPressed) return;
+                        if (!_companionPickedIds.Add(msgCap.Id))
+                            _companionPickedIds.Remove(msgCap.Id);
+                        RenderRightPane();
+                    };
+                    chatStack.Children.Add(pickWrap);
+                }
+                else
+                {
+                    chatStack.Children.Add(bubble);
+                }
 
                 // Follow-up chips under the latest assistant message
-                if (!msg.IsUser && mi == _companionMessages.Count - 1 && !_companionBusy && msg.FollowUps is { Count: > 0 })
+                if (!_companionPicking && !msg.IsUser && mi == _companionMessages.Count - 1 && !_companionBusy && msg.FollowUps is { Count: > 0 })
                 {
                     var fuStack = new StackPanel { Spacing = 4, Margin = new Thickness(0, -2, 0, 0) };
                     foreach (var fu in msg.FollowUps.Take(3))
@@ -852,14 +1144,138 @@ public sealed partial class ReaderPaneView
                 }
             }
         }
+        _companionStreamBubble = null;
         if (_companionBusy)
         {
-            chatStack.Children.Add(new TextBlock { Text = L10n.T("书伴正在翻阅原文并思考…"), FontSize = 12, Foreground = ThemeHelper.Brush(tc.Accent) });
+            var streamBubble = new Border
+            {
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12, 9, 12, 9),
+                Background = ThemeHelper.Brush(p.Card),
+                BorderBrush = ThemeHelper.Brush(p.Line),
+                BorderThickness = new Thickness(1),
+                Child = BuildCompanionStreamingInner(_companionStreamText, _companionStreamThinking, p, tc),
+            };
+            _companionStreamBubble = streamBubble;
+            chatStack.Children.Add(streamBubble);
         }
 
         var scroller = new ScrollViewer { Content = chatStack };
+        _companionScroller = scroller;
+        if (_companionMessages.Count > 0 || _companionBusy)
+        {
+            scroller.Loaded += (_, _) =>
+            {
+                DispatcherQueue.TryEnqueue(ScrollCompanionToBottom);
+            };
+        }
         Grid.SetRow(scroller, 1);
         g.Children.Add(scroller);
+
+        if (_companionPicking)
+        {
+            var pickBarStack = new StackPanel { Spacing = 8 };
+            var hintRow = new Grid { ColumnSpacing = 6 };
+            hintRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            hintRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            hintRow.Children.Add(new TextBlock
+            {
+                Text = L10n.T("可同时勾选提问与多条回答，合并存为 1 条想法"),
+                FontSize = 10.5,
+                Foreground = ThemeHelper.Brush(p.T3),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            if (_companionPickedIds.Count > 0)
+            {
+                var prevBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
+                    Content = L10n.T(_companionPreviewMerged ? "收起预览" : "预览合并"),
+                    FontSize = 11,
+                    Foreground = ThemeHelper.Brush(tc.Accent),
+                    Padding = new Thickness(4, 0, 4, 0),
+                    MinHeight = 20,
+                };
+                prevBtn.Click += (_, _) => { _companionPreviewMerged = !_companionPreviewMerged; RenderRightPane(); };
+                Grid.SetColumn(prevBtn, 1);
+                hintRow.Children.Add(prevBtn);
+            }
+            pickBarStack.Children.Add(hintRow);
+
+            if (_companionPreviewMerged && _companionPickedIds.Count > 0)
+            {
+                string composed = ComposeCompanionThought(_companionPickedIds);
+                if (!string.IsNullOrWhiteSpace(composed))
+                {
+                    pickBarStack.Children.Add(new Border
+                    {
+                        CornerRadius = new CornerRadius(8),
+                        Background = ThemeHelper.Brush(p.Inset),
+                        Padding = new Thickness(10, 7, 10, 7),
+                        Child = new ScrollViewer
+                        {
+                            MaxHeight = 110,
+                            Content = L10n.Skip(new TextBlock
+                            {
+                                Text = composed,
+                                FontSize = 11.5,
+                                LineHeight = 18,
+                                Foreground = ThemeHelper.Brush(p.T2),
+                                TextWrapping = TextWrapping.Wrap,
+                                IsTextSelectionEnabled = true,
+                            }),
+                        },
+                    });
+                }
+            }
+
+            var pickFoot = new Grid { ColumnSpacing = 8 };
+            pickFoot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            pickFoot.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            pickFoot.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var cancelBtn = new Button
+            {
+                Style = (Style)Application.Current.Resources["YYFluentButtonStyle"],
+                Height = 30,
+                MinHeight = 30,
+                Content = L10n.T("取消"),
+            };
+            cancelBtn.Click += (_, _) => ExitCompanionPicking();
+            int nPick = _companionPickedIds.Count;
+            var mergeSaveBtn = new Button
+            {
+                Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"],
+                Height = 30,
+                MinHeight = 30,
+                IsEnabled = nPick > 0,
+                Content = nPick > 1 ? L10n.T($"合并存为想法 ({nPick})") : L10n.T($"存为想法 ({nPick})"),
+            };
+            mergeSaveBtn.Click += (_, _) =>
+            {
+                if (SaveCompanionPickedThoughts())
+                    ExitCompanionPicking();
+            };
+            Grid.SetColumn(cancelBtn, 0);
+            Grid.SetColumn(mergeSaveBtn, 2);
+            pickFoot.Children.Add(cancelBtn);
+            pickFoot.Children.Add(mergeSaveBtn);
+            pickBarStack.Children.Add(pickFoot);
+
+            var pickBar = new Border
+            {
+                Margin = new Thickness(10, 4, 10, 10),
+                Padding = new Thickness(10),
+                CornerRadius = new CornerRadius(10),
+                Background = ThemeHelper.Brush(p.Card),
+                BorderBrush = ThemeHelper.Brush(p.Line),
+                BorderThickness = new Thickness(1),
+                Child = pickBarStack,
+            };
+            Grid.SetRow(pickBar, 3);
+            g.Children.Add(pickBar);
+            return g;
+        }
 
         // Slash Command popup card (shown right above input bar when "/" is active)
         var slashListStack = new StackPanel { Spacing = 2 };
@@ -891,21 +1307,31 @@ public sealed partial class ReaderPaneView
             Height = 32,
             MinHeight = 32,
             Padding = new Thickness(0),
+            VerticalAlignment = VerticalAlignment.Bottom,
             Content = new TextBlock { Text = "/", FontSize = 13, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center },
         };
-        ToolTipService.SetToolTip(slashBtn, L10n.T("快捷斜杠指令 (/chapter, /characters, /recap…)"));
+        ToolTipService.SetToolTip(slashBtn, L10n.T("快捷指令 (/)"));
 
         var inputBox = new TextBox
         {
-            Style = (Style)Application.Current.Resources["YYSingleLineTextBoxStyle"],
-            PlaceholderText = L10n.T("问书伴，或输入 / …"),
-            AcceptsReturn = false,
+            PlaceholderText = L10n.T("问这本书，或输入 / …"),
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            MinHeight = 32,
+            MaxHeight = 88,
+            FontSize = 12.5,
+            Padding = new Thickness(10, 6, 10, 5),
+            CornerRadius = new CornerRadius(6),
+            VerticalAlignment = VerticalAlignment.Bottom,
+            UseSystemFocusVisuals = false,
         };
+        ToolTipService.SetToolTip(inputBox, L10n.T("Enter 发送 · Shift+Enter 换行"));
         var sendBtn = new Button
         {
             Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"],
             Height = 32,
             MinHeight = 32,
+            VerticalAlignment = VerticalAlignment.Bottom,
             Content = L10n.T("发送"),
             IsEnabled = !_companionBusy,
         };
@@ -917,9 +1343,10 @@ public sealed partial class ReaderPaneView
             int spIdx = q.IndexOfAny([' ', '\t']);
             if (spIdx >= 0) q = q[..spIdx];
 
+            var allCmds = GetAllCompanionSlashCommands();
             var matched = string.IsNullOrEmpty(q)
-                ? AllCompanionSlashCommands
-                : AllCompanionSlashCommands.Where(c =>
+                ? allCmds
+                : allCmds.Where(c =>
                     c.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
                     || c.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
                     || c.Keywords.Any(k => k.Contains(q, StringComparison.OrdinalIgnoreCase))).ToArray();
@@ -942,26 +1369,28 @@ public sealed partial class ReaderPaneView
                 ic.VerticalAlignment = VerticalAlignment.Center;
                 row.Children.Add(ic);
 
-                var cmdNameTb = new TextBlock
+                var cmdNameTb = L10n.Skip(new TextBlock
                 {
                     Text = $"/{cCap.Name}",
                     FontSize = 11.5,
                     FontWeight = FontWeights.SemiBold,
                     Foreground = ThemeHelper.Brush(p.T1),
                     VerticalAlignment = VerticalAlignment.Center,
-                };
+                });
                 Grid.SetColumn(cmdNameTb, 1);
                 row.Children.Add(cmdNameTb);
 
-                var cmdDescTb = new TextBlock
+                var cmdDescTb = L10n.Skip(new TextBlock
                 {
-                    Text = $"{L10n.T(cCap.Title)} · {L10n.T(cCap.Subtitle)}",
+                    Text = cCap.CustomPrompt is not null
+                        ? $"{cCap.Title} · {L10n.T(cCap.Subtitle)}"
+                        : $"{L10n.T(cCap.Title)} · {L10n.T(cCap.Subtitle)}",
                     FontSize = 10.5,
                     Foreground = ThemeHelper.Brush(p.T3),
                     MaxLines = 1,
                     TextTrimming = TextTrimming.CharacterEllipsis,
                     VerticalAlignment = VerticalAlignment.Center,
-                };
+                });
                 Grid.SetColumn(cmdDescTb, 2);
                 row.Children.Add(cmdDescTb);
 
@@ -1023,10 +1452,22 @@ public sealed partial class ReaderPaneView
             _ = ExecuteCompanionInputAsync(q, modelBtn, dark);
         }
         sendBtn.Click += (_, _) => Submit();
-        inputBox.KeyDown += (_, e) =>
+        inputBox.PreviewKeyDown += (_, e) =>
         {
-            if (e.Key == VirtualKey.Enter) { Submit(); e.Handled = true; }
-            else if (e.Key == VirtualKey.Escape && slashPopup.Visibility == Visibility.Visible) { slashPopup.Visibility = Visibility.Collapsed; e.Handled = true; }
+            if (e.Key == VirtualKey.Enter)
+            {
+                bool shift = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(CoreVirtualKeyStates.Down);
+                if (!shift)
+                {
+                    Submit();
+                    e.Handled = true;
+                }
+            }
+            else if (e.Key == VirtualKey.Escape && slashPopup.Visibility == Visibility.Visible)
+            {
+                slashPopup.Visibility = Visibility.Collapsed;
+                e.Handled = true;
+            }
         };
 
         Grid.SetColumn(slashBtn, 0);
@@ -1168,14 +1609,24 @@ public sealed partial class ReaderPaneView
                 var grp = groups[gi];
                 if (gi > 0)
                     host.Children.Add(new Border { Height = 1, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(4, 4, 4, 2) });
-                host.Children.Add(new TextBlock
+                var grpHead = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 6,
+                    Margin = new Thickness(6, 3, 6, 2),
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                if (ThemeHelper.CreateBrandLogoImage(grp.ProviderId, dark, 14) is { } brandLogo)
+                    grpHead.Children.Add(brandLogo);
+                grpHead.Children.Add(L10n.Skip(new TextBlock
                 {
                     Text = grp.ProviderName,
                     FontSize = 10.5,
                     FontWeight = FontWeights.SemiBold,
                     Foreground = ThemeHelper.Brush(p.T3),
-                    Margin = new Thickness(6, 3, 6, 2),
-                });
+                    VerticalAlignment = VerticalAlignment.Center,
+                }));
+                host.Children.Add(grpHead);
 
                 foreach (var modelId in grp.Models)
                 {
@@ -1261,15 +1712,24 @@ public sealed partial class ReaderPaneView
             string cmdToken = (spIdx >= 0 ? body[..spIdx] : body).Trim().ToLowerInvariant();
             string arg = spIdx >= 0 ? body[(spIdx + 1)..].Trim() : "";
 
-            var matched = AllCompanionSlashCommands.FirstOrDefault(c =>
+            var allCmds = GetAllCompanionSlashCommands();
+            var matched = allCmds.FirstOrDefault(c =>
                 string.Equals(c.Name, cmdToken, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(c.Title, cmdToken, StringComparison.OrdinalIgnoreCase));
+            if (matched?.CustomPrompt is string customPrompt)
+            {
+                await SendCompanionQuestionAsync(string.IsNullOrWhiteSpace(arg) ? customPrompt : $"{customPrompt}\n{arg}");
+                return;
+            }
             string cmdName = matched?.Name ?? cmdToken;
 
             switch (cmdName)
             {
                 case "clear":
                     _companionMessages.Clear();
+                    _companionPicking = false;
+                    _companionPickedIds.Clear();
+                    _companionPreviewMerged = false;
                     RenderRightPane();
                     return;
 
@@ -1361,35 +1821,558 @@ public sealed partial class ReaderPaneView
         await SendCompanionQuestionAsync(trimmed);
     }
 
-    private async Task SendCompanionQuestionAsync(string question)
+    private void ScrollCompanionToBottom()
+    {
+        if (_companionScroller is not { } sc) return;
+        try
+        {
+            sc.UpdateLayout();
+            sc.ChangeView(null, sc.ScrollableHeight, null, disableAnimation: true);
+        }
+        catch { }
+    }
+
+    private UIElement BuildCompanionStreamingInner(string visibleText, bool thinking, YYPalette p, YYTintColors tc)
+    {
+        if (string.IsNullOrWhiteSpace(visibleText))
+        {
+            return new TextBlock
+            {
+                Text = L10n.T(thinking ? "正在思考…" : "正在整理回答…"),
+                FontSize = 12,
+                Foreground = ThemeHelper.Brush(tc.Accent),
+            };
+        }
+
+        var stack = new StackPanel { Spacing = 4 };
+        stack.Children.Add(BuildCompanionRichContent(visibleText, null, p, tc, selectable: false, streaming: true));
+        stack.Children.Add(new TextBlock
+        {
+            Text = L10n.T(thinking ? "正在思考…" : "生成中…"),
+            FontSize = 10.5,
+            Foreground = ThemeHelper.Brush(tc.Accent),
+        });
+        return stack;
+    }
+
+    private StackPanel BuildCompanionRichContent(
+        string rawText,
+        IReadOnlyList<CompanionClient.CompanionSource>? sources,
+        YYPalette p,
+        YYTintColors tc,
+        bool selectable,
+        bool streaming = false)
+    {
+        var container = new StackPanel { Spacing = 4 };
+        L10n.Skip(container);
+
+        var segments = CompanionClient.ParseRichSegments(rawText, streaming);
+        if (segments.Count == 0)
+        {
+            container.Children.Add(new TextBlock
+            {
+                Text = rawText,
+                FontSize = 12.5,
+                LineHeight = 20,
+                Foreground = ThemeHelper.Brush(p.T1),
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = selectable,
+            });
+            return container;
+        }
+
+        var sourceMap = new Dictionary<int, CompanionClient.CompanionSource>();
+        if (sources is not null)
+        {
+            foreach (var s in sources)
+                sourceMap[s.Index] = s;
+        }
+
+        // Split flat segments into lines separated by Newline
+        var lines = new List<List<CompanionClient.CompanionRichSegment>>();
+        var curLine = new List<CompanionClient.CompanionRichSegment>();
+        foreach (var seg in segments)
+        {
+            if (seg.Kind == CompanionClient.CompanionRichKind.Newline)
+            {
+                lines.Add(curLine);
+                curLine = new List<CompanionClient.CompanionRichSegment>();
+            }
+            else
+            {
+                curLine.Add(seg);
+            }
+        }
+        lines.Add(curLine);
+
+        RichTextBlock BuildInlineRichBlock(IReadOnlyList<CompanionClient.CompanionRichSegment> inlineSegs, Color fgColor)
+        {
+            var rtb = new RichTextBlock
+            {
+                FontSize = 12.5,
+                LineHeight = 20,
+                Foreground = ThemeHelper.Brush(fgColor),
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = selectable,
+            };
+            var para = new Paragraph();
+            foreach (var seg in inlineSegs)
+            {
+                switch (seg.Kind)
+                {
+                    case CompanionClient.CompanionRichKind.Text:
+                        para.Inlines.Add(new Run { Text = seg.Text });
+                        break;
+                    case CompanionClient.CompanionRichKind.Bold:
+                        para.Inlines.Add(new Run { Text = seg.Text, FontWeight = FontWeights.SemiBold });
+                        break;
+                    case CompanionClient.CompanionRichKind.Italic:
+                        para.Inlines.Add(new Run { Text = seg.Text, FontStyle = FontStyle.Italic });
+                        break;
+                    case CompanionClient.CompanionRichKind.Strike:
+                        para.Inlines.Add(new Run
+                        {
+                            Text = seg.Text,
+                            TextDecorations = TextDecorations.Strikethrough,
+                            Foreground = ThemeHelper.Brush(p.T3),
+                        });
+                        break;
+                    case CompanionClient.CompanionRichKind.Code:
+                        para.Inlines.Add(new Run
+                        {
+                            Text = $" {seg.Text} ",
+                            FontFamily = new FontFamily("Cascadia Mono, Consolas"),
+                            FontSize = 11.5,
+                            Foreground = ThemeHelper.Brush(tc.Accent),
+                        });
+                        break;
+                    case CompanionClient.CompanionRichKind.Citation:
+                        if (selectable && sourceMap.TryGetValue(seg.CitationIndex, out var srcCap))
+                        {
+                            var hl = new Hyperlink
+                            {
+                                UnderlineStyle = UnderlineStyle.None,
+                                Foreground = ThemeHelper.Brush(tc.Accent),
+                            };
+                            hl.Inlines.Add(new Run
+                            {
+                                Text = $" [{seg.CitationIndex}]",
+                                FontSize = 11,
+                                FontWeight = FontWeights.SemiBold,
+                            });
+                            var jumpTarget = srcCap;
+                            hl.Click += (_, _) => JumpTo(jumpTarget.Section, (int)jumpTarget.Sentence);
+                            para.Inlines.Add(hl);
+                        }
+                        else
+                        {
+                            para.Inlines.Add(new Run
+                            {
+                                Text = $" [{seg.CitationIndex}]",
+                                FontSize = 11,
+                                FontWeight = FontWeights.SemiBold,
+                                Foreground = ThemeHelper.Brush(tc.Accent),
+                            });
+                        }
+                        break;
+                }
+            }
+            rtb.Blocks.Add(para);
+            return rtb;
+        }
+
+        foreach (var lineSegs in lines)
+        {
+            if (lineSegs.Count == 0)
+            {
+                if (container.Children.Count > 0)
+                    container.Children.Add(new Border { Height = 2 });
+                continue;
+            }
+
+            if (lineSegs[0].Kind == CompanionClient.CompanionRichKind.Heading)
+            {
+                container.Children.Add(new TextBlock
+                {
+                    Text = lineSegs[0].Text,
+                    FontSize = 13.5,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = ThemeHelper.Brush(p.T1),
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, container.Children.Count > 0 ? 4 : 0, 0, 1),
+                    IsTextSelectionEnabled = selectable,
+                });
+                continue;
+            }
+
+            if (lineSegs[0].Kind == CompanionClient.CompanionRichKind.Bullet)
+            {
+                var row = new Grid { ColumnSpacing = 6 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.Children.Add(new TextBlock
+                {
+                    Text = "•",
+                    FontSize = 12.5,
+                    LineHeight = 20,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = ThemeHelper.Brush(tc.Accent),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                });
+                var body = BuildInlineRichBlock(lineSegs.Skip(1).ToList(), p.T1);
+                Grid.SetColumn(body, 1);
+                row.Children.Add(body);
+                container.Children.Add(row);
+                continue;
+            }
+
+            if (lineSegs[0].Kind == CompanionClient.CompanionRichKind.QuoteBar)
+            {
+                var row = new Grid { ColumnSpacing = 8, Margin = new Thickness(0, 1, 0, 1) };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2.5) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.Children.Add(new Border
+                {
+                    Background = ThemeHelper.Brush(tc.Edge),
+                    CornerRadius = new CornerRadius(1.5),
+                });
+                var body = BuildInlineRichBlock(lineSegs.Skip(1).ToList(), p.T2);
+                Grid.SetColumn(body, 1);
+                row.Children.Add(body);
+                container.Children.Add(row);
+                continue;
+            }
+
+            container.Children.Add(BuildInlineRichBlock(lineSegs, p.T1));
+        }
+
+        return container;
+    }
+
+    private async Task SendCompanionQuestionAsync(string question, CompanionAnchor? anchor = null)
     {
         if (_companionBusy) return;
+        var uiQueue = DispatcherQueue;
         _companionBusy = true;
-        _companionMessages.Add((true, question, null, null));
+        _companionStreamText = "";
+        _companionStreamThinking = true;
+
+        var priorHistory = _companionMessages
+            .Where(m => !m.IsError && !string.IsNullOrWhiteSpace(m.Text))
+            .TakeLast(4)
+            .Select(m => (Role: m.IsUser ? "user" : "assistant", Content: m.Text))
+            .ToList();
+
+        uint askedSec = _currentSection;
+        int askedSent = CurrentReadingSentence();
+        _companionMessages.Add(new CompanionChatMsg
+        {
+            IsUser = true,
+            Text = question,
+            Anchor = anchor,
+            AskedSection = askedSec,
+            AskedSentence = askedSent,
+        });
         if (_rightPaneOpen && _rightPaneTab == "companion") RenderRightPane();
+
+        long lastUiTick = 0;
+        void OnStreamPreview(string visibleText, bool thinking)
+        {
+            _companionStreamText = visibleText;
+            _companionStreamThinking = thinking;
+            long now = Environment.TickCount64;
+            if (now - lastUiTick < 55) return;
+            lastUiTick = now;
+
+            uiQueue.TryEnqueue(() =>
+            {
+                if (_disposed || !_companionBusy || _companionStreamBubble is null) return;
+                bool dark = CurrentPaperChrome?.IsDark ?? ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
+                var p = ThemeHelper.Palette(dark);
+                var tc = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+                _companionStreamBubble.Child = BuildCompanionStreamingInner(_companionStreamText, _companionStreamThinking, p, tc);
+                ScrollCompanionToBottom();
+            });
+        }
 
         try
         {
-            int curSent = CurrentReadingSentence();
+            double frac = CalculateBookFraction(askedSec, askedSent);
             var ans = await _library.Companion.AskBookStructuredAsync(
                 _bookId,
                 _detail.Summary.Title,
-                _currentSection,
-                curSent,
+                askedSec,
+                askedSent,
                 question,
+                selectedQuote: anchor?.Text,
                 wholeBook: !_companionNoSpoiler,
-                detail: _detail);
-            var (cleanAnswer, followUps) = CompanionClient.SplitFollowUpQuestions(ans.Text);
-            _companionMessages.Add((false, cleanAnswer, ans.Sources, followUps));
+                history: priorHistory.Count > 0 ? priorHistory : null,
+                detail: _detail,
+                readingFraction: frac,
+                onStreamPreview: OnStreamPreview);
+            _companionMessages.Add(new CompanionChatMsg
+            {
+                IsUser = false,
+                Text = ans.Text,
+                Sources = ans.Sources,
+                FollowUps = ans.NextQuestions,
+                Anchor = anchor,
+                AskedSection = askedSec,
+                AskedSentence = askedSent,
+            });
         }
         catch (Exception ex)
         {
-            _companionMessages.Add((false, $"书伴暂时无法回答：{CompanionClient.FormatErrorMessage(ex)}\n可在「设置 → 书伴」检查模型与密钥。", null, null));
+            _companionMessages.Add(new CompanionChatMsg
+            {
+                IsUser = false,
+                Text = $"书伴暂时无法回答：{CompanionClient.FormatErrorMessage(ex)}\n可在「设置 → 书伴」检查模型与密钥。",
+                AskedSection = askedSec,
+                AskedSentence = askedSent,
+                IsError = true,
+            });
         }
         finally
         {
             _companionBusy = false;
+            _companionStreamText = "";
+            _companionStreamThinking = false;
+            _companionStreamBubble = null;
             if (!_disposed && _rightPaneOpen && _rightPaneTab == "companion") RenderRightPane();
+        }
+    }
+
+    private static string StripCompanionMarkdownForNote(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "";
+        string noCites = Regex.Replace(raw, @"[ \t\u00A0]*\[\d+\]", "");
+        var lines = noCites.Replace("\r\n", "\n").Split('\n');
+        var cleaned = new List<string>(lines.Length);
+        foreach (var rawLine in lines)
+        {
+            string line = rawLine;
+            if (Regex.IsMatch(line, @"^\s*([-*_])\1{2,}\s*$"))
+            {
+                cleaned.Add("");
+                continue;
+            }
+            var hm = Regex.Match(line, @"^\s{0,3}#{1,6}\s+(.*)$");
+            if (hm.Success) line = hm.Groups[1].Value;
+            else
+            {
+                var bm = Regex.Match(line, @"^\s*[-*•]\s+(.*)$");
+                if (bm.Success) line = "• " + bm.Groups[1].Value;
+                else
+                {
+                    var qm = Regex.Match(line, @"^\s*>\s?(.*)$");
+                    if (qm.Success) line = qm.Groups[1].Value;
+                }
+            }
+            line = Regex.Replace(line, @"\*\*(.+?)\*\*", "$1");
+            line = Regex.Replace(line, @"__(.+?)__", "$1");
+            line = Regex.Replace(line, @"`([^`\n]+)`", "$1");
+            line = Regex.Replace(line, @"~~(.+?)~~", "$1");
+            line = Regex.Replace(line, @"(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)", "$1");
+            cleaned.Add(line);
+        }
+        return Regex.Replace(string.Join("\n", cleaned), @"\n{3,}", "\n\n").Trim();
+    }
+
+    private static string MergeCompanionNote(string? existing, string addition)
+    {
+        string old = (existing ?? "").Trim();
+        if (string.IsNullOrEmpty(old)) return addition;
+        if (old.Contains(addition, StringComparison.Ordinal)) return old;
+        return $"{old}\n\n{addition}";
+    }
+
+    private string ComposeCompanionThought(HashSet<string> pickedIds)
+    {
+        if (pickedIds.Count == 0) return "";
+        var picked = _companionMessages.Where(m => !m.IsError && pickedIds.Contains(m.Id)).ToList();
+        if (picked.Count == 0) return "";
+        bool hasQ = picked.Any(m => m.IsUser && !string.IsNullOrWhiteSpace(m.Text));
+        bool hasA = picked.Any(m => !m.IsUser && !string.IsNullOrWhiteSpace(StripCompanionMarkdownForNote(m.Text)));
+        bool labelBoth = hasQ && hasA;
+
+        var blocks = new List<string>();
+        foreach (var m in picked)
+        {
+            string body = m.IsUser ? m.Text.Trim() : StripCompanionMarkdownForNote(m.Text);
+            if (string.IsNullOrEmpty(body)) continue;
+            if (labelBoth)
+                blocks.Add((m.IsUser ? L10n.T("问：") : L10n.T("答：")) + body);
+            else
+                blocks.Add(body);
+        }
+        return string.Join("\n\n", blocks);
+    }
+
+    private MarkStyle PreferredHighlightStyle() => _library.Prefs.LastHighlightStyle switch
+    {
+        "Blue" => MarkStyle.Blue,
+        "Pink" => MarkStyle.Pink,
+        "Wave" => MarkStyle.Wave,
+        _ => MarkStyle.Yellow,
+    };
+
+    private void SaveCompanionThought(CompanionChatMsg answerMsg)
+    {
+        if (answerMsg.IsUser || answerMsg.IsError) return;
+        if (!string.IsNullOrEmpty(answerMsg.SavedMarkId))
+        {
+            var existing = _library.GetMarks(_bookId).FirstOrDefault(m => m.Id == answerMsg.SavedMarkId);
+            if (existing is not null)
+            {
+                JumpTo(existing.Section, (int)existing.Start.Sentence);
+                return;
+            }
+        }
+        string clean = StripCompanionMarkdownForNote(answerMsg.Text);
+        if (string.IsNullOrEmpty(clean)) return;
+        var firstCited = answerMsg.Sources?.OrderBy(s => s.Index).FirstOrDefault();
+        PersistCompanionThought(
+            clean,
+            answerMsg.Anchor,
+            firstCited,
+            answerMsg.AskedSection,
+            answerMsg.AskedSentence,
+            [answerMsg],
+            merged: false);
+    }
+
+    private bool SaveCompanionPickedThoughts()
+    {
+        string clean = ComposeCompanionThought(_companionPickedIds);
+        if (string.IsNullOrEmpty(clean)) return false;
+        var picked = _companionMessages.Where(m => !m.IsError && _companionPickedIds.Contains(m.Id)).ToList();
+        if (picked.Count == 0) return false;
+        var first = picked[0];
+        var anchor = picked.Select(m => m.Anchor).FirstOrDefault(a => a?.MarkId is not null)
+            ?? picked.Select(m => m.Anchor).FirstOrDefault(a => a is not null);
+        var firstCited = picked
+            .Where(m => !m.IsUser && m.Sources is { Count: > 0 })
+            .Select(m => m.Sources!.OrderBy(s => s.Index).FirstOrDefault())
+            .FirstOrDefault(s => s is not null);
+        var answerTargets = picked.Where(m => !m.IsUser).ToList();
+        return PersistCompanionThought(
+            clean,
+            anchor,
+            firstCited,
+            first.AskedSection,
+            first.AskedSentence,
+            answerTargets,
+            merged: picked.Count > 1);
+    }
+
+    private bool PersistCompanionThought(
+        string clean,
+        CompanionAnchor? anchor,
+        CompanionClient.CompanionSource? fallbackSource,
+        uint askedSection,
+        int askedSentence,
+        List<CompanionChatMsg> stampTargets,
+        bool merged)
+    {
+        string toastTitle = merged ? L10n.T("已合并存进想法") : L10n.T("已存进想法");
+        var prevSaved = stampTargets.ToDictionary(m => m, m => m.SavedMarkId);
+        void Stamp(string? markId) { foreach (var m in stampTargets) m.SavedMarkId = markId; }
+        void RestoreStamp() { foreach (var kv in prevSaved) kv.Key.SavedMarkId = kv.Value; }
+
+        try
+        {
+            var marks = _library.GetMarks(_bookId);
+
+            // 1. Existing highlight tapped via 问: append/update its thought
+            if (anchor?.MarkId is string mid && marks.FirstOrDefault(m => m.Id == mid) is { } targetMark)
+            {
+                string? prevNote = targetMark.Note;
+                _library.SetMarkNote(_bookId, mid, MergeCompanionNote(prevNote, clean));
+                Stamp(mid);
+                _ = RefreshSectionOverlaysAsync();
+                if (_rightPaneOpen) RenderRightPane();
+                ShowReaderAlert(toastTitle, "撤销", () =>
+                {
+                    try { _library.SetMarkNote(_bookId, mid, prevNote); } catch { }
+                    RestoreStamp();
+                    _ = RefreshSectionOverlaysAsync();
+                    if (_rightPaneOpen) RenderRightPane();
+                });
+                return true;
+            }
+
+            // 2. Fresh text selection handed via 问: highlight that exact span with the thought
+            if (anchor is not null && !string.IsNullOrWhiteSpace(anchor.Text))
+            {
+                var created = _library.AddMark(_bookId, anchor.Section, anchor.Start, anchor.End, anchor.Text, PreferredHighlightStyle(), clean);
+                Stamp(created.Id);
+                _ = RefreshSectionOverlaysAsync();
+                if (_rightPaneOpen) RenderRightPane();
+                ShowReaderAlert(toastTitle, "撤销", () =>
+                {
+                    try { _library.DeleteMark(_bookId, created.Id); } catch { }
+                    RestoreStamp();
+                    _ = RefreshSectionOverlaysAsync();
+                    if (_rightPaneOpen) RenderRightPane();
+                });
+                return true;
+            }
+
+            // 3. No selection quote: anchor to first cited sentence or the reading sentence where asked
+            uint targetSec = fallbackSource?.Section ?? askedSection;
+            int targetSent = (int)(fallbackSource?.Sentence ?? (uint)Math.Max(0, askedSentence));
+            var all = _library.GetSentences(_bookId, targetSec);
+            if (all.Count == 0) return false;
+            int clamped = Math.Clamp(targetSent, 0, all.Count - 1);
+            int chosen = -1;
+            for (int i = clamped; i < all.Count; i++) { if (!string.IsNullOrWhiteSpace(all[i])) { chosen = i; break; } }
+            if (chosen < 0)
+                for (int i = clamped - 1; i >= 0; i--) { if (!string.IsNullOrWhiteSpace(all[i])) { chosen = i; break; } }
+            if (chosen < 0) chosen = clamped;
+
+            string raw = all[chosen];
+            string trimmed = raw.Trim();
+            if (string.IsNullOrEmpty(trimmed)) return false;
+            int offsetStart = raw.IndexOf(trimmed, StringComparison.Ordinal);
+            if (offsetStart < 0) offsetStart = 0;
+            var start = new TextPoint((uint)chosen, (uint)offsetStart);
+            var end = new TextPoint((uint)chosen, (uint)(offsetStart + trimmed.Length));
+
+            var existingSame = marks.FirstOrDefault(m => m.Section == targetSec && m.Start == start && m.End == end);
+            if (existingSame is not null)
+            {
+                string? prevNote = existingSame.Note;
+                _library.SetMarkNote(_bookId, existingSame.Id, MergeCompanionNote(prevNote, clean));
+                Stamp(existingSame.Id);
+                _ = RefreshSectionOverlaysAsync();
+                if (_rightPaneOpen) RenderRightPane();
+                ShowReaderAlert(toastTitle, "撤销", () =>
+                {
+                    try { _library.SetMarkNote(_bookId, existingSame.Id, prevNote); } catch { }
+                    RestoreStamp();
+                    _ = RefreshSectionOverlaysAsync();
+                    if (_rightPaneOpen) RenderRightPane();
+                });
+                return true;
+            }
+
+            var added = _library.AddMark(_bookId, targetSec, start, end, trimmed, PreferredHighlightStyle(), clean);
+            Stamp(added.Id);
+            _ = RefreshSectionOverlaysAsync();
+            if (_rightPaneOpen) RenderRightPane();
+            ShowReaderAlert(toastTitle, "撤销", () =>
+            {
+                try { _library.DeleteMark(_bookId, added.Id); } catch { }
+                RestoreStamp();
+                _ = RefreshSectionOverlaysAsync();
+                if (_rightPaneOpen) RenderRightPane();
+            });
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ShowReaderAlert($"保存想法失败：{ex.Message}");
+            return false;
         }
     }
 
@@ -1432,8 +2415,8 @@ public sealed partial class ReaderPaneView
         }
 
         topCardStack.Children.Add(MakeToggleRow(
-            "多角色广播剧演播",
-            "为小说人物自动分配不同声线，带情感与环境音效",
+            "广播剧模式",
+            "按人物自动分声，带语气与场景音效，点了就听",
             _dramaModeOn,
             on =>
             {
@@ -1447,8 +2430,8 @@ public sealed partial class ReaderPaneView
         topCardStack.Children.Add(new Border { Height = 1, Background = ThemeHelper.Brush(p.Line) });
 
         topCardStack.Children.Add(MakeToggleRow(
-            "正文对话角色气泡",
-            "在对话旁显示说话人头像，点击气泡即可改认说话人",
+            "对话气泡",
+            "将人物台词排成聊天气泡，点气泡可改认说话人",
             _bubblesOn,
             on =>
             {
@@ -1464,7 +2447,7 @@ public sealed partial class ReaderPaneView
         narGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         narGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var narMeta = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
-        narMeta.Children.Add(new TextBlock { Text = L10n.T("旁白音色"), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
+        narMeta.Children.Add(new TextBlock { Text = L10n.T("旁白"), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
         narMeta.Children.Add(L10n.Skip(new TextBlock { Text = $"{_audio.VoiceName} · {_audio.Rate:0.##}×", FontSize = 11, Foreground = ThemeHelper.Brush(p.T2), MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis }));
         var pickNarBtn = new Button
         {
@@ -1473,7 +2456,7 @@ public sealed partial class ReaderPaneView
             MinHeight = 26,
             Padding = new Thickness(10, 0, 10, 0),
             FontSize = 11,
-            Content = L10n.T("更换声音"),
+            Content = L10n.T("换声音"),
             VerticalAlignment = VerticalAlignment.Center,
         };
         pickNarBtn.Click += async (_, _) =>
@@ -1568,23 +2551,23 @@ public sealed partial class ReaderPaneView
             return b;
         }
 
-        stack.Children.Add(MakeCastAction("cast", "校对本章对话角色", "逐句确认未写明说话人的台词", true, async () =>
+        stack.Children.Add(MakeCastAction("cast", "待确认的台词", "逐句确认未写明说话人的台词", true, async () =>
         {
             if (RootGrid.XamlRoot is { } xr)
                 await VoiceCloneAndDramaDialogs.ShowUnsureSpeakerReviewAsync(xr, _library, _bookId, _currentSection, RefreshCastAndAudio);
         }));
-        stack.Children.Add(MakeCastAction("people", "全书角色与说话人", "搜索并查看全书已识别的所有人物", false, async () =>
+        stack.Children.Add(MakeCastAction("people", "是谁说的", "搜索并查看全书已识别的所有人物", false, async () =>
         {
             if (RootGrid.XamlRoot is { } xr)
-                await VoiceCloneAndDramaDialogs.ShowPeoplePickerDialogAsync(xr, _library, _bookId, _currentSection, "全书角色与说话人");
+                await VoiceCloneAndDramaDialogs.ShowPeoplePickerDialogAsync(xr, _library, _bookId, _currentSection, "是谁说的");
         }));
-        stack.Children.Add(MakeCastAction("mic", "克隆专属朗读音色", "录制 10 秒样本打造个人专属音色卡", false, async () =>
+        stack.Children.Add(MakeCastAction("mic", "克隆一个声音", "录 10 秒自己的声音 · 不联网、不花钱", false, async () =>
         {
             if (RootGrid.XamlRoot is { } xr)
                 await VoiceCloneAndDramaDialogs.ShowCloneVoiceDialogAsync(_ownerWindow, xr, _library, forBookId: _bookId);
         }));
-        stack.Children.Add(MakeCastAction("pip", "置顶迷你听书浮窗", "缩小为置顶半透明浮窗，边办公边听书", false, OpenMiniPlayer));
-        stack.Children.Add(MakeCastAction("headphones", "更多声源与语音引擎设置", "管理云端 / 本地 TTS、离线引擎与音效库", false, () => _ownerWindow.ShowSettings("listening")));
+        stack.Children.Add(MakeCastAction("pip", "迷你听书", "缩小为置顶浮窗，边办公边听书", false, OpenMiniPlayer));
+        stack.Children.Add(MakeCastAction("headphones", "声音来源设置", "管理离线声音、云端声音与音效库", false, () => _ownerWindow.ShowSettings("listening")));
 
         return new ScrollViewer { Content = stack };
     }
@@ -1705,15 +2688,15 @@ public sealed partial class ReaderPaneView
 
             int missing = Math.Max(0, snap.secLines - snap.secKnown);
             string mainLine = running
-                ? L10n.T("正在后台识别全书说话人…")
-                : (!string.IsNullOrWhiteSpace(lastErr) ? L10n.T("说话人识别已暂停") : L10n.T($"本章台词 · {snap.secKnown} / {snap.secLines}"));
+                ? L10n.T("正在认全书…")
+                : (!string.IsNullOrWhiteSpace(lastErr) ? L10n.T("停下了") : L10n.T($"本章台词 · {snap.secKnown} / {snap.secLines}"));
             string subLine = running && snap.prog is { } pr
-                ? L10n.T($"已处理 {pr.SectionsDone} / {Math.Max(1u, pr.Sections)} 章")
+                ? L10n.T($"第 {pr.SectionsDone} / {Math.Max(1u, pr.Sections)} 章")
                 : (!string.IsNullOrWhiteSpace(lastErr)
                     ? lastErr!
                     : (snap.unsureLines.Length > 0
-                        ? L10n.T($"截至当前有 {snap.unsureLines.Length} 句待确认")
-                        : (missing > 0 ? L10n.T($"余 {missing} 句未写明说话人，可用 AI 自动补全") : L10n.T("读到这里的台词都已认好"))));
+                        ? L10n.T($"截至当前共有 {snap.unsureLines.Length} 句待确认")
+                        : (missing > 0 ? L10n.T($"余 {missing} 句未写明说话人") : L10n.T("读到这里的台词都认好了"))));
 
             var meta = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
             meta.Children.Add(new TextBlock { Text = mainLine, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
@@ -1729,7 +2712,7 @@ public sealed partial class ReaderPaneView
                 Padding = new Thickness(10, 0, 10, 0),
                 FontSize = 11,
                 VerticalAlignment = VerticalAlignment.Center,
-                Content = L10n.T(running ? "暂停" : (_library.Companion.IsConfigured ? "开始识别" : "去配置")),
+                Content = L10n.T(running ? "暂停" : (_library.Companion.IsConfigured ? "开始认全书" : "去设置")),
             };
             workerBtn.Click += (_, _) =>
             {
@@ -1782,14 +2765,14 @@ public sealed partial class ReaderPaneView
             sgGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             sgGrid.Children.Add(new TextBlock
             {
-                Text = $"「{sg.A}」{L10n.T("与")}「{sg.B}」{L10n.T("可能是同一人")}",
+                Text = $"{sg.A} {L10n.T("和")} {sg.B} {L10n.T("可能是同一个人")}",
                 FontSize = 11.5,
                 Foreground = ThemeHelper.Brush(p.T1),
                 VerticalAlignment = VerticalAlignment.Center,
                 TextWrapping = TextWrapping.Wrap,
             });
             var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
-            var mergeBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"], Height = 24, MinHeight = 24, Padding = new Thickness(8, 0, 8, 0), FontSize = 10.5, Content = L10n.T("合并") };
+            var mergeBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"], Height = 24, MinHeight = 24, Padding = new Thickness(8, 0, 8, 0), FontSize = 10.5, Content = L10n.T("合成一个") };
             mergeBtn.Click += (_, _) => { try { _library.Core.DramaEditCast(_bookId, new CastEdit.Merge(sg.A, sg.B)); } catch { } refreshCastAndAudio(); };
             var noBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Height = 24, MinHeight = 24, Padding = new Thickness(8, 0, 8, 0), FontSize = 10.5, Content = L10n.T("不是") };
             noBtn.Click += (_, _) => { try { _library.Core.DramaEditCast(_bookId, new CastEdit.NotSame(sg.A, sg.B)); } catch { } refreshCastAndAudio(); };
@@ -1937,8 +2920,8 @@ public sealed partial class ReaderPaneView
                 });
             }
 
-            AddRoleGroup("本章出场角色", snap.cast.Where(m => m.LinesHere > 0).ToArray());
-            AddRoleGroup("之前出场角色", snap.cast.Where(m => m.LinesHere == 0).Take(12).ToArray());
+            AddRoleGroup("这一章", snap.cast.Where(m => m.LinesHere > 0).ToArray());
+            AddRoleGroup("前面出场过", snap.cast.Where(m => m.LinesHere == 0).Take(12).ToArray());
         }
 
         // D. Drama Sound Effects & Background Pre-Render Studio Card (when drama mode is ON)
@@ -1949,13 +2932,13 @@ public sealed partial class ReaderPaneView
             {
                 var ds = initDs;
                 studioStack.Children.Add(makeToggleRow(
-                    "情感语气",
+                    "带语气演绎",
                     snap.canAct ? "按原文语境表现笑、叹、低语等语气" : "需使用支持情感的云端音色或增强本地音色",
                     ds.Acting,
                     v => { try { ds = ds with { Acting = v }; _library.Core.DramaSetSound(_bookId, ds); _audio.InvalidateRolesAndSpeakers(); } catch { } },
                     snap.canAct));
                 studioStack.Children.Add(makeToggleRow(
-                    "场景环境音",
+                    "环境音",
                     "随室内、雨夜、水边等场景铺垫氛围音",
                     ds.Beds,
                     v =>
@@ -1971,7 +2954,7 @@ public sealed partial class ReaderPaneView
                     },
                     true));
                 studioStack.Children.Add(makeToggleRow(
-                    "剧情音效",
+                    "音效",
                     "随正文触发敲门、雷声、钟声等音效",
                     ds.Spots,
                     v =>
@@ -1990,24 +2973,13 @@ public sealed partial class ReaderPaneView
                 studioStack.Children.Add(new Border { Height = 1, Background = ThemeHelper.Brush(p.Line) });
             }
 
-            string layerNote = snap.borrowedFrom is not null
-                ? L10n.T($"已借用「{snap.borrowedFrom}」预合成片段")
-                : snap.secLayer == DramaLayer.Studio
-                    ? L10n.T("本章已就绪（工作室预合成层）")
-                    : L10n.T("本章将按实时演播层合成");
-            if (snap.sectionSpeakerCount > 0)
-                layerNote = $"{layerNote} · {L10n.T($"本章 {snap.sectionSpeakerCount} 位角色发声")}";
-            studioStack.Children.Add(new TextBlock
-            {
-                Text = layerNote,
-                FontSize = 11,
-                Foreground = ThemeHelper.Brush(tc.Accent),
-                TextWrapping = TextWrapping.Wrap,
-            });
-
             string preHint = snap.made is { Sections: > 0 } md
-                ? L10n.T($"已预合成 {md.Made} / {md.Sections} 章")
-                : L10n.T("开启后后台提前合成全书，切章零等待");
+                ? (snap.borrowedFrom is not null
+                    ? L10n.T($"已完成 {md.Made} / {md.Sections} 章 · 来自「{snap.borrowedFrom}」")
+                    : L10n.T($"已完成 {md.Made} / {md.Sections} 章"))
+                : L10n.T("不开启也可即时听；开启后提前做好全书");
+            _ = snap.secLayer;
+            _ = snap.sectionSpeakerCount;
             studioStack.Children.Add(makeToggleRow(
                 "后台预合成全书",
                 preHint,
@@ -2028,20 +3000,20 @@ public sealed partial class ReaderPaneView
                 Height = 32,
                 MinHeight = 32,
                 Content = snap.made is { Made: > 0 } m2
-                    ? L10n.T($"导出多人有声书 (.m4b · {m2.Made} 章)…")
-                    : L10n.T("导出多人有声书 (.m4b)…"),
+                    ? L10n.T($"导出成有声书（{m2.Made} 章）…")
+                    : L10n.T("导出成有声书…"),
             };
             exportBtn.Click += async (_, _) =>
             {
-                string? path = await NativePickerHelper.PickSaveFileAsync(_ownerWindow, $"{_detail.Summary.Title}-演播版", [("M4B 有声书", [".m4b"])]);
+                string? path = await NativePickerHelper.PickSaveFileAsync(_ownerWindow, $"{_detail.Summary.Title}", [("M4B 有声书", [".m4b"])]);
                 if (string.IsNullOrEmpty(path) || _disposed) return;
                 exportBtn.IsEnabled = false;
-                exportBtn.Content = L10n.T("正在混音封装 .m4b…");
+                exportBtn.Content = L10n.T("正在混音和压缩，一章要几十秒…");
                 bool ok = await DramaSynthService.ExportM4bAsync(_library, _bookId, path, (cur, tot) =>
-                    DispatcherQueue.TryEnqueue(() => { if (!_disposed) exportBtn.Content = L10n.T($"正在混音封装 ({cur}/{tot})…"); }));
+                    DispatcherQueue.TryEnqueue(() => { if (!_disposed) exportBtn.Content = L10n.T($"正在导出（{cur}/{tot}）…"); }));
                 if (_disposed) return;
                 exportBtn.IsEnabled = true;
-                ShowReaderAlert(ok ? $"已导出有声书：{Path.GetFileName(path)}" : "当前尚无已合成的演播章节可导出，请先开启演播或预合成");
+                ShowReaderAlert(ok ? "导出好了" : "当前还没有可导出的章节，请先开启广播剧模式或预合成");
                 if (_rightPaneOpen && _rightPaneTab == "cast") RenderRightPane();
             };
             studioStack.Children.Add(exportBtn);

@@ -51,15 +51,47 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
     private readonly HashSet<string> _selectedBookIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Action> _selectionVisualUpdaters = [];
     private readonly Dictionary<string, (Button RowBtn, Border Indicator, TextBlock Label, TextBlock? Badge, ContentPresenter Icon)> _navControls = new();
+    private readonly Dictionary<string, Border> _bookElementsById = new(StringComparer.OrdinalIgnoreCase);
 
     private Border? _podcastCustomDock;
+    private string? _highlightedBookId;
+    private DispatcherTimer? _highlightTimer;
+    private DispatcherTimer? _importCardAutoHideTimer;
     private double _lastRenderWidth;
     private int _lastCatalogFilteredCount;
     private int _lastCatalogReadingCount;
+    private string? _lastClickedBookId;
+    private long _lastClickTickMs;
+    private string? _lastDoubleOpenedBookId;
+    private long _lastDoubleOpenedTickMs;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetDoubleClickTime();
+
+    private static long DoubleClickIntervalMs()
+    {
+        try
+        {
+            uint ms = GetDoubleClickTime();
+            return Math.Clamp((long)ms, 350L, 750L);
+        }
+        catch
+        {
+            return 500L;
+        }
+    }
+
+    public string? ActiveCollectionId =>
+        _activeSection.StartsWith("col:", StringComparison.Ordinal) ? _activeSection["col:".Length..] : null;
+
+    public string? ActiveCollectionName =>
+        ActiveCollectionId is string cid
+            ? _collections.FirstOrDefault(c => string.Equals(c.Id, cid, StringComparison.OrdinalIgnoreCase))?.Name
+            : null;
 
     // ITabContent implementation
     public string TabId => "pinned-library";
-    public string TabTitle => "书库";
+    public string TabTitle => "书架";
     public string? BookId => null;
     public string TabKind => "library";
     public string TabIconName => "shelf";
@@ -80,6 +112,7 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         _ownerWindow = ownerWindow;
         _library = library;
         InitializeComponent();
+        YYChrome.WireClearButton(InlineFilterBox);
 
         _recordBuilder = new BookRecordPageBuilder(this, library);
         _podcastBuilder = new PodcastWorkspaceBuilder(this, library);
@@ -275,17 +308,6 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         ImportBtnIcon.Content = YYIcons.Make("plus", 12.5, ThemeHelper.Brush(Colors.White));
         ImportDropdownIcon.Content = YYIcons.Make("chevron-down", 10, ThemeHelper.Brush(Colors.White));
         ImportSplitBorder.Background = ThemeHelper.Brush(tc.Fill);
-        Color accentHover = Color.FromArgb(28, 0, 0, 0);
-        Color accentPress = Color.FromArgb(48, 0, 0, 0);
-        foreach (var b in new[] { ImportPrimaryBtn, ImportDropdownBtn })
-        {
-            b.Resources["ButtonBackground"] = new SolidColorBrush(Colors.Transparent);
-            b.Resources["ButtonBackgroundPointerOver"] = ThemeHelper.Brush(accentHover);
-            b.Resources["ButtonBackgroundPressed"] = ThemeHelper.Brush(accentPress);
-            b.Resources["ButtonForeground"] = ThemeHelper.Brush(Colors.White);
-            b.Resources["ButtonForegroundPointerOver"] = ThemeHelper.Brush(Colors.White);
-            b.Resources["ButtonForegroundPressed"] = ThemeHelper.Brush(Colors.White);
-        }
         GridViewBtn.Content = YYIcons.Make("grid-view", 13.5, ThemeHelper.Brush(p.T2));
         ListViewBtn.Content = YYIcons.Make("list-view", 13.5, ThemeHelper.Brush(p.T2));
         SortBtnIcon.Content = YYIcons.Make(_sortAsc ? "sort-asc" : "sort-desc", 13, ThemeHelper.Brush(p.T2));
@@ -375,15 +397,39 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
             if (acceptBookDrop && key.StartsWith("col:", StringComparison.Ordinal))
             {
                 string colId = key["col:".Length..];
+                string colLabel = label;
+                var tcDrop = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
                 btn.AllowDrop = true;
                 btn.DragOver += (_, e) =>
                 {
-                    if (e.DataView.Contains(StandardDataFormats.Text))
+                    if (e.DataView.Contains(StandardDataFormats.StorageItems) || e.DataView.Contains(StandardDataFormats.Text))
+                    {
                         e.AcceptedOperation = DataPackageOperation.Copy;
+                        e.Handled = true;
+                        btn.Background = ThemeHelper.Brush(tcDrop.Soft);
+                    }
                 };
+                btn.DragLeave += (_, _) => UpdateNavSelectionVisuals();
                 btn.Drop += async (_, e) =>
                 {
+                    UpdateNavSelectionVisuals();
+                    if (e.DataView.Contains(StandardDataFormats.StorageItems))
+                    {
+                        e.Handled = true;
+                        var def = e.GetDeferral();
+                        try
+                        {
+                            var items = await e.DataView.GetStorageItemsAsync();
+                            var paths = items.Select(it => it.Path).Where(fp => !string.IsNullOrEmpty(fp)).ToList();
+                            if (paths.Count > 0)
+                                await ImportPathsAsync(paths, openFirst: false, source: "drag_drop", targetCollectionId: colId);
+                        }
+                        catch { }
+                        finally { def.Complete(); }
+                        return;
+                    }
                     if (!e.DataView.Contains(StandardDataFormats.Text)) return;
+                    e.Handled = true;
                     try
                     {
                         string text = await e.DataView.GetTextAsync();
@@ -392,7 +438,7 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
                             string bid = text["yuyue-book:".Length..];
                             _library.SetInCollection(colId, bid, true);
                             RefreshBooks();
-                            ShowToast("已加入合集");
+                            ShowToast($"已加入「{colLabel}」");
                         }
                     }
                     catch { }
@@ -410,15 +456,15 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         int notesCount = 0;
         foreach (var kv in _markCounts) notesCount += (int)kv.Value;
 
-        AddNavItem(NavLibraryStack, "all", "shelf", "全部书籍", totalBooks);
-        AddNavItem(NavLibraryStack, "progress", "book", "阅读进度", _keptBooks.Count(b => b.Status == ReadingStatus.Reading));
+        AddNavItem(NavLibraryStack, "all", "shelf", "书", totalBooks);
+        AddNavItem(NavLibraryStack, "progress", "book", "进度", _keptBooks.Count(b => b.Status == ReadingStatus.Reading));
         AddNavItem(NavLibraryStack, "podcasts", "radio", "播客", podcastCount);
-        AddNavItem(NavLibraryStack, "audio", "headphones", "有声书", audioCount);
+        AddNavItem(NavLibraryStack, "audio", "headphones", "有声", audioCount);
 
         AddNavItem(NavNotesStack, "notes", "square.and.pencil", "笔记", notesCount);
         AddNavItem(NavNotesStack, "words", "a-wen", "生词本", _words.Count);
 
-        AddNavItem(NavCollectionsStack, "collections", "stack", "全部合集", _collections.Count);
+        AddNavItem(NavCollectionsStack, "collections", "stack", "合集", _collections.Count);
         var orderedCols = GetOrderedCollections();
         for (int ci = 0; ci < Math.Min(orderedCols.Count, 12); ci++)
         {
@@ -523,6 +569,7 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         }
 
         RebuildNavItems();
+        UpdateClickModePill();
         UpdateSyncFooter();
         UpdateGlobalNowPlayingDock();
         RenderCurrentSection();
@@ -537,7 +584,7 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         if (!_library.Sync.IsEnabled)
         {
             SyncStatusDot.Fill = ThemeHelper.Brush(p.T3);
-            SyncFooterLabel.Text = L10n.T("未开启同步");
+            SyncFooterLabel.Text = L10n.T("尚未开启同步");
             return;
         }
         if (_library.Sync.State == SyncStateKind.Syncing)
@@ -549,7 +596,7 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         if (_library.Sync.State == SyncStateKind.Failed)
         {
             SyncStatusDot.Fill = ThemeHelper.Brush(p.Danger);
-            SyncFooterLabel.Text = L10n.T("同步异常 · 点击查看");
+            SyncFooterLabel.Text = L10n.T("同步未成功");
             return;
         }
         SyncStatusDot.Fill = ThemeHelper.Brush(p.Ok);
@@ -591,24 +638,57 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         }
 
         _selectionVisualUpdaters.Clear();
+        _bookElementsById.Clear();
         MainContentStack.Children.Clear();
 
         switch (_activeSection)
         {
             case "all":
-                PageTitleText.Text = L10n.T("全部书籍");
+                PageTitleText.Text = L10n.T("书");
                 BuildStatusFilterPills(dark);
                 RenderBooksCatalog(_shelfBooks, showContinueReading: true, dark);
                 break;
 
             case "audio":
-                PageTitleText.Text = L10n.T("有声书");
+                PageTitleText.Text = L10n.T("有声");
                 BuildStatusFilterPills(dark);
                 RenderBooksCatalog(_shelfBooks.Where(b => b.Format == BookFormat.Audio).ToArray(), showContinueReading: false, dark);
                 break;
 
             case "progress":
-                PageTitleText.Text = L10n.T("阅读进度");
+                PageTitleText.Text = L10n.T("进度");
+                if (_recordBuilder.OpenBookId is null)
+                {
+                    var pCol = ThemeHelper.Palette(dark);
+                    var statsSp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+                    statsSp.Children.Add(YYIcons.Make("chart-bar", 12, ThemeHelper.Brush(pCol.T1)));
+                    statsSp.Children.Add(new TextBlock { Text = L10n.T("阅读统计"), FontSize = 12, Foreground = ThemeHelper.Brush(pCol.T1), VerticalAlignment = VerticalAlignment.Center });
+                    var statsBtn = new Button
+                    {
+                        Style = (Style)Application.Current.Resources["YYFluentButtonStyle"],
+                        Content = statsSp,
+                    };
+                    ToolTipService.SetToolTip(statsBtn, L10n.T("按周、月、年查看阅读与听书时长及年度热力图"));
+                    statsBtn.Click += async (_, _) =>
+                    {
+                        try { await ShowReadingStatsDialogAsync(dark); }
+                        catch (Exception ex) { ShowToast($"打开阅读统计失败：{ex.Message}"); }
+                    };
+
+                    var addSp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, VerticalAlignment = VerticalAlignment.Center };
+                    addSp.Children.Add(YYIcons.Make("plus", 11, ThemeHelper.Brush(pCol.T1)));
+                    addSp.Children.Add(new TextBlock { Text = L10n.T("加书"), FontSize = 12, Foreground = ThemeHelper.Brush(pCol.T1), VerticalAlignment = VerticalAlignment.Center });
+                    var addBookBtn = new Button
+                    {
+                        Style = (Style)Application.Current.Resources["YYFluentButtonStyle"],
+                        Content = addSp,
+                    };
+                    ToolTipService.SetToolTip(addBookBtn, L10n.T("加一本纸书或在别处读的书，打个书名就行"));
+                    addBookBtn.Click += (_, _) => _ = PromptAddRecordBookAsync(_recordBuilder.ActiveStatus);
+
+                    HeaderRightExtras.Children.Add(statsBtn);
+                    HeaderRightExtras.Children.Add(addBookBtn);
+                }
                 _recordBuilder.RenderInto(MainContentStack, _keptBooks, dark);
                 StatusLeftText.Text = L10n.T($"共 {_keptBooks.Count} 本书 · 在读 {_keptBooks.Count(b => b.Status == ReadingStatus.Reading)} 本");
                 break;
@@ -621,7 +701,7 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
                 break;
 
             case "notes":
-                PageTitleText.Text = L10n.T("笔记与划线");
+                PageTitleText.Text = L10n.T("笔记");
                 RenderNotesSubView(dark);
                 break;
 
@@ -631,7 +711,7 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
                 break;
 
             case "collections":
-                PageTitleText.Text = L10n.T("合集");
+                PageTitleText.Text = L10n.T("全部合集");
                 RenderCollectionsSubView(dark);
                 break;
 
@@ -661,7 +741,7 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
             ("all", "全部"),
             ("reading", "在读"),
             ("want", "想读"),
-            ("finished", "读完"),
+            ("finished", "读过"),
         ];
 
         var wrap = new Border
@@ -795,7 +875,7 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
                 var crSection = new StackPanel { Spacing = 10 };
                 crSection.Children.Add(new TextBlock
                 {
-                    Text = L10n.T("继续阅读"),
+                    Text = L10n.T("在读"),
                     FontSize = 13,
                     FontWeight = FontWeights.SemiBold,
                     Foreground = ThemeHelper.Brush(p.T2),
@@ -827,7 +907,7 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
             {
                 gridSection.Children.Add(new TextBlock
                 {
-                    Text = L10n.T($"全部书目 ({filtered.Count})"),
+                    Text = L10n.T($"全部 {filtered.Count} 本"),
                     FontSize = 13,
                     FontWeight = FontWeights.SemiBold,
                     Foreground = ThemeHelper.Brush(p.T2),
@@ -914,7 +994,7 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         actionsRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var pctBadge = new TextBlock
         {
-            Text = pct > 0 ? $"{pct}% · {FormatBookTypeBadge(book.Format)}" : L10n.T("刚开始阅读"),
+            Text = pct > 0 ? $"{pct}% · {FormatBookTypeBadge(book.Format)}" : L10n.T("刚开始"),
             FontSize = 11,
             Foreground = ThemeHelper.Brush(p.T3),
             VerticalAlignment = VerticalAlignment.Center,
@@ -940,29 +1020,27 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
             BorderThickness = new Thickness(1),
             UseSystemFocusVisuals = false,
         };
-        ToolTipService.SetToolTip(listenBtn, L10n.T("直接开始朗读 / 听书"));
+        ToolTipService.SetToolTip(listenBtn, L10n.T(IsBookPlaying(book) ? "正在听" : "听"));
         listenBtn.Click += (_, _) => TryOpenBook(book, autoListen: true);
+        listenBtn.Tapped += (_, e) => e.Handled = true;
+        listenBtn.DoubleTapped += (_, e) => e.Handled = true;
 
         var readBtn = new Button
         {
-            Content = L10n.T("继续阅读"),
+            Style = (Style)Application.Current.Resources["YYFluentSoftAccentButtonStyle"],
+            Content = L10n.T(book.Format == BookFormat.Audio ? "接着听" : "接着读"),
             Height = 26,
             MinHeight = 26,
             Padding = new Thickness(10, 0, 10, 0),
             CornerRadius = new CornerRadius(5),
             FontSize = 11.5,
-            FontWeight = FontWeights.SemiBold,
             Background = ThemeHelper.Brush(tc.Soft),
             Foreground = ThemeHelper.Brush(tc.Accent),
             BorderBrush = ThemeHelper.Brush(tc.Edge),
-            BorderThickness = new Thickness(1),
-            UseSystemFocusVisuals = false,
         };
-        readBtn.Resources["ButtonBackground"] = ThemeHelper.Brush(tc.Soft);
-        readBtn.Resources["ButtonBackgroundPointerOver"] = ThemeHelper.Brush(tc.Fill);
-        readBtn.Resources["ButtonForeground"] = ThemeHelper.Brush(tc.Accent);
-        readBtn.Resources["ButtonForegroundPointerOver"] = ThemeHelper.Brush(Colors.White);
         readBtn.Click += (_, _) => TryOpenBook(book);
+        readBtn.Tapped += (_, e) => e.Handled = true;
+        readBtn.DoubleTapped += (_, e) => e.Handled = true;
 
         btns.Children.Add(listenBtn);
         btns.Children.Add(readBtn);
@@ -978,7 +1056,34 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         card.Child = g;
         card.PointerEntered += (_, _) => card.BorderBrush = ThemeHelper.Brush(tc.Edge);
         card.PointerExited += (_, _) => card.BorderBrush = ThemeHelper.Brush(p.Line);
-        card.DoubleTapped += (_, _) => TryOpenBook(book);
+        card.Tapped += (_, e) =>
+        {
+            if (e.Handled) return;
+            if (_library.Prefs.ShelfSingleClickOpen)
+            {
+                TryOpenBook(book);
+                e.Handled = true;
+                return;
+            }
+            long now = Environment.TickCount64;
+            if (string.Equals(_lastClickedBookId, book.Id, StringComparison.OrdinalIgnoreCase)
+                && (now - _lastClickTickMs) <= DoubleClickIntervalMs())
+            {
+                TryOpenBookFromDoubleClick(book);
+            }
+            else
+            {
+                _lastClickedBookId = book.Id;
+                _lastClickTickMs = now;
+            }
+            e.Handled = true;
+        };
+        card.DoubleTapped += (_, e) =>
+        {
+            if (e.Handled) return;
+            TryOpenBookFromDoubleClick(book);
+            e.Handled = true;
+        };
         return card;
     }
 
@@ -1035,6 +1140,7 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         var p = ThemeHelper.Palette(dark);
         var tc = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
         bool selected = _selectedBookIds.Contains(book.Id);
+        bool highlighted = string.Equals(_highlightedBookId, book.Id, StringComparison.OrdinalIgnoreCase);
         int pct = (int)Math.Round(Math.Clamp(book.Progress, 0f, 1f) * 100);
 
         var tile = new Border
@@ -1042,12 +1148,13 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
             Width = coverW + 20,
             Padding = new Thickness(10, 10, 10, 8),
             CornerRadius = new CornerRadius(8),
-            Background = selected ? ThemeHelper.Brush(tc.Soft) : new SolidColorBrush(Colors.Transparent),
-            BorderBrush = selected ? ThemeHelper.Brush(tc.Accent) : new SolidColorBrush(Colors.Transparent),
-            BorderThickness = new Thickness(1.5),
+            Background = (selected || highlighted) ? ThemeHelper.Brush(tc.Soft) : new SolidColorBrush(Colors.Transparent),
+            BorderBrush = (selected || highlighted) ? ThemeHelper.Brush(tc.Accent) : new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(highlighted ? 2 : 1.5),
             ContextFlyout = BuildBookMenuFlyout(book),
             CanDrag = true,
         };
+        _bookElementsById[book.Id] = tile;
         tile.DragStarting += (_, e) =>
         {
             e.Data.SetText($"yuyue-book:{book.Id}");
@@ -1109,25 +1216,23 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
             BorderBrush = ThemeHelper.Brush(p.Line),
             BorderThickness = new Thickness(0.75),
             Opacity = 0.0,
+            IsHitTestVisible = false,
         };
-        quickHoverBar.Tapped += (_, e) => e.Handled = true;
-        quickHoverBar.DoubleTapped += (_, e) => e.Handled = true;
         var hoverBtns = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 3 };
         var qOpenBtn = new Button
         {
+            Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"],
             Content = L10n.T("打开"),
             Height = 22,
             MinHeight = 22,
             Padding = new Thickness(7, 0, 7, 0),
             CornerRadius = new CornerRadius(4),
             FontSize = 11,
-            FontWeight = FontWeights.SemiBold,
             Background = ThemeHelper.Brush(tc.Fill),
-            Foreground = ThemeHelper.Brush(Colors.White),
-            BorderThickness = new Thickness(0),
-            UseSystemFocusVisuals = false,
         };
         qOpenBtn.Click += (_, _) => TryOpenBook(book);
+        qOpenBtn.Tapped += (_, e) => e.Handled = true;
+        qOpenBtn.DoubleTapped += (_, e) => e.Handled = true;
 
         var qListenBtn = new Button
         {
@@ -1144,6 +1249,8 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         };
         ToolTipService.SetToolTip(qListenBtn, L10n.T("直接听书"));
         qListenBtn.Click += (_, _) => TryOpenBook(book, autoListen: true);
+        qListenBtn.Tapped += (_, e) => e.Handled = true;
+        qListenBtn.DoubleTapped += (_, e) => e.Handled = true;
 
         hoverBtns.Children.Add(qOpenBtn);
         hoverBtns.Children.Add(qListenBtn);
@@ -1224,23 +1331,26 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
             isPointerOver = true;
             SyncTileVisual();
             quickHoverBar.Opacity = 1.0;
+            quickHoverBar.IsHitTestVisible = true;
         };
         tile.PointerExited += (_, _) =>
         {
             isPointerOver = false;
             SyncTileVisual();
             quickHoverBar.Opacity = 0.0;
+            quickHoverBar.IsHitTestVisible = false;
         };
         tile.Tapped += (_, e) =>
         {
             if (e.Handled) return;
             HandleBookTileClick(book);
+            e.Handled = true;
         };
         tile.DoubleTapped += (_, e) =>
         {
             if (e.Handled) return;
             if (!_library.Prefs.ShelfSingleClickOpen)
-                TryOpenBook(book);
+                TryOpenBookFromDoubleClick(book);
             e.Handled = true;
         };
 
@@ -1333,11 +1443,11 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         var fmtLbl = new TextBlock { Text = L10n.T("格式"), FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(fmtLbl, 3);
         headerGrid.Children.Add(fmtLbl);
-        AddSortHeader(4, "阅读进度", "progress");
+        AddSortHeader(4, "进度", "progress");
         var stLbl = new TextBlock { Text = L10n.T("状态"), FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(stLbl, 5);
         headerGrid.Children.Add(stLbl);
-        AddSortHeader(6, "最近阅读", "recent");
+        AddSortHeader(6, "最近读过", "recent");
 
         rows.Children.Add(headerGrid);
 
@@ -1348,6 +1458,7 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         foreach (var book in books)
         {
             bool selected = _selectedBookIds.Contains(book.Id);
+            bool highlighted = string.Equals(_highlightedBookId, book.Id, StringComparison.OrdinalIgnoreCase);
             int pct = (int)Math.Round(Math.Clamp(book.Progress, 0f, 1f) * 100);
 
             var rowBorder = new Border
@@ -1356,12 +1467,13 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
                 Padding = new Thickness(8, 0, 12, 0),
                 CornerRadius = new CornerRadius(6),
                 Margin = new Thickness(0, 2, 0, 0),
-                Background = selected ? selectedBgBrush : transparentBrush,
-                BorderBrush = ThemeHelper.Brush(dark ? Color.FromArgb(14, 255, 255, 255) : Color.FromArgb(14, 42, 43, 46)),
-                BorderThickness = new Thickness(0, 0, 0, 1),
+                Background = (selected || highlighted) ? selectedBgBrush : transparentBrush,
+                BorderBrush = highlighted ? ThemeHelper.Brush(tc.Accent) : ThemeHelper.Brush(dark ? Color.FromArgb(14, 255, 255, 255) : Color.FromArgb(14, 42, 43, 46)),
+                BorderThickness = highlighted ? new Thickness(1.5) : new Thickness(0, 0, 0, 1),
                 ContextFlyout = BuildBookMenuFlyout(book),
                 CanDrag = true,
             };
+            _bookElementsById[book.Id] = rowBorder;
             rowBorder.DragStarting += (_, e) =>
             {
                 e.Data.SetText($"yuyue-book:{book.Id}");
@@ -1504,12 +1616,13 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
             {
                 if (e.Handled) return;
                 HandleBookTileClick(book);
+                e.Handled = true;
             };
             rowBorder.DoubleTapped += (_, e) =>
             {
                 if (e.Handled) return;
                 if (!_library.Prefs.ShelfSingleClickOpen)
-                    TryOpenBook(book);
+                    TryOpenBookFromDoubleClick(book);
                 e.Handled = true;
             };
 
@@ -1518,6 +1631,26 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
 
         card.Child = rows;
         return card;
+    }
+
+    private void TryOpenBookFromDoubleClick(BookSummary book)
+    {
+        long now = Environment.TickCount64;
+        if (string.Equals(_lastDoubleOpenedBookId, book.Id, StringComparison.OrdinalIgnoreCase)
+            && (now - _lastDoubleOpenedTickMs) < 450)
+        {
+            return;
+        }
+        _lastDoubleOpenedBookId = book.Id;
+        _lastDoubleOpenedTickMs = now;
+        _lastClickedBookId = null;
+
+        if (_selectedBookIds.Count > 0)
+        {
+            _selectedBookIds.Clear();
+            UpdateBatchBarAndSelectionVisuals();
+        }
+        TryOpenBook(book);
     }
 
     private void HandleBookTileClick(BookSummary book)
@@ -1531,23 +1664,44 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
 
         if (ctrl)
         {
+            _lastClickedBookId = null;
             ToggleBookSelection(book.Id);
+            return;
         }
-        else
+
+        long now = Environment.TickCount64;
+        if (string.Equals(_lastClickedBookId, book.Id, StringComparison.OrdinalIgnoreCase)
+            && (now - _lastClickTickMs) <= DoubleClickIntervalMs())
         {
-            if (_selectedBookIds.Count == 1 && _selectedBookIds.Contains(book.Id))
-                _selectedBookIds.Clear();
-            else
-            {
-                _selectedBookIds.Clear();
-                _selectedBookIds.Add(book.Id);
-            }
+            TryOpenBookFromDoubleClick(book);
+            return;
+        }
+
+        _lastClickedBookId = book.Id;
+        _lastClickTickMs = now;
+
+        if (_selectedBookIds.Count != 1 || !_selectedBookIds.Contains(book.Id))
+        {
+            _selectedBookIds.Clear();
+            _selectedBookIds.Add(book.Id);
+            UpdateBatchBarAndSelectionVisuals();
+        }
+    }
+
+    private void MainScroller_Tapped(object sender, TappedRoutedEventArgs e)
+    {
+        if (e.Handled) return;
+        _lastClickedBookId = null;
+        if (_selectedBookIds.Count > 0)
+        {
+            _selectedBookIds.Clear();
             UpdateBatchBarAndSelectionVisuals();
         }
     }
 
     private void ToggleBookSelection(string bookId)
     {
+        _lastClickedBookId = null;
         if (!_selectedBookIds.Add(bookId))
             _selectedBookIds.Remove(bookId);
         UpdateBatchBarAndSelectionVisuals();
@@ -1610,12 +1764,13 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
             Padding = new Thickness(32, 48, 32, 48),
         };
         bool isAudioEmpty = _activeSection == "audio";
+        bool isCollectionEmpty = _activeSection.StartsWith("col:", StringComparison.Ordinal);
         stack.Children.Add(YYIcons.Make(isAudioEmpty ? "headphones" : "book-open", 36, ThemeHelper.Brush(tc.Accent)));
         stack.Children.Add(new TextBlock
         {
             Text = L10n.T(trulyEmpty
-                ? (isAudioEmpty ? "还没有有声书" : "书库里还没有书")
-                : "当前筛选条件下没有匹配的书籍"),
+                ? (isAudioEmpty ? "还没有有声书" : isCollectionEmpty ? "还没有书" : "书架是空的")
+                : "当前筛选条件下没有匹配的书"),
             FontSize = 16,
             FontWeight = FontWeights.SemiBold,
             Foreground = ThemeHelper.Brush(p.T1),
@@ -1625,9 +1780,11 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         {
             Text = L10n.T(trulyEmpty
                 ? (isAudioEmpty
-                    ? "直接将 M4B / MP3 音频文件或文件夹拖进窗口，或点击下方按钮导入有声书，支持与电子书图文配对。"
-                    : "直接将 EPUB / PDF / TXT / 有声书拖进窗口，或点击下方按钮导入本地文件与 Wi-Fi 传书。")
-                : "清空搜索词或切换上方阅读状态筛选即可查看全部书籍。"),
+                    ? "把 M4B、MP3、M4A 拖进窗口，或导入音频与书架上的电子书合成听读同步。"
+                    : isCollectionEmpty
+                        ? "把文件拖进窗口，或在书架上右键一本书「加入合集…」"
+                        : "把 EPUB、PDF、MOBI、AZW3、TXT 拖进窗口就能开始读")
+                : "清空搜索词或切换上方状态筛选即可查看全部书。"),
             FontSize = 12.5,
             Foreground = ThemeHelper.Brush(p.T2),
             TextWrapping = TextWrapping.Wrap,
@@ -1640,15 +1797,15 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         {
             if (isAudioEmpty)
             {
-                var impAudioBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"], Content = L10n.T("导入有声书 / 音频文件夹") };
+                var impAudioBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"], Content = L10n.T("导入有声书") };
                 impAudioBtn.Click += (_, _) => _ = PickAndImportAudiobookAsync();
                 btnRow.Children.Add(impAudioBtn);
             }
-            else
+            else if (!isCollectionEmpty)
             {
-                var impBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"], Content = L10n.T("导入本地书籍") };
+                var impBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"], Content = L10n.T("导入") };
                 impBtn.Click += (_, _) => _ = PickAndImportBooksAsync();
-                var wifiBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Content = L10n.T("局域网 Wi-Fi 传书") };
+                var wifiBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Content = L10n.T("Wi‑Fi 传书") };
                 wifiBtn.Click += (_, _) => ShowWifiTransfer();
                 btnRow.Children.Add(impBtn);
                 btnRow.Children.Add(wifiBtn);
@@ -1695,13 +1852,26 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
             return mi;
         }
 
-        menu.Items.Add(MakeItem("在新标签页打开", "book-open", () => TryOpenBook(book), "Enter"));
-        menu.Items.Add(MakeItem("在独立窗口打开", "detach", () => App.CurrentApp.OpenBookInNewWindow(book.Id)));
-        menu.Items.Add(MakeItem("直接开始朗读 / 听书", "headphones", () => TryOpenBook(book, autoListen: true)));
-        menu.Items.Add(new MenuFlyoutSeparator());
+        if (!book.Record)
+        {
+            string openVerb = book.Format == BookFormat.Audio
+                ? (book.Progress > 0.001f ? "接着听" : "开始听")
+                : (book.Progress > 0.001f ? "接着读" : "开始读");
+            menu.Items.Add(MakeItem(openVerb, "book-open", () => TryOpenBook(book), "Enter"));
+            menu.Items.Add(MakeItem("在独立窗口打开", "detach", () => App.CurrentApp.OpenBookInNewWindow(book.Id)));
+            menu.Items.Add(MakeItem("从头听", "headphones", () => TryOpenBook(book, autoListen: true)));
+            menu.Items.Add(new MenuFlyoutSeparator());
+        }
 
-        var statusSub = new MenuFlyoutSubItem { Text = L10n.T("标记阅读状态") };
-        foreach (var (st, lbl) in new[] { (ReadingStatus.Reading, "在读"), (ReadingStatus.Want, "想读"), (ReadingStatus.Finished, "读完") })
+        var statusSub = new MenuFlyoutSubItem { Text = L10n.T("状态") };
+        foreach (var (st, lbl) in new[]
+        {
+            (ReadingStatus.Reading, "在读"),
+            (ReadingStatus.Want, "想读"),
+            (ReadingStatus.Finished, "读过"),
+            (ReadingStatus.Paused, "搁置"),
+            (ReadingStatus.Dropped, "弃读"),
+        })
         {
             var sCap = st;
             var subItem = new ToggleMenuFlyoutItem { Text = L10n.T(lbl), IsChecked = book.Status == st };
@@ -1718,22 +1888,14 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
             statusSub.Items.Add(subItem);
         }
         menu.Items.Add(statusSub);
-        menu.Items.Add(MakeItem(
-            book.Status == ReadingStatus.Finished ? "取消读完标记" : "标为读完",
-            "check",
-            () =>
-            {
-                _library.SetFinished(book.Id, book.Status != ReadingStatus.Finished);
-                RefreshBooks();
-            }));
         menu.Items.Add(MakeItem("加入合集…", "stack", () => OpenPickCollectionForBook(book)));
         if (book.Format != BookFormat.Audio && !book.Record)
         {
-            menu.Items.Add(MakeItem("配对有声书…", "headphones", () => _ = ShowPairAudiobookDialogAsync(book)));
+            menu.Items.Add(MakeItem(_pairedBookIds.Contains(book.Id) ? "有声书…" : "合成听读书…", "headphones", () => _ = ShowPairAudiobookDialogAsync(book)));
         }
 
         menu.Items.Add(new MenuFlyoutSeparator());
-        menu.Items.Add(MakeItem("编辑书名与作者…", "pencil", () => _ = ShowEditBookDialogAsync(book), "F2"));
+        menu.Items.Add(MakeItem("编辑信息…", "pencil", () => _ = ShowEditBookDialogAsync(book), "F2"));
         if (book.Available && !book.Record)
         {
             menu.Items.Add(MakeItem("在文件资源管理器中显示", "folder", () => RevealInExplorer(book)));
@@ -1743,24 +1905,7 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
             }
         }
         menu.Items.Add(new MenuFlyoutSeparator());
-        if (!book.Record)
-        {
-            menu.Items.Add(MakeItem("只删文件，留下记录", "archive", () =>
-            {
-                try
-                {
-                    App.CurrentApp.CloseBookWindows(book.Id);
-                    _library.KeepRecordOnly(book.Id);
-                    RefreshBooks();
-                    ShowToast($"已删除《{book.Title}》原文件，保留阅读记录与笔记");
-                }
-                catch (Exception ex)
-                {
-                    ShowToast($"操作失败：{ex.Message}");
-                }
-            }));
-        }
-        menu.Items.Add(MakeItem("移出书库", "trash", () => OpenDeleteForBook(book), "Del", danger: true));
+        menu.Items.Add(MakeItem("删除", "trash", () => OpenDeleteForBook(book), "Del", danger: true));
         return menu;
     }
 
@@ -1775,14 +1920,14 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
             flyout.Items.Add(mi);
         }
 
-        Add("导入本地书籍 (EPUB / PDF / TXT / MOBI)…", () => _ = PickAndImportBooksAsync(), "Ctrl+O");
-        Add("导入有声书 / 音频文件夹…", () => _ = PickAndImportAudiobookAsync());
+        Add("从文件导入…", () => _ = PickAndImportBooksAsync(), "Ctrl+O");
+        Add("导入有声书…", () => _ = PickAndImportAudiobookAsync());
         flyout.Items.Add(new MenuFlyoutSeparator());
-        Add("局域网 Wi-Fi 传书…", ShowWifiTransfer);
+        Add("Wi‑Fi 传书…", ShowWifiTransfer);
         Add("远程书库 (OPDS / WebDAV)…", ShowRemoteLibrary);
-        Add("记一本纸质书…", () => _ = PromptAddRecordBookAsync(ReadingStatus.Reading));
+        Add("加一本书…", () => _ = PromptAddRecordBookAsync(ReadingStatus.Reading));
         flyout.Items.Add(new MenuFlyoutSeparator());
-        Add("从 .yuyue 备份快照恢复…", () => _ = ImportSnapshotAsync());
+        Add("导入快照…", () => _ = ImportSnapshotAsync());
 
         ImportDropdownBtn.Flyout = flyout;
     }
@@ -1792,11 +1937,11 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         var flyout = new MenuFlyout();
         (string Key, string Label)[] opts =
         [
-            ("recent", "最近阅读"),
-            ("added", "添加时间"),
+            ("recent", "最近读过"),
+            ("added", "加入时间"),
             ("title", "书名"),
             ("author", "作者"),
-            ("progress", "阅读进度"),
+            ("progress", "进度"),
         ];
         foreach (var (key, label) in opts)
         {
@@ -1812,7 +1957,14 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
     private void BuildBatchStatusFlyout()
     {
         var flyout = new MenuFlyout();
-        foreach (var (st, lbl) in new[] { (ReadingStatus.Reading, "标记为在读"), (ReadingStatus.Want, "标记为想读"), (ReadingStatus.Finished, "标记为读完") })
+        foreach (var (st, lbl) in new[]
+        {
+            (ReadingStatus.Reading, "在读"),
+            (ReadingStatus.Want, "想读"),
+            (ReadingStatus.Finished, "读过"),
+            (ReadingStatus.Paused, "搁置"),
+            (ReadingStatus.Dropped, "弃读"),
+        })
         {
             var sCap = st;
             var mi = new MenuFlyoutItem { Text = L10n.T(lbl) };
@@ -1845,11 +1997,11 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
     {
         SortBtnLabel.Text = _sortKey switch
         {
-            "added" => L10n.T("添加时间"),
+            "added" => L10n.T("加入时间"),
             "title" => L10n.T("书名"),
             "author" => L10n.T("作者"),
-            "progress" => L10n.T("阅读进度"),
-            _ => L10n.T("最近阅读"),
+            "progress" => L10n.T("进度"),
+            _ => L10n.T("最近读过"),
         };
         bool dark = ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
         SortBtnIcon.Content = YYIcons.Make(_sortAsc ? "sort-asc" : "sort-desc", 13, ThemeHelper.Brush(ThemeHelper.Palette(dark).T2));
@@ -1927,7 +2079,7 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
 
         var titleTb = L10n.Skip(new TextBlock
         {
-            Text = $"{L10n.T("正在播放")} · {_library.SystemIntegration.ActivePlaybackTitle}",
+            Text = $"{L10n.T("正在听")} · {_library.SystemIntegration.ActivePlaybackTitle}",
             FontSize = 12.5,
             FontWeight = FontWeights.Medium,
             Foreground = ThemeHelper.Brush(p.T1),
@@ -2141,14 +2293,14 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         BookFormat.Pdf => "PDF",
         BookFormat.Txt => "TXT",
         BookFormat.Audio => "有声",
-        BookFormat.Mobi => "MOBI",
+        BookFormat.Mobi => "Kindle",
         _ => "EPUB",
     };
 
     private static string FormatReadingStatus(ReadingStatus st) => st switch
     {
         ReadingStatus.Reading => L10n.T("在读"),
-        ReadingStatus.Finished => L10n.T("读完"),
+        ReadingStatus.Finished => L10n.T("读过"),
         ReadingStatus.Paused => L10n.T("搁置"),
         ReadingStatus.Dropped => L10n.T("弃读"),
         _ => L10n.T("想读"),
@@ -2167,10 +2319,52 @@ public sealed partial class LibraryView : UserControl, ITabContent, ILibraryHost
         catch { return "—"; }
     }
 
+    public void RevealBookInShelf(string bookId, string? collectionId = null)
+    {
+        if (string.IsNullOrWhiteSpace(bookId)) return;
+        _statusFilter = "all";
+        _formatFilter = "all";
+        _inlineQuery = "";
+        if (!string.IsNullOrEmpty(InlineFilterBox.Text))
+            InlineFilterBox.Text = "";
+        _highlightedBookId = bookId;
+        SwitchTab(!string.IsNullOrWhiteSpace(collectionId) ? $"col:{collectionId}" : "all");
+
+        DispatcherQueue?.TryEnqueue(() =>
+        {
+            if (_disposed) return;
+            if (_bookElementsById.TryGetValue(bookId, out var elem))
+            {
+                try
+                {
+                    elem.StartBringIntoView(new BringIntoViewOptions
+                    {
+                        AnimationDesired = true,
+                        VerticalAlignmentRatio = 0.35,
+                    });
+                }
+                catch { }
+            }
+        });
+
+        _highlightTimer?.Stop();
+        _highlightTimer = new DispatcherTimer { Interval = System.TimeSpan.FromSeconds(2.8) };
+        _highlightTimer.Tick += (_, _) =>
+        {
+            _highlightTimer.Stop();
+            if (_disposed) return;
+            _highlightedBookId = null;
+            if (IsBooksSection()) RenderCurrentSection();
+        };
+        _highlightTimer.Start();
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        _highlightTimer?.Stop();
+        _importCardAutoHideTimer?.Stop();
         _library.SystemIntegration.PlaybackStateChanged -= OnPlaybackStateChanged;
         try { _podcastBuilder.Dispose(); } catch { }
     }

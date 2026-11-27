@@ -43,7 +43,7 @@
                         Margin="10,0,0,0"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
-                        ToolTipService.ToolTip="语阅 · 回到全部书籍"
+                        ToolTipService.ToolTip="语阅 · 回到书架"
                         Click="BrandMark_Click">
                         <Viewbox Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center">
                             <Canvas Width="1000" Height="1000">
@@ -73,11 +73,11 @@
                         Margin="0,0,8,0"
                         HorizontalAlignment="Right"
                         VerticalAlignment="Center"
-                        ToolTipService.ToolTip="折叠或展开导航栏 (Ctrl+B)"
+                        ToolTipService.ToolTip="显示或隐藏侧栏 (Ctrl+B)"
                         Click="SidebarToggleBtn_Click" />
                 </Grid>
 
-                <!-- 设置态：返回书库按钮直接融入标题栏左槽，下方搜索框与书库对齐 -->
+                <!-- 设置态：返回书架按钮直接融入标题栏左槽，下方搜索框与书架对齐 -->
                 <Grid x:Name="SettingsHeaderHost" Visibility="Collapsed">
                     <Button
                         x:Name="TitleBarBackBtn"
@@ -91,7 +91,7 @@
                         Click="TitleBarBackBtn_Click">
                         <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
                             <ContentPresenter x:Name="TitleBarBackIcon" VerticalAlignment="Center" />
-                            <TextBlock Text="返回书库" FontSize="12.5" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" VerticalAlignment="Center" />
+                            <TextBlock Text="返回书架" FontSize="12.5" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                 </Grid>
@@ -116,6 +116,7 @@
             <!-- 新建 / 快搜打开按钮 (+) -->
             <Button
                 x:Name="AddTabBtn"
+                Style="{StaticResource YYToolbarIconButtonStyle}"
                 Grid.Column="2"
                 Width="28"
                 Height="28"
@@ -123,12 +124,8 @@
                 MinHeight="28"
                 Margin="4,0,0,0"
                 Padding="0"
-                CornerRadius="6"
-                BorderThickness="0"
-                Background="Transparent"
                 VerticalAlignment="Center"
-                UseSystemFocusVisuals="False"
-                ToolTipService.ToolTip="搜索或打开书籍 (Ctrl+K)"
+                ToolTipService.ToolTip="搜书名、原文、笔记，或者问书伴 (Ctrl+K)"
                 Click="AddTabBtn_Click" />
 
             <!-- 右侧空白标题栏拖动区，留出 146px 给 Windows 11 原生 [ — □ × ] 窗控键 -->
@@ -173,7 +170,7 @@
             <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                 <TextBlock
                     x:Name="FullScreenTitleText"
-                    Text="语阅 · 沉浸全屏"
+                    Text="语阅 · 沉浸阅读"
                     FontSize="12"
                     FontWeight="Medium"
                     Foreground="{ThemeResource YYText1Brush}"
@@ -208,13 +205,13 @@
                     <ContentPresenter x:Name="DropOverlayIcon" HorizontalAlignment="Center" />
                     <TextBlock
                         x:Name="DropOverlayText"
-                        Text="松开即可导入书籍"
+                        Text="松开即可导入书库"
                         FontSize="15"
                         FontWeight="SemiBold"
                         Foreground="{ThemeResource YYText1Brush}"
                         HorizontalAlignment="Center" />
                     <TextBlock
-                        Text="支持 EPUB / PDF / TXT / MOBI / AZW3 与有声书文件夹"
+                        Text="支持 EPUB、PDF、TXT、MOBI、AZW3 与 M4B、MP3 有声书"
                         FontSize="12"
                         Foreground="{ThemeResource YYText2Brush}"
                         HorizontalAlignment="Center" />

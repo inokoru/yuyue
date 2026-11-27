@@ -29,9 +29,14 @@
                     <SolidColorBrush x:Key="YYDangerBrush" Color="#C2473A" />
                     <SolidColorBrush x:Key="YYOkBrush" Color="#3E9B6A" />
                     <SolidColorBrush x:Key="YYSidebarSelectedBrush" Color="#112A2B2E" />
-                    <SolidColorBrush x:Key="YYSidebarHoverBrush" Color="#0A2A2B2E" />
-                    <SolidColorBrush x:Key="YYSubtleHoverBrush" Color="#0C2A2B2E" />
-                    <SolidColorBrush x:Key="YYSubtlePressBrush" Color="#162A2B2E" />
+                    <SolidColorBrush x:Key="YYSidebarHoverBrush" Color="#0B2A2B2E" />
+                    <SolidColorBrush x:Key="YYSubtleHoverBrush" Color="#0E2A2B2E" />
+                    <SolidColorBrush x:Key="YYSubtlePressBrush" Color="#1A2A2B2E" />
+                    <SolidColorBrush x:Key="YYButtonHoverOverlayBrush" Color="#0A2A2B2E" />
+                    <SolidColorBrush x:Key="YYButtonPressOverlayBrush" Color="#142A2B2E" />
+                    <SolidColorBrush x:Key="YYButtonHoverBorderBrush" Color="#CFC8BD" />
+                    <SolidColorBrush x:Key="YYAccentHoverOverlayBrush" Color="#1A000000" />
+                    <SolidColorBrush x:Key="YYAccentPressOverlayBrush" Color="#2E000000" />
                     <SolidColorBrush x:Key="YYSidebarFieldBrush" Color="#0C2A2B2E" />
                     <SolidColorBrush x:Key="YYSettingsSideBrush" Color="#F2EFEA" />
 
@@ -42,6 +47,54 @@
                     <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#8A653F" />
                     <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#7A5835" />
                     <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#6B4C2D" />
+                    <SolidColorBrush x:Key="ButtonBackground" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#F5F2EC" />
+                    <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#ECE8E0" />
+                    <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#80FFFFFF" />
+                    <SolidColorBrush x:Key="ButtonBorderBrush" Color="#E4DFD8" />
+                    <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#CFC8BD" />
+                    <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#C4BDB2" />
+                    <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="#66E4DFD8" />
+                    <SolidColorBrush x:Key="ButtonForeground" Color="#232427" />
+                    <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#232427" />
+                    <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#635F5B" />
+                    <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#8C8781" />
+                    <SolidColorBrush x:Key="ComboBoxBackground" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxBackgroundPointerOver" Color="#F5F2EC" />
+                    <SolidColorBrush x:Key="ComboBoxBackgroundPressed" Color="#ECE8E0" />
+                    <SolidColorBrush x:Key="ComboBoxBackgroundDisabled" Color="#80FFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxBorderBrush" Color="#DCD7CF" />
+                    <SolidColorBrush x:Key="ComboBoxBorderBrushPointerOver" Color="#C9C3BA" />
+                    <SolidColorBrush x:Key="ComboBoxBorderBrushPressed" Color="#C0B9AF" />
+                    <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="#FCFBF9" />
+                    <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush" Color="#DDD8D0" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundPointerOver" Color="#0D2A2B2E" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundPressed" Color="#162A2B2E" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelected" Color="#112A2B2E" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPointerOver" Color="#182A2B2E" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPressed" Color="#202A2B2E" />
+                    <SolidColorBrush x:Key="ComboBoxItemPillFillBrush" Color="#8A653F" />
+                    <SolidColorBrush x:Key="MenuFlyoutPresenterBackground" Color="#FCFBF9" />
+                    <SolidColorBrush x:Key="MenuFlyoutPresenterBorderBrush" Color="#E0DBD3" />
+                    <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPointerOver" Color="#0E2A2B2E" />
+                    <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPressed" Color="#182A2B2E" />
+                    <SolidColorBrush x:Key="MenuFlyoutSubItemBackgroundPointerOver" Color="#0E2A2B2E" />
+                    <SolidColorBrush x:Key="MenuFlyoutSubItemBackgroundPressed" Color="#182A2B2E" />
+                    <SolidColorBrush x:Key="ToggleMenuFlyoutItemBackgroundPointerOver" Color="#0E2A2B2E" />
+                    <SolidColorBrush x:Key="ToggleMenuFlyoutItemBackgroundPressed" Color="#182A2B2E" />
+                    <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="#232427" />
+                    <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="#232427" />
+                    <SolidColorBrush x:Key="ToolTipBackground" Color="#FCFBF9" />
+                    <SolidColorBrush x:Key="ToolTipBorderBrush" Color="#DDD8D0" />
+                    <SolidColorBrush x:Key="ToolTipForeground" Color="#232427" />
+                    <SolidColorBrush x:Key="HyperlinkButtonForeground" Color="#8A653F" />
+                    <SolidColorBrush x:Key="HyperlinkButtonForegroundPointerOver" Color="#7A5835" />
+                    <SolidColorBrush x:Key="HyperlinkButtonForegroundPressed" Color="#6B4C2D" />
+                    <SolidColorBrush x:Key="HyperlinkButtonBackgroundPointerOver" Color="#0C2A2B2E" />
+                    <SolidColorBrush x:Key="TextControlBackground" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#FAF8F5" />
+                    <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="#80F2EFEA" />
                     <SolidColorBrush x:Key="SliderTrackFill" Color="#DDD8D0" />
                     <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#D2CCC3" />
                     <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#C8C1B8" />
@@ -82,6 +135,15 @@
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPointerOver" Color="#DC383634" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPressed" Color="#FF2A2B2E" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOffDisabled" Color="#786E6B68" />
+                    <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillChecked" Color="#8A653F" />
+                    <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPointerOver" Color="#7A5835" />
+                    <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPressed" Color="#6B4C2D" />
+                    <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeChecked" Color="#8A653F" />
+                    <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeCheckedPointerOver" Color="#7A5835" />
+                    <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeCheckedPressed" Color="#6B4C2D" />
+                    <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundChecked" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundCheckedPointerOver" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundCheckedPressed" Color="#FFFFFF" />
                     <!-- TabView 柔和无断层底边 -->
                     <SolidColorBrush x:Key="TabViewBorderBrush" Color="Transparent" />
                     <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="#FDFBF8" />
@@ -108,9 +170,14 @@
                     <SolidColorBrush x:Key="YYDangerBrush" Color="#E5806F" />
                     <SolidColorBrush x:Key="YYOkBrush" Color="#5DBB88" />
                     <SolidColorBrush x:Key="YYSidebarSelectedBrush" Color="#16FFFFFF" />
-                    <SolidColorBrush x:Key="YYSidebarHoverBrush" Color="#0DFFFFFF" />
-                    <SolidColorBrush x:Key="YYSubtleHoverBrush" Color="#0FFFFFFF" />
-                    <SolidColorBrush x:Key="YYSubtlePressBrush" Color="#18FFFFFF" />
+                    <SolidColorBrush x:Key="YYSidebarHoverBrush" Color="#0EFFFFFF" />
+                    <SolidColorBrush x:Key="YYSubtleHoverBrush" Color="#12FFFFFF" />
+                    <SolidColorBrush x:Key="YYSubtlePressBrush" Color="#1EFFFFFF" />
+                    <SolidColorBrush x:Key="YYButtonHoverOverlayBrush" Color="#10FFFFFF" />
+                    <SolidColorBrush x:Key="YYButtonPressOverlayBrush" Color="#1AFFFFFF" />
+                    <SolidColorBrush x:Key="YYButtonHoverBorderBrush" Color="#4B4742" />
+                    <SolidColorBrush x:Key="YYAccentHoverOverlayBrush" Color="#1EFFFFFF" />
+                    <SolidColorBrush x:Key="YYAccentPressOverlayBrush" Color="#1C000000" />
                     <SolidColorBrush x:Key="YYSidebarFieldBrush" Color="#12FFFFFF" />
                     <SolidColorBrush x:Key="YYSettingsSideBrush" Color="#161514" />
 
@@ -120,6 +187,54 @@
                     <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#A0754F" />
                     <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#B0845D" />
                     <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#8E6542" />
+                    <SolidColorBrush x:Key="ButtonBackground" Color="#242220" />
+                    <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#2F2C29" />
+                    <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#201E1C" />
+                    <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#80242220" />
+                    <SolidColorBrush x:Key="ButtonBorderBrush" Color="#34312E" />
+                    <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#4B4742" />
+                    <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#403D39" />
+                    <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="#6634312E" />
+                    <SolidColorBrush x:Key="ButtonForeground" Color="#F0EDE8" />
+                    <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#F0EDE8" />
+                    <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#A6A099" />
+                    <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#88837C" />
+                    <SolidColorBrush x:Key="ComboBoxBackground" Color="#242220" />
+                    <SolidColorBrush x:Key="ComboBoxBackgroundPointerOver" Color="#2F2C29" />
+                    <SolidColorBrush x:Key="ComboBoxBackgroundPressed" Color="#201E1C" />
+                    <SolidColorBrush x:Key="ComboBoxBackgroundDisabled" Color="#80242220" />
+                    <SolidColorBrush x:Key="ComboBoxBorderBrush" Color="#393632" />
+                    <SolidColorBrush x:Key="ComboBoxBorderBrushPointerOver" Color="#4E4A45" />
+                    <SolidColorBrush x:Key="ComboBoxBorderBrushPressed" Color="#45413C" />
+                    <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="#252321" />
+                    <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush" Color="#3B3834" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundPointerOver" Color="#12FFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundPressed" Color="#1CFFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelected" Color="#18FFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPointerOver" Color="#22FFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPressed" Color="#28FFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxItemPillFillBrush" Color="#A0754F" />
+                    <SolidColorBrush x:Key="MenuFlyoutPresenterBackground" Color="#262422" />
+                    <SolidColorBrush x:Key="MenuFlyoutPresenterBorderBrush" Color="#3B3834" />
+                    <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPointerOver" Color="#12FFFFFF" />
+                    <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPressed" Color="#1CFFFFFF" />
+                    <SolidColorBrush x:Key="MenuFlyoutSubItemBackgroundPointerOver" Color="#12FFFFFF" />
+                    <SolidColorBrush x:Key="MenuFlyoutSubItemBackgroundPressed" Color="#1CFFFFFF" />
+                    <SolidColorBrush x:Key="ToggleMenuFlyoutItemBackgroundPointerOver" Color="#12FFFFFF" />
+                    <SolidColorBrush x:Key="ToggleMenuFlyoutItemBackgroundPressed" Color="#1CFFFFFF" />
+                    <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="#F0EDE8" />
+                    <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="#F0EDE8" />
+                    <SolidColorBrush x:Key="ToolTipBackground" Color="#282623" />
+                    <SolidColorBrush x:Key="ToolTipBorderBrush" Color="#3D3A36" />
+                    <SolidColorBrush x:Key="ToolTipForeground" Color="#F0EDE8" />
+                    <SolidColorBrush x:Key="HyperlinkButtonForeground" Color="#A0754F" />
+                    <SolidColorBrush x:Key="HyperlinkButtonForegroundPointerOver" Color="#B0845D" />
+                    <SolidColorBrush x:Key="HyperlinkButtonForegroundPressed" Color="#8E6542" />
+                    <SolidColorBrush x:Key="HyperlinkButtonBackgroundPointerOver" Color="#12FFFFFF" />
+                    <SolidColorBrush x:Key="TextControlBackground" Color="#242220" />
+                    <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#2B2825" />
+                    <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#201E1C" />
+                    <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="#80242220" />
                     <SolidColorBrush x:Key="SliderTrackFill" Color="#353330" />
                     <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#403D3A" />
                     <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#4A4743" />
@@ -160,6 +275,15 @@
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPointerOver" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPressed" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="ToggleSwitchKnobFillOffDisabled" Color="#7E7C79" />
+                    <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillChecked" Color="#A0754F" />
+                    <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPointerOver" Color="#B0845D" />
+                    <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPressed" Color="#8E6542" />
+                    <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeChecked" Color="#A0754F" />
+                    <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeCheckedPointerOver" Color="#B0845D" />
+                    <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeCheckedPressed" Color="#8E6542" />
+                    <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundChecked" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundCheckedPointerOver" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundCheckedPressed" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="TabViewBorderBrush" Color="Transparent" />
                     <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="#282623" />
                     <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPointerOver" Color="#12FFFFFF" />
@@ -218,6 +342,185 @@
             <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPointerOver" Color="#DC383634" />
             <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPressed" Color="#FF2A2B2E" />
             <SolidColorBrush x:Key="ToggleSwitchKnobFillOffDisabled" Color="#786E6B68" />
+            <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillChecked" Color="#8A653F" />
+            <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPointerOver" Color="#7A5835" />
+            <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPressed" Color="#6B4C2D" />
+            <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeChecked" Color="#8A653F" />
+            <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeCheckedPointerOver" Color="#7A5835" />
+            <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeCheckedPressed" Color="#6B4C2D" />
+            <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundChecked" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundCheckedPointerOver" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundCheckedPressed" Color="#FFFFFF" />
+
+            <!-- 原生 WinUI 3 Fluent 2 CheckBox（始终使用暖色强调，避免暗色模式回落系统蓝） -->
+            <Style TargetType="CheckBox">
+                <Setter Property="Foreground" Value="{ThemeResource YYText1Brush}" />
+                <Setter Property="FontSize" Value="12.5" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="MinHeight" Value="24" />
+                <Setter Property="Padding" Value="7,0,0,0" />
+                <Setter Property="HorizontalAlignment" Value="Left" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="UseSystemFocusVisuals" Value="False" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="CheckBox">
+                            <Grid x:Name="RootGrid" Background="Transparent">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CombinedStates">
+                                        <VisualState x:Name="UncheckedNormal" />
+                                        <VisualState x:Name="UncheckedPointerOver">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="UncheckedHover" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.07" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="UncheckedPressed">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="UncheckedPress" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.03" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="UncheckedDisabled">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="RootGrid" Storyboard.TargetProperty="Opacity" To="0.45" Duration="0" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="CheckedNormal">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="CheckedBox" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.08" />
+                                                <DoubleAnimation Storyboard.TargetName="UncheckedBox" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.08" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="CheckedPointerOver">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="CheckedBox" Storyboard.TargetProperty="Opacity" To="1" Duration="0" />
+                                                <DoubleAnimation Storyboard.TargetName="UncheckedBox" Storyboard.TargetProperty="Opacity" To="0" Duration="0" />
+                                                <DoubleAnimation Storyboard.TargetName="CheckedHover" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.07" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="CheckedPressed">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="CheckedBox" Storyboard.TargetProperty="Opacity" To="1" Duration="0" />
+                                                <DoubleAnimation Storyboard.TargetName="UncheckedBox" Storyboard.TargetProperty="Opacity" To="0" Duration="0" />
+                                                <DoubleAnimation Storyboard.TargetName="CheckedPress" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.03" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="CheckedDisabled">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="CheckedBox" Storyboard.TargetProperty="Opacity" To="1" Duration="0" />
+                                                <DoubleAnimation Storyboard.TargetName="UncheckedBox" Storyboard.TargetProperty="Opacity" To="0" Duration="0" />
+                                                <DoubleAnimation Storyboard.TargetName="RootGrid" Storyboard.TargetProperty="Opacity" To="0.45" Duration="0" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="IndeterminateNormal">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="IndeterminateBox" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.08" />
+                                                <DoubleAnimation Storyboard.TargetName="UncheckedBox" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.08" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="IndeterminatePointerOver">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="IndeterminateBox" Storyboard.TargetProperty="Opacity" To="1" Duration="0" />
+                                                <DoubleAnimation Storyboard.TargetName="UncheckedBox" Storyboard.TargetProperty="Opacity" To="0" Duration="0" />
+                                                <DoubleAnimation Storyboard.TargetName="CheckedHover" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.07" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="IndeterminatePressed">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="IndeterminateBox" Storyboard.TargetProperty="Opacity" To="1" Duration="0" />
+                                                <DoubleAnimation Storyboard.TargetName="UncheckedBox" Storyboard.TargetProperty="Opacity" To="0" Duration="0" />
+                                                <DoubleAnimation Storyboard.TargetName="CheckedPress" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.03" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="IndeterminateDisabled">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="IndeterminateBox" Storyboard.TargetProperty="Opacity" To="1" Duration="0" />
+                                                <DoubleAnimation Storyboard.TargetName="UncheckedBox" Storyboard.TargetProperty="Opacity" To="0" Duration="0" />
+                                                <DoubleAnimation Storyboard.TargetName="RootGrid" Storyboard.TargetProperty="Opacity" To="0.45" Duration="0" />
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Grid Width="17" Height="17" VerticalAlignment="Center">
+                                    <Border
+                                        x:Name="UncheckedBox"
+                                        CornerRadius="4"
+                                        Background="Transparent"
+                                        BorderBrush="{ThemeResource YYText3Brush}"
+                                        BorderThickness="1.35" />
+                                    <Border
+                                        x:Name="UncheckedHover"
+                                        CornerRadius="4"
+                                        Background="{ThemeResource YYSubtleHoverBrush}"
+                                        Opacity="0"
+                                        IsHitTestVisible="False" />
+                                    <Border
+                                        x:Name="UncheckedPress"
+                                        CornerRadius="4"
+                                        Background="{ThemeResource YYSubtlePressBrush}"
+                                        Opacity="0"
+                                        IsHitTestVisible="False" />
+                                    <Border
+                                        x:Name="CheckedBox"
+                                        CornerRadius="4"
+                                        Background="{ThemeResource YYAccentBrush}"
+                                        Opacity="0"
+                                        IsHitTestVisible="False">
+                                        <Path
+                                            Data="M 1.5,5.0 L 4.2,7.8 L 9.6,2.0"
+                                            Width="11"
+                                            Height="10"
+                                            Stroke="White"
+                                            StrokeThickness="1.75"
+                                            StrokeLineJoin="Round"
+                                            StrokeStartLineCap="Round"
+                                            StrokeEndLineCap="Round"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center" />
+                                    </Border>
+                                    <Border
+                                        x:Name="IndeterminateBox"
+                                        CornerRadius="4"
+                                        Background="{ThemeResource YYAccentBrush}"
+                                        Opacity="0"
+                                        IsHitTestVisible="False">
+                                        <Border Width="8" Height="1.8" CornerRadius="1" Background="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <Border
+                                        x:Name="CheckedHover"
+                                        CornerRadius="4"
+                                        Background="{ThemeResource YYAccentHoverOverlayBrush}"
+                                        Opacity="0"
+                                        IsHitTestVisible="False" />
+                                    <Border
+                                        x:Name="CheckedPress"
+                                        CornerRadius="4"
+                                        Background="{ThemeResource YYAccentPressOverlayBrush}"
+                                        Opacity="0"
+                                        IsHitTestVisible="False" />
+                                </Grid>
+                                <ContentPresenter
+                                    x:Name="ContentPresenter"
+                                    Grid.Column="1"
+                                    Margin="{TemplateBinding Padding}"
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    ContentTransitions="{TemplateBinding ContentTransitions}"
+                                    Foreground="{TemplateBinding Foreground}"
+                                    HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    TextWrapping="Wrap"
+                                    AutomationProperties.AccessibilityView="Raw" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
 
             <!-- 原生 WinUI 3 Fluent 2 ToggleSwitch（44px 紧贴卡片右缘且保留完整呼吸空间） -->
             <Style TargetType="ToggleSwitch">
@@ -329,6 +632,120 @@
                 </Setter>
             </Style>
 
+            <!-- 带一键清空 × 按钮的单行搜索/筛选输入框（严格垂直居中，非空即显示清空按钮） -->
+            <Style x:Key="YYSearchTextBoxStyle" TargetType="TextBox">
+                <Setter Property="Height" Value="32" />
+                <Setter Property="MinHeight" Value="32" />
+                <Setter Property="FontSize" Value="12.5" />
+                <Setter Property="Foreground" Value="{ThemeResource YYText1Brush}" />
+                <Setter Property="Background" Value="{ThemeResource YYCardBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource TextControlBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="Padding" Value="10,0,6,0" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="ScrollViewer.HorizontalScrollMode" Value="Auto" />
+                <Setter Property="ScrollViewer.VerticalScrollMode" Value="Disabled" />
+                <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Hidden" />
+                <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Hidden" />
+                <Setter Property="UseSystemFocusVisuals" Value="False" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="TextBox">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="Disabled">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="BorderElement" Storyboard.TargetProperty="Opacity" To="0.55" Duration="0" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="PointerOver">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BorderElement" Storyboard.TargetProperty="BorderBrush">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlBorderBrushPointerOver}" />
+                                                </ObjectAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Focused">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BorderElement" Storyboard.TargetProperty="BorderBrush">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource TextControlBorderBrushFocused}" />
+                                                </ObjectAnimationUsingKeyFrames>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="BorderElement" Storyboard.TargetProperty="BorderThickness">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="1,1,1,2" />
+                                                </ObjectAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Border
+                                    x:Name="BorderElement"
+                                    Grid.ColumnSpan="2"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="{TemplateBinding CornerRadius}" />
+                                <ScrollViewer
+                                    x:Name="ContentElement"
+                                    Grid.Column="0"
+                                    Margin="{TemplateBinding Padding}"
+                                    Padding="0"
+                                    VerticalAlignment="Center"
+                                    HorizontalScrollMode="{TemplateBinding ScrollViewer.HorizontalScrollMode}"
+                                    HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                                    VerticalScrollMode="Disabled"
+                                    VerticalScrollBarVisibility="Hidden"
+                                    IsTabStop="False"
+                                    AutomationProperties.AccessibilityView="Raw" />
+                                <TextBlock
+                                    x:Name="PlaceholderTextContentPresenter"
+                                    Grid.Column="0"
+                                    Margin="{TemplateBinding Padding}"
+                                    VerticalAlignment="Center"
+                                    Text="{TemplateBinding PlaceholderText}"
+                                    Foreground="{ThemeResource YYText3Brush}"
+                                    FontSize="{TemplateBinding FontSize}"
+                                    TextTrimming="CharacterEllipsis"
+                                    IsHitTestVisible="False" />
+                                <Button
+                                    x:Name="YYClearButton"
+                                    Grid.Column="1"
+                                    Width="22"
+                                    Height="22"
+                                    MinWidth="22"
+                                    MinHeight="22"
+                                    Margin="0,0,5,0"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Visibility="Collapsed"
+                                    IsTabStop="False"
+                                    VerticalAlignment="Center"
+                                    HorizontalAlignment="Center"
+                                    ToolTipService.ToolTip="清空">
+                                    <Path
+                                        Data="M 1.5,1.5 L 7.5,7.5 M 7.5,1.5 L 1.5,7.5"
+                                        Width="9"
+                                        Height="9"
+                                        Stroke="{ThemeResource YYText3Brush}"
+                                        StrokeThickness="1.35"
+                                        StrokeStartLineCap="Round"
+                                        StrokeEndLineCap="Round" />
+                                </Button>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <!-- 严格垂直居中的单行 Fluent 2 PasswordBox -->
             <Style x:Key="YYCompactPasswordBoxStyle" TargetType="PasswordBox">
                 <Setter Property="Height" Value="32" />
@@ -353,6 +770,78 @@
                 <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
             </Style>
 
+            <!-- 全局隐式 Button 模板：保留自定义背景/边框/前景色，以柔和状态层呈现悬停与按压，彻底杜绝 WinUI 默认白块覆盖 -->
+            <Style TargetType="Button">
+                <Setter Property="Background" Value="{ThemeResource ButtonBackground}" />
+                <Setter Property="Foreground" Value="{ThemeResource YYText1Brush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource ButtonBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="Padding" Value="11,5,11,6" />
+                <Setter Property="HorizontalAlignment" Value="Left" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="UseSystemFocusVisuals" Value="False" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid x:Name="RootGrid" Background="Transparent" CornerRadius="{TemplateBinding CornerRadius}">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="HoverOverlay" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.07" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="PressOverlay" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.03" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="RootGrid" Storyboard.TargetProperty="Opacity" To="0.45" Duration="0" />
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Border
+                                    x:Name="SurfaceBorder"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="{TemplateBinding CornerRadius}" />
+                                <Border
+                                    x:Name="HoverOverlay"
+                                    Background="{ThemeResource YYSubtleHoverBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                                <Border
+                                    x:Name="PressOverlay"
+                                    Background="{ThemeResource YYSubtlePressBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                                <ContentPresenter
+                                    x:Name="ContentPresenter"
+                                    Margin="{TemplateBinding BorderThickness}"
+                                    Padding="{TemplateBinding Padding}"
+                                    Foreground="{TemplateBinding Foreground}"
+                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    ContentTransitions="{TemplateBinding ContentTransitions}"
+                                    AutomationProperties.AccessibilityView="Raw" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <!-- Fluent 2 轻量文字操作按钮 -->
             <Style x:Key="YYTextActionButtonStyle" TargetType="Button">
                 <Setter Property="Background" Value="Transparent" />
@@ -366,9 +855,65 @@
                 <Setter Property="VerticalContentAlignment" Value="Center" />
                 <Setter Property="HorizontalContentAlignment" Value="Center" />
                 <Setter Property="UseSystemFocusVisuals" Value="False" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid x:Name="RootGrid" Background="Transparent" CornerRadius="{TemplateBinding CornerRadius}">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="HoverOverlay" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.07" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="PressOverlay" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.03" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="RootGrid" Storyboard.TargetProperty="Opacity" To="0.38" Duration="0" />
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Border
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="{TemplateBinding CornerRadius}" />
+                                <Border
+                                    x:Name="HoverOverlay"
+                                    Background="{ThemeResource YYSubtleHoverBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                                <Border
+                                    x:Name="PressOverlay"
+                                    Background="{ThemeResource YYSubtlePressBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                                <ContentPresenter
+                                    x:Name="ContentPresenter"
+                                    Margin="{TemplateBinding BorderThickness}"
+                                    Padding="{TemplateBinding Padding}"
+                                    Foreground="{TemplateBinding Foreground}"
+                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    ContentTransitions="{TemplateBinding ContentTransitions}"
+                                    AutomationProperties.AccessibilityView="Raw" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
             </Style>
 
-            <!-- Fluent 2 标准次要按钮（32px 高、6px 圆角、柔和边线） -->
+            <!-- Fluent 2 标准次要按钮（32px 高、6px 圆角、柔和边线 + 悬停微加深边线） -->
             <Style x:Key="YYFluentButtonStyle" TargetType="Button">
                 <Setter Property="Background" Value="{ThemeResource YYCardBrush}" />
                 <Setter Property="Foreground" Value="{ThemeResource YYText1Brush}" />
@@ -382,6 +927,71 @@
                 <Setter Property="VerticalContentAlignment" Value="Center" />
                 <Setter Property="HorizontalContentAlignment" Value="Center" />
                 <Setter Property="UseSystemFocusVisuals" Value="False" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid x:Name="RootGrid" Background="Transparent" CornerRadius="{TemplateBinding CornerRadius}">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="HoverOverlay" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.07" />
+                                                <DoubleAnimation Storyboard.TargetName="HoverBorder" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.07" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="PressOverlay" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.03" />
+                                                <DoubleAnimation Storyboard.TargetName="HoverBorder" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.03" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="RootGrid" Storyboard.TargetProperty="Opacity" To="0.45" Duration="0" />
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Border
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="{TemplateBinding CornerRadius}" />
+                                <Border
+                                    x:Name="HoverOverlay"
+                                    Background="{ThemeResource YYButtonHoverOverlayBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                                <Border
+                                    x:Name="PressOverlay"
+                                    Background="{ThemeResource YYButtonPressOverlayBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                                <Border
+                                    x:Name="HoverBorder"
+                                    BorderBrush="{ThemeResource YYButtonHoverBorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                                <ContentPresenter
+                                    x:Name="ContentPresenter"
+                                    Margin="{TemplateBinding BorderThickness}"
+                                    Padding="{TemplateBinding Padding}"
+                                    Foreground="{TemplateBinding Foreground}"
+                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    ContentTransitions="{TemplateBinding ContentTransitions}"
+                                    AutomationProperties.AccessibilityView="Raw" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
             </Style>
 
             <!-- Fluent 2 柔和强调次级按钮（暖浅底 + 强调边线） -->
@@ -399,9 +1009,65 @@
                 <Setter Property="VerticalContentAlignment" Value="Center" />
                 <Setter Property="HorizontalContentAlignment" Value="Center" />
                 <Setter Property="UseSystemFocusVisuals" Value="False" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid x:Name="RootGrid" Background="Transparent" CornerRadius="{TemplateBinding CornerRadius}">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="HoverOverlay" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.07" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="PressOverlay" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.03" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="RootGrid" Storyboard.TargetProperty="Opacity" To="0.45" Duration="0" />
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Border
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="{TemplateBinding CornerRadius}" />
+                                <Border
+                                    x:Name="HoverOverlay"
+                                    Background="{ThemeResource YYSubtleHoverBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                                <Border
+                                    x:Name="PressOverlay"
+                                    Background="{ThemeResource YYSubtlePressBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                                <ContentPresenter
+                                    x:Name="ContentPresenter"
+                                    Margin="{TemplateBinding BorderThickness}"
+                                    Padding="{TemplateBinding Padding}"
+                                    Foreground="{TemplateBinding Foreground}"
+                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    ContentTransitions="{TemplateBinding ContentTransitions}"
+                                    AutomationProperties.AccessibilityView="Raw" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
             </Style>
 
-            <!-- Fluent 2 主强调暖色按钮（32px 高、6px 圆角） -->
+            <!-- Fluent 2 主强调暖色按钮（32px 高、6px 圆角，悬停平滑加深/提亮且保持纯白文字） -->
             <Style x:Key="YYFluentAccentButtonStyle" TargetType="Button">
                 <Setter Property="Background" Value="{ThemeResource YYAccentBrush}" />
                 <Setter Property="Foreground" Value="White" />
@@ -416,9 +1082,132 @@
                 <Setter Property="VerticalContentAlignment" Value="Center" />
                 <Setter Property="HorizontalContentAlignment" Value="Center" />
                 <Setter Property="UseSystemFocusVisuals" Value="False" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid x:Name="RootGrid" Background="Transparent" CornerRadius="{TemplateBinding CornerRadius}">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="HoverOverlay" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.07" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="PressOverlay" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.03" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="RootGrid" Storyboard.TargetProperty="Opacity" To="0.45" Duration="0" />
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Border
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="{TemplateBinding CornerRadius}" />
+                                <Border
+                                    x:Name="HoverOverlay"
+                                    Background="{ThemeResource YYAccentHoverOverlayBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                                <Border
+                                    x:Name="PressOverlay"
+                                    Background="{ThemeResource YYAccentPressOverlayBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                                <ContentPresenter
+                                    x:Name="ContentPresenter"
+                                    Margin="{TemplateBinding BorderThickness}"
+                                    Padding="{TemplateBinding Padding}"
+                                    Foreground="{TemplateBinding Foreground}"
+                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    ContentTransitions="{TemplateBinding ContentTransitions}"
+                                    AutomationProperties.AccessibilityView="Raw" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
             </Style>
 
-            <!-- Fluent 2 工具栏图标按钮（6px 圆角，透明常态） -->
+            <!-- 强调容器内嵌分段按钮（如 Split 导入主按钮与下拉箭头，透明常态 + 强调态悬停层） -->
+            <Style x:Key="YYAccentOverlayButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Foreground" Value="White" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="Height" Value="32" />
+                <Setter Property="MinHeight" Value="32" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="UseSystemFocusVisuals" Value="False" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid x:Name="RootGrid" Background="Transparent" CornerRadius="{TemplateBinding CornerRadius}">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="HoverOverlay" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.07" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="PressOverlay" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.03" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="RootGrid" Storyboard.TargetProperty="Opacity" To="0.45" Duration="0" />
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Border
+                                    Background="{TemplateBinding Background}"
+                                    CornerRadius="{TemplateBinding CornerRadius}" />
+                                <Border
+                                    x:Name="HoverOverlay"
+                                    Background="{ThemeResource YYAccentHoverOverlayBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                                <Border
+                                    x:Name="PressOverlay"
+                                    Background="{ThemeResource YYAccentPressOverlayBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                                <ContentPresenter
+                                    x:Name="ContentPresenter"
+                                    Padding="{TemplateBinding Padding}"
+                                    Foreground="{TemplateBinding Foreground}"
+                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    ContentTransitions="{TemplateBinding ContentTransitions}"
+                                    AutomationProperties.AccessibilityView="Raw" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- Fluent 2 工具栏图标按钮（6px 圆角，透明常态，保留动态激活背景与纸色适配前景色） -->
             <Style x:Key="YYToolbarIconButtonStyle" TargetType="Button">
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="Foreground" Value="{ThemeResource YYText2Brush}" />
@@ -431,9 +1220,65 @@
                 <Setter Property="VerticalContentAlignment" Value="Center" />
                 <Setter Property="HorizontalContentAlignment" Value="Center" />
                 <Setter Property="UseSystemFocusVisuals" Value="False" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid x:Name="RootGrid" Background="Transparent" CornerRadius="{TemplateBinding CornerRadius}">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="HoverOverlay" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.07" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="PressOverlay" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.03" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="RootGrid" Storyboard.TargetProperty="Opacity" To="0.38" Duration="0" />
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Border
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="{TemplateBinding CornerRadius}" />
+                                <Border
+                                    x:Name="HoverOverlay"
+                                    Background="{ThemeResource YYSubtleHoverBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                                <Border
+                                    x:Name="PressOverlay"
+                                    Background="{ThemeResource YYSubtlePressBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                                <ContentPresenter
+                                    x:Name="ContentPresenter"
+                                    Margin="{TemplateBinding BorderThickness}"
+                                    Padding="{TemplateBinding Padding}"
+                                    Foreground="{TemplateBinding Foreground}"
+                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    ContentTransitions="{TemplateBinding ContentTransitions}"
+                                    AutomationProperties.AccessibilityView="Raw" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
             </Style>
 
-            <!-- NavigationView 风格侧栏行按钮（高度 34，圆角 6） -->
+            <!-- NavigationView 风格侧栏行按钮（高度 34，圆角 6，悬停不破坏选中底色） -->
             <Style x:Key="YYSidebarItemStyle" TargetType="Button">
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="Foreground" Value="{ThemeResource YYText1Brush}" />
@@ -447,6 +1292,62 @@
                 <Setter Property="MinHeight" Value="34" />
                 <Setter Property="FontSize" Value="13" />
                 <Setter Property="UseSystemFocusVisuals" Value="False" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid x:Name="RootGrid" Background="Transparent" CornerRadius="{TemplateBinding CornerRadius}">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="HoverOverlay" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.07" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="PressOverlay" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.03" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="RootGrid" Storyboard.TargetProperty="Opacity" To="0.42" Duration="0" />
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Border
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="{TemplateBinding CornerRadius}" />
+                                <Border
+                                    x:Name="HoverOverlay"
+                                    Background="{ThemeResource YYSidebarHoverBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                                <Border
+                                    x:Name="PressOverlay"
+                                    Background="{ThemeResource YYSubtlePressBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0"
+                                    IsHitTestVisible="False" />
+                                <ContentPresenter
+                                    x:Name="ContentPresenter"
+                                    Margin="{TemplateBinding BorderThickness}"
+                                    Padding="{TemplateBinding Padding}"
+                                    Foreground="{TemplateBinding Foreground}"
+                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    ContentTransitions="{TemplateBinding ContentTransitions}"
+                                    AutomationProperties.AccessibilityView="Raw" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
             </Style>
         </ResourceDictionary>
     </Application.Resources>

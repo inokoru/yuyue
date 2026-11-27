@@ -44,6 +44,12 @@ public sealed class DevicePrefs
     public byte GlossLevel { get; set; } = 3; // 2=四级, 3=六级, 4=考研, 5=雅思, 6=GRE (0=兼容旧版关闭)
     public bool GlossVocabOnly { get; set; } = false;
     public Dictionary<string, bool> BookTranslationsActive { get; set; } = new();
+    public Dictionary<string, string> BookTranslateModes { get; set; } = new(); // off | bilingual | only（对齐 macOS TranslateMode）
+
+    // 阅读窗口亮度与护眼柔光（对齐 MacReaderBrightness）
+    public bool ReaderBrightnessFollow { get; set; } = true;
+    public double ReaderBrightness { get; set; } = 0.72;
+    public bool ReaderEyeCare { get; set; } = false;
 
     // 沉浸阅读偏好（对齐 MacSettings ReadingSettings）
     public bool ImmersiveAutoEnter { get; set; } = false;
@@ -51,6 +57,11 @@ public sealed class DevicePrefs
     public bool ImmersiveHideMarks { get; set; } = false;
     public bool ImmersiveHideHints { get; set; } = true;
     public bool ImmersiveNoAnimation { get; set; } = true;
+
+    // 翻页音效偏好（对齐 macOS PageTurnPrefs）
+    public bool PageTurnSound { get; set; } = false;
+    public string PageTurnSoundStyle { get; set; } = "softPaper";
+    public double PageTurnSoundVolume { get; set; } = 0.60;
 
     // PDF 阅读偏好（按书保存对齐 PdfModel.swift）
     public string PdfLayout { get; set; } = "scroll"; // scroll | single | double
@@ -188,6 +199,7 @@ public sealed class DevicePrefs
     public List<string> GlobalRecentAiModels { get; set; } = [];
     public Dictionary<string, string> AiProviderUrls { get; set; } = new();
     public Dictionary<string, string> AiCustomProviderNames { get; set; } = new();
+    public List<CompanionPromptItem>? CompanionQuickPrompts { get; set; }
 
     // 笔记页与背景白噪音偏好（对齐 MacNotesView & SoundLibrary）
     public bool NotesCoversOnly { get; set; } = false;
@@ -230,6 +242,175 @@ public sealed class DevicePrefs
 
 public sealed record SavedTabEntry(string BookId, string Kind, string? SplitBookId = null);
 
+public sealed class CompanionPromptItem
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Command { get; set; } = "";
+    public string Prompt { get; set; } = "";
+}
+
+/// <summary>
+/// 1:1 port of macOS <c>CompanionPrompts</c> (<c>BookCompanion.swift:936</c>):
+/// user-saved quick prompts (max 8) with customizable <c>/command</c> tokens, surfaced in Companion quick suggestions
+/// and the <c>/</c> slash command menu.
+/// </summary>
+public static class CompanionPromptsHelper
+{
+    public const int MaxCount = 8;
+    public const int MaxLength = 160;
+    public const int MaxCommandLength = 20;
+
+    public static readonly HashSet<string> ReservedCommands = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "recap", "chapter", "characters", "explain", "quote", "quiz",
+        "read", "whole", "model", "clear", "settings",
+    };
+
+    public static List<CompanionPromptItem> CreateDefaults() =>
+    [
+        new() { Id = "default-grammar", Command = "grammar", Prompt = L10n.T("拆解这句语法与长难句") },
+        new() { Id = "default-baihua", Command = "baihua", Prompt = L10n.T("把这段古文译成现代白话") },
+        new() { Id = "default-logic", Command = "logic", Prompt = L10n.T("提炼核心论点与逻辑") },
+    ];
+
+    public static List<CompanionPromptItem> GetItems(DevicePrefs prefs) =>
+        prefs.CompanionQuickPrompts is null
+            ? CreateDefaults()
+            : Normalize(prefs.CompanionQuickPrompts);
+
+    public static bool IsDefault(DevicePrefs prefs)
+    {
+        if (prefs.CompanionQuickPrompts is null) return true;
+        var cur = Normalize(prefs.CompanionQuickPrompts);
+        var def = CreateDefaults();
+        if (cur.Count != def.Count) return false;
+        for (int i = 0; i < cur.Count; i++)
+        {
+            if (!string.Equals(cur[i].Id, def[i].Id, StringComparison.Ordinal)
+                || !string.Equals(cur[i].Command, def[i].Command, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(cur[i].Prompt, def[i].Prompt, StringComparison.Ordinal))
+                return false;
+        }
+        return true;
+    }
+
+    public static string NextDefaultCommand(IEnumerable<CompanionPromptItem> existing)
+    {
+        var used = new HashSet<string>(ReservedCommands, StringComparer.OrdinalIgnoreCase);
+        foreach (var it in existing)
+            if (!string.IsNullOrWhiteSpace(it.Command)) used.Add(it.Command);
+        int n = 1;
+        while (used.Contains($"ask{n}")) n++;
+        return $"ask{n}";
+    }
+
+    public static string SanitizeCommand(
+        string? raw,
+        string fallback,
+        IEnumerable<CompanionPromptItem> existing,
+        string? excludingId = null)
+    {
+        static string CleanToken(string? s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return "";
+            var trimmed = s.Trim().TrimStart('/', '／');
+            var chars = trimmed.Where(c => !char.IsWhiteSpace(c)).ToArray();
+            return new string(chars).ToLowerInvariant();
+        }
+
+        string stripped = CleanToken(raw);
+        string cleanFallback = CleanToken(fallback);
+        string baseCmd = string.IsNullOrEmpty(stripped)
+            ? (string.IsNullOrEmpty(cleanFallback) ? "ask1" : cleanFallback)
+            : stripped;
+        if (baseCmd.Length > MaxCommandLength) baseCmd = baseCmd[..MaxCommandLength];
+
+        var used = new HashSet<string>(ReservedCommands, StringComparer.OrdinalIgnoreCase);
+        foreach (var it in existing)
+        {
+            if (excludingId is not null && string.Equals(it.Id, excludingId, StringComparison.Ordinal)) continue;
+            if (!string.IsNullOrWhiteSpace(it.Command)) used.Add(it.Command);
+        }
+        if (!used.Contains(baseCmd)) return baseCmd;
+
+        int n = 2;
+        while (true)
+        {
+            string suffix = n.ToString();
+            int prefixLen = Math.Max(1, MaxCommandLength - suffix.Length);
+            string candidate = (baseCmd.Length > prefixLen ? baseCmd[..prefixLen] : baseCmd) + suffix;
+            if (!used.Contains(candidate)) return candidate;
+            n++;
+        }
+    }
+
+    public static List<CompanionPromptItem> Normalize(IEnumerable<CompanionPromptItem> rawItems)
+    {
+        var seenPrompts = new HashSet<string>(StringComparer.Ordinal);
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        var outList = new List<CompanionPromptItem>();
+        foreach (var raw in rawItems)
+        {
+            if (raw is null) continue;
+            string p = (raw.Prompt ?? "").Trim();
+            if (p.Length > MaxLength) p = p[..MaxLength];
+            if (string.IsNullOrEmpty(p) || !seenPrompts.Add(p)) continue;
+
+            string id = (raw.Id ?? "").Trim();
+            if (string.IsNullOrEmpty(id) || !seenIds.Add(id))
+            {
+                id = Guid.NewGuid().ToString("N");
+                seenIds.Add(id);
+            }
+            string fb = NextDefaultCommand(outList);
+            string cmd = SanitizeCommand(raw.Command, fb, outList, excludingId: id);
+            outList.Add(new CompanionPromptItem { Id = id, Command = cmd, Prompt = p });
+            if (outList.Count >= MaxCount) break;
+        }
+        return outList;
+    }
+
+    public static bool Upsert(DevicePrefs prefs, CompanionPromptItem item)
+    {
+        var list = GetItems(prefs);
+        string p = (item.Prompt ?? "").Trim();
+        if (p.Length > MaxLength) p = p[..MaxLength];
+        if (string.IsNullOrEmpty(p)) return false;
+
+        int idx = list.FindIndex(x => string.Equals(x.Id, item.Id, StringComparison.Ordinal));
+        if (idx >= 0)
+        {
+            if (list.Where((_, i) => i != idx).Any(x => string.Equals(x.Prompt, p, StringComparison.Ordinal)))
+                return false;
+            string cmd = SanitizeCommand(item.Command, list[idx].Command, list, excludingId: item.Id);
+            list[idx] = new CompanionPromptItem { Id = item.Id, Command = cmd, Prompt = p };
+            prefs.CompanionQuickPrompts = Normalize(list);
+            return true;
+        }
+
+        if (list.Count >= MaxCount || list.Any(x => string.Equals(x.Prompt, p, StringComparison.Ordinal)))
+            return false;
+        string id = string.IsNullOrWhiteSpace(item.Id) ? Guid.NewGuid().ToString("N") : item.Id.Trim();
+        string fb = NextDefaultCommand(list);
+        string newCmd = SanitizeCommand(item.Command, fb, list, excludingId: id);
+        list.Add(new CompanionPromptItem { Id = id, Command = newCmd, Prompt = p });
+        prefs.CompanionQuickPrompts = Normalize(list);
+        return true;
+    }
+
+    public static void Remove(DevicePrefs prefs, string id)
+    {
+        var list = GetItems(prefs);
+        list.RemoveAll(x => string.Equals(x.Id, id, StringComparison.Ordinal));
+        prefs.CompanionQuickPrompts = Normalize(list);
+    }
+
+    public static void ResetDefaults(DevicePrefs prefs)
+    {
+        prefs.CompanionQuickPrompts = null;
+    }
+}
+
 /// <summary>
 /// Single process-wide facade over <see cref="YuyueCore"/> (Rust).
 /// All rules, parsing, progress and operation-log writes live in core; the UI only draws.
@@ -256,6 +437,7 @@ public sealed class LibraryService : IDisposable
     public SystemIntegrationService SystemIntegration { get; }
     public RemoteLibraryService RemoteLibraries { get; }
     public RecordingShareServer RecordingShare { get; }
+    public Yuyue.Reader.PageTurnSoundService PageTurnSounds { get; }
     public SettingsHistoryStore SettingsHistory { get; }
     public AirTrafficClient Analytics { get; }
 
@@ -314,6 +496,7 @@ public sealed class LibraryService : IDisposable
         RemoteLibraries = new RemoteLibraryService(this);
         RecordingShare = new RecordingShareServer(this);
         RecordingShare.Start();
+        PageTurnSounds = new Yuyue.Reader.PageTurnSoundService(this);
         SettingsHistory = new SettingsHistoryStore(DataDir)
         {
             PersistentActuator = ApplyPersistedHistoryRecord,
@@ -366,6 +549,9 @@ public sealed class LibraryService : IDisposable
         return new DevicePrefs();
     }
 
+    public event Action? PrefsSaved;
+    public event Action? ReaderSettingsSaved;
+
     public void SavePrefs()
     {
         try
@@ -373,6 +559,7 @@ public sealed class LibraryService : IDisposable
             File.WriteAllText(_prefsPath, JsonSerializer.Serialize(Prefs, new JsonSerializerOptions { WriteIndented = true }));
         }
         catch { /* ignore */ }
+        PrefsSaved?.Invoke();
     }
 
     private static string ResolveDataDir(string? customDataDir)
@@ -477,7 +664,11 @@ public sealed class LibraryService : IDisposable
 
     // Reader settings & progress
     public ReaderSettings GetReaderSettings() => Core.ReaderSettings();
-    public void SaveReaderSettings(ReaderSettings settings) => Core.SetReaderSettings(settings);
+    public void SaveReaderSettings(ReaderSettings settings)
+    {
+        Core.SetReaderSettings(settings);
+        ReaderSettingsSaved?.Invoke();
+    }
     public ReaderSettings? GetBookReaderSettings(string bookId) => Core.BookReaderSettings(bookId);
     public void SetBookReaderSettings(string bookId, ReaderSettings? settings) => Core.SetBookReaderSettings(bookId, settings);
     public Progress? GetProgress(string bookId) => Core.Progress(bookId);
@@ -600,6 +791,7 @@ public sealed class LibraryService : IDisposable
         Kokoro.CancelDownload();
         KokoroEngine.Instance.CloseSession();
         AudiobookWork.Dispose();
+        PageTurnSounds.Dispose();
         RecordingShare.Dispose();
         SystemIntegration.Dispose();
         WatchedFolder.Dispose();

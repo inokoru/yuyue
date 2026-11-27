@@ -73,7 +73,7 @@ public sealed class CompanionClient
             KeyHint: "gsk_…", DefaultFastModel: "llama-3.1-8b-instant", KeyUrl: "https://console.groq.com/keys"),
         new("magpie", "magpie", "http://127.0.0.1:3425/v1", "claude-sonnet-4-5", false,
             Group: "local", KeyHint: "局域网里用才要填网关 Key",
-            Blurb: "转接你在 magpie 里登录的 Claude、ChatGPT 账号", Aliases: "喜鹊 网关 gateway", DefaultKey: "magpie"),
+            Blurb: "连接本机或局域网中的 magpie 模型网关", Aliases: "喜鹊 网关 gateway", DefaultKey: "magpie"),
         new("ollama", "Ollama", "http://localhost:11434/v1", "qwen2.5:7b", false,
             Group: "local", KeyHint: "不用填"),
         new("lmstudio", "LM Studio", "http://localhost:1234/v1", "qwen2.5-7b-instruct", false,
@@ -83,6 +83,15 @@ public sealed class CompanionClient
     ];
 
     private static readonly Regex CitationRx = new(@"\[(\d+)\]", RegexOptions.Compiled);
+    private static readonly Regex ThinkBlockRx = new(@"<think>.*?</think>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly Regex TrailingCiteOpenRx = new(@"\s*\[\d*$", RegexOptions.Compiled);
+    private static readonly Regex TrailingMdTokenRx = new(@"(?:\*\*|\*|`|~~)$", RegexOptions.Compiled);
+    private static readonly Regex HrLineRx = new(@"^\s*([-*_])\1{2,}\s*$", RegexOptions.Compiled);
+    private static readonly Regex HeadingLineRx = new(@"^\s{0,3}#{1,6}\s+(.*)$", RegexOptions.Compiled);
+    private static readonly Regex BulletLineRx = new(@"^\s*[-*•]\s+(.*)$", RegexOptions.Compiled);
+    private static readonly Regex QuoteLineRx = new(@"^\s*>\s?(.*)$", RegexOptions.Compiled);
+    private static readonly Regex InlineCitePrefixRx = new(@"\G\s?\[(\d+)\]", RegexOptions.Compiled);
+    private static readonly Regex MultiBlankRx = new(@"\n{3,}", RegexOptions.Compiled);
     private static readonly JsonSerializerOptions CacheJsonOpts = new() { WriteIndented = false };
     private static readonly HttpClient Http = new() { Timeout = System.TimeSpan.FromSeconds(240) };
 
@@ -174,6 +183,22 @@ public sealed class CompanionClient
                 || !string.IsNullOrWhiteSpace(_library.Secrets.Get($"ai.key.{p.AiProvider}"));
         }
     }
+
+    public enum CompanionRichKind
+    {
+        Text,
+        Bold,
+        Italic,
+        Code,
+        Strike,
+        Bullet,
+        QuoteBar,
+        Heading,
+        Citation,
+        Newline,
+    }
+
+    public readonly record struct CompanionRichSegment(CompanionRichKind Kind, string Text = "", int CitationIndex = 0);
 
     public sealed record CompanionSource(int Index, uint Section, uint Sentence, string Snippet, bool Later = false, string? Chapter = null);
     public sealed record CompanionAnswer(
@@ -317,7 +342,8 @@ public sealed class CompanionClient
         IReadOnlyList<(string Role, string Content)>? history = null,
         BookDetail? detail = null,
         double readingFraction = 0,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Action<string, bool>? onStreamPreview = null)
     {
         string cleanQ = question.Trim();
         string scopeKey = wholeBook ? "whole" : "read";
@@ -465,7 +491,14 @@ public sealed class CompanionClient
             user.AppendLine($"\n读者选中的句子：「{selectedQuote}」");
         user.AppendLine($"\n读者问：{cleanQ}");
 
-        string rawReply = await ChatAsync(user.ToString(), system.ToString(), maxTokens: 1024, fast: false, cachePrefixLen: 0, source: UsageSource.Companion, ct: ct);
+        Action<string>? onRawAccum = onStreamPreview is null
+            ? null
+            : rawAccum =>
+            {
+                var (visible, thinking) = FormatStreamingPreview(rawAccum, hideNotYet: !wholeBook);
+                onStreamPreview(visible, thinking);
+            };
+        string rawReply = await ChatAsync(user.ToString(), system.ToString(), maxTokens: 1024, fast: false, cachePrefixLen: 0, source: UsageSource.Companion, ct: ct, onStreamRaw: onRawAccum);
         var (answerText, followUps) = SplitFollowUpQuestions(rawReply);
 
         bool notInRead = !wholeBook && (
@@ -491,11 +524,215 @@ public sealed class CompanionClient
         return result;
     }
 
+    /// <summary>Removes <c>&lt;think&gt;…&lt;/think&gt;</c> blocks from reasoning models, reporting whether an unclosed block is still streaming.</summary>
+    public static (string Visible, bool Thinking) StripThinking(string raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return ("", false);
+        string completed = ThinkBlockRx.Replace(raw, "");
+        int openIdx = completed.IndexOf("<think>", StringComparison.OrdinalIgnoreCase);
+        if (openIdx >= 0)
+            return (completed[..openIdx].Trim(), true);
+        return (completed.Trim(), false);
+    }
+
+    /// <summary>Live preview string during SSE streaming: hides <c>&lt;think&gt;</c>, trailing <c>接着问</c> line, and partial <c>[n</c> tail.</summary>
+    public static (string Visible, bool Thinking) FormatStreamingPreview(string raw, bool hideNotYet)
+    {
+        var (cleaned, thinking) = StripThinking(raw);
+        if (string.IsNullOrEmpty(cleaned)) return ("", thinking);
+        if (hideNotYet && cleaned.StartsWith("没读到", StringComparison.Ordinal)) return ("", thinking);
+
+        var lines = cleaned.Replace("\r\n", "\n").Split('\n').ToList();
+        int followIdx = lines.FindLastIndex(l => l.Contains("接着问", StringComparison.Ordinal));
+        if (followIdx >= 0)
+            lines.RemoveRange(followIdx, lines.Count - followIdx);
+
+        string body = TrailingCiteOpenRx.Replace(string.Join("\n", lines), "").Trim();
+        if (hideNotYet && body.Length > 0 && "没读到".StartsWith(body, StringComparison.Ordinal))
+            body = "";
+        return (body, thinking);
+    }
+
+    private static string StripInlineMarkdownSimple(string line)
+    {
+        string s = Regex.Replace(line, @"\*\*(.+?)\*\*", "$1");
+        s = Regex.Replace(s, @"__(.+?)__", "$1");
+        s = Regex.Replace(s, @"`([^`\n]+)`", "$1");
+        s = Regex.Replace(s, @"~~(.+?)~~", "$1");
+        s = Regex.Replace(s, @"(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)", "$1");
+        return s;
+    }
+
+    /// <summary>
+    /// 1:1 port of <c>BookCompanion.richSegments</c>: parses headings, bullets, blockquotes, bold (CJK-safe),
+    /// italic, inline code, strikethrough, and <c>[n]</c> citations into structured rendering segments.
+    /// </summary>
+    public static IReadOnlyList<CompanionRichSegment> ParseRichSegments(string rawText, bool streaming = false)
+    {
+        if (string.IsNullOrEmpty(rawText)) return [];
+        string text = rawText.Replace("\r\n", "\n");
+        if (streaming)
+            text = TrailingMdTokenRx.Replace(text, "");
+        text = MultiBlankRx.Replace(text, "\n\n");
+
+        string[] lines = text.Split('\n');
+        var output = new List<CompanionRichSegment>(lines.Length * 2);
+
+        for (int lineIdx = 0; lineIdx < lines.Length; lineIdx++)
+        {
+            if (lineIdx > 0) output.Add(new CompanionRichSegment(CompanionRichKind.Newline));
+            string rawLine = lines[lineIdx];
+            if (HrLineRx.IsMatch(rawLine)) continue;
+
+            var hm = HeadingLineRx.Match(rawLine);
+            if (hm.Success)
+            {
+                string title = StripInlineMarkdownSimple(hm.Groups[1].Value).Trim();
+                if (!string.IsNullOrEmpty(title))
+                    output.Add(new CompanionRichSegment(CompanionRichKind.Heading, title));
+                continue;
+            }
+
+            string rest = rawLine;
+            var bm = BulletLineRx.Match(rawLine);
+            if (bm.Success)
+            {
+                output.Add(new CompanionRichSegment(CompanionRichKind.Bullet));
+                rest = bm.Groups[1].Value;
+            }
+            else
+            {
+                var qm = QuoteLineRx.Match(rawLine);
+                if (qm.Success)
+                {
+                    output.Add(new CompanionRichSegment(CompanionRichKind.QuoteBar));
+                    rest = qm.Groups[1].Value;
+                }
+            }
+
+            ParseInlineSegments(rest, output);
+        }
+
+        return output;
+    }
+
+    private static void ParseInlineSegments(string input, List<CompanionRichSegment> output)
+    {
+        int i = 0;
+        int plainStart = 0;
+
+        void FlushPlain(int end)
+        {
+            if (plainStart < end)
+                output.Add(new CompanionRichSegment(CompanionRichKind.Text, input[plainStart..end]));
+        }
+
+        while (i < input.Length)
+        {
+            // 1. Citation `[n]` (with optional single leading space)
+            if (input[i] == '[' || (char.IsWhiteSpace(input[i]) && i + 1 < input.Length && input[i + 1] == '['))
+            {
+                var cm = InlineCitePrefixRx.Match(input, i);
+                if (cm.Success && cm.Index == i && int.TryParse(cm.Groups[1].Value, out int citeNum))
+                {
+                    FlushPlain(i);
+                    output.Add(new CompanionRichSegment(CompanionRichKind.Citation, CitationIndex: citeNum));
+                    i += cm.Length;
+                    plainStart = i;
+                    continue;
+                }
+            }
+
+            // 2. Bold `**...**`
+            if (i + 1 < input.Length && input[i] == '*' && input[i + 1] == '*')
+            {
+                int innerStart = i + 2;
+                int close = input.IndexOf("**", innerStart, StringComparison.Ordinal);
+                if (close > innerStart)
+                {
+                    FlushPlain(i);
+                    string inner = input[innerStart..close];
+                    if (CitationRx.IsMatch(inner))
+                    {
+                        var sub = new List<CompanionRichSegment>();
+                        ParseInlineSegments(inner, sub);
+                        foreach (var seg in sub)
+                            output.Add(seg.Kind == CompanionRichKind.Text ? new CompanionRichSegment(CompanionRichKind.Bold, seg.Text) : seg);
+                    }
+                    else
+                    {
+                        output.Add(new CompanionRichSegment(CompanionRichKind.Bold, inner));
+                    }
+                    i = close + 2;
+                    plainStart = i;
+                    continue;
+                }
+            }
+
+            // 3. Inline code `` `...` ``
+            if (input[i] == '`')
+            {
+                int innerStart = i + 1;
+                int close = input.IndexOf('`', innerStart);
+                if (close > innerStart)
+                {
+                    FlushPlain(i);
+                    output.Add(new CompanionRichSegment(CompanionRichKind.Code, input[innerStart..close]));
+                    i = close + 1;
+                    plainStart = i;
+                    continue;
+                }
+            }
+
+            // 4. Strikethrough `~~...~~`
+            if (i + 1 < input.Length && input[i] == '~' && input[i + 1] == '~')
+            {
+                int innerStart = i + 2;
+                int close = input.IndexOf("~~", innerStart, StringComparison.Ordinal);
+                if (close > innerStart)
+                {
+                    FlushPlain(i);
+                    output.Add(new CompanionRichSegment(CompanionRichKind.Strike, input[innerStart..close]));
+                    i = close + 2;
+                    plainStart = i;
+                    continue;
+                }
+            }
+
+            // 5. Italic `*...*`
+            if (input[i] == '*' && (i + 1 >= input.Length || input[i + 1] != '*'))
+            {
+                int innerStart = i + 1;
+                if (innerStart < input.Length && !char.IsWhiteSpace(input[innerStart]))
+                {
+                    int close = input.IndexOf('*', innerStart);
+                    if (close > innerStart && !char.IsWhiteSpace(input[close - 1]))
+                    {
+                        int afterClose = close + 1;
+                        if (afterClose == input.Length || input[afterClose] != '*')
+                        {
+                            FlushPlain(i);
+                            output.Add(new CompanionRichSegment(CompanionRichKind.Italic, input[innerStart..close]));
+                            i = afterClose;
+                            plainStart = i;
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            i++;
+        }
+
+        FlushPlain(input.Length);
+    }
+
     public static (string AnswerText, IReadOnlyList<string> FollowUps) SplitFollowUpQuestions(string reply)
     {
-        var lines = reply.Replace("\r\n", "\n").Split('\n').ToList();
+        string cleaned = StripThinking(reply).Visible;
+        var lines = cleaned.Replace("\r\n", "\n").Split('\n').ToList();
         int idx = lines.FindLastIndex(l => l.Contains("接着问", StringComparison.Ordinal));
-        if (idx < 0) return (reply.Trim(), Array.Empty<string>());
+        if (idx < 0) return (cleaned.Trim(), Array.Empty<string>());
 
         string line = lines[idx];
         lines.RemoveAt(idx);
@@ -712,7 +949,8 @@ public sealed class CompanionClient
         bool fast = false,
         int cachePrefixLen = 0,
         UsageSource source = UsageSource.Other,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Action<string>? onStreamRaw = null)
     {
         var p = _library.Prefs;
         var preset = FindPreset(p.AiProvider);
@@ -742,14 +980,14 @@ public sealed class CompanionClient
         try
         {
             text = isAnthropic
-                ? await SendAnthropicAsync(baseUrl, effectiveModel, rawKey, systemPrompt, userPrompt, maxTokens, cachePrefixLen, paid, source, ct)
-                : await SendOpenAiAsync(p.AiProvider, baseUrl, effectiveModel, rawKey, systemPrompt, userPrompt, maxTokens, cachePrefixLen, paid, source, ct);
+                ? await SendAnthropicAsync(baseUrl, effectiveModel, rawKey, systemPrompt, userPrompt, maxTokens, cachePrefixLen, paid, source, ct, onStreamRaw)
+                : await SendOpenAiAsync(p.AiProvider, baseUrl, effectiveModel, rawKey, systemPrompt, userPrompt, maxTokens, cachePrefixLen, paid, source, ct, onStreamRaw);
         }
         catch (HttpStatusException ex) when (effectiveModel != primaryModel && (ex.StatusCode == 400 || ex.StatusCode == 404))
         {
             text = isAnthropic
-                ? await SendAnthropicAsync(baseUrl, primaryModel, rawKey, systemPrompt, userPrompt, maxTokens, cachePrefixLen, paid, source, ct)
-                : await SendOpenAiAsync(p.AiProvider, baseUrl, primaryModel, rawKey, systemPrompt, userPrompt, maxTokens, cachePrefixLen, paid, source, ct);
+                ? await SendAnthropicAsync(baseUrl, primaryModel, rawKey, systemPrompt, userPrompt, maxTokens, cachePrefixLen, paid, source, ct, onStreamRaw)
+                : await SendOpenAiAsync(p.AiProvider, baseUrl, primaryModel, rawKey, systemPrompt, userPrompt, maxTokens, cachePrefixLen, paid, source, ct, onStreamRaw);
         }
 
         var trimmed = text.Trim();
@@ -793,12 +1031,13 @@ public sealed class CompanionClient
 
     private async Task<string> SendAnthropicAsync(
         string baseUrl, string model, string apiKey, string? systemPrompt, string userPrompt,
-        int maxTokens, int cachePrefixLen, bool paid, UsageSource source, CancellationToken ct)
+        int maxTokens, int cachePrefixLen, bool paid, UsageSource source, CancellationToken ct,
+        Action<string>? onAccumulated = null)
     {
         string endpoint = baseUrl.EndsWith("/messages", StringComparison.OrdinalIgnoreCase)
             ? baseUrl
             : baseUrl.TrimEnd('/') + "/messages";
-        bool stream = maxTokens > 2048;
+        bool stream = onAccumulated is not null || maxTokens > 2048;
 
         string sysText = systemPrompt ?? "";
         bool useCache = cachePrefixLen > 0 || Encoding.UTF8.GetByteCount(sysText) >= 1024;
@@ -856,7 +1095,7 @@ public sealed class CompanionClient
                     return txt.GetString();
                 }
                 return null;
-            }, ct);
+            }, ct, onAccumulated);
 
             if (inTok == 0 && outTok == 0)
             {
@@ -898,12 +1137,13 @@ public sealed class CompanionClient
 
     private async Task<string> SendOpenAiAsync(
         string providerId, string baseUrl, string model, string apiKey, string? systemPrompt, string userPrompt,
-        int maxTokens, int cachePrefixLen, bool paid, UsageSource source, CancellationToken ct)
+        int maxTokens, int cachePrefixLen, bool paid, UsageSource source, CancellationToken ct,
+        Action<string>? onAccumulated = null)
     {
         string endpoint = baseUrl.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase)
             ? baseUrl
             : baseUrl.TrimEnd('/') + "/chat/completions";
-        bool stream = maxTokens > 2048;
+        bool stream = onAccumulated is not null || maxTokens > 2048;
         bool isOpenRouterClaude = string.Equals(providerId, "openrouter", StringComparison.OrdinalIgnoreCase)
             && model.StartsWith("anthropic/", StringComparison.OrdinalIgnoreCase);
 
@@ -960,11 +1200,11 @@ public sealed class CompanionClient
                 if (ev.TryGetProperty("choices", out var ch) && ch.ValueKind == JsonValueKind.Array && ch.GetArrayLength() > 0)
                 {
                     var first = ch[0];
-                    if (first.TryGetProperty("delta", out var d) && d.TryGetProperty("content", out var c))
+                    if (first.TryGetProperty("delta", out var d) && d.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String)
                         return c.GetString();
                 }
                 return null;
-            }, ct);
+            }, ct, onAccumulated);
 
             if (inTok == 0 && outTok == 0)
             {
@@ -1020,7 +1260,8 @@ public sealed class CompanionClient
     }
 
     private static async Task<string> ReadSseStreamAsync(
-        HttpRequestMessage req, Func<JsonElement, string?> extractDelta, CancellationToken ct)
+        HttpRequestMessage req, Func<JsonElement, string?> extractDelta, CancellationToken ct,
+        Action<string>? onAccumulated = null)
     {
         using var res = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
         if (!res.IsSuccessStatusCode)
@@ -1040,8 +1281,11 @@ public sealed class CompanionClient
             try
             {
                 using var doc = JsonDocument.Parse(data);
-                if (extractDelta(doc.RootElement) is string piece)
+                if (extractDelta(doc.RootElement) is { Length: > 0 } piece)
+                {
                     sb.Append(piece);
+                    onAccumulated?.Invoke(sb.ToString());
+                }
             }
             catch { }
         }

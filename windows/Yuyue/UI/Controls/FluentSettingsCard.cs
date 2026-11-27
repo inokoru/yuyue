@@ -50,7 +50,8 @@ public sealed class FluentSettingsCard : UserControl
         string? iconName = null,
         UIElement? action = null,
         Action? onClick = null,
-        bool dark = false)
+        bool dark = false,
+        UIElement? customIcon = null)
     {
         _dark = dark;
         _onClick = onClick;
@@ -65,19 +66,25 @@ public sealed class FluentSettingsCard : UserControl
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
 
+        bool hasIcon = customIcon is not null || !string.IsNullOrEmpty(iconName);
         _root = new Grid { ColumnSpacing = 14 };
-        _root.ColumnDefinitions.Add(new ColumnDefinition { Width = string.IsNullOrEmpty(iconName) ? new GridLength(0) : new GridLength(22) });
+        _root.ColumnDefinitions.Add(new ColumnDefinition { Width = hasIcon ? (customIcon is not null ? GridLength.Auto : new GridLength(22)) : new GridLength(0) });
         _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         _root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         _iconHost = new ContentPresenter
         {
+            MinWidth = hasIcon ? 22 : 0,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            Visibility = string.IsNullOrEmpty(iconName) ? Visibility.Collapsed : Visibility.Visible,
+            Visibility = hasIcon ? Visibility.Visible : Visibility.Collapsed,
         };
-        if (!string.IsNullOrEmpty(iconName))
+        if (customIcon is not null)
+        {
+            _iconHost.Content = customIcon;
+        }
+        else if (!string.IsNullOrEmpty(iconName))
         {
             var p = ThemeHelper.Palette(dark);
             _iconHost.Content = YYIcons.Make(iconName, 17, ThemeHelper.Brush(p.T2));

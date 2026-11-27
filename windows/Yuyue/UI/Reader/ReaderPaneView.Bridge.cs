@@ -285,24 +285,24 @@ public sealed partial class ReaderPaneView
                 {
                     await host.SetGlossesAsync([]);
                 }
+            }
 
-                if (_translationsActive)
+            if (_translationsActive)
+            {
+                var paragraphs = await host.GetForeignParagraphsAsync();
+                if (paragraphs.Count > 0 && !_disposed)
                 {
-                    var paragraphs = await host.GetForeignParagraphsAsync();
-                    if (paragraphs.Count > 0 && !_disposed)
+                    var cache = await Task.Run(LoadTranslationCache);
+                    var cachedItems = new List<(int Last, string Text)>();
+                    foreach (var para in paragraphs)
                     {
-                        var cache = await Task.Run(LoadTranslationCache);
-                        var cachedItems = new List<(int Last, string Text)>();
-                        foreach (var para in paragraphs)
-                        {
-                            if (string.IsNullOrWhiteSpace(para.text)) continue;
-                            string key = $"{section}|{para.last}|{HashText32(para.text):X8}";
-                            if (cache.TryGetValue(key, out var cached) && !string.IsNullOrWhiteSpace(cached))
-                                cachedItems.Add((para.last, cached));
-                        }
-                        if (cachedItems.Count > 0 && !_disposed)
-                            await host.SetTranslationsAsync(cachedItems);
+                        if (string.IsNullOrWhiteSpace(para.text)) continue;
+                        string key = TranslationCacheKey(section, para.last, para.text);
+                        if (cache.TryGetValue(key, out var cached) && !string.IsNullOrWhiteSpace(cached))
+                            cachedItems.Add((para.last, cached));
                     }
+                    if (cachedItems.Count > 0 && !_disposed)
+                        await host.SetTranslationsAsync(cachedItems, _translateOnly);
                 }
             }
         }
@@ -426,7 +426,7 @@ public sealed partial class ReaderPaneView
                             StartListenFromCurrentPage();
                         }
 
-                        if (_translationsActive && IsForeignBook())
+                        if (_translationsActive && CanTranslateBook())
                         {
                             _ = ApplyCurrentSectionTranslationsAsync();
                         }
@@ -668,9 +668,21 @@ public sealed partial class ReaderPaneView
         {
             if (HasOpenOverlay())
                 DismissOverlays();
-            else
+            else if (_rightPaneOpen)
+            {
+                _rightPaneOpen = false;
+                ApplyDockedPanesLayout();
+            }
+            else if (_isFullScreen)
                 _ownerWindow.SetFullScreen(false);
             return;
+        }
+        if (ctrl && alt)
+        {
+            if (k is "t" or "T" || c == "KeyT") { ToggleLeftPaneTab("toc"); return; }
+            if (k is "n" or "N" || c == "KeyN") { ToggleRightPaneTab("notes"); return; }
+            if (k == "ArrowUp") { MoveToPreviousSection(joinAtEnd: false); return; }
+            if (k == "ArrowDown") { MoveToNextSection(); return; }
         }
         if (k == " " || k == "Spacebar") { HandleSpaceKey(); return; }
         if (!ctrl && !alt && (_activeSelection is not null || _editingMark is not null))
@@ -715,6 +727,17 @@ public sealed partial class ReaderPaneView
         if (ctrl && !alt && (k == "f" || k == "F")) { OpenLeftPane("search"); FocusLeftSearchBox(); return; }
         if (ctrl && !alt && (k == "d" || k == "D")) { ToggleBookmarkAtCurrentPosition(); return; }
         if (ctrl && !alt && (k == "g" || k == "G")) { StatusProgress_Click(StatusProgressBtn, new RoutedEventArgs()); return; }
+        if (ctrl && !alt && !shift && (k == "i" || k == "I")) { OpenBookInfo(); return; }
+        if (ctrl && !alt && (k == "[" || c == "BracketLeft"))
+        {
+            if (_audio.IsPlaying || TtsBarHost.Visibility == Visibility.Visible) _audio.Previous();
+            return;
+        }
+        if (ctrl && !alt && (k == "]" || c == "BracketRight"))
+        {
+            if (_audio.IsPlaying || TtsBarHost.Visibility == Visibility.Visible) _audio.Next();
+            return;
+        }
         if (ctrl && !alt && !shift && (k == "w" || k == "W")) { if (_ownerWindow.ActiveTab is { } tab && !tab.IsPinned) _ = _ownerWindow.CloseTabAsync(tab); return; }
         if (ctrl && !alt && (k == "k" || k == "K") && _ownerWindow.WindowXamlRoot is { } xr) { _ = Yuyue.Shelf.QuickSearchDialog.ShowAsync(xr, _library, _bookId); return; }
         if (ctrl && !alt && k == ",") { _ownerWindow.ShowSettings("reading"); return; }
@@ -762,26 +785,48 @@ public sealed partial class ReaderPaneView
     {
         if (!_pager.IsInitialized) return;
         DismissOverlays();
-        if (_audio.IsPlaying)
+        bool readingAloud = _audio.IsPlaying;
+        if (readingAloud)
         {
             _autoTurnTargetPage = null;
             _ttsFollowPage = false;
         }
         bool moved = await _pager.Current.NextPageAsync(animated: !_library.Prefs.ImmersiveNoAnimation);
-        if (!moved) MoveToNextSection();
+        if (moved)
+        {
+            _library.PageTurnSounds.PlayManualTurn(isReadingAloud: readingAloud);
+        }
+        else if (_library.NextSection(_bookId, _currentSection) is not null)
+        {
+            _library.PageTurnSounds.PlayManualTurn(isReadingAloud: readingAloud);
+            MoveToNextSection();
+        }
+        else
+        {
+            MoveToNextSection();
+        }
     }
 
     private async Task PrevPageOrSectionAsync()
     {
         if (!_pager.IsInitialized) return;
         DismissOverlays();
-        if (_audio.IsPlaying)
+        bool readingAloud = _audio.IsPlaying;
+        if (readingAloud)
         {
             _autoTurnTargetPage = null;
             _ttsFollowPage = false;
         }
         bool moved = await _pager.Current.PrevPageAsync(animated: !_library.Prefs.ImmersiveNoAnimation);
-        if (!moved) MoveToPreviousSection(joinAtEnd: true);
+        if (moved)
+        {
+            _library.PageTurnSounds.PlayManualTurn(isReadingAloud: readingAloud);
+        }
+        else if (_library.PreviousSection(_bookId, _currentSection) is not null)
+        {
+            _library.PageTurnSounds.PlayManualTurn(isReadingAloud: readingAloud);
+            MoveToPreviousSection(joinAtEnd: true);
+        }
     }
 
     private void MoveToNextSection()
@@ -1130,7 +1175,7 @@ public sealed partial class ReaderPaneView
         {
             XamlRoot = xr,
             RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light,
-            Title = L10n.T("记下想法"),
+            Title = L10n.T("想法"),
             PrimaryButtonText = L10n.T("保存"),
             CloseButtonText = L10n.T("取消"),
             DefaultButton = ContentDialogButton.Primary,
@@ -1187,12 +1232,34 @@ public sealed partial class ReaderPaneView
 
     private void AskSelection_Click(object sender, RoutedEventArgs e)
     {
-        string text = _editingMark?.Text ?? _activeSelection?.Text ?? "";
+        var capturedMark = _editingMark;
+        var capturedSelection = _activeSelection;
+        uint capturedSection = _currentSection;
+        string text = capturedMark?.Text ?? capturedSelection?.Text ?? "";
+        CompanionAnchor? anchor = capturedMark is not null
+            ? new CompanionAnchor
+            {
+                MarkId = capturedMark.Id,
+                Section = capturedMark.Section,
+                Start = capturedMark.Start,
+                End = capturedMark.End,
+                Text = capturedMark.Text,
+            }
+            : capturedSelection is { } sel
+                ? new CompanionAnchor
+                {
+                    MarkId = null,
+                    Section = capturedSection,
+                    Start = new TextPoint((uint)sel.Start.S, (uint)sel.Start.O),
+                    End = new TextPoint((uint)sel.End.S, (uint)sel.End.O),
+                    Text = sel.Text,
+                }
+                : null;
         DismissOverlays();
         if (!string.IsNullOrWhiteSpace(text))
         {
             OpenRightPane("companion");
-            _ = SendCompanionQuestionAsync($"请结合前文解读这段话：\n「{text}」");
+            _ = SendCompanionQuestionAsync($"请结合前文解读这段话：\n「{text}」", anchor);
         }
     }
 
@@ -1367,32 +1434,8 @@ public sealed partial class ReaderPaneView
         ShowReaderAlert("已拷贝译文");
     }
 
-    // ---------- Full-Section Bilingual Inline Translation ----------
-    private async void ToggleTranslate_Click(object sender, RoutedEventArgs e)
-    {
-        if (_translationsActive)
-        {
-            try { _translateCts?.Cancel(); } catch { }
-            _translationsActive = false;
-            _library.Prefs.BookTranslationsActive[_bookId] = false;
-            _library.SavePrefs();
-            if (_pager.IsInitialized) await _pager.Current.SetTranslationsAsync(null);
-            ApplyPaperAndChrome();
-            return;
-        }
-
-        if (!_library.Companion.IsConfigured)
-        {
-            ShowReaderAlert("整章对照翻译需要先在「设置 → 书伴」配置 AI 模型", "去配置", () => _ownerWindow.ShowSettings("companion"), seconds: 6);
-            return;
-        }
-
-        _translationsActive = true;
-        _library.Prefs.BookTranslationsActive[_bookId] = true;
-        _library.SavePrefs();
-        ApplyPaperAndChrome();
-        await ApplyCurrentSectionTranslationsAsync();
-    }
+    // ---------- Full-Section Inline Translation (原文 / 双语对照 / 仅译文) ----------
+    private void ToggleTranslate_Click(object sender, RoutedEventArgs e) => ShowTranslateModeFlyout();
 
     private string GetTranslationCachePath()
     {
@@ -1400,6 +1443,12 @@ public sealed partial class ReaderPaneView
         Directory.CreateDirectory(dir);
         return Path.Combine(dir, $"{_bookId}.trans.json");
     }
+
+    /// <summary>Foreign books translate to Chinese; Chinese books (e.g. 文言) translate to modern 白话 under a separate key.</summary>
+    private string TranslationCacheKey(uint section, int last, string text) =>
+        IsForeignBook()
+            ? $"{section}|{last}|{HashText32(text):X8}"
+            : $"zh-baihua|{section}|{last}|{HashText32(text):X8}";
 
     private Dictionary<string, string> LoadTranslationCache()
     {
@@ -1426,6 +1475,7 @@ public sealed partial class ReaderPaneView
         var cts = new CancellationTokenSource();
         _translateCts = cts;
         uint targetSec = _currentSection;
+        bool toBaihua = !IsForeignBook();
 
         var paragraphs = await _pager.Current.GetForeignParagraphsAsync();
         if (paragraphs.Count == 0 || cts.IsCancellationRequested || _disposed) return;
@@ -1437,7 +1487,7 @@ public sealed partial class ReaderPaneView
         foreach (var para in paragraphs)
         {
             if (string.IsNullOrWhiteSpace(para.text)) continue;
-            string key = $"{targetSec}|{para.last}|{HashText32(para.text):X8}";
+            string key = TranslationCacheKey(targetSec, para.last, para.text);
             if (cache.TryGetValue(key, out var cached) && !string.IsNullOrWhiteSpace(cached))
                 results.Add((para.last, cached));
             else
@@ -1445,19 +1495,28 @@ public sealed partial class ReaderPaneView
         }
 
         if (results.Count > 0 && !cts.IsCancellationRequested && !_disposed && _currentSection == targetSec && _translationsActive)
-            await _pager.Current.SetTranslationsAsync(results);
+            await _pager.Current.SetTranslationsAsync(results, _translateOnly);
 
         if (uncached.Count == 0) return;
         if (!_library.Companion.IsConfigured)
         {
-            _translationsActive = false;
-            _library.Prefs.BookTranslationsActive[_bookId] = false;
-            _library.SavePrefs();
-            if (results.Count == 0) { try { await _pager.Current.SetTranslationsAsync(null); } catch { } }
-            ApplyPaperAndChrome();
-            ShowReaderAlert("翻译暂不可用");
+            await SetTranslateModeAsync("off", persist: true);
+            ShowReaderAlert("整章翻译需要先在「设置 → 书伴」配置模型服务", "去配置", () => _ownerWindow.ShowSettings("companion"), seconds: 6);
             return;
         }
+
+        string singlePrompt = toBaihua
+            ? "把下面这段原文译为通顺自然的现代简体白话文（若已是明白晓畅的现代汉语，则简明释义或保持通顺直译），只输出译文，不要加任何解释：\n\n"
+            : "请把下面这段外文准确自然地译为简体中文，只输出译文正文，不要加任何解释：\n\n";
+        string singleSystem = toBaihua
+            ? "你是精通古今汉语的学者，译文准确、通顺、贴合原意。"
+            : "你是专业的文学翻译家，译文信达雅、贴合原文语境。";
+        string batchPrompt = toBaihua
+            ? "把下面按编号排列的原文逐段译为通顺自然的现代简体白话文（若某段已是明白晓畅的现代汉语，则简明释义或保持通顺直译）。严格保留每段开头的 [编号] 标记，每段译文对应一个编号，不要遗漏、合并或输出额外说明："
+            : "请将以下按 [1]、[2]… 编号的外文段落逐段准确自然地译为简体中文。严格按相同编号 `[1] 译文`、`[2] 译文` 分段输出，不要遗漏或合并，不要加解释：";
+        string batchSystem = toBaihua
+            ? "你是精通古今汉语的学者，严格保持对应编号输出现代白话译文。"
+            : "你是专业的文学翻译家，严格保持对应编号输出简体中文译文。";
 
         for (int offset = 0; offset < uncached.Count; offset += 4)
         {
@@ -1467,9 +1526,7 @@ public sealed partial class ReaderPaneView
             {
                 if (chunk.Length == 1)
                 {
-                    string tr = await _library.Companion.ChatAsync(
-                        $"请把下面这段外文准确自然地译为简体中文，只输出译文正文，不要加任何解释：\n\n{chunk[0].Text}",
-                        "你是专业的文学翻译家，译文信达雅、贴合原文语境。");
+                    string tr = await _library.Companion.ChatAsync(singlePrompt + chunk[0].Text, singleSystem);
                     string clean = tr.Trim();
                     if (!string.IsNullOrEmpty(clean))
                     {
@@ -1480,11 +1537,11 @@ public sealed partial class ReaderPaneView
                 else
                 {
                     var sb = new StringBuilder();
-                    sb.AppendLine("请将以下按 [1]、[2]… 编号的外文段落逐段准确自然地译为简体中文。严格按相同编号 `[1] 译文`、`[2] 译文` 分段输出，不要遗漏或合并，不要加解释：");
+                    sb.AppendLine(batchPrompt);
                     for (int i = 0; i < chunk.Length; i++)
                         sb.AppendLine($"\n[{i + 1}] {chunk[i].Text}");
 
-                    string reply = await _library.Companion.ChatAsync(sb.ToString(), "你是专业的文学翻译家，严格保持对应编号输出简体中文译文。");
+                    string reply = await _library.Companion.ChatAsync(sb.ToString(), batchSystem);
                     var parsed = ParseNumberedTranslations(reply, chunk.Length);
                     for (int i = 0; i < chunk.Length; i++)
                     {
@@ -1498,18 +1555,14 @@ public sealed partial class ReaderPaneView
 
                 SaveTranslationCache(cache);
                 if (!cts.IsCancellationRequested && !_disposed && _translationsActive && _currentSection == targetSec)
-                    await _pager.Current.SetTranslationsAsync(results.OrderBy(x => x.Last));
+                    await _pager.Current.SetTranslationsAsync(results.OrderBy(x => x.Last), _translateOnly);
             }
             catch (OperationCanceledException) { break; }
             catch
             {
                 if (!cts.IsCancellationRequested && !_disposed)
                 {
-                    _translationsActive = false;
-                    _library.Prefs.BookTranslationsActive[_bookId] = false;
-                    _library.SavePrefs();
-                    try { await _pager.Current.SetTranslationsAsync(null); } catch { }
-                    ApplyPaperAndChrome();
+                    await SetTranslateModeAsync("off", persist: true);
                     ShowReaderAlert("翻译暂不可用");
                 }
                 break;
@@ -1594,11 +1647,11 @@ public sealed partial class ReaderPaneView
 
         if (menu.Items.Count > 0) menu.Items.Add(new MenuFlyoutSeparator());
 
-        var otherItem = new MenuFlyoutItem { Text = L10n.T("选择其他人物…") };
+        var otherItem = new MenuFlyoutItem { Text = L10n.T("别的人物…") };
         otherItem.Click += async (_, _) =>
         {
             if (RootGrid.XamlRoot is not { } xr) return;
-            var picked = await VoiceCloneAndDramaDialogs.ShowPeoplePickerDialogAsync(xr, _library, _bookId, _currentSection, L10n.T("这句是谁说的？"));
+            var picked = await VoiceCloneAndDramaDialogs.ShowPeoplePickerDialogAsync(xr, _library, _bookId, _currentSection, L10n.T("是谁说的"));
             if (picked is not null && !_disposed)
             {
                 try
@@ -1611,7 +1664,7 @@ public sealed partial class ReaderPaneView
         };
         menu.Items.Add(otherItem);
 
-        var grpItem = new MenuFlyoutItem { Text = L10n.T("众人齐声") };
+        var grpItem = new MenuFlyoutItem { Text = L10n.T("众人") };
         grpItem.Click += (_, _) =>
         {
             try
@@ -1639,7 +1692,7 @@ public sealed partial class ReaderPaneView
         }
 
         menu.Items.Add(new MenuFlyoutSeparator());
-        var narrItem = new MenuFlyoutItem { Text = L10n.T("不是台词（旁白）") };
+        var narrItem = new MenuFlyoutItem { Text = L10n.T("不是台词") };
         narrItem.Click += (_, _) =>
         {
             try
@@ -1680,7 +1733,7 @@ public sealed partial class ReaderPaneView
         {
             AddItem(string.IsNullOrWhiteSpace(existingMark.Note) ? "写想法…" : "改想法…", () => _ = PromptEditThoughtAsync());
             AddItem("复制", () => CopySelection_Click(this, new RoutedEventArgs()));
-            AddItem("分享书摘…", async () =>
+            AddItem("分享…", async () =>
             {
                 if (RootGrid.XamlRoot is { } xr)
                     await QuoteShareDialog.ShowAsync(_ownerWindow, xr, existingMark.Text, existingMark.Note, _detail.Summary.Title, _detail.Summary.Authors.FirstOrDefault(), _detail.Summary.CoverPath, library: _library);
@@ -1690,18 +1743,18 @@ public sealed partial class ReaderPaneView
         }
         else if (_activeSelection is { } sel && !string.IsNullOrWhiteSpace(sel.Text))
         {
-            AddItem("划黄色 (1)", () => ApplySelectionStyle(MarkStyle.Yellow));
-            AddItem("划蓝色 (2)", () => ApplySelectionStyle(MarkStyle.Blue));
-            AddItem("划粉色 (3)", () => ApplySelectionStyle(MarkStyle.Pink));
-            AddItem("划波浪线 (4)", () => ApplySelectionStyle(MarkStyle.Wave));
+            AddItem("划黄色", () => ApplySelectionStyle(MarkStyle.Yellow));
+            AddItem("划蓝色", () => ApplySelectionStyle(MarkStyle.Blue));
+            AddItem("划粉色", () => ApplySelectionStyle(MarkStyle.Pink));
+            AddItem("划波浪线", () => ApplySelectionStyle(MarkStyle.Wave));
             AddItem("划下划线", () => ApplySelectionStyle(MarkStyle.Underline));
             menu.Items.Add(new MenuFlyoutSeparator());
-            AddItem("记下想法…", () => _ = PromptEditThoughtAsync());
-            AddItem("从这句听", () => SpeakFromSelection_Click(this, new RoutedEventArgs()));
+            AddItem("想法…", () => _ = PromptEditThoughtAsync());
+            AddItem("从这听", () => SpeakFromSelection_Click(this, new RoutedEventArgs()));
             AddItem("问书伴", () => AskSelection_Click(this, new RoutedEventArgs()));
             AddItem("翻译", () => TranslateSelection_Click(this, new RoutedEventArgs()));
             AddItem("复制", () => CopySelection_Click(this, new RoutedEventArgs()));
-            AddItem("分享书摘…", async () =>
+            AddItem("分享…", async () =>
             {
                 string quote = sel.Text;
                 DismissOverlays();
@@ -1713,7 +1766,7 @@ public sealed partial class ReaderPaneView
         {
             if (targetSentence is int ts && ts >= 0)
             {
-                AddItem("从这句朗读", () => StartListenFromSentence(ts));
+                AddItem("从这句读", () => StartListenFromSentence(ts));
                 if (_audio.IsPlaying && _audio.CurrentSentence >= 0 && ts > _audio.CurrentSentence)
                 {
                     int a = _audio.CurrentSentence;
@@ -1727,15 +1780,15 @@ public sealed partial class ReaderPaneView
                     AddItem("谁说的…", () => ShowBubbleSpeakerFlyout(ts, targetOffset ?? 0, null, pos));
                 menu.Items.Add(new MenuFlyoutSeparator());
             }
-            AddItem(_audio.IsPlaying ? "暂停朗读 (空格)" : "从这页朗读 (空格)", ToggleListenPlayback);
-            AddItem("添加或取消书签 (Ctrl+D)", ToggleBookmarkAtCurrentPosition);
+            AddItem(_audio.IsPlaying ? "暂停朗读" : "从这页读", ToggleListenPlayback);
+            AddItem("加书签 / 拿掉书签", ToggleBookmarkAtCurrentPosition);
             menu.Items.Add(new MenuFlyoutSeparator());
-            AddItem("书内搜索 (Ctrl+F)", () => { OpenLeftPane("search"); FocusLeftSearchBox(); });
-            AddItem("目录与书签", () => OpenLeftPane("toc"));
-            AddItem("本书笔记", () => OpenRightPane("notes"));
-            AddItem("书伴 AI", () => OpenRightPane("companion"));
+            AddItem("书内搜索", () => { OpenLeftPane("search"); FocusLeftSearchBox(); });
+            AddItem("目录", () => OpenLeftPane("toc"));
+            AddItem("笔记", () => OpenRightPane("notes"));
+            AddItem("书伴", () => OpenRightPane("companion"));
             menu.Items.Add(new MenuFlyoutSeparator());
-            AddItem(_isFullScreen ? "退出全屏 (F11)" : "沉浸全屏 (F11)", () => _ownerWindow.ToggleFullScreen());
+            AddItem(_isFullScreen ? "退出沉浸阅读" : "沉浸阅读", () => _ownerWindow.ToggleFullScreen());
         }
 
         menu.ShowAt(BookStage, new FlyoutShowOptions { Position = pos });

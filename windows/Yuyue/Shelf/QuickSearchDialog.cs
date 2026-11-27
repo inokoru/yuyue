@@ -246,9 +246,7 @@ public static class QuickSearchDialog
             selectedIdx = -1;
 
             scopeText.Foreground = ThemeHelper.Brush(p.T3);
-            scopeText.Text = L10n.T(searching
-                ? "正在书库和笔记里检索…"
-                : $"在 {allKeptInitial.Count} 本书和 {totalNotesCount} 条笔记里搜");
+            scopeText.Text = L10n.T($"在 {allKeptInitial.Count} 本书和 {totalNotesCount} 条笔记里搜");
 
             var passageBook = passageHits.Select(x => x.Book).FirstOrDefault(IsCompanionEligible);
             bestCompanionBook = ResolveCompanionTargetBook(
@@ -314,7 +312,7 @@ public static class QuickSearchDialog
             // Group 1: Books & TOC
             if (bookMatches.Length > 0 || tocMatches.Count > 0)
             {
-                string? countNote = string.IsNullOrEmpty(q) ? null : $"{bookMatches.Length + tocMatches.Count} 项";
+                string? countNote = string.IsNullOrEmpty(q) ? null : $"{bookMatches.Length + tocMatches.Count}";
                 AddSectionHeader(string.IsNullOrEmpty(q) ? "最近读过" : "书名和篇目", countNote);
                 foreach (var book in bookMatches)
                 {
@@ -331,9 +329,19 @@ public static class QuickSearchDialog
                     Grid.SetColumn(tb, 1);
                     row.Children.Add(tb);
 
+                    int pct = (int)Math.Round(Math.Clamp(b.Progress, 0f, 1f) * 100);
                     string statusNote = !b.Available && !b.Record
                         ? L10n.T("在别的设备上")
-                        : (b.Record ? L10n.T($"纸书 · {BookRecordPageBuilder.StatusDisplayName(b.Status)}") : L10n.T($"已读 {(int)Math.Round(b.Progress * 100)}%"));
+                        : b.Record
+                            ? L10n.T($"纸书 · {BookRecordPageBuilder.StatusDisplayName(b.Status)}")
+                            : b.Status switch
+                            {
+                                ReadingStatus.Finished => L10n.T("读完"),
+                                ReadingStatus.Want => L10n.T("想读"),
+                                ReadingStatus.Paused => L10n.T("搁置"),
+                                ReadingStatus.Dropped => L10n.T("弃读"),
+                                _ => pct > 0 ? $"{pct}%" : L10n.T("刚开始"),
+                            };
                     string subLabel = string.Join(" · ", new[] { b.Authors.FirstOrDefault(), statusNote }.Where(s => !string.IsNullOrWhiteSpace(s)));
                     var sub = L10n.Skip(BuildHighlightedBlock(subLabel, q, 11, FontWeights.Normal, p.T3, tint.Accent));
                     sub.MaxLines = 1;
@@ -377,7 +385,7 @@ public static class QuickSearchDialog
 
                     var sub = L10n.Skip(new TextBlock
                     {
-                        Text = $"{L10n.T("章节")} · {b.Title}",
+                        Text = $"{L10n.T($"第 {targetSec + 1} 篇")} · {b.Title}",
                         FontSize = 11,
                         Foreground = ThemeHelper.Brush(p.T3),
                         VerticalAlignment = VerticalAlignment.Center,

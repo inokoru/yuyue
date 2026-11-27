@@ -74,7 +74,7 @@ public static class SnapshotAndConflictDialogs
         }));
         fileMeta.Children.Add(new TextBlock
         {
-            Text = $"来自 {info.DeviceName} ({info.Platform}) · {madeTime:yyyy-MM-dd HH:mm} · {sizeStr}",
+            Text = $"来自 {info.DeviceName} · {madeTime:yyyy-MM-dd HH:mm} · {sizeStr}",
             FontSize = 11,
             Foreground = ThemeHelper.Brush(p.T3),
             MaxLines = 1,
@@ -157,8 +157,8 @@ public static class SnapshotAndConflictDialogs
             return border;
         }
 
-        var mergeCard = BuildModeCard("合并", "保留本机已有书与笔记，合并快照里更新的进度与划线。", mergeCheck, out var mergeBtn);
-        var replaceCard = BuildModeCard("覆盖", "恢复前自动备份当前书库快照，再完全替换。", replaceCheck, out var replaceBtn);
+        var mergeCard = BuildModeCard("合并", "保留这台设备上的书和笔记，把快照里更新的部分合进来。", mergeCheck, out var mergeBtn);
+        var replaceCard = BuildModeCard("覆盖", "用快照里的内容替换现在的数据，覆盖前会自动先留一份备份。", replaceCheck, out var replaceBtn);
 
         var modeGrid = new Grid { ColumnSpacing = 10 };
         modeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -234,6 +234,10 @@ public static class SnapshotAndConflictDialogs
 
         mergeBtn.Click += (_, _) => { replaceMode = false; SyncModeVisuals(); };
         replaceBtn.Click += (_, _) => { replaceMode = true; SyncModeVisuals(); };
+        mergeBtn.PointerEntered += (_, _) => { if (replaceMode) mergeCard.BorderBrush = ThemeHelper.Brush(tint.Edge); };
+        mergeBtn.PointerExited += (_, _) => SyncModeVisuals();
+        replaceBtn.PointerEntered += (_, _) => { if (!replaceMode) replaceCard.BorderBrush = ThemeHelper.Brush(Color.FromArgb(140, p.Danger.R, p.Danger.G, p.Danger.B)); };
+        replaceBtn.PointerExited += (_, _) => SyncModeVisuals();
         SyncModeVisuals();
 
         var root = new StackPanel
@@ -603,7 +607,7 @@ public static class SnapshotAndConflictDialogs
                 });
                 if (string.IsNullOrEmpty(side.Note))
                 {
-                    rtb.Text = L10n.T("（清空了想法）");
+                    rtb.Text = L10n.T("（没写想法）");
                     rtb.Foreground = ThemeHelper.Brush(p.T3);
                 }
                 else

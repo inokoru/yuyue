@@ -468,7 +468,7 @@ public sealed class UpdateAndFeedbackService
                 {
                     YYChrome.MakeDialogHeader(info is not null ? "已是最新版本" : "检查更新", null, () => upToDateDlg?.Hide(), dark, titleSize: 16),
                     new TextBlock { Text = msg, FontSize = 13, LineHeight = 20, Foreground = ThemeHelper.Brush(p.T1), TextWrapping = TextWrapping.Wrap },
-                    new TextBlock { Text = $"更新渠道：{(_library.Prefs.UpdateChannel == "beta" ? "测试版 (Beta)" : "正式版")}", FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3) },
+                    new TextBlock { Text = $"更新渠道：{(_library.Prefs.UpdateChannel == "beta" ? "测试版" : "正式版")}", FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3) },
                     footRow,
                 },
             };
@@ -497,7 +497,7 @@ public sealed class UpdateAndFeedbackService
 
         var topHead = new Grid();
         var kickerStack = new StackPanel { Spacing = 3 };
-        kickerStack.Children.Add(new TextBlock { Text = L10n.T("发现新版本"), FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(tint.Accent) });
+        kickerStack.Children.Add(new TextBlock { Text = L10n.T("新版本"), FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = ThemeHelper.Brush(tint.Accent) });
         kickerStack.Children.Add(new TextBlock { Text = $"语阅 v{info.Version}", FontFamily = serif, FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = ThemeHelper.Brush(p.T1) });
         kickerStack.Children.Add(new TextBlock { Text = $"当前版本 v{CurrentVersion}", FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T3) });
         topHead.Children.Add(kickerStack);
@@ -530,7 +530,7 @@ public sealed class UpdateAndFeedbackService
         skipBtn.HorizontalAlignment = HorizontalAlignment.Left;
         subRow.Children.Add(skipBtn);
 
-        var laterBtn = YYChrome.MakeSettingsActionButton("稍后提醒（3 天后）", () => { action = 2; offerDlg?.Hide(); }, dark);
+        var laterBtn = YYChrome.MakeSettingsActionButton("稍后提醒", () => { action = 2; offerDlg?.Hide(); }, dark);
         laterBtn.HorizontalAlignment = HorizontalAlignment.Right;
         subRow.Children.Add(laterBtn);
 
@@ -810,8 +810,8 @@ public sealed class UpdateAndFeedbackService
 
         (string Title, string Body)[] items =
         [
-            ("没有账号，也没有广告", "语阅没有注册登录、广告或跨应用追踪。你的书库、阅读进度、划线想法与生词全部保存在本机目录中。为了解功能使用情况，应用默认开启匿名使用统计，仅记录功能使用形态，不关联个人身份，绝不收集书名、笔记、划线或搜索词，可随时在「关于」页关闭。"),
-            ("连接外部服务时直连服务商", "使用免费在线语音时，当前要读的句子会直接发给在线语音服务；当你主动配置 WebDAV 云盘、AI 书伴（DeepSeek / OpenAI / Claude / Ollama 等）、云端语音或 Notion / flomo / 新枝笔记导出时，客户端直接向你指定的服务地址发起请求，API Key 使用 Windows DPAPI 加密存储在本机，从不经过语阅中转，也从不写入跨端同步包。"),
+            ("没有账号，也没有广告", "语阅没有注册登录、广告或跨应用追踪。你的书、进度、划线想法与生词全部保存在本机目录中。为了解功能使用情况，应用默认开启匿名使用统计，仅记录功能使用形态，不关联个人身份，绝不收集书名、笔记、划线或搜索词，可随时在「关于」页关闭。"),
+            ("连接外部服务时直连服务商", "使用免费在线语音时，当前要读的句子会直接发给在线语音服务；当你主动配置 WebDAV 云盘、书伴（DeepSeek / OpenAI / Claude / Ollama 等）、云端语音或 Notion / flomo / 新枝笔记导出时，客户端直接向你指定的服务地址发起请求，API Key 使用 Windows DPAPI 加密存储在本机，从不经过语阅中转，也从不写入跨端同步包。"),
             ("检查更新与模型下载", "检查更新与按需下载开源字体、离线语音模型、声音包时，仅向 GitHub Releases、魔搭（ModelScope）或 Hugging Face 发起普通 HTTPS GET 请求（字体预览按需访问 Google Fonts），不携带任何书库或设备标识。"),
             ("问题反馈", "只有在你主动提交反馈时才会联网，正文和截图仅发给开发者，不会公开，也不收集邮箱。"),
         ];

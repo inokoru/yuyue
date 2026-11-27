@@ -50,6 +50,47 @@ public sealed class ParityGapClosureTests
     }
 
     [Fact]
+    public void ReadingHeatmapBuilder_BuildForYear_AlignsJan1ToDec31AndExcludesOutsideAndFutureDates()
+    {
+        // 2026-01-01 is Thursday -> leading Mon/Tue/Wed belong to 2025 (outside target year)
+        var today = new DateOnly(2026, 2, 10);
+        DayTime[] times =
+        [
+            new("2025-12-31", "b1", 3600, 0),   // Previous year -> must be excluded
+            new("2026-01-01", "b1", 900, 0),    // 15m -> level 2
+            new("2026-02-09", "b1", 0, 1800),   // 30m -> level 3
+            new("2026-02-10", "b1", 3600, 0),   // 60m -> level 4 (today)
+            new("2026-02-11", "b1", 3600, 0),   // Future -> must be excluded
+        ];
+
+        var summary = ReadingHeatmapBuilder.BuildForYear(times, 2026, today);
+
+        Assert.Equal(new DateOnly(2026, 1, 1), summary.RangeStart);
+        Assert.Equal(new DateOnly(2026, 12, 31), summary.RangeEnd);
+        Assert.Equal(53, summary.Weeks.Count);
+        foreach (var week in summary.Weeks)
+        {
+            Assert.Equal(7, week.Count);
+            Assert.Equal(DayOfWeek.Monday, week[0].Date.DayOfWeek);
+        }
+
+        // First week Mon..Wed are 2025-12-29..31 -> marked IsFuture/outside with 0 seconds
+        Assert.True(summary.Weeks[0][0].IsFuture);
+        Assert.True(summary.Weeks[0][2].IsFuture);
+        Assert.Equal(0u, summary.Weeks[0][2].TotalSeconds);
+
+        // Thursday 2026-01-01
+        Assert.False(summary.Weeks[0][3].IsFuture);
+        Assert.Equal(2, summary.Weeks[0][3].Level);
+
+        Assert.Equal(3, summary.ActiveDays);
+        Assert.Equal(4500u, summary.TotalReadSeconds);
+        Assert.Equal(1800u, summary.TotalListenSeconds);
+        Assert.Equal(2, summary.CurrentStreak);
+        Assert.Equal(2, summary.LongestStreak);
+    }
+
+    [Fact]
     public void LibraryService_FacadeClosesAllCoreShelfReviewAndDramaGaps()
     {
         string dir = Path.Combine(Path.GetTempPath(), $"yuyue-parity-gap-{Guid.NewGuid():N}");

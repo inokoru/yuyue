@@ -23,7 +23,7 @@
             <TextBox
                 x:Name="GlobalSearchBox"
                 Grid.Row="0"
-                Style="{StaticResource YYSingleLineTextBoxStyle}"
+                Style="{StaticResource YYSearchTextBoxStyle}"
                 Margin="0,0,0,10"
                 FontSize="12"
                 PlaceholderText="搜索设置（托盘、空格、Mica）"
@@ -47,11 +47,56 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <!-- 干净留白页头（无生硬 T 字错位横线） -->
-                <StackPanel Grid.Row="0" Padding="28,22,28,12" Spacing="4">
-                    <TextBlock x:Name="PageTitleText" Text="通用与操控" FontSize="22" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" />
-                    <TextBlock x:Name="PageSubtitleText" Text="窗口标签、鼠键习惯、文件关联与启动方式" FontSize="12.5" Foreground="{ThemeResource YYText2Brush}" />
-                </StackPanel>
+                <!-- 干净留白页头（右槽集成微妙「已保存」提示与「历史」快捷入口） -->
+                <Grid Grid.Row="0" Padding="28,22,28,12" ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Spacing="4">
+                        <TextBlock x:Name="PageTitleText" Text="通用" FontSize="22" FontWeight="SemiBold" Foreground="{ThemeResource YYText1Brush}" />
+                        <TextBlock x:Name="PageSubtitleText" Text="语言、启动行为与导入方式" FontSize="12.5" Foreground="{ThemeResource YYText2Brush}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <Border
+                            x:Name="SavedStatusPill"
+                            Visibility="Collapsed"
+                            Height="28"
+                            Padding="10,0,8,0"
+                            CornerRadius="6"
+                            Background="{ThemeResource YYCardBrush}"
+                            BorderBrush="{ThemeResource YYLineBrush}"
+                            BorderThickness="1">
+                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                <ContentPresenter x:Name="SavedStatusIcon" VerticalAlignment="Center" />
+                                <TextBlock x:Name="SavedStatusText" Text="已保存" FontSize="11.5" Foreground="{ThemeResource YYText2Brush}" VerticalAlignment="Center" />
+                                <Button
+                                    x:Name="SavedUndoQuickBtn"
+                                    Style="{StaticResource YYTextActionButtonStyle}"
+                                    Content="撤销"
+                                    FontSize="11.5"
+                                    MinHeight="20"
+                                    Padding="4,0"
+                                    Foreground="{ThemeResource YYAccentBrush}"
+                                    ToolTipService.ToolTip="撤销刚刚的改动 (Ctrl+Z)"
+                                    Click="SavedUndoQuickBtn_Click" />
+                            </StackPanel>
+                        </Border>
+                        <Button
+                            x:Name="HistoryQuickBtn"
+                            Style="{StaticResource YYFluentButtonStyle}"
+                            Height="28"
+                            MinHeight="28"
+                            Padding="10,0"
+                            ToolTipService.ToolTip="查看最近改动并撤销 (Ctrl+Z)"
+                            Click="HistoryQuickBtn_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                <ContentPresenter x:Name="HistoryQuickIcon" VerticalAlignment="Center" />
+                                <TextBlock x:Name="HistoryQuickLabel" Text="历史" FontSize="11.5" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Grid>
 
                 <ScrollViewer x:Name="MainScroller" Grid.Row="1" Padding="28,8,28,56" VerticalScrollBarVisibility="Auto" SizeChanged="MainScroller_SizeChanged">
                     <StackPanel x:Name="PageBodyStack" Spacing="10" Width="760" HorizontalAlignment="Left" />

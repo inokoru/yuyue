@@ -495,7 +495,7 @@ public sealed class CloudVoiceService
     {
         CloudTtsProvider.Edge => "微软 Edge",
         CloudTtsProvider.Free => "在线自然语音",
-        CloudTtsProvider.Volcengine => "火山豆包",
+        CloudTtsProvider.Volcengine => "火山引擎（豆包）",
         CloudTtsProvider.Fish => "Fish Audio",
         CloudTtsProvider.Xiaomi => "小米 MiMo",
         CloudTtsProvider.SiliconFlow => "硅基流动",

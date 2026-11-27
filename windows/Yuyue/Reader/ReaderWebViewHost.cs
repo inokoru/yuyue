@@ -218,10 +218,10 @@ public sealed class ReaderWebViewHost : IDisposable
                     const c = e.code || '';
                     if (ctrl && (k === 'c' || k === 'C' || k === 'a' || k === 'A')) return;
                     const isCtrlShortcut = ctrl && (
-                        ['f','F','k','K','g','G','d','D','b','B','z','Z','w','W','0','1','2','3','4','5','6','7','8','9','[',']','=','+','-','_',',','Tab'].includes(k) ||
+                        ['f','F','k','K','g','G','d','D','b','B','i','I','z','Z','w','W','0','1','2','3','4','5','6','7','8','9','[',']','=','+','-','_',',','Tab'].includes(k) ||
                         (shift && (k === 't' || k === 'T')) ||
                         c === 'BracketLeft' || c === 'BracketRight' || /^Digit[0-9]$/.test(c) || /^Numpad[0-9]$/.test(c) ||
-                        (alt && ['t','T','n','N','ArrowUp','ArrowDown'].includes(k))
+                        (alt && (['t','T','n','N','ArrowUp','ArrowDown'].includes(k) || c === 'KeyT' || c === 'KeyN'))
                     );
                     const isAltShortcut = !ctrl && alt && (k === 'ArrowLeft' || k === 'ArrowRight');
                     const isNavKey = !ctrl && !alt && (
@@ -480,15 +480,19 @@ public sealed class ReaderWebViewHost : IDisposable
         }
     }
 
-    public Task SetTranslationsAsync(IEnumerable<(int Last, string Text)>? items)
+    public Task SetTranslationsAsync(IEnumerable<(int Last, string Text)>? items, bool only = false)
     {
         // reader/src/main.ts:320-323 already runs relayout() inside setTranslations; no extra applySettings needed.
         if (items is null)
             return CallAsync("window.yy && window.yy.setTranslations(null);");
         var list = items.Select(x => new { last = x.Last, text = x.Text });
         var json = JsonSerializer.Serialize(list);
-        return CallAsync($"window.yy && window.yy.setTranslations({json});");
+        return CallAsync($"window.yy && window.yy.setTranslations({json}, {(only ? "true" : "false")});");
     }
+
+    /// <summary>Switches already-rendered translations between bilingual and translation-only without re-sending them.</summary>
+    public Task SetTranslationOnlyAsync(bool only) =>
+        CallAsync($"window.yy && window.yy.setTranslationOnly && window.yy.setTranslationOnly({(only ? "true" : "false")});");
 
     /// <summary>
     /// Saves a PNG snapshot of the currently rendered page for instant-open preview (TECH.md §3).

@@ -66,6 +66,7 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
 
     // Foreign translation, dialogue bubbles, drama & context cards state
     private bool _translationsActive;
+    private bool _translateOnly;
     private bool _bubblesOn;
     private bool _dramaModeOn;
     private bool _isTextVersion;
@@ -150,8 +151,16 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
         try { _bubblesOn = _library.Core.BookBubbles(_bookId); } catch { _bubblesOn = false; }
         try { _dramaModeOn = _library.Core.DramaEnabled(_bookId); } catch { _dramaModeOn = false; }
         try { _isTextVersion = _library.Core.AudiobookIsTextVersion(_bookId); } catch { _isTextVersion = false; }
-        _translationsActive = _library.Prefs.BookTranslationsActive.TryGetValue(_bookId, out var savedTr) && savedTr;
-        TranslateBtn.Visibility = IsForeignBook() ? Visibility.Visible : Visibility.Collapsed;
+        if (_library.Prefs.BookTranslateModes.TryGetValue(_bookId, out var savedMode) && savedMode is "bilingual" or "only")
+        {
+            _translationsActive = true;
+            _translateOnly = savedMode == "only";
+        }
+        else
+        {
+            _translationsActive = _library.Prefs.BookTranslationsActive.TryGetValue(_bookId, out var savedTr) && savedTr;
+        }
+        TranslateBtn.Visibility = CanTranslateBook() ? Visibility.Visible : Visibility.Collapsed;
         var perBook = _library.GetBookReaderSettings(bookId);
         _ownSettings = perBook is not null;
         _settings = perBook ?? _library.GetReaderSettings();
@@ -215,7 +224,6 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
             PushGeometryToReader();
         };
 
-        BuildMoreMenuFlyout();
         BuildSleepTimerFlyout();
 
         _timeTracker = new DispatcherTimer { Interval = System.TimeSpan.FromSeconds(30) };
@@ -388,6 +396,7 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
         SplitViewBtn.Content = YYIcons.Make("split-view", 14.5, fg2);
         MoreBtn.Content = YYIcons.Make("more", 14.5, fg2);
         CloseSplitPaneBtn.Content = YYIcons.Make("xmark", 12, fg2);
+        ApplyReaderLightOverlays(pDark, resolved.Preset == Paper.Eink || _library.Prefs.GlobalEinkMode);
 
         IconTopNotes.Content = YYIcons.Make("square.and.pencil", 13.5, (_rightPaneOpen && _rightPaneTab == "notes") ? accent : fg2);
         LabelTopNotes.Foreground = (_rightPaneOpen && _rightPaneTab == "notes") ? accent : fg2;
@@ -404,16 +413,16 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
 
         TtsPrevBtn.Content = YYIcons.Make("chevron-left", 14, fg1);
         TtsNextBtn.Content = YYIcons.Make("chevron-right", 14, fg1);
-        TtsSleepBtn.Content = YYIcons.Make("moon", 13.5, _audio.SleepMode > 0 ? accent : fg2);
         TtsPureBtn.Content = YYIcons.Make("eye-slash", 13.5, ListenOnlyCover.Visibility == Visibility.Visible ? accent : fg2);
         TtsPipBtn.Content = YYIcons.Make("pip", 13.5, fg2);
         TtsStopBtn.Content = YYIcons.Make("xmark", 12, fg2);
-        TtsVoiceChip.Background = ThemeHelper.Brush(ThemeHelper.TintColors(_library.Prefs.Tint, pDark).Soft);
+        TtsVoiceBtn.Background = ThemeHelper.Brush(ThemeHelper.TintColors(_library.Prefs.Tint, pDark).Soft);
         TtsVoiceLabel.Foreground = accent;
+        TtsVoiceChevron.Foreground = accent;
 
         StatusPaperBtn.Content = L10n.T(resolved.Custom?.Name ?? paper.Name);
         StatusFontSizeText.Text = $"{Math.Round(_settings.FontSize)}px";
-        StatusModeBtn.Content = L10n.T(_settings.Mode == LayoutMode.Scrolled ? "滚动" : "分页");
+        StatusModeBtn.Content = L10n.T(_settings.Mode == LayoutMode.Scrolled ? "上下滚动" : "左右翻页");
         StatusColBtn.Content = L10n.T(EffectiveColumnCount() == 2 ? "双栏" : "单栏");
 
         UpdateTtsBarVisuals();
@@ -487,12 +496,76 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
         {
             if (panel is "toc" or "bookmarks" or "search") OpenLeftPane(panel);
             else if (panel is "notes" or "companion" or "cast") OpenRightPane(panel);
+#if DEBUG
+            else if (panel == "companion-demo")
+            {
+                _companionMessages.Clear();
+                _companionMessages.Add(new CompanionChatMsg
+                {
+                    IsUser = true,
+                    Text = "这一段里贾母和王夫人的对话透露了哪些细节？",
+                    AskedSection = _currentSection,
+                    AskedSentence = 0,
+                });
+                _companionMessages.Add(new CompanionChatMsg
+                {
+                    IsUser = false,
+                    Text = "### 对话要点\n- **贾母精神好转**：吃了两剂药后便说「今日可大好了」[1]，还夸野鸡崽子汤受用。\n- **凤姐受宠细节**：王夫人点明这是*凤丫头*的孝心，贾母顺势称赞「难为他想着」[2]。\n> 看似家常闲话，实则通过 `饮食照料` 写活了荣国府的日常秩序。",
+                    Sources =
+                    [
+                        new CompanionClient.CompanionSource(1, _currentSection, 2, "贾母道：“今日可大好了。方才你们送来野鸡崽子汤，我尝了一尝，倒有味儿。”"),
+                        new CompanionClient.CompanionSource(2, _currentSection, 4, "贾母点头笑道：“难为他想着。若是还有生的，再炸上两块，咸浸浸的，吃粥有味儿。”"),
+                    ],
+                    FollowUps = ["凤姐平时还有哪些讨好贾母的桥段？", "这一回的庆寿有哪些伏笔？"],
+                    AskedSection = _currentSection,
+                    AskedSentence = 2,
+                });
+                OpenRightPane("companion");
+            }
+#endif
+            else if (panel is "more" or "translate" or "typography")
+            {
+                string cap = panel;
+                _ = OpenDebugFlyoutAfterDelayAsync(cap);
+            }
         }
         if (showListenBar)
         {
             TtsBarHost.Visibility = Visibility.Visible;
             UpdateTtsBarVisuals();
         }
+    }
+
+    private async Task OpenDebugFlyoutAfterDelayAsync(string cap)
+    {
+        await Task.Delay(2400);
+        if (_disposed) return;
+#if DEBUG
+        bool dark = CurrentPaperChrome?.IsDark ?? ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
+        var p = ThemeHelper.Palette(dark);
+        FrameworkElement? content = cap switch
+        {
+            "more" => BuildMoreCardContent(() => { }),
+            "translate" => BuildTranslateModeContent(() => { }),
+            _ => null,
+        };
+        if (content is not null)
+        {
+            var previewShell = new Border
+            {
+                CornerRadius = new CornerRadius(10),
+                Background = ThemeHelper.Brush(p.Card),
+                BorderBrush = ThemeHelper.Brush(p.Line),
+                BorderThickness = new Thickness(1),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = cap == "translate" ? new Thickness(0, 44, 290, 0) : new Thickness(0, 44, 14, 0),
+                Child = content,
+            };
+            Grid.SetRowSpan(previewShell, 4);
+            RootGrid.Children.Add(previewShell);
+        }
+#endif
     }
 
     public void JumpTo(uint section, int sentence, bool recordHistory = true)
@@ -608,8 +681,63 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
         RunInBookSearch(query);
     }
 
+    private void ToggleLeftPaneTab(string tab)
+    {
+        if (_leftPaneOpen && _leftPaneTab == tab)
+        {
+            _leftPaneOpen = false;
+            if (!_isSecondarySplitPane)
+            {
+                _library.Prefs.ReaderLeftPaneOpen = false;
+                _library.SavePrefs();
+            }
+            ApplyDockedPanesLayout();
+        }
+        else
+        {
+            OpenLeftPane(tab);
+        }
+    }
+
+    private void ToggleRightPaneTab(string tab)
+    {
+        if (_rightPaneOpen && _rightPaneTab == tab)
+        {
+            _rightPaneOpen = false;
+            ApplyDockedPanesLayout();
+        }
+        else
+        {
+            OpenRightPane(tab);
+        }
+    }
+
     public bool HandleWindowKeyDown(VirtualKey key, bool ctrl, bool shift, bool alt)
     {
+        if (ctrl && alt)
+        {
+            if (key == VirtualKey.T)
+            {
+                ToggleLeftPaneTab("toc");
+                return true;
+            }
+            if (key == VirtualKey.N)
+            {
+                ToggleRightPaneTab("notes");
+                return true;
+            }
+            if (key == VirtualKey.Up)
+            {
+                MoveToPreviousSection(joinAtEnd: false);
+                return true;
+            }
+            if (key == VirtualKey.Down)
+            {
+                MoveToNextSection();
+                return true;
+            }
+        }
+
         if (ctrl && !alt)
         {
             if (key == VirtualKey.F)
@@ -627,6 +755,27 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
             {
                 StatusProgress_Click(StatusProgressBtn, new RoutedEventArgs());
                 return true;
+            }
+            if (key == VirtualKey.I && !shift)
+            {
+                OpenBookInfo();
+                return true;
+            }
+            if (key == (VirtualKey)219) // Ctrl+[
+            {
+                if (_audio.IsPlaying || TtsBarHost.Visibility == Visibility.Visible)
+                {
+                    _audio.Previous();
+                    return true;
+                }
+            }
+            if (key == (VirtualKey)221) // Ctrl+]
+            {
+                if (_audio.IsPlaying || TtsBarHost.Visibility == Visibility.Visible)
+                {
+                    _audio.Next();
+                    return true;
+                }
             }
             if (key == (VirtualKey)187 || key == VirtualKey.Add) // Ctrl+= / Ctrl++
             {
@@ -697,6 +846,12 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
                 if (HasOpenOverlay())
                 {
                     DismissOverlays();
+                    return true;
+                }
+                if (_rightPaneOpen)
+                {
+                    _rightPaneOpen = false;
+                    ApplyDockedPanesLayout();
                     return true;
                 }
                 if (_isFullScreen)
@@ -788,7 +943,7 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
             StatusProgressText.Text = L10n.T($"第 {pageNum} / {pageTotal} 页 · {bookPct:0.#}% · 本章还剩 {remMin} 分钟");
         }
         StatusFontSizeText.Text = $"{Math.Round(_settings.FontSize)}px";
-        StatusModeBtn.Content = L10n.T(_settings.Mode == LayoutMode.Scrolled ? "滚动" : "分页");
+        StatusModeBtn.Content = L10n.T(_settings.Mode == LayoutMode.Scrolled ? "上下滚动" : "左右翻页");
         StatusColBtn.Content = L10n.T(EffectiveColumnCount() == 2 ? "双栏" : "单栏");
     }
 
@@ -830,94 +985,6 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
         _alertTimer.Start();
     }
 
-    private void BuildMoreMenuFlyout()
-    {
-        var menu = new MenuFlyout();
-        void Add(string label, Action act, string? key = null)
-        {
-            var mi = new MenuFlyoutItem { Text = L10n.T(label) };
-            if (key is not null) mi.KeyboardAcceleratorTextOverride = key;
-            mi.Click += (_, _) => act();
-            menu.Items.Add(mi);
-        }
-
-        Add("沉浸全屏", () => _ownerWindow.ToggleFullScreen(), "F11");
-        Add("添加或取消书签", ToggleBookmarkAtCurrentPosition, "Ctrl+D");
-        Add("跳转章节与页码…", () => StatusProgress_Click(StatusProgressBtn, new RoutedEventArgs()), "Ctrl+G");
-        Add("前情提要（不剧透）…", () => _ = ShowRecapDialogAsync());
-        menu.Items.Add(new MenuFlyoutSeparator());
-        Add("净化替换规则…", async () =>
-        {
-            if (RootGrid.XamlRoot is { } xr && await BookToolsDialogs.ShowReplaceRulesDialogAsync(xr, _library, _bookId, _detail.Summary.Title))
-                LoadSection(_currentSection, forceReload: true);
-        });
-        Add("AI 文本精校与润色…", async () =>
-        {
-            if (RootGrid.XamlRoot is { } xr)
-                await global::Yuyue.Audiobook.AlignCheckAndPolishService.ShowTextPolishDialogAsync(xr, _library, _bookId, () => LoadSection(_currentSection, forceReload: true));
-        });
-        if (_detail.Summary.Format == BookFormat.Txt)
-        {
-            Add("TXT 分章与排版…", async () =>
-            {
-                if (RootGrid.XamlRoot is { } xr && await BookToolsDialogs.ShowTxtLayoutDialogAsync(xr, _library, _bookId, _detail.Summary.Title))
-                {
-                    _detail = _library.GetBookDetail(_bookId);
-                    LoadSection(_currentSection, forceReload: true);
-                }
-            });
-        }
-        Add("自定义纸张…", async () =>
-        {
-            if (RootGrid.XamlRoot is { } xr)
-            {
-                var cp = await CustomPaperDialog.ShowAsync(xr, _library);
-                if (cp is not null)
-                {
-                    if (PaperAppearance.PickCustom(_library, cp, _settings, out var updated, perBookOverride: _ownSettings))
-                        _settings = updated;
-                    PushSettingsToReader(save: true);
-                }
-            }
-        });
-        Add("导出带笔记的 EPUB…", async () =>
-        {
-            string? path = await NativePickerHelper.PickSaveFileAsync(_ownerWindow, $"{_detail.Summary.Title}-笔记版", [("EPUB", [".epub"])]);
-            if (string.IsNullOrEmpty(path)) return;
-            try
-            {
-                await _library.NoteExports.ExportAnnotatedEpubAsync(_bookId, path);
-                ShowReaderAlert($"已导出带笔记的 EPUB：{Path.GetFileName(path)}");
-            }
-            catch (Exception ex) { ShowReaderAlert($"导出失败：{ex.Message}"); }
-        });
-        if (_isTextVersion)
-        {
-            Add("整理录音转写错字…", async () =>
-            {
-                if (RootGrid.XamlRoot is { } xr)
-                {
-                    await global::Yuyue.Audiobook.AlignCheckAndPolishService.ShowTextPolishDialogAsync(xr, _library, _bookId, () =>
-                    {
-                        if (!_disposed) LoadSection(_currentSection);
-                    });
-                }
-            });
-        }
-        Add("书籍详情与阅读记录", () =>
-        {
-            App.CurrentApp.ShowShelf();
-            App.CurrentApp.OpenBookRecordInPrimaryShelf(_bookId);
-        });
-        if (!_isSecondarySplitPane)
-        {
-            menu.Items.Add(new MenuFlyoutSeparator());
-            Add("撕出到独立窗口", () => RequestDetachWindow?.Invoke());
-            Add("阅读设置…", () => _ownerWindow.ShowSettings("reading"), "Ctrl+,");
-        }
-        MoreBtn.Flyout = menu;
-    }
-
     private void CheckInitialContextCards()
     {
         if (_disposed) return;
@@ -930,7 +997,7 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
         // 0. Audio-transcribed text version notice (parity with Apple TextVersionBanner & Android ReaderScreen)
         if (_isTextVersion)
         {
-            ShowReaderAlert("这是录音转出来的文字版，可能有错字", "整理错字", () =>
+            ShowReaderAlert("这是录音转出来的文字，可能有错字", "整理错字", () =>
             {
                 if (RootGrid.XamlRoot is { } xr)
                 {
@@ -1013,7 +1080,7 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
                 int snapSent = curSent;
                 _pendingRecapOffer = (snapSec, snapSent, daysAway, lms);
                 _readyRecap = ReaderRecapAndSleepHelper.TryGetCachedRecap(_library, _bookId, snapSec, snapSent, daysAway);
-                RecapTopPillLabel.Text = L10n.T($"前情 · {daysAway}天前");
+                RecapTopPillLabel.Text = L10n.T($"前情提要 · {daysAway}天前");
                 RecapTopPillBtn.Visibility = Visibility.Visible;
                 ApplyPaperAndChrome();
 
@@ -1100,32 +1167,37 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
 
     private async void RecapTopPill_Click(object sender, RoutedEventArgs e)
     {
-        if (RootGrid.XamlRoot is not { } xr) return;
         if (_readyRecap is { } ready)
         {
-            await PresentRecapCardDialogAsync(xr, ready, manualOpened: false);
+            PresentRecapFlyout(RecapTopPillBtn, ready, manualOpened: false);
             return;
         }
-        await ShowRecapDialogAsync();
+        await ShowRecapDialogAsync(anchor: RecapTopPillBtn);
     }
 
-    private async Task PresentRecapCardDialogAsync(XamlRoot xr, RecapDto recap, bool manualOpened)
+    private void PresentRecapFlyout(FrameworkElement anchor, RecapDto recap, bool manualOpened)
     {
         bool dark = CurrentPaperChrome?.IsDark ?? ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
         var p = ThemeHelper.Palette(dark);
         var tc = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
-        ContentDialog? dlgRef = null;
-        var card = ReaderRecapAndSleepHelper.BuildRecapCard(recap, p, tc, manualOpened, onDone: () => dlgRef?.Hide());
-        dlgRef = YYChrome.CreateFluentDialog(xr, dark, 420, card, tint: _library.Prefs.Tint);
-        await dlgRef.ShowSafeAsync(_library.Prefs.Tint);
+        Flyout? flyRef = null;
+        var card = ReaderRecapAndSleepHelper.BuildRecapCard(recap, p, tc, manualOpened, onDone: () => flyRef?.Hide());
+        card.Width = 390;
+        card.RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light;
+        ThemeHelper.ApplyControlThemeResources(card.Resources, dark, _library.Prefs.Tint);
+        flyRef = new Flyout
+        {
+            FlyoutPresenterStyle = (Style)Application.Current.Resources["YYFloatFlyoutPresenterStyle"],
+            Content = new ScrollViewer { MaxHeight = 520, Content = card },
+        };
+        flyRef.ShowAt(anchor);
     }
 
-    private async Task ShowRecapDialogAsync()
+    private async Task ShowRecapDialogAsync(FrameworkElement? anchor = null)
     {
-        if (RootGrid.XamlRoot is not { } xr) return;
         if (!_library.Companion.IsConfigured)
         {
-            ShowReaderAlert("前情提要需要先在「设置 → 书伴」配置 AI 模型", "去配置", () => _ownerWindow.ShowSettings("companion"), seconds: 6);
+            ShowReaderAlert("前情提要需要先在「设置 · 书伴」里配好模型", "去设置", () => _ownerWindow.ShowSettings("companion"), seconds: 6);
             return;
         }
         ShowReaderAlert("正在为你整理截至当前页的不剧透前情提要…", seconds: 8);
@@ -1139,410 +1211,462 @@ public sealed partial class ReaderPaneView : UserControl, IDisposable
             return;
         }
         _readyRecap = recap;
-        await PresentRecapCardDialogAsync(xr, recap, manualOpened: true);
+        var target = anchor ?? (RecapTopPillBtn.Visibility == Visibility.Visible ? (FrameworkElement)RecapTopPillBtn : MoreBtn);
+        PresentRecapFlyout(target, recap, manualOpened: true);
     }
 
-    // Complete Fluent 2 Typography & Paper Flyout
+    // Complete Fluent 2 Typography & Paper Flyout (stays open while tweaking paper/font/layout, 1:1 macOS)
     private void TypographyBtn_Click(object sender, RoutedEventArgs e)
     {
-        bool dark = CurrentPaperChrome?.IsDark ?? ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
-        var p = ThemeHelper.Palette(dark);
-        var tc = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
         Flyout? flyoutRef = null;
+        var scroller = new ScrollViewer { MaxHeight = 560 };
 
-        var root = new StackPanel
+        void RebuildTypographyKeepingScroll()
         {
-            Spacing = 12,
-            Width = 336,
-            Padding = new Thickness(16, 14, 16, 14),
-            RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light,
-        };
-        ThemeHelper.ApplyControlThemeResources(root.Resources, dark, _library.Prefs.Tint);
-
-        // 1. Reading papers + Custom papers + Follow system toggle
-        var paperHead = new Grid { ColumnSpacing = 8 };
-        paperHead.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        paperHead.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var paperLbl = new TextBlock { Text = L10n.T("阅读纸张"), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center };
-        var newPaperBtn = new Button
-        {
-            Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
-            Content = L10n.T("+ 自定义"),
-            FontSize = 11.5,
-            MinHeight = 22,
-            Padding = new Thickness(6, 0, 6, 0),
-            Foreground = ThemeHelper.Brush(tc.Accent),
-        };
-        newPaperBtn.Click += async (_, _) =>
-        {
-            flyoutRef?.Hide();
-            if (RootGrid.XamlRoot is not { } xr) return;
-            var cp = await CustomPaperDialog.ShowEditorAsync(xr, _library, existing: null, currentSettings: _settings);
-            if (cp is not null)
+            double prevY = scroller.VerticalOffset;
+            bool nextDark = CurrentPaperChrome?.IsDark ?? ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
+            var nextP = ThemeHelper.Palette(nextDark);
+            var nextRoot = BuildTypographyRoot();
+            scroller.RequestedTheme = nextDark ? ElementTheme.Dark : ElementTheme.Light;
+            scroller.Content = nextRoot;
+            if (VisualTreeHelper.GetParent(scroller) is FlyoutPresenter fp)
             {
-                if (PaperAppearance.PickCustom(_library, cp, _settings, out var updated, perBookOverride: _ownSettings))
-                    _settings = updated;
-                PushSettingsToReader(save: true);
+                fp.RequestedTheme = nextDark ? ElementTheme.Dark : ElementTheme.Light;
+                fp.Background = ThemeHelper.Brush(nextP.Card);
+                fp.BorderBrush = ThemeHelper.Brush(nextP.Line);
             }
-        };
-        Grid.SetColumn(paperLbl, 0);
-        Grid.SetColumn(newPaperBtn, 1);
-        paperHead.Children.Add(paperLbl);
-        paperHead.Children.Add(newPaperBtn);
-        root.Children.Add(paperHead);
-
-        var paperRow = new Grid { ColumnSpacing = 6 };
-        (Paper Preset, string Name, Color Bg, Color Ink)[] papers =
-        [
-            (Paper.Plain, "素白", YYPapers.Plain.Bg, YYPapers.Plain.Ink),
-            (Paper.Kami, "纸本", YYPapers.Kami.Bg, YYPapers.Kami.Ink),
-            (Paper.Sage, "芦苇", YYPapers.Sage.Bg, YYPapers.Sage.Ink),
-            (Paper.Eink, "铅纸", YYPapers.Eink.Bg, YYPapers.Eink.Ink),
-            (Paper.Dark, "暗黑", YYPapers.Dark.Bg, YYPapers.Dark.Ink),
-            (Paper.KamiNight, "纸夜", YYPapers.Kaminight.Bg, YYPapers.Kaminight.Ink),
-        ];
-        var activeRes = PaperAppearance.Resolve(_library, _settings);
-        for (int i = 0; i < papers.Length; i++)
-        {
-            paperRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var (preset, name, bg, ink) = papers[i];
-            bool isSel = activeRes.Custom is null && activeRes.Preset == preset;
-            var btn = new Button
+            if (prevY > 0.5)
             {
-                Height = 34,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                Padding = new Thickness(0),
-                CornerRadius = new CornerRadius(6),
-                Background = ThemeHelper.Brush(bg),
-                BorderBrush = ThemeHelper.Brush(isSel ? tc.Accent : p.Line),
-                BorderThickness = new Thickness(isSel ? 2 : 1),
-                Content = new TextBlock { Text = L10n.T(name), FontSize = 11, FontWeight = isSel ? FontWeights.SemiBold : FontWeights.Normal, Foreground = ThemeHelper.Brush(ink) },
-                UseSystemFocusVisuals = false,
-            };
-            btn.Click += (_, _) =>
-            {
-                if (PaperAppearance.PickPreset(_library, preset, _settings, out var updated, perBookOverride: _ownSettings))
-                    _settings = updated;
-                PushSettingsToReader(save: true);
-                flyoutRef?.Hide();
-            };
-            Grid.SetColumn(btn, i);
-            paperRow.Children.Add(btn);
-        }
-        root.Children.Add(paperRow);
-
-        // Saved custom papers row (if any)
-        var savedCustoms = _library.Core.CustomPapers();
-        if (savedCustoms.Length > 0)
-        {
-            var cpWrap = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-            foreach (var cp in savedCustoms.Take(5))
-            {
-                var cpCap = cp;
-                bool isSel = activeRes.Custom?.Id == cpCap.Id;
-                Color bgCol = CustomPaperDialog.ParseHexColor(cpCap.Bg, YYPapers.Kami.Bg);
-                Color inkCol = CustomPaperDialog.ParseHexColor(cpCap.Ink ?? "", YYPapers.Kami.Ink);
-                try
+                nextRoot.Loaded += (_, _) =>
                 {
-                    var cols = YuyueCoreMethods.PaperColors(cpCap);
-                    bgCol = ParseHexColor(cols.Bg, bgCol);
-                    inkCol = ParseHexColor(cols.Ink, inkCol);
-                }
-                catch { }
-                var cBtn = new Button
-                {
-                    Height = 28,
-                    MinHeight = 28,
-                    Padding = new Thickness(8, 0, 8, 0),
-                    CornerRadius = new CornerRadius(6),
-                    Background = ThemeHelper.Brush(bgCol),
-                    BorderBrush = ThemeHelper.Brush(isSel ? tc.Accent : p.Line),
-                    BorderThickness = new Thickness(isSel ? 2 : 1),
-                    Content = new TextBlock { Text = cpCap.Name, FontSize = 11, Foreground = ThemeHelper.Brush(inkCol), MaxWidth = 64, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis },
-                    UseSystemFocusVisuals = false,
+                    scroller.UpdateLayout();
+                    scroller.ChangeView(null, prevY, null, disableAnimation: true);
                 };
-                cBtn.Click += (_, _) =>
+            }
+        }
+
+        StackPanel BuildTypographyRoot()
+        {
+            bool dark = CurrentPaperChrome?.IsDark ?? ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
+            var p = ThemeHelper.Palette(dark);
+            var tc = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+
+            var root = new StackPanel
+            {
+                Spacing = 12,
+                Width = 336,
+                Padding = new Thickness(16, 14, 16, 14),
+                Background = ThemeHelper.Brush(p.Card),
+                RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light,
+            };
+            ThemeHelper.ApplyControlThemeResources(root.Resources, dark, _library.Prefs.Tint);
+
+            // 1. Reading papers + Custom papers + Follow system toggle
+            var paperHead = new Grid { ColumnSpacing = 8 };
+            paperHead.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            paperHead.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var paperLbl = new TextBlock { Text = L10n.T("纸色"), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center };
+            var newPaperBtn = new Button
+            {
+                Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
+                Content = L10n.T("自己调一张"),
+                FontSize = 11.5,
+                MinHeight = 22,
+                Padding = new Thickness(6, 0, 6, 0),
+                Foreground = ThemeHelper.Brush(tc.Accent),
+            };
+            newPaperBtn.Click += async (_, _) =>
+            {
+                flyoutRef?.Hide();
+                if (RootGrid.XamlRoot is not { } xr) return;
+                var cp = await CustomPaperDialog.ShowEditorAsync(xr, _library, existing: null, currentSettings: _settings);
+                if (cp is not null)
                 {
-                    if (PaperAppearance.PickCustom(_library, cpCap, _settings, out var updated, perBookOverride: _ownSettings))
+                    if (PaperAppearance.PickCustom(_library, cp, _settings, out var updated, perBookOverride: _ownSettings))
                         _settings = updated;
                     PushSettingsToReader(save: true);
-                    flyoutRef?.Hide();
-                };
-                var cpMenu = new MenuFlyout();
-                var editPaperMi = new MenuFlyoutItem { Text = L10n.T("调整这张纸…") };
-                editPaperMi.Click += async (_, _) =>
-                {
-                    flyoutRef?.Hide();
-                    if (RootGrid.XamlRoot is not { } xr) return;
-                    var edited = await CustomPaperDialog.ShowEditorAsync(
-                        xr,
-                        _library,
-                        existing: cpCap,
-                        currentSettings: _settings,
-                        onDeleted: deleted =>
-                        {
-                            ShowReaderAlert($"已删除纸张「{deleted.Name}」", "撤销", () =>
-                            {
-                                try { _library.RestoreCustomPaper(deleted.Id); } catch { }
-                                ShowReaderAlert($"已恢复纸张「{deleted.Name}」");
-                            });
-                        });
-                    if (edited is not null)
-                    {
-                        if (PaperAppearance.PickCustom(_library, edited, _settings, out var updated, perBookOverride: _ownSettings))
-                            _settings = updated;
-                        PushSettingsToReader(save: true);
-                    }
-                };
-                var delPaperMi = new MenuFlyoutItem { Text = L10n.T("删除这张纸"), Foreground = ThemeHelper.Brush(p.Danger) };
-                delPaperMi.Click += (_, _) =>
-                {
-                    flyoutRef?.Hide();
-                    string deletedId = cpCap.Id;
-                    string deletedName = cpCap.Name;
-                    try { _library.Core.DeleteCustomPaper(deletedId); } catch { }
-                    PaperAppearance.Forget(_library, deletedId);
-                    PushSettingsToReader(save: false);
-                    ShowReaderAlert($"已删除纸张「{deletedName}」", "撤销", () =>
-                    {
-                        try { _library.RestoreCustomPaper(deletedId); } catch { }
-                        ShowReaderAlert($"已恢复纸张「{deletedName}」");
-                    });
-                };
-                cpMenu.Items.Add(editPaperMi);
-                cpMenu.Items.Add(delPaperMi);
-                cBtn.ContextFlyout = cpMenu;
-                cpWrap.Children.Add(cBtn);
-            }
-            root.Children.Add(cpWrap);
-        }
-
-        // 2. Font family segmented selector + imported custom fonts
-        root.Children.Add(new TextBlock { Text = L10n.T("正文字体"), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T2) });
-        var fontRow = new Grid { ColumnSpacing = 6 };
-        (Font? F, string Label)[] fonts = [(null, "随纸张"), (Font.Sans, "黑体"), (Font.Serif, "宋体"), (Font.Kai, "楷体")];
-        for (int i = 0; i < fonts.Length; i++)
-        {
-            fontRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var (fVal, fLbl) = fonts[i];
-            bool on = _settings.Font == fVal && string.IsNullOrEmpty(_settings.FontFace);
-            var btn = new Button
-            {
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                Height = 30,
-                Padding = new Thickness(0),
-                CornerRadius = new CornerRadius(6),
-                Background = ThemeHelper.Brush(on ? tc.Soft : p.Inset),
-                BorderBrush = ThemeHelper.Brush(on ? tc.Accent : p.Line),
-                BorderThickness = new Thickness(1),
-                Content = new TextBlock { Text = L10n.T(fLbl), FontSize = 12, Foreground = ThemeHelper.Brush(on ? tc.Accent : p.T1) },
-                UseSystemFocusVisuals = false,
-            };
-            btn.Click += (_, _) =>
-            {
-                _settings = _settings with { Font = fVal, FontFace = null };
-                PushSettingsToReader(save: true);
-                flyoutRef?.Hide();
-            };
-            Grid.SetColumn(btn, i);
-            fontRow.Children.Add(btn);
-        }
-        root.Children.Add(fontRow);
-
-        var extraFonts = new List<(string Label, Font? Font, string? FontFace)>();
-        foreach (var pack in _library.Fonts.Catalog)
-        {
-            if (!_library.Fonts.IsPackInstalled(pack.Id)) continue;
-            if (string.Equals(pack.Id, "wenkai", StringComparison.OrdinalIgnoreCase))
-            {
-                extraFonts.Add((pack.Name, Font.WenKai, null));
-            }
-            else
-            {
-                Font fallbackFont = pack.Kind switch
-                {
-                    FontKind.Hei => Font.Sans,
-                    FontKind.Kai or FontKind.Hand => Font.Kai,
-                    _ => Font.Serif,
-                };
-                extraFonts.Add((pack.Name, fallbackFont, pack.Id));
-            }
-        }
-        foreach (var fn in _library.Fonts.GetCustomFontFiles())
-        {
-            extraFonts.Add((_library.Fonts.GetFontFileDisplayName(fn), _settings.Font, $"file:{fn}"));
-        }
-        if (!string.IsNullOrWhiteSpace(_settings.FontFace) &&
-            _settings.FontFace.StartsWith("local:", StringComparison.OrdinalIgnoreCase))
-        {
-            string localFamily = _settings.FontFace[6..].Trim();
-            if (!string.IsNullOrEmpty(localFamily))
-                extraFonts.Add((localFamily, _settings.Font, _settings.FontFace));
-        }
-
-        if (extraFonts.Count > 0)
-        {
-            var customFontCombo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = L10n.T("选用已下载或已导入字体…") };
-            foreach (var ef in extraFonts) customFontCombo.Items.Add(ef.Label);
-            int curFIdx = extraFonts.FindIndex(ef =>
-                ef.FontFace is not null
-                    ? string.Equals(_settings.FontFace, ef.FontFace, StringComparison.OrdinalIgnoreCase)
-                    : (string.IsNullOrEmpty(_settings.FontFace) && _settings.Font == ef.Font));
-            if (curFIdx >= 0) customFontCombo.SelectedIndex = curFIdx;
-            customFontCombo.SelectionChanged += (_, _) =>
-            {
-                if (customFontCombo.SelectedIndex >= 0 && customFontCombo.SelectedIndex < extraFonts.Count)
-                {
-                    var chosen = extraFonts[customFontCombo.SelectedIndex];
-                    _settings = _settings with { Font = chosen.Font, FontFace = chosen.FontFace };
-                    PushSettingsToReader(save: true);
-                    flyoutRef?.Hide();
                 }
             };
-            root.Children.Add(customFontCombo);
+            Grid.SetColumn(paperLbl, 0);
+            Grid.SetColumn(newPaperBtn, 1);
+            paperHead.Children.Add(paperLbl);
+            paperHead.Children.Add(newPaperBtn);
+            root.Children.Add(paperHead);
+
+            var paperRow = new Grid { ColumnSpacing = 6 };
+            (Paper Preset, string Name, Color Bg, Color Ink)[] papers =
+            [
+                (Paper.Plain, "素白", YYPapers.Plain.Bg, YYPapers.Plain.Ink),
+                (Paper.Kami, "纸本", YYPapers.Kami.Bg, YYPapers.Kami.Ink),
+                (Paper.Sage, "芦苇", YYPapers.Sage.Bg, YYPapers.Sage.Ink),
+                (Paper.Eink, "铅纸", YYPapers.Eink.Bg, YYPapers.Eink.Ink),
+                (Paper.Dark, "暗黑", YYPapers.Dark.Bg, YYPapers.Dark.Ink),
+                (Paper.KamiNight, "纸本 · 夜", YYPapers.Kaminight.Bg, YYPapers.Kaminight.Ink),
+            ];
+            var activeRes = PaperAppearance.Resolve(_library, _settings);
+            for (int i = 0; i < papers.Length; i++)
+            {
+                paperRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                var (preset, name, bg, ink) = papers[i];
+                bool isSel = activeRes.Custom is null && activeRes.Preset == preset;
+                var btn = new Button
+                {
+                    Height = 34,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    Padding = new Thickness(0),
+                    CornerRadius = new CornerRadius(6),
+                    Background = ThemeHelper.Brush(bg),
+                    BorderBrush = ThemeHelper.Brush(isSel ? tc.Accent : p.Line),
+                    BorderThickness = new Thickness(isSel ? 2 : 1),
+                    Content = new TextBlock { Text = L10n.T(name), FontSize = 11, FontWeight = isSel ? FontWeights.SemiBold : FontWeights.Normal, Foreground = ThemeHelper.Brush(ink) },
+                    UseSystemFocusVisuals = false,
+                };
+                btn.Click += (_, _) =>
+                {
+                    if (PaperAppearance.PickPreset(_library, preset, _settings, out var updated, perBookOverride: _ownSettings))
+                        _settings = updated;
+                    PushSettingsToReader(save: true);
+                    RebuildTypographyKeepingScroll();
+                };
+                Grid.SetColumn(btn, i);
+                paperRow.Children.Add(btn);
+            }
+            root.Children.Add(paperRow);
+
+            // Saved custom papers row (if any)
+            var savedCustoms = _library.Core.CustomPapers();
+            if (savedCustoms.Length > 0)
+            {
+                var cpWrap = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+                foreach (var cp in savedCustoms.Take(5))
+                {
+                    var cpCap = cp;
+                    bool isSel = activeRes.Custom?.Id == cpCap.Id;
+                    Color bgCol = CustomPaperDialog.ParseHexColor(cpCap.Bg, YYPapers.Kami.Bg);
+                    Color inkCol = CustomPaperDialog.ParseHexColor(cpCap.Ink ?? "", YYPapers.Kami.Ink);
+                    try
+                    {
+                        var cols = YuyueCoreMethods.PaperColors(cpCap);
+                        bgCol = ParseHexColor(cols.Bg, bgCol);
+                        inkCol = ParseHexColor(cols.Ink, inkCol);
+                    }
+                    catch { }
+                    var cBtn = new Button
+                    {
+                        Height = 28,
+                        MinHeight = 28,
+                        Padding = new Thickness(8, 0, 8, 0),
+                        CornerRadius = new CornerRadius(6),
+                        Background = ThemeHelper.Brush(bgCol),
+                        BorderBrush = ThemeHelper.Brush(isSel ? tc.Accent : p.Line),
+                        BorderThickness = new Thickness(isSel ? 2 : 1),
+                        Content = new TextBlock { Text = cpCap.Name, FontSize = 11, Foreground = ThemeHelper.Brush(inkCol), MaxWidth = 64, MaxLines = 1, TextTrimming = TextTrimming.CharacterEllipsis },
+                        UseSystemFocusVisuals = false,
+                    };
+                    cBtn.Click += (_, _) =>
+                    {
+                        if (PaperAppearance.PickCustom(_library, cpCap, _settings, out var updated, perBookOverride: _ownSettings))
+                            _settings = updated;
+                        PushSettingsToReader(save: true);
+                        RebuildTypographyKeepingScroll();
+                    };
+                    var cpMenu = new MenuFlyout();
+                    var editPaperMi = new MenuFlyoutItem { Text = L10n.T("调整颜色") };
+                    editPaperMi.Click += async (_, _) =>
+                    {
+                        flyoutRef?.Hide();
+                        if (RootGrid.XamlRoot is not { } xr) return;
+                        var edited = await CustomPaperDialog.ShowEditorAsync(
+                            xr,
+                            _library,
+                            existing: cpCap,
+                            currentSettings: _settings,
+                            onDeleted: deleted =>
+                            {
+                                ShowReaderAlert($"已删除“{deleted.Name}”", "撤销", () =>
+                                {
+                                    try { _library.RestoreCustomPaper(deleted.Id); } catch { }
+                                    ShowReaderAlert($"已恢复“{deleted.Name}”");
+                                });
+                            });
+                        if (edited is not null)
+                        {
+                            if (PaperAppearance.PickCustom(_library, edited, _settings, out var updated, perBookOverride: _ownSettings))
+                                _settings = updated;
+                            PushSettingsToReader(save: true);
+                        }
+                    };
+                    var delPaperMi = new MenuFlyoutItem { Text = L10n.T("删除…"), Foreground = ThemeHelper.Brush(p.Danger) };
+                    delPaperMi.Click += (_, _) =>
+                    {
+                        flyoutRef?.Hide();
+                        string deletedId = cpCap.Id;
+                        string deletedName = cpCap.Name;
+                        try { _library.Core.DeleteCustomPaper(deletedId); } catch { }
+                        PaperAppearance.Forget(_library, deletedId);
+                        PushSettingsToReader(save: false);
+                        ShowReaderAlert($"已删除“{deletedName}”", "撤销", () =>
+                        {
+                            try { _library.RestoreCustomPaper(deletedId); } catch { }
+                            ShowReaderAlert($"已恢复“{deletedName}”");
+                        });
+                    };
+                    cpMenu.Items.Add(editPaperMi);
+                    cpMenu.Items.Add(delPaperMi);
+                    cBtn.ContextFlyout = cpMenu;
+                    cpWrap.Children.Add(cBtn);
+                }
+                root.Children.Add(cpWrap);
+            }
+
+            // 2. Font family segmented selector + imported custom fonts
+            root.Children.Add(new TextBlock { Text = L10n.T("字体"), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T2) });
+            var fontRow = new Grid { ColumnSpacing = 6 };
+            (Font? F, string Label)[] fonts = [(null, "系统"), (Font.Sans, "黑体"), (Font.Serif, "宋体"), (Font.Kai, "楷体")];
+            for (int i = 0; i < fonts.Length; i++)
+            {
+                fontRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                var (fVal, fLbl) = fonts[i];
+                bool on = _settings.Font == fVal && string.IsNullOrEmpty(_settings.FontFace);
+                var btn = new Button
+                {
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    Height = 30,
+                    Padding = new Thickness(0),
+                    CornerRadius = new CornerRadius(6),
+                    Background = ThemeHelper.Brush(on ? tc.Soft : p.Inset),
+                    BorderBrush = ThemeHelper.Brush(on ? tc.Accent : p.Line),
+                    BorderThickness = new Thickness(1),
+                    Content = new TextBlock { Text = L10n.T(fLbl), FontSize = 12, Foreground = ThemeHelper.Brush(on ? tc.Accent : p.T1) },
+                    UseSystemFocusVisuals = false,
+                };
+                btn.Click += (_, _) =>
+                {
+                    _settings = _settings with { Font = fVal, FontFace = null };
+                    PushSettingsToReader(save: true);
+                    RebuildTypographyKeepingScroll();
+                };
+                Grid.SetColumn(btn, i);
+                fontRow.Children.Add(btn);
+            }
+            root.Children.Add(fontRow);
+
+            var extraFonts = new List<(string Label, Font? Font, string? FontFace)>();
+            foreach (var pack in _library.Fonts.Catalog)
+            {
+                if (!_library.Fonts.IsPackInstalled(pack.Id)) continue;
+                if (string.Equals(pack.Id, "wenkai", StringComparison.OrdinalIgnoreCase))
+                {
+                    extraFonts.Add((pack.Name, Font.WenKai, null));
+                }
+                else
+                {
+                    Font fallbackFont = pack.Kind switch
+                    {
+                        FontKind.Hei => Font.Sans,
+                        FontKind.Kai or FontKind.Hand => Font.Kai,
+                        _ => Font.Serif,
+                    };
+                    extraFonts.Add((pack.Name, fallbackFont, pack.Id));
+                }
+            }
+            foreach (var fn in _library.Fonts.GetCustomFontFiles())
+            {
+                extraFonts.Add((_library.Fonts.GetFontFileDisplayName(fn), _settings.Font, $"file:{fn}"));
+            }
+            if (!string.IsNullOrWhiteSpace(_settings.FontFace) &&
+                _settings.FontFace.StartsWith("local:", StringComparison.OrdinalIgnoreCase))
+            {
+                string localFamily = _settings.FontFace[6..].Trim();
+                if (!string.IsNullOrEmpty(localFamily))
+                    extraFonts.Add((localFamily, _settings.Font, _settings.FontFace));
+            }
+
+            if (extraFonts.Count > 0)
+            {
+                var customFontCombo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = L10n.T("选用已下载或已导入字体…") };
+                foreach (var ef in extraFonts) customFontCombo.Items.Add(ef.Label);
+                int curFIdx = extraFonts.FindIndex(ef =>
+                    ef.FontFace is not null
+                        ? string.Equals(_settings.FontFace, ef.FontFace, StringComparison.OrdinalIgnoreCase)
+                        : (string.IsNullOrEmpty(_settings.FontFace) && _settings.Font == ef.Font));
+                if (curFIdx >= 0) customFontCombo.SelectedIndex = curFIdx;
+                customFontCombo.SelectionChanged += (_, _) =>
+                {
+                    if (customFontCombo.SelectedIndex >= 0 && customFontCombo.SelectedIndex < extraFonts.Count)
+                    {
+                        var chosen = extraFonts[customFontCombo.SelectedIndex];
+                        _settings = _settings with { Font = chosen.Font, FontFace = chosen.FontFace };
+                        PushSettingsToReader(save: true);
+                        RebuildTypographyKeepingScroll();
+                    }
+                };
+                root.Children.Add(customFontCombo);
+            }
+
+            // 3. Font size & Line height sliders
+            var szHeader = new Grid { ColumnSpacing = 8 };
+            szHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            szHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var szLbl = new TextBlock { Text = L10n.T("字号"), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center };
+            var szValTb = new TextBlock { Text = $"{Math.Round(_settings.FontSize)} px", FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(szLbl, 0);
+            Grid.SetColumn(szValTb, 1);
+            szHeader.Children.Add(szLbl);
+            szHeader.Children.Add(szValTb);
+            var szSlider = new Slider { Minimum = 12, Maximum = 34, StepFrequency = 1, Value = Math.Clamp(_settings.FontSize, 12, 34) };
+            szSlider.ValueChanged += (_, args) =>
+            {
+                szValTb.Text = $"{Math.Round(args.NewValue)} px";
+                SetFontSize(args.NewValue);
+            };
+            root.Children.Add(szHeader);
+            root.Children.Add(szSlider);
+
+            var lhHeader = new Grid { ColumnSpacing = 8 };
+            lhHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            lhHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var lhLbl = new TextBlock { Text = L10n.T("行距"), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center };
+            double curLh = _settings.LineHeight ?? 1.9;
+            var lhValTb = new TextBlock { Text = $"{curLh:0.0}", FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(lhLbl, 0);
+            Grid.SetColumn(lhValTb, 1);
+            lhHeader.Children.Add(lhLbl);
+            lhHeader.Children.Add(lhValTb);
+            var lhSlider = new Slider { Minimum = 1.4, Maximum = 2.6, StepFrequency = 0.1, Value = curLh };
+            lhSlider.ValueChanged += (_, args) =>
+            {
+                lhValTb.Text = $"{args.NewValue:0.0}";
+                _settings = _settings with { LineHeight = Math.Round(args.NewValue, 1) };
+                PushSettingsToReader(save: true);
+            };
+            root.Children.Add(lhHeader);
+            root.Children.Add(lhSlider);
+
+            // 4. Layout mode + Columns + Paragraph spacing + Indent + Justify + Script
+            Grid MakeOptionRow(string label, FrameworkElement ctrl)
+            {
+                var g = new Grid { ColumnSpacing = 10 };
+                g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var tb = new TextBlock { Text = L10n.T(label), FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center };
+                Grid.SetColumn(tb, 0);
+                Grid.SetColumn(ctrl, 1);
+                g.Children.Add(tb);
+                g.Children.Add(ctrl);
+                return g;
+            }
+
+            root.Children.Add(MakeOptionRow("翻页方式", YYChrome.MakeSegmentedBar(
+                [("page", "左右翻页"), ("scroll", "上下滚动")],
+                _settings.Mode == LayoutMode.Scrolled ? "scroll" : "page",
+                v => { _settings = _settings with { Mode = v == "scroll" ? LayoutMode.Scrolled : LayoutMode.Paginated }; PushSettingsToReader(save: true); UpdateHeaderAndStatus(); RebuildTypographyKeepingScroll(); },
+                dark, fontSize: 11.5, height: 28)));
+
+            if (_settings.Mode == LayoutMode.Paginated)
+            {
+                var typoSfxPickerWrap = new Border
+                {
+                    Padding = new Thickness(0, 2, 0, 2),
+                    Visibility = _library.Prefs.PageTurnSound ? Visibility.Visible : Visibility.Collapsed,
+                    Child = PageTurnSoundUi.BuildSoundPicker(
+                        _library,
+                        dark,
+                        showSubtitle: false,
+                        compact: true,
+                        showVolume: true,
+                        getXamlRoot: () => RootGrid.XamlRoot,
+                        eink: _library.Prefs.GlobalEinkMode),
+                };
+                var typoSfxSw = new ToggleSwitch { IsOn = _library.Prefs.PageTurnSound };
+                typoSfxSw.Toggled += (_, _) =>
+                {
+                    _library.Prefs.PageTurnSound = typoSfxSw.IsOn;
+                    _library.SavePrefs();
+                    typoSfxPickerWrap.Visibility = typoSfxSw.IsOn ? Visibility.Visible : Visibility.Collapsed;
+                    if (typoSfxSw.IsOn) _library.PageTurnSounds.PreviewSelection(_library.Prefs.PageTurnSoundStyle);
+                };
+                root.Children.Add(MakeOptionRow("翻页音效", typoSfxSw));
+                root.Children.Add(typoSfxPickerWrap);
+            }
+
+            root.Children.Add(MakeOptionRow("栏数", YYChrome.MakeSegmentedBar(
+                [("1", "单栏"), ("2", "双栏")],
+                _library.Prefs.TwoColumns ? "2" : "1",
+                v => { _library.Prefs.TwoColumns = v == "2"; _library.SavePrefs(); PushSettingsToReader(save: false); UpdateHeaderAndStatus(); },
+                dark, fontSize: 11.5, height: 28)));
+
+            root.Children.Add(MakeOptionRow("段距", YYChrome.MakeSegmentedBar(
+                [("0", "无"), ("0.5", "适中"), ("1.0", "宽")],
+                _settings.ParagraphSpacing switch { <= 0.1 => "0", >= 0.8 => "1.0", _ => "0.5" },
+                v => { _settings = _settings with { ParagraphSpacing = v switch { "0" => 0.0, "1.0" => 1.0, _ => 0.5 } }; PushSettingsToReader(save: true); },
+                dark, fontSize: 11.5, height: 28)));
+
+            root.Children.Add(MakeOptionRow("首行缩进", YYChrome.MakeSegmentedBar(
+                [("auto", "跟书"), ("on", "缩进"), ("off", "不缩")],
+                _settings.Indent is null ? "auto" : (_settings.Indent.Value ? "on" : "off"),
+                v => { _settings = _settings with { Indent = v switch { "on" => true, "off" => false, _ => null } }; PushSettingsToReader(save: true); },
+                dark, fontSize: 11.5, height: 28)));
+
+            root.Children.Add(MakeOptionRow("两端对齐", YYChrome.MakeSegmentedBar(
+                [("auto", "跟书"), ("on", "对齐"), ("off", "靠左")],
+                _settings.Justify is null ? "auto" : (_settings.Justify.Value ? "on" : "off"),
+                v => { _settings = _settings with { Justify = v switch { "on" => true, "off" => false, _ => null } }; PushSettingsToReader(save: true); },
+                dark, fontSize: 11.5, height: 28)));
+
+            var curScript = _library.Core.BookScript(_bookId);
+            root.Children.Add(MakeOptionRow("简繁", YYChrome.MakeSegmentedBar(
+                [("orig", "原样"), ("simp", "简体"), ("trad", "繁體")],
+                curScript switch { Script.Simplified => "simp", Script.Traditional => "trad", _ => "orig" },
+                v =>
+                {
+                    Script? sc = v switch { "simp" => Script.Simplified, "trad" => Script.Traditional, _ => null };
+                    _library.Core.SetBookScript(_bookId, sc);
+                    LoadSection(_currentSection, forceReload: true);
+                },
+                dark, fontSize: 11.5, height: 28)));
+
+            var compSw = new ToggleSwitch { IsOn = _settings.Compress };
+            compSw.Toggled += (_, _) => { _settings = _settings with { Compress = compSw.IsOn }; PushSettingsToReader(save: true); };
+            root.Children.Add(MakeOptionRow("中文标点挤压", compSw));
+
+            var bubblesSw = new ToggleSwitch { IsOn = _bubblesOn };
+            bubblesSw.Toggled += (_, _) =>
+            {
+                _bubblesOn = bubblesSw.IsOn;
+                try { _library.Core.SetBookBubbles(_bookId, _bubblesOn); } catch { }
+                _ = ApplySectionBubblesAsync();
+            };
+            root.Children.Add(MakeOptionRow("对话气泡", bubblesSw));
+
+            var perBookSw = new ToggleSwitch { IsOn = _ownSettings };
+            perBookSw.Toggled += (_, _) =>
+            {
+                _ownSettings = perBookSw.IsOn;
+                if (_ownSettings)
+                {
+                    _library.SetBookReaderSettings(_bookId, _settings);
+                }
+                else
+                {
+                    _library.SetBookReaderSettings(_bookId, null);
+                    _settings = _library.GetReaderSettings();
+                    ApplyPaperAndChrome();
+                    PushSettingsToReader(save: false);
+                    UpdateHeaderAndStatus();
+                    RebuildTypographyKeepingScroll();
+                }
+            };
+            root.Children.Add(MakeOptionRow("只用于这本书", perBookSw));
+            return root;
         }
 
-        // 3. Font size & Line height sliders
-        var szHeader = new Grid { ColumnSpacing = 8 };
-        szHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        szHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var szLbl = new TextBlock { Text = L10n.T("字号"), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center };
-        var szValTb = new TextBlock { Text = $"{Math.Round(_settings.FontSize)} px", FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(szLbl, 0);
-        Grid.SetColumn(szValTb, 1);
-        szHeader.Children.Add(szLbl);
-        szHeader.Children.Add(szValTb);
-        var szSlider = new Slider { Minimum = 12, Maximum = 34, StepFrequency = 1, Value = Math.Clamp(_settings.FontSize, 12, 34) };
-        szSlider.ValueChanged += (_, args) =>
-        {
-            szValTb.Text = $"{Math.Round(args.NewValue)} px";
-            SetFontSize(args.NewValue);
-        };
-        root.Children.Add(szHeader);
-        root.Children.Add(szSlider);
-
-        var lhHeader = new Grid { ColumnSpacing = 8 };
-        lhHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        lhHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var lhLbl = new TextBlock { Text = L10n.T("行距"), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T2), VerticalAlignment = VerticalAlignment.Center };
-        double curLh = _settings.LineHeight ?? 1.9;
-        var lhValTb = new TextBlock { Text = $"{curLh:0.0}", FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(lhLbl, 0);
-        Grid.SetColumn(lhValTb, 1);
-        lhHeader.Children.Add(lhLbl);
-        lhHeader.Children.Add(lhValTb);
-        var lhSlider = new Slider { Minimum = 1.4, Maximum = 2.6, StepFrequency = 0.1, Value = curLh };
-        lhSlider.ValueChanged += (_, args) =>
-        {
-            lhValTb.Text = $"{args.NewValue:0.0}";
-            _settings = _settings with { LineHeight = Math.Round(args.NewValue, 1) };
-            PushSettingsToReader(save: true);
-        };
-        root.Children.Add(lhHeader);
-        root.Children.Add(lhSlider);
-
-        // 4. Layout mode + Columns + Paragraph spacing + Indent + Justify + Script
-        Grid MakeOptionRow(string label, FrameworkElement ctrl)
-        {
-            var g = new Grid { ColumnSpacing = 10 };
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var tb = new TextBlock { Text = L10n.T(label), FontSize = 12, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(tb, 0);
-            Grid.SetColumn(ctrl, 1);
-            g.Children.Add(tb);
-            g.Children.Add(ctrl);
-            return g;
-        }
-
-        root.Children.Add(MakeOptionRow("翻页方式", YYChrome.MakeSegmentedBar(
-            [("page", "左右翻页"), ("scroll", "上下滚动")],
-            _settings.Mode == LayoutMode.Scrolled ? "scroll" : "page",
-            v => { _settings = _settings with { Mode = v == "scroll" ? LayoutMode.Scrolled : LayoutMode.Paginated }; PushSettingsToReader(save: true); UpdateHeaderAndStatus(); flyoutRef?.Hide(); },
-            dark, fontSize: 11.5, height: 28)));
-
-        root.Children.Add(MakeOptionRow("栏数排版", YYChrome.MakeSegmentedBar(
-            [("1", "单栏"), ("2", "双栏")],
-            _library.Prefs.TwoColumns ? "2" : "1",
-            v => { _library.Prefs.TwoColumns = v == "2"; _library.SavePrefs(); PushSettingsToReader(save: false); UpdateHeaderAndStatus(); flyoutRef?.Hide(); },
-            dark, fontSize: 11.5, height: 28)));
-
-        root.Children.Add(MakeOptionRow("段落间距", YYChrome.MakeSegmentedBar(
-            [("0", "无"), ("0.5", "适中"), ("1.0", "宽")],
-            _settings.ParagraphSpacing switch { <= 0.1 => "0", >= 0.8 => "1.0", _ => "0.5" },
-            v => { _settings = _settings with { ParagraphSpacing = v switch { "0" => 0.0, "1.0" => 1.0, _ => 0.5 } }; PushSettingsToReader(save: true); flyoutRef?.Hide(); },
-            dark, fontSize: 11.5, height: 28)));
-
-        root.Children.Add(MakeOptionRow("首行缩进", YYChrome.MakeSegmentedBar(
-            [("auto", "跟书"), ("on", "缩进"), ("off", "不缩")],
-            _settings.Indent is null ? "auto" : (_settings.Indent.Value ? "on" : "off"),
-            v => { _settings = _settings with { Indent = v switch { "on" => true, "off" => false, _ => null } }; PushSettingsToReader(save: true); flyoutRef?.Hide(); },
-            dark, fontSize: 11.5, height: 28)));
-
-        root.Children.Add(MakeOptionRow("段落对齐", YYChrome.MakeSegmentedBar(
-            [("auto", "跟书"), ("on", "对齐"), ("off", "靠左")],
-            _settings.Justify is null ? "auto" : (_settings.Justify.Value ? "on" : "off"),
-            v => { _settings = _settings with { Justify = v switch { "on" => true, "off" => false, _ => null } }; PushSettingsToReader(save: true); flyoutRef?.Hide(); },
-            dark, fontSize: 11.5, height: 28)));
-
-        var curScript = _library.Core.BookScript(_bookId);
-        root.Children.Add(MakeOptionRow("简繁转换", YYChrome.MakeSegmentedBar(
-            [("orig", "原样"), ("simp", "简体"), ("trad", "繁體")],
-            curScript switch { Script.Simplified => "simp", Script.Traditional => "trad", _ => "orig" },
-            v =>
-            {
-                Script? sc = v switch { "simp" => Script.Simplified, "trad" => Script.Traditional, _ => null };
-                _library.Core.SetBookScript(_bookId, sc);
-                LoadSection(_currentSection, forceReload: true);
-                flyoutRef?.Hide();
-            },
-            dark, fontSize: 11.5, height: 28)));
-
-        var compSw = new ToggleSwitch { IsOn = _settings.Compress };
-        compSw.Toggled += (_, _) => { _settings = _settings with { Compress = compSw.IsOn }; PushSettingsToReader(save: true); };
-        root.Children.Add(MakeOptionRow("标点挤压", compSw));
-
-        var glossSw = new ToggleSwitch { IsOn = _library.Prefs.ForeignGlossEnabled };
-        glossSw.Toggled += (_, _) =>
-        {
-            _library.Prefs.ForeignGlossEnabled = glossSw.IsOn;
-            _library.SavePrefs();
-            _ = RefreshSectionOverlaysAsync();
-        };
-        root.Children.Add(MakeOptionRow("外文难词行间释义", glossSw));
-
-        var bubblesSw = new ToggleSwitch { IsOn = _bubblesOn };
-        bubblesSw.Toggled += (_, _) =>
-        {
-            _bubblesOn = bubblesSw.IsOn;
-            try { _library.Core.SetBookBubbles(_bookId, _bubblesOn); } catch { }
-            _ = ApplySectionBubblesAsync();
-        };
-        root.Children.Add(MakeOptionRow("对话角色气泡", bubblesSw));
-
-        var perBookSw = new ToggleSwitch { IsOn = _ownSettings };
-        perBookSw.Toggled += (_, _) =>
-        {
-            _ownSettings = perBookSw.IsOn;
-            if (_ownSettings)
-            {
-                _library.SetBookReaderSettings(_bookId, _settings);
-            }
-            else
-            {
-                _library.SetBookReaderSettings(_bookId, null);
-                _settings = _library.GetReaderSettings();
-                ApplyPaperAndChrome();
-                PushSettingsToReader(save: false);
-                UpdateHeaderAndStatus();
-            }
-        };
-        root.Children.Add(MakeOptionRow("仅对本书生效", perBookSw));
-
+        RebuildTypographyKeepingScroll();
         flyoutRef = new Flyout
         {
+            ShouldConstrainToRootBounds = true,
             FlyoutPresenterStyle = (Style)Application.Current.Resources["YYFloatFlyoutPresenterStyle"],
-            Content = new ScrollViewer { MaxHeight = 560, Content = root },
+            Content = scroller,
         };
         flyoutRef.ShowAt(TypographyBtn);
     }

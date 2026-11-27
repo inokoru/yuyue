@@ -97,16 +97,21 @@ public sealed partial class SettingsView
             dark: dark);
         (string Keys, string Desc)[] shortcuts =
         [
-            ("Ctrl + 1..9 / Ctrl + Tab", "快速切换顶部标签页（Ctrl+1 回到书库）"),
+            ("Ctrl + 1..9 / Ctrl + Tab", "快速切换顶部标签页（Ctrl+1 回到书架）"),
             ("Ctrl + W / 鼠标中键", "关闭当前书籍标签页"),
             ("Ctrl + Shift + T", "恢复刚刚关闭的书籍标签页"),
             ("Ctrl + K", "全局搜索书名、原文、笔记或直接问书伴"),
             ("F11", "进入或退出无边框沉浸全屏（移至顶边唤出）"),
             ("Ctrl + 鼠标滚轮", "阅读器实时调整正文字号 / PDF 缩放"),
             ("Alt + ← / → 或鼠标侧键", "阅读跳转历史后退与前进"),
+            ("Ctrl + Alt + T / N", "阅读器开关目录栏 / 笔记栏（Esc 关闭右侧栏）"),
+            ("Ctrl + Alt + ↑ / ↓", "阅读器切换上一章 / 下一章"),
+            ("Ctrl + [ / ]", "朗读中切换上一句 / 下一句"),
+            ("Ctrl + I", "查看当前书籍信息"),
             ("Ctrl + F / F3 / Shift + F3", "书内全文搜索与跳转下一处 / 上一处"),
-            ("Ctrl + B / Ctrl + E", "书库折叠侧栏导航 / 聚焦内联筛选框"),
-            ("F2 / Delete", "书库选中书籍后编辑信息 / 移出书库"),
+            ("Ctrl + B / Ctrl + E", "书架折叠侧栏导航 / 聚焦内联筛选框"),
+            ("Ctrl + Z / Ctrl + Y", "在设置页撤销或还原最近改动"),
+            ("F2 / Delete", "书架选中书后编辑信息 / 删除"),
         ];
         foreach (var (k, d) in shortcuts)
         {
@@ -117,7 +122,7 @@ public sealed partial class SettingsView
                 BorderBrush = ThemeHelper.Brush(p.Line),
                 BorderThickness = new Thickness(1),
                 Padding = new Thickness(8, 3, 8, 3),
-                Child = new TextBlock { Text = k, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 11, Foreground = ThemeHelper.Brush(p.T1) },
+                Child = new TextBlock { Text = L10n.T(k), FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 11, Foreground = ThemeHelper.Brush(p.T1) },
             };
             scExp.AddKeyValueRow(d, null, badge);
         }
@@ -152,9 +157,18 @@ public sealed partial class SettingsView
             autoStartSw,
             dark: dark));
 
+        var awakeSw = new ToggleSwitch { IsOn = _library.Prefs.KeepAwakeWhileListening };
+        awakeSw.Toggled += (_, _) => { _library.Prefs.KeepAwakeWhileListening = awakeSw.IsOn; _library.SavePrefs(); };
+        PageBodyStack.Children.Add(new FluentSettingsCard(
+            "朗读时防止系统休眠",
+            "朗读或播放有声书期间保持电脑唤醒",
+            "clock",
+            awakeSw,
+            dark: dark));
+
         var langCombo = new ComboBox { Width = 160 };
-        (string Key, string Label)[] langs = [("system", "跟随系统"), ("zh-Hans", "简体中文"), ("en", "English")];
-        foreach (var (_, lbl) in langs) langCombo.Items.Add(lbl);
+        (string Key, string Label)[] langs = [("system", "跟随系统"), ("zh-Hans", "中文"), ("en", "English")];
+        foreach (var (_, lbl) in langs) langCombo.Items.Add(lbl == "跟随系统" ? L10n.T(lbl) : lbl);
         langCombo.SelectedIndex = Math.Max(0, Array.FindIndex(langs, x => x.Key == _library.Prefs.UiLanguage));
         langCombo.SelectionChanged += (_, _) =>
         {
@@ -166,12 +180,14 @@ public sealed partial class SettingsView
                 App.CurrentApp.BroadcastAppearanceChanged();
             }
         };
-        PageBodyStack.Children.Add(new FluentSettingsCard("界面语言", "即时切换简体中文与英文界面", "globe", langCombo, dark: dark));
+        PageBodyStack.Children.Add(new FluentSettingsCard("语言", "即时切换简体中文与英文界面", "globe", langCombo, dark: dark));
 
+        bool hasWatchedFolder = !string.IsNullOrWhiteSpace(_library.Prefs.WatchedFolder);
+        var watchActs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
         var watchBtn = new Button
         {
             Style = (Style)Application.Current.Resources["YYFluentButtonStyle"],
-            Content = string.IsNullOrWhiteSpace(_library.Prefs.WatchedFolder) ? L10n.T("选择文件夹…") : Path.GetFileName(_library.Prefs.WatchedFolder),
+            Content = !hasWatchedFolder ? L10n.T("选一个文件夹") : Path.GetFileName(_library.Prefs.WatchedFolder),
         };
         watchBtn.Click += async (_, _) =>
         {
@@ -184,20 +200,38 @@ public sealed partial class SettingsView
                 RenderActivePage();
             }
         };
+        watchActs.Children.Add(watchBtn);
+        if (hasWatchedFolder)
+        {
+            var clearWatchBtn = new Button
+            {
+                Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"],
+                Content = L10n.T("停止监听"),
+                Foreground = ThemeHelper.Brush(p.Danger),
+            };
+            clearWatchBtn.Click += (_, _) =>
+            {
+                _library.Prefs.WatchedFolder = "";
+                _library.SavePrefs();
+                _library.WatchedFolder.Reload();
+                RenderActivePage();
+            };
+            watchActs.Children.Add(clearWatchBtn);
+        }
         PageBodyStack.Children.Add(new FluentSettingsCard(
-            "自动监视导入目录",
-            string.IsNullOrWhiteSpace(_library.Prefs.WatchedFolder) ? "尚未设置监视文件夹" : _library.Prefs.WatchedFolder,
+            "监听一个文件夹",
+            !hasWatchedFolder ? "放进这个文件夹的书，下次打开语阅时自动导入" : _library.Prefs.WatchedFolder,
             "folder-plus",
-            watchBtn,
+            watchActs,
             dark: dark));
 
-        var wifiBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Content = L10n.T("打开 Wi-Fi 传书") };
+        var wifiBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Content = L10n.T("打开") };
         wifiBtn.Click += (_, _) =>
         {
             if (RootGrid.XamlRoot is { } xr)
                 _ = ShelfFeaturesDialogs.ShowWifiTransferDialogAsync(xr, _library, () => App.CurrentApp.NotifyShelfRefresh());
         };
-        PageBodyStack.Children.Add(new FluentSettingsCard("局域网 Wi-Fi 传书", "同 Wi-Fi 下从手机或平板浏览器直接传书到电脑", "wifi", wifiBtn, dark: dark));
+        PageBodyStack.Children.Add(new FluentSettingsCard("Wi‑Fi 传书", "同 Wi-Fi 下从手机或平板浏览器直接传书到电脑", "wifi", wifiBtn, dark: dark));
     }
 
     private void RegisterWindowsFileAssociations()
@@ -247,7 +281,7 @@ public sealed partial class SettingsView
             dark,
             fontSize: 12,
             height: 32);
-        PageBodyStack.Children.Add(new FluentSettingsCard("外观模式", "可随时跟随 Windows 11 浅色或深色主题", "sun", themeSeg, dark: dark));
+        PageBodyStack.Children.Add(new FluentSettingsCard("界面", "可随时跟随 Windows 11 浅色或深色主题", "sun", themeSeg, dark: dark));
 
         var micaSw = new ToggleSwitch { IsOn = _library.Prefs.UseWarmMica };
         micaSw.Toggled += (_, _) =>
@@ -322,43 +356,75 @@ public sealed partial class SettingsView
             tintRow.Children.Add(swatchBtn);
         }
         PageBodyStack.Children.Add(new FluentSettingsCard(
-            "主题强调色",
-            "保留语阅 4 套东方低饱和纸墨色，同时提供 Windows 11 系统强调蓝",
+            "主题色",
+            "用于按钮、开关与进度标记",
             "sparkle",
             tintRow,
             dark: dark));
 
-        var iconCombo = new ComboBox { Width = 150 };
-        foreach (var (_, title) in ThemeHelper.AppIcons) iconCombo.Items.Add(L10n.T(title));
-        iconCombo.SelectedIndex = Math.Max(0, Array.FindIndex(ThemeHelper.AppIcons, x => x.Id == _library.Prefs.AppIconId));
-        iconCombo.SelectionChanged += (_, _) =>
+        // Visual App Icon preview selector (6 bundled PNG tiles matching the circular tint swatches above)
+        string curIconId = ThemeHelper.NormalizeAppIconId(_library.Prefs.AppIconId);
+        var iconRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var (iconId, iconTitle) in ThemeHelper.AppIcons)
         {
-            if (iconCombo.SelectedIndex >= 0)
+            string capId = iconId;
+            bool sel = string.Equals(curIconId, capId, StringComparison.OrdinalIgnoreCase);
+
+            var previewImg = ThemeHelper.CreateAppIconPreviewImage(capId, dark, size: 36);
+            var imgTile = new Border
             {
-                _library.Prefs.AppIconId = ThemeHelper.AppIcons[iconCombo.SelectedIndex].Id;
+                Width = 36,
+                Height = 36,
+                CornerRadius = new CornerRadius(8),
+                BorderBrush = ThemeHelper.Brush(sel ? Microsoft.UI.Colors.Transparent : p.Line),
+                BorderThickness = new Thickness(sel ? 0 : 1),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = previewImg,
+            };
+            var iconRing = new Border
+            {
+                Width = 42,
+                Height = 42,
+                CornerRadius = new CornerRadius(10),
+                BorderBrush = ThemeHelper.Brush(sel ? tc.Accent : Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(2),
+                Padding = new Thickness(1),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Child = imgTile,
+            };
+
+            var col = new StackPanel { Spacing = 3, HorizontalAlignment = HorizontalAlignment.Center };
+            col.Children.Add(iconRing);
+            col.Children.Add(new TextBlock
+            {
+                Text = L10n.T(iconTitle),
+                FontSize = 10.5,
+                FontWeight = sel ? FontWeights.SemiBold : FontWeights.Normal,
+                Foreground = ThemeHelper.Brush(sel ? tc.Accent : p.T2),
+                HorizontalAlignment = HorizontalAlignment.Center,
+            });
+
+            var iconBtn = new Button
+            {
+                Padding = new Thickness(3, 2, 3, 2),
+                CornerRadius = new CornerRadius(8),
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                UseSystemFocusVisuals = false,
+                Content = col,
+            };
+            ToolTipService.SetToolTip(iconBtn, L10n.T(iconTitle));
+            iconBtn.Click += (_, _) =>
+            {
+                if (string.Equals(_library.Prefs.AppIconId, capId, StringComparison.OrdinalIgnoreCase)) return;
+                _library.Prefs.AppIconId = capId;
                 _library.SavePrefs();
                 App.CurrentApp.BroadcastAppearanceChanged();
-            }
-        };
-        PageBodyStack.Children.Add(new FluentSettingsCard("应用窗口图标", "切换任务栏与标题栏图标色调", "photo", iconCombo, dark: dark));
-
-        PageBodyStack.Children.Add(MakeSectionHeader("纸张联动与护眼", dark));
-
-        var followSw = new ToggleSwitch { IsOn = _library.Prefs.PaperFollowAppearance };
-        followSw.Toggled += (_, _) =>
-        {
-            var rs = _library.GetReaderSettings();
-            if (PaperAppearance.SetFollow(_library, followSw.IsOn, rs, out var updated))
-                _library.SaveReaderSettings(updated);
-            BroadcastReaderSettingsWithoutSelfRefresh();
-            RenderPaperLivePreview(dark);
-        };
-        PageBodyStack.Children.Add(new FluentSettingsCard(
-            "阅读纸张跟随深浅外观",
-            "浅色与深色模式切换时自动配对日间与夜间阅读纸，避免夜读刺眼",
-            "moon",
-            followSw,
-            dark: dark));
+            };
+            iconRow.Children.Add(iconBtn);
+        }
+        PageBodyStack.Children.Add(new FluentSettingsCard("应用图标", "切换任务栏与标题栏图标色调", "photo", iconRow, dark: dark));
 
         var einkSw = new ToggleSwitch { IsOn = _library.Prefs.GlobalEinkMode };
         einkSw.Toggled += (_, _) =>
@@ -374,89 +440,5 @@ public sealed partial class SettingsView
             "eye",
             einkSw,
             dark: dark));
-
-        PageBodyStack.Children.Add(MakeSectionHeader("自定义阅读纸张", dark));
-        var newPaperBtn = new Button
-        {
-            Style = (Style)Application.Current.Resources["YYFluentButtonStyle"],
-            Content = L10n.T("+ 新建纸张…"),
-        };
-        newPaperBtn.Click += async (_, _) =>
-        {
-            if (RootGrid.XamlRoot is not { } xr) return;
-            var created = await global::Yuyue.Reader.CustomPaperDialog.ShowEditorAsync(xr, _library, existing: null, currentSettings: _library.GetReaderSettings());
-            if (created is not null)
-            {
-                if (PaperAppearance.PickCustom(_library, created, _library.GetReaderSettings(), out var updated))
-                    _library.SaveReaderSettings(updated);
-                BroadcastReaderSettingsWithoutSelfRefresh();
-                RenderActivePage();
-            }
-        };
-        var customPapers = _library.Core.CustomPapers();
-        PageBodyStack.Children.Add(new FluentSettingsCard(
-            $"我的纸张 ({customPapers.Length})",
-            customPapers.Length == 0 ? "调配专属纸底色、墨色与纸纹材质，同步到全部阅读标签" : "点击下方任意自定义纸张可编辑、复制或删除",
-            "book-open",
-            newPaperBtn,
-            dark: dark));
-
-        foreach (var cp in customPapers)
-        {
-            var cpCap = cp;
-            var acts = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
-            var swatch = new Border
-            {
-                Width = 22,
-                Height = 22,
-                CornerRadius = new CornerRadius(5),
-                Background = ThemeHelper.Brush(global::Yuyue.Reader.CustomPaperDialog.ParseHexColor(cpCap.Bg, YYPapers.Kami.Bg)),
-                BorderBrush = ThemeHelper.Brush(p.Line),
-                BorderThickness = new Thickness(1),
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            var applyBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Height = 28, MinHeight = 28, Content = L10n.T("应用") };
-            applyBtn.Click += (_, _) =>
-            {
-                if (PaperAppearance.PickCustom(_library, cpCap, _library.GetReaderSettings(), out var updated))
-                    _library.SaveReaderSettings(updated);
-                BroadcastReaderSettingsWithoutSelfRefresh();
-                RenderPaperLivePreview(dark);
-                _ownerWindow.ShowToast($"已应用纸张「{cpCap.Name}」");
-            };
-            var editBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Height = 28, MinHeight = 28, Content = L10n.T("编辑") };
-            editBtn.Click += async (_, _) =>
-            {
-                if (RootGrid.XamlRoot is not { } xr) return;
-                if (await global::Yuyue.Reader.CustomPaperDialog.ShowEditorAsync(xr, _library, existing: cpCap, currentSettings: _library.GetReaderSettings()) is not null)
-                {
-                    BroadcastReaderSettingsWithoutSelfRefresh();
-                    RenderActivePage();
-                }
-            };
-            var dupBtn = new Button { Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"], Height = 28, MinHeight = 28, Content = L10n.T("复制") };
-            dupBtn.Click += (_, _) =>
-            {
-                global::Yuyue.Reader.CustomPaperDialog.DuplicateCustomPaper(_library, cpCap);
-                RenderActivePage();
-            };
-            var delBtn = new Button { Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"], Height = 28, MinHeight = 28, Content = L10n.T("删除"), Foreground = ThemeHelper.Brush(p.Danger) };
-            delBtn.Click += (_, _) =>
-            {
-                try { _library.Core.DeleteCustomPaper(cpCap.Id); } catch { }
-                PaperAppearance.Forget(_library, cpCap.Id);
-                var curRs = _library.GetReaderSettings();
-                if (string.Equals(curRs.CustomPaper, cpCap.Id, StringComparison.Ordinal))
-                    _library.SaveReaderSettings(curRs with { CustomPaper = null });
-                BroadcastReaderSettingsWithoutSelfRefresh();
-                RenderActivePage();
-            };
-            acts.Children.Add(swatch);
-            acts.Children.Add(applyBtn);
-            acts.Children.Add(editBtn);
-            acts.Children.Add(dupBtn);
-            acts.Children.Add(delBtn);
-            PageBodyStack.Children.Add(new FluentSettingsCard(cpCap.Name, $"{cpCap.Bg} · {cpCap.Layout}", "book-open", acts, dark: dark));
-        }
     }
 }

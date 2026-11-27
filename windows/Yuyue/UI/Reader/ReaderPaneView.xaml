@@ -32,7 +32,7 @@
                 <Button
                     x:Name="LeftPaneBtn"
                     Style="{StaticResource YYToolbarIconButtonStyle}"
-                    ToolTipService.ToolTip="目录 / 书签 / 搜索"
+                    ToolTipService.ToolTip="目录、书签"
                     Click="LeftPaneBtn_Click" />
                 <Button
                     x:Name="HistBackBtn"
@@ -89,11 +89,11 @@
                     Visibility="Collapsed"
                     Style="{StaticResource YYToolbarIconButtonStyle}"
                     Padding="8,0"
-                    ToolTipService.ToolTip="查看上次阅读前情提要（不剧透）"
+                    ToolTipService.ToolTip="前情提要"
                     Click="RecapTopPill_Click">
                     <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                         <ContentPresenter x:Name="IconRecapPill" VerticalAlignment="Center" />
-                        <TextBlock x:Name="RecapTopPillLabel" Text="前情" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <TextBlock x:Name="RecapTopPillLabel" Text="前情提要" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
                 <Button
@@ -101,7 +101,7 @@
                     Visibility="Collapsed"
                     Style="{StaticResource YYToolbarIconButtonStyle}"
                     Padding="8,0"
-                    ToolTipService.ToolTip="开启或关闭整章双语对照翻译"
+                    ToolTipService.ToolTip="原文 / 双语对照 / 仅译文（外文译中、文言译白话）"
                     Click="ToggleTranslate_Click">
                     <TextBlock x:Name="TranslateBtnLabel" Text="译" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
                 </Button>
@@ -114,14 +114,14 @@
                     x:Name="TypographyBtn"
                     Style="{StaticResource YYToolbarIconButtonStyle}"
                     Padding="8,0"
-                    ToolTipService.ToolTip="纸张、字体与排版"
+                    ToolTipService.ToolTip="排版"
                     Click="TypographyBtn_Click">
                     <TextBlock Text="Aa" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
                 </Button>
                 <Button
                     x:Name="ListenBtn"
                     Style="{StaticResource YYToolbarIconButtonStyle}"
-                    ToolTipService.ToolTip="开始或暂停朗读 / 听书"
+                    ToolTipService.ToolTip="朗读 (空格)"
                     Click="ListenBtn_Click" />
                 <Button
                     x:Name="SplitViewBtn"
@@ -135,7 +135,7 @@
                     x:Name="NotesPaneBtn"
                     Style="{StaticResource YYToolbarIconButtonStyle}"
                     Padding="8,0"
-                    ToolTipService.ToolTip="本书笔记与划线"
+                    ToolTipService.ToolTip="笔记"
                     Click="RightPaneTab_Click"
                     Tag="notes">
                     <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
@@ -147,7 +147,7 @@
                     x:Name="CompanionPaneBtn"
                     Style="{StaticResource YYToolbarIconButtonStyle}"
                     Padding="8,0"
-                    ToolTipService.ToolTip="AI 书伴问答（防剧透）"
+                    ToolTipService.ToolTip="书伴"
                     Click="RightPaneTab_Click"
                     Tag="companion">
                     <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
@@ -159,19 +159,20 @@
                     x:Name="CastPaneBtn"
                     Style="{StaticResource YYToolbarIconButtonStyle}"
                     Padding="8,0"
-                    ToolTipService.ToolTip="演播、有声配对与广播剧角色"
+                    ToolTipService.ToolTip="人物：谁说了话，各用什么声音"
                     Click="RightPaneTab_Click"
                     Tag="cast">
                     <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
                         <ContentPresenter x:Name="IconTopCast" VerticalAlignment="Center" />
-                        <TextBlock x:Name="LabelTopCast" Text="演播" FontSize="12" VerticalAlignment="Center" />
+                        <TextBlock x:Name="LabelTopCast" Text="人物" FontSize="12" VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
 
                 <Button
                     x:Name="MoreBtn"
                     Style="{StaticResource YYToolbarIconButtonStyle}"
-                    ToolTipService.ToolTip="更多阅读工具" />
+                    ToolTipService.ToolTip="更多：亮度、护眼、日夜与书的工具"
+                    Click="MoreBtn_Click" />
                 <Button
                     x:Name="CloseSplitPaneBtn"
                     Visibility="Collapsed"
@@ -252,7 +253,7 @@
                     <StackPanel Spacing="12" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="360">
                         <ContentPresenter x:Name="ListenOnlyIcon" HorizontalAlignment="Center" />
                         <TextBlock x:Name="ListenOnlyTitle" FontSize="17" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap" />
-                        <TextBlock Text="纯听模式 · 专注聆听" FontSize="12" Opacity="0.7" HorizontalAlignment="Center" />
+                        <TextBlock Text="纯听模式 · 已隐藏正文" FontSize="12" Opacity="0.7" HorizontalAlignment="Center" />
                         <Button
                             Style="{StaticResource YYFluentButtonStyle}"
                             Content="显示原文"
@@ -281,24 +282,24 @@
 
                         <Grid>
                             <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                <Button Tag="yellow" Padding="3" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="黄色划线 (1)" Click="MarkColor_Click">
+                                <Button Tag="yellow" Padding="3" CornerRadius="13" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="黄色 · 按 1" Click="MarkColor_Click">
                                     <Border Width="20" Height="20" CornerRadius="10" Background="#FBE7A0" BorderBrush="#28000000" BorderThickness="0.75" />
                                 </Button>
-                                <Button Tag="blue" Padding="3" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="蓝色划线 (2)" Click="MarkColor_Click">
+                                <Button Tag="blue" Padding="3" CornerRadius="13" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="蓝色 · 按 2" Click="MarkColor_Click">
                                     <Border Width="20" Height="20" CornerRadius="10" Background="#CFE6F4" BorderBrush="#28000000" BorderThickness="0.75" />
                                 </Button>
-                                <Button Tag="pink" Padding="3" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="粉色划线 (3)" Click="MarkColor_Click">
+                                <Button Tag="pink" Padding="3" CornerRadius="13" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="粉色 · 按 3" Click="MarkColor_Click">
                                     <Border Width="20" Height="20" CornerRadius="10" Background="#F6C7C0" BorderBrush="#28000000" BorderThickness="0.75" />
                                 </Button>
-                                <Button Tag="wave" Padding="3" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="波浪线 (4)" Click="MarkColor_Click">
+                                <Button Tag="wave" Padding="3" CornerRadius="13" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="波浪线 · 按 4" Click="MarkColor_Click">
                                     <Border Width="20" Height="20" CornerRadius="10" Background="{ThemeResource YYInsetBrush}">
                                         <TextBlock Text="~" FontSize="12" FontWeight="Bold" Foreground="#EF7F71" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
                                     </Border>
                                 </Button>
-                                <Button Tag="underline" Width="26" Height="24" Padding="0" CornerRadius="5" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" ToolTipService.ToolTip="实线下划线" Click="MarkColor_Click">
+                                <Button Tag="underline" Width="26" Height="24" Padding="0" CornerRadius="5" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" ToolTipService.ToolTip="下划线" Click="MarkColor_Click">
                                     <TextBlock Text="U" FontSize="11.5" FontWeight="SemiBold" TextDecorations="Underline" />
                                 </Button>
-                                <Button Tag="dotted" Width="26" Height="24" Padding="0" CornerRadius="5" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" ToolTipService.ToolTip="点线下划线" Click="MarkColor_Click">
+                                <Button Tag="dotted" Width="26" Height="24" Padding="0" CornerRadius="5" Background="{ThemeResource YYInsetBrush}" BorderThickness="0" ToolTipService.ToolTip="点线" Click="MarkColor_Click">
                                     <TextBlock Text="···" FontSize="11.5" FontWeight="Bold" />
                                 </Button>
                             </StackPanel>
@@ -359,8 +360,8 @@
                                 <TextBlock x:Name="WordPhoneticText" FontSize="11.5" Foreground="{ThemeResource YYText2Brush}" MaxLines="1" TextTrimming="CharacterEllipsis" />
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right" VerticalAlignment="Center">
-                                <Button x:Name="WordSpeakBtn" Style="{StaticResource YYToolbarIconButtonStyle}" Width="26" Height="26" Padding="0" ToolTipService.ToolTip="发音" Click="WordSpeak_Click" />
-                                <Button x:Name="WordSaveBtn" Style="{StaticResource YYFluentButtonStyle}" Height="24" MinHeight="24" FontSize="11" Padding="8,0" Content="加入生词" Click="WordSave_Click" />
+                                <Button x:Name="WordSpeakBtn" Style="{StaticResource YYToolbarIconButtonStyle}" Width="26" Height="26" Padding="0" ToolTipService.ToolTip="再读一遍" Click="WordSpeak_Click" />
+                                <Button x:Name="WordSaveBtn" Style="{StaticResource YYFluentButtonStyle}" Height="24" MinHeight="24" FontSize="11" Padding="8,0" Content="加入生词本" Click="WordSave_Click" />
                             </StackPanel>
                         </Grid>
                         <TextBlock x:Name="WordMeaningText" FontSize="12.5" Foreground="{ThemeResource YYText1Brush}" TextWrapping="Wrap" MaxLines="5" />
@@ -384,7 +385,7 @@
                                 MinHeight="22"
                                 Padding="6,0"
                                 Foreground="{ThemeResource YYAccentBrush}"
-                                Content="更多释义"
+                                Content="完整释义"
                                 Click="ToggleFullDictEntry_Click" />
                         </Grid>
                     </StackPanel>
@@ -480,7 +481,7 @@
                         Padding="12,0"
                         CornerRadius="15"
                         Click="ReturnPill_Click">
-                        <TextBlock x:Name="ReturnPillText" Text="↩ 回到刚才位置" FontSize="11.5" FontWeight="Medium" VerticalAlignment="Center" />
+                        <TextBlock x:Name="ReturnPillText" Text="回到原处" FontSize="11.5" FontWeight="Medium" VerticalAlignment="Center" />
                     </Button>
                 </StackPanel>
 
@@ -559,9 +560,23 @@
                     <Button x:Name="TtsPrevBtn" Style="{StaticResource YYToolbarIconButtonStyle}" Width="28" Height="28" Padding="0" ToolTipService.ToolTip="上一句" Click="TtsPrev_Click" />
                     <Button x:Name="TtsPlayPauseBtn" Style="{StaticResource YYFluentAccentButtonStyle}" Width="34" Height="26" MinHeight="26" Padding="0" CornerRadius="13" ToolTipService.ToolTip="播放 / 暂停 (空格)" Click="TtsPlayPause_Click" />
                     <Button x:Name="TtsNextBtn" Style="{StaticResource YYToolbarIconButtonStyle}" Width="28" Height="28" Padding="0" ToolTipService.ToolTip="下一句" Click="TtsNext_Click" />
-                    <Border x:Name="TtsVoiceChip" CornerRadius="4" Padding="7,2" Margin="4,0,0,0" VerticalAlignment="Center">
-                        <TextBlock x:Name="TtsVoiceLabel" Text="朗读" FontSize="11" FontWeight="Medium" />
-                    </Border>
+                    <Button
+                        x:Name="TtsVoiceBtn"
+                        Height="24"
+                        MinHeight="24"
+                        Padding="8,0,6,0"
+                        Margin="4,0,0,0"
+                        CornerRadius="5"
+                        BorderThickness="0"
+                        VerticalAlignment="Center"
+                        UseSystemFocusVisuals="False"
+                        ToolTipService.ToolTip="点击试听并切换朗读声音"
+                        Click="TtsVoice_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                            <TextBlock x:Name="TtsVoiceLabel" Text="朗读" FontSize="11" FontWeight="Medium" VerticalAlignment="Center" />
+                            <TextBlock x:Name="TtsVoiceChevron" Text="▾" FontSize="9.5" Opacity="0.72" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
 
                 <!-- 中：当前朗读句子滚动字幕 -->
@@ -576,9 +591,9 @@
 
                 <!-- 右：倍速 / 定时 / 纯听 / 弹出置顶迷你浮窗 / 停止 -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                    <Button x:Name="TtsRateBtn" Style="{StaticResource YYTextActionButtonStyle}" Content="1.0×" FontSize="11.5" MinHeight="26" ToolTipService.ToolTip="切换朗读倍速" Click="TtsRate_Click" />
-                    <Button x:Name="TtsSleepBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="睡眠定时" />
-                    <Button x:Name="TtsPureBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="纯听模式" Click="TtsPureListen_Click" />
+                    <Button x:Name="TtsRateBtn" Style="{StaticResource YYTextActionButtonStyle}" Content="1.0×" FontSize="11.5" MinHeight="26" ToolTipService.ToolTip="朗读倍速" />
+                    <Button x:Name="TtsSleepBtn" Style="{StaticResource YYToolbarIconButtonStyle}" Width="Auto" MinWidth="28" Padding="6,0" ToolTipService.ToolTip="定时关闭" />
+                    <Button x:Name="TtsPureBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="隐藏原文" Click="TtsPureListen_Click" />
                     <Button x:Name="TtsPipBtn" Style="{StaticResource YYToolbarIconButtonStyle}" ToolTipService.ToolTip="弹出置顶迷你听书浮窗" Click="TtsOpenMiniPlayer_Click" />
                     <Button x:Name="TtsStopBtn" Style="{StaticResource YYToolbarIconButtonStyle}" Width="26" Height="26" Padding="0" ToolTipService.ToolTip="关闭听书条" Click="TtsStop_Click" />
                 </StackPanel>
@@ -619,8 +634,8 @@
                         MinHeight="20"
                         FontSize="11"
                         Opacity="0.78"
-                        Content="分页"
-                        ToolTipService.ToolTip="切换分页 / 上下滚动"
+                        Content="左右翻页"
+                        ToolTipService.ToolTip="切换左右翻页 / 上下滚动"
                         Click="StatusModeToggle_Click" />
                     <Border x:Name="StatusSep1" Width="1" Height="11" Opacity="0.22" VerticalAlignment="Center" />
                     <Button
@@ -655,5 +670,21 @@
                 </StackPanel>
             </Grid>
         </Border>
+
+        <!-- 阅读窗口护眼柔光与亮度遮罩（对齐 macOS MacReaderView overlay，不拦截鼠标） -->
+        <Border
+            x:Name="EyeCareOverlay"
+            Grid.Row="0"
+            Grid.RowSpan="4"
+            Background="#F5A63B"
+            Opacity="0"
+            IsHitTestVisible="False" />
+        <Border
+            x:Name="DimOverlay"
+            Grid.Row="0"
+            Grid.RowSpan="4"
+            Background="Black"
+            Opacity="0"
+            IsHitTestVisible="False" />
     </Grid>
 </UserControl>

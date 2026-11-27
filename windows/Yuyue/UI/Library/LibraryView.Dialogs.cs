@@ -1,7 +1,10 @@
 using System.Diagnostics;
+using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Windows.UI;
 using Yuyue.Audiobook;
 using Yuyue.Core;
 using Yuyue.Design;
@@ -56,30 +59,41 @@ public sealed partial class LibraryView
 
     private static string FormatImportError(Exception ex) => ex switch
     {
-        CoreException.Protected => L10n.T("文件受加密或 DRM 保护，无法导入"),
-        CoreException.Unsupported => L10n.T("暂不支持该文件格式"),
+        CoreException.Protected => L10n.T("这本书有版权保护（DRM），打不开"),
+        CoreException.Unsupported => L10n.T("不支持这种文件，目前能打开 EPUB、PDF、MOBI、AZW3、TXT"),
         CoreException.BadBook bad => FormatBadBookError(bad.detail),
-        CoreException.NotFound => L10n.T("找不到原文件"),
-        CoreException.Io io => string.IsNullOrWhiteSpace(io.detail) ? L10n.T("无法读取文件") : L10n.T($"文件读写失败：{io.detail}"),
+        CoreException.NotFound => L10n.T("找不到这本书的文件，可能被移走或删掉了"),
+        CoreException.Io io => string.IsNullOrWhiteSpace(io.detail) ? L10n.T("无法读取文件") : L10n.T($"出错了（{io.detail}）"),
         CoreException.Invalid inv => string.IsNullOrWhiteSpace(inv.detail) ? L10n.T("文件参数无效") : inv.detail,
-        CoreException.Db db => string.IsNullOrWhiteSpace(db.detail) ? L10n.T("书库写入失败") : L10n.T($"书库写入失败：{db.detail}"),
+        CoreException.Db db => string.IsNullOrWhiteSpace(db.detail) ? L10n.T("出错了") : L10n.T($"出错了（{db.detail}）"),
         _ => string.IsNullOrWhiteSpace(ex.Message) ? L10n.T("未知错误") : ex.Message,
     };
 
     private static string FormatBadBookError(string? detail)
     {
         if (string.IsNullOrWhiteSpace(detail))
-            return L10n.T("文件已损坏或无法打开");
+            return L10n.T("这本书读不出来，文件可能坏了，或者不是它看起来的格式");
         if (detail.Contains("empty", StringComparison.OrdinalIgnoreCase))
-            return L10n.T("文件是空的");
+            return L10n.T("这个文件是空的，里面没有内容");
         if (detail.Contains("large", StringComparison.OrdinalIgnoreCase) || detail.Contains("size", StringComparison.OrdinalIgnoreCase))
-            return L10n.T("文件过大，无法导入");
-        return L10n.T("文件已损坏或无法打开");
+            return L10n.T("这本书太大了，读不进来");
+        return L10n.T("这本书读不出来，文件可能坏了，或者不是它看起来的格式");
     }
 
-    public async Task ImportPathsAsync(IReadOnlyList<string> rawPaths, bool openFirst = false, string source = "picker")
+    private sealed class ImportRowState
+    {
+        public string FileName { get; init; } = "";
+        public string Status { get; set; } = "pending"; // pending | importing | imported | exists | failed
+        public string? Detail { get; set; }
+    }
+
+    public async Task ImportPathsAsync(IReadOnlyList<string> rawPaths, bool openFirst = false, string source = "picker", string? targetCollectionId = null)
     {
         if (rawPaths.Count == 0) return;
+
+        string? targetColName = !string.IsNullOrWhiteSpace(targetCollectionId)
+            ? _collections.FirstOrDefault(c => string.Equals(c.Id, targetCollectionId, StringComparison.OrdinalIgnoreCase))?.Name
+            : null;
 
         var audioCandidates = new List<string>();
         var bookFiles = new List<string>();
@@ -191,8 +205,14 @@ public sealed partial class LibraryView
                     var importedAudio = await AudiobookImporter.ShowImportSheetAsync(_ownerWindow, audXr, _library, audioCandidates);
                     if (importedAudio is not null)
                     {
+                        if (!string.IsNullOrWhiteSpace(targetCollectionId))
+                        {
+                            try { _library.SetInCollection(targetCollectionId, importedAudio.Id, true); } catch { }
+                        }
                         RefreshBooks();
-                        ShowToast(L10n.T($"已导入有声书《{importedAudio.Title}》"));
+                        ShowToast(!string.IsNullOrWhiteSpace(targetColName)
+                            ? L10n.T($"已导入《{importedAudio.Title}》并加入「{targetColName}」")
+                            : L10n.T($"已导入《{importedAudio.Title}》"));
                         if (openFirst) TryOpenBook(importedAudio);
                     }
                 }
@@ -221,60 +241,278 @@ public sealed partial class LibraryView
             return;
         }
 
+        var existingIds = new HashSet<string>(_library.GetBooks().Select(b => b.Id), StringComparer.OrdinalIgnoreCase);
+        var rows = bookFiles.Select(f => new ImportRowState { FileName = Path.GetFileName(f), Status = "pending" }).ToList();
+        foreach (var (fn, reason) in failures)
+            rows.Add(new ImportRowState { FileName = fn, Status = "failed", Detail = reason });
+
+        _importCardAutoHideTimer?.Stop();
         BookSummary? firstImported = null;
-        int ok = 0;
+        BookSummary? firstExisted = null;
+        int newlyImported = 0;
+        int alreadyExisted = 0;
+
         for (int i = 0; i < bookFiles.Count; i++)
         {
-            if (bookFiles.Count > 1)
-                ShowToast(L10n.T($"正在导入 {i + 1} / {bookFiles.Count}…"));
+            rows[i].Status = "importing";
+            RenderImportProgressCard(rows, done: i, total: bookFiles.Count, newlyImported, alreadyExisted, failures.Count, targetColName, targetCollectionId, revealBook: null, finished: false);
             try
             {
                 var imported = await _library.ImportBookWithExtrasAsync(bookFiles[i]);
-                firstImported ??= imported;
-                ok++;
+                bool existed = !existingIds.Add(imported.Id);
+                if (!string.IsNullOrWhiteSpace(targetCollectionId))
+                {
+                    try { _library.SetInCollection(targetCollectionId, imported.Id, true); } catch { }
+                }
+                if (existed)
+                {
+                    alreadyExisted++;
+                    firstExisted ??= imported;
+                    rows[i].Status = "exists";
+                    rows[i].Detail = !string.IsNullOrWhiteSpace(targetColName)
+                        ? L10n.T($"已在书库中，已加入「{targetColName}」")
+                        : L10n.T("已在书库中");
+                }
+                else
+                {
+                    newlyImported++;
+                    firstImported ??= imported;
+                    rows[i].Status = "imported";
+                    rows[i].Detail = imported.Title;
+                }
             }
             catch (Exception ex)
             {
-                failures.Add((Path.GetFileName(bookFiles[i]), FormatImportError(ex)));
+                string reason = FormatImportError(ex);
+                failures.Add((Path.GetFileName(bookFiles[i]), reason));
+                rows[i].Status = "failed";
+                rows[i].Detail = reason;
             }
         }
 
-        if (ok > 0)
-        {
+        if (newlyImported > 0 || alreadyExisted > 0)
             RefreshBooks();
-            if (failures.Count == 0)
-            {
-                ShowToast(ok == 1 && firstImported is not null
-                    ? L10n.T($"已导入《{firstImported.Title}》")
-                    : L10n.T($"已成功导入 {ok} 本书"));
-            }
-            else
-            {
-                var firstFail = failures[0];
-                string failDetail = failures.Count == 1
-                    ? $"{firstFail.FileName}：{firstFail.Reason}"
-                    : L10n.T($"{firstFail.FileName}：{firstFail.Reason} 等 {failures.Count} 个文件");
-                ShowToast(
-                    L10n.T($"已导入 {ok} 本，{failures.Count} 本失败"),
-                    detail: failDetail);
-            }
-            if (openFirst && firstImported is not null)
-                TryOpenBook(firstImported);
-        }
-        else if (failures.Count > 0)
+
+        var revealBook = firstImported ?? firstExisted;
+        RenderImportProgressCard(rows, done: bookFiles.Count, total: bookFiles.Count, newlyImported, alreadyExisted, failures.Count, targetColName, targetCollectionId, revealBook, finished: true);
+
+        if (openFirst && firstImported is not null)
+            TryOpenBook(firstImported);
+
+        if (failures.Count == 0 && !_disposed)
         {
-            var firstFail = failures[0];
-            if (failures.Count == 1)
+            _importCardAutoHideTimer?.Stop();
+            _importCardAutoHideTimer = new DispatcherTimer { Interval = System.TimeSpan.FromSeconds(8) };
+            _importCardAutoHideTimer.Tick += (_, _) =>
             {
-                ShowToast(L10n.T($"导入失败 ({firstFail.FileName})：{firstFail.Reason}"));
-            }
-            else
+                _importCardAutoHideTimer.Stop();
+                if (!_disposed) ImportProgressCard.Visibility = Visibility.Collapsed;
+            };
+            _importCardAutoHideTimer.Start();
+        }
+    }
+
+    private void RenderImportProgressCard(
+        List<ImportRowState> rows,
+        int done,
+        int total,
+        int newlyImported,
+        int alreadyExisted,
+        int failCount,
+        string? targetColName,
+        string? targetCollectionId,
+        BookSummary? revealBook,
+        bool finished)
+    {
+        if (_disposed) return;
+        bool dark = ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
+        var p = ThemeHelper.Palette(dark);
+        var tc = ThemeHelper.TintColors(_library.Prefs.Tint, dark);
+
+        ImportProgressContent.Children.Clear();
+
+        // Header row: status indicator + summary title + close button
+        var head = new Grid { ColumnSpacing = 8 };
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        if (!finished)
+        {
+            head.Children.Add(new ProgressRing { Width = 15, Height = 15, IsActive = true, VerticalAlignment = VerticalAlignment.Center });
+        }
+        else
+        {
+            var iconColor = (newlyImported > 0 || alreadyExisted > 0) ? p.Ok : p.Danger;
+            head.Children.Add(YYIcons.Make((newlyImported > 0 || alreadyExisted > 0) ? "check-circle" : "info-circle", 15, ThemeHelper.Brush(iconColor)));
+        }
+
+        string titleText;
+        if (!finished)
+        {
+            titleText = !string.IsNullOrWhiteSpace(targetColName)
+                ? L10n.T($"正在导入「{targetColName}」({done + 1} / {total})…")
+                : L10n.T($"正在导入 {done + 1} / {total}…");
+        }
+        else
+        {
+            var parts = new List<string>();
+            if (newlyImported > 0) parts.Add(L10n.T($"已导入 {newlyImported} 本"));
+            if (alreadyExisted > 0) parts.Add(L10n.T($"已存在 {alreadyExisted} 本"));
+            if (failCount > 0) parts.Add(L10n.T($"{failCount} 本失败"));
+            titleText = parts.Count > 0 ? string.Join(" · ", parts) : L10n.T("导入完成");
+            if (!string.IsNullOrWhiteSpace(targetColName) && (newlyImported > 0 || alreadyExisted > 0))
+                titleText += $" · {targetColName}";
+        }
+
+        var titleTb = L10n.Skip(new TextBlock
+        {
+            Text = titleText,
+            FontSize = 12.5,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ThemeHelper.Brush(p.T1),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        Grid.SetColumn(titleTb, 1);
+        head.Children.Add(titleTb);
+
+        var closeBtn = new Button
+        {
+            Style = (Style)Application.Current.Resources["YYToolbarIconButtonStyle"],
+            Width = 22,
+            Height = 22,
+            MinWidth = 22,
+            MinHeight = 22,
+            Padding = new Thickness(0),
+            Content = YYIcons.Make("xmark", 10.5, ThemeHelper.Brush(p.T3)),
+        };
+        closeBtn.Click += (_, _) =>
+        {
+            _importCardAutoHideTimer?.Stop();
+            ImportProgressCard.Visibility = Visibility.Collapsed;
+        };
+        Grid.SetColumn(closeBtn, 2);
+        head.Children.Add(closeBtn);
+        ImportProgressContent.Children.Add(head);
+
+        if (!finished)
+        {
+            ImportProgressContent.Children.Add(new ProgressBar
             {
-                ShowToast(
-                    L10n.T($"导入失败，共 {failures.Count} 个文件未能导入"),
-                    detail: $"{firstFail.FileName}：{firstFail.Reason}");
+                Minimum = 0,
+                Maximum = Math.Max(1, total),
+                Value = Math.Clamp(done, 0, Math.Max(1, total)),
+                Height = 3,
+            });
+        }
+
+        // Per-file rows
+        var listStack = new StackPanel { Spacing = 4 };
+        foreach (var r in rows)
+        {
+            var rg = new Grid { ColumnSpacing = 8 };
+            rg.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            rg.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var fnTb = L10n.Skip(new TextBlock
+            {
+                Text = r.FileName,
+                FontSize = 11.5,
+                Foreground = ThemeHelper.Brush(r.Status == "failed" ? p.Danger : p.T1),
+                MaxLines = 1,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            if (!string.IsNullOrWhiteSpace(r.Detail))
+                ToolTipService.SetToolTip(fnTb, r.Detail);
+            rg.Children.Add(fnTb);
+
+            var (stLabel, stColor) = r.Status switch
+            {
+                "importing" => (L10n.T("导入中…"), tc.Accent),
+                "imported" => (L10n.T("已导入"), p.Ok),
+                "exists" => (L10n.T("已存在"), p.T2),
+                "failed" => (L10n.T("失败"), p.Danger),
+                _ => (L10n.T("等待中"), p.T3),
+            };
+            var stTb = L10n.Skip(new TextBlock
+            {
+                Text = stLabel,
+                FontSize = 11,
+                FontWeight = r.Status is "importing" or "imported" ? FontWeights.SemiBold : FontWeights.Normal,
+                Foreground = ThemeHelper.Brush(stColor),
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            if (!string.IsNullOrWhiteSpace(r.Detail))
+                ToolTipService.SetToolTip(stTb, r.Detail);
+            Grid.SetColumn(stTb, 1);
+            rg.Children.Add(stTb);
+            listStack.Children.Add(rg);
+
+            if (r.Status == "failed" && !string.IsNullOrWhiteSpace(r.Detail))
+            {
+                listStack.Children.Add(L10n.Skip(new TextBlock
+                {
+                    Text = r.Detail,
+                    FontSize = 10.5,
+                    Foreground = ThemeHelper.Brush(p.T3),
+                    MaxLines = 2,
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, -2, 0, 2),
+                }));
             }
         }
+        ImportProgressContent.Children.Add(new ScrollViewer
+        {
+            MaxHeight = 148,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = listStack,
+        });
+
+        if (finished && revealBook is not null)
+        {
+            var footRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 2, 0, 0) };
+            var bookCap = revealBook;
+            var colCap = targetCollectionId;
+            var revealBtn = new Button
+            {
+                Style = (Style)Application.Current.Resources["YYFluentButtonStyle"],
+                Height = 28,
+                MinHeight = 28,
+                FontSize = 11.5,
+                Content = L10n.T("在书架里显示"),
+            };
+            revealBtn.Click += (_, _) =>
+            {
+                _importCardAutoHideTimer?.Stop();
+                ImportProgressCard.Visibility = Visibility.Collapsed;
+                RevealBookInShelf(bookCap.Id, colCap);
+            };
+            footRow.Children.Add(revealBtn);
+
+            if (newlyImported + alreadyExisted == 1)
+            {
+                var openBtn = new Button
+                {
+                    Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"],
+                    Height = 28,
+                    MinHeight = 28,
+                    FontSize = 11.5,
+                    Content = L10n.T("打开"),
+                };
+                openBtn.Click += (_, _) =>
+                {
+                    _importCardAutoHideTimer?.Stop();
+                    ImportProgressCard.Visibility = Visibility.Collapsed;
+                    TryOpenBook(bookCap);
+                };
+                footRow.Children.Add(openBtn);
+            }
+            ImportProgressContent.Children.Add(footRow);
+        }
+
+        ImportProgressCard.Visibility = Visibility.Visible;
     }
 
     private async Task PickAndImportBooksAsync()
@@ -285,7 +523,7 @@ public sealed partial class LibraryView
                 _ownerWindow,
                 [".epub", ".pdf", ".txt", ".mobi", ".azw3", ".azw", ".prc", ".mp3", ".m4b", ".m4a", ".zip"]);
             if (files.Count > 0)
-                await ImportPathsAsync(files, openFirst: false);
+                await ImportPathsAsync(files, openFirst: false, targetCollectionId: ActiveCollectionId);
         }
         catch (Exception ex)
         {
@@ -300,7 +538,7 @@ public sealed partial class LibraryView
             string? folder = await NativePickerHelper.PickSingleFolderAsync(_ownerWindow);
             if (!string.IsNullOrEmpty(folder))
             {
-                await ImportPathsAsync([folder], openFirst: false);
+                await ImportPathsAsync([folder], openFirst: false, targetCollectionId: ActiveCollectionId);
             }
         }
         catch (Exception ex)
@@ -338,17 +576,24 @@ public sealed partial class LibraryView
     public async Task PromptAddRecordBookAsync(ReadingStatus defaultStatus)
     {
         if (RootGrid.XamlRoot is not { } xr) return;
-        var titleBox = new TextBox { Header = L10n.T("书名"), PlaceholderText = L10n.T("输入纸质书书名") };
-        var authorBox = new TextBox { Header = L10n.T("作者（可选）"), PlaceholderText = L10n.T("多位作者用顿号或逗号隔开") };
+        var titleBox = new TextBox { Header = L10n.T("书名"), PlaceholderText = L10n.T("书名") };
+        var authorBox = new TextBox { Header = L10n.T("作者（可选）"), PlaceholderText = L10n.T("几位作者用顿号隔开") };
+        var hint = new TextBlock
+        {
+            Text = L10n.T("作者、页数、封面以后在书的页面里补，不补也行。"),
+            FontSize = 11.5,
+            Opacity = 0.72,
+            TextWrapping = TextWrapping.Wrap,
+        };
 
         var dlg = new ContentDialog
         {
             XamlRoot = xr,
-            Title = L10n.T("记一本纸质书"),
-            PrimaryButtonText = L10n.T("加入书架"),
+            Title = L10n.T("加一本书"),
+            PrimaryButtonText = L10n.T("加入"),
             CloseButtonText = L10n.T("取消"),
             DefaultButton = ContentDialogButton.Primary,
-            Content = new StackPanel { Spacing = 12, MinWidth = 340, Children = { titleBox, authorBox } },
+            Content = new StackPanel { Spacing = 12, MinWidth = 340, Children = { titleBox, authorBox, hint } },
         };
         ConfigureDialogTheme(dlg);
         if (await dlg.ShowSafeAsync(_library.Prefs.Tint) != ContentDialogResult.Primary) return;
@@ -361,7 +606,7 @@ public sealed partial class LibraryView
         {
             var added = _library.Core.AddRecordBook(title, authors, defaultStatus);
             RefreshBooks();
-            ShowToast($"已记录纸质书《{added.Title}》");
+            ShowToast($"已加入《{added.Title}》");
         }
         catch (Exception ex)
         {
@@ -372,14 +617,14 @@ public sealed partial class LibraryView
     private async Task ShowEditBookDialogAsync(BookSummary book)
     {
         if (RootGrid.XamlRoot is not { } xr) return;
-        var titleBox = new TextBox { Header = L10n.T("书名"), Text = book.Title };
-        var authorBox = new TextBox { Header = L10n.T("作者"), Text = string.Join("、", book.Authors) };
+        var titleBox = new TextBox { Header = L10n.T("书名"), Text = book.Title, PlaceholderText = L10n.T("留空就用文件里的") };
+        var authorBox = new TextBox { Header = L10n.T("作者"), Text = string.Join("、", book.Authors), PlaceholderText = L10n.T("几位作者用顿号隔开") };
         byte[]? pickedCoverBytes = null;
-        var coverStatus = new TextBlock { Text = L10n.T("保持当前封面"), FontSize = 12 };
+        var coverStatus = new TextBlock { Text = L10n.T("保持当前封面"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
         var pickCoverBtn = new Button
         {
             Style = (Style)Application.Current.Resources["YYFluentButtonStyle"],
-            Content = L10n.T("更换封面图片…"),
+            Content = L10n.T("换封面"),
         };
         pickCoverBtn.Click += async (_, _) =>
         {
@@ -399,14 +644,21 @@ public sealed partial class LibraryView
         };
 
         var coverRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { pickCoverBtn, coverStatus } };
+        var noteTb = new TextBlock
+        {
+            Text = L10n.T("只改书架上显示的名字，书的文件不动。"),
+            FontSize = 11.5,
+            Opacity = 0.72,
+            TextWrapping = TextWrapping.Wrap,
+        };
         var dlg = new ContentDialog
         {
             XamlRoot = xr,
-            Title = L10n.T("编辑书籍信息"),
-            PrimaryButtonText = L10n.T("保存"),
+            Title = L10n.T("编辑信息"),
+            PrimaryButtonText = L10n.T("好"),
             CloseButtonText = L10n.T("取消"),
             DefaultButton = ContentDialogButton.Primary,
-            Content = new StackPanel { Spacing = 12, MinWidth = 360, Children = { titleBox, authorBox, coverRow } },
+            Content = new StackPanel { Spacing = 12, MinWidth = 360, Children = { titleBox, authorBox, coverRow, noteTb } },
         };
         ConfigureDialogTheme(dlg);
 
@@ -453,7 +705,7 @@ public sealed partial class LibraryView
         var newColBox = new TextBox
         {
             Style = (Style)Application.Current.Resources["YYSingleLineTextBoxStyle"],
-            PlaceholderText = L10n.T("或输入新合集名称直接创建…"),
+            PlaceholderText = L10n.T("找合集，或打个新名字"),
             Margin = new Thickness(0, 6, 0, 0),
         };
         var body = new StackPanel { Spacing = 8, MinWidth = 320 };
@@ -463,8 +715,8 @@ public sealed partial class LibraryView
         var dlg = new ContentDialog
         {
             XamlRoot = xr,
-            Title = books.Count == 1 ? L10n.T($"加入合集 · 《{books[0].Title}》") : L10n.T($"将 {books.Count} 本书加入合集"),
-            PrimaryButtonText = L10n.T("确定"),
+            Title = books.Count == 1 ? L10n.T("加入合集") : L10n.T($"将 {books.Count} 本书加入合集"),
+            PrimaryButtonText = L10n.T("好"),
             CloseButtonText = L10n.T("取消"),
             DefaultButton = ContentDialogButton.Primary,
             Content = body,
@@ -490,7 +742,7 @@ public sealed partial class LibraryView
                     _library.SetInCollection(created.Id, books[i].Id, true);
             }
             RefreshBooks();
-            ShowToast("已更新合集归档");
+            ShowToast("已加入合集");
         }
         catch (Exception ex)
         {
@@ -501,12 +753,12 @@ public sealed partial class LibraryView
     private async Task CreateNewCollectionDialogAsync()
     {
         if (RootGrid.XamlRoot is not { } xr) return;
-        var nameBox = new TextBox { Header = L10n.T("合集名称"), PlaceholderText = L10n.T("例如：文学经典、2026 必读") };
+        var nameBox = new TextBox { Header = L10n.T("起个名字，之后可以把书拖进去。"), PlaceholderText = L10n.T("合集的名字") };
         var dlg = new ContentDialog
         {
             XamlRoot = xr,
             Title = L10n.T("新建合集"),
-            PrimaryButtonText = L10n.T("创建"),
+            PrimaryButtonText = L10n.T("建好了"),
             CloseButtonText = L10n.T("取消"),
             DefaultButton = ContentDialogButton.Primary,
             Content = nameBox,
@@ -533,7 +785,7 @@ public sealed partial class LibraryView
         var audios = _shelfBooks.Where(b => b.Format == BookFormat.Audio).ToList();
         if (audios.Count == 0)
         {
-            ShowToast("书库中暂无可配对的有声书，请先导入有声书");
+            ShowToast("书架上还没有有声书，可以先导入 .m4b / .mp3 文件或文件夹后再配对。");
             return;
         }
         var combo = new ComboBox
@@ -545,8 +797,8 @@ public sealed partial class LibraryView
         var dlg = new ContentDialog
         {
             XamlRoot = xr,
-            Title = L10n.T($"为《{book.Title}》配对有声书"),
-            PrimaryButtonText = L10n.T("配对并后台对齐"),
+            Title = L10n.T($"合成听读书 · 《{book.Title}》"),
+            PrimaryButtonText = L10n.T("开始合成"),
             CloseButtonText = L10n.T("取消"),
             DefaultButton = ContentDialogButton.Primary,
             Content = new StackPanel
@@ -555,7 +807,7 @@ public sealed partial class LibraryView
                 MinWidth = 340,
                 Children =
                 {
-                    new TextBlock { Text = L10n.T("配对后可在阅读器内直接切换真人原声跟读，文字随声音逐句推进。"), TextWrapping = TextWrapping.Wrap, FontSize = 12.5 },
+                    new TextBlock { Text = L10n.T("合成以后听到哪句，书页就走到哪句。"), TextWrapping = TextWrapping.Wrap, FontSize = 12.5 },
                     combo,
                 },
             },
@@ -567,7 +819,7 @@ public sealed partial class LibraryView
         {
             _library.Core.AudiobookPair(picked.Id, book.Id);
             RefreshBooks();
-            ShowToast($"已配对《{picked.Title}》");
+            ShowToast($"已配上《{picked.Title}》");
         }
         catch (Exception ex)
         {
@@ -578,21 +830,59 @@ public sealed partial class LibraryView
     private async Task HandleDeleteBooksAsync(IReadOnlyList<BookSummary> books)
     {
         if (RootGrid.XamlRoot is not { } xr || books.Count == 0) return;
-        string msg = books.Count == 1
-            ? L10n.T($"确定要将《{books[0].Title}》移出语阅书库吗？移出后可立即点击撤销恢复。")
-            : L10n.T($"确定要将选中的 {books.Count} 本书移出语阅书库吗？");
+
+        // 1:1 macOS deletingRecord (BookRecord.swift:318): offer "只删文件，留下记录" when deleting a single
+        // digital book that already carries progress, rating, comment, or highlights.
+        bool canKeepRecordOnly = books.Count == 1
+            && !books[0].Record
+            && (books[0].Progress > 0.001f
+                || books[0].Status == ReadingStatus.Finished
+                || books[0].Rating is > 0
+                || !string.IsNullOrWhiteSpace(books[0].Comment)
+                || (_markCounts.TryGetValue(books[0].Id, out var mc) && mc > 0));
+        bool isSinglePaper = books.Count == 1 && books[0].Record;
+
+        string title = books.Count == 1
+            ? L10n.T($"删除《{books[0].Title}》")
+            : L10n.T($"删除这 {books.Count} 本书？");
+        string msg = canKeepRecordOnly
+            ? L10n.T("留下记录的话，评分、短评、笔记和读到哪都还在「进度」里。")
+            : isSinglePaper
+                ? L10n.T("评分、短评和读书记录都会一起删掉。")
+                : books.Count == 1
+                    ? L10n.T("删除后可以立即点击撤销恢复。")
+                    : L10n.T("删除后可以立即点击撤销恢复。");
 
         var dlg = new ContentDialog
         {
             XamlRoot = xr,
-            Title = L10n.T("移出书库"),
+            Title = title,
             Content = msg,
-            PrimaryButtonText = L10n.T("移出"),
+            PrimaryButtonText = (canKeepRecordOnly || isSinglePaper) ? L10n.T("连记录一起删") : L10n.T("删除"),
+            SecondaryButtonText = canKeepRecordOnly ? L10n.T("只删文件，留下记录") : null,
             CloseButtonText = L10n.T("取消"),
             DefaultButton = ContentDialogButton.Close,
         };
         ConfigureDialogTheme(dlg);
-        if (await dlg.ShowSafeAsync(_library.Prefs.Tint) != ContentDialogResult.Primary) return;
+        var result = await dlg.ShowSafeAsync(_library.Prefs.Tint);
+        if (result == ContentDialogResult.Secondary && canKeepRecordOnly)
+        {
+            var target = books[0];
+            App.CurrentApp.CloseBookWindows(target.Id);
+            try
+            {
+                _library.KeepRecordOnly(target.Id);
+                _selectedBookIds.Remove(target.Id);
+                RefreshBooks();
+                ShowToast($"已删除《{target.Title}》", detail: "笔记和进度都留着");
+            }
+            catch (Exception ex)
+            {
+                ShowToast($"操作失败：{ex.Message}");
+            }
+            return;
+        }
+        if (result != ContentDialogResult.Primary) return;
 
         var deletedIds = books.Select(b => b.Id).ToList();
         foreach (var id in deletedIds)
@@ -603,7 +893,7 @@ public sealed partial class LibraryView
         }
         RefreshBooks();
         ShowToast(
-            deletedIds.Count == 1 ? $"已移出《{books[0].Title}》" : $"已移出 {deletedIds.Count} 本书",
+            deletedIds.Count == 1 ? $"已删除《{books[0].Title}》" : $"已删除 {deletedIds.Count} 本书",
             canUndo: true,
             isDelete: true,
             undo: () =>
@@ -627,10 +917,10 @@ public sealed partial class LibraryView
     {
         try
         {
-            string? path = await NativePickerHelper.PickSaveFileAsync(_ownerWindow, $"{book.Title}-笔记版", [("EPUB", [".epub"])]);
+            string? path = await NativePickerHelper.PickSaveFileAsync(_ownerWindow, $"{book.Title}（带笔记）", [("EPUB", [".epub"])]);
             if (string.IsNullOrEmpty(path)) return;
             await _library.NoteExports.ExportAnnotatedEpubAsync(book.Id, path);
-            ShowToast($"已导出带笔记的 EPUB：{Path.GetFileName(path)}");
+            ShowToast("导出好了", detail: Path.GetFileName(path));
         }
         catch (Exception ex)
         {

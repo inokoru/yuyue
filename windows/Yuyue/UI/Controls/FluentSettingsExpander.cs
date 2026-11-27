@@ -38,7 +38,8 @@ public sealed class FluentSettingsExpander : UserControl
         string? iconName = null,
         UIElement? headerAction = null,
         bool initiallyExpanded = false,
-        bool dark = false)
+        bool dark = false,
+        UIElement? customIcon = null)
     {
         _dark = dark;
         _expanded = initiallyExpanded;
@@ -57,10 +58,12 @@ public sealed class FluentSettingsExpander : UserControl
         {
             Padding = new Thickness(16, 13, 16, 13),
             MinHeight = 56,
+            CornerRadius = _expanded ? new CornerRadius(5, 5, 0, 0) : new CornerRadius(5),
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
         };
+        bool hasIcon = customIcon is not null || !string.IsNullOrEmpty(iconName);
         var hGrid = new Grid { ColumnSpacing = 14 };
-        hGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = string.IsNullOrEmpty(iconName) ? new GridLength(0) : new GridLength(22) });
+        hGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = hasIcon ? (customIcon is not null ? GridLength.Auto : new GridLength(22)) : new GridLength(0) });
         hGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         hGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         hGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -68,10 +71,11 @@ public sealed class FluentSettingsExpander : UserControl
         var p = ThemeHelper.Palette(dark);
         var iconHost = new ContentPresenter
         {
+            MinWidth = hasIcon ? 22 : 0,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            Visibility = string.IsNullOrEmpty(iconName) ? Visibility.Collapsed : Visibility.Visible,
-            Content = string.IsNullOrEmpty(iconName) ? null : YYIcons.Make(iconName, 17, ThemeHelper.Brush(p.T2)),
+            Visibility = hasIcon ? Visibility.Visible : Visibility.Collapsed,
+            Content = customIcon ?? (string.IsNullOrEmpty(iconName) ? null : YYIcons.Make(iconName, 17, ThemeHelper.Brush(p.T2))),
         };
 
         var textStack = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
@@ -166,12 +170,28 @@ public sealed class FluentSettingsExpander : UserControl
         _itemsHost.Children.Add(row);
     }
 
-    public void AddKeyValueRow(string label, string? description, FrameworkElement rightControl)
+    public void AddKeyValueRow(string label, string? description, FrameworkElement rightControl, UIElement? leadingIcon = null)
     {
         var p = ThemeHelper.Palette(_dark);
         var g = new Grid { ColumnSpacing = 12 };
+        if (leadingIcon is not null)
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        int textCol = 0;
+        if (leadingIcon is not null)
+        {
+            var iconWrap = new ContentPresenter
+            {
+                Content = leadingIcon,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(iconWrap, 0);
+            g.Children.Add(iconWrap);
+            textCol = 1;
+        }
 
         var left = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
         left.Children.Add(new TextBlock
@@ -190,8 +210,8 @@ public sealed class FluentSettingsExpander : UserControl
                 TextWrapping = TextWrapping.Wrap,
             });
         }
-        Grid.SetColumn(left, 0);
-        Grid.SetColumn(rightControl, 1);
+        Grid.SetColumn(left, textCol);
+        Grid.SetColumn(rightControl, textCol + 1);
         g.Children.Add(left);
         g.Children.Add(rightControl);
         AddItem(g);
@@ -213,6 +233,7 @@ public sealed class FluentSettingsExpander : UserControl
     private void UpdateChevron()
     {
         var p = ThemeHelper.Palette(_dark);
+        _headerBar.CornerRadius = _expanded ? new CornerRadius(5, 5, 0, 0) : new CornerRadius(5);
         _chevronHost.Content = YYIcons.Make(_expanded ? "chevron-up" : "chevron-down", 13, ThemeHelper.Brush(p.T3));
     }
 }

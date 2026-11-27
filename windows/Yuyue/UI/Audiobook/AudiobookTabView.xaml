@@ -41,8 +41,8 @@
                     MinHeight="26"
                     Padding="10,0"
                     FontSize="11.5"
-                    Content="弹出置顶迷你窗"
-                    ToolTipService.ToolTip="弹出置顶 Acrylic 迷你播放器，边办公边听书"
+                    Content="迷你听书"
+                    ToolTipService.ToolTip="弹出置顶迷你听书浮窗，边办公边听书"
                     Click="OpenMiniPlayer_Click" />
                 <Button
                     x:Name="BookmarkBtn"
@@ -51,7 +51,7 @@
                     MinHeight="26"
                     Padding="10,0"
                     FontSize="11.5"
-                    Content="+ 音频书签 (B)"
+                    Content="加书签"
                     Click="AddBookmark_Click" />
                 <Button
                     x:Name="DetachBtn"
@@ -121,7 +121,7 @@
                         <Button x:Name="RewindBtn" Grid.Column="1" Style="{StaticResource YYToolbarIconButtonStyle}" Width="40" Height="40" CornerRadius="20" HorizontalAlignment="Center" ToolTipService.ToolTip="后退 15 秒 (←)" Click="Rewind15_Click" />
                         <Button x:Name="PlayPauseBtn" Grid.Column="2" Style="{StaticResource YYFluentAccentButtonStyle}" Width="58" Height="58" CornerRadius="29" Padding="0" HorizontalAlignment="Center" ToolTipService.ToolTip="播放 / 暂停 (空格)" Click="PlayPause_Click" />
                         <Button x:Name="ForwardBtn" Grid.Column="3" Style="{StaticResource YYToolbarIconButtonStyle}" Width="40" Height="40" CornerRadius="20" HorizontalAlignment="Center" ToolTipService.ToolTip="前进 30 秒 (→)" Click="Forward30_Click" />
-                        <Button x:Name="SleepBtn" Grid.Column="4" Style="{StaticResource YYToolbarIconButtonStyle}" Width="40" Height="40" CornerRadius="20" HorizontalAlignment="Center" ToolTipService.ToolTip="睡眠定时" />
+                        <Button x:Name="SleepBtn" Grid.Column="4" Style="{StaticResource YYToolbarIconButtonStyle}" Width="40" Height="40" CornerRadius="20" HorizontalAlignment="Center" ToolTipService.ToolTip="定时" />
                     </Grid>
 
                     <!-- 响度均衡与音量增益控制 -->
@@ -178,7 +178,7 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="StatusLeftText" Grid.Column="0" Text="有声书" FontSize="11" Foreground="{ThemeResource YYText3Brush}" VerticalAlignment="Center" MaxLines="1" TextTrimming="CharacterEllipsis" />
-                <TextBlock Grid.Column="1" Text="空格播放/暂停 · ← 后退15秒 · → 前进30秒 · B 加书签" FontSize="11" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="空格 播放/暂停 · ← 后退 15 秒 · → 前进 30 秒 · B 加书签" FontSize="11" Foreground="{ThemeResource YYText3Brush}" HorizontalAlignment="Right" VerticalAlignment="Center" />
             </Grid>
         </Border>
     </Grid>

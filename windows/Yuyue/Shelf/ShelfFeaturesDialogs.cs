@@ -47,13 +47,13 @@ public static class ShelfFeaturesDialogs
         });
 
         Button? copyBtn = null;
-        copyBtn = YYChrome.MakeDialogButton("复制传书地址", () =>
+        copyBtn = YYChrome.MakeDialogButton("复制", () =>
         {
             var dp = new DataPackage();
             dp.SetText(url);
             Clipboard.SetContent(dp);
             if (copyBtn?.Content is TextBlock tb)
-                tb.Text = L10n.T("✓ 已复制");
+                tb.Text = L10n.T("已复制");
         }, dark, library.Prefs.Tint, "secondary", height: 30, horizontalPadding: 14);
         copyBtn.HorizontalAlignment = HorizontalAlignment.Center;
 
@@ -130,7 +130,7 @@ public static class ShelfFeaturesDialogs
             });
             var statusTb = new TextBlock
             {
-                Text = L10n.T("准备接收…"),
+                Text = L10n.T("排队中"),
                 FontSize = 11,
                 Foreground = ThemeHelper.Brush(p.T3),
                 TextWrapping = TextWrapping.Wrap,
@@ -178,10 +178,10 @@ public static class ShelfFeaturesDialogs
             Padding = new Thickness(22, 18, 22, 18),
             Children =
             {
-                YYChrome.MakeDialogHeader("局域网无线传书", "同一 Wi-Fi 下浏览器直传", () => dlgRef?.Hide(), dark, titleSize: 17),
+                YYChrome.MakeDialogHeader("Wi‑Fi 传书", "同一 Wi-Fi 下浏览器直传", () => dlgRef?.Hide(), dark, titleSize: 17),
                 urlCard,
                 rowsCard,
-                YYChrome.MakeDialogButton("关闭传书服务", () => dlgRef?.Hide(), dark, library.Prefs.Tint, "dark", height: 38, stretch: true),
+                YYChrome.MakeDialogButton("关闭", () => dlgRef?.Hide(), dark, library.Prefs.Tint, "dark", height: 38, stretch: true),
             },
         };
 
@@ -197,7 +197,7 @@ public static class ShelfFeaturesDialogs
                     string name = msg["准备接收：".Length..].Trim();
                     var row = GetOrAddRow(name, name);
                     row.Finished = false;
-                    row.StatusText.Text = L10n.T("准备接收…");
+                    row.StatusText.Text = L10n.T("排队中");
                     row.StatusText.Foreground = ThemeHelper.Brush(p.T3);
                     row.Bar.Visibility = Visibility.Visible;
                     row.Bar.IsIndeterminate = true;
@@ -226,7 +226,7 @@ public static class ShelfFeaturesDialogs
                         ?? GetOrAddRow(Guid.NewGuid().ToString("N"), msg.TrimStart('✓', ' '));
                     active.Finished = true;
                     active.NameText.Text = msg.Replace("✓ 已导入", "").Trim(' ', '《', '》') is { Length: > 0 } t ? t : active.NameText.Text;
-                    active.StatusText.Text = L10n.T("已导入书架");
+                    active.StatusText.Text = L10n.T("已经放进书架");
                     active.StatusText.Foreground = ThemeHelper.Brush(p.Ok);
                     active.Bar.Visibility = Visibility.Collapsed;
                     active.Badge.Content = YYIcons.Make("check-circle", 14, ThemeHelper.Brush(p.Ok));

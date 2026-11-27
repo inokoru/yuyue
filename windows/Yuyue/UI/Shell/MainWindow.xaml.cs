@@ -841,15 +841,20 @@ public sealed partial class MainWindow : Window, IDebugScreenshotCapable
 
         if (e.Key == VirtualKey.Escape)
         {
-            if (_isFullScreen)
-            {
-                SetFullScreen(false);
-                e.Handled = true;
-                return;
-            }
             if (IsSettingsOpen && !inTextInput)
             {
                 CloseSettings();
+                e.Handled = true;
+                return;
+            }
+            if (!inTextInput && _activeTab is not null && _activeTab.HandleWindowKeyDown(e.Key, ctrl, shift, alt))
+            {
+                e.Handled = true;
+                return;
+            }
+            if (_isFullScreen)
+            {
+                SetFullScreen(false);
                 e.Handled = true;
                 return;
             }
@@ -923,7 +928,10 @@ public sealed partial class MainWindow : Window, IDebugScreenshotCapable
         if (e.DataView.Contains(StandardDataFormats.StorageItems))
         {
             e.AcceptedOperation = DataPackageOperation.Copy;
-            DropOverlayText.Text = L10n.T("松开即可导入到语阅书库");
+            string? colName = _activeTab is Yuyue.UI.Library.LibraryView lv ? lv.ActiveCollectionName : null;
+            DropOverlayText.Text = !string.IsNullOrWhiteSpace(colName)
+                ? L10n.T($"松开即可导入「{colName}」")
+                : L10n.T("松开即可导入书库");
             DropOverlay.Visibility = Visibility.Visible;
         }
     }
@@ -1105,28 +1113,46 @@ public sealed partial class MainWindow : Window, IDebugScreenshotCapable
                 }
             }
 
-            // Composite any open modal ContentDialog (e.g. QuickSearchDialog) from PopupRoot over the window capture
+            // Composite any open modal ContentDialog or Flyout popup from PopupRoot over the window capture
             if (RootGrid.XamlRoot is { } xr)
             {
                 foreach (var pop in VisualTreeHelper.GetOpenPopupsForXamlRoot(xr))
                 {
-                    if (pop.Child is not ContentDialog dlg || dlg.ActualWidth < 20 || dlg.ActualHeight < 20) continue;
+                    if (pop.Child is not FrameworkElement fe || fe.ActualWidth < 20 || fe.ActualHeight < 20) continue;
+                    bool isDialog = fe is ContentDialog;
                     try
                     {
                         var pRtb = new Microsoft.UI.Xaml.Media.Imaging.RenderTargetBitmap();
-                        await pRtb.RenderAsync(dlg);
+                        await pRtb.RenderAsync(fe);
                         var pBuf = await pRtb.GetPixelsAsync();
                         byte[] src = System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions.ToArray(pBuf);
                         int pw = pRtb.PixelWidth;
                         int ph = pRtb.PixelHeight;
-                        int ox = Math.Max(0, (dstW - pw) / 2);
-                        int oy = Math.Max(0, (dstH - ph) / 2);
-                        // Subtle Windows 11 modal smoke layer
-                        for (int i = 0; i < dst.Length; i += 4)
+                        int ox, oy;
+                        if (isDialog)
                         {
-                            dst[i] = (byte)(dst[i] * 0.72);
-                            dst[i + 1] = (byte)(dst[i + 1] * 0.72);
-                            dst[i + 2] = (byte)(dst[i + 2] * 0.72);
+                            ox = Math.Max(0, (dstW - pw) / 2);
+                            oy = Math.Max(0, (dstH - ph) / 2);
+                            // Subtle Windows 11 modal smoke layer
+                            for (int i = 0; i < dst.Length; i += 4)
+                            {
+                                dst[i] = (byte)(dst[i] * 0.72);
+                                dst[i + 1] = (byte)(dst[i + 1] * 0.72);
+                                dst[i + 2] = (byte)(dst[i + 2] * 0.72);
+                            }
+                        }
+                        else
+                        {
+                            double rawX = pop.HorizontalOffset;
+                            double rawY = pop.VerticalOffset;
+                            try
+                            {
+                                var pt = fe.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point(0, 0));
+                                if (pt.X > 0 || pt.Y > 0) { rawX = pt.X; rawY = pt.Y; }
+                            }
+                            catch { }
+                            ox = Math.Clamp((int)Math.Round(rawX * scaleX), 0, Math.Max(0, dstW - pw));
+                            oy = Math.Clamp((int)Math.Round(rawY * scaleY), 0, Math.Max(0, dstH - ph));
                         }
                         int cw = Math.Min(pw, dstW - ox);
                         int ch = Math.Min(ph, dstH - oy);

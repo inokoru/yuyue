@@ -454,7 +454,7 @@ public static class BookToolsDialogs
 
             root.Children.Add(new TextBlock
             {
-                Text = "规则从上往下依次执行，按住一条可以拖动顺序。只改朗读的规则不动屏幕上的字，只改读出来的音。",
+                Text = "规则从上往下依次执行，点右侧上下箭头可以调整顺序。只改朗读的规则不动屏幕上的字，只改读出来的音。",
                 FontSize = 11.5,
                 LineHeight = 18,
                 Foreground = ThemeHelper.Brush(p.T3),
@@ -472,7 +472,7 @@ public static class BookToolsDialogs
 
             var footRow = new Grid { Margin = new Thickness(0, 4, 0, 0) };
             var leftActs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Left };
-            var commonPill = YYChrome.MakeDialogButton(L10n.T("＋  常用规则"), () => { subMode = "common"; RenderHost(); }, dark, library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 14);
+            var commonPill = YYChrome.MakeDialogButton(L10n.T("＋ 常用规则"), () => { subMode = "common"; RenderHost(); }, dark, library.Prefs.Tint, "secondary", height: 36, horizontalPadding: 14);
             var importJsonPill = YYChrome.MakeDialogButton(L10n.T("导入 JSON…"), async () =>
             {
                 try

@@ -4,7 +4,9 @@ using Microsoft.UI;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.UI;
 using WinRT.Interop;
 
@@ -124,18 +126,35 @@ public static class ThemeHelper
         void SetBrush(string key, Color color)
         {
             if (target.TryGetValue(key, out var existing) && existing is SolidColorBrush sb)
-                sb.Color = color;
-            else
-                target[key] = new SolidColorBrush(color);
+            {
+                try
+                {
+                    sb.Color = color;
+                    return;
+                }
+                catch
+                {
+                    // System/ThemeDictionaries brushes can be frozen/immutable; replace with a mutable brush in target.
+                }
+            }
+            target[key] = new SolidColorBrush(color);
         }
 
         void SetColor(string key, Color color) => target[key] = color;
 
-        // Accent
+        // Accent (override Light1/2/3 & Dark1/2/3 too so WinUI 3 system templates never fall back to Windows blue)
         SetColor("SystemAccentColor", accent);
+        SetColor("SystemAccentColorLight1", Shift(accent, 12));
+        SetColor("SystemAccentColorLight2", Shift(accent, 22));
+        SetColor("SystemAccentColorLight3", Shift(accent, 34));
+        SetColor("SystemAccentColorDark1", Shift(accent, -12));
+        SetColor("SystemAccentColorDark2", Shift(accent, -24));
+        SetColor("SystemAccentColorDark3", Shift(accent, -36));
         SetBrush("AccentFillColorDefaultBrush", accent);
         SetBrush("AccentFillColorSecondaryBrush", accentHover);
         SetBrush("AccentFillColorTertiaryBrush", accentPress);
+        SetBrush("TextOnAccentFillColorPrimaryBrush", Colors.White);
+        SetBrush("TextOnAccentFillColorSecondaryBrush", Color.FromArgb(230, 255, 255, 255));
 
         // Slider (Native Windows 11 Fluent 2: crisp warm accent center dot inside white/surface ring)
         SetBrush("SliderTrackFill", dark ? Color.FromArgb(255, 52, 50, 47) : Color.FromArgb(255, 224, 220, 213));
@@ -193,6 +212,74 @@ public static class ThemeHelper
         SetBrush("CheckBoxCheckBackgroundStrokeChecked", accent);
         SetBrush("CheckBoxCheckBackgroundStrokeCheckedPointerOver", accentHover);
         SetBrush("CheckBoxCheckBackgroundStrokeCheckedPressed", accentPress);
+        SetBrush("CheckBoxCheckBackgroundFillIndeterminate", accent);
+        SetBrush("CheckBoxCheckBackgroundFillIndeterminatePointerOver", accentHover);
+        SetBrush("CheckBoxCheckBackgroundFillIndeterminatePressed", accentPress);
+        SetBrush("CheckBoxCheckBackgroundStrokeIndeterminate", accent);
+        SetBrush("CheckBoxCheckBackgroundStrokeIndeterminatePointerOver", accentHover);
+        SetBrush("CheckBoxCheckBackgroundStrokeIndeterminatePressed", accentPress);
+        SetBrush("CheckBoxCheckGlyphForegroundChecked", Colors.White);
+        SetBrush("CheckBoxCheckGlyphForegroundCheckedPointerOver", Colors.White);
+        SetBrush("CheckBoxCheckGlyphForegroundCheckedPressed", Colors.White);
+        SetBrush("CheckBoxCheckGlyphForegroundIndeterminate", Colors.White);
+        SetBrush("CheckBoxCheckBackgroundFillUncheckedPointerOver", dark ? Color.FromArgb(18, 255, 255, 255) : Color.FromArgb(14, 42, 43, 46));
+        SetBrush("CheckBoxCheckBackgroundFillUncheckedPressed", dark ? Color.FromArgb(28, 255, 255, 255) : Color.FromArgb(24, 42, 43, 46));
+
+        // Button warm paper fallback states (defense-in-depth alongside custom App.xaml ControlTemplates)
+        SetBrush("ButtonBackground", dark ? Color.FromArgb(255, 36, 34, 32) : Colors.White);
+        SetBrush("ButtonBackgroundPointerOver", dark ? Color.FromArgb(255, 47, 44, 41) : Color.FromArgb(255, 245, 242, 236));
+        SetBrush("ButtonBackgroundPressed", dark ? Color.FromArgb(255, 32, 30, 28) : Color.FromArgb(255, 236, 232, 224));
+        SetBrush("ButtonBackgroundDisabled", dark ? Color.FromArgb(128, 36, 34, 32) : Color.FromArgb(128, 255, 255, 255));
+        SetBrush("ButtonBorderBrush", dark ? Color.FromArgb(255, 52, 49, 46) : Color.FromArgb(255, 228, 223, 216));
+        SetBrush("ButtonBorderBrushPointerOver", dark ? Color.FromArgb(255, 75, 71, 66) : Color.FromArgb(255, 207, 200, 189));
+        SetBrush("ButtonBorderBrushPressed", dark ? Color.FromArgb(255, 64, 61, 57) : Color.FromArgb(255, 196, 189, 178));
+        SetBrush("ButtonForeground", dark ? Color.FromArgb(255, 240, 237, 232) : Color.FromArgb(255, 35, 36, 39));
+        SetBrush("ButtonForegroundPointerOver", dark ? Color.FromArgb(255, 240, 237, 232) : Color.FromArgb(255, 35, 36, 39));
+        SetBrush("ButtonForegroundPressed", dark ? Color.FromArgb(255, 166, 160, 153) : Color.FromArgb(255, 99, 95, 91));
+
+        // TextBox & PasswordBox warm background hover/focus
+        SetBrush("TextControlBackground", dark ? Color.FromArgb(255, 36, 34, 32) : Colors.White);
+        SetBrush("TextControlBackgroundPointerOver", dark ? Color.FromArgb(255, 43, 40, 37) : Color.FromArgb(255, 250, 248, 245));
+        SetBrush("TextControlBackgroundFocused", dark ? Color.FromArgb(255, 32, 30, 28) : Colors.White);
+        SetBrush("TextControlBackgroundDisabled", dark ? Color.FromArgb(128, 36, 34, 32) : Color.FromArgb(128, 242, 239, 234));
+
+        // ComboBox warm paper surface, hover, and dropdown accent indicator
+        SetBrush("ComboBoxBackground", dark ? Color.FromArgb(255, 36, 34, 32) : Colors.White);
+        SetBrush("ComboBoxBackgroundPointerOver", dark ? Color.FromArgb(255, 47, 44, 41) : Color.FromArgb(255, 245, 242, 236));
+        SetBrush("ComboBoxBackgroundPressed", dark ? Color.FromArgb(255, 32, 30, 28) : Color.FromArgb(255, 236, 232, 224));
+        SetBrush("ComboBoxBackgroundDisabled", dark ? Color.FromArgb(128, 36, 34, 32) : Color.FromArgb(128, 255, 255, 255));
+        SetBrush("ComboBoxBorderBrush", dark ? Color.FromArgb(255, 57, 54, 50) : Color.FromArgb(255, 220, 215, 207));
+        SetBrush("ComboBoxBorderBrushPointerOver", dark ? Color.FromArgb(255, 78, 74, 69) : Color.FromArgb(255, 201, 195, 186));
+        SetBrush("ComboBoxBorderBrushPressed", dark ? Color.FromArgb(255, 69, 65, 60) : Color.FromArgb(255, 192, 185, 175));
+        SetBrush("ComboBoxDropDownBackground", dark ? Color.FromArgb(255, 37, 35, 33) : Color.FromArgb(255, 252, 251, 249));
+        SetBrush("ComboBoxDropDownBorderBrush", dark ? Color.FromArgb(255, 59, 56, 52) : Color.FromArgb(255, 221, 216, 208));
+        SetBrush("ComboBoxItemBackgroundPointerOver", dark ? Color.FromArgb(18, 255, 255, 255) : Color.FromArgb(13, 42, 43, 46));
+        SetBrush("ComboBoxItemBackgroundPressed", dark ? Color.FromArgb(28, 255, 255, 255) : Color.FromArgb(22, 42, 43, 46));
+        SetBrush("ComboBoxItemBackgroundSelected", dark ? Color.FromArgb(24, 255, 255, 255) : Color.FromArgb(17, 42, 43, 46));
+        SetBrush("ComboBoxItemBackgroundSelectedPointerOver", dark ? Color.FromArgb(34, 255, 255, 255) : Color.FromArgb(24, 42, 43, 46));
+        SetBrush("ComboBoxItemBackgroundSelectedPressed", dark ? Color.FromArgb(40, 255, 255, 255) : Color.FromArgb(32, 42, 43, 46));
+        SetBrush("ComboBoxItemPillFillBrush", accent);
+
+        // MenuFlyout & ToolTip warm hover states
+        SetBrush("MenuFlyoutPresenterBackground", dark ? Color.FromArgb(255, 38, 36, 34) : Color.FromArgb(255, 252, 251, 249));
+        SetBrush("MenuFlyoutPresenterBorderBrush", dark ? Color.FromArgb(255, 59, 56, 52) : Color.FromArgb(255, 224, 219, 211));
+        SetBrush("MenuFlyoutItemBackgroundPointerOver", dark ? Color.FromArgb(18, 255, 255, 255) : Color.FromArgb(14, 42, 43, 46));
+        SetBrush("MenuFlyoutItemBackgroundPressed", dark ? Color.FromArgb(28, 255, 255, 255) : Color.FromArgb(24, 42, 43, 46));
+        SetBrush("MenuFlyoutSubItemBackgroundPointerOver", dark ? Color.FromArgb(18, 255, 255, 255) : Color.FromArgb(14, 42, 43, 46));
+        SetBrush("MenuFlyoutSubItemBackgroundPressed", dark ? Color.FromArgb(28, 255, 255, 255) : Color.FromArgb(24, 42, 43, 46));
+        SetBrush("ToggleMenuFlyoutItemBackgroundPointerOver", dark ? Color.FromArgb(18, 255, 255, 255) : Color.FromArgb(14, 42, 43, 46));
+        SetBrush("ToggleMenuFlyoutItemBackgroundPressed", dark ? Color.FromArgb(28, 255, 255, 255) : Color.FromArgb(24, 42, 43, 46));
+        SetBrush("MenuFlyoutItemForeground", dark ? Color.FromArgb(255, 240, 237, 232) : Color.FromArgb(255, 35, 36, 39));
+        SetBrush("MenuFlyoutItemForegroundPointerOver", dark ? Color.FromArgb(255, 240, 237, 232) : Color.FromArgb(255, 35, 36, 39));
+        SetBrush("ToolTipBackground", dark ? Color.FromArgb(255, 40, 38, 35) : Color.FromArgb(255, 252, 251, 249));
+        SetBrush("ToolTipBorderBrush", dark ? Color.FromArgb(255, 61, 58, 54) : Color.FromArgb(255, 221, 216, 208));
+        SetBrush("ToolTipForeground", dark ? Color.FromArgb(255, 240, 237, 232) : Color.FromArgb(255, 35, 36, 39));
+
+        // HyperlinkButton warm accent hover
+        SetBrush("HyperlinkButtonForeground", accent);
+        SetBrush("HyperlinkButtonForegroundPointerOver", accentHover);
+        SetBrush("HyperlinkButtonForegroundPressed", accentPress);
+        SetBrush("HyperlinkButtonBackgroundPointerOver", dark ? Color.FromArgb(18, 255, 255, 255) : Color.FromArgb(12, 42, 43, 46));
     }
 
     /// <summary>
@@ -240,6 +327,130 @@ public static class ThemeHelper
         string candidate = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcons", $"{norm}-{variant}.{ext}");
         if (File.Exists(candidate)) return candidate;
         return Path.Combine(AppContext.BaseDirectory, "Assets", ico ? "AppIcon.ico" : "AppIcon.png");
+    }
+
+    public static Image? CreateAppIconPreviewImage(string? iconId, bool dark, double size = 36)
+    {
+        string path = ResolveAppIconAssetPath(iconId, dark, ico: false);
+        if (!File.Exists(path)) return null;
+        try
+        {
+            var bmp = new BitmapImage(new Uri(path))
+            {
+                DecodePixelWidth = (int)Math.Ceiling(size * 2),
+                DecodePixelHeight = (int)Math.Ceiling(size * 2),
+            };
+            return new Image
+            {
+                Source = bmp,
+                Width = size,
+                Height = size,
+                Stretch = Stretch.UniformToFill,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+        }
+        catch { return null; }
+    }
+
+    public static string? ResolveBrandLogoAssetPath(string? brandId, bool dark)
+    {
+        if (string.IsNullOrWhiteSpace(brandId)) return null;
+        string id = brandId.Trim().ToLowerInvariant();
+        string brandsDir = Path.Combine(AppContext.BaseDirectory, "Assets", "Brands");
+        if (dark)
+        {
+            string darkCand = Path.Combine(brandsDir, $"{id}-dark.png");
+            if (File.Exists(darkCand)) return darkCand;
+        }
+        string lightCand = Path.Combine(brandsDir, $"{id}.png");
+        return File.Exists(lightCand) ? lightCand : null;
+    }
+
+    public static Image? CreateBrandLogoImage(string? brandId, bool dark, double size = 18)
+    {
+        string? path = ResolveBrandLogoAssetPath(brandId, dark);
+        if (string.IsNullOrEmpty(path)) return null;
+        try
+        {
+            var bmp = new BitmapImage(new Uri(path))
+            {
+                DecodePixelWidth = (int)Math.Ceiling(size * 2),
+                DecodePixelHeight = (int)Math.Ceiling(size * 2),
+            };
+            return new Image
+            {
+                Source = bmp,
+                Width = size,
+                Height = size,
+                Stretch = Stretch.Uniform,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Uniform rounded-square brand tile for note export targets (Obsidian, flomo, Notion, 新枝),
+    /// matching macOS <c>ExportTile</c> (<c>MacNoteExportSettings.swift</c>) so full-bleed app icons
+    /// (flomo / 新枝) and transparent symbol marks (Obsidian / Notion) share one cohesive framed silhouette
+    /// in both Light and Dark themes.
+    /// </summary>
+    public static UIElement? CreateExportBrandTile(string brandId, bool dark, double size = 28)
+    {
+        if (string.IsNullOrWhiteSpace(brandId)) return null;
+        string id = brandId.Trim().ToLowerInvariant();
+        bool fullBleed = id is "flomo" or "xinzhi";
+        double radius = Math.Round(size * 0.25);
+        Color borderColor = dark
+            ? Color.FromArgb(46, 255, 255, 255)
+            : Color.FromArgb(30, 0, 0, 0);
+
+        if (fullBleed)
+        {
+            string? path = ResolveBrandLogoAssetPath(id, dark: false);
+            if (string.IsNullOrEmpty(path)) return null;
+            try
+            {
+                var bmp = new BitmapImage(new Uri(path))
+                {
+                    DecodePixelWidth = (int)Math.Ceiling(size * 3),
+                    DecodePixelHeight = (int)Math.Ceiling(size * 3),
+                };
+                return new Border
+                {
+                    Width = size,
+                    Height = size,
+                    CornerRadius = new CornerRadius(radius),
+                    BorderThickness = new Thickness(1),
+                    BorderBrush = Brush(borderColor),
+                    Background = new ImageBrush
+                    {
+                        ImageSource = bmp,
+                        Stretch = Stretch.UniformToFill,
+                    },
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+            }
+            catch { return null; }
+        }
+
+        var inner = CreateBrandLogoImage(id, dark: false, size: Math.Round(size * 0.62));
+        if (inner is null) return null;
+        return new Border
+        {
+            Width = size,
+            Height = size,
+            CornerRadius = new CornerRadius(radius),
+            BorderThickness = new Thickness(1),
+            BorderBrush = Brush(borderColor),
+            Background = Brush(Colors.White),
+            Child = inner,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
     }
 
     public static void ConfigureTitleBar(Window window, bool dark, Color? buttonHoverBg = null)

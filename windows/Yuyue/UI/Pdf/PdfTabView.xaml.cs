@@ -739,7 +739,7 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
             {
                 Style = (Style)Application.Current.Resources["YYSingleLineTextBoxStyle"],
                 Text = _searchQuery,
-                PlaceholderText = L10n.T("搜索 PDF 文本，Enter 查找…"),
+                PlaceholderText = L10n.T("在这个 PDF 里找"),
                 Margin = new Thickness(10, 0, 10, 8),
                 Height = 30,
                 MinHeight = 30,
@@ -769,7 +769,7 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
                         Background = ThemeHelper.Brush(curP.Card),
                         BorderBrush = ThemeHelper.Brush(curP.Line),
                         BorderThickness = new Thickness(1),
-                        Content = L10n.Skip(new TextBlock { Text = $"P.{pg + 1} · {hit.Snippet}", FontSize = 11.5, Foreground = ThemeHelper.Brush(curP.T1), TextWrapping = TextWrapping.Wrap, MaxLines = 3 }),
+                        Content = L10n.Skip(new TextBlock { Text = $"{L10n.T($"第 {pg + 1} 页")} · {hit.Snippet}", FontSize = 11.5, Foreground = ThemeHelper.Brush(curP.T1), TextWrapping = TextWrapping.Wrap, MaxLines = 3 }),
                     };
                     btn.Click += (_, _) =>
                     {
@@ -847,7 +847,7 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
             .ToList();
         if (marks.Count == 0)
         {
-            PdfNotesStack.Children.Add(new TextBlock { Text = L10n.T("暂无 PDF 标注，点击上方「+ 记当前页」随时记录笔记。"), FontSize = 12, Foreground = ThemeHelper.Brush(p.T3), TextWrapping = TextWrapping.Wrap });
+            PdfNotesStack.Children.Add(new TextBlock { Text = L10n.T("还没有划线。选中文字，按 1–4 就划上，也可以点上方「+ 记当前页」。"), FontSize = 12, Foreground = ThemeHelper.Brush(p.T3), TextWrapping = TextWrapping.Wrap });
             return;
         }
         foreach (var mk in marks)
@@ -930,8 +930,19 @@ public sealed partial class PdfTabView : UserControl, ITabContent, IMiniPlayerSo
         ApplyAppearance();
     }
 
-    private void PrevPage_Click(object sender, RoutedEventArgs e) => JumpToPage(_currentPage - (_layoutMode == "double" ? 2 : 1));
-    private void NextPage_Click(object sender, RoutedEventArgs e) => JumpToPage(_currentPage + (_layoutMode == "double" ? 2 : 1));
+    private void PrevPage_Click(object sender, RoutedEventArgs e)
+    {
+        int prev = _currentPage;
+        JumpToPage(_currentPage - (_layoutMode == "double" ? 2 : 1));
+        if (_currentPage != prev) _library.PageTurnSounds.PlayManualTurn(isReadingAloud: false);
+    }
+
+    private void NextPage_Click(object sender, RoutedEventArgs e)
+    {
+        int prev = _currentPage;
+        JumpToPage(_currentPage + (_layoutMode == "double" ? 2 : 1));
+        if (_currentPage != prev) _library.PageTurnSounds.PlayManualTurn(isReadingAloud: false);
+    }
     private async Task ShowJumpToPageDialogAsync()
     {
         if (_disposed || RootGrid.XamlRoot is not { } xr || _pageCount <= 1) return;

@@ -562,11 +562,11 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
                 catch { }
                 bool dark = ThemeHelper.IsDark(_library.Prefs.ToElementTheme());
                 SleepBtn.Content = YYIcons.Make("moon", 16, ThemeHelper.Brush(ThemeHelper.Palette(dark).T2));
-                _ownerWindow.ShowToast("睡眠定时已到，已暂停播放并记下起点");
+                _ownerWindow.ShowToast("定时到了 · 已暂停并加书签");
             }
             else
             {
-                SleepStatusText.Text = L10n.T($"睡眠定时 · 还剩 {(int)Math.Ceiling(left.TotalMinutes)} 分钟");
+                SleepStatusText.Text = L10n.T($"定时 · {(int)Math.Ceiling(left.TotalMinutes)} 分钟");
             }
         }
 
@@ -609,8 +609,10 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
             try { totalRem = Math.Max(0, totalRem - _library.Core.AudiobookPauseSavings(_bookId, globalSec)); }
             catch { }
         }
-        RemainingText.Text = totalRem >= 3600
-            ? L10n.T($"全书还剩 {(int)(totalRem / 3600)} 小时 {(int)((totalRem % 3600) / 60)} 分")
+        int remH = (int)(totalRem / 3600);
+        int remM = (int)((totalRem % 3600) / 60);
+        RemainingText.Text = remH > 0
+            ? (remM > 0 ? L10n.T($"全书还剩 {remH} 小时 {remM} 分") : L10n.T($"全书还剩 {remH} 小时"))
             : L10n.T($"全书还剩 {Math.Max(1, (int)(totalRem / 60))} 分钟");
 
         if (!_isScrubbingSlider)
@@ -734,7 +736,7 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
                 int chIdxCap = i;
                 string currentTitleCap = ch.Title ?? "";
                 var chMenu = new MenuFlyout();
-                var renameMi = new MenuFlyoutItem { Text = L10n.T("重命名章节…") };
+                var renameMi = new MenuFlyoutItem { Text = L10n.T("改名") };
                 renameMi.Click += async (_, _) => await PromptRenameChapterAsync(chIdxCap, currentTitleCap);
                 chMenu.Items.Add(renameMi);
                 row.ContextFlyout = chMenu;
@@ -746,7 +748,7 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
             var bms = _library.GetBookmarks(_bookId);
             if (bms.Count == 0)
             {
-                RightPaneStack.Children.Add(new TextBlock { Text = L10n.T("还没有音频书签，按 B 键可随时记录精彩瞬间。"), FontSize = 12, Foreground = ThemeHelper.Brush(p.T3), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 14, 4, 0) });
+                RightPaneStack.Children.Add(new TextBlock { Text = L10n.T("听到想记住的地方，点书签按钮记一下。"), FontSize = 12, Foreground = ThemeHelper.Brush(p.T3), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 14, 4, 0) });
             }
             else
             {
@@ -801,13 +803,13 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
                         VerticalAlignment = VerticalAlignment.Center,
                         Content = YYIcons.Make("trash", 12, ThemeHelper.Brush(p.T3)),
                     };
-                    ToolTipService.SetToolTip(delBtn, L10n.T("删除书签"));
+                    ToolTipService.SetToolTip(delBtn, L10n.T("删除"));
                     delBtn.Click += (_, _) =>
                     {
                         if (_disposed) return;
                         try { _library.DeleteBookmark(_bookId, bmId); } catch { }
                         RenderRightPane();
-                        _ownerWindow.ShowToast("已删除音频书签", "撤销", () =>
+                        _ownerWindow.ShowToast("书签拿掉了", "撤销", () =>
                         {
                             try { _library.RestoreBookmark(_bookId, bmId); } catch { }
                             if (!_disposed) RenderRightPane();
@@ -845,8 +847,8 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
                 string alignDesc = workActive && workSt is not null
                     ? workSt.Message
                     : (alignDone && alignProg is { Sentences: > 0 }
-                        ? L10n.T($"已对齐 {alignProg.Exact} / {alignProg.Sentences} 句 · 电子书内可同步跟读")
-                        : L10n.T("已配对电子书 · 点击下方合成句级声文时间轴"));
+                        ? L10n.T("合成好了 · 听到哪句，书页就走到哪句")
+                        : L10n.T("合成以后听到哪句，书页就走到哪句"));
 
                 RightPaneStack.Children.Add(new Border
                 {
@@ -860,19 +862,19 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
                         Spacing = 4,
                         Children =
                         {
-                            new TextBlock { Text = L10n.T("已配对电子书"), FontSize = 11, Foreground = ThemeHelper.Brush(p.T3) },
+                            new TextBlock { Text = L10n.T("配对电子书"), FontSize = 11, Foreground = ThemeHelper.Brush(p.T3) },
                             L10n.Skip(new TextBlock { Text = $"《{ebook?.Title ?? pair.Book}》", FontSize = 13.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1), TextWrapping = TextWrapping.Wrap }),
                             new TextBlock { Text = alignDesc, FontSize = 11.5, Foreground = ThemeHelper.Brush(tc.Accent), TextWrapping = TextWrapping.Wrap },
                         },
                     },
                 });
 
-                var openEbookBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("打开配对电子书跟读") };
+                var openEbookBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("开始听") };
                 openEbookBtn.Click += (_, _) => App.CurrentApp.OpenBook(pair.Book, autoListen: true);
                 RightPaneStack.Children.Add(openEbookBtn);
 
                 string pairBookId = pair.Book;
-                var alignBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T(workActive ? "停止后台声文合成" : (alignDone ? "重新合成声文对齐" : "开始声文对齐合成")) };
+                var alignBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T(workActive ? "停下合成" : (alignDone ? "重新合成" : "开始合成")) };
                 alignBtn.Click += (_, _) =>
                 {
                     if (_library.AudiobookWork.IsRunning(_bookId)) _library.AudiobookWork.Stop(_bookId);
@@ -881,13 +883,13 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
                 };
                 RightPaneStack.Children.Add(alignBtn);
 
-                var checkBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("检查声文对齐精准度…") };
+                var checkBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("对齐检查与微调…") };
                 checkBtn.Click += (_, _) => AlignCheckAndPolishService.OpenAlignCheckWindow(_library, _bookId);
                 RightPaneStack.Children.Add(checkBtn);
 
                 if (_library.AudiobookWork.HasSavedEmissions(_bookId))
                 {
-                    var fastRealignBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("快速重新对齐（复用声学缓存）") };
+                    var fastRealignBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("快速重新对齐") };
                     fastRealignBtn.Click += async (_, _) =>
                     {
                         fastRealignBtn.IsEnabled = false;
@@ -896,7 +898,7 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
                             var res = await Task.Run(() => _library.AudiobookWork.RealignFromSavedEmissions(_bookId));
                             if (!_disposed)
                             {
-                                _ownerWindow.ShowToast(res is not null ? "已基于声学缓存重新完成对齐" : "未能从缓存重新对齐");
+                                _ownerWindow.ShowToast(res is not null ? "重新对齐好了" : "未能重新对齐");
                                 RenderRightPane();
                             }
                         }
@@ -912,29 +914,18 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
                     RightPaneStack.Children.Add(fastRealignBtn);
                 }
 
-                var exportEpubBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("导出同步时间轴 EPUB…") };
-                exportEpubBtn.Click += async (_, _) =>
+                if (alignDone)
                 {
-                    try
-                    {
-                        string? outPath = await NativePickerHelper.PickSaveFileAsync(_ownerWindow, $"{_detail.Summary.Title}-听读版", [("EPUB", [".epub"])]);
-                        if (string.IsNullOrEmpty(outPath) || _disposed) return;
-                        await Task.Run(() => _library.Core.AudiobookExportEpub(_bookId, outPath));
-                        if (!_disposed) _ownerWindow.ShowToast($"已导出：{Path.GetFileName(outPath)}");
-                    }
-                    catch (Exception ex)
-                    {
-                        if (!_disposed) _ownerWindow.ShowToast($"导出失败：{ex.Message}");
-                    }
-                };
-                RightPaneStack.Children.Add(exportEpubBtn);
+                    // 1:1 macOS AudiobookScreen "这本录音" card (includes export read-along EPUB inside card)
+                    RenderSkipSettingsCard(dark, p, tc);
+                }
 
-                var unpairBtn = new Button { Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("解除电子书配对"), Foreground = ThemeHelper.Brush(p.Danger) };
+                var unpairBtn = new Button { Style = (Style)Application.Current.Resources["YYTextActionButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("取消配对"), Foreground = ThemeHelper.Brush(p.Danger) };
                 unpairBtn.Click += (_, _) =>
                 {
                     _library.AudiobookWork.Stop(_bookId);
                     try { _library.Core.AudiobookPair(_bookId, null); } catch { }
-                    _ownerWindow.ShowToast("已解除电子书配对");
+                    _ownerWindow.ShowToast("已取消配对");
                     RenderRightPane();
                 };
                 RightPaneStack.Children.Add(unpairBtn);
@@ -946,15 +937,14 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
                 {
                     var candCap = candidate;
                     var autoCard = new StackPanel { Spacing = 8 };
-                    autoCard.Children.Add(new TextBlock { Text = L10n.T("发现同名电子书"), FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(tc.Accent) });
-                    autoCard.Children.Add(L10n.Skip(new TextBlock { Text = $"《{candCap.Title}》", FontSize = 13.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1), TextWrapping = TextWrapping.Wrap }));
-                    autoCard.Children.Add(new TextBlock { Text = L10n.T("配对并合成后，在电子书内可直接收听本真人有声书并同步逐句高亮。"), FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T2), TextWrapping = TextWrapping.Wrap });
-                    var autoPairBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("一键配对并开始合成") };
+                    autoCard.Children.Add(new TextBlock { Text = L10n.T($"书架上有《{candCap.Title}》电子书"), FontSize = 12.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1), TextWrapping = TextWrapping.Wrap });
+                    autoCard.Children.Add(new TextBlock { Text = L10n.T("合成以后听到哪句，书页就走到哪句"), FontSize = 11.5, Foreground = ThemeHelper.Brush(p.T2), TextWrapping = TextWrapping.Wrap });
+                    var autoPairBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("合成") };
                     autoPairBtn.Click += (_, _) =>
                     {
                         try { _library.Core.AudiobookPair(_bookId, candCap.Id); } catch { }
                         _library.AudiobookWork.Start(_bookId, candCap.Id, GetGlobalPositionSeconds(), autoDownloadModel: true);
-                        _ownerWindow.ShowToast($"已与《{candCap.Title}》配对，正在后台对齐…");
+                        _ownerWindow.ShowToast($"已配上《{candCap.Title}》，正在合成…");
                         RenderRightPane();
                     };
                     autoCard.Children.Add(autoPairBtn);
@@ -973,7 +963,7 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
                 {
                     RightPaneStack.Children.Add(new TextBlock
                     {
-                        Text = L10n.T("尚未配对电子书。配对后可在电子书里边看文字边听真人有声原声。"),
+                        Text = L10n.T("配上书架上的电子书，合成以后听到哪句，书页就走到哪句。"),
                         FontSize = 12,
                         Foreground = ThemeHelper.Brush(p.T2),
                         TextWrapping = TextWrapping.Wrap,
@@ -982,7 +972,7 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
 
                 if (shelfEbooks.Count > 0)
                 {
-                    var pickBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("从书架手动选择电子书配对…") };
+                    var pickBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], HorizontalAlignment = HorizontalAlignment.Stretch, Content = L10n.T("选书…") };
                     var pickMenu = new MenuFlyout();
                     foreach (var eb in shelfEbooks.OrderByDescending(b => b.OpenedAt ?? b.AddedAt).Take(16))
                     {
@@ -1001,9 +991,6 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
                     RightPaneStack.Children.Add(pickBtn);
                 }
             }
-
-            // Skip settings, detected extras & time saved card (parity with Apple AudiobookPlayer.swift)
-            RenderSkipSettingsCard(dark, p, tc);
         }
     }
 
@@ -1018,40 +1005,22 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
         var stack = new StackPanel { Spacing = 8 };
         stack.Children.Add(new TextBlock
         {
-            Text = L10n.T("跳过与听感"),
+            Text = L10n.T("这本录音"),
             FontSize = 11.5,
             FontWeight = FontWeights.SemiBold,
             Foreground = ThemeHelper.Brush(p.T2),
         });
 
-        if (savedSec >= 1.0 || extrasCount > 0)
-        {
-            string meta = savedSec >= 1.0 && extrasCount > 0
-                ? L10n.T($"识别到 {extrasCount} 处片头/插播 · 累计可省 {FormatClock(savedSec)}")
-                : savedSec >= 1.0
-                    ? L10n.T($"缩短停顿与跳过累计可省 {FormatClock(savedSec)}")
-                    : L10n.T($"已识别 {extrasCount} 处非正文片段");
-            stack.Children.Add(new TextBlock
-            {
-                Text = meta,
-                FontSize = 11,
-                Foreground = ThemeHelper.Brush(tc.Accent),
-                TextWrapping = TextWrapping.Wrap,
-            });
-        }
-
-        void AddToggle(string title, bool initial, Func<SkipSettings, bool, SkipSettings> mutate)
+        void AddToggle(string title, string? subtitle, bool initial, Func<SkipSettings, bool, SkipSettings> mutate)
         {
             var row = new Grid { ColumnSpacing = 8 };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.Children.Add(new TextBlock
-            {
-                Text = L10n.T(title),
-                FontSize = 12,
-                Foreground = ThemeHelper.Brush(p.T1),
-                VerticalAlignment = VerticalAlignment.Center,
-            });
+            var textCol = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
+            textCol.Children.Add(new TextBlock { Text = L10n.T(title), FontSize = 12, Foreground = ThemeHelper.Brush(p.T1) });
+            if (!string.IsNullOrEmpty(subtitle))
+                textCol.Children.Add(new TextBlock { Text = subtitle, FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3), TextWrapping = TextWrapping.Wrap });
+            row.Children.Add(textCol);
             var sw = new ToggleSwitch { IsOn = initial, OnContent = null, OffContent = null, MinWidth = 0 };
             sw.Toggled += (_, _) =>
             {
@@ -1065,10 +1034,47 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
             stack.Children.Add(row);
         }
 
-        AddToggle("跳过片头片尾", _skipSettings.HeadTail, (s, on) => s with { HeadTail = on });
-        AddToggle("跳过中间插播", _skipSettings.Middle, (s, on) => s with { Middle = on });
-        AddToggle("缩短长停顿", _skipSettings.ShortenPauses, (s, on) => s with { ShortenPauses = on });
-        AddToggle("人声更清晰", _skipSettings.ClearerVoice, (s, on) => s with { ClearerVoice = on });
+        static string FormatSavedDuration(double sec)
+        {
+            int mins = Math.Max(1, (int)Math.Round(sec / 60.0));
+            return mins >= 60
+                ? (mins % 60 == 0 ? L10n.T($"{mins / 60} 小时") : L10n.T($"{mins / 60} 小时 {mins % 60} 分"))
+                : L10n.T($"{mins} 分钟");
+        }
+
+        AddToggle("片头片尾", extrasCount > 0 ? L10n.T("自动跳过片头片尾") : null, _skipSettings.HeadTail, (s, on) => s with { HeadTail = on });
+        AddToggle("章间音乐", L10n.T("压到 1.5 秒"), _skipSettings.ShortenChapterGaps, (s, on) => s with { ShortenChapterGaps = on });
+        AddToggle("人声清楚一点", L10n.T("压低底噪，人声提一点"), _skipSettings.ClearerVoice, (s, on) => s with { ClearerVoice = on });
+        AddToggle("缩短停顿", savedSec >= 60 ? L10n.T($"这本已经省了 {FormatSavedDuration(savedSec)}") : L10n.T("长停顿压短一些"), _skipSettings.ShortenPauses, (s, on) => s with { ShortenPauses = on });
+        AddToggle("没念的用朗读补上", L10n.T("录音里跳过的地方自动补读"), _skipSettings.FillUnread, (s, on) => s with { FillUnread = on });
+        AddToggle("逐词跟读", L10n.T("念到哪个词，哪个词下面一道线"), _skipSettings.WordFollow, (s, on) => s with { WordFollow = on });
+
+        stack.Children.Add(new Border { Height = 1, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(0, 2, 0, 2) });
+        var expRow = new Grid { ColumnSpacing = 8 };
+        expRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        expRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var expMeta = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
+        expMeta.Children.Add(new TextBlock { Text = L10n.T("导出带朗读时间的电子书"), FontSize = 12, Foreground = ThemeHelper.Brush(p.T1) });
+        expMeta.Children.Add(new TextBlock { Text = L10n.T("一个 EPUB，别的阅读器也能跟读"), FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3), TextWrapping = TextWrapping.Wrap });
+        expRow.Children.Add(expMeta);
+        var expBtn = new Button { Style = (Style)Application.Current.Resources["YYFluentButtonStyle"], Height = 26, MinHeight = 26, Padding = new Thickness(10, 0, 10, 0), FontSize = 11.5, Content = L10n.T("导出…") };
+        expBtn.Click += async (_, _) =>
+        {
+            try
+            {
+                string? outPath = await NativePickerHelper.PickSaveFileAsync(_ownerWindow, $"{_detail.Summary.Title}", [("EPUB", [".epub"])]);
+                if (string.IsNullOrEmpty(outPath) || _disposed) return;
+                await Task.Run(() => _library.Core.AudiobookExportEpub(_bookId, outPath));
+                if (!_disposed) _ownerWindow.ShowToast("导出好了", Path.GetFileName(outPath));
+            }
+            catch (Exception ex)
+            {
+                if (!_disposed) _ownerWindow.ShowToast($"导出失败：{ex.Message}");
+            }
+        };
+        Grid.SetColumn(expBtn, 1);
+        expRow.Children.Add(expBtn);
+        stack.Children.Add(expRow);
 
         RightPaneStack.Children.Add(new Border
         {
@@ -1089,12 +1095,12 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
         string? next = await YYChrome.ShowPromptAsync(
             xr,
             dark,
-            "重命名章节",
+            "给这一集起个名字",
             placeholder: $"第 {chapterIndex + 1} 集",
             initialText: currentTitle,
-            confirmText: "保存",
+            confirmText: "好",
             cancelText: "取消",
-            subtitle: "留空将恢复默认章节名：",
+            subtitle: "留空就叫「第几集」。",
             tint: _library.Prefs.Tint);
         if (next is null || _disposed) return;
         string? normalized = string.IsNullOrWhiteSpace(next) ? null : next.Trim();
@@ -1104,11 +1110,11 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
             _recording = _library.Core.AudioRecording(_bookId);
             RenderRightPane();
             OnPositionTick();
-            _ownerWindow.ShowToast("已更新章节名称");
+            _ownerWindow.ShowToast("改好了");
         }
         catch (Exception ex)
         {
-            _ownerWindow.ShowToast($"重命名失败：{ex.Message}");
+            _ownerWindow.ShowToast($"改名失败：{ex.Message}");
         }
     }
 
@@ -1117,7 +1123,7 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
         var menu = new MenuFlyout();
         void Add(string lbl, int minutes)
         {
-            var mi = new MenuFlyoutItem { Text = lbl };
+            var mi = new MenuFlyoutItem { Text = L10n.T(lbl) };
             mi.Click += (_, _) =>
             {
                 if (_disposed) return;
@@ -1128,12 +1134,13 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
             };
             menu.Items.Add(mi);
         }
-        Add("15 分钟后停止", 15);
-        Add("30 分钟后停止", 30);
-        Add("45 分钟后停止", 45);
-        Add("60 分钟后停止", 60);
+        Add("15 分钟", 15);
+        Add("30 分钟", 30);
+        Add("45 分钟", 45);
+        Add("60 分钟", 60);
+        Add("90 分钟", 90);
         menu.Items.Add(new MenuFlyoutSeparator());
-        Add("取消定时", 0);
+        Add("关闭", 0);
         SleepBtn.Flyout = menu;
     }
 
@@ -1208,14 +1215,14 @@ public sealed partial class AudiobookTabView : UserControl, ITabContent, IMiniPl
         if (heard is not null)
         {
             var captured = heard;
-            _ownerWindow.ShowToast("已添加音频书签（已定位至对应正文句）", "打开原文", () =>
+            _ownerWindow.ShowToast("记了一个书签", "回原文 ›", () =>
             {
                 App.CurrentApp.OpenBook(captured.Book, section: captured.Section, sentence: (int)captured.Sentence);
             });
         }
         else
         {
-            _ownerWindow.ShowToast("已添加音频书签");
+            _ownerWindow.ShowToast("记了一个书签");
         }
     }
 

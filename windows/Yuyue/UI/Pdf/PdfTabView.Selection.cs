@@ -680,7 +680,7 @@ public sealed partial class PdfTabView
         {
             XamlRoot = xr,
             RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light,
-            Title = L10n.T($"第 {pageStart + 1} 页想法"),
+            Title = L10n.T("想法"),
             PrimaryButtonText = L10n.T("保存"),
             CloseButtonText = L10n.T("取消"),
             DefaultButton = ContentDialogButton.Primary,
@@ -736,7 +736,7 @@ public sealed partial class PdfTabView
         var hit = _library.LookUpWordRich(text);
         string body = hit is not null
             ? $"{hit.Headword}{(string.IsNullOrWhiteSpace(hit.Phonetic) ? "" : $"  {hit.Phonetic}")}\n{hit.Summary}\n({hit.Source})"
-            : L10n.T($"本地词典未收录「{text}」，可点击「翻译」使用 AI 译文。");
+            : L10n.T($"词典里没有「{text}」，可点击「翻译」查看译文。");
         ShowPdfInfoPopup("查词", body, anchor);
     }
 
@@ -749,7 +749,7 @@ public sealed partial class PdfTabView
 
         if (!_library.Companion.IsConfigured)
         {
-            ShowPdfInfoPopup("翻译", L10n.T("尚未配置书伴 AI 模型，请先在「设置 → 书伴」中配置。"), anchor);
+            ShowPdfInfoPopup("翻译", L10n.T("请先在「设置 · 书伴」中配好模型。"), anchor);
             return;
         }
 

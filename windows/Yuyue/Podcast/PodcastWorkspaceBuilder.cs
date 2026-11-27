@@ -1148,10 +1148,9 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         var now = DateTime.Now;
         string greeting = now.Hour switch
         {
-            < 5 => L10n.T("夜深了"),
-            < 11 => L10n.T("早上好"),
-            < 14 => L10n.T("中午好"),
-            < 18 => L10n.T("下午好"),
+            >= 5 and < 11 => L10n.T("早上好"),
+            >= 11 and < 13 => L10n.T("中午好"),
+            >= 13 and < 18 => L10n.T("下午好"),
             _ => L10n.T("晚上好"),
         };
         var greetLine = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
@@ -2101,7 +2100,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                             UseSystemFocusVisuals = false,
                             Content = YYIcons.Make("xmark", 10.5, ThemeHelper.Brush(p.T3)),
                         };
-                        ToolTipService.SetToolTip(moveDeskBtn, L10n.T("移回在听书桌"));
+                        ToolTipService.SetToolTip(moveDeskBtn, L10n.T("移出稍后听"));
                         moveDeskBtn.Click += (_, _) =>
                         {
                             try { _library.Core.PodcastSetPlacement(target.Id, PodcastPlacement.Desk); } catch { }
@@ -2122,10 +2121,10 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             {
                 (string Id, string Name, string Role, string Sample)[] studioVoices =
                 [
-                    ("linshen", L10n.T("林深 · 书房主播"), L10n.T("本地声卡 · 沉静温和 · 默认主讲"), L10n.T("欢迎回到书房电台，所有内容都严格停在你读到的页码之前。")),
+                    ("linshen", L10n.T("林深 · 书房主播"), L10n.T("本地声卡 · 沉静温和 · 书房电台默认主讲"), L10n.T("欢迎回到书房电台，所有内容都严格停在你读到的页码之前。")),
                     ("suwan", L10n.T("苏晚 · 理性对谈"), L10n.T("本地声卡 · 清晰克制 · 跨书圆桌搭档"), L10n.T("把同一件事放进另一本书的语境里重说一遍，理解才会真正立体起来。")),
-                    ("clara", "Clara", "English Host · Warm & Clear", "Let us revisit the words you highlighted this week."),
-                    ("david", "David", "English Co-Host · Calm", "Every unfamiliar word makes more sense inside a living story."),
+                    ("clara", "Clara", L10n.T("本地声卡 · 温和英音 · 生词外语主讲"), "Let us revisit the words you highlighted this week."),
+                    ("david", "David", L10n.T("本地声卡 · 沉稳英音 · 生词外语搭档"), "Every unfamiliar word makes more sense inside a living story."),
                 ];
                 foreach (var v in studioVoices)
                 {
@@ -2193,11 +2192,11 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                     cRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                     cRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                     var cm = new StackPanel { Spacing = 1 };
-                    cm.Children.Add(new TextBlock { Text = $"✦ {cc.Name}", FontSize = 12.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(tint.Accent) });
-                    cm.Children.Add(new TextBlock { Text = L10n.T("嘉宾声纹 · 本机安全区提取"), FontSize = 11, Foreground = ThemeHelper.Brush(p.T3) });
+                    cm.Children.Add(new TextBlock { Text = cc.Name, FontSize = 12.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(tint.Accent) });
+                    cm.Children.Add(new TextBlock { Text = L10n.T("嘉宾声纹 · 本机提取"), FontSize = 11, Foreground = ThemeHelper.Brush(p.T3) });
                     cRow.Children.Add(cm);
                     bool isActiveCard = _library.Prefs.PodcastStudioVoiceStyle == "card:" + cc.Id;
-                    var useBtn = MakePaperPill(isActiveCard ? L10n.T("✓ 当前主播") : L10n.T("设为主播"), accent: true, p, tint);
+                    var useBtn = MakePaperPill(isActiveCard ? L10n.T("当前主播") : L10n.T("设为主播"), accent: true, p, tint);
                     useBtn.Height = 24;
                     useBtn.Click += (_, _) =>
                     {
@@ -2222,7 +2221,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 {
                     Style = (Style)Application.Current.Resources["YYFluentButtonStyle"],
                     HorizontalAlignment = HorizontalAlignment.Stretch,
-                    Content = L10n.T("🎙 克隆一段自己的主播声音…"),
+                    Content = L10n.T("克隆一个声音…"),
                     FontSize = 11.5,
                 };
                 cloneBtn.Click += async (_, _) =>
@@ -2821,7 +2820,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             UseSystemFocusVisuals = false,
             Content = YYIcons.Make("bookmark", 12, ThemeHelper.Brush(inLater ? tint.Accent : p.T3), filled: inLater),
         };
-        ToolTipService.SetToolTip(bmBtn, inLater ? L10n.T("已在稍后听（点击移回在听）") : L10n.T("存入稍后听"));
+        ToolTipService.SetToolTip(bmBtn, inLater ? L10n.T("已在稍后听") : L10n.T("存入稍后听"));
         bmBtn.Click += (_, _) =>
         {
             try
@@ -2841,12 +2840,12 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         openMi.Click += (_, _) => { OpenIssueAt(iid); _shelf.RefreshCurrentSubPage(); };
         var playMi = new MenuFlyoutItem { Text = isPlayingThis ? L10n.T("暂停") : L10n.T("播放") };
         playMi.Click += (_, _) => ToggleDeskIssuePlayback(issue);
-        var laterMi = new MenuFlyoutItem { Text = inLater ? L10n.T("移回在听书桌") : L10n.T("存入稍后听") };
+        var laterMi = new MenuFlyoutItem { Text = inLater ? L10n.T("移回在听") : L10n.T("存入稍后听") };
         laterMi.Click += (_, _) =>
         {
             try { _library.Core.PodcastSetPlacement(iid, inLater ? PodcastPlacement.Desk : PodcastPlacement.Archive); _shelf.RefreshBooks(); } catch { }
         };
-        var del = new MenuFlyoutItem { Text = L10n.T("删除单集"), Foreground = ThemeHelper.Brush(p.Danger) };
+        var del = new MenuFlyoutItem { Text = L10n.T("删除"), Foreground = ThemeHelper.Brush(p.Danger) };
         del.Click += (_, _) => { try { _library.Core.PodcastDeleteIssue(iid); _shelf.RefreshBooks(); } catch { } };
         ctx.Items.Add(openMi);
         ctx.Items.Add(playMi);
@@ -2961,7 +2960,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                     }
                     else
                     {
-                        var subBtn = MakePaperPill(busy ? L10n.T("订阅中…") : L10n.T("订阅"), accent: true, p, tint);
+                        var subBtn = MakePaperPill(busy ? L10n.T("订阅中") : L10n.T("订阅"), accent: true, p, tint);
                         subBtn.Height = 24;
                         subBtn.IsEnabled = !busy;
                         string feedUrl = hit.FeedUrl;
@@ -2970,7 +2969,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                         {
                             _subscribingFeedUrls.Add(feedUrl);
                             subBtn.IsEnabled = false;
-                            subBtn.Content = L10n.T("订阅中…");
+                            subBtn.Content = L10n.T("订阅中");
                             try
                             {
                                 await _library.Podcasts.SubscribeRssAsync(feedUrl);
@@ -3343,8 +3342,8 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             string dynamicFootNote = active is null
                 ? L10n.T("防剧透锁 · 仅基于已读进度")
                 : (active.StudioKind is StudioKind sk2
-                    ? $"{StudioKindTitle(sk2)} · 不剧透"
-                    : L10n.T("原声 · 书摘就绪"));
+                    ? $"{StudioKindTitle(sk2)} · 防剧透锁"
+                    : L10n.T("原声 · 书摘与插话就绪"));
             midSlot.Child = new TextBlock
             {
                 Text = dynamicFootNote,
@@ -3462,7 +3461,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         int mins = Math.Max(1, (int)Math.Round(issue.DurationSec / 60.0));
         kicker.Children.Add(new TextBlock
         {
-            Text = $"{issue.ShowTitle} · {mins} 分钟",
+            Text = $"{issue.ShowTitle} · {mins} 分",
             FontSize = 12,
             Foreground = ThemeHelper.Brush(p.T3),
             VerticalAlignment = VerticalAlignment.Center,
@@ -3485,9 +3484,9 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         bool canDub = SupportsTrackSwitch(issue, sentences);
         string metaLeft = canDub
             ? $"当前声轨：{TrackLabel(_track, issue)}"
-            : (issue.StudioKind is StudioKind sk ? $"{StudioKindTitle(sk)} · 防剧透物理锁" : L10n.T("原声收听"));
+            : (issue.StudioKind is StudioKind sk ? $"{StudioKindTitle(sk)} · 防剧透锁" : L10n.T("原声播放中"));
         string metaRight = canDub
-            ? L10n.T("点任意句子即刻跳播，点高亮词查词收进生词本")
+            ? L10n.T("点任意句子即刻跳播，点虚线词查词收进生词本")
             : L10n.T("点任意句子即刻跳播，点书名签核对原书出处");
         sheet.Children.Add(new TextBlock
         {
@@ -3680,7 +3679,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                     {
                         var srcBtn = new Button
                         {
-                            Content = $"📖 《{srcBook.Title}》 →",
+                            Content = $"《{srcBook.Title}》",
                             Height = 22,
                             MinHeight = 22,
                             Padding = new Thickness(8, 0, 8, 0),
@@ -3696,9 +3695,9 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                         {
                             var flyout = new Flyout();
                             var pop = new StackPanel { Width = 310, Spacing = 8 };
-                            pop.Children.Add(new TextBlock { Text = $"引自《{srcBook.Title}》", FontSize = 11.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(tint.Accent) });
-                            pop.Children.Add(new TextBlock { Text = $"「{s.BookQuote}」", FontFamily = serif, FontSize = 13, LineHeight = 20, Foreground = ThemeHelper.Brush(p.T1), TextWrapping = TextWrapping.Wrap });
-                            var openOrigBtn = MakePaperPill(L10n.T("跳回书页原文 →"), accent: true, p, tint);
+                            pop.Children.Add(new TextBlock { Text = $"原书锚点 · {srcBook.Title}", FontSize = 11.5, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(tint.Accent) });
+                            pop.Children.Add(new TextBlock { Text = $"“{s.BookQuote}”", FontFamily = serif, FontSize = 13, LineHeight = 20, Foreground = ThemeHelper.Brush(p.T1), TextWrapping = TextWrapping.Wrap });
+                            var openOrigBtn = MakePaperPill(L10n.T("打开原书 →"), accent: true, p, tint);
                             openOrigBtn.HorizontalAlignment = HorizontalAlignment.Right;
                             openOrigBtn.Click += (_, _) => { flyout.Hide(); App.CurrentApp.OpenBook(targetBookId, section: s.BookSection, sentence: (int?)s.BookSentence); };
                             pop.Children.Add(openOrigBtn);
@@ -5595,7 +5594,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             headLeft.Children.Add(new TextBlock { Text = L10n.T("· 已存入当前句旁"), FontSize = 11, Foreground = ThemeHelper.Brush(p.T3) });
             headRow.Children.Add(headLeft);
 
-            var speakBtn = MakePaperPill(_isPreviewingInterruptAnswer ? L10n.T("播放中…") : L10n.T("▶ 听回答"), accent: _isPreviewingInterruptAnswer, p, tint);
+            var speakBtn = MakePaperPill(_isPreviewingInterruptAnswer ? L10n.T("停止朗读") : L10n.T("听回答"), accent: _isPreviewingInterruptAnswer, p, tint);
             speakBtn.Height = 24;
             speakBtn.FontSize = 11;
             speakBtn.Click += async (_, _) =>
@@ -5603,7 +5602,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 if (_isPreviewingInterruptAnswer) return;
                 bool replyEn = !reply.Answer.Any(ch => ch >= 0x4E00 && ch <= 0x9FFF);
                 _isPreviewingInterruptAnswer = true;
-                speakBtn.Content = L10n.T("播放中…");
+                speakBtn.Content = L10n.T("停止朗读");
                 try
                 {
                     string? replyVoice = PickHostVoiceId(false, replyEn);
@@ -5615,7 +5614,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 finally
                 {
                     _isPreviewingInterruptAnswer = false;
-                    speakBtn.Content = L10n.T("▶ 听回答");
+                    speakBtn.Content = L10n.T("听回答");
                     if (_playing)
                         App.CurrentApp.ClaimAudioPlayback(_shelf, CreateShelfPauseCallback());
                 }
@@ -5632,7 +5631,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             // Lower warm-leaf action bar (`语音追问` · `打字追问` · `明白了，继续 -3s`)
             var lower = new Grid { Height = 40, Padding = new Thickness(16, 0, 16, 0), Background = ThemeHelper.Brush(leafSurface), CornerRadius = new CornerRadius(0, 0, 14, 14) };
             var leftActs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7, VerticalAlignment = VerticalAlignment.Center };
-            var micFollowBtn = MakePaperPill(L10n.T("🎙 语音追问"), accent: true, p, tint);
+            var micFollowBtn = MakePaperPill(L10n.T("语音追问"), accent: true, p, tint);
             micFollowBtn.Height = 26;
             micFollowBtn.Click += (_, _) =>
             {
@@ -6296,7 +6295,9 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             ("studio-solo-zh", L10n.T("林深 · 单人"), L10n.T("林深（单人沉静导读）")),
         };
         foreach (var cc in _library.LiveVoice.GetClonedCards())
-            voiceOptions.Add(("card:" + cc.Id, cc.Name, $"✦ {cc.Name}（我的克隆声纹）"));
+            voiceOptions.Add(("card:" + cc.Id, cc.Name, cc.Name));
+
+        var refHeadTitleTb = new TextBlock { Text = L10n.T("参考书目"), FontFamily = serif, FontSize = 14, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) };
 
         string ShortHostName(string id) => voiceOptions.FirstOrDefault(v => v.Id == id).ShortLabel ?? L10n.T("林深 · 苏晚");
         var hostVoiceLabel = new TextBlock { Text = ShortHostName(voiceStyle), FontSize = 12, FontWeight = FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1), VerticalAlignment = VerticalAlignment.Center };
@@ -6341,12 +6342,13 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
 
         void RebuildForm()
         {
+            refHeadTitleTb.Text = chosenKind == StudioKind.VocabRadio ? L10n.T("生词素材") : L10n.T("参考书目");
             headerSubtitle.Text = chosenKind switch
             {
                 StudioKind.BookGuide => L10n.T("·  读前热身精讲 · 拆解核心脉络"),
-                StudioKind.Roundtable => L10n.T("·  多书观点碰撞 · 串联不同视角"),
-                StudioKind.VocabRadio => L10n.T("·  把生词本织进自然对话"),
-                _ => L10n.T("·  串起近期划线与阅读心绪"),
+                StudioKind.Roundtable => L10n.T("·  挑 2–3 本在读书同桌对谈"),
+                StudioKind.VocabRadio => L10n.T("·  本周生词编进自然对谈"),
+                _ => L10n.T("·  串联本周划线、想法与听过的播客线索"),
             };
 
             leftFormats.Children.Clear();
@@ -6761,7 +6763,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         // Right column
         var refHead = new Grid();
         var refHeadLeft = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
-        refHeadLeft.Children.Add(new TextBlock { Text = L10n.T("参考书目"), FontFamily = serif, FontSize = 14, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(p.T1) });
+        refHeadLeft.Children.Add(refHeadTitleTb);
         refHeadLeft.Children.Add(refScopeSub);
         refHead.Children.Add(refHeadLeft);
         refHead.Children.Add(refRightPanel);
@@ -7421,7 +7423,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         (PodcastTrack Tr, string Label)[] opts =
         [
             (PodcastTrack.Original, compact ? L10n.T("原声") : (isEnglish ? L10n.T("英文原声") : L10n.T("原声"))),
-            (PodcastTrack.Dub, compact ? L10n.T("中文") : L10n.T("原声线中文")),
+            (PodcastTrack.Dub, L10n.T("原声线中文")),
             (PodcastTrack.Coach, compact ? L10n.T("双语") : L10n.T("双语助教")),
         ];
         foreach (var (tr, lbl) in opts)

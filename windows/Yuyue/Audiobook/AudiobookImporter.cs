@@ -619,7 +619,7 @@ public static class AudiobookImporter
             pairGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var pairText = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
             pairText.Children.Add(new TextBlock { Text = $"书架上有《{match.Title}》电子书", FontSize = 12, FontWeight = FontWeights.Medium, Foreground = ThemeHelper.Brush(p.T1) });
-            pairText.Children.Add(new TextBlock { Text = "导入后配对合成听读书：切换阅读时自动同步进度", FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3) });
+            pairText.Children.Add(new TextBlock { Text = "导入后合成听读书：听到哪句，书页就走到哪句", FontSize = 10.5, Foreground = ThemeHelper.Brush(p.T3) });
             pairGrid.Children.Add(pairText);
             var pairSw = new ToggleSwitch { IsOn = true, MinWidth = 0, OnContent = "", OffContent = "", VerticalAlignment = VerticalAlignment.Center };
             pairSw.Toggled += (_, _) => pairWithEbook = pairSw.IsOn;
@@ -675,7 +675,9 @@ public static class AudiobookImporter
     private static string FormatTotalLength(double sec)
     {
         int totalMin = Math.Max(1, (int)Math.Round(sec / 60.0));
-        return totalMin >= 60 ? $"约 {totalMin / 60} 小时 {totalMin % 60} 分" : $"约 {totalMin} 分钟";
+        return totalMin >= 60
+            ? (totalMin % 60 == 0 ? $"{totalMin / 60} 小时" : $"{totalMin / 60} 小时 {totalMin % 60} 分")
+            : $"{totalMin} 分钟";
     }
 
     private static string FormatClock(double sec)

@@ -193,6 +193,83 @@ public static class YYChrome
         box.Resources["TextControlBorderBrushDisabled"] = transparent;
     }
 
+    private static T? FindNamedDescendant<T>(DependencyObject root, string name) where T : FrameworkElement
+    {
+        int n = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < n; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match && match.Name == name) return match;
+            var deep = FindNamedDescendant<T>(child, name);
+            if (deep is not null) return deep;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Connects the <c>YYClearButton</c> inside <c>YYSearchTextBoxStyle</c> so any non-empty search/filter box
+    /// offers a one-click <c>×</c> reset even when unfocused.
+    /// </summary>
+    public static void WireClearButton(TextBox box, Action? onCleared = null)
+    {
+        Button? clearBtn = null;
+        void UpdateVisibility()
+        {
+            if (clearBtn is not null)
+                clearBtn.Visibility = string.IsNullOrEmpty(box.Text) ? Visibility.Collapsed : Visibility.Visible;
+        }
+        void TryAttach()
+        {
+            if (clearBtn is not null)
+            {
+                UpdateVisibility();
+                return;
+            }
+            box.ApplyTemplate();
+            clearBtn = FindNamedDescendant<Button>(box, "YYClearButton");
+            if (clearBtn is null) return;
+            clearBtn.Click += (_, _) =>
+            {
+                box.Text = "";
+                onCleared?.Invoke();
+                box.Focus(FocusState.Programmatic);
+            };
+            UpdateVisibility();
+        }
+        box.Loaded += (_, _) => TryAttach();
+        box.TextChanged += (_, _) =>
+        {
+            if (clearBtn is null) TryAttach();
+            else UpdateVisibility();
+        };
+        TryAttach();
+    }
+
+    /// <summary>
+    /// Creates a vertically-centered single-line search/filter <see cref="TextBox"/> with an integrated one-click clear button.
+    /// </summary>
+    public static TextBox MakeSearchBox(
+        string placeholder,
+        string initialText = "",
+        double? width = null,
+        double height = 32,
+        double fontSize = 12.5,
+        Action? onCleared = null)
+    {
+        var box = new TextBox
+        {
+            Style = (Style)Application.Current.Resources["YYSearchTextBoxStyle"],
+            Text = initialText,
+            PlaceholderText = L10n.T(placeholder),
+            Height = height,
+            MinHeight = height,
+            FontSize = fontSize,
+        };
+        if (width.HasValue) box.Width = width.Value;
+        WireClearButton(box, onCleared);
+        return box;
+    }
+
     /// <summary>
     /// Hides any currently open <see cref="ContentDialog"/> on <paramref name="xamlRoot"/> and awaits its closure
     /// so WinUI 3 never throws <c>COMException (0x80000019): Only a single ContentDialog can be open at any time</c>.
@@ -426,9 +503,9 @@ public static class YYChrome
         if (destructive)
         {
             Color dangerBg = p.Danger;
-            Color dangerHover = Color.FromArgb(255, (byte)Math.Clamp(dangerBg.R - 14, 0, 255), (byte)Math.Clamp(dangerBg.G - 10, 0, 255), (byte)Math.Clamp(dangerBg.B - 10, 0, 255));
             okBtn = new Button
             {
+                Style = (Style)Application.Current.Resources["YYFluentAccentButtonStyle"],
                 MinWidth = 88,
                 Height = 32,
                 MinHeight = 32,
@@ -436,16 +513,8 @@ public static class YYChrome
                 CornerRadius = new CornerRadius(6),
                 Background = ThemeHelper.Brush(dangerBg),
                 Foreground = ThemeHelper.Brush(Colors.White),
-                BorderThickness = new Thickness(0),
-                FontWeight = FontWeights.SemiBold,
-                UseSystemFocusVisuals = false,
                 Content = new TextBlock { Text = L10n.T(confirmText), FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = ThemeHelper.Brush(Colors.White) },
             };
-            okBtn.Resources["ButtonBackground"] = ThemeHelper.Brush(dangerBg);
-            okBtn.Resources["ButtonBackgroundPointerOver"] = ThemeHelper.Brush(dangerHover);
-            okBtn.Resources["ButtonBackgroundPressed"] = ThemeHelper.Brush(dangerHover);
-            okBtn.Resources["ButtonForeground"] = ThemeHelper.Brush(Colors.White);
-            okBtn.Resources["ButtonForegroundPointerOver"] = ThemeHelper.Brush(Colors.White);
             okBtn.Click += (_, _) => { confirmed = true; dlgRef?.Hide(); };
         }
         else
@@ -749,18 +818,14 @@ public static class YYChrome
         var p = ThemeHelper.Palette(dark);
         var tc = ThemeHelper.TintColors(tint, dark);
         double clampedH = Math.Min(height, 34);
-        Color bg, bgHover, bgPress, bgDisabled, fg, fgDisabled, edge;
+        Color bg, fg, edge;
         double borderW;
         FontWeight fw;
         switch (kind)
         {
             case "warm":
                 bg = tc.Soft;
-                bgHover = Color.FromArgb(bg.A, (byte)Math.Clamp(bg.R + (dark ? 14 : -10), 0, 255), (byte)Math.Clamp(bg.G + (dark ? 14 : -10), 0, 255), (byte)Math.Clamp(bg.B + (dark ? 14 : -10), 0, 255));
-                bgPress = Color.FromArgb(bg.A, (byte)Math.Clamp(bg.R + (dark ? 22 : -18), 0, 255), (byte)Math.Clamp(bg.G + (dark ? 22 : -18), 0, 255), (byte)Math.Clamp(bg.B + (dark ? 22 : -18), 0, 255));
-                bgDisabled = Color.FromArgb(110, bg.R, bg.G, bg.B);
                 fg = tc.Accent;
-                fgDisabled = Color.FromArgb(130, fg.R, fg.G, fg.B);
                 edge = tc.Edge;
                 borderW = 1;
                 fw = FontWeights.SemiBold;
@@ -768,22 +833,14 @@ public static class YYChrome
             case "primary":
             case "dark":
                 bg = tc.Fill;
-                bgHover = Color.FromArgb(255, (byte)Math.Clamp(bg.R + (dark ? 12 : -14), 0, 255), (byte)Math.Clamp(bg.G + (dark ? 12 : -14), 0, 255), (byte)Math.Clamp(bg.B + (dark ? 12 : -14), 0, 255));
-                bgPress = Color.FromArgb(255, (byte)Math.Clamp(bg.R + (dark ? -12 : -26), 0, 255), (byte)Math.Clamp(bg.G + (dark ? -12 : -26), 0, 255), (byte)Math.Clamp(bg.B + (dark ? -12 : -26), 0, 255));
-                bgDisabled = Color.FromArgb(dark ? (byte)64 : (byte)110, bg.R, bg.G, bg.B);
                 fg = Colors.White;
-                fgDisabled = Color.FromArgb(180, 255, 255, 255);
                 edge = bg;
                 borderW = 0;
                 fw = FontWeights.SemiBold;
                 break;
             default:
                 bg = p.Card;
-                bgHover = p.Inset;
-                bgPress = Color.FromArgb(255, (byte)Math.Clamp(p.Inset.R + (dark ? 10 : -10), 0, 255), (byte)Math.Clamp(p.Inset.G + (dark ? 10 : -10), 0, 255), (byte)Math.Clamp(p.Inset.B + (dark ? 10 : -10), 0, 255));
-                bgDisabled = Color.FromArgb(140, p.Card.R, p.Card.G, p.Card.B);
                 fg = p.T1;
-                fgDisabled = p.T3;
                 edge = p.Line;
                 borderW = 1;
                 fw = FontWeights.Normal;
@@ -794,8 +851,15 @@ public static class YYChrome
             ? new TextBlock { Text = L10n.T(s), FontSize = 13, FontWeight = fw, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center }
             : (UIElement)content;
 
+        string styleKey = kind switch
+        {
+            "primary" or "dark" => "YYFluentAccentButtonStyle",
+            "warm" => "YYFluentSoftAccentButtonStyle",
+            _ => "YYFluentButtonStyle",
+        };
         var btn = new Button
         {
+            Style = (Style)Application.Current.Resources[styleKey],
             Height = clampedH,
             MinHeight = clampedH,
             Padding = new Thickness(horizontalPadding, 0, horizontalPadding, 0),
@@ -811,18 +875,6 @@ public static class YYChrome
         };
         if (content is string labelStr)
             AutomationProperties.SetName(btn, L10n.T(labelStr));
-        btn.Resources["ButtonBackground"] = ThemeHelper.Brush(bg);
-        btn.Resources["ButtonBackgroundPointerOver"] = ThemeHelper.Brush(bgHover);
-        btn.Resources["ButtonBackgroundPressed"] = ThemeHelper.Brush(bgPress);
-        btn.Resources["ButtonBackgroundDisabled"] = ThemeHelper.Brush(bgDisabled);
-        btn.Resources["ButtonForeground"] = ThemeHelper.Brush(fg);
-        btn.Resources["ButtonForegroundPointerOver"] = ThemeHelper.Brush(fg);
-        btn.Resources["ButtonForegroundPressed"] = ThemeHelper.Brush(fg);
-        btn.Resources["ButtonForegroundDisabled"] = ThemeHelper.Brush(fgDisabled);
-        btn.Resources["ButtonBorderBrush"] = ThemeHelper.Brush(edge);
-        btn.Resources["ButtonBorderBrushPointerOver"] = ThemeHelper.Brush(edge);
-        btn.Resources["ButtonBorderBrushPressed"] = ThemeHelper.Brush(edge);
-        btn.Resources["ButtonBorderBrushDisabled"] = borderW > 0 ? ThemeHelper.Brush(Color.FromArgb(96, edge.R, edge.G, edge.B)) : new SolidColorBrush(Colors.Transparent);
         btn.Click += (_, _) => onClick();
         return btn;
     }
@@ -874,5 +926,235 @@ public static class YYChrome
         {
             element.Opacity = 1.0;
         }
+    }
+
+    /// <summary>
+    /// Interactive graphite pencil signature (<c>CTT</c>) for the About bookplate folio
+    /// (1:1 <c>apple/Yuyue/Phone/PhoneSignature.swift</c> &amp; <c>MacUpdate.swift</c>).
+    /// Writes out all three bezier strokes sequentially on load and whenever clicked.
+    /// </summary>
+    public static (FrameworkElement View, Action TriggerWrite) MakePencilSignature(double size, bool dark, bool autoWrite = true)
+    {
+        double k = size / 60.0;
+        double w = size;
+        double h = size * 56.0 / 60.0;
+        Color lead = dark ? Color.FromArgb(255, 217, 213, 205) : Color.FromArgb(255, 47, 46, 45);
+
+        Windows.Foundation.Point Pt(double x, double y) => new((x - 8.0) * k, (y - 6.0) * k);
+
+        var s0 = SampleMultiBezier([
+            (Pt(24, 9),    Pt(19, 15),    Pt(13.5, 25),  Pt(11.5, 33)),
+            (Pt(11.5, 33), Pt(10, 39),    Pt(13, 41.5),  Pt(20, 41.5)),
+            (Pt(20, 41.5), Pt(28, 41.5),  Pt(36, 40.5),  Pt(44, 39.5)),
+            (Pt(44, 39.5), Pt(51, 38.5),  Pt(58, 37.5),  Pt(64, 37)),
+        ]);
+        var s1 = SampleMultiBezier([
+            (Pt(21.5, 17), Pt(27, 18.5),  Pt(31.5, 18.8), Pt(35, 18.2)),
+            (Pt(35, 18.2), Pt(31, 21),    Pt(27.5, 26),   Pt(26.3, 33)),
+            (Pt(26.3, 33), Pt(25.3, 40),  Pt(24.6, 47),   Pt(25.2, 53)),
+        ]);
+        var s2 = SampleMultiBezier([
+            (Pt(43, 17.5), Pt(48, 18.8),  Pt(52.5, 17.8), Pt(56.5, 15.5)),
+            (Pt(56.5, 15.5), Pt(51, 19),  Pt(45.5, 24),   Pt(43.3, 31)),
+            (Pt(43.3, 31), Pt(41.5, 39),  Pt(40.3, 49),   Pt(41, 59.5)),
+        ]);
+        var pressed = SampleMultiBezier([
+            (Pt(40, 40.2), Pt(48, 39), Pt(56, 37.8), Pt(63.5, 37.2)),
+        ]);
+
+        Microsoft.UI.Xaml.Shapes.Polyline MakeLine(double thickness, double opacity, double dx = 0, double dy = 0, bool grainDash = false)
+        {
+            var pl = new Microsoft.UI.Xaml.Shapes.Polyline
+            {
+                Stroke = ThemeHelper.Brush(lead),
+                StrokeThickness = thickness,
+                Opacity = opacity,
+                StrokeStartLineCap = PenLineCap.Round,
+                StrokeEndLineCap = PenLineCap.Round,
+                StrokeLineJoin = PenLineJoin.Round,
+                IsHitTestVisible = false,
+            };
+            if (grainDash)
+            {
+                pl.StrokeDashArray = [2.4, 0.65];
+                pl.StrokeDashCap = PenLineCap.Round;
+            }
+            if (dx != 0 || dy != 0)
+            {
+                Canvas.SetLeft(pl, dx);
+                Canvas.SetTop(pl, dy);
+            }
+            return pl;
+        }
+
+        var canvas = new Canvas
+        {
+            Width = w,
+            Height = h,
+            Background = new SolidColorBrush(Colors.Transparent),
+            Opacity = 0.86,
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        AutomationProperties.SetName(canvas, "CTT");
+
+        var mainLines = new[] { MakeLine(1.9 * k, 0.84), MakeLine(1.9 * k, 0.84), MakeLine(1.9 * k, 0.84) };
+        var grainLines = new[]
+        {
+            MakeLine(1.0 * k, 0.54, 0.28 * k, 0.22 * k, grainDash: true),
+            MakeLine(1.0 * k, 0.54, 0.28 * k, 0.22 * k, grainDash: true),
+            MakeLine(1.0 * k, 0.54, 0.28 * k, 0.22 * k, grainDash: true),
+        };
+        var pressedLine = MakeLine(2.6 * k, 0.46);
+
+        for (int i = 0; i < 3; i++)
+        {
+            canvas.Children.Add(mainLines[i]);
+            canvas.Children.Add(grainLines[i]);
+            if (i == 0) canvas.Children.Add(pressedLine);
+        }
+
+        canvas.PointerEntered += (_, _) => canvas.Opacity = 1.0;
+        canvas.PointerExited += (_, _) => canvas.Opacity = 0.86;
+
+        var samples = new[] { s0, s1, s2 };
+        double[] durations = [0.62, 0.50, 0.56];
+        double[] starts = [0.10, 0.10 + 0.62 * 0.82, 0.10 + 0.62 * 0.82 + 0.50 * 0.82];
+        double totalEnd = starts[2] + durations[2] + 0.04;
+
+        DispatcherTimer? timer = null;
+        var sw = new System.Diagnostics.Stopwatch();
+
+        void ApplyTrim(Microsoft.UI.Xaml.Shapes.Polyline target, (Windows.Foundation.Point Pt, double CumLen)[] table, double t)
+        {
+            target.Points.Clear();
+            if (t <= 0.001 || table.Length < 2) return;
+            double total = table[^1].CumLen;
+            double targetLen = Math.Clamp(t, 0.0, 1.0) * total;
+            target.Points.Add(table[0].Pt);
+            for (int idx = 1; idx < table.Length; idx++)
+            {
+                if (table[idx].CumLen <= targetLen)
+                {
+                    target.Points.Add(table[idx].Pt);
+                }
+                else
+                {
+                    double prevLen = table[idx - 1].CumLen;
+                    double seg = Math.Max(1e-6, table[idx].CumLen - prevLen);
+                    double frac = (targetLen - prevLen) / seg;
+                    var a = table[idx - 1].Pt;
+                    var b = table[idx].Pt;
+                    target.Points.Add(new Windows.Foundation.Point(a.X + (b.X - a.X) * frac, a.Y + (b.Y - a.Y) * frac));
+                    break;
+                }
+            }
+        }
+
+        void RenderInstant()
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                ApplyTrim(mainLines[i], samples[i], 1.0);
+                ApplyTrim(grainLines[i], samples[i], 1.0);
+            }
+            ApplyTrim(pressedLine, pressed, 1.0);
+        }
+
+        void Write()
+        {
+            timer?.Stop();
+            for (int i = 0; i < 3; i++)
+            {
+                mainLines[i].Points.Clear();
+                grainLines[i].Points.Clear();
+            }
+            pressedLine.Points.Clear();
+
+            sw.Restart();
+            timer = new DispatcherTimer { Interval = System.TimeSpan.FromMilliseconds(16) };
+            timer.Tick += (_, _) =>
+            {
+                double elapsed = sw.Elapsed.TotalSeconds;
+                for (int i = 0; i < 3; i++)
+                {
+                    double raw = (elapsed - starts[i]) / durations[i];
+                    double eased = raw <= 0 ? 0 : (raw >= 1 ? 1 : CubicBezierEase(raw, 0.45, 0.05, 0.30, 1.0));
+                    ApplyTrim(mainLines[i], samples[i], eased);
+                    ApplyTrim(grainLines[i], samples[i], eased);
+                    if (i == 0)
+                    {
+                        double pTrim = Math.Max(0.0, eased * 2.1 - 1.1);
+                        ApplyTrim(pressedLine, pressed, pTrim);
+                    }
+                }
+                if (elapsed >= totalEnd)
+                {
+                    timer.Stop();
+                }
+            };
+            timer.Start();
+        }
+
+        if (autoWrite)
+        {
+            RenderInstant();
+            bool playedInitial = false;
+            canvas.Loaded += (_, _) =>
+            {
+                if (playedInitial) return;
+                playedInitial = true;
+                Write();
+            };
+        }
+
+        canvas.PointerPressed += (_, e) =>
+        {
+            Write();
+            e.Handled = true;
+        };
+        canvas.Unloaded += (_, _) => timer?.Stop();
+
+        return (canvas, Write);
+    }
+
+    private static (Windows.Foundation.Point Pt, double CumLen)[] SampleMultiBezier(
+        (Windows.Foundation.Point P0, Windows.Foundation.Point C1, Windows.Foundation.Point C2, Windows.Foundation.Point P3)[] segs)
+    {
+        const int stepsPerSeg = 36;
+        var list = new List<(Windows.Foundation.Point Pt, double CumLen)>(segs.Length * stepsPerSeg + 1);
+        double cum = 0;
+        var prev = segs[0].P0;
+        list.Add((prev, 0));
+        foreach (var (p0, c1, c2, p3) in segs)
+        {
+            for (int s = 1; s <= stepsPerSeg; s++)
+            {
+                double t = (double)s / stepsPerSeg;
+                double u = 1.0 - t;
+                double x = u * u * u * p0.X + 3 * u * u * t * c1.X + 3 * u * t * t * c2.X + t * t * t * p3.X;
+                double y = u * u * u * p0.Y + 3 * u * u * t * c1.Y + 3 * u * t * t * c2.Y + t * t * t * p3.Y;
+                var cur = new Windows.Foundation.Point(x, y);
+                double dx = cur.X - prev.X;
+                double dy = cur.Y - prev.Y;
+                cum += Math.Sqrt(dx * dx + dy * dy);
+                list.Add((cur, cum));
+                prev = cur;
+            }
+        }
+        return list.ToArray();
+    }
+
+    private static double CubicBezierEase(double x, double x1, double y1, double x2, double y2)
+    {
+        double lo = 0.0, hi = 1.0, t = x;
+        for (int i = 0; i < 12; i++)
+        {
+            t = 0.5 * (lo + hi);
+            double u = 1.0 - t;
+            double bx = 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t;
+            if (bx < x) lo = t; else hi = t;
+        }
+        double uFinal = 1.0 - t;
+        return 3 * uFinal * uFinal * t * y1 + 3 * uFinal * t * t * y2 + t * t * t;
     }
 }

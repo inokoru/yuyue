@@ -235,4 +235,56 @@ public sealed class CompanionAndCloudVoiceTests : IDisposable
         byte[] combined = CloudVoiceService.CombineMp3Chunks([chunk1, chunk2]);
         Assert.Equal(new byte[] { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66 }, combined);
     }
+
+    [Fact]
+    public void CompanionClient_StripsThinkingStreamsPreviewAndParsesRichMarkdownWithCitations()
+    {
+        // StripThinking removes completed blocks and flags unclosed <think>
+        var (visDone, thinkDone) = CompanionClient.StripThinking("<think>step 1\nstep 2</think>\n宝玉很在意黛玉 [1]。");
+        Assert.Equal("宝玉很在意黛玉 [1]。", visDone);
+        Assert.False(thinkDone);
+
+        var (visOpen, thinkOpen) = CompanionClient.StripThinking("<THINK>still reasoning...");
+        Assert.Equal("", visOpen);
+        Assert.True(thinkOpen);
+
+        // FormatStreamingPreview hides trailing 接着问, partial [1, and partial 没读到
+        var (s1, t1) = CompanionClient.FormatStreamingPreview("<think>ok</think>这一回主要写庆寿 [1\n接着问：下一步？", hideNotYet: true);
+        Assert.Equal("这一回主要写庆寿", s1);
+        Assert.False(t1);
+
+        var (s2, _) = CompanionClient.FormatStreamingPreview("没读", hideNotYet: true);
+        Assert.Equal("", s2);
+
+        // SplitFollowUpQuestions also strips <think> blocks
+        var (cleanAns, followUps) = CompanionClient.SplitFollowUpQuestions("<think>plan</think>\n核心内容 [2]。\n接着问：为何如此？｜结局如何？");
+        Assert.Equal("核心内容 [2]。", cleanAns);
+        Assert.Equal(["为何如此？", "结局如何？"], followUps);
+
+        // ParseRichSegments handles headings, bullets, quote bars, CJK-adjacent bold with inline citations, code, italic, strike
+        const string md = """
+            ### 人物关系
+            - **贾母**：「今日可大好了」 [1]，语气亲昵
+            > *闲笔*里藏着 `伏笔` 和 ~~误解~~ [2]
+            ---
+            **重点 [3]**：细节决定成败
+            """;
+        var segs = CompanionClient.ParseRichSegments(md);
+        Assert.Contains(segs, s => s.Kind == CompanionClient.CompanionRichKind.Heading && s.Text == "人物关系");
+        Assert.Contains(segs, s => s.Kind == CompanionClient.CompanionRichKind.Bullet);
+        Assert.Contains(segs, s => s.Kind == CompanionClient.CompanionRichKind.Bold && s.Text == "贾母");
+        Assert.Contains(segs, s => s.Kind == CompanionClient.CompanionRichKind.Citation && s.CitationIndex == 1);
+        Assert.Contains(segs, s => s.Kind == CompanionClient.CompanionRichKind.QuoteBar);
+        Assert.Contains(segs, s => s.Kind == CompanionClient.CompanionRichKind.Italic && s.Text == "闲笔");
+        Assert.Contains(segs, s => s.Kind == CompanionClient.CompanionRichKind.Code && s.Text == "伏笔");
+        Assert.Contains(segs, s => s.Kind == CompanionClient.CompanionRichKind.Strike && s.Text == "误解");
+        Assert.Contains(segs, s => s.Kind == CompanionClient.CompanionRichKind.Citation && s.CitationIndex == 2);
+        Assert.Contains(segs, s => s.Kind == CompanionClient.CompanionRichKind.Bold && s.Text == "重点");
+        Assert.Contains(segs, s => s.Kind == CompanionClient.CompanionRichKind.Citation && s.CitationIndex == 3);
+
+        // Streaming mode trims trailing dangling markdown token
+        var streamSegs = CompanionClient.ParseRichSegments("正在分析**", streaming: true);
+        Assert.Single(streamSegs);
+        Assert.Equal("正在分析", streamSegs[0].Text);
+    }
 }

@@ -338,24 +338,25 @@ public sealed class WifiTransferService : IDisposable
     {
         string templatePath = Path.Combine(AppContext.BaseDirectory, "Assets", "Shared", "wifi-page.html");
         bool en = L10n.IsEnglish;
+        string dev = Environment.MachineName;
         string html = File.Exists(templatePath)
             ? File.ReadAllText(templatePath)
-            : $"<!doctype html><html><body><h1>{(en ? "Yuyue · Wi-Fi Transfer" : "语阅 · 局域网传书")}</h1></body></html>";
+            : $"<!doctype html><html><body><h1>{(en ? "Yuyue · Wi-Fi Transfer" : "语阅 · Wi‑Fi 传书")}</h1></body></html>";
 
         return html
             .Replace("{{lang}}", en ? "en" : "zh-Hans")
-            .Replace("{{title}}", en ? "Yuyue · Wi-Fi Transfer" : "语阅 · 局域网传书")
-            .Replace("{{heading}}", en ? "Send books to Yuyue" : "传书到语阅")
-            .Replace("{{formats}}", en ? "EPUB, PDF, MOBI, AZW3, TXT, and M4B / MP3 audiobooks" : "支持 EPUB、PDF、MOBI、AZW3、TXT 与 M4B / MP3 有声书")
-            .Replace("{{drop}}", en ? "Click to choose books, or drop files here" : "点击选书，或把文件拖到这里")
-            .Replace("{{many}}", en ? "You can pick several files at once" : "可一次选择多本书")
-            .Replace("{{sending}}", en ? "Transferring" : "传输列表")
-            .Replace("{{files}}", en ? "\"%d files\"" : "\"共 %d 个文件\"")
-            .Replace("{{done}}", en ? "\"Added to shelf\"" : "\"已加入书架\"")
-            .Replace("{{queued}}", en ? "\"Waiting\"" : "\"等待中\"")
-            .Replace("{{importing}}", en ? "\"Importing…\"" : "\"正在整理入库…\"")
-            .Replace("{{gone}}", en ? "Connection lost, retrying…" : "连接中断，正在重试…")
-            .Replace("{{awake}}", en ? "Keep the Wi-Fi Transfer window open on your PC while sending." : "传书期间请保持电脑端「局域网传书」窗口打开。");
+            .Replace("{{title}}", en ? "Yuyue · Wi-Fi Transfer" : "语阅 · Wi‑Fi 传书")
+            .Replace("{{heading}}", en ? $"Send books to {dev}" : $"传书到「{dev}」")
+            .Replace("{{formats}}", en ? "EPUB, PDF, TXT, MOBI, AZW3, M4B, MP3. Added straight to your shelf." : "EPUB、PDF、TXT、MOBI、AZW3、M4B、MP3。传完直接放进书架。")
+            .Replace("{{drop}}", en ? "Drop books here, or click to choose files" : "把书拖到这里，或者点这里选文件")
+            .Replace("{{many}}", en ? "You can pick several files at once" : "一次可以放很多本")
+            .Replace("{{sending}}", en ? "Sending" : "正在传")
+            .Replace("{{files}}", en ? "\"%d files\"" : "\"%d 个文件\"")
+            .Replace("{{done}}", en ? "\"Added to shelf\"" : "\"已经放进书架\"")
+            .Replace("{{queued}}", en ? "\"Queued\"" : "\"排队中\"")
+            .Replace("{{importing}}", en ? "\"Adding to shelf…\"" : "\"正在放进书架…\"")
+            .Replace("{{gone}}", en ? $"Lost connection to {dev}. Return to Wi-Fi Transfer in Yuyue to resume." : $"连不上 {dev} 了。回到语阅的“Wi‑Fi 传书”页面，这里会从断的地方接着传。")
+            .Replace("{{awake}}", en ? $"Keep the Wi-Fi Transfer window open on {dev} while sending." : $"传的时候让 {dev} 那一页亮着。");
     }
 
     private static async Task<(string Method, string Target, long ContentLength, bool BadContentLength, byte[] BodyPrefix)> ReadHttpHeaderAsync(

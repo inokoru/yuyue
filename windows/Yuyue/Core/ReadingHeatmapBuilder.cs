@@ -146,6 +146,98 @@ public static class ReadingHeatmapBuilder
             LongestStreak: longestStreak);
     }
 
+    /// <summary>
+    /// Builds a Monday-aligned full-calendar-year heatmap for <paramref name="year"/>
+    /// (1:1 parity with Apple's <c>ReadingHeatmap(yearDays:times:)</c> in <c>MacStatsSheet</c>).
+    /// </summary>
+    public static ReadingHeatmapSummary BuildForYear(
+        IReadOnlyList<DayTime> dayTimes,
+        int year,
+        DateOnly today)
+    {
+        var totals = new Dictionary<string, (uint Read, uint Listen)>(StringComparer.Ordinal);
+        foreach (var dt in dayTimes)
+        {
+            if (string.IsNullOrWhiteSpace(dt.Day)) continue;
+            totals.TryGetValue(dt.Day, out var acc);
+            totals[dt.Day] = (acc.Read + dt.ReadSeconds, acc.Listen + dt.ListenSeconds);
+        }
+
+        var jan1 = new DateOnly(year, 1, 1);
+        var dec31 = new DateOnly(year, 12, 31);
+        int lead = ((int)jan1.DayOfWeek + 6) % 7;
+        DateOnly startMonday = jan1.AddDays(-lead);
+        int totalDays = (dec31.DayNumber - startMonday.DayNumber) + 1;
+        int weekCount = (totalDays + 6) / 7;
+
+        var weeks = new List<IReadOnlyList<ReadingHeatmapCell>>(weekCount);
+        int activeDays = 0;
+        uint totalRead = 0;
+        uint totalListen = 0;
+        int longestStreak = 0;
+        int runningStreak = 0;
+
+        for (int w = 0; w < weekCount; w++)
+        {
+            var col = new ReadingHeatmapCell[7];
+            for (int d = 0; d < 7; d++)
+            {
+                DateOnly date = startMonday.AddDays(w * 7 + d);
+                string key = FormatDayKey(date);
+                bool outside = date.Year != year;
+                bool future = outside || date > today;
+                uint r = 0, l = 0;
+                if (!future && totals.TryGetValue(key, out var val))
+                {
+                    r = val.Read;
+                    l = val.Listen;
+                }
+                uint sum = r + l;
+                int level = future ? 0 : IntensityLevel(sum);
+                col[d] = new ReadingHeatmapCell(date, key, r, l, level, future);
+
+                if (!future)
+                {
+                    if (sum > 0)
+                    {
+                        activeDays++;
+                        totalRead += r;
+                        totalListen += l;
+                        runningStreak++;
+                        if (runningStreak > longestStreak) longestStreak = runningStreak;
+                    }
+                    else
+                    {
+                        runningStreak = 0;
+                    }
+                }
+            }
+            weeks.Add(col);
+        }
+
+        int currentStreak = 0;
+        DateOnly cursor = today > dec31 ? dec31 : today;
+        if (cursor >= jan1)
+        {
+            if (!HasActivity(totals, cursor)) cursor = cursor.AddDays(-1);
+            while (cursor >= jan1 && HasActivity(totals, cursor))
+            {
+                currentStreak++;
+                cursor = cursor.AddDays(-1);
+            }
+        }
+
+        return new ReadingHeatmapSummary(
+            Weeks: weeks,
+            RangeStart: jan1,
+            RangeEnd: dec31,
+            ActiveDays: activeDays,
+            TotalReadSeconds: totalRead,
+            TotalListenSeconds: totalListen,
+            CurrentStreak: currentStreak,
+            LongestStreak: longestStreak);
+    }
+
     private static bool HasActivity(Dictionary<string, (uint Read, uint Listen)> totals, DateOnly date) =>
         totals.TryGetValue(FormatDayKey(date), out var v) && (v.Read + v.Listen) > 0;
 }

@@ -281,6 +281,7 @@ public partial class App : Application
         bool debugListenBar = false;
         bool debugQuickSearch = false;
         string? debugTheme = null;
+        string? debugSettingsDialog = null;
         uint? debugSection = null;
 #endif
         for (int i = 1; i < cliArgs.Length; i++)
@@ -300,6 +301,7 @@ public partial class App : Application
             if (cliArgs[i] == "--left-panel" && i + 1 < cliArgs.Length) { debugLeftPanel = cliArgs[++i]; continue; }
             if (cliArgs[i] == "--listen-bar") { debugListenBar = true; continue; }
             if (cliArgs[i] == "--quick-search") { debugQuickSearch = true; continue; }
+            if (cliArgs[i] == "--settings-dialog" && i + 1 < cliArgs.Length) { debugSettingsDialog = cliArgs[++i]; continue; }
             if (cliArgs[i] == "--dark") { debugTheme = "dark"; continue; }
             if (cliArgs[i] == "--light") { debugTheme = "light"; continue; }
 #endif
@@ -407,6 +409,9 @@ public partial class App : Application
             OpenSettings(settingsPage ?? "general");
 
 #if DEBUG
+        if (!string.IsNullOrEmpty(debugSettingsDialog) && _mainWindow?.ActiveTab is SettingsView sv)
+            sv.OpenDebugDialog(debugSettingsDialog);
+
         if (debugQuickSearch && _mainWindow is { } qsWin)
         {
             qsWin.DispatcherQueue.TryEnqueue(async () =>
@@ -626,7 +631,10 @@ public partial class App : Application
         win.FilesDroppedHandler = async paths =>
         {
             if (_libraryView is not null)
-                await _libraryView.ImportPathsAsync(paths, openFirst: false, source: "drag_drop");
+            {
+                string? colId = win.ActiveTab is LibraryView lv ? lv.ActiveCollectionId : null;
+                await _libraryView.ImportPathsAsync(paths, openFirst: false, source: "drag_drop", targetCollectionId: colId);
+            }
         };
         win.TabTearOutRequested += TearOutTabToNewWindow;
         win.ShellWindowClosingToTray += _ =>
@@ -857,7 +865,13 @@ public partial class App : Application
             "SliderTrackValueFill",
             "SliderThumbBackground",
             "ToggleSwitchFillOn",
+            "CheckBoxCheckBackgroundFillChecked",
+            "CheckBoxCheckBackgroundStrokeChecked",
+            "CheckBoxCheckBackgroundFillIndeterminate",
+            "CheckBoxCheckBackgroundStrokeIndeterminate",
             "TextControlBorderBrushFocused",
+            "ComboBoxItemPillFillBrush",
+            "HyperlinkButtonForeground",
         ];
         string[] hoverKeys =
         [
@@ -865,6 +879,9 @@ public partial class App : Application
             "SliderTrackValueFillPointerOver",
             "SliderThumbBackgroundPointerOver",
             "ToggleSwitchFillOnPointerOver",
+            "CheckBoxCheckBackgroundFillCheckedPointerOver",
+            "CheckBoxCheckBackgroundStrokeCheckedPointerOver",
+            "HyperlinkButtonForegroundPointerOver",
         ];
         string[] pressKeys =
         [
@@ -872,6 +889,9 @@ public partial class App : Application
             "SliderTrackValueFillPressed",
             "SliderThumbBackgroundPressed",
             "ToggleSwitchFillOnPressed",
+            "CheckBoxCheckBackgroundFillCheckedPressed",
+            "CheckBoxCheckBackgroundStrokeCheckedPressed",
+            "HyperlinkButtonForegroundPressed",
         ];
 
         static Windows.UI.Color ShiftShade(Windows.UI.Color c, int delta) => Windows.UI.Color.FromArgb(
@@ -880,18 +900,29 @@ public partial class App : Application
             (byte)Math.Clamp(c.G + delta, 0, 255),
             (byte)Math.Clamp(c.B + delta, 0, 255));
 
+        void SetDictBrush(ResourceDictionary dict, string key, Windows.UI.Color color)
+        {
+            if (dict.TryGetValue(key, out var v) && v is Microsoft.UI.Xaml.Media.SolidColorBrush b)
+            {
+                try
+                {
+                    b.Color = color;
+                    return;
+                }
+                catch { }
+            }
+            dict[key] = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
+        }
+
         void UpdateDict(ResourceDictionary dict, YYTintColors c, bool dark)
         {
             var hover = ShiftShade(c.Fill, dark ? 14 : -12);
             var press = ShiftShade(c.Fill, dark ? -10 : -24);
-            foreach (var k in baseKeys)
-                if (dict.TryGetValue(k, out var v) && v is Microsoft.UI.Xaml.Media.SolidColorBrush b) b.Color = c.Fill;
-            foreach (var k in hoverKeys)
-                if (dict.TryGetValue(k, out var v) && v is Microsoft.UI.Xaml.Media.SolidColorBrush b) b.Color = hover;
-            foreach (var k in pressKeys)
-                if (dict.TryGetValue(k, out var v) && v is Microsoft.UI.Xaml.Media.SolidColorBrush b) b.Color = press;
-            if (dict.TryGetValue("YYAccentSoftBrush", out var s) && s is Microsoft.UI.Xaml.Media.SolidColorBrush soft) soft.Color = c.Soft;
-            if (dict.TryGetValue("YYAccentEdgeBrush", out var e) && e is Microsoft.UI.Xaml.Media.SolidColorBrush edge) edge.Color = c.Edge;
+            foreach (var k in baseKeys) SetDictBrush(dict, k, c.Fill);
+            foreach (var k in hoverKeys) SetDictBrush(dict, k, hover);
+            foreach (var k in pressKeys) SetDictBrush(dict, k, press);
+            SetDictBrush(dict, "YYAccentSoftBrush", c.Soft);
+            SetDictBrush(dict, "YYAccentEdgeBrush", c.Edge);
         }
 
         bool appDark = ThemeHelper.IsDark(Library.Prefs.ToElementTheme());
