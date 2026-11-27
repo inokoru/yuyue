@@ -1518,6 +1518,175 @@ struct CustomPageTurnSoundSheet: View {
         }
     }
 
+    private func errorBanner(_ message: String) -> some View {
+        HStack(spacing: YYUI.s(8)) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(YYUI.font(13))
+                .foregroundStyle(YYColor.danger)
+            Text(message)
+                .font(YYUI.font(11.5))
+                .foregroundStyle(YYColor.t1)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, YYUI.s(12))
+        .padding(.vertical, YYUI.s(10))
+        .background(YYColor.danger.opacity(0.09), in: RoundedRectangle(cornerRadius: YYUI.s(12), style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: YYUI.s(12), style: .continuous)
+                .strokeBorder(YYColor.danger.opacity(0.22), lineWidth: 0.5)
+        )
+    }
+
+    // MARK: State 1 — Capture Studio
+
+    private var captureStudio: some View {
+        VStack(spacing: YYUI.s(12)) {
+            VStack(spacing: YYUI.s(16)) {
+                liveMeterView
+                    .frame(height: 44)
+                    .padding(.top, YYUI.s(4))
+
+                Button {
+                    toggleRecord()
+                } label: {
+                    let progress = min(1.0, recorder.seconds / PageTurnClipRecorder.maxSeconds)
+                    ZStack {
+                        Circle()
+                            .stroke(
+                                recorder.recording ? YYColor.danger.opacity(0.16) : tint.accent.opacity(0.16),
+                                lineWidth: 2.5
+                            )
+                            .frame(width: 74, height: 74)
+
+                        if recorder.recording {
+                            Circle()
+                                .trim(from: 0, to: progress)
+                                .stroke(YYColor.danger, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                                .rotationEffect(.degrees(-90))
+                                .frame(width: 74, height: 74)
+                                .animation(.linear(duration: 0.05), value: progress)
+                        }
+
+                        Circle()
+                            .fill(recorder.recording ? YYColor.danger : tint.fill)
+                            .frame(width: 60, height: 60)
+                            .scaleEffect(recorder.recording ? (1.0 + recorder.level * 0.07) : 1.0)
+                            .shadow(
+                                color: (recorder.recording ? YYColor.danger : tint.fill).opacity(0.26),
+                                radius: 10,
+                                y: 4
+                            )
+                            .animation(.easeOut(duration: 0.08), value: recorder.level)
+
+                        if recorder.recording {
+                            RoundedRectangle(cornerRadius: 4.5, style: .continuous)
+                                .fill(.white)
+                                .frame(width: 17, height: 17)
+                        } else if processing {
+                            ProgressView()
+                                .tint(.white)
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "mic.fill")
+                                .font(.yy(size: 22, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .frame(width: 78, height: 78)
+                    .contentShape(.circle)
+                }
+                .buttonStyle(YYPressStyle(scale: 0.94))
+                .disabled(processing)
+                .accessibilityLabel(recorder.recording ? Text("停止录音") : Text("录一段翻书声"))
+
+                VStack(spacing: 4) {
+                    if recorder.recording {
+                        Text("正在收音 · \(recorder.seconds.formatted(.number.precision(.fractionLength(1)))) 秒")
+                            .font(YYUI.font(13, .semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(YYColor.danger)
+                        Text("翻完停顿片刻自动完成，或轻点停止")
+                            .font(YYUI.font(10.5))
+                            .foregroundStyle(YYColor.t3)
+                    } else if processing {
+                        Text("正在裁剪与调平音量…")
+                            .font(YYUI.font(13, .semibold))
+                            .foregroundStyle(YYColor.t1)
+                    } else {
+                        Text("翻一页真书，或轻敲桌面")
+                            .font(YYUI.font(13, .semibold))
+                            .foregroundStyle(YYColor.t1)
+                        Text("录完稍停自动截取 · 自动去静音并调平音量")
+                            .font(YYUI.font(10.5))
+                            .foregroundStyle(YYColor.t3)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+                .animation(YYMotion.quick, value: recorder.recording)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, YYUI.s(18))
+            .padding(.horizontal, YYUI.s(16))
+            .yyCard()
+
+            // Quiet local-only & import footer row
+            HStack(spacing: YYUI.s(8)) {
+                Text("只保存在本地，不上传")
+                    .font(YYUI.font(10.5))
+                    .foregroundStyle(YYColor.t3)
+                Spacer(minLength: 6)
+                Button {
+                    errorMessage = nil
+                    importing = true
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "folder")
+                            .font(YYUI.font(11, .semibold))
+                        Text("从文件导入…")
+                            .font(YYUI.font(11, .semibold))
+                    }
+                    .foregroundStyle(tint.accent)
+                    .padding(.horizontal, YYUI.s(11))
+                    .frame(height: YYUI.s(30))
+                    .background(tint.accentSoft, in: Capsule())
+                }
+                .buttonStyle(YYPressStyle(scale: 0.96))
+                .disabled(recorder.recording || processing)
+            }
+            .padding(.horizontal, YYUI.s(4))
+        }
+    }
+
+    private var liveMeterView: some View {
+        let count = PageTurnClipRecorder.barCount
+        let live = recorder.levels
+        return HStack(spacing: 4) {
+            ForEach(0 ..< count, id: \.self) { i in
+                let h: CGFloat = {
+                    if recorder.recording {
+                        let offset = count - live.count
+                        if i < offset { return 0.10 }
+                        return CGFloat(live[i - offset])
+                    }
+                    return Self.idleWaveHeights[i % Self.idleWaveHeights.count]
+                }()
+                let barColor: Color = {
+                    if recorder.recording {
+                        let recency = Double(i + 1) / Double(count)
+                        return YYColor.danger.opacity(0.32 + 0.68 * recency)
+                    }
+                    return tint.accent.opacity(0.22)
+                }()
+                Capsule()
+                    .fill(barColor)
+                    .frame(width: 3.5, height: max(5, h * 38))
+            }
+        }
+        .animation(.easeOut(duration: 0.08), value: recorder.levels.count)
+    }
+
+
     private func discardDraft() {
         nameFocused = false
         playTask?.cancel()
