@@ -12,6 +12,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+    $PSNativeCommandUseErrorActionPreference = $true
+}
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $Py = if ($env:PYTHON) { $env:PYTHON } else { "python" }
 if (-not (Get-Command $Py -ErrorAction SilentlyContinue)) { $Py = "py" }
@@ -26,7 +29,40 @@ $DoClips = $true
 if ($Shots -and -not $Clips) { $DoClips = $false }
 if ($Clips -and -not $Shots) { $DoShots = $false }
 
-New-Item -ItemType Directory -Force -Path $Raw, $ClipDir, (Split-Path $Lib) | Out-Null
+New-Item -ItemType Directory -Force -Path $Raw, $ClipDir, (Split-Path $Lib), $Books | Out-Null
+
+function Invoke-Py {
+    & $Py @args
+    if ($LASTEXITCODE -ne 0) {
+        throw "python 失败（退出码 $LASTEXITCODE）：$($args -join ' ')"
+    }
+}
+
+# 缺 Pillow 或（要录短片时）缺 ffmpeg 时直接停，避免空书架也被截下来。
+# 这里先不要让原生命令的非零退出变成终止错误，好把安装命令印出来。
+$ErrorActionPreference = "Continue"
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
+& $Py -c "import PIL" 2>$null
+$pillowOk = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = "Stop"
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+    $PSNativeCommandUseErrorActionPreference = $true
+}
+if (-not $pillowOk) {
+    Write-Host "缺少 Pillow，封面和合成图都要用它。先装上再重跑："
+    Write-Host "  python3 -m pip install --user pillow"
+    Write-Host "  Windows：py -m pip install pillow"
+    exit 1
+}
+if ($DoClips) {
+    if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+        Write-Host "录短片需要 ffmpeg，当前没有找到。只截图可以加 -Shots。"
+        Write-Host "  winget install Gyan.FFmpeg"
+        exit 1
+    }
+}
 
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
@@ -221,14 +257,15 @@ for p in root.glob('books/*/book.json'):
     if needle in title.lower():
         print(p.parent.name); break
 "@
-    return (& $Py -c $code $Lib $Needle).Trim()
+    $id = & $Py -c $code $Lib $Needle
+    if ($LASTEXITCODE -ne 0) { throw "按书名查找失败：$Needle" }
+    return "$id".Trim()
 }
 
 function Set-Prefs([string]$OpenId, [int]$W, [int]$H) {
     $arg = @("$Root\scripts\readme-shots.py", "windows-prefs", "--library", $Lib, "--width", "$W", "--height", "$H")
     if ($OpenId) { $arg += @("--open-book", $OpenId) }
-    & $Py @arg
-    if ($LASTEXITCODE -ne 0) { throw "windows-prefs 失败" }
+    Invoke-Py @arg
 }
 
 function Grab($proc, [string]$name, [int]$dipW, [int]$dipH, [int]$waitMs) {
@@ -244,8 +281,7 @@ function Grab($proc, [string]$name, [int]$dipW, [int]$dipH, [int]$waitMs) {
 function Record-Clip($proc, [string]$name, [int]$seconds, [scriptblock]$action) {
     $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
     if (-not $ffmpeg) {
-        Write-Host "没有 ffmpeg，跳过短片 $name。安装后重跑 -Clips。示例: winget install Gyan.FFmpeg"
-        return
+        throw "录短片需要 ffmpeg。winget install Gyan.FFmpeg"
     }
     $h = Wait-Window $proc 12000
     [YuyueShot]::Place($h, 1200, 820)
@@ -270,8 +306,7 @@ Write-Host "使用 $($chosen.Path)"
 Write-Host "版本 $($chosen.Version)（优先已安装的 0.1.7；没有就用本机 Release / Debug）"
 Write-Host "隔离书库 $Lib"
 
-& $Py "$Root\scripts\readme-shots.py" books --out $Books
-if ($LASTEXITCODE -ne 0) { throw "生成演示书失败" }
+Invoke-Py "$Root\scripts\readme-shots.py" books --out $Books
 $bookFiles = @(Get-ChildItem $Books -File)
 if (-not $Keep -or -not (Test-Path (Join-Path $Lib "position.json"))) {
     if (Test-Path $Lib) { Remove-Item -Recurse -Force $Lib }
@@ -279,13 +314,21 @@ if (-not $Keep -or -not (Test-Path (Join-Path $Lib "position.json"))) {
     $argList = @("--library", $Lib) + @($bookFiles | ForEach-Object { $_.FullName })
     Write-Host "导入 $($bookFiles.Count) 本书"
     $proc = Start-Process -FilePath $chosen.Path -ArgumentList $argList -PassThru
-    $n = Wait-Books 8
+    $n = Wait-Books @($bookFiles).Count
     Close-App $proc
     Write-Host "导入完成，书库里有 $n 本"
-    if ($n -lt 8) { throw "导入到的书少于 8 本。没有改你的真实书库 $Real" }
-    & $Py "$Root\scripts\readme-shots.py" seed --library $Lib
-    if ($LASTEXITCODE -ne 0) { throw "seed 失败" }
+    if ($n -lt 15) { throw "导入到的书只有 $n 本，至少要有 15 本。没有改你的真实书库 $Real" }
+    Invoke-Py "$Root\scripts\readme-shots.py" seed --library $Lib
 }
+
+function Assert-SeededLibrary {
+    $n = @(Get-ChildItem (Join-Path $Lib "books") -Recurse -Filter book.json -ErrorAction SilentlyContinue).Count
+    if ($n -lt 15) {
+        throw "隔离书库里只有 $n 本书，至少要有 15 本才截图或录屏。没有改你的真实书库 $Real"
+    }
+    Write-Host "隔离书库里有 $n 本"
+}
+Assert-SeededLibrary
 
 function Launch-Lib {
     return Start-Process -FilePath $chosen.Path -ArgumentList @("--library", $Lib) -PassThru
@@ -297,7 +340,7 @@ if ($DoShots) {
     Grab $p "01-shelf" 1320 900 15000
     Close-App $p
 
-    & $Py "$Root\scripts\readme-shots.py" focus --library $Lib --mode notes
+    Invoke-Py "$Root\scripts\readme-shots.py" focus --library $Lib --mode notes
     $id = Book-Id "背影"
     Set-Prefs $id 1200 820
     $p = Launch-Lib
@@ -334,7 +377,7 @@ if ($DoClips) {
     }
     Close-App $p
 
-    & $Py "$Root\scripts\readme-shots.py" focus --library $Lib --mode listen
+    Invoke-Py "$Root\scripts\readme-shots.py" focus --library $Lib --mode listen
     $id = Book-Id "背影"
     Set-Prefs $id 1200 820
     $p = Launch-Lib
@@ -348,7 +391,7 @@ if ($DoClips) {
     }
     Close-App $p
 
-    & $Py "$Root\scripts\readme-shots.py" focus --library $Lib --mode notes
+    Invoke-Py "$Root\scripts\readme-shots.py" focus --library $Lib --mode notes
     Set-Prefs $id 1200 820
     $p = Launch-Lib
     Record-Clip $p "03-highlight-note" 11 {
@@ -374,7 +417,7 @@ if ($DoClips) {
     }
     Close-App $p
 
-    & $Py "$Root\scripts\readme-shots.py" focus --library $Lib --mode same
+    Invoke-Py "$Root\scripts\readme-shots.py" focus --library $Lib --mode same
     Set-Prefs "" 1320 900
     $p = Launch-Lib
     Record-Clip $p "04-open-same-position" 6 {
@@ -389,7 +432,7 @@ if ($DoClips) {
     Copy-Item (Join-Path $Lib "position.json") (Join-Path $ClipDir "position.json") -Force -ErrorAction SilentlyContinue
 }
 
-try { & $Py "$Root\scripts\readme-shots.py" compose } catch { Write-Host "合成跳过。python -m pip install pillow 之后再跑 python scripts/readme-shots.py compose" }
+Invoke-Py "$Root\scripts\readme-shots.py" compose
 Write-Host "截图目录 $Raw"
 Write-Host "短片目录 $ClipDir"
 Write-Host "真实书库没有动过：$Real"

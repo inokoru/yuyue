@@ -330,6 +330,8 @@ FIXTURE_COPIES = [
 
 def prepare(out: Path) -> list[Path]:
     """Write generated EPUBs and copy the three real fixtures. Returns every book path."""
+    # Create the folder before any cover drawing, so a later Pillow error
+    # does not look like the output path was never chosen.
     out.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     for i, spec in enumerate(GENERATED):

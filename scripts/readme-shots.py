@@ -21,7 +21,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from readme_shots.books import prepare  # noqa: E402
-from readme_shots.compose import compose, rewrite_readme  # noqa: E402
 from readme_shots.seed import apply_plan, focus, write_windows_prefs  # noqa: E402
 
 SCHEMA = """
@@ -56,8 +55,22 @@ def _real_library(path: Path) -> None:
         raise SystemExit(f"拒绝使用真实书库：{resolved}")
 
 
+def _need_pillow() -> None:
+    try:
+        import PIL  # noqa: F401
+    except ImportError:
+        raise SystemExit(
+            "缺少 Pillow，封面和合成图都要用它。\n"
+            "  python3 -m pip install --user pillow\n"
+            "  macOS 上若 pip 不可用：brew install pillow\n"
+            "  Windows：py -m pip install pillow"
+        )
+
+
 def cmd_books(args: argparse.Namespace) -> None:
+    _need_pillow()
     out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
     paths = prepare(out)
     print(f"{len(paths)} 本书 → {out}")
 
@@ -81,6 +94,9 @@ def cmd_prefs(args: argparse.Namespace) -> None:
 
 
 def cmd_compose(_: argparse.Namespace) -> None:
+    _need_pillow()
+    from readme_shots.compose import compose, rewrite_readme
+
     made = compose()
     rewrite_readme(made)
 

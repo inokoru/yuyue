@@ -12,7 +12,7 @@
 # The scratch library lives under build/readme-shots or the simulator's
 # container. It is not the real 语阅 library. Pass --keep to reuse a library
 # this script already seeded. Pass --shots or --clips to run only that half.
-set -u
+set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${PYTHON:-python3}"
 SCRATCH="$ROOT/build/readme-shots"
@@ -53,20 +53,69 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "${CMD:-}" ]; then usage; exit 2; fi
-mkdir -p "$SCRATCH" "$RAW" "$CLIPS"
+mkdir -p "$SCRATCH" "$BOOKS" "$RAW" "$CLIPS"
 
 need() {
   command -v "$1" >/dev/null 2>&1 || { echo "缺少 $1"; exit 1; }
 }
 
-prepare_books() {
+# Pillow is imported by cover drawing and by compose. Fail here, before the
+# app is copied or launched, so a missing module cannot fall through into an
+# empty-shelf capture.
+preflight() {
   need "$PY"
+  if ! "$PY" -c "import PIL" >/dev/null 2>&1; then
+    echo "缺少 Pillow，封面和合成图都要用它。先装上再重跑："
+    echo "  python3 -m pip install --user pillow"
+    if [ "$(uname -s)" = "Darwin" ]; then
+      echo "  若 pip 不可用：brew install pillow"
+    fi
+    exit 1
+  fi
+  if [ "$DO_CLIPS" = "1" ]; then
+    if ! command -v ffmpeg >/dev/null 2>&1; then
+      echo "录短片需要 ffmpeg，当前没有找到。只截图可以加 --shots。"
+      if [ "$(uname -s)" = "Darwin" ]; then
+        echo "  brew install ffmpeg"
+      else
+        echo "  请先安装 ffmpeg，并确认它在 PATH 里。"
+      fi
+      exit 1
+    fi
+  fi
+}
+
+prepare_books() {
+  mkdir -p "$BOOKS"
   "$PY" "$ROOT/scripts/readme-shots.py" books --out "$BOOKS"
+  local n
+  n="$(find "$BOOKS" -type f \( -name '*.epub' -o -name '*.pdf' \) | wc -l | tr -d ' ')"
+  if [ "${n:-0}" -lt 15 ]; then
+    echo "演示书只生成了 ${n:-0} 本，至少要有 15 本。没有启动应用。"
+    exit 1
+  fi
 }
 
 count_books() {
-  find "$1" -name book.json 2>/dev/null | wc -l | tr -d ' '
+  if [ ! -d "$1" ]; then
+    echo 0
+    return 0
+  fi
+  find "$1" -name book.json | wc -l | tr -d ' '
 }
+
+require_library() {
+  local n
+  n="$(count_books "$1")"
+  if [ "${n:-0}" -lt 15 ]; then
+    echo "隔离书库里只有 ${n:-0} 本书，至少要有 15 本才截图或录屏。"
+    echo "没有改你的真实书库。这是一次没导全的临时书库的话，删掉它再重跑，不要加 --keep。"
+    exit 1
+  fi
+  echo "隔离书库里有 $n 本"
+}
+
+preflight
 
 input_bin() {
   if [ ! -x "$SCRATCH/mac-input" ]; then
@@ -86,6 +135,9 @@ window_bounds() {
   echo "$line" | cut -f2- | tr '\t' ' '
 }
 
+# 「Window move completed without beginning」是系统在窗口还没开始移动时
+# 就收到一次定位时打的警告，窗口仍会打开，不影响截图。等窗口出现再改大小，
+# 避免对一个还不存在的窗口发定位。
 resize_process() {
   local proc="$1" w="$2" h="$3"
   osascript <<EOF || true
@@ -93,8 +145,16 @@ tell application "System Events"
   if exists process "$proc" then
     tell process "$proc"
       set frontmost to true
-      set position of window 1 to {70, 50}
-      set size of window 1 to {$w, $h}
+      repeat 20 times
+        if (count of windows) > 0 then exit repeat
+        delay 0.3
+      end repeat
+      if (count of windows) > 0 then
+        try
+          set position of window 1 to {70, 50}
+          set size of window 1 to {$w, $h}
+        end try
+      end if
     end tell
   end if
 end tell
@@ -205,20 +265,13 @@ run_macos() {
     for f in "$BOOKS"/*; do
       [ -n "$joined" ] && joined="$joined|$f" || joined="$f"
     done
-    expect="$(count_books "$BOOKS" | awk '{print $1}')"
-    # book.json count is after import, not in the epub folder. Count files instead.
     expect="$(find "$BOOKS" -type f \( -name '*.epub' -o -name '*.pdf' \) | wc -l | tr -d ' ')"
     echo "导入 $expect 本书到隔离书库 $lib"
     "$bin" -debugLibrary "$lib" -debugShots "$shots" -debugShotName _import -debugShotDelay 36 \
-      -debugImport "$joined" -AppleLanguages "(zh-Hans)" -AppleLocale "zh_CN" || true
-    n="$(count_books "$lib/books")"
-    echo "导入完成，书库里有 $n 本"
-    if [ "$n" -lt 8 ]; then
-      echo "导入到的书少于 8 本。看 $shots 和终端输出。没有改你的真实书库。"
-      exit 1
-    fi
+      -debugImport "$joined" -AppleLanguages "(zh-Hans)" -AppleLocale "zh_CN"
     "$PY" "$ROOT/scripts/readme-shots.py" seed --library "$lib"
   fi
+  require_library "$lib/books"
   shot() { # name delay w h extra-args...
     local name="$1" delay="$2" w="$3" h="$4"
     shift 4
@@ -233,7 +286,8 @@ run_macos() {
       cp "$shots/$name/1.png" "$RAW/macos/$name.png"
       echo "截图 → $RAW/macos/$name.png"
     else
-      echo "没有截到 $name"
+      echo "没有截到 $name，停止。没有改你的真实书库。"
+      exit 1
     fi
   }
   if [ "$DO_SHOTS" = "1" ]; then
@@ -338,7 +392,7 @@ EOF
     cp "$lib/position.json" "$CLIPS/macos/position.json" 2>/dev/null || true
     echo "短片在 $CLIPS/macos/"
   fi
-  "$PY" "$ROOT/scripts/readme-shots.py" compose || echo "合成跳过。装好 pillow 后运行: python3 scripts/readme-shots.py compose"
+  "$PY" "$ROOT/scripts/readme-shots.py" compose
 }
 
 # ---------- iOS / iPad simulator ----------
@@ -415,18 +469,14 @@ run_sim() {
     n=0
     while [ "$i" -lt 45 ]; do
       n="$(count_books "$lib/books")"
-      if [ "$n" -ge 8 ]; then break; fi
+      if [ "$n" -ge 15 ]; then break; fi
       sleep 1
       i=$((i + 1))
     done
     xcrun simctl terminate "$udid" app.yuyue.Yuyue 2>/dev/null || true
-    echo "导入完成，书库里有 $n 本"
-    if [ "$n" -lt 8 ]; then
-      echo "模拟器里的书不够。容器: $container"
-      exit 1
-    fi
     "$PY" "$ROOT/scripts/readme-shots.py" seed --library "$lib"
   fi
+  require_library "$lib/books"
   mkdir -p "$RAW/$folder" "$CLIPS/$folder"
   sim_shot() {
     local name="$1"; shift
@@ -542,7 +592,7 @@ run_sim() {
     defaults write com.apple.iphonesimulator ShowSingleTouches -bool NO
   fi
   xcrun simctl status_bar "$udid" clear >/dev/null 2>&1 || true
-  "$PY" "$ROOT/scripts/readme-shots.py" compose || true
+  "$PY" "$ROOT/scripts/readme-shots.py" compose
 }
 
 # ---------- Android ----------
@@ -614,6 +664,7 @@ run_android() {
   adb exec-out run-as app.yuyue tar -C files/Yuyue -cf - . > "$SCRATCH/android-lib.tar"
   tar -C "$SCRATCH/android-lib" -xf "$SCRATCH/android-lib.tar"
   "$PY" "$ROOT/scripts/readme-shots.py" seed --library "$SCRATCH/android-lib"
+  require_library "$SCRATCH/android-lib/books"
   local id
   id="$("$PY" -c "import json;print(json.load(open('$SCRATCH/android-lib/position.json'))['bookId'])")"
   rm -f "$SCRATCH/android-back.tar"
@@ -682,7 +733,7 @@ run_android() {
     cp "$SCRATCH/android-lib/position.json" "$CLIPS/android/position.json" 2>/dev/null || true
   fi
   adb shell cmd uimode night "$night" >/dev/null 2>&1 || true
-  "$PY" "$ROOT/scripts/readme-shots.py" compose || true
+  "$PY" "$ROOT/scripts/readme-shots.py" compose
   # trap restores the private directory
 }
 

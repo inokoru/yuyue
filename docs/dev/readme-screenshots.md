@@ -43,8 +43,8 @@ python3 scripts/readme-shots.py compose
 
 | | 需要 |
 |---|---|
-| 各端 | Python 3，`python3 -m pip install pillow` |
-| Mac 应用 | Xcode。Debug 构建：`cd apple && xcodegen && xcodebuild -project Yuyue.xcodeproj -scheme Yuyue -configuration Debug -destination 'platform=macOS' -derivedDataPath build/dd build`。系统外观用浅色。终端需要「辅助功能」，短片里的点击才点得下去。 |
+| 各端 | Python 3。脚本一开始就检查 Pillow，没有就退出，不会去截空书架。安装：`python3 -m pip install --user pillow`（Mac 上 pip 不可用时 `brew install pillow`；Windows：`py -m pip install pillow`）。要录短片还要有 ffmpeg（Mac：`brew install ffmpeg`；Windows：`winget install Gyan.FFmpeg`），只截图可加 `--shots` / `-Shots`。 |
+| Mac 应用 | Xcode。Debug 构建：`cd apple && xcodegen && xcodebuild -project Yuyue.xcodeproj -scheme Yuyue -configuration Debug -destination 'platform=macOS' -derivedDataPath build/dd build`。系统外观用浅色。终端需要「辅助功能」，短片里的点击才点得下去。若看到 `Window move completed without beginning`，那是系统在窗口还没开始移动时收到一次定位的警告，窗口仍会打开，可以忽略。 |
 | iPhone / iPad | 同一套 Xcode。模拟器 Debug 包：`xcodebuild ... -destination 'platform=iOS Simulator,name=iPhone 16' -derivedDataPath build/sim build`。脚本自己选已安装的 iPhone 16 或 iPad Pro 11 寸，把状态栏设成 9:41，拍完恢复。 |
 | Android | 已安装的 **Debug** 包（`assembleDebug`），这样 `run-as` 才能进应用目录。优先模拟器。 |
 | Windows | 已安装的官方 **0.1.7**（`%LOCALAPPDATA%\Programs\Yuyue\Yuyue.exe` 或开始菜单里的安装位置）。没有安装包时用本机 Release / Debug。短片另要 ffmpeg（`winget install Gyan.FFmpeg`）。截图不需要 ffmpeg。 |
