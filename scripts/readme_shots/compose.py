@@ -311,11 +311,7 @@ def compose() -> dict[str, bool]:
 def readme_block(made: dict[str, bool]) -> str:
     parts = ['<p align="center">', '  <img src="docs/screenshots/composed/shelf.png" alt="语阅书架" width="100%" />', "</p>"]
     if made.get("windows_shelf"):
-        parts.append('<p align="center">Mac 与 Windows，同一套演示书库。</p>')
-    else:
-        parts.append(
-            '<p align="center">Mac 书架。Windows 用 <code>pwsh scripts/capture-readme.ps1</code> 拍好后，再跑一次合成，会排在旁边。</p>'
-        )
+        parts.append('<p align="center">Mac 与 Windows。</p>')
     if made.get("reading"):
         parts += [
             '<p align="center">',
@@ -353,10 +349,6 @@ def phone_block(made: dict[str, bool]) -> str:
         ]
     if made.get("android"):
         lines.append('<p align="center">iPhone 与 Android。</p>')
-    else:
-        lines.append(
-            '<p align="center">iPhone。Android 模拟器拍完后，同一张图里会并排放上。</p>'
-        )
     if made.get("phones_more"):
         lines += [
             '<p align="center">',

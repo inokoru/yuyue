@@ -5,16 +5,18 @@
 <h1 align="center">语阅 Yuyue</h1>
 
 <p align="center">
-  读书、听书的本地阅读器，支持 Mac、Windows、Android、iPhone 和 iPad。<br />
-  没有账号，不用登录，书和笔记都留在你自己的设备上。
+  本地读书、听书。看、听、记对着同一句话。<br />
+  没有账号，不用登录，书和笔记都留在你自己的设备上。<br />
+  Mac、Windows、Android、iPhone 和 iPad。
 </p>
 
 <p align="center">
   <a href="https://cnb.cool/inokoru/yuyue/-/releases">国内高速下载</a> ·
   <a href="https://github.com/inokoru/yuyue/releases">GitHub 下载</a> ·
-  <a href="#能做什么">功能一览</a> ·
-  <a href="#下载与安装">安装说明</a> ·
-  <a href="#给开发者">参与与构建</a> ·
+  <a href="#能做什么">能做什么</a> ·
+  <a href="#下载与安装">下载与安装</a> ·
+  <a href="#隐私说明">隐私说明</a> ·
+  <a href="#给开发者">给开发者</a> ·
   <a href="LICENSE">GPL-3.0</a>
 </p>
 
@@ -22,7 +24,6 @@
 <p align="center">
   <img src="docs/screenshots/composed/shelf.png" alt="语阅书架" width="100%" />
 </p>
-<p align="center">Mac 书架。Windows 用 <code>pwsh scripts/capture-readme.ps1</code> 拍好后，再跑一次合成，会排在旁边。</p>
 <p align="center">
   <img src="docs/screenshots/composed/reading.png" alt="听书与笔记" width="100%" />
 </p>
@@ -31,95 +32,108 @@
 </p>
 <!-- readme-shots:end -->
 
-## 能做什么
-
-一本书，可以看、可以听、可以记，三件事对着同一句话。
-
-- **安静地读**  
-  支持 EPUB、PDF、TXT、无加密 MOBI / AZW3。内置素白、纸本、纸本·夜、芦苇、铅纸、暗黑等纸张并支持自定义「我的纸」，配有日夜一键切换、独立亮度与「护眼柔光」暖色滤蓝光；支持滑动 / 覆盖阴影 / 无动画三档翻页、自定义翻页音效、上下滚动拉动切章、双栏排版与正则替换规则；可通过局域网 Wi‑Fi 传书、监听文件夹，或连接 OPDS / WebDAV 远程书库（Calibre、Kavita、Komga）。
-
-- **读着听，听着读**  
-  点任意一句就从那一句开始朗读，墨线跟着声音逐句推进、自动翻页；支持本机离线语音（Kokoro 32 音色、声音卡与本机声音克隆）、免 Key 微软 Edge 在线神经语音、系统声音与自接云端声音，异常时明确提示而不擅自切声；同时内置双语播客（支持按需加载往期单集）与有声书空间。听到一半拿起来看，正好停在同一行。
-
-- **读外文原著**  
-  点词查释义、双击整句翻译，支持「原文 / 双语对照 / 仅译文」三态即时切换与导入 MDict 词典，带生词本与四六级、雅思、GRE 行间难词简注。
-
-- **不剧透的 AI 书伴**  
-  可接入端侧模型（Apple 智能）、本机服务（Ollama、LM Studio）或自有大模型 API（DeepSeek、OpenRouter、Claude、OpenAI 等）。隔天打开备好前情提要；随时通过快捷指令总结本章、梳理人物、段落翻译或划词追问，默认只在已读范围内流式作答，每句出处点一下就翻回原句，好回答支持多选一键存进想法。
-
-- **记下来，随时带走**  
-  支持多样式划线、随手写想法、今日回顾、年度阅读热力图与书摘卡片。笔记可导出为 Markdown、带划线的 EPUB、CSV，或直发 Obsidian、Notion、flomo、新枝与 Anki。
-
-- **无服务器同步**  
-  通过你自己的 iCloud Drive 或 WebDAV（坚果云、群晖、Nextcloud 等）同步进度、笔记与书文件，内置 WebDAV 同步检查视图；遇到冲突并排交给你选，不暗中覆盖，并支持整库 `.yuyue` 快照备份。
-
-
-### 手机端同样顺手
-
-手机与电脑共用同一套排版与同步内核：支持拖拽定制底部导航与自动记住上次书架标签，在**书、进度、播客、有声与个人合集**之间切换自如；提供书脊与浅木层板书架样式，阅读时支持纸张与字体细调、音量键翻页、双击边缘进出沉浸阅读与墨水屏模式，锁屏与耳机均可控制收听。
-
 <!-- readme-shots:phones:begin -->
 <p align="center">
   <img src="docs/screenshots/composed/phones.png" alt="手机上的语阅" width="100%" />
 </p>
-<p align="center">iPhone。Android 模拟器拍完后，同一张图里会并排放上。</p>
 <p align="center">
   <img src="docs/screenshots/composed/phones-more.png" alt="手机上的书架、播客与排版" width="100%" />
 </p>
 <!-- readme-shots:phones:end -->
 
-> **在做什么、不做什么**：语阅不做账号系统、自建内容服务器、广告、书城和推荐流；你的书、进度与笔记始终只留在你自己的设备或个人网盘里。为了解功能使用情况，应用默认开启仅记录功能使用形态的匿名统计（不关联个人身份，绝不收集书名、笔记、划线或搜索词），可随时在「关于」页关闭；应用内反馈仅直发给开发者，不公开且不收集邮箱。仓库中围绕有声书自动录音对齐、分角色广播剧配音及书房电台自动编排等进阶能力仍在持续打磨与真机验收中，暂不作为成熟功能过度承诺；具体进度与验收标准见 [ROADMAP.md](ROADMAP.md)。
+## 能做什么
+
+- **看**  
+  在同一页上读。纸张、亮度和翻页可以自己调；外文可以点词、译一句。
+
+- **听**  
+  从这一句开始念，墨线跟着声音走，自动翻页。听到一半拿起来看，还停在这一行。
+
+- **记**  
+  划下来，写一句想法。笔记能导出，也能交到你自己的笔记软件里。
+
+- **同步**  
+  用你自己的 iCloud 或 WebDAV，在设备之间同步进度、笔记和书。两边改了同一处，并排给你选，不暗中覆盖。
+
+<details>
+<summary>格式、声音、笔记和同步的细节</summary>
+
+**看。** EPUB、PDF、TXT，以及无加密的 MOBI / AZW3。纸张有素白、纸本、纸本·夜、芦苇、铅纸、暗黑，也可以做一张「我的纸」；日夜切换、单独亮度、「护眼柔光」。翻页有滑动、覆盖阴影、无动画，可以自己换翻页声；上下滚动拉到底能切章，可以双栏，也可以用正则替换。传书可以走局域网 Wi‑Fi、监听一个文件夹，或连接 OPDS / WebDAV 远程书库（Calibre、Kavita、Komga）。外文点词查释义，双击整句翻译，原文 / 双语对照 / 仅译文可以当场换；能导入 MDict，有生词本，以及四六级、雅思、GRE 的行间简注。
+
+**听。** 本机离线语音（Kokoro 32 音色、声音卡、本机声音克隆）、免 Key 的微软 Edge 在线神经语音、系统声音，或你自己接的云端声音。出错时说明原因，不擅自换一声。另有双语播客（往期单集按需加载）和有声书空间。
+
+**书伴。** 可以接端侧模型（Apple 智能）、本机服务（Ollama、LM Studio），或你自己的大模型 API（DeepSeek、OpenRouter、Claude、OpenAI 等）。隔天打开可以有前情提要；总结本章、梳理人物、译一段、划词追问，默认只在已读范围内回答，出处点一下回到那一句。
+
+**记。** 几种划线、随手的想法、今日回顾、一年的阅读热力图、书摘卡片。导出为 Markdown、带划线的 EPUB、CSV，或发到 Obsidian、Notion、flomo、新枝、Anki。
+
+**同步。** iCloud Drive，或 WebDAV（坚果云、群晖、Nextcloud 等），带一个 WebDAV 同步检查视图。也可以把整库打成一份 `.yuyue` 快照。
+
+**手机。** 和电脑同一套排版与同步。底部导航可以拖，会记住上次的书架标签；书、进度、播客、有声和个人合集之间切换。书架可以是书脊或浅木层板。阅读时能调纸张和字体，音量键翻页，双击边缘进出沉浸阅读，有墨水屏模式。锁屏和耳机可以控制收听。
+
+有声书的自动录音对齐、分角色广播剧，以及书房电台的自动编排，还在打磨和真机验收里，这里不把它们说成已经做好。进度见 [ROADMAP.md](ROADMAP.md)。
+
+</details>
+
+## 不做什么
+
+不做账号，不做广告，不做书城和推荐，也不自己搭一台内容服务器。书、进度和笔记只在你的设备上，或在你自己的网盘里。
 
 ## 下载与安装
 
-从 [国内高速镜像](https://cnb.cool/inokoru/yuyue/-/releases)（无需登录、大陆直连）或 [GitHub Releases](https://github.com/inokoru/yuyue/releases) 下载。语阅目前不上架应用商店，也没有购买商业代码签名证书，首次安装时会多一两步系统确认。现阶段 **Mac、Windows 和 Android 都可直接下载安装**（均支持应用内检查更新，国内网络优先走镜像源），iPhone 与 iPad 适合愿意自行签名的进阶用户；Linux 桌面端规划见 [ROADMAP.md](ROADMAP.md)。
+从 [国内高速镜像](https://cnb.cool/inokoru/yuyue/-/releases)（不用登录，大陆可直连）或 [GitHub Releases](https://github.com/inokoru/yuyue/releases) 下载。语阅不上架应用商店，也没有购买商业代码签名证书，所以第一次打开时，系统会让你再确认一次。
+
+Mac、Windows 和 Android 可以直接装，也能在应用里检查更新；国内网络先走镜像。iPhone 和 iPad 需要自己签名。Linux 桌面端见 [ROADMAP.md](ROADMAP.md)。
 
 ### Mac（Apple 芯片 / Intel，macOS 14 及以上）
 
-- 直接下载最新版：
-  - Apple 芯片（M 系列）：[国内直链](https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-mac-arm64.dmg) · [GitHub](https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-mac-arm64.dmg)
-  - Intel 芯片：[国内直链](https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-mac-x86_64.dmg) · [GitHub](https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-mac-x86_64.dmg)
+- Apple 芯片（M 系列）：[国内直链](https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-mac-arm64.dmg) · [GitHub](https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-mac-arm64.dmg)
+- Intel 芯片：[国内直链](https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-mac-x86_64.dmg) · [GitHub](https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-mac-x86_64.dmg)
 
-1. 打开下载好的 `.dmg`，把语阅拖进“应用程序”。
-2. 第一次打开会被系统拦下，前往“系统设置 → 隐私与安全性”，点一次“仍要打开”。
+1. 打开 `.dmg`，把语阅拖进「应用程序」。
+2. 第一次会被系统拦住。到「系统设置 → 隐私与安全性」，点一次「仍要打开」。
 
-API Key 与网盘密码保存在 App 沙盒目录内的本机权限文件中（避免无开发者证书签名更新时反复弹出系统钥匙串授权），仅当前系统账号可读，不进同步、不进快照。
+API Key 和网盘密码放在 App 沙盒里的本机权限文件中（没有开发者证书时，这样更新不会反复弹出钥匙串授权）。只有当前系统账号能读，不进同步，不进快照。
 
 ### Windows（64 位 x64 / ARM64，Windows 10 1809 及以上 / Windows 11）
 
-- 直接下载最新版安装程序（x64 推荐）：
-  - 安装包（`.exe`）：[国内直链](https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-windows-x64-Setup.exe) · [GitHub](https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-windows-x64-Setup.exe)
-  - 如需绿色免安装版（`.zip`）或 ARM64 安装包，请在 [国内高速镜像](https://cnb.cool/inokoru/yuyue/-/releases) 或 [GitHub Releases](https://github.com/inokoru/yuyue/releases) 对应版本的附件列表中下载。
+- 安装包（x64，`.exe`）：[国内直链](https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-windows-x64-Setup.exe) · [GitHub](https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-windows-x64-Setup.exe)
+- 免安装的 `.zip`，或 ARM64 安装包，在[国内高速镜像](https://cnb.cool/inokoru/yuyue/-/releases)或 [GitHub Releases](https://github.com/inokoru/yuyue/releases) 该版本的附件里。
 
-1. 双击运行安装程序（默认按当前用户安装，支持 `.epub` / `.mobi` / `.azw3` / `.pdf` / `.m4b` 文件关联与后续应用内检查更新）。
-2. 因暂未购买代码签名证书，首次运行若遇 Windows Defender SmartScreen 提示，点「更多信息 → 仍要运行」即可。
+1. 双击安装程序。默认装给当前用户，可关联 `.epub` / `.mobi` / `.azw3` / `.pdf` / `.m4b`，之后能在应用里检查更新。
+2. 还没有代码签名证书。若 Windows Defender SmartScreen 拦住，点「更多信息 → 仍要运行」。
 
-API Key 与网盘密码使用 Windows DPAPI（当前用户范围）加密保存在本机，不进同步、不进快照。
+API Key 和网盘密码用 Windows DPAPI（当前用户）加密后留在本机，不进同步，不进快照。
 
 ### Android（8.0 及以上）
 
-- 直接下载最新版（`.apk`）：[国内直链](https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-android.apk) · [GitHub](https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-android.apk)
+- 安装包（`.apk`）：[国内直链](https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-android.apk) · [GitHub](https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-android.apk)
 
-允许浏览器或文件管理器安装未知来源的应用后即可安装。
+在浏览器或文件管理器里允许安装未知来源的应用，然后安装。
 
-### iPhone、iPad（iOS 17 及以上，进阶用户）
+### iPhone、iPad（iOS 17 及以上）
 
 - 未签名安装包（`.ipa`）：[国内直链](https://cnb.cool/inokoru/yuyue/-/releases/latest/download/Yuyue-ios-unsigned.ipa) · [GitHub](https://github.com/inokoru/yuyue/releases/latest/download/Yuyue-ios-unsigned.ipa)
 
-需使用 [Impactor](https://github.com/claration/Impactor) 和你自己的 Apple ID 给未签名 `.ipa` 签名安装，或使用 Xcode 从源码编译：
+用 [Impactor](https://github.com/claration/Impactor) 和你自己的 Apple ID 给未签名 `.ipa` 签名后再装，也可以用 Xcode 从源码编译。
 
-- 免费 Apple ID 签名的应用 **7 天后过期**，需要重新签名；
-- 手机需开启开发者模式，并配合电脑操作；
-- Impactor 为第三方工具，建议搭配备用 Apple ID 使用；苹果随时可能调整侧载机制，语阅无法保证此方式长期可用。
+- 免费 Apple ID 签名的应用 **7 天后过期**，要重新签名。
+- 手机要打开开发者模式，并且用电脑操作。
+- Impactor 是第三方工具，建议用一个备用 Apple ID。苹果可能调整侧载，语阅不能保证这种方式一直能用。
 
----
+## 隐私说明
+
+为了知道功能被怎样使用，语阅默认开启匿名的使用形态统计。它不关联个人身份，不收集书名、笔记、划线或搜索词。可以在「关于」里关掉。
+
+应用里写的反馈只发给开发者，不公开，也不收集邮箱。
 
 ## 给开发者
 
-接下来做什么见 [ROADMAP.md](ROADMAP.md)，怎么参与见 [CONTRIBUTING.md](CONTRIBUTING.md)，多端一致性工程架构见 [docs/dev/multi-platform-architecture.md](docs/dev/multi-platform-architecture.md)。感谢 [LINUX DO](https://linux.do/) 社区的交流与反馈。
-
 <details>
-<summary>目录结构与本地构建说明</summary>
+<summary>目录、构建和测试</summary>
+
+接下来做什么见 [ROADMAP.md](ROADMAP.md)，怎么参与见 [CONTRIBUTING.md](CONTRIBUTING.md)，多端一致性见 [docs/dev/multi-platform-architecture.md](docs/dev/multi-platform-architecture.md)。感谢 [LINUX DO](https://linux.do/) 社区的交流与反馈。
+
+README 截图和宣传短片的采集见 [docs/dev/readme-screenshots.md](docs/dev/readme-screenshots.md)。
 
 ### 目录
 
