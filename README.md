@@ -18,9 +18,18 @@
   <a href="LICENSE">GPL-3.0</a>
 </p>
 
+<!-- readme-shots:begin -->
 <p align="center">
-  <img src="docs/screenshots/01-shelf.png" alt="语阅书架" width="100%" />
+  <img src="docs/screenshots/composed/shelf.png" alt="语阅书架" width="100%" />
 </p>
+<p align="center">Mac 书架。Windows 用 <code>pwsh scripts/capture-readme.ps1</code> 拍好后，再跑一次合成，会排在旁边。</p>
+<p align="center">
+  <img src="docs/screenshots/composed/reading.png" alt="听书与笔记" width="100%" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/composed/english.png" alt="外文原著" width="78%" />
+</p>
+<!-- readme-shots:end -->
 
 ## 能做什么
 
@@ -44,29 +53,20 @@
 - **无服务器同步**  
   通过你自己的 iCloud Drive 或 WebDAV（坚果云、群晖、Nextcloud 等）同步进度、笔记与书文件，内置 WebDAV 同步检查视图；遇到冲突并排交给你选，不暗中覆盖，并支持整库 `.yuyue` 快照备份。
 
-<p align="center">
-  <img src="docs/screenshots/02-listening.png" alt="逐句跟读与听书控制" width="49%" />
-  <img src="docs/screenshots/03-notes.png" alt="划线、想法与笔记面板" width="49%" />
-</p>
-<p align="center">
-  <img src="docs/screenshots/04-english.png" alt="外文原著双栏排版与难词注释" width="49%" />
-  <img src="docs/screenshots/05-sync.png" alt="无服务器个人网盘同步" width="49%" />
-</p>
 
 ### 手机端同样顺手
 
 手机与电脑共用同一套排版与同步内核：支持拖拽定制底部导航与自动记住上次书架标签，在**书、进度、播客、有声与个人合集**之间切换自如；提供书脊与浅木层板书架样式，阅读时支持纸张与字体细调、音量键翻页、双击边缘进出沉浸阅读与墨水屏模式，锁屏与耳机均可控制收听。
 
+<!-- readme-shots:phones:begin -->
 <p align="center">
-  <img src="docs/screenshots/06-mobile-shelf.png" alt="手机端书架主页与在读书脊" width="32%" />
-  <img src="docs/screenshots/07-mobile-reading.png" alt="手机端暖纸划线阅读与听书胶囊" width="32%" />
-  <img src="docs/screenshots/08-mobile-notes.png" alt="手机端笔记列表与今日回顾" width="32%" />
+  <img src="docs/screenshots/composed/phones.png" alt="手机上的语阅" width="100%" />
 </p>
+<p align="center">iPhone。Android 模拟器拍完后，同一张图里会并排放上。</p>
 <p align="center">
-  <img src="docs/screenshots/09-mobile-places.png" alt="手机端书、进度、播客、有声与合集切换面板" width="32%" />
-  <img src="docs/screenshots/10-mobile-podcast.png" alt="手机端播客与双轨收听台" width="32%" />
-  <img src="docs/screenshots/11-mobile-typeset.png" alt="手机端纸张、字体与排版抽屉" width="32%" />
+  <img src="docs/screenshots/composed/phones-more.png" alt="手机上的书架、播客与排版" width="100%" />
 </p>
+<!-- readme-shots:phones:end -->
 
 > **在做什么、不做什么**：语阅不做账号系统、自建内容服务器、广告、书城和推荐流；你的书、进度与笔记始终只留在你自己的设备或个人网盘里。为了解功能使用情况，应用默认开启仅记录功能使用形态的匿名统计（不关联个人身份，绝不收集书名、笔记、划线或搜索词），可随时在「关于」页关闭；应用内反馈仅直发给开发者，不公开且不收集邮箱。仓库中围绕有声书自动录音对齐、分角色广播剧配音及书房电台自动编排等进阶能力仍在持续打磨与真机验收中，暂不作为成熟功能过度承诺；具体进度与验收标准见 [ROADMAP.md](ROADMAP.md)。
 
@@ -132,7 +132,7 @@ android/       Android 客户端（Kotlin + Compose）
 windows/       Windows 客户端（WinUI 3 / C#）
 shared/        各平台共用资源与图标
 fixtures/      测试书籍、跨端共享用例（conformance）与旧版书库样本（legacy）
-scripts/       开发、多端一致性审计、快照与打包发布脚本
+scripts/       开发、审计、打包，以及 README 截图与宣传短片（docs/dev/readme-screenshots.md）
 docs/          功能对照表（parity.yaml）、截图与开发/测试文档（docs/dev/）
 e2e/ & tests/  基于 Midscene 的跨端主线与 Windows 正式版视觉 E2E 套件
 feedback/      旧版反馈中转脚本（已停用保留，当前反馈方案见 docs/dev/feedback.md）
