@@ -683,6 +683,10 @@ struct ListenCard: View {
     var unit = String(localized: "章")
     /// 人物声音: the book and the chapter, for the cast page (a PDF has none).
     var castBook: (core: YuyueCore, bookID: String, section: UInt32)?
+    /// The open book, when this card is the reader's. A PDF player has none, so 更多 stays hidden.
+    private let reader: ReaderModel?
+    /// Closes the sheet or popover after 记下这句 / 纠正读音, so the playback capsule can morph.
+    private let dismissListen: () -> Void
     @State private var castShown = false
     @State private var voicePickerShown = false
     @State private var sleepOpen = false
@@ -691,7 +695,9 @@ struct ListenCard: View {
     @State private var dramaOn = false
     private let tint = YYTint.standard
 
-    init(model: ReaderModel) {
+    init(model: ReaderModel, dismiss: @escaping () -> Void = {}) {
+        reader = model
+        dismissListen = dismiss
         player = model.player
         _rate = Binding(get: { model.rate }, set: { model.rate = $0 })
         minutesLeft = Self.minutesLeft(model)
@@ -700,6 +706,8 @@ struct ListenCard: View {
     }
 
     init(player: Player?, rate: Binding<Float>, minutesLeft: Int, unit: String) {
+        reader = nil
+        dismissListen = {}
         self.player = player
         _rate = rate
         self.minutesLeft = minutesLeft
@@ -806,18 +814,16 @@ struct ListenCard: View {
                 }
                 .font(.yy(size: 10.5))
                 .foregroundStyle(YYColor.t3)
-                if let player {
-                    sleepToggleButton(player)
-                }
+                headerActions(player)
             }
             #else
-            if let player {
+            if player != nil {
                 HStack(alignment: .center) {
                     Text(String(localized: "听书"))
                         .font(.yy(size: 15, weight: .bold))
                         .foregroundStyle(YYColor.t1)
                     Spacer()
-                    sleepToggleButton(player)
+                    headerActions(player)
                 }
                 .padding(.horizontal, 2)
             }
@@ -1095,6 +1101,49 @@ struct ListenCard: View {
             .frame(height: 14)
             }
             .padding(.horizontal, 9).padding(.top, 2)
+        }
+    }
+
+    /// 更多 sits beside the sleep toggle: the chip row that used to fill this header is now `sleepPage`.
+    @ViewBuilder private func headerActions(_ player: Player?) -> some View {
+        HStack(spacing: 6) {
+            moreMenu
+            if let player {
+                sleepToggleButton(player)
+            }
+        }
+    }
+
+    @ViewBuilder private var moreMenu: some View {
+        if let reader {
+            Menu {
+                Button {
+                    reader.markCurrentHeard()
+                    dismissListen()
+                } label: {
+                    Label(String(localized: "记下这句"), systemImage: "bookmark")
+                }
+                Button {
+                    reader.promptPronunciation()
+                    dismissListen()
+                } label: {
+                    Label(String(localized: "纠正读音"), systemImage: "waveform")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.yy(size: 13, weight: .semibold))
+                    .foregroundStyle(YYColor.t2)
+                    .frame(minWidth: 32, minHeight: 32)
+                    .background(YYColor.inset, in: .capsule)
+                    .overlay(Capsule().strokeBorder(YYColor.line, lineWidth: 0.5))
+                    .contentShape(Capsule().inset(by: -4))
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(String(localized: "更多"))
+            .accessibilityLabel(String(localized: "更多"))
         }
     }
 

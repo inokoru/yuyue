@@ -736,10 +736,9 @@ struct MacReaderView: View {
 
     private var capsule: some View {
         let reading = model.player?.spot != nil
-        let showQuickIcons = reading || model.listenOnly
         let isPron: Bool = if case .pronunciation = model.capsuleMode { true } else { false }
         let width: CGFloat = switch model.capsuleMode {
-        case .idle: showQuickIcons ? 426 : 360
+        case .idle: 360
         case .pronunciation: 472
         case .pronunciationDone, .marked, .rewound: 396
         }
@@ -750,7 +749,7 @@ struct MacReaderView: View {
         return Group {
             switch model.capsuleMode {
             case .idle:
-                idleCapsuleContent(reading: reading, showQuickIcons: showQuickIcons)
+                idleCapsuleContent(reading: reading)
                     .transition(.opacity.combined(with: .scale(scale: 0.97)))
 
             case .pronunciation(let find, let sentence):
@@ -795,10 +794,9 @@ struct MacReaderView: View {
         }
         .overlay(shape.strokeBorder(paper.line, lineWidth: 0.5))
         .animation(morphAnim, value: model.capsuleMode)
-        .animation(morphAnim, value: showQuickIcons)
     }
 
-    private func idleCapsuleContent(reading: Bool, showQuickIcons: Bool) -> some View {
+    private func idleCapsuleContent(reading: Bool) -> some View {
         let accent = paper.isEink ? paper.ink : tint.accent
         return HStack(spacing: 4) {
             Button { panel = panel == .toc ? nil : .toc } label: {
@@ -878,42 +876,12 @@ struct MacReaderView: View {
             .animation(YYMotion.quick, value: hoverListen)
             .help(model.capsuleAlert?.note ?? String(localized: "听书：声音、速度、睡眠定时"))
             .popover(isPresented: $listenShown, arrowEdge: .top) {
-                ListenCard(model: model)
+                ListenCard(model: model, dismiss: { listenShown = false })
                     .presentationBackground(YYColor.card)
             }
 
-            if showQuickIcons {
-                Button { model.markCurrentHeard() } label: {
-                    Image(systemName: "bookmark")
-                        .font(.yy(size: 12.5, weight: .medium))
-                        .foregroundStyle(paper.ink2)
-                        .frame(width: 30, height: 30)
-                        .contentShape(.circle)
-                }
-                .buttonStyle(YYPressStyle(scale: 0.92))
-                .help("记下这句")
-                .accessibilityLabel(Text("记下这句"))
-
-                Button { model.promptPronunciation() } label: {
-                    Image(systemName: "waveform")
-                        .font(.yy(size: 13, weight: .semibold))
-                        .foregroundStyle(accent)
-                        .frame(width: 30, height: 30)
-                        .background(accent.opacity(paper.isDark ? 0.18 : 0.10), in: .circle)
-                        .contentShape(.circle)
-                }
-                .buttonStyle(YYPressStyle(scale: 0.92))
-                .help("纠正读音（划选读错的字并重念）")
-                .accessibilityLabel(Text("纠正读音"))
-
-                Rectangle()
-                    .fill(paper.line)
-                    .frame(width: 0.5, height: 16)
-                    .padding(.horizontal, 2)
-            }
-
             Button { step(forward: false) } label: {
-                Image(systemName: "chevron.left").font(.yy(size: 13, weight: .semibold)).frame(width: 28, height: 36)
+                Image(systemName: "chevron.left").font(.yy(size: 13, weight: .semibold)).frame(width: 30, height: 36)
             }
             .help(reading ? String(localized: "上一句 ⌘[") : String(localized: "上一页 ←"))
             .accessibilityLabel(reading ? Text("上一句") : Text("上一页"))
@@ -931,7 +899,7 @@ struct MacReaderView: View {
             .help(model.isPlaying ? String(localized: "暂停 空格") : String(localized: "朗读 空格"))
             .accessibilityLabel(model.isPlaying ? Text("暂停") : Text("朗读"))
             Button { step(forward: true) } label: {
-                Image(systemName: "chevron.right").font(.yy(size: 13, weight: .semibold)).frame(width: 28, height: 36)
+                Image(systemName: "chevron.right").font(.yy(size: 13, weight: .semibold)).frame(width: 30, height: 36)
             }
             .help(reading ? String(localized: "下一句 ⌘]") : String(localized: "下一页 →"))
             .accessibilityLabel(reading ? Text("下一句") : Text("下一页"))

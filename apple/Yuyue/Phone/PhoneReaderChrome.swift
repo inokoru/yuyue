@@ -192,7 +192,7 @@ struct PhoneReaderChrome: View {
             )
         }
         .sheet(isPresented: $listenShown) {
-            PhoneListenSheet(model: model)
+            PhoneListenSheet(model: model, dismiss: { listenShown = false })
         }
         .sheet(isPresented: $readyVoicePickerShown, onDismiss: {
             pickedReadyVoiceID = nil
@@ -1093,6 +1093,7 @@ struct PhoneReaderCapsule: View {
 /// Compact content-sized bottom sheet hosting `ListenCard` so there is no awkward dead space below it.
 private struct PhoneListenSheet: View {
     let model: ReaderModel
+    let dismiss: () -> Void
     @State private var measuredHeight: CGFloat = 0
 
     private var sheetHeight: CGFloat {
@@ -1101,7 +1102,7 @@ private struct PhoneListenSheet: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            ListenCard(model: model)
+            ListenCard(model: model, dismiss: { dismiss() })
                 .frame(maxWidth: .infinity)
                 .onGeometryChange(for: CGFloat.self, of: \.size.height) { h in
                     let rounded = ceil(h)
