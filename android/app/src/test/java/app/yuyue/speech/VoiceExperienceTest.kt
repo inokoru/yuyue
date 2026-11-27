@@ -358,6 +358,43 @@ class VoiceExperienceTest {
     }
 
     @Test
+    fun ttsSettingsActionsPreferVisibleSettingsOverInstallTrampoline() {
+        val actions = SystemVoice.Engine.ttsSettingsActions()
+        assertEquals("com.android.settings.TTS_SETTINGS", actions.first())
+        assertTrue(actions.contains(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        assertEquals(android.provider.Settings.ACTION_SETTINGS, actions.last())
+        assertFalse(actions.contains(android.speech.tts.TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA))
+    }
+
+    @Test
+    fun cloudVoiceFormatsFriendlyOfflineNetworkErrors() {
+        val dns = java.net.UnknownHostException(
+            "Unable to resolve host \"speech.platform.bing.com\": No address associated with hostname",
+        )
+        val edgeErr = CloudVoice.friendlyNetworkFailure(CloudVoice.Provider.Edge, dns)
+        assertTrue(edgeErr?.message?.contains("当前没有网络") == true)
+        assertFalse(edgeErr?.message?.contains("speech.platform.bing.com") == true)
+
+        val wrapped = RuntimeException("ws failed", dns)
+        val wrappedErr = CloudVoice.friendlyNetworkFailure(CloudVoice.Provider.Edge, wrapped)
+        assertTrue(wrappedErr?.message?.contains("当前没有网络") == true)
+
+        val timeoutErr = CloudVoice.friendlyNetworkFailure(
+            CloudVoice.Provider.Edge,
+            java.net.SocketTimeoutException("timeout"),
+        )
+        assertTrue(timeoutErr?.message?.contains("超时") == true)
+
+        val localErr = CloudVoice.friendlyNetworkFailure(
+            CloudVoice.Provider.VoiceStudio,
+            java.net.ConnectException("Connection refused"),
+        )
+        assertTrue(localErr?.message?.contains("局域网") == true)
+
+        assertNull(CloudVoice.friendlyNetworkFailure(CloudVoice.Provider.Edge, IllegalStateException("other")))
+    }
+
+    @Test
     fun systemVoiceWavDecodesFloat32And8BitPcm() {
         val dir = Files.createTempDirectory("yuyue-wav-formats").toFile()
         try {

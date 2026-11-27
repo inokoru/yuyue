@@ -689,6 +689,45 @@ fun VoiceSourcePage(id: String, openSettings: () -> Unit) {
                     Box(Modifier.padding(bottom = YY.s(8))) {
                         app.yuyue.reader.PrepareBetterVoiceRow(lib.core, lib.dataDir, book.tag)
                     }
+                } else {
+                    val cur = current
+                    val defaultOffline = remember(voices, book) {
+                        Voices.defaultNarrator(book.tag) ?: voices?.firstOrNull()
+                    }
+                    if (cur != null && sourceOf(cur) != NEURAL && defaultOffline != null) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = YY.s(8))
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(YY.c.card)
+                                .border(0.5.dp, YY.c.line, RoundedCornerShape(10.dp))
+                                .padding(horizontal = 11.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                t("离线语音已就绪，当前仍在使用「%@」", voiceSourceTitle(sourceOf(cur))),
+                                style = YY.font(11f),
+                                color = YY.c.t2,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                t("立即切换"),
+                                style = YY.font(11.5f, FontWeight.SemiBold),
+                                color = YY.tint.accent,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        focus.pick(defaultOffline)
+                                        version++
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
                 }
             } else if (id == SYSTEM) {
                 Row(

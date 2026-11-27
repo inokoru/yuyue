@@ -193,8 +193,10 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     private var startWord: Pair<Spot, Double>? = null
     /** Shown when critical device heat throttles background pre-synthesis (never auto-switches voice). */
     var thermalNotice by mutableStateOf<String?>(null)
-    /** Remember where playback failed so 重试 / 换成系统声音 resumes from the same sentence. */
+    /** Remember where playback failed so 重试 / 换成离线声音 / 换成系统声音 resumes from the same sentence. */
     private var failedSpot: Spot? = null
+    /** Remember which voice failed so offline fallback never loops back to the same voice. */
+    private var failedVoiceId: String? = null
     private var chapterLayer: Pair<Int, uniffi.yuyue_core.DramaLayer>? = null
     private var chapterLiveAllMade: Pair<Int, Boolean>? = null
     private var lastRenderedSection: Int? = null
@@ -207,6 +209,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     fun play(from: Position, word: Double? = null) {
         failure = null
         failedSpot = null
+        failedVoiceId = null
         missingVoice = null
         thermalNotice = null
         pausedForFocus = false
@@ -241,6 +244,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
     private fun seekPaused(from: Position) {
         failure = null
         failedSpot = null
+        failedVoiceId = null
         missingVoice = null
         thermalNotice = null
         reset()
@@ -391,13 +395,45 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         readyOfflineVoice = null
     }
 
+    /** Returns an installed on-device offline voice pack (Kokoro / LiveVoice) distinct from the failed voice, if any. */
+    fun offlineFallbackVoice(langTag: String = language): BookVoice? {
+        val candidate = Voices.defaultNarrator(langTag) ?: return null
+        return if (shouldOfferOfflineFallback(candidate.id, failedVoiceId)) candidate else null
+    }
+
+    /** Switches to the downloaded on-device offline voice pack and resumes from where playback failed. */
+    fun useOfflineVoice() {
+        val langTag = language
+        val resumeAt = failedSpot ?: spot
+        val offline = offlineFallbackVoice(langTag)
+        if (offline == null) {
+            useSystemVoice()
+            return
+        }
+        failure = null
+        failedVoiceId = null
+        missingVoice = null
+        saveVoicePreference(langTag, offline.id, notify = false)
+        val cacheKey = canonicalLanguage(langTag).ifEmpty { langTag }
+        voices[cacheKey] = offline
+        voices[langTag] = offline
+        voiceVersion++
+        ttsTrackedForSession = false
+        runCatching { app.yuyue.YuyueApp.instance.library.dramaSynth.invalidateCast(detail.summary.id) }
+        chapterLayer = null
+        chapterLiveAllMade = null
+        if (resumeAt != null) play(resumeAt.position) else restartHere()
+    }
+
     /** Switches to a local system voice and resumes from where playback failed. */
     fun useSystemVoice() {
         val langTag = language
         val resumeAt = failedSpot ?: spot
         failure = null
+        failedVoiceId = null
         missingVoice = null
         scope.launch {
+            SystemVoice.Engine.init(context)
             val sys = try {
                 Voices.systemBest(langTag)
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -411,7 +447,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                 val name = java.util.Locale.forLanguageTag(langTag).getDisplayLanguage(java.util.Locale.getDefault()).ifEmpty { langTag }
                 failedSpot = resumeAt
                 missingVoice = name
-                failure = t("下载一个%@声音就能朗读这本书，系统会带你去它的下载页。", name)
+                failure = missingVoiceGuidance(langTag, name)
                 return@launch
             }
             saveVoicePreference(langTag, sys.id, notify = false)
@@ -427,10 +463,18 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         }
     }
 
+    private fun missingVoiceGuidance(langTag: String, displayName: String): String =
+        if (CardVoice.speaksLanguage(langTag) && !KokoroModel.deviceUnsupported) {
+            t("系统文字转语音暂无%@声音。可以去系统设置切换或下载语音引擎；联网后也可以在「我的 › 朗读」下载语阅离线语音，断网直接听。", displayName)
+        } else {
+            t("系统文字转语音暂无%@声音，可以去系统「文字转语音」设置切换或下载语音引擎。", displayName)
+        }
+
     /** Retries playback from the sentence where the last error occurred. */
     fun retry() {
         val resumeAt = failedSpot ?: spot
         failure = null
+        failedVoiceId = null
         missingVoice = null
         if (resumeAt != null) play(resumeAt.position)
     }
@@ -627,7 +671,12 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                         throw e
                     } catch (e: Throwable) {
                         if (generation != g || renderToken != token) return@launch
-                        failed(t("朗读出错了（%@）", e.message ?: e.toString()))
+                        val msg = if (e is CloudVoice.Failure && !e.message.isNullOrBlank()) {
+                            e.message!!
+                        } else {
+                            t("朗读出错了（%@）", e.message ?: e.toString())
+                        }
+                        failed(msg, voiceId = chosenNarrator)
                         return@launch
                     }
                     if (generation != g || renderToken != token) return@launch
@@ -662,7 +711,12 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                         throw e
                     } catch (e: Throwable) {
                         if (generation != g || renderToken != token) return@launch
-                        failed(t("朗读出错了（%@）", e.message ?: e.toString()))
+                        val msg = if (e is CloudVoice.Failure && !e.message.isNullOrBlank()) {
+                            e.message!!
+                        } else {
+                            t("朗读出错了（%@）", e.message ?: e.toString())
+                        }
+                        failed(msg, voiceId = segPlan.firstOrNull()?.first?.id)
                         return@launch
                     }
                     if (generation != g || renderToken != token) return@launch
@@ -690,7 +744,7 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                 }
                 if (voice == null) {
                     val name = java.util.Locale.forLanguageTag(language).getDisplayLanguage(java.util.Locale.getDefault()).ifEmpty { language }
-                    failed(t("下载一个%@声音就能朗读这本书，系统会带你去它的下载页。", name))
+                    failed(missingVoiceGuidance(language, name))
                     missingVoice = name
                     return@launch
                 }
@@ -703,7 +757,12 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
                     throw e
                 } catch (e: Throwable) {
                     if (generation != g || renderToken != token) return@launch
-                    failed(t("朗读出错了（%@）", e.message ?: e.toString()))
+                    val msg = if (e is CloudVoice.Failure && !e.message.isNullOrBlank()) {
+                        e.message!!
+                    } else {
+                        t("朗读出错了（%@）", e.message ?: e.toString())
+                    }
+                    failed(msg, voiceId = voice.id)
                     return@launch
                 }
                 if (generation != g || renderToken != token) return@launch
@@ -955,10 +1014,11 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         sleep = Sleep.Until(System.currentTimeMillis() + 600_000, s.minutes)
     }
 
-    private fun failed(message: String) {
+    private fun failed(message: String, voiceId: String? = null) {
         val resumeAt = spot ?: nextToRender
         stop()
         failedSpot = resumeAt
+        failedVoiceId = voiceId
         failure = message
     }
 
@@ -1223,6 +1283,9 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
             else -> 15.0
         }
 
+        internal fun shouldOfferOfflineFallback(candidateId: String?, failedVoiceId: String?): Boolean =
+            !candidateId.isNullOrEmpty() && candidateId != failedVoiceId
+
         internal fun canonicalLanguage(language: String): String {
             val t = language.replace('_', '-').trim().lowercase()
             return when {
@@ -1316,7 +1379,6 @@ class Player(private val context: Context, private val core: YuyueCore, val deta
         }
         if (narrator != null) return
         val lang = language
-        if (savedVoiceId(lang).isNotEmpty()) return
         val cacheKey = canonicalLanguage(lang).ifEmpty { lang }
         val cur = voices[cacheKey] ?: voices[lang]
         if (cur is KokoroVoice || cur is CardVoice) return

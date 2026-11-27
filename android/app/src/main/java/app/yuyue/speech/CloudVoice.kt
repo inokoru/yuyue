@@ -612,27 +612,73 @@ class CloudVoice(
             return file
         }
 
+        internal fun friendlyNetworkFailure(p: Provider, error: Throwable): Failure? {
+            var cur: Throwable? = error
+            var depth = 0
+            while (cur != null && depth < 6) {
+                val msg = cur.message.orEmpty()
+                when {
+                    cur is java.net.UnknownHostException ||
+                        msg.contains("Unable to resolve host", ignoreCase = true) ||
+                        msg.contains("No address associated with hostname", ignoreCase = true) -> {
+                        return if (p.isLocal) {
+                            Failure(t("连不上 %@，请确认服务已启动且在同一局域网", p.title))
+                        } else {
+                            Failure(t("当前没有网络，「%@」需要联网才能朗读", p.title))
+                        }
+                    }
+                    cur is java.net.SocketTimeoutException -> {
+                        return Failure(t("连接「%@」超时了，请检查网络后重试", p.title))
+                    }
+                    cur is java.net.ConnectException ||
+                        cur is java.net.NoRouteToHostException ||
+                        cur is java.net.SocketException -> {
+                        return if (p.isLocal) {
+                            Failure(t("连不上 %@，请确认服务已启动且在同一局域网", p.title))
+                        } else {
+                            Failure(t("暂时连不上「%@」，请检查网络后重试", p.title))
+                        }
+                    }
+                }
+                cur = cur.cause
+                depth++
+            }
+            return null
+        }
+
         private fun postJSON(p: Provider, url: String, body: ByteArray, vararg headers: Pair<String, String>, readTimeoutMs: Int = 35_000): ByteArray {
-            val c = URL(url).openConnection() as HttpURLConnection
-            c.requestMethod = "POST"
-            c.doOutput = true
-            c.connectTimeout = 15_000
-            c.readTimeout = readTimeoutMs
-            c.setRequestProperty("Content-Type", "application/json")
-            headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
-            c.outputStream.use { it.write(body) }
-            val code = c.responseCode
-            if (code !in 200..299) throw failure(p, code, c.errorStream?.readBytes())
-            return c.inputStream.use { it.readBytes() }
+            return try {
+                val c = URL(url).openConnection() as HttpURLConnection
+                c.requestMethod = "POST"
+                c.doOutput = true
+                c.connectTimeout = 15_000
+                c.readTimeout = readTimeoutMs
+                c.setRequestProperty("Content-Type", "application/json")
+                headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
+                c.outputStream.use { it.write(body) }
+                val code = c.responseCode
+                if (code !in 200..299) throw failure(p, code, c.errorStream?.readBytes())
+                c.inputStream.use { it.readBytes() }
+            } catch (e: Failure) {
+                throw e
+            } catch (e: Exception) {
+                throw friendlyNetworkFailure(p, e) ?: e
+            }
         }
 
         private fun getBytes(p: Provider, url: String): ByteArray {
-            val c = URL(url).openConnection() as HttpURLConnection
-            c.connectTimeout = 15_000
-            c.readTimeout = 35_000
-            val code = c.responseCode
-            if (code !in 200..299) throw failure(p, code, c.errorStream?.readBytes())
-            return c.inputStream.use { it.readBytes() }
+            return try {
+                val c = URL(url).openConnection() as HttpURLConnection
+                c.connectTimeout = 15_000
+                c.readTimeout = 35_000
+                val code = c.responseCode
+                if (code !in 200..299) throw failure(p, code, c.errorStream?.readBytes())
+                c.inputStream.use { it.readBytes() }
+            } catch (e: Failure) {
+                throw e
+            } catch (e: Exception) {
+                throw friendlyNetworkFailure(p, e) ?: e
+            }
         }
 
         fun normalizedBaseV1(rawBase: String): String {
@@ -915,6 +961,7 @@ class CloudVoice(
             } catch (e: EdgeTTS.EdgeHttpException) {
                 throw Failure("${Provider.Edge.title} (${e.code})")
             } catch (e: Exception) {
+                friendlyNetworkFailure(Provider.Edge, e)?.let { throw it }
                 throw Failure(e.message?.let { "${Provider.Edge.title}: $it" } ?: t("微软 Edge 暂时连不上，请稍后再试"))
             }
             if (!looksLikeAudio(audio)) throw Failure(t("声音数据读不出来"))

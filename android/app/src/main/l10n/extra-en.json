@@ -690,5 +690,14 @@
   "系统默认语音": "System Default Voice",
   "试听失败，请重试": "Preview failed. Please try again.",
   "试听播放失败，请重试": "Couldn't play preview. Please try again.",
-  "加载往期失败：%@": "Failed to load older episodes: %@"
+  "加载往期失败：%@": "Failed to load older episodes: %@",
+  "当前没有网络，「%@」需要联网才能朗读": "No internet connection. “%@” needs internet to read aloud.",
+  "连接「%@」超时了，请检查网络后重试": "Timed out connecting to “%@”. Check your connection and try again.",
+  "暂时连不上「%@」，请检查网络后重试": "Can't reach “%@” right now. Check your connection and try again.",
+  "换成离线声音": "Use Offline Voice",
+  "打开系统语音设置": "Open System TTS Settings",
+  "系统文字转语音暂无%@声音。可以去系统设置切换或下载语音引擎；联网后也可以在「我的 › 朗读」下载语阅离线语音，断网直接听。": "System text-to-speech has no %@ voice yet. Switch or download an engine in system settings, or download Yuyue Offline Voices in Mine › Listening once online to listen offline.",
+  "系统文字转语音暂无%@声音，可以去系统「文字转语音」设置切换或下载语音引擎。": "System text-to-speech has no %@ voice yet. Switch or download an engine in Android Text-to-Speech settings.",
+  "离线语音已就绪，当前仍在使用「%@」": "Offline voices are ready; currently using “%@”",
+  "立即切换": "Switch Now"
 }

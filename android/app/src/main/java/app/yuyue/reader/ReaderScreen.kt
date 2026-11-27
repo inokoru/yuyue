@@ -1378,27 +1378,45 @@ private fun PageTapHint(model: ReaderModel, paper: YYPaper) {
     }
 }
 
-/** Why reading aloud stopped. With no voice for the language, the way to get one comes first. */
+/** Why reading aloud stopped. Offers downloaded offline voice pack first when available, then system TTS. */
 @Composable
 internal fun PlayerFailure(player: app.yuyue.speech.Player) {
     val message = player.failure ?: return
     val context = LocalContext.current
     val missing = player.missingVoice
+    val offlineFallback = remember(
+        message,
+        missing,
+        player.language,
+        player.voiceVersion,
+        app.yuyue.speech.KokoroModel.state,
+        app.yuyue.speech.LiveVoiceModel.state,
+    ) {
+        player.offlineFallbackVoice()
+    }
     AlertDialog(
         onDismissRequest = { player.failure = null },
         containerColor = YY.c.card,
         title = { Text(if (missing != null) t("这台手机还没有%@声音", missing) else t("朗读停下了"), color = YY.c.t1) },
         text = { Text(message, color = YY.c.t2) },
-        confirmButton = if (missing != null) {
-            {
-                TextButton({
-                    player.failure = null
-                    // The engine's own page for voice data: Chinese, English and the rest.
-                    app.yuyue.speech.SystemVoice.Engine.openSettings(context)
-                }) { Text(t("下载%@声音", missing), color = YY.tint.accent) }
+        confirmButton = when {
+            missing != null && offlineFallback != null -> {
+                { TextButton({ player.useOfflineVoice() }) { Text(t("换成离线声音"), color = YY.tint.accent) } }
             }
-        } else {
-            { TextButton({ player.useSystemVoice() }) { Text(t("换成系统声音"), color = YY.tint.accent) } }
+            missing != null -> {
+                {
+                    TextButton({
+                        player.failure = null
+                        app.yuyue.speech.SystemVoice.Engine.openTtsSettings(context)
+                    }) { Text(t("打开系统语音设置"), color = YY.tint.accent) }
+                }
+            }
+            offlineFallback != null -> {
+                { TextButton({ player.useOfflineVoice() }) { Text(t("换成离线声音"), color = YY.tint.accent) } }
+            }
+            else -> {
+                { TextButton({ player.useSystemVoice() }) { Text(t("换成系统声音"), color = YY.tint.accent) } }
+            }
         },
         dismissButton = if (missing != null) {
             { TextButton({ player.failure = null }) { Text(t("先不听"), color = YY.c.t2) } }

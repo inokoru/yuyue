@@ -21,6 +21,9 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <intent>
+            <action android:name="com.android.settings.TTS_SETTINGS" />
+        </intent>
         <!-- HyperOS's pen engine, for Xiaomi Focus Pen Pro gestures. -->
         <package android:name="com.xiaomi.touchservice" />
     </queries>

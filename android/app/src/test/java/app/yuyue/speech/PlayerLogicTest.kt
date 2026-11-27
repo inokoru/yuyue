@@ -168,4 +168,14 @@ class PlayerLogicTest {
         assertEquals("kokoro.zm_010", Player.savedVoiceId("zh-CN") { store[it].orEmpty() })
         assertEquals("kokoro.zm_010", Player.savedVoiceId("zh") { store[it].orEmpty() })
     }
+
+    @Test
+    fun offlineFallbackOfferedForCloudOrSystemFailureButNotSelfLoop() {
+        assertTrue(Player.shouldOfferOfflineFallback("kokoro.zf_001", "cloud.edge.zh-CN-XiaoxiaoNeural"))
+        assertTrue(Player.shouldOfferOfflineFallback("kokoro.zf_001", SystemVoice.DEFAULT_ID))
+        assertTrue(Player.shouldOfferOfflineFallback("kokoro.zf_001", null))
+        assertFalse(Player.shouldOfferOfflineFallback("kokoro.zf_001", "kokoro.zf_001"))
+        assertFalse(Player.shouldOfferOfflineFallback(null, "cloud.edge.zh-CN-XiaoxiaoNeural"))
+        assertFalse(Player.shouldOfferOfflineFallback("", "cloud.edge.zh-CN-XiaoxiaoNeural"))
+    }
 }

@@ -5,6 +5,8 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -300,6 +302,13 @@ class SystemVoice private constructor(
                 val avail = runCatching { engine.isLanguageAvailable(SpokenLanguage.localeForTag(tag)) }
                     .getOrDefault(TextToSpeech.LANG_NOT_SUPPORTED)
                 if (avail >= TextToSpeech.LANG_AVAILABLE) return@systemDefault true
+                if (SpokenLanguage.voiceLanguages(tag).any { alt ->
+                        runCatching { engine.isLanguageAvailable(Locale.forLanguageTag(alt)) }
+                            .getOrDefault(TextToSpeech.LANG_NOT_SUPPORTED) >= TextToSpeech.LANG_AVAILABLE
+                    }
+                ) {
+                    return@systemDefault true
+                }
                 // Some OEM / third-party TTS engines (e.g. custom ROM wrappers) omit getVoices() and
                 // return LANG_NOT_SUPPORTED even though default synthesis works for the phone's locale.
                 enumerated.isEmpty() && SpokenLanguage.matches(SpokenLanguage.localeTag(Locale.getDefault()), tag)
@@ -774,25 +783,27 @@ class SystemVoice private constructor(
             return true
         }
 
-        /** Opens Android's system TTS engine settings (choose Samsung / OnePlus / MultiTTS / Google TTS). */
+        internal fun ttsSettingsActions(): List<String> = listOf(
+            "com.android.settings.TTS_SETTINGS",
+            Settings.ACTION_ACCESSIBILITY_SETTINGS,
+            Settings.ACTION_SETTINGS,
+        )
+
+        /**
+         * Opens Android's visible system TTS settings (choose Samsung / OnePlus / Xiaomi / MultiTTS /
+         * Google TTS and manage voice data). Avoids `ACTION_INSTALL_TTS_DATA` as the primary intent
+         * because OEM stubs and offline Google TTS resolve it with a no-UI trampoline that immediately
+         * calls `finish()`, leaving the user with no visible navigation.
+         */
         fun openTtsSettings(context: Context): Boolean {
             val flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            return listOf(
-                Intent("com.android.settings.TTS_SETTINGS").addFlags(flags),
-                Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).addFlags(flags),
-                Intent(Settings.ACTION_SETTINGS).addFlags(flags),
-            ).any { runCatching { context.startActivity(it) }.isSuccess }
+            return ttsSettingsActions().any { action ->
+                runCatching { context.startActivity(Intent(action).addFlags(flags)) }.isSuccess
+            }
         }
 
-        /** Opens system TTS data download, or falls back to system TTS / general settings. */
-        fun openSettings(context: Context): Boolean {
-            val flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            return listOf(
-                Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).addFlags(flags),
-                Intent("com.android.settings.TTS_SETTINGS").addFlags(flags),
-                Intent(Settings.ACTION_SETTINGS).addFlags(flags),
-            ).any { runCatching { context.startActivity(it) }.isSuccess }
-        }
+        /** Opens system TTS settings (visible page) so the user can switch engines or download voice data. */
+        fun openSettings(context: Context): Boolean = openTtsSettings(context)
     }
 
     fun preview(text: String, language: String = "", onComplete: (() -> Unit)? = null): Boolean =
@@ -918,9 +929,21 @@ object Voices {
         return voices.firstOrNull { it.speaks(tag) }
     }
 
-    /** The best voice for text in `tag`: Kokoro / LiveVoice narrator -> keyless Free online -> system fallback. */
+    internal fun hasInternet(): Boolean {
+        val ctx = runCatching { app.yuyue.YuyueApp.instance }.getOrNull() ?: return true
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return true
+        val net = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(net) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    /** The best voice for text in `tag`: Kokoro / LiveVoice narrator -> keyless Free online (when online) -> system fallback. */
     suspend fun best(tag: String): BookVoice? {
         defaultNarrator(tag)?.let { return it }
+        val online = hasInternet()
+        if (!online) {
+            systemBest(tag)?.let { return it }
+        }
         val freeList = CloudVoice.all().filter { it.provider == CloudVoice.Provider.Free && it.speaks(tag) }
         if (freeList.isNotEmpty()) {
             val preferred = if (tag.lowercase().startsWith("en")) "cloud.free.en_us" else "cloud.free.zh_baidu"
