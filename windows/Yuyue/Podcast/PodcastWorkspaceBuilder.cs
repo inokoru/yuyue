@@ -87,6 +87,8 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
     private IReadOnlyList<PodcastSearchHitDto>? _discoveredShows;
     private bool _loadingDiscovery;
     private readonly HashSet<string> _subscribingFeedUrls = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _loadingMoreChannelIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _exhaustedChannelIds = new(StringComparer.OrdinalIgnoreCase);
 
     // Right-edge 386px Stationery Overlay Drawer (clips | later | voices | local)
     private bool _drawerOpen;
@@ -763,6 +765,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 {
                     try { await _library.Podcasts.AddUrlOrFeedAsync(c.FeedUrl, putLatestOnDesk: false, isRefresh: true); ok++; } catch { }
                 }
+                _exhaustedChannelIds.Clear();
                 refBtn.IsEnabled = true;
                 _shelf.RefreshBooks();
                 _shelf.ShowToast($"已刷新 {ok} 档订阅", canUndo: false);
@@ -1001,7 +1004,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         var leftCol = new StackPanel { Spacing = 12, Padding = new Thickness(0, 0, 6, 32) };
 
         // Build structured non-duplicating sections matching MacPodcastView.swift:481-584
-        var sections = new List<(string Id, string Title, string Meta, Button? ActionPill, PodcastIssue[] Issues, bool IsStudioSection, bool IsPlayingGroup)>();
+        var sections = new List<(string Id, string Title, string Meta, Button? ActionPill, PodcastIssue[] Issues, bool IsStudioSection, bool IsPlayingGroup, PodcastChannel? LoadMoreChannel)>();
 
         if (_selectedShowKey == "all")
         {
@@ -1012,7 +1015,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 var resumeBtn = MakePaperPill(L10n.T("接着听"), accent: false, p, tint);
                 var firstIp = inProgress[0];
                 resumeBtn.Click += (_, _) => ToggleDeskIssuePlayback(firstIp, forcePlay: true);
-                sections.Add(("playing-now", L10n.T("正在听"), $"{inProgress.Length} 期未完", resumeBtn, inProgress, false, true));
+                sections.Add(("playing-now", L10n.T("正在听"), $"{inProgress.Length} 期未完", resumeBtn, inProgress, false, true, null));
             }
 
             var studioAll = allIssues.Where(i => i.StudioKind is not null).ToArray();
@@ -1026,18 +1029,25 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                         : $"{studioRest.Length} 期 · 由你的书架酿制");
                 var brewBtn = MakePaperPill(L10n.T("+ 酿一期"), accent: true, p, tint);
                 brewBtn.Click += async (_, _) => await ShowStudioSheetAsync();
-                sections.Add(("studio", L10n.T("书房电台"), studioMeta, brewBtn, studioRest, studioAll.Length == 0, false));
+                sections.Add(("studio", L10n.T("书房电台"), studioMeta, brewBtn, studioRest, studioAll.Length == 0, false, null));
             }
 
             foreach (var show in externalShows)
             {
-                var showAll = allIssues.Where(i => MatchesExternalShow(i, show)).ToArray();
+                var showAll = allIssues.Where(i => MatchesExternalShow(i, show)).OrderByDescending(i => i.PublishedAt).ToArray();
                 var rest = showAll.Where(i => !inProgressIds.Contains(i.Id)).ToArray();
                 if (rest.Length == 0) continue;
                 string prefix = rest.Length < showAll.Length ? $"其余 {rest.Length} 期" : $"{rest.Length} 期";
                 bool hasEnglish = rest.Any(i => (i.Language ?? "").StartsWith("en", StringComparison.OrdinalIgnoreCase));
                 string suffix = hasEnglish ? L10n.T(" · 外语伴听就绪") : L10n.T(" · 原声访谈");
-                sections.Add((show.Key, show.Title, prefix + suffix, null, rest.Take(6).ToArray(), false, false));
+                Button? viewAllBtn = null;
+                if (rest.Length > 6 || show.ChannelId is not null)
+                {
+                    var keyCapture = show.Key;
+                    viewAllBtn = MakePaperPill(L10n.T("查看全部"), accent: false, p, tint);
+                    viewAllBtn.Click += (_, _) => { _selectedShowKey = keyCapture; _shelf.RefreshCurrentSubPage(); };
+                }
+                sections.Add((show.Key, show.Title, prefix + suffix, viewAllBtn, rest.Take(6).ToArray(), false, false, null));
             }
         }
         else if (_selectedShowKey == "studio")
@@ -1046,18 +1056,21 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             var brewBtn = MakePaperPill(L10n.T("+ 酿一期"), accent: true, p, tint);
             brewBtn.Click += async (_, _) => await ShowStudioSheetAsync();
             string meta = studioAll.Length == 0 ? L10n.T("由你的书架酿制") : $"{studioAll.Length} 期 · 防剧透锁";
-            sections.Add(("studio", L10n.T("书房电台"), meta, brewBtn, studioAll, studioAll.Length == 0, false));
+            sections.Add(("studio", L10n.T("书房电台"), meta, brewBtn, studioAll, studioAll.Length == 0, false, null));
         }
         else
         {
             var matchedShow = externalShows.FirstOrDefault(s => s.Key == _selectedShowKey);
             string showName = matchedShow?.Title ?? L10n.T("收听台");
             var list = matchedShow is not null
-                ? allIssues.Where(i => MatchesExternalShow(i, matchedShow)).ToArray()
+                ? allIssues.Where(i => MatchesExternalShow(i, matchedShow)).OrderByDescending(i => i.PublishedAt).ToArray()
                 : [];
-            var allViewBtn = MakePaperPill(L10n.T("查看全部"), accent: false, p, tint);
+            var matchedChannel = matchedShow?.ChannelId is { Length: > 0 } cid
+                ? channels.FirstOrDefault(c => c.Id == cid)
+                : channels.FirstOrDefault(c => string.Equals(c.Title, showName, StringComparison.OrdinalIgnoreCase));
+            var allViewBtn = MakePaperPill(L10n.T("全部节目"), accent: false, p, tint);
             allViewBtn.Click += (_, _) => { _selectedShowKey = "all"; _shelf.RefreshCurrentSubPage(); };
-            sections.Add((_selectedShowKey, showName, $"{list.Length} 期", allViewBtn, list, false, false));
+            sections.Add((_selectedShowKey, showName, $"{list.Length} 期", allViewBtn, list, false, false, matchedChannel));
         }
 
         bool showDiscovery = _selectedShowKey == "all" && externalShows.Count == 0;
@@ -1109,7 +1122,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
             }
             else
             {
-                leftCol.Children.Add(BuildStationGroupCard(sec.Id, sec.Title, sec.Meta, sec.ActionPill, sec.Issues, sec.IsPlayingGroup, p, tint, serif));
+                leftCol.Children.Add(BuildStationGroupCard(sec.Id, sec.Title, sec.Meta, sec.ActionPill, sec.Issues, sec.IsPlayingGroup, sec.LoadMoreChannel, p, tint, serif));
             }
         }
 
@@ -2490,6 +2503,7 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
         Button? actionPill,
         PodcastIssue[] issues,
         bool isPlayingGroup,
+        PodcastChannel? loadMoreChannel,
         YYPalette p,
         YYTintColors tint,
         FontFamily serif)
@@ -2508,6 +2522,50 @@ public sealed class PodcastWorkspaceBuilder : IDisposable
                 if (i > 0 && !cur && !prevCur)
                     stack.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(14, 0, 14, 0) });
                 stack.Children.Add(BuildEpisodeRow(issues[i], showProgress: isPlayingGroup || issues[i].PositionSec > 0, p, tint));
+            }
+            if (loadMoreChannel is not null && !_exhaustedChannelIds.Contains(loadMoreChannel.Id))
+            {
+                bool loading = _loadingMoreChannelIds.Contains(loadMoreChannel.Id);
+                stack.Children.Add(new Border { Height = 0.5, Background = ThemeHelper.Brush(p.Line), Margin = new Thickness(14, 0, 14, 0) });
+                var moreBtn = new Button
+                {
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                    Background = new SolidColorBrush(Colors.Transparent),
+                    BorderThickness = new Thickness(0),
+                    Padding = new Thickness(0, 10, 0, 10),
+                    IsEnabled = !loading,
+                    UseSystemFocusVisuals = false,
+                    Content = new TextBlock
+                    {
+                        Text = loading ? L10n.T("正在加载往期…") : L10n.T("加载更多往期"),
+                        FontSize = 12,
+                        FontWeight = FontWeights.Medium,
+                        Foreground = ThemeHelper.Brush(loading ? p.T3 : tint.Accent),
+                    },
+                };
+                var chCapture = loadMoreChannel;
+                moreBtn.Click += async (_, _) =>
+                {
+                    if (!_loadingMoreChannelIds.Add(chCapture.Id)) return;
+                    _shelf.RefreshCurrentSubPage();
+                    try
+                    {
+                        var (added, exhausted) = await _library.Podcasts.LoadMoreEpisodesAsync(chCapture);
+                        if (exhausted) _exhaustedChannelIds.Add(chCapture.Id);
+                        _shelf.ShowToast(added > 0 ? $"已加载 {added} 期往期节目" : L10n.T("已加载该节目全部往期"));
+                    }
+                    catch (Exception ex)
+                    {
+                        _shelf.ShowToast($"加载往期失败：{ex.Message}");
+                    }
+                    finally
+                    {
+                        _loadingMoreChannelIds.Remove(chCapture.Id);
+                        _shelf.RefreshCurrentSubPage();
+                    }
+                };
+                stack.Children.Add(moreBtn);
             }
         }
 

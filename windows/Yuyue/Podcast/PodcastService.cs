@@ -345,6 +345,51 @@ public sealed class PodcastService
         throw new InvalidOperationException("未能识别该链接中的播客订阅或音频单集");
     }
 
+    public async Task<(int Added, bool Exhausted)> LoadMoreEpisodesAsync(PodcastChannel channel)
+    {
+        using var resp = await Http.GetAsync(channel.FeedUrl);
+        resp.EnsureSuccessStatusCode();
+        string body = await resp.Content.ReadAsStringAsync();
+        var parsed = await Task.Run(() => YuyueCoreMethods.ParsePodcastRss(body));
+
+        var existing = GetIssues().Where(i => i.ChannelId == channel.Id).ToArray();
+        var existingAudio = existing
+            .Where(i => !string.IsNullOrWhiteSpace(i.AudioUrl))
+            .Select(i => i.AudioUrl!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var existingTitles = existing
+            .Select(i => i.Title)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        int lastIdx = -1;
+        for (int i = 0; i < parsed.Episodes.Length; i++)
+        {
+            var ep = parsed.Episodes[i];
+            if (existingAudio.Contains(ep.AudioUrl) || existingTitles.Contains(ep.Title))
+                lastIdx = i;
+        }
+
+        var remaining = parsed.Episodes.Skip(lastIdx + 1).ToArray();
+        var batch = remaining.Take(20).ToArray();
+        if (batch.Length == 0)
+            return (0, true);
+
+        int beforeCount = GetIssues().Count;
+        var batchFeed = new ParsedPodcastFeed(
+            parsed.Title,
+            parsed.Author,
+            parsed.Summary,
+            parsed.Language,
+            parsed.Link,
+            parsed.ArtworkUrl,
+            batch);
+        await Task.Run(() => _library.Core.PodcastUpsertChannelFromFeed(channel.FeedUrl, batchFeed, false));
+        int afterCount = GetIssues().Count;
+        int added = Math.Max(0, afterCount - beforeCount);
+        bool exhausted = remaining.Length <= batch.Length || added == 0;
+        return (added, exhausted);
+    }
+
     /// <summary>
     /// Automatically downloads Podcasting 2.0 <c>&lt;podcast:transcript&gt;</c> (SRT / VTT / JSON) for newly imported episodes.
     /// </summary>

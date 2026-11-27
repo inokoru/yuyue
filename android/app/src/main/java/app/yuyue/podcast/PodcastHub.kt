@@ -361,6 +361,10 @@ class PodcastHub(
         private set
     var subscribingFeedURLs by mutableStateOf<Set<String>>(emptySet())
         private set
+    var loadingMoreChannelIDs by mutableStateOf<Set<String>>(emptySet())
+        private set
+    var exhaustedChannelIDs by mutableStateOf<Set<String>>(emptySet())
+        private set
 
     var activeIssueID by mutableStateOf<String?>(null)
         private set
@@ -1573,6 +1577,7 @@ class PodcastHub(
             return false
         }
         val ch = core.podcastUpsertChannelFromFeed(feedUrl, parsed, putLatestOnDesk)
+        exhaustedChannelIDs = exhaustedChannelIDs - ch.id
         reload()
         prefetchFeedTranscripts(ch.id, parsed)
         lastNotice = t("已订阅《%@》", ch.title)
@@ -1621,7 +1626,61 @@ class PodcastHub(
                 }
             }
         }
+        exhaustedChannelIDs = emptySet()
         reload()
+    }
+
+    fun channelForShowKey(key: String): PodcastChannel? =
+        channels.firstOrNull { it.title.ifBlank { it.id } == key }
+
+    suspend fun loadMoreEpisodes(channel: PodcastChannel): Int {
+        if (channel.id in loadingMoreChannelIDs) return 0
+        loadingMoreChannelIDs = loadingMoreChannelIDs + channel.id
+        return try {
+            val xml = withContext(Dispatchers.IO) {
+                http.newCall(
+                    Request.Builder()
+                        .url(channel.feedUrl)
+                        .header("User-Agent", "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 YuyuePodcast/1.0")
+                        .header("Accept", "application/rss+xml, application/xml, text/xml, */*")
+                        .build()
+                ).execute().use { r ->
+                    if (!r.isSuccessful) throw java.io.IOException("HTTP ${r.code}")
+                    r.body?.string().orEmpty()
+                }
+            }
+            val parsed = withContext(Dispatchers.IO) { parsePodcastRss(xml) }
+            val existing = allIssues.filter { it.channelId == channel.id }
+            val existingAudio = existing.mapNotNull { it.audioUrl }.toSet()
+            val existingTitles = existing.map { it.title }.toSet()
+            val lastIdx = parsed.episodes.indexOfLast { it.audioUrl in existingAudio || it.title in existingTitles }
+            val remaining = parsed.episodes.drop(lastIdx + 1)
+            val batch = remaining.take(20)
+            if (batch.isEmpty()) {
+                exhaustedChannelIDs = exhaustedChannelIDs + channel.id
+                lastNotice = t("已加载该节目全部往期")
+                return 0
+            }
+            val beforeCount = allIssues.size
+            val batchFeed = parsed.copy(episodes = batch)
+            withContext(Dispatchers.IO) {
+                core.podcastUpsertChannelFromFeed(channel.feedUrl, batchFeed, false)
+            }
+            reload()
+            val added = max(0, allIssues.size - beforeCount)
+            if (remaining.size <= batch.size || added == 0) {
+                exhaustedChannelIDs = exhaustedChannelIDs + channel.id
+            }
+            lastNotice = if (added > 0) t("已加载 %lld 期往期节目", added) else t("已加载该节目全部往期")
+            added
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            lastNotice = t("加载往期失败：%@", e.localizedMessage ?: e.javaClass.simpleName)
+            0
+        } finally {
+            loadingMoreChannelIDs = loadingMoreChannelIDs - channel.id
+        }
     }
 
     suspend fun importOPML(uri: Uri): Int {

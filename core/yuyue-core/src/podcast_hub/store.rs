@@ -381,8 +381,8 @@ impl YuyueCore {
         Ok(out)
     }
 
-    /// Subscribes to (or refreshes) a parsed RSS feed, placing recent episodes (within 14 days)
-    /// into the Newsstand (`报刊栏`) without ever creating unread badges.
+    /// Subscribes to (or refreshes) a parsed RSS feed, pulling up to 20 episodes per batch
+    /// without dropping older back-catalog episodes at a 14-day cutoff (and without unread badges).
     pub fn podcast_upsert_channel_from_feed(
         &self,
         feed_url: String,
@@ -412,7 +412,6 @@ impl YuyueCore {
             ],
         )?;
 
-        let fourteen_days_ms = 14 * 24 * 3600 * 1000i64;
         for (idx, ep) in feed.episodes.iter().take(20).enumerate() {
             let issue_id = stable_id("iss", &format!("{ch_id}:{}", ep.guid));
             let iss_entity = format!("pod_issue/{issue_id}");
@@ -420,12 +419,7 @@ impl YuyueCore {
             if already_exists {
                 continue;
             }
-            let pub_ms = if ep.published_at > 0 { ep.published_at } else { now };
-            // Newsstand only keeps recent 14 days (unless user explicitly puts latest on Desk).
-            let recent = now - pub_ms <= fourteen_days_ms;
-            if idx > 0 && !recent {
-                continue;
-            }
+            let pub_ms = if ep.published_at > 0 { ep.published_at } else { now - idx as i64 };
             let placement = if idx == 0 && put_latest_on_desk {
                 PodcastPlacement::Desk
             } else {
@@ -582,10 +576,8 @@ impl YuyueCore {
     }
 
     /// Lists issues in a given placement (`Desk` / `Newsstand` / `Archive`), or all issues when
-    /// `placement` is `None`. Newsstand automatically filters to the last 14 days.
+    /// `placement` is `None`.
     pub fn podcast_issues(&self, placement: Option<PodcastPlacement>) -> Result<Vec<PodcastIssue>> {
-        let now = now_ms();
-        let fourteen_days_ms = 14 * 24 * 3600 * 1000i64;
         let mut out = Vec::new();
         for (entity, f) in lock(&self.store).entities("pod_issue/")? {
             let Some(id) = entity.strip_prefix("pod_issue/") else { continue };
@@ -594,13 +586,16 @@ impl YuyueCore {
                 if issue.placement != want {
                     continue;
                 }
-                if want == PodcastPlacement::Newsstand && issue.published_at > 0 && now - issue.published_at > fourteen_days_ms {
-                    continue;
-                }
             }
             out.push(issue);
         }
-        out.sort_by_key(|i| std::cmp::Reverse(i.last_played_at.unwrap_or(0).max(i.published_at).max(i.added_at)));
+        out.sort_by_key(|i| {
+            std::cmp::Reverse((
+                i.last_played_at.unwrap_or(0),
+                if i.published_at > 0 { i.published_at } else { i.added_at },
+                i.added_at,
+            ))
+        });
         Ok(out)
     }
 
@@ -929,5 +924,103 @@ mod tests {
         assert!(!is_within_progress(3, 13, limit, 0.3, 10));
         assert!(!is_within_progress(4, 0, limit, 0.3, 10));
         assert_eq!(strip_slop("大家好，欢迎来到今天的节目！今天直接看土地财政。"), "今天直接看土地财政。");
+    }
+
+    fn test_episode(idx: usize, published_at: i64) -> crate::podcast_hub::parse::ParsedPodcastEpisode {
+        crate::podcast_hub::parse::ParsedPodcastEpisode {
+            guid: format!("ep-{idx}"),
+            title: format!("Episode {idx}"),
+            summary: format!("Summary {idx}"),
+            shownotes: String::new(),
+            audio_url: format!("https://example.com/ep-{idx}.mp3"),
+            audio_mime: "audio/mpeg".to_string(),
+            duration_sec: 1800,
+            published_at,
+            artwork_url: None,
+            episode_number: Some(format!("{idx}")),
+            transcripts: Vec::new(),
+            chapters_url: None,
+            chapters: Vec::new(),
+            people: Vec::new(),
+        }
+    }
+
+    fn test_feed(episodes: Vec<crate::podcast_hub::parse::ParsedPodcastEpisode>) -> crate::podcast_hub::parse::ParsedPodcastFeed {
+        crate::podcast_hub::parse::ParsedPodcastFeed {
+            title: "Monthly Study".to_string(),
+            author: "Host".to_string(),
+            summary: "Slow cadence show".to_string(),
+            language: "zh-Hans".to_string(),
+            link: None,
+            artwork_url: None,
+            episodes,
+        }
+    }
+
+    #[test]
+    fn upsert_channel_keeps_older_episodes_and_sorts_newest_first() {
+        let dir = std::env::temp_dir().join(format!("yuyue-pod-older-{}", super::fresh_id("t")));
+        let _ = std::fs::create_dir_all(&dir);
+        let core = crate::api::YuyueCore::open(dir.to_string_lossy().into_owned(), "Test".into(), "macos".into()).expect("open");
+
+        let now = crate::api::now_ms();
+        let day_ms = 24 * 3600 * 1000i64;
+        // All 6 episodes are older than 14 days (monthly cadence).
+        let episodes = (0..6).map(|i| test_episode(i, now - (20 + i as i64 * 30) * day_ms)).collect();
+        core.podcast_upsert_channel_from_feed("https://example.com/monthly.xml".into(), test_feed(episodes), true)
+            .expect("upsert");
+
+        let desk = core.podcast_issues(Some(super::PodcastPlacement::Desk)).expect("desk");
+        let news = core.podcast_issues(Some(super::PodcastPlacement::Newsstand)).expect("news");
+        let all = core.podcast_issues(None).expect("all");
+
+        assert_eq!(desk.len(), 1);
+        assert_eq!(desk[0].title, "Episode 0");
+        assert_eq!(news.len(), 5);
+        assert_eq!(
+            news.iter().map(|i| i.title.as_str()).collect::<Vec<_>>(),
+            vec!["Episode 1", "Episode 2", "Episode 3", "Episode 4", "Episode 5"]
+        );
+        assert_eq!(all.len(), 6);
+        assert_eq!(all[0].title, "Episode 0");
+        assert_eq!(all[5].title, "Episode 5");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upsert_channel_caps_initial_batch_at_twenty_and_loads_older_batches() {
+        let dir = std::env::temp_dir().join(format!("yuyue-pod-batch-{}", super::fresh_id("t")));
+        let _ = std::fs::create_dir_all(&dir);
+        let core = crate::api::YuyueCore::open(dir.to_string_lossy().into_owned(), "Test".into(), "macos".into()).expect("open");
+
+        let now = crate::api::now_ms();
+        let day_ms = 24 * 3600 * 1000i64;
+        let all_eps: Vec<_> = (0..25).map(|i| test_episode(i, now - (i as i64 + 1) * 7 * day_ms)).collect();
+
+        core.podcast_upsert_channel_from_feed("https://example.com/archive.xml".into(), test_feed(all_eps.clone()), true)
+            .expect("initial upsert");
+        let initial = core.podcast_issues(None).expect("initial issues");
+        assert_eq!(initial.len(), 20);
+        assert_eq!(initial[0].title, "Episode 0");
+        assert_eq!(initial[19].title, "Episode 19");
+
+        // Deleting an episode is respected on refresh.
+        core.podcast_delete_issue(initial[2].id.clone()).expect("delete ep 2");
+        core.podcast_upsert_channel_from_feed("https://example.com/archive.xml".into(), test_feed(all_eps.clone()), false)
+            .expect("refresh");
+        let after_refresh = core.podcast_issues(None).expect("after refresh");
+        assert_eq!(after_refresh.len(), 19);
+        assert!(after_refresh.iter().all(|i| i.title != "Episode 2"));
+
+        // Loading the next older batch imports episodes 20..25 without touching Desk.
+        let older_batch = all_eps[20..].to_vec();
+        core.podcast_upsert_channel_from_feed("https://example.com/archive.xml".into(), test_feed(older_batch), false)
+            .expect("load older");
+        let after_more = core.podcast_issues(None).expect("after more");
+        assert_eq!(after_more.len(), 24);
+        assert_eq!(after_more.last().map(|i| i.title.as_str()), Some("Episode 24"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

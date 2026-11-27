@@ -587,7 +587,10 @@ struct PhonePodcasts: View {
                     $0.studioKind == nil
                         && ($0.showTitle.isEmpty ? String(localized: "单集导入") : $0.showTitle) == show.key
                         && matchesQuery($0)
-                }
+                }.sorted { $0.publishedAt > $1.publishedAt }
+                let isSingleShow = showFilter == .show(show.key)
+                let matchedChannel = hub.channel(forShowKey: show.key)
+                let visibleEps = isSingleShow ? eps : Array(eps.prefix(5))
                 if !eps.isEmpty {
                     PodcastStationeryCard(cornerRadius: 14) {
                         VStack(alignment: .leading, spacing: 0) {
@@ -602,12 +605,43 @@ struct PhonePodcasts: View {
                                     .monospacedDigit()
                                     .foregroundStyle(YYColor.t3)
                                 Spacer()
+                                if isSingleShow {
+                                    PodcastPaperPill(title: String(localized: "全部节目"), height: 23, horizontalPadding: 9) {
+                                        withAnimation(YYMotion.quick) { showFilter = .all }
+                                    }
+                                } else if eps.count > 5 || matchedChannel != nil {
+                                    PodcastPaperPill(title: String(localized: "查看全部"), height: 23, horizontalPadding: 9) {
+                                        withAnimation(YYMotion.quick) { showFilter = .show(show.key) }
+                                    }
+                                }
                             }
                             .padding(.bottom, 6)
 
-                            ForEach(Array(eps.prefix(5).enumerated()), id: \.element.id) { idx, item in
+                            ForEach(Array(visibleEps.enumerated()), id: \.element.id) { idx, item in
                                 if idx > 0 { Rectangle().fill(YYColor.line.opacity(0.65)).frame(height: 0.5) }
                                 mobileEpisodeRow(item)
+                            }
+
+                            if isSingleShow, let ch = matchedChannel, !hub.exhaustedChannelIDs.contains(ch.id) {
+                                let loading = hub.loadingMoreChannelIDs.contains(ch.id)
+                                Rectangle().fill(YYColor.line.opacity(0.65)).frame(height: 0.5)
+                                Button {
+                                    Task { _ = await hub.loadMoreEpisodes(for: ch) }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        if loading {
+                                            ProgressView().controlSize(.mini)
+                                        }
+                                        Text(loading ? String(localized: "正在加载往期…") : String(localized: "加载更多往期"))
+                                            .font(.yy(size: 12, weight: .medium))
+                                            .foregroundStyle(loading ? YYColor.t3 : tint.accent)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                                    .contentShape(.rect)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(loading)
                             }
                         }
                         .padding(.horizontal, 14)

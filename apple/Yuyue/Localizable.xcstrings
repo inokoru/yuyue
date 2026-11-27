@@ -2763,26 +2763,6 @@
             "value" : "%#@n@ · %#@b@"
           },
           "substitutions" : {
-            "b" : {
-              "argNum" : 2,
-              "formatSpecifier" : "lld",
-              "variations" : {
-                "plural" : {
-                  "one" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg book"
-                    }
-                  },
-                  "other" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg books"
-                    }
-                  }
-                }
-              }
-            },
             "n" : {
               "argNum" : 1,
               "formatSpecifier" : "lld",
@@ -2798,6 +2778,26 @@
                     "stringUnit" : {
                       "state" : "translated",
                       "value" : "%arg places"
+                    }
+                  }
+                }
+              }
+            },
+            "b" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg book"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg books"
                     }
                   }
                 }
@@ -3363,26 +3363,6 @@
             "value" : "%#@n@ · from %#@b@"
           },
           "substitutions" : {
-            "b" : {
-              "argNum" : 2,
-              "formatSpecifier" : "lld",
-              "variations" : {
-                "plural" : {
-                  "one" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg book"
-                    }
-                  },
-                  "other" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg books"
-                    }
-                  }
-                }
-              }
-            },
             "n" : {
               "argNum" : 1,
               "formatSpecifier" : "lld",
@@ -3398,6 +3378,26 @@
                     "stringUnit" : {
                       "state" : "translated",
                       "value" : "%arg items"
+                    }
+                  }
+                }
+              }
+            },
+            "b" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg book"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg books"
                     }
                   }
                 }
@@ -35866,26 +35866,6 @@
             "value" : "Tapped %#@t@, %#@s@ settled"
           },
           "substitutions" : {
-            "s" : {
-              "argNum" : 2,
-              "formatSpecifier" : "lld",
-              "variations" : {
-                "plural" : {
-                  "one" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg sentence"
-                    }
-                  },
-                  "other" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg sentences"
-                    }
-                  }
-                }
-              }
-            },
             "t" : {
               "argNum" : 1,
               "formatSpecifier" : "lld",
@@ -35901,6 +35881,26 @@
                     "stringUnit" : {
                       "state" : "translated",
                       "value" : "%arg times"
+                    }
+                  }
+                }
+              }
+            },
+            "s" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg sentence"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg sentences"
                     }
                   }
                 }
@@ -51249,6 +51249,68 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Word"
+          }
+        }
+      }
+    },
+    "加载更多往期" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Load older episodes"
+          }
+        }
+      }
+    },
+    "正在加载往期…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading older episodes…"
+          }
+        }
+      }
+    },
+    "已加载该节目全部往期" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All episodes loaded"
+          }
+        }
+      }
+    },
+    "已订阅《%@》，已拉取最近节目" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subscribed to “%@” and fetched recent episodes"
+          }
+        }
+      }
+    },
+    "已加载 %lld 期往期节目" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Loaded %lld older episode"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Loaded %lld older episodes"
+                }
+              }
+            }
           }
         }
       }

@@ -594,7 +594,10 @@ fun PodcastShelfContent(
         for (show in showsToRender) {
             val eps = hub.allIssues.filter {
                 it.studioKind == null && (it.showTitle.ifBlank { t("单集导入") }) == show.key && matches(it)
-            }
+            }.sortedByDescending { it.publishedAt }
+            val isSingleShow = showFilter == ShowFilter.Show(show.key)
+            val matchedChannel = hub.channelForShowKey(show.key)
+            val visibleEps = if (isSingleShow) eps else eps.take(5)
             if (eps.isNotEmpty()) {
                 PodcastStationeryCard(cornerRadius = 14.dp) {
                     Column(Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 4.dp)) {
@@ -616,10 +619,43 @@ fun PodcastShelfContent(
                             )
                             Text(t("%lld 期", eps.size), fontSize = 11.sp, color = YY.c.t3, style = YY.tnum)
                             Spacer(Modifier.weight(1f))
+                            if (isSingleShow) {
+                                PodcastPaperPill(t("全部节目"), height = 24.dp, horizontalPadding = 9.dp) {
+                                    showFilter = ShowFilter.All
+                                }
+                            } else if (eps.size > 5 || matchedChannel != null) {
+                                PodcastPaperPill(t("查看全部"), height = 24.dp, horizontalPadding = 9.dp) {
+                                    showFilter = ShowFilter.Show(show.key)
+                                }
+                            }
                         }
-                        eps.take(5).forEachIndexed { idx, ep ->
+                        visibleEps.forEachIndexed { idx, ep ->
                             if (idx > 0) HorizontalDivider(color = YY.c.line.copy(alpha = 0.65f), thickness = 0.5.dp)
                             EpisodeRow(library, ep, onOpen = { onOpenIssue(ep.id) })
+                        }
+                        if (isSingleShow && matchedChannel != null && matchedChannel.id !in hub.exhaustedChannelIDs) {
+                            val loading = matchedChannel.id in hub.loadingMoreChannelIDs
+                            HorizontalDivider(color = YY.c.line.copy(alpha = 0.65f), thickness = 0.5.dp)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = !loading) {
+                                        scope.launch { hub.loadMoreEpisodes(matchedChannel) }
+                                    }
+                                    .padding(vertical = 11.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (loading) {
+                                    CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 1.6.dp, color = tint.accent)
+                                }
+                                Text(
+                                    if (loading) t("正在加载往期…") else t("加载更多往期"),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = if (loading) YY.c.t3 else tint.accent,
+                                )
+                            }
                         }
                     }
                 }

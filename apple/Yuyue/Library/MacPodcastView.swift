@@ -35,6 +35,7 @@ struct MacPodcastView: View {
         let actionAccent: Bool
         let action: (() -> Void)?
         let isNowPlayingGroup: Bool
+        let loadMoreChannel: PodcastChannel?
         let issues: [PodcastIssue]
     }
 
@@ -496,6 +497,7 @@ struct MacPodcastView: View {
                         if let first = inProgress.first { hub.selectAndPlay(first) }
                     },
                     isNowPlayingGroup: true,
+                    loadMoreChannel: nil,
                     issues: inProgress
                 ))
             }
@@ -519,6 +521,7 @@ struct MacPodcastView: View {
                     actionAccent: true,
                     action: { studioSheet = StudioLaunch(kind: .weeklyDigest) },
                     isNowPlayingGroup: false,
+                    loadMoreChannel: nil,
                     issues: studioShown
                 ))
             }
@@ -528,7 +531,7 @@ struct MacPodcastView: View {
                 $0.showTitle.isEmpty ? standaloneLabel : $0.showTitle
             }
             for show in externalShows {
-                let allShow = byShow[show.key] ?? []
+                let allShow = (byShow[show.key] ?? []).sorted { $0.publishedAt > $1.publishedAt }
                 // Do not duplicate an episode already shown in 「正在听」
                 let rest = allShow.filter { !inProgressIDs.contains($0.id) }
                 guard !rest.isEmpty else { continue }
@@ -537,14 +540,16 @@ struct MacPodcastView: View {
                     : String(localized: "\(rest.count) 期")
                 let hasEnglish = rest.contains { $0.language.lowercased().hasPrefix("en") }
                 let suffix = hasEnglish ? String(localized: " · 原声线中文就绪") : String(localized: " · 中文深度访谈")
+                let hasMoreOrChannel = rest.count > 5 || hub.channel(forShowKey: show.key) != nil
                 sections.append(GroupSection(
                     id: "show-\(show.key)",
                     title: show.title,
                     meta: prefix + suffix,
-                    actionTitle: nil,
+                    actionTitle: hasMoreOrChannel ? String(localized: "查看全部") : nil,
                     actionAccent: false,
-                    action: nil,
+                    action: hasMoreOrChannel ? { withAnimation(YYMotion.quick) { showFilter = .show(show.key) } } : nil,
                     isNowPlayingGroup: false,
+                    loadMoreChannel: nil,
                     issues: Array(rest.prefix(5))
                 ))
             }
@@ -561,21 +566,23 @@ struct MacPodcastView: View {
                 actionAccent: true,
                 action: { studioSheet = StudioLaunch(kind: .weeklyDigest) },
                 isNowPlayingGroup: false,
+                loadMoreChannel: nil,
                 issues: studioAll
             ))
 
         case .show(let key):
             let list = hub.allIssues.filter {
                 $0.studioKind == nil && ($0.showTitle.isEmpty ? String(localized: "单集导入") : $0.showTitle) == key
-            }
+            }.sorted { $0.publishedAt > $1.publishedAt }
             sections.append(GroupSection(
                 id: "show-\(key)",
                 title: key,
                 meta: String(localized: "\(list.count) 期"),
-                actionTitle: String(localized: "查看全部"),
+                actionTitle: String(localized: "全部节目"),
                 actionAccent: false,
                 action: { withAnimation(YYMotion.quick) { showFilter = .all } },
                 isNowPlayingGroup: false,
+                loadMoreChannel: hub.channel(forShowKey: key),
                 issues: list
             ))
         }
@@ -688,6 +695,36 @@ struct MacPodcastView: View {
                                         .frame(height: 0.5)
                                 }
                                 episodeRow(issue, showProgress: section.isNowPlayingGroup || issue.positionSec > 0)
+                            }
+                            if let ch = section.loadMoreChannel, !hub.exhaustedChannelIDs.contains(ch.id) {
+                                let loading = hub.loadingMoreChannelIDs.contains(ch.id)
+                                Rectangle()
+                                    .fill(scheme == .dark ? Color.white.opacity(0.05) : YYColor.line.opacity(0.65))
+                                    .frame(height: 0.5)
+                                Button {
+                                    Task {
+                                        let added = await hub.loadMoreEpisodes(for: ch)
+                                        if added > 0 {
+                                            showToast(String(localized: "已加载 \(added) 期往期节目"))
+                                        } else if let note = hub.lastNotice {
+                                            showToast(note)
+                                        }
+                                    }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        if loading {
+                                            ProgressView().controlSize(.mini)
+                                        }
+                                        Text(loading ? String(localized: "正在加载往期…") : String(localized: "加载更多往期"))
+                                            .font(.yy(size: 12, weight: .medium))
+                                            .foregroundStyle(loading ? YYColor.t3 : tint.accent)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 9)
+                                    .contentShape(.rect)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(loading)
                             }
                         }
                     }

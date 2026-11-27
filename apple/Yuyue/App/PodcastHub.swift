@@ -47,6 +47,8 @@ final class PodcastHub {
     private(set) var discoveredShows: [PodcastSearchHit] = []
     private(set) var isLoadingDiscovery = false
     private(set) var subscribingFeedURLs: Set<String> = []
+    private(set) var loadingMoreChannelIDs: Set<String> = []
+    private(set) var exhaustedChannelIDs: Set<String> = []
 
     // MARK: Active playback state
     private(set) var activeIssueID: String?
@@ -466,7 +468,8 @@ final class PodcastHub {
 
             // Try RSS first; if HTML webpage, extract single episode or discover embedded RSS.
             if let feed = try? parsePodcastRss(xml: body), !feed.episodes.isEmpty {
-                _ = try core.podcastUpsertChannelFromFeed(feedUrl: trimmed, feed: feed, putLatestOnDesk: putLatestOnDesk)
+                let channel = try core.podcastUpsertChannelFromFeed(feedUrl: trimmed, feed: feed, putLatestOnDesk: putLatestOnDesk)
+                exhaustedChannelIDs.remove(channel.id)
                 reload()
                 if trackAdd { AirTraffic.trackAudioFeatureUsed(kind: "podcast_added") }
                 // Prefetch Podcasting 2.0 transcript if the top episode provides one.
@@ -509,6 +512,68 @@ final class PodcastHub {
     func refreshAllChannels() async {
         for ch in channels {
             _ = await subscribeRSS(urlString: ch.feedUrl, putLatestOnDesk: false, trackAdd: false)
+        }
+    }
+
+    func channel(forShowKey key: String) -> PodcastChannel? {
+        channels.first { ($0.title.isEmpty ? $0.id : $0.title) == key }
+    }
+
+    @discardableResult
+    func loadMoreEpisodes(for channel: PodcastChannel) async -> Int {
+        guard !loadingMoreChannelIDs.contains(channel.id),
+              let url = URL(string: channel.feedUrl)
+        else { return 0 }
+        loadingMoreChannelIDs.insert(channel.id)
+        defer { loadingMoreChannelIDs.remove(channel.id) }
+        do {
+            var req = URLRequest(url: url)
+            req.timeoutInterval = 25
+            req.setValue("YuyuePodcast/1.0", forHTTPHeaderField: "User-Agent")
+            let (data, _) = try await URLSession.shared.data(for: req)
+            let body = String(decoding: data, as: UTF8.self)
+            let feed = try parsePodcastRss(xml: body)
+            let existing = allIssues.filter { $0.channelId == channel.id }
+            let existingAudio = Set(existing.compactMap(\.audioUrl))
+            let existingTitles = Set(existing.map(\.title))
+            let lastMatchedIdx = feed.episodes.lastIndex {
+                existingAudio.contains($0.audioUrl) || existingTitles.contains($0.title)
+            }
+            let startIdx = (lastMatchedIdx ?? -1) + 1
+            let remaining = Array(feed.episodes.dropFirst(startIdx))
+            let batch = Array(remaining.prefix(20))
+            if batch.isEmpty {
+                exhaustedChannelIDs.insert(channel.id)
+                lastNotice = String(localized: "已加载该节目全部往期")
+                return 0
+            }
+            let beforeCount = allIssues.count
+            let batchFeed = ParsedPodcastFeed(
+                title: feed.title,
+                author: feed.author,
+                summary: feed.summary,
+                language: feed.language,
+                link: feed.link,
+                artworkUrl: feed.artworkUrl,
+                episodes: batch
+            )
+            _ = try core.podcastUpsertChannelFromFeed(feedUrl: channel.feedUrl, feed: batchFeed, putLatestOnDesk: false)
+            reload()
+            let added = max(0, allIssues.count - beforeCount)
+            if remaining.count <= batch.count {
+                exhaustedChannelIDs.insert(channel.id)
+            }
+            if added > 0 {
+                lastNotice = String(localized: "已加载 \(added) 期往期节目")
+            } else {
+                exhaustedChannelIDs.insert(channel.id)
+                lastNotice = String(localized: "已加载该节目全部往期")
+            }
+            return added
+        } catch {
+            Self.logger.error("loadMoreEpisodes failed: \(error.localizedDescription)")
+            lastNotice = error.localizedDescription
+            return 0
         }
     }
 

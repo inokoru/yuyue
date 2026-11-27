@@ -832,5 +832,9 @@
   "收起早先 %lld 次": {
     "one": "Hide %lld earlier",
     "other": "Hide %lld earlier"
+  },
+  "已加载 %lld 期往期节目": {
+    "one": "Loaded %lld older episode",
+    "other": "Loaded %lld older episodes"
   }
 }

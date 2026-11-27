@@ -689,5 +689,6 @@
   "系统默认": "System default",
   "系统默认语音": "System Default Voice",
   "试听失败，请重试": "Preview failed. Please try again.",
-  "试听播放失败，请重试": "Couldn't play preview. Please try again."
+  "试听播放失败，请重试": "Couldn't play preview. Please try again.",
+  "加载往期失败：%@": "Failed to load older episodes: %@"
 }

@@ -287,7 +287,7 @@ struct PodcastAddSheet: View {
                     Task {
                         if await hub.subscribeRSS(urlString: hit.feedURL, putLatestOnDesk: true) {
                             subscribedURLs.insert(hit.feedURL)
-                            statusLine = String(localized: "已订阅《\(hit.title)》，最新一期已放到收听台")
+                            statusLine = String(localized: "已订阅《\(hit.title)》，已拉取最近节目")
                         }
                     }
                 }
