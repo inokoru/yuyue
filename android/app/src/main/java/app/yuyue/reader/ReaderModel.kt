@@ -520,6 +520,63 @@ class ReaderModel(val library: Library, val bookID: String, val pager: ReaderPag
         }
     }
 
+    /** 记下这句: highlight the sentence being read, or the one on the page when nothing is playing. */
+    fun markCurrentHeard() {
+        val spot = player?.spot
+        val section = spot?.section ?: this.section
+        val sentence = spot?.sentence ?: this.sentence
+        val raw = runCatching { core.sentences(bookID, section.toUInt()) }.getOrNull()?.getOrNull(sentence) ?: return
+        val text = raw.trim()
+        if (text.isEmpty()) return
+        val from = raw.indexOf(text).coerceAtLeast(0)
+        val end = (from + text.length).coerceAtMost(raw.length)
+        fun point(i: Int) = CoreTextPoint(sentence.toUInt(), i.coerceIn(0, raw.length).toUInt())
+        val known = marks.map { it.id }.toSet()
+        val made = runCatching {
+            core.markHeard(bookID, section.toUInt(), point(from), point(end), text, lastStyle)
+        }.getOrElse {
+            failure = Library.message(it)
+            null
+        } ?: return
+        pager.keepShown(made.id)
+        reloadNotes()
+        val fresh = made.id !in known
+        show(
+            Library.Toast(
+                Library.Toast.Icon.Highlight,
+                if (fresh) t("划下了刚听到的这句") else t("这句已经划过了"),
+                "“${text.take(16)}”",
+                undo = if (fresh) ({ run { core.deleteMark(bookID, made.id) } }) else null,
+            ),
+        )
+    }
+
+    /** The sentence 纠正读音 starts from: the one being read, else the one on the page. */
+    fun currentSpokenLine(): String {
+        player?.line?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+        val raw = runCatching { core.sentences(bookID, section.toUInt()) }.getOrNull()?.getOrNull(sentence) ?: return ""
+        return raw.trim()
+    }
+
+    /** Saves a speech-only replacement and rereads the current sentence. */
+    fun applyPronunciationFix(find: String, replace: String, wholeLibrary: Boolean): Boolean {
+        val f = find.trim()
+        val r = replace.trim()
+        if (f.isEmpty() || r.isEmpty()) return false
+        return try {
+            core.saveReplaceRule(uniffi.yuyue_core.ReplaceRule("", if (wholeLibrary) null else bookID, f, r, false, true, true, 0.0))
+            val p = player
+            val at = p?.spot?.position
+            p?.textsChanged()
+            if (at != null) p.play(at)
+            show(Library.Toast(Library.Toast.Icon.Check, t("正在重念…"), "“$f” → “$r”"))
+            true
+        } catch (e: Exception) {
+            failure = Library.message(e)
+            false
+        }
+    }
+
     fun setStyle(style: MarkStyle, mark: Mark) {
         remember(style)
         run { core.setMarkStyle(bookID, mark.id, style) }

@@ -212,6 +212,7 @@ struct YYGroup<Content: View>: View {
         .preference(key: YYFieldLabelWidthKey.self, value: 0)
         .padding(.horizontal, YYUI.s(12))
         .background(YYColor.card, in: .rect(cornerRadius: YYUI.s(14)))
+        .clipShape(.rect(cornerRadius: YYUI.s(14)))
         .overlay(RoundedRectangle(cornerRadius: YYUI.s(14)).strokeBorder(scheme == .dark ? Color.white.opacity(0.06) : YYColor.line, lineWidth: 0.5))
     }
 }
